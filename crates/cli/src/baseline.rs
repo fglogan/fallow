@@ -108,22 +108,38 @@ pub struct BaselineData {
 }
 
 impl BaselineData {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one match arm per issue type keeps the baseline key map flat and grep-friendly"
+    )]
     pub fn from_results(results: &fallow_core::results::AnalysisResults, root: &Path) -> Self {
         Self {
             unused_files: results
                 .unused_files
                 .iter()
-                .map(|f| relative_path(&f.path, root))
+                .map(|f| relative_path(&f.file.path, root))
                 .collect(),
             unused_exports: results
                 .unused_exports
                 .iter()
-                .map(|e| format!("{}:{}", relative_path(&e.path, root), e.export_name))
+                .map(|e| {
+                    format!(
+                        "{}:{}",
+                        relative_path(&e.export.path, root),
+                        e.export.export_name
+                    )
+                })
                 .collect(),
             unused_types: results
                 .unused_types
                 .iter()
-                .map(|e| format!("{}:{}", relative_path(&e.path, root), e.export_name))
+                .map(|e| {
+                    format!(
+                        "{}:{}",
+                        relative_path(&e.export.path, root),
+                        e.export.export_name
+                    )
+                })
                 .collect(),
             private_type_leaks: results
                 .private_type_leaks
@@ -131,9 +147,9 @@ impl BaselineData {
                 .map(|e| {
                     format!(
                         "{}:{}->{}",
-                        relative_path(&e.path, root),
-                        e.export_name,
-                        e.type_name
+                        relative_path(&e.leak.path, root),
+                        e.leak.export_name,
+                        e.leak.type_name
                     )
                 })
                 .collect(),
@@ -150,7 +166,7 @@ impl BaselineData {
             circular_dependencies: results
                 .circular_dependencies
                 .iter()
-                .map(|c| circular_dep_key(c, root))
+                .map(|c| circular_dep_key(&c.cycle, root))
                 .collect(),
             unused_optional_dependencies: results
                 .unused_optional_dependencies
@@ -163,9 +179,9 @@ impl BaselineData {
                 .map(|m| {
                     format!(
                         "{}:{}.{}",
-                        relative_path(&m.path, root),
-                        m.parent_name,
-                        m.member_name
+                        relative_path(&m.member.path, root),
+                        m.member.parent_name,
+                        m.member.member_name
                     )
                 })
                 .collect(),
@@ -175,16 +191,22 @@ impl BaselineData {
                 .map(|m| {
                     format!(
                         "{}:{}.{}",
-                        relative_path(&m.path, root),
-                        m.parent_name,
-                        m.member_name
+                        relative_path(&m.member.path, root),
+                        m.member.parent_name,
+                        m.member.member_name
                     )
                 })
                 .collect(),
             unresolved_imports: results
                 .unresolved_imports
                 .iter()
-                .map(|i| format!("{}:{}", relative_path(&i.path, root), i.specifier))
+                .map(|i| {
+                    format!(
+                        "{}:{}",
+                        relative_path(&i.import.path, root),
+                        i.import.specifier
+                    )
+                })
                 .collect(),
             unlisted_dependencies: results
                 .unlisted_dependencies
@@ -209,7 +231,7 @@ impl BaselineData {
             boundary_violations: results
                 .boundary_violations
                 .iter()
-                .map(|v| boundary_violation_key(v, root))
+                .map(|v| boundary_violation_key(&v.violation, root))
                 .collect(),
             stale_suppressions: results
                 .stale_suppressions
@@ -316,14 +338,14 @@ fn private_type_leak_key(leak: &fallow_core::results::PrivateTypeLeak, root: &Pa
 }
 
 fn filter_private_type_leaks(
-    leaks: &mut Vec<fallow_core::results::PrivateTypeLeak>,
+    leaks: &mut Vec<fallow_types::output_dead_code::PrivateTypeLeakFinding>,
     baseline_keys: &[String],
     root: &Path,
 ) {
     let baseline_private_type_leaks: FxHashSet<&str> =
         baseline_keys.iter().map(String::as_str).collect();
-    leaks.retain(|leak| {
-        let key = private_type_leak_key(leak, root);
+    leaks.retain(|entry| {
+        let key = private_type_leak_key(&entry.leak, root);
         !baseline_private_type_leaks.contains(key.as_str())
     });
 }
@@ -357,13 +379,21 @@ pub fn filter_new_issues(
 
     results
         .unused_files
-        .retain(|f| !baseline_files.contains(relative_path(&f.path, root).as_str()));
+        .retain(|f| !baseline_files.contains(relative_path(&f.file.path, root).as_str()));
     results.unused_exports.retain(|e| {
-        let key = format!("{}:{}", relative_path(&e.path, root), e.export_name);
+        let key = format!(
+            "{}:{}",
+            relative_path(&e.export.path, root),
+            e.export.export_name
+        );
         !baseline_exports.contains(key.as_str())
     });
     results.unused_types.retain(|e| {
-        let key = format!("{}:{}", relative_path(&e.path, root), e.export_name);
+        let key = format!(
+            "{}:{}",
+            relative_path(&e.export.path, root),
+            e.export.export_name
+        );
         !baseline_types.contains(key.as_str())
     });
     filter_private_type_leaks(
@@ -386,7 +416,7 @@ pub fn filter_new_issues(
         .map(String::as_str)
         .collect();
     results.circular_dependencies.retain(|c| {
-        let key = circular_dep_key(c, root);
+        let key = circular_dep_key(&c.cycle, root);
         !baseline_circular.contains(key.as_str())
     });
 
@@ -408,9 +438,9 @@ pub fn filter_new_issues(
     results.unused_enum_members.retain(|m| {
         let key = format!(
             "{}:{}.{}",
-            relative_path(&m.path, root),
-            m.parent_name,
-            m.member_name
+            relative_path(&m.member.path, root),
+            m.member.parent_name,
+            m.member.member_name
         );
         !baseline_enum_members.contains(key.as_str())
     });
@@ -423,9 +453,9 @@ pub fn filter_new_issues(
     results.unused_class_members.retain(|m| {
         let key = format!(
             "{}:{}.{}",
-            relative_path(&m.path, root),
-            m.parent_name,
-            m.member_name
+            relative_path(&m.member.path, root),
+            m.member.parent_name,
+            m.member.member_name
         );
         !baseline_class_members.contains(key.as_str())
     });
@@ -436,7 +466,11 @@ pub fn filter_new_issues(
         .map(String::as_str)
         .collect();
     results.unresolved_imports.retain(|i| {
-        let key = format!("{}:{}", relative_path(&i.path, root), i.specifier);
+        let key = format!(
+            "{}:{}",
+            relative_path(&i.import.path, root),
+            i.import.specifier
+        );
         !baseline_unresolved.contains(key.as_str())
     });
 
@@ -485,7 +519,7 @@ pub fn filter_new_issues(
         .map(String::as_str)
         .collect();
     results.boundary_violations.retain(|v| {
-        let key = boundary_violation_key(v, root);
+        let key = boundary_violation_key(&v.violation, root);
         !baseline_boundary.contains(key.as_str())
     });
 
@@ -1069,21 +1103,25 @@ mod tests {
     use super::*;
     use fallow_core::duplicates::{CloneGroup, CloneInstance, DuplicationReport, DuplicationStats};
     use fallow_core::results::{
-        AnalysisResults, DependencyLocation, UnusedDependency, UnusedExport, UnusedFile,
+        AnalysisResults, BoundaryViolationFinding, CircularDependencyFinding, DependencyLocation,
+        UnusedDependency, UnusedExport, UnusedFile,
+    };
+    use fallow_types::output_dead_code::{
+        UnusedExportFinding, UnusedFileFinding, UnusedTypeFinding,
     };
     use std::path::PathBuf;
 
     fn make_results() -> AnalysisResults {
         AnalysisResults {
             unused_files: vec![
-                UnusedFile {
+                UnusedFileFinding::with_actions(UnusedFile {
                     path: PathBuf::from("src/old.ts"),
-                },
-                UnusedFile {
+                }),
+                UnusedFileFinding::with_actions(UnusedFile {
                     path: PathBuf::from("src/dead.ts"),
-                },
+                }),
             ],
-            unused_exports: vec![UnusedExport {
+            unused_exports: vec![UnusedExportFinding::with_actions(UnusedExport {
                 path: PathBuf::from("src/utils.ts"),
                 export_name: "helperA".to_string(),
                 is_type_only: false,
@@ -1091,8 +1129,8 @@ mod tests {
                 col: 0,
                 span_start: 40,
                 is_re_export: false,
-            }],
-            unused_types: vec![UnusedExport {
+            })],
+            unused_types: vec![UnusedTypeFinding::with_actions(UnusedExport {
                 path: PathBuf::from("src/types.ts"),
                 export_name: "OldType".to_string(),
                 is_type_only: true,
@@ -1100,7 +1138,7 @@ mod tests {
                 col: 0,
                 span_start: 100,
                 is_re_export: false,
-            }],
+            })],
             unused_dependencies: vec![UnusedDependency {
                 package_name: "lodash".to_string(),
                 location: DependencyLocation::Dependencies,
@@ -1303,19 +1341,19 @@ mod tests {
         };
         let results = AnalysisResults {
             unused_files: vec![
-                UnusedFile {
+                UnusedFileFinding::with_actions(UnusedFile {
                     path: PathBuf::from("src/old.ts"),
-                },
-                UnusedFile {
+                }),
+                UnusedFileFinding::with_actions(UnusedFile {
                     path: PathBuf::from("src/new-dead.ts"),
-                },
+                }),
             ],
             ..Default::default()
         };
         let filtered = filter_new_issues(results, &baseline, Path::new(""));
         assert_eq!(filtered.unused_files.len(), 1);
         assert_eq!(
-            filtered.unused_files[0].path,
+            filtered.unused_files[0].file.path,
             PathBuf::from("src/new-dead.ts")
         );
     }
@@ -1380,7 +1418,7 @@ mod tests {
         };
         let results = AnalysisResults {
             unused_exports: vec![
-                UnusedExport {
+                UnusedExportFinding::with_actions(UnusedExport {
                     path: PathBuf::from("src/utils.ts"),
                     export_name: "helperA".to_string(),
                     is_type_only: false,
@@ -1388,8 +1426,8 @@ mod tests {
                     col: 0,
                     span_start: 40,
                     is_re_export: false,
-                },
-                UnusedExport {
+                }),
+                UnusedExportFinding::with_actions(UnusedExport {
                     path: PathBuf::from("src/utils.ts"),
                     export_name: "helperB".to_string(),
                     is_type_only: false,
@@ -1397,13 +1435,13 @@ mod tests {
                     col: 0,
                     span_start: 80,
                     is_re_export: false,
-                },
+                }),
             ],
             ..Default::default()
         };
         let filtered = filter_new_issues(results, &baseline, Path::new(""));
         assert_eq!(filtered.unused_exports.len(), 1);
-        assert_eq!(filtered.unused_exports[0].export_name, "helperB");
+        assert_eq!(filtered.unused_exports[0].export.export_name, "helperB");
     }
 
     // ── DuplicationBaselineData ──────────────────────────────────
@@ -1833,23 +1871,23 @@ mod tests {
     fn circular_dep_key_is_order_independent() {
         use fallow_core::results::CircularDependency;
 
-        let dep_ab = CircularDependency {
+        let dep_ab = CircularDependencyFinding::with_actions(CircularDependency {
             files: vec![PathBuf::from("src/a.ts"), PathBuf::from("src/b.ts")],
             length: 2,
             line: 1,
             col: 0,
             is_cross_package: false,
-        };
-        let dep_ba = CircularDependency {
+        });
+        let dep_ba = CircularDependencyFinding::with_actions(CircularDependency {
             files: vec![PathBuf::from("src/b.ts"), PathBuf::from("src/a.ts")],
             length: 2,
             line: 1,
             col: 0,
             is_cross_package: false,
-        };
+        });
         assert_eq!(
-            super::circular_dep_key(&dep_ab, Path::new("")),
-            super::circular_dep_key(&dep_ba, Path::new("")),
+            super::circular_dep_key(&dep_ab.cycle, Path::new("")),
+            super::circular_dep_key(&dep_ba.cycle, Path::new("")),
             "same files in different order should produce identical keys"
         );
     }
@@ -1858,23 +1896,23 @@ mod tests {
     fn circular_dep_key_different_files_different_keys() {
         use fallow_core::results::CircularDependency;
 
-        let dep1 = CircularDependency {
+        let dep1 = CircularDependencyFinding::with_actions(CircularDependency {
             files: vec![PathBuf::from("src/a.ts"), PathBuf::from("src/b.ts")],
             length: 2,
             line: 1,
             col: 0,
             is_cross_package: false,
-        };
-        let dep2 = CircularDependency {
+        });
+        let dep2 = CircularDependencyFinding::with_actions(CircularDependency {
             files: vec![PathBuf::from("src/a.ts"), PathBuf::from("src/c.ts")],
             length: 2,
             line: 1,
             col: 0,
             is_cross_package: false,
-        };
+        });
         assert_ne!(
-            super::circular_dep_key(&dep1, Path::new("")),
-            super::circular_dep_key(&dep2, Path::new("")),
+            super::circular_dep_key(&dep1.cycle, Path::new("")),
+            super::circular_dep_key(&dep2.cycle, Path::new("")),
         );
     }
 
@@ -1882,7 +1920,7 @@ mod tests {
     fn circular_dep_key_three_files_order_independent() {
         use fallow_core::results::CircularDependency;
 
-        let dep_abc = CircularDependency {
+        let dep_abc = CircularDependencyFinding::with_actions(CircularDependency {
             files: vec![
                 PathBuf::from("src/a.ts"),
                 PathBuf::from("src/b.ts"),
@@ -1892,8 +1930,8 @@ mod tests {
             line: 1,
             col: 0,
             is_cross_package: false,
-        };
-        let dep_cab = CircularDependency {
+        });
+        let dep_cab = CircularDependencyFinding::with_actions(CircularDependency {
             files: vec![
                 PathBuf::from("src/c.ts"),
                 PathBuf::from("src/a.ts"),
@@ -1903,10 +1941,10 @@ mod tests {
             line: 1,
             col: 0,
             is_cross_package: false,
-        };
+        });
         assert_eq!(
-            super::circular_dep_key(&dep_abc, Path::new("")),
-            super::circular_dep_key(&dep_cab, Path::new("")),
+            super::circular_dep_key(&dep_abc.cycle, Path::new("")),
+            super::circular_dep_key(&dep_cab.cycle, Path::new("")),
         );
     }
 
@@ -1917,13 +1955,16 @@ mod tests {
         use fallow_core::results::*;
 
         let mut r = make_results();
-        r.circular_dependencies.push(CircularDependency {
-            files: vec![PathBuf::from("src/a.ts"), PathBuf::from("src/b.ts")],
-            length: 2,
-            line: 1,
-            col: 0,
-            is_cross_package: false,
-        });
+        r.circular_dependencies
+            .push(CircularDependencyFinding::with_actions(
+                CircularDependency {
+                    files: vec![PathBuf::from("src/a.ts"), PathBuf::from("src/b.ts")],
+                    length: 2,
+                    line: 1,
+                    col: 0,
+                    is_cross_package: false,
+                },
+            ));
         r.unused_optional_dependencies.push(UnusedDependency {
             package_name: "fsevents".to_string(),
             location: DependencyLocation::OptionalDependencies,
@@ -1931,30 +1972,35 @@ mod tests {
             line: 15,
             used_in_workspaces: Vec::new(),
         });
-        r.unused_enum_members.push(UnusedMember {
-            path: PathBuf::from("src/enums.ts"),
-            parent_name: "Status".to_string(),
-            member_name: "Deprecated".to_string(),
-            kind: MemberKind::EnumMember,
-            line: 8,
-            col: 0,
-        });
-        r.unused_class_members.push(UnusedMember {
-            path: PathBuf::from("src/service.ts"),
-            parent_name: "UserService".to_string(),
-            member_name: "legacy".to_string(),
-            kind: MemberKind::ClassMethod,
-            line: 42,
-            col: 0,
-        });
-        r.unresolved_imports
-            .push(fallow_core::results::UnresolvedImport {
-                path: PathBuf::from("src/app.ts"),
-                specifier: "./missing".to_string(),
-                line: 3,
+        r.unused_enum_members
+            .push(UnusedEnumMemberFinding::with_actions(UnusedMember {
+                path: PathBuf::from("src/enums.ts"),
+                parent_name: "Status".to_string(),
+                member_name: "Deprecated".to_string(),
+                kind: MemberKind::EnumMember,
+                line: 8,
                 col: 0,
-                specifier_col: 0,
-            });
+            }));
+        r.unused_class_members
+            .push(UnusedClassMemberFinding::with_actions(UnusedMember {
+                path: PathBuf::from("src/service.ts"),
+                parent_name: "UserService".to_string(),
+                member_name: "legacy".to_string(),
+                kind: MemberKind::ClassMethod,
+                line: 42,
+                col: 0,
+            }));
+        r.unresolved_imports.push(
+            fallow_types::output_dead_code::UnresolvedImportFinding::with_actions(
+                fallow_core::results::UnresolvedImport {
+                    path: PathBuf::from("src/app.ts"),
+                    specifier: "./missing".to_string(),
+                    line: 3,
+                    col: 0,
+                    specifier_col: 0,
+                },
+            ),
+        );
         r.unlisted_dependencies
             .push(fallow_core::results::UnlistedDependency {
                 package_name: "chalk".to_string(),
@@ -1988,16 +2034,19 @@ mod tests {
                 path: PathBuf::from("package.json"),
                 line: 10,
             });
-        r.boundary_violations
-            .push(fallow_core::results::BoundaryViolation {
-                from_path: PathBuf::from("src/ui/btn.ts"),
-                to_path: PathBuf::from("src/db/query.ts"),
-                from_zone: "ui".to_string(),
-                to_zone: "db".to_string(),
-                import_specifier: "../db/query".to_string(),
-                line: 1,
-                col: 0,
-            });
+        r.boundary_violations.push(
+            fallow_types::output_dead_code::BoundaryViolationFinding::with_actions(
+                fallow_core::results::BoundaryViolation {
+                    from_path: PathBuf::from("src/ui/btn.ts"),
+                    to_path: PathBuf::from("src/db/query.ts"),
+                    from_zone: "ui".to_string(),
+                    to_zone: "db".to_string(),
+                    import_specifier: "../db/query".to_string(),
+                    line: 1,
+                    col: 0,
+                },
+            ),
+        );
         r
     }
 
@@ -2051,20 +2100,28 @@ mod tests {
         };
         let mut results = AnalysisResults::default();
         // One in baseline, one new
-        results.circular_dependencies.push(CircularDependency {
-            files: vec![PathBuf::from("src/a.ts"), PathBuf::from("src/b.ts")],
-            length: 2,
-            line: 1,
-            col: 0,
-            is_cross_package: false,
-        });
-        results.circular_dependencies.push(CircularDependency {
-            files: vec![PathBuf::from("src/x.ts"), PathBuf::from("src/y.ts")],
-            length: 2,
-            line: 5,
-            col: 0,
-            is_cross_package: false,
-        });
+        results
+            .circular_dependencies
+            .push(CircularDependencyFinding::with_actions(
+                CircularDependency {
+                    files: vec![PathBuf::from("src/a.ts"), PathBuf::from("src/b.ts")],
+                    length: 2,
+                    line: 1,
+                    col: 0,
+                    is_cross_package: false,
+                },
+            ));
+        results
+            .circular_dependencies
+            .push(CircularDependencyFinding::with_actions(
+                CircularDependency {
+                    files: vec![PathBuf::from("src/x.ts"), PathBuf::from("src/y.ts")],
+                    length: 2,
+                    line: 5,
+                    col: 0,
+                    is_cross_package: false,
+                },
+            ));
         let filtered = filter_new_issues(results, &baseline, Path::new(""));
         assert_eq!(filtered.circular_dependencies.len(), 1);
     }
@@ -2077,24 +2134,28 @@ mod tests {
             ..BaselineData::from_results(&AnalysisResults::default(), Path::new(""))
         };
         let mut results = AnalysisResults::default();
-        results.boundary_violations.push(BoundaryViolation {
-            from_path: PathBuf::from("src/a.ts"),
-            to_path: PathBuf::from("src/b.ts"),
-            from_zone: "a".to_string(),
-            to_zone: "b".to_string(),
-            import_specifier: "../b".to_string(),
-            line: 1,
-            col: 0,
-        });
-        results.boundary_violations.push(BoundaryViolation {
-            from_path: PathBuf::from("src/new.ts"),
-            to_path: PathBuf::from("src/secret.ts"),
-            from_zone: "new".to_string(),
-            to_zone: "secret".to_string(),
-            import_specifier: "../secret".to_string(),
-            line: 1,
-            col: 0,
-        });
+        results
+            .boundary_violations
+            .push(BoundaryViolationFinding::with_actions(BoundaryViolation {
+                from_path: PathBuf::from("src/a.ts"),
+                to_path: PathBuf::from("src/b.ts"),
+                from_zone: "a".to_string(),
+                to_zone: "b".to_string(),
+                import_specifier: "../b".to_string(),
+                line: 1,
+                col: 0,
+            }));
+        results
+            .boundary_violations
+            .push(BoundaryViolationFinding::with_actions(BoundaryViolation {
+                from_path: PathBuf::from("src/new.ts"),
+                to_path: PathBuf::from("src/secret.ts"),
+                from_zone: "new".to_string(),
+                to_zone: "secret".to_string(),
+                import_specifier: "../secret".to_string(),
+                line: 1,
+                col: 0,
+            }));
         let filtered = filter_new_issues(results, &baseline, Path::new(""));
         assert_eq!(filtered.boundary_violations.len(), 1);
     }
@@ -2203,10 +2264,10 @@ mod tests {
         let p = |rel: &str| PathBuf::from(format!("{root}/{rel}"));
 
         AnalysisResults {
-            unused_files: vec![UnusedFile {
+            unused_files: vec![UnusedFileFinding::with_actions(UnusedFile {
                 path: p("src/old.ts"),
-            }],
-            unused_exports: vec![UnusedExport {
+            })],
+            unused_exports: vec![UnusedExportFinding::with_actions(UnusedExport {
                 path: p("src/utils.ts"),
                 export_name: "helper".to_string(),
                 is_type_only: false,
@@ -2214,7 +2275,7 @@ mod tests {
                 col: 0,
                 span_start: 40,
                 is_re_export: false,
-            }],
+            })],
             unused_dependencies: vec![UnusedDependency {
                 package_name: "lodash-es".to_string(),
                 location: DependencyLocation::Dependencies,
@@ -2222,36 +2283,38 @@ mod tests {
                 line: 5,
                 used_in_workspaces: Vec::new(),
             }],
-            circular_dependencies: vec![CircularDependency {
-                files: vec![p("src/a.ts"), p("src/b.ts")],
-                length: 2,
-                line: 1,
-                col: 0,
-                is_cross_package: false,
-            }],
-            unused_enum_members: vec![UnusedMember {
+            circular_dependencies: vec![CircularDependencyFinding::with_actions(
+                CircularDependency {
+                    files: vec![p("src/a.ts"), p("src/b.ts")],
+                    length: 2,
+                    line: 1,
+                    col: 0,
+                    is_cross_package: false,
+                },
+            )],
+            unused_enum_members: vec![UnusedEnumMemberFinding::with_actions(UnusedMember {
                 path: p("src/enums.ts"),
                 parent_name: "Status".to_string(),
                 member_name: "Deprecated".to_string(),
                 kind: MemberKind::EnumMember,
                 line: 8,
                 col: 0,
-            }],
-            unused_class_members: vec![UnusedMember {
+            })],
+            unused_class_members: vec![UnusedClassMemberFinding::with_actions(UnusedMember {
                 path: p("src/service.ts"),
                 parent_name: "UserService".to_string(),
                 member_name: "legacy".to_string(),
                 kind: MemberKind::ClassMethod,
                 line: 42,
                 col: 0,
-            }],
-            unresolved_imports: vec![UnresolvedImport {
+            })],
+            unresolved_imports: vec![UnresolvedImportFinding::with_actions(UnresolvedImport {
                 path: p("src/app.ts"),
                 specifier: "./missing".to_string(),
                 line: 3,
                 col: 0,
                 specifier_col: 0,
-            }],
+            })],
             duplicate_exports: vec![DuplicateExport {
                 export_name: "Config".to_string(),
                 locations: vec![
@@ -2267,7 +2330,7 @@ mod tests {
                     },
                 ],
             }],
-            boundary_violations: vec![BoundaryViolation {
+            boundary_violations: vec![BoundaryViolationFinding::with_actions(BoundaryViolation {
                 from_path: p("src/ui/btn.ts"),
                 to_path: p("src/db/query.ts"),
                 from_zone: "ui".to_string(),
@@ -2275,7 +2338,7 @@ mod tests {
                 import_specifier: "../db/query".to_string(),
                 line: 1,
                 col: 0,
-            }],
+            })],
             ..Default::default()
         }
     }

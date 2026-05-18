@@ -9,7 +9,7 @@ fn three_level_star_chain_used_exports_propagate() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     // alpha and beta are imported through barrel-a -> barrel-b -> barrel-c -> source
@@ -32,7 +32,7 @@ fn three_level_star_chain_unused_exports_detected() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     // gamma and delta are star-re-exported but never imported by index.ts
@@ -59,7 +59,7 @@ fn three_level_star_chain_no_unused_files() {
         results
             .unused_files
             .iter()
-            .map(|f| &f.path)
+            .map(|f| &f.file.path)
             .collect::<Vec<_>>()
     );
 }

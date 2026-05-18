@@ -25,9 +25,9 @@
 
 
 /**
- * Schemas for the JSON output of fallow commands. Bare `fallow --format json` produces a combined envelope with `check`, `dupes`, and `health` keys. Individual commands (`fallow dead-code --format json`, `fallow health --format json`, `fallow dupes --format json`, `fallow audit --format json`, `fallow explain <issue-type> --format json`, `fallow coverage setup --json`, `fallow list --boundaries --format json`) produce their own top-level structure.
+ * Schemas for the JSON output of fallow commands. Bare `fallow --format json` produces a combined envelope with `check`, `dupes`, and `health` keys. Individual commands (`fallow dead-code --format json`, `fallow health --format json`, `fallow dupes --format json`, `fallow audit --format json`, `fallow explain <issue-type> --format json`, `fallow coverage setup --json`) produce their own top-level structure.
  */
-export type FallowJsonOutput = (CombinedOutput | CheckOutput | CheckGroupedOutput | HealthOutput | DupesOutput | AuditOutput | ExplainOutput | CoverageSetupOutput | CodeClimateOutput | ReviewEnvelopeOutput | ReviewReconcileOutput | ListBoundariesOutput)
+export type FallowJsonOutput = (CombinedOutput | CheckOutput | CheckGroupedOutput | HealthOutput | DupesOutput | AuditOutput | ExplainOutput | CoverageSetupOutput | CodeClimateOutput | ReviewEnvelopeOutput | ReviewReconcileOutput)
 /**
  * Schema version for this output format (independent of tool version). Bump
  * policy: ADDITIVE changes (new optional top-level fields, new optional struct
@@ -480,13 +480,6 @@ export type ReviewCheckConclusion = ("success" | "neutral" | "failure")
  * Schema-version discriminator for the review reconcile envelope.
  */
 export type ReviewReconcileSchema = "fallow-review-reconcile/v1"
-/**
- * Discovery outcome for a [`LogicalGroup`]. Discriminates "no children" into
- * "the directory exists and is empty" versus "at least one `autoDiscover`
- * path was invalid or unreadable", so consumers can render an actionable
- * hint instead of "0 children, mystery".
- */
-export type LogicalGroupStatus = ("ok" | "empty" | "invalid_path")
 
 /**
  * Envelope emitted by bare `fallow --format json` (the combined
@@ -550,21 +543,30 @@ total_issues: number
 entry_points?: (EntryPoints | null)
 summary: CheckSummary
 /**
- * Files not reachable from any entry point.
+ * Files not reachable from any entry point. Wrapped in
+ * [`UnusedFileFinding`] so each entry carries a typed `actions` array
+ * natively, replacing the pre-2.76 post-pass injection.
  */
-unused_files: UnusedFile[]
+unused_files: UnusedFileFinding[]
 /**
- * Exports never imported by other modules.
+ * Exports never imported by other modules. Wrapped in
+ * [`UnusedExportFinding`] so each entry carries a typed `actions`
+ * array natively.
  */
-unused_exports: UnusedExport[]
+unused_exports: UnusedExportFinding[]
 /**
- * Type exports never imported by other modules.
+ * Type exports never imported by other modules. Wrapped in
+ * [`UnusedTypeFinding`]: the inner [`UnusedExport`] struct is shared
+ * with `unused_exports` but the wrapper emits a type-targeted fix
+ * description.
  */
-unused_types: UnusedExport[]
+unused_types: UnusedTypeFinding[]
 /**
- * Exported symbols whose public signature references same-file private types.
+ * Exported symbols whose public signature references same-file private
+ * types. Wrapped in [`PrivateTypeLeakFinding`] so each entry carries a
+ * typed `actions` array natively.
  */
-private_type_leaks: PrivateTypeLeak[]
+private_type_leaks: PrivateTypeLeakFinding[]
 /**
  * Dependencies listed in package.json but never imported.
  */
@@ -578,17 +580,25 @@ unused_dev_dependencies: UnusedDependency[]
  */
 unused_optional_dependencies: UnusedDependency[]
 /**
- * Enum members never accessed.
+ * Enum members never accessed. Wrapped in
+ * [`UnusedEnumMemberFinding`] so each entry carries a typed `actions`
+ * array natively.
  */
-unused_enum_members: UnusedMember[]
+unused_enum_members: UnusedEnumMemberFinding[]
 /**
- * Class members never accessed.
+ * Class members never accessed. Wrapped in
+ * [`UnusedClassMemberFinding`]: same inner [`UnusedMember`] struct as
+ * `unused_enum_members`, with a class-targeted fix description and the
+ * `auto_fixable: false` default to reflect dependency-injection
+ * patterns.
  */
-unused_class_members: UnusedMember[]
+unused_class_members: UnusedClassMemberFinding[]
 /**
- * Import specifiers that could not be resolved.
+ * Import specifiers that could not be resolved. Wrapped in
+ * [`UnresolvedImportFinding`] so each entry carries a typed `actions`
+ * array natively.
  */
-unresolved_imports: UnresolvedImport[]
+unresolved_imports: UnresolvedImportFinding[]
 /**
  * Dependencies used in code but not listed in package.json.
  */
@@ -607,13 +617,17 @@ type_only_dependencies: TypeOnlyDependency[]
  */
 test_only_dependencies?: TestOnlyDependency[]
 /**
- * Circular dependency chains detected in the module graph.
+ * Circular dependency chains detected in the module graph. Wrapped in
+ * [`CircularDependencyFinding`] so each entry carries a typed `actions`
+ * array natively.
  */
-circular_dependencies: CircularDependency[]
+circular_dependencies: CircularDependencyFinding[]
 /**
- * Imports that cross architecture boundary rules.
+ * Imports that cross architecture boundary rules. Wrapped in
+ * [`BoundaryViolationFinding`] so each entry carries a typed `actions`
+ * array natively.
  */
-boundary_violations?: BoundaryViolation[]
+boundary_violations?: BoundaryViolationFinding[]
 /**
  * Suppression comments or JSDoc tags that no longer match any issue.
  */
@@ -786,18 +800,26 @@ unused_dependency_overrides: number
 misconfigured_dependency_overrides: number
 }
 /**
- * A file that is not reachable from any entry point.
+ * Wire-shape envelope for an [`UnusedFile`] finding. The bare finding
+ * flattens in via `#[serde(flatten)]`, with a typed `actions` array
+ * populated at construction time and the audit-pass `introduced` flag
+ * attached as an optional sibling.
  */
-export interface UnusedFile {
+export interface UnusedFileFinding {
 /**
  * Absolute path to the unused file.
  */
 path: string
 /**
- * Suggested actions to resolve this issue.
+ * Suggested next steps: a `delete-file` primary and a `suppress-file`
+ * secondary. Always emitted (possibly empty for forward-compat).
  */
 actions: IssueAction[]
-introduced?: AuditIntroduced
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base. `None` when serialized directly from Rust.
+ */
+introduced?: (AuditIntroduced | null)
 }
 /**
  * A code-change fix. `type` is one of the kebab-case identifiers in
@@ -942,9 +964,12 @@ file: string
 exports: string[]
 }
 /**
- * An export that is never imported by other modules.
+ * Wire-shape envelope for an [`UnusedExport`] finding consumed under the
+ * `unused_exports` key. Same Rust struct as [`UnusedTypeFinding`], with a
+ * different fix description so consumers can tell value-export from
+ * type-export removal at the action level.
  */
-export interface UnusedExport {
+export interface UnusedExportFinding {
 /**
  * File containing the unused export.
  */
@@ -974,15 +999,68 @@ span_start: number
  */
 is_re_export: boolean
 /**
- * Suggested actions to resolve this issue.
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
  */
 actions: IssueAction[]
-introduced?: AuditIntroduced
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
 }
 /**
- * A public export signature that references a same-file private type.
+ * Wire-shape envelope for an [`UnusedExport`] finding consumed under the
+ * `unused_types` key. Wraps the same bare [`UnusedExport`] struct as
+ * [`UnusedExportFinding`] but emits a fix action targeted at type-only
+ * declarations, with the same `is_re_export`-aware note swap.
  */
-export interface PrivateTypeLeak {
+export interface UnusedTypeFinding {
+/**
+ * File containing the unused export.
+ */
+path: string
+/**
+ * Name of the unused export.
+ */
+export_name: string
+/**
+ * Whether this is a type-only export.
+ */
+is_type_only: boolean
+/**
+ * 1-based line number of the export.
+ */
+line: number
+/**
+ * 0-based byte column offset.
+ */
+col: number
+/**
+ * Byte offset into the source file (used by the fix command).
+ */
+span_start: number
+/**
+ * Whether this finding comes from a barrel/index re-export rather than the source definition.
+ */
+is_re_export: boolean
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+}
+/**
+ * Wire-shape envelope for a [`PrivateTypeLeak`] finding. Mirrors
+ * [`UnusedFileFinding`]: flattens the bare finding and carries a typed
+ * `actions` array (`export-type` primary plus `suppress-line` secondary).
+ */
+export interface PrivateTypeLeakFinding {
 /**
  * File containing the exported symbol.
  */
@@ -1008,10 +1086,15 @@ col: number
  */
 span_start: number
 /**
- * Suggested actions to resolve this issue.
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
  */
 actions: IssueAction[]
-introduced?: AuditIntroduced
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
 }
 /**
  * A dependency that is listed in package.json but never imported.
@@ -1042,9 +1125,10 @@ actions: IssueAction[]
 introduced?: AuditIntroduced
 }
 /**
- * An unused enum or class member.
+ * Wire-shape envelope for an [`UnusedMember`] finding consumed under the
+ * `unused_enum_members` key.
  */
-export interface UnusedMember {
+export interface UnusedEnumMemberFinding {
 /**
  * File containing the unused member.
  */
@@ -1067,15 +1151,62 @@ line: number
  */
 col: number
 /**
- * Suggested actions to resolve this issue.
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
  */
 actions: IssueAction[]
-introduced?: AuditIntroduced
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
 }
 /**
- * An import that could not be resolved.
+ * Wire-shape envelope for an [`UnusedMember`] finding consumed under the
+ * `unused_class_members` key. Same Rust struct as
+ * [`UnusedEnumMemberFinding`]; the fix action and suppress comment carry
+ * the class-member kebab-case identifier instead.
  */
-export interface UnresolvedImport {
+export interface UnusedClassMemberFinding {
+/**
+ * File containing the unused member.
+ */
+path: string
+/**
+ * Name of the parent enum or class.
+ */
+parent_name: string
+/**
+ * Name of the unused member.
+ */
+member_name: string
+kind: MemberKind
+/**
+ * 1-based line number.
+ */
+line: number
+/**
+ * 0-based byte column offset.
+ */
+col: number
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+}
+/**
+ * Wire-shape envelope for an [`UnresolvedImport`] finding. Mirrors
+ * [`UnusedFileFinding`]: flattens the bare finding and carries a typed
+ * `actions` array (`resolve-import` primary plus `suppress-line`
+ * secondary).
+ */
+export interface UnresolvedImportFinding {
 /**
  * File containing the unresolved import.
  */
@@ -1098,10 +1229,15 @@ col: number
  */
 specifier_col: number
 /**
- * Suggested actions to resolve this issue.
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
  */
 actions: IssueAction[]
-introduced?: AuditIntroduced
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
 }
 /**
  * A dependency used in code but not listed in package.json.
@@ -1223,18 +1359,12 @@ actions: IssueAction[]
 introduced?: AuditIntroduced
 }
 /**
- * A circular dependency chain detected in the module graph.
- * 
- * The `line` and `col` fields carry `#[serde(default)]` so callers reading
- * historical baseline JSON without these fields can still deserialize the
- * struct, but the JSON output layer always emits them (u32 always
- * serializes, never via `skip_serializing_if`). The schemars derive sees
- * the serde defaults and marks both fields optional in the generated
- * schema; the explicit `extend("required" = ...)` override here keeps the
- * schema's `required` array honest about what the JSON output actually
- * contains.
+ * Wire-shape envelope for a [`CircularDependency`] finding. Mirrors
+ * [`UnusedFileFinding`]: flattens the bare finding and carries a typed
+ * `actions` array (`refactor-cycle` primary plus `suppress-line`
+ * secondary).
  */
-export interface CircularDependency {
+export interface CircularDependencyFinding {
 /**
  * Files forming the cycle, in import order.
  */
@@ -1256,15 +1386,23 @@ col: number
  */
 is_cross_package?: boolean
 /**
- * Suggested actions to resolve this issue.
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
  */
 actions: IssueAction[]
-introduced?: AuditIntroduced
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
 }
 /**
- * An import that crosses an architecture boundary rule.
+ * Wire-shape envelope for a [`BoundaryViolation`] finding. Mirrors
+ * [`UnusedFileFinding`]: flattens the bare finding and carries a typed
+ * `actions` array (`refactor-boundary` primary plus `suppress-line`
+ * secondary).
  */
-export interface BoundaryViolation {
+export interface BoundaryViolationFinding {
 /**
  * The file making the disallowed import.
  */
@@ -1294,10 +1432,15 @@ line: number
  */
 col: number
 /**
- * Suggested actions to resolve this issue.
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
  */
 actions: IssueAction[]
-introduced?: AuditIntroduced
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
 }
 /**
  * A suppression comment or JSDoc tag that no longer matches any issue.
@@ -3573,21 +3716,30 @@ owners?: (string[] | null)
  */
 total_issues: number
 /**
- * Files not reachable from any entry point.
+ * Files not reachable from any entry point. Wrapped in
+ * [`UnusedFileFinding`] so each entry carries a typed `actions` array
+ * natively, replacing the pre-2.76 post-pass injection.
  */
-unused_files: UnusedFile[]
+unused_files: UnusedFileFinding[]
 /**
- * Exports never imported by other modules.
+ * Exports never imported by other modules. Wrapped in
+ * [`UnusedExportFinding`] so each entry carries a typed `actions`
+ * array natively.
  */
-unused_exports: UnusedExport[]
+unused_exports: UnusedExportFinding[]
 /**
- * Type exports never imported by other modules.
+ * Type exports never imported by other modules. Wrapped in
+ * [`UnusedTypeFinding`]: the inner [`UnusedExport`] struct is shared
+ * with `unused_exports` but the wrapper emits a type-targeted fix
+ * description.
  */
-unused_types: UnusedExport[]
+unused_types: UnusedTypeFinding[]
 /**
- * Exported symbols whose public signature references same-file private types.
+ * Exported symbols whose public signature references same-file private
+ * types. Wrapped in [`PrivateTypeLeakFinding`] so each entry carries a
+ * typed `actions` array natively.
  */
-private_type_leaks: PrivateTypeLeak[]
+private_type_leaks: PrivateTypeLeakFinding[]
 /**
  * Dependencies listed in package.json but never imported.
  */
@@ -3601,17 +3753,25 @@ unused_dev_dependencies: UnusedDependency[]
  */
 unused_optional_dependencies: UnusedDependency[]
 /**
- * Enum members never accessed.
+ * Enum members never accessed. Wrapped in
+ * [`UnusedEnumMemberFinding`] so each entry carries a typed `actions`
+ * array natively.
  */
-unused_enum_members: UnusedMember[]
+unused_enum_members: UnusedEnumMemberFinding[]
 /**
- * Class members never accessed.
+ * Class members never accessed. Wrapped in
+ * [`UnusedClassMemberFinding`]: same inner [`UnusedMember`] struct as
+ * `unused_enum_members`, with a class-targeted fix description and the
+ * `auto_fixable: false` default to reflect dependency-injection
+ * patterns.
  */
-unused_class_members: UnusedMember[]
+unused_class_members: UnusedClassMemberFinding[]
 /**
- * Import specifiers that could not be resolved.
+ * Import specifiers that could not be resolved. Wrapped in
+ * [`UnresolvedImportFinding`] so each entry carries a typed `actions`
+ * array natively.
  */
-unresolved_imports: UnresolvedImport[]
+unresolved_imports: UnresolvedImportFinding[]
 /**
  * Dependencies used in code but not listed in package.json.
  */
@@ -3630,13 +3790,17 @@ type_only_dependencies: TypeOnlyDependency[]
  */
 test_only_dependencies?: TestOnlyDependency[]
 /**
- * Circular dependency chains detected in the module graph.
+ * Circular dependency chains detected in the module graph. Wrapped in
+ * [`CircularDependencyFinding`] so each entry carries a typed `actions`
+ * array natively.
  */
-circular_dependencies: CircularDependency[]
+circular_dependencies: CircularDependencyFinding[]
 /**
- * Imports that cross architecture boundary rules.
+ * Imports that cross architecture boundary rules. Wrapped in
+ * [`BoundaryViolationFinding`] so each entry carries a typed `actions`
+ * array natively.
  */
-boundary_violations?: BoundaryViolation[]
+boundary_violations?: BoundaryViolationFinding[]
 /**
  * Suppression comments or JSDoc tags that no longer match any issue.
  */
@@ -4468,167 +4632,4 @@ threads_resolved: number
  * Errors collected during apply, one entry per failure.
  */
 apply_errors: string[]
-}
-/**
- * Envelope emitted by `fallow list --boundaries --format json`. Surfaces
- * the architecture boundary zones, rules, and (issue #373) the user's
- * pre-expansion `autoDiscover` logical groups so consumers can render
- * grouping intent that `expand_auto_discover` would otherwise flatten out
- * of `zones[]`.
- */
-export interface ListBoundariesOutput {
-boundaries: BoundariesListing
-}
-/**
- * `boundaries` block carried by [`ListBoundariesOutput`].
- */
-export interface BoundariesListing {
-/**
- * `false` when the project has no `boundaries` configured; `true`
- * otherwise. When `false` every array below is empty and every count
- * is `0` (parity is enforced so consumers can read the counts without
- * first branching on this flag).
- */
-configured: boolean
-/**
- * Length of [`Self::zones`]; emitted alongside the array for parity
- * with `rule_count` / `logical_group_count`.
- */
-zone_count: number
-/**
- * Boundary zones after preset and `autoDiscover` expansion.
- */
-zones: BoundariesListZone[]
-/**
- * Length of [`Self::rules`].
- */
-rule_count: number
-/**
- * Boundary import rules, each `from -> allow[]`.
- */
-rules: BoundariesListRule[]
-/**
- * Length of [`Self::logical_groups`]. Always present (issue #373).
- */
-logical_group_count: number
-/**
- * Pre-expansion `autoDiscover` groups carrying the user-authored parent
- * name and grouping intent (issue #373).
- */
-logical_groups: BoundariesListLogicalGroup[]
-}
-/**
- * A boundary zone after preset and `autoDiscover` expansion. Each entry
- * classifies files into a single zone via glob patterns.
- */
-export interface BoundariesListZone {
-/**
- * Zone identifier as referenced in rules (e.g. `app`, `features/auth`).
- */
-name: string
-/**
- * Compiled glob patterns. Children of an `autoDiscover` parent each
- * carry a single pattern like `src/features/auth/**`.
- */
-patterns: string[]
-/**
- * Number of discovered files classified into this zone.
- */
-file_count: number
-}
-/**
- * A boundary import rule, expanded to operate on concrete child zone
- * names after `autoDiscover` flattening. The user's pre-expansion rule
- * (keyed on the logical parent name, if any) is preserved on the
- * corresponding [`BoundariesListLogicalGroup::authored_rule`].
- */
-export interface BoundariesListRule {
-/**
- * Source zone the rule applies to.
- */
-from: string
-/**
- * Target zones [`Self::from`] is allowed to import from. Self-imports
- * are always allowed implicitly.
- */
-allow: string[]
-}
-/**
- * A pre-expansion `autoDiscover` logical group surfaced for observability
- * (issue #373). Captured during `expand_auto_discover` so consumers can
- * see the user-authored parent name and grouping intent after expansion
- * would otherwise flatten it out of [`BoundariesListing::zones`].
- */
-export interface BoundariesListLogicalGroup {
-/**
- * Logical parent zone name as authored by the user.
- */
-name: string
-/**
- * Discovered child zone names in stable directory-sorted order.
- */
-children: string[]
-/**
- * Verbatim `autoDiscover` strings from the user's config (not
- * normalized) so round-trip tooling can match byte-for-byte.
- */
-auto_discover: string[]
-status: LogicalGroupStatus
-/**
- * Position of the parent zone in the user's pre-expansion `zones[]`.
- */
-source_zone_index: number
-/**
- * Sum of `file_count` across [`Self::children`] plus the fallback
- * zone's `file_count` when present.
- */
-file_count: number
-/**
- * Pre-expansion rule keyed on the parent name, when the user wrote
- * one.
- */
-authored_rule?: (AuthoredRule | null)
-/**
- * When the parent zone also carried explicit `patterns`, it stayed in
- * [`BoundariesListing::zones`] as a fallback classifier; this is its
- * name. Equal to [`Self::name`] when present.
- */
-fallback_zone?: (string | null)
-/**
- * Parent zone indices merged into this group when the user declared
- * the same parent name multiple times.
- */
-merged_from?: (number[] | null)
-/**
- * Echo of the parent zone's `root` (subtree scope) as the user wrote
- * it. `None` when the parent had no `root` field.
- */
-original_zone_root?: (string | null)
-/**
- * Parallel to [`Self::children`]: for child at index `i`, the index
- * into [`Self::auto_discover`] of the path that produced it. Empty
- * when only one path was authored (every child trivially maps to
- * index 0). `serde(default)` keeps the schema's `required` array in
- * step with the runtime's `skip_serializing_if` behavior.
- */
-child_source_indices?: number[]
-}
-/**
- * Pre-expansion `from`-rule preserved on a [`LogicalGroup`]. Surfaces the
- * user's original intent (`{ from: "features", allow: ["shared"] }`) even
- * after `expand_auto_discover` rewrote it into per-child rules
- * (`features/auth -> shared`, `features/billing -> shared`).
- */
-export interface AuthoredRule {
-/**
- * Pre-expansion `allow` list as the user wrote it.
- */
-allow: string[]
-/**
- * Pre-expansion `allowTypeOnly` list as the user wrote it. Omitted
- * from JSON output when empty; `serde(default)` keeps the derived
- * schema in lock-step (schemars 1 marks any field with a
- * `serde(default)` attribute as non-required).
- */
-allow_type_only?: string[]
 }

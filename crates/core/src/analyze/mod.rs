@@ -17,6 +17,12 @@ use crate::discover::FileId;
 use crate::extract::ModuleInfo;
 use crate::graph::ModuleGraph;
 use crate::resolve::ResolvedModule;
+use fallow_types::output_dead_code::{
+    BoundaryViolationFinding, CircularDependencyFinding, PrivateTypeLeakFinding,
+    UnresolvedImportFinding, UnusedClassMemberFinding, UnusedEnumMemberFinding,
+    UnusedExportFinding, UnusedFileFinding, UnusedTypeFinding,
+};
+
 use crate::results::{AnalysisResults, CircularDependency};
 use crate::suppress::IssueKind;
 
@@ -270,6 +276,9 @@ pub fn find_dead_code_full(
                 || {
                     if config.rules.unused_files != Severity::Off {
                         find_unused_files(graph, &suppressions)
+                            .into_iter()
+                            .map(UnusedFileFinding::with_actions)
+                            .collect::<Vec<_>>()
                     } else {
                         Vec::new()
                     }
@@ -289,15 +298,18 @@ pub fn find_dead_code_full(
                             &line_offsets_by_file,
                         );
                         if config.rules.unused_exports != Severity::Off {
-                            results.unused_exports = exports;
+                            results.unused_exports = exports
+                                .into_iter()
+                                .map(UnusedExportFinding::with_actions)
+                                .collect();
                         }
                         if config.rules.unused_types != Severity::Off {
-                            results.unused_types = types;
-                            suppress_signature_backing_types(
-                                &mut results.unused_types,
-                                graph,
-                                modules,
-                            );
+                            let mut typed = types;
+                            suppress_signature_backing_types(&mut typed, graph, modules);
+                            results.unused_types = typed
+                                .into_iter()
+                                .map(UnusedTypeFinding::with_actions)
+                                .collect();
                         }
                         if config.rules.private_type_leaks != Severity::Off {
                             results.private_type_leaks = find_private_type_leaks(
@@ -306,7 +318,10 @@ pub fn find_dead_code_full(
                                 config,
                                 &suppressions,
                                 &line_offsets_by_file,
-                            );
+                            )
+                            .into_iter()
+                            .map(PrivateTypeLeakFinding::with_actions)
+                            .collect();
                         }
                         // @expected-unused tags that became stale (export is now used).
                         if config.rules.stale_suppressions != Severity::Off {
@@ -335,10 +350,16 @@ pub fn find_dead_code_full(
                                     &user_class_members,
                                 );
                                 if config.rules.unused_enum_members != Severity::Off {
-                                    results.unused_enum_members = enum_members;
+                                    results.unused_enum_members = enum_members
+                                        .into_iter()
+                                        .map(UnusedEnumMemberFinding::with_actions)
+                                        .collect();
                                 }
                                 if config.rules.unused_class_members != Severity::Off {
-                                    results.unused_class_members = class_members;
+                                    results.unused_class_members = class_members
+                                        .into_iter()
+                                        .map(UnusedClassMemberFinding::with_actions)
+                                        .collect();
                                 }
                             }
                             results
@@ -416,6 +437,9 @@ pub fn find_dead_code_full(
                                             &generated_patterns,
                                             &line_offsets_by_file,
                                         )
+                                        .into_iter()
+                                        .map(UnresolvedImportFinding::with_actions)
+                                        .collect::<Vec<_>>()
                                     } else {
                                         Vec::new()
                                     }
@@ -447,6 +471,9 @@ pub fn find_dead_code_full(
                                             &suppressions,
                                             &line_offsets_by_file,
                                         )
+                                        .into_iter()
+                                        .map(BoundaryViolationFinding::with_actions)
+                                        .collect::<Vec<_>>()
                                     } else {
                                         Vec::new()
                                     }
@@ -461,6 +488,9 @@ pub fn find_dead_code_full(
                                                     &suppressions,
                                                     workspaces,
                                                 )
+                                                .into_iter()
+                                                .map(CircularDependencyFinding::with_actions)
+                                                .collect::<Vec<_>>()
                                             } else {
                                                 Vec::new()
                                             }
@@ -511,18 +541,26 @@ pub fn find_dead_code_full(
     // Public packages are workspace packages whose exports are intended for external consumers.
     let public_roots = public_workspace_roots(&config.public_packages, workspaces);
     if !public_roots.is_empty() {
-        results
-            .unused_exports
-            .retain(|e| !public_roots.iter().any(|root| e.path.starts_with(root)));
-        results
-            .unused_types
-            .retain(|e| !public_roots.iter().any(|root| e.path.starts_with(root)));
-        results
-            .unused_enum_members
-            .retain(|e| !public_roots.iter().any(|root| e.path.starts_with(root)));
-        results
-            .unused_class_members
-            .retain(|e| !public_roots.iter().any(|root| e.path.starts_with(root)));
+        results.unused_exports.retain(|e| {
+            !public_roots
+                .iter()
+                .any(|root| e.export.path.starts_with(root))
+        });
+        results.unused_types.retain(|e| {
+            !public_roots
+                .iter()
+                .any(|root| e.export.path.starts_with(root))
+        });
+        results.unused_enum_members.retain(|e| {
+            !public_roots
+                .iter()
+                .any(|root| e.member.path.starts_with(root))
+        });
+        results.unused_class_members.retain(|e| {
+            !public_roots
+                .iter()
+                .any(|root| e.member.path.starts_with(root))
+        });
     }
 
     // Detect stale suppression comments (must run after all detectors)
@@ -1008,10 +1046,11 @@ mod tests {
             // Note: unused_files also checks if the file exists on disk, so it
             // may still be filtered out. The key is the suppression path is exercised.
             assert!(
-                !results
-                    .unused_files
-                    .iter()
-                    .any(|f| f.path.to_string_lossy().contains("utils.ts")),
+                !results.unused_files.iter().any(|f| f
+                    .file
+                    .path
+                    .to_string_lossy()
+                    .contains("utils.ts")),
                 "suppressed file should not appear in unused_files"
             );
         }

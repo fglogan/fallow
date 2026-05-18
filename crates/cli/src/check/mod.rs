@@ -721,27 +721,30 @@ mod tests {
 
     fn make_results() -> AnalysisResults {
         let mut r = AnalysisResults::default();
-        r.unused_files.push(UnusedFile {
-            path: PathBuf::from("/project/src/a.ts"),
-        });
-        r.unused_exports.push(UnusedExport {
-            path: PathBuf::from("/project/src/b.ts"),
-            export_name: "foo".into(),
-            is_type_only: false,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
-        r.unused_types.push(UnusedExport {
-            path: PathBuf::from("/project/src/c.ts"),
-            export_name: "MyType".into(),
-            is_type_only: true,
-            line: 5,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
+        r.unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: PathBuf::from("/project/src/a.ts"),
+            }));
+        r.unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: PathBuf::from("/project/src/b.ts"),
+                export_name: "foo".into(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
+        r.unused_types
+            .push(UnusedTypeFinding::with_actions(UnusedExport {
+                path: PathBuf::from("/project/src/c.ts"),
+                export_name: "MyType".into(),
+                is_type_only: true,
+                line: 5,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
         r.unused_dependencies.push(UnusedDependency {
             package_name: "lodash".into(),
             location: DependencyLocation::Dependencies,
@@ -756,29 +759,32 @@ mod tests {
             line: 5,
             used_in_workspaces: Vec::new(),
         });
-        r.unused_enum_members.push(UnusedMember {
-            path: PathBuf::from("/project/src/d.ts"),
-            parent_name: "Status".into(),
-            member_name: "Pending".into(),
-            kind: MemberKind::EnumMember,
-            line: 3,
-            col: 0,
-        });
-        r.unused_class_members.push(UnusedMember {
-            path: PathBuf::from("/project/src/e.ts"),
-            parent_name: "Service".into(),
-            member_name: "helper".into(),
-            kind: MemberKind::ClassMethod,
-            line: 10,
-            col: 0,
-        });
-        r.unresolved_imports.push(UnresolvedImport {
-            path: PathBuf::from("/project/src/f.ts"),
-            specifier: "./missing".into(),
-            line: 1,
-            col: 0,
-            specifier_col: 0,
-        });
+        r.unused_enum_members
+            .push(UnusedEnumMemberFinding::with_actions(UnusedMember {
+                path: PathBuf::from("/project/src/d.ts"),
+                parent_name: "Status".into(),
+                member_name: "Pending".into(),
+                kind: MemberKind::EnumMember,
+                line: 3,
+                col: 0,
+            }));
+        r.unused_class_members
+            .push(UnusedClassMemberFinding::with_actions(UnusedMember {
+                path: PathBuf::from("/project/src/e.ts"),
+                parent_name: "Service".into(),
+                member_name: "helper".into(),
+                kind: MemberKind::ClassMethod,
+                line: 10,
+                col: 0,
+            }));
+        r.unresolved_imports
+            .push(UnresolvedImportFinding::with_actions(UnresolvedImport {
+                path: PathBuf::from("/project/src/f.ts"),
+                specifier: "./missing".into(),
+                line: 1,
+                col: 0,
+                specifier_col: 0,
+            }));
         r.unlisted_dependencies.push(UnlistedDependency {
             package_name: "chalk".into(),
             imported_from: vec![ImportSite {
@@ -902,18 +908,20 @@ mod tests {
     fn apply_circular_deps_filter_keeps_only_circular_deps() {
         let mut results = make_results();
         // Add circular dependency to results
-        results
-            .circular_dependencies
-            .push(fallow_core::results::CircularDependency {
-                files: vec![
-                    PathBuf::from("/project/src/a.ts"),
-                    PathBuf::from("/project/src/b.ts"),
-                ],
-                length: 2,
-                line: 1,
-                col: 0,
-                is_cross_package: false,
-            });
+        results.circular_dependencies.push(
+            fallow_types::output_dead_code::CircularDependencyFinding::with_actions(
+                fallow_core::results::CircularDependency {
+                    files: vec![
+                        PathBuf::from("/project/src/a.ts"),
+                        PathBuf::from("/project/src/b.ts"),
+                    ],
+                    length: 2,
+                    line: 1,
+                    col: 0,
+                    is_cross_package: false,
+                },
+            ),
+        );
         let mut f = no_filters();
         f.circular_deps = true;
         f.apply(&mut results);
@@ -986,17 +994,19 @@ mod tests {
     #[test]
     fn apply_boundary_violations_filter() {
         let mut results = make_results();
-        results
-            .boundary_violations
-            .push(fallow_core::results::BoundaryViolation {
-                from_path: PathBuf::from("/project/src/bad.ts"),
-                to_path: PathBuf::from("/project/lib/secret.ts"),
-                from_zone: "src".to_string(),
-                to_zone: "lib".to_string(),
-                import_specifier: "../lib/secret".to_string(),
-                line: 1,
-                col: 0,
-            });
+        results.boundary_violations.push(
+            fallow_types::output_dead_code::BoundaryViolationFinding::with_actions(
+                fallow_core::results::BoundaryViolation {
+                    from_path: PathBuf::from("/project/src/bad.ts"),
+                    to_path: PathBuf::from("/project/lib/secret.ts"),
+                    from_zone: "src".to_string(),
+                    to_zone: "lib".to_string(),
+                    import_specifier: "../lib/secret".to_string(),
+                    line: 1,
+                    col: 0,
+                },
+            ),
+        );
         let mut f = no_filters();
         f.boundary_violations = true;
         f.apply(&mut results);
@@ -1013,29 +1023,33 @@ mod tests {
     #[test]
     fn apply_all_filter_types_simultaneously() {
         let mut results = make_results();
-        results
-            .circular_dependencies
-            .push(fallow_core::results::CircularDependency {
-                files: vec![
-                    PathBuf::from("/project/src/a.ts"),
-                    PathBuf::from("/project/src/b.ts"),
-                ],
-                length: 2,
-                line: 1,
-                col: 0,
-                is_cross_package: false,
-            });
-        results
-            .boundary_violations
-            .push(fallow_core::results::BoundaryViolation {
-                from_path: PathBuf::from("/project/src/x.ts"),
-                to_path: PathBuf::from("/project/lib/y.ts"),
-                from_zone: "src".to_string(),
-                to_zone: "lib".to_string(),
-                import_specifier: "../lib/y".to_string(),
-                line: 1,
-                col: 0,
-            });
+        results.circular_dependencies.push(
+            fallow_types::output_dead_code::CircularDependencyFinding::with_actions(
+                fallow_core::results::CircularDependency {
+                    files: vec![
+                        PathBuf::from("/project/src/a.ts"),
+                        PathBuf::from("/project/src/b.ts"),
+                    ],
+                    length: 2,
+                    line: 1,
+                    col: 0,
+                    is_cross_package: false,
+                },
+            ),
+        );
+        results.boundary_violations.push(
+            fallow_types::output_dead_code::BoundaryViolationFinding::with_actions(
+                fallow_core::results::BoundaryViolation {
+                    from_path: PathBuf::from("/project/src/x.ts"),
+                    to_path: PathBuf::from("/project/lib/y.ts"),
+                    from_zone: "src".to_string(),
+                    to_zone: "lib".to_string(),
+                    import_specifier: "../lib/y".to_string(),
+                    line: 1,
+                    col: 0,
+                },
+            ),
+        );
 
         // Enable all filters
         let f = IssueFilters {

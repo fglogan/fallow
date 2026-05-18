@@ -771,11 +771,11 @@ fn compute_function_statement_coverage(
 /// Type-only exports (interfaces, type aliases) are intentionally excluded ---
 /// they are a different concern than unused functions/components.
 pub(super) fn count_unused_exports_by_path(
-    unused_exports: &[fallow_core::results::UnusedExport],
+    unused_exports: &[fallow_core::results::UnusedExportFinding],
 ) -> rustc_hash::FxHashMap<&std::path::Path, usize> {
     let mut map: rustc_hash::FxHashMap<&std::path::Path, usize> = rustc_hash::FxHashMap::default();
     for exp in unused_exports {
-        *map.entry(exp.path.as_path()).or_default() += 1;
+        *map.entry(exp.export.path.as_path()).or_default() += 1;
     }
     map
 }
@@ -990,7 +990,7 @@ pub(super) fn compute_file_scores(
     let circular_files: rustc_hash::FxHashSet<std::path::PathBuf> = results
         .circular_dependencies
         .iter()
-        .flat_map(|c| c.files.iter().cloned())
+        .flat_map(|c| c.cycle.files.iter().cloned())
         .collect();
 
     let mut top_complex_fns: rustc_hash::FxHashMap<std::path::PathBuf, Vec<(String, u32, u16)>> =
@@ -1018,9 +1018,14 @@ pub(super) fn compute_file_scores(
     let mut cycle_members: rustc_hash::FxHashMap<std::path::PathBuf, Vec<std::path::PathBuf>> =
         rustc_hash::FxHashMap::default();
     for cycle in &results.circular_dependencies {
-        for file in &cycle.files {
-            let others: Vec<std::path::PathBuf> =
-                cycle.files.iter().filter(|f| *f != file).cloned().collect();
+        for file in &cycle.cycle.files {
+            let others: Vec<std::path::PathBuf> = cycle
+                .cycle
+                .files
+                .iter()
+                .filter(|f| *f != file)
+                .cloned()
+                .collect();
             cycle_members
                 .entry(file.clone())
                 .or_default()
@@ -1038,9 +1043,9 @@ pub(super) fn compute_file_scores(
         rustc_hash::FxHashMap::default();
     for exp in &results.unused_exports {
         unused_export_names
-            .entry(exp.path.clone())
+            .entry(exp.export.path.clone())
             .or_default()
-            .push(exp.export_name.clone());
+            .push(exp.export.export_name.clone());
     }
 
     let mut entry_points: rustc_hash::FxHashSet<std::path::PathBuf> =
@@ -1052,7 +1057,7 @@ pub(super) fn compute_file_scores(
     let unused_files: rustc_hash::FxHashSet<&std::path::Path> = results
         .unused_files
         .iter()
-        .map(|f| f.path.as_path())
+        .map(|f| f.file.path.as_path())
         .collect();
 
     let unused_exports_by_path = count_unused_exports_by_path(&results.unused_exports);
@@ -1065,7 +1070,12 @@ pub(super) fn compute_file_scores(
     let unused_exports: rustc_hash::FxHashSet<(&std::path::Path, String)> = results
         .unused_exports
         .iter()
-        .map(|export| (export.path.as_path(), export.export_name.clone()))
+        .map(|export| {
+            (
+                export.export.path.as_path(),
+                export.export.export_name.clone(),
+            )
+        })
         .collect();
     let coverage = compute_coverage_gaps(&graph, file_paths, &module_by_id, &unused_exports, root);
 
@@ -1248,8 +1258,8 @@ pub(super) fn compute_file_scores(
     }
     let mut unused_export_paths: Vec<std::path::PathBuf> =
         Vec::with_capacity(results.unused_exports.len() + results.unused_types.len());
-    unused_export_paths.extend(results.unused_exports.iter().map(|e| e.path.clone()));
-    unused_export_paths.extend(results.unused_types.iter().map(|e| e.path.clone()));
+    unused_export_paths.extend(results.unused_exports.iter().map(|e| e.export.path.clone()));
+    unused_export_paths.extend(results.unused_types.iter().map(|e| e.export.path.clone()));
     let mut unused_dep_package_paths: Vec<std::path::PathBuf> = Vec::with_capacity(unused_deps);
     unused_dep_package_paths.extend(results.unused_dependencies.iter().map(|d| d.path.clone()));
     unused_dep_package_paths.extend(
@@ -1268,14 +1278,14 @@ pub(super) fn compute_file_scores(
         unused_file_paths: results
             .unused_files
             .iter()
-            .map(|f| f.path.clone())
+            .map(|f| f.file.path.clone())
             .collect(),
         unused_export_paths,
         unused_dep_package_paths,
         circular_dep_groups: results
             .circular_dependencies
             .iter()
-            .map(|c| c.files.clone())
+            .map(|c| c.cycle.files.clone())
             .collect(),
         module_export_counts,
     };
@@ -1671,7 +1681,7 @@ mod tests {
 
     #[test]
     fn count_unused_exports_empty() {
-        let exports: Vec<fallow_core::results::UnusedExport> = vec![];
+        let exports: Vec<fallow_core::results::UnusedExportFinding> = vec![];
         let map = count_unused_exports_by_path(&exports);
         assert!(map.is_empty());
     }
@@ -1679,33 +1689,39 @@ mod tests {
     #[test]
     fn count_unused_exports_groups_by_path() {
         let exports = vec![
-            fallow_core::results::UnusedExport {
-                path: std::path::PathBuf::from("/src/a.ts"),
-                export_name: "foo".into(),
-                is_type_only: false,
-                line: 1,
-                col: 0,
-                span_start: 0,
-                is_re_export: false,
-            },
-            fallow_core::results::UnusedExport {
-                path: std::path::PathBuf::from("/src/a.ts"),
-                export_name: "bar".into(),
-                is_type_only: false,
-                line: 5,
-                col: 0,
-                span_start: 40,
-                is_re_export: false,
-            },
-            fallow_core::results::UnusedExport {
-                path: std::path::PathBuf::from("/src/b.ts"),
-                export_name: "baz".into(),
-                is_type_only: false,
-                line: 1,
-                col: 0,
-                span_start: 0,
-                is_re_export: false,
-            },
+            fallow_core::results::UnusedExportFinding::with_actions(
+                fallow_core::results::UnusedExport {
+                    path: std::path::PathBuf::from("/src/a.ts"),
+                    export_name: "foo".into(),
+                    is_type_only: false,
+                    line: 1,
+                    col: 0,
+                    span_start: 0,
+                    is_re_export: false,
+                },
+            ),
+            fallow_core::results::UnusedExportFinding::with_actions(
+                fallow_core::results::UnusedExport {
+                    path: std::path::PathBuf::from("/src/a.ts"),
+                    export_name: "bar".into(),
+                    is_type_only: false,
+                    line: 5,
+                    col: 0,
+                    span_start: 40,
+                    is_re_export: false,
+                },
+            ),
+            fallow_core::results::UnusedExportFinding::with_actions(
+                fallow_core::results::UnusedExport {
+                    path: std::path::PathBuf::from("/src/b.ts"),
+                    export_name: "baz".into(),
+                    is_type_only: false,
+                    line: 1,
+                    col: 0,
+                    span_start: 0,
+                    is_re_export: false,
+                },
+            ),
         ];
         let map = count_unused_exports_by_path(&exports);
         assert_eq!(map.get(std::path::Path::new("/src/a.ts")).copied(), Some(2));
@@ -1849,15 +1865,17 @@ mod tests {
 
     #[test]
     fn count_unused_exports_single_file_single_export() {
-        let exports = vec![fallow_core::results::UnusedExport {
-            path: std::path::PathBuf::from("/src/only.ts"),
-            export_name: "lonely".into(),
-            is_type_only: false,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        }];
+        let exports = vec![fallow_core::results::UnusedExportFinding::with_actions(
+            fallow_core::results::UnusedExport {
+                path: std::path::PathBuf::from("/src/only.ts"),
+                export_name: "lonely".into(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            },
+        )];
         let map = count_unused_exports_by_path(&exports);
         assert_eq!(map.len(), 1);
         assert_eq!(
@@ -2345,11 +2363,13 @@ mod tests {
         file_paths.insert(fallow_core::discover::FileId(0), &files[0].path);
 
         let mut results = fallow_types::results::AnalysisResults::default();
-        results
-            .unused_files
-            .push(fallow_types::results::UnusedFile {
-                path: path_a.clone(),
-            });
+        results.unused_files.push(
+            fallow_types::output_dead_code::UnusedFileFinding::with_actions(
+                fallow_types::results::UnusedFile {
+                    path: path_a.clone(),
+                },
+            ),
+        );
 
         let output = fallow_core::AnalysisOutput {
             results,
@@ -2546,15 +2566,17 @@ mod tests {
         file_paths.insert(fallow_core::discover::FileId(1), &files[1].path);
 
         let mut results = fallow_types::results::AnalysisResults::default();
-        results
-            .circular_dependencies
-            .push(fallow_types::results::CircularDependency {
-                files: vec![path_a.clone(), path_b.clone()],
-                length: 2,
-                line: 1,
-                col: 0,
-                is_cross_package: false,
-            });
+        results.circular_dependencies.push(
+            fallow_types::output_dead_code::CircularDependencyFinding::with_actions(
+                fallow_types::results::CircularDependency {
+                    files: vec![path_a.clone(), path_b.clone()],
+                    length: 2,
+                    line: 1,
+                    col: 0,
+                    is_cross_package: false,
+                },
+            ),
+        );
 
         let output = fallow_core::AnalysisOutput {
             results,
@@ -2670,28 +2692,32 @@ mod tests {
         file_paths.insert(fallow_core::discover::FileId(0), &files[0].path);
 
         let mut results = fallow_types::results::AnalysisResults::default();
-        results
-            .unused_exports
-            .push(fallow_types::results::UnusedExport {
-                path: path_a.clone(),
-                export_name: "foo".into(),
-                is_type_only: false,
-                line: 1,
-                col: 0,
-                span_start: 0,
-                is_re_export: false,
-            });
-        results
-            .unused_types
-            .push(fallow_types::results::UnusedExport {
-                path: path_a,
-                export_name: "MyType".into(),
-                is_type_only: true,
-                line: 5,
-                col: 0,
-                span_start: 40,
-                is_re_export: false,
-            });
+        results.unused_exports.push(
+            fallow_types::output_dead_code::UnusedExportFinding::with_actions(
+                fallow_types::results::UnusedExport {
+                    path: path_a.clone(),
+                    export_name: "foo".into(),
+                    is_type_only: false,
+                    line: 1,
+                    col: 0,
+                    span_start: 0,
+                    is_re_export: false,
+                },
+            ),
+        );
+        results.unused_types.push(
+            fallow_types::output_dead_code::UnusedTypeFinding::with_actions(
+                fallow_types::results::UnusedExport {
+                    path: path_a,
+                    export_name: "MyType".into(),
+                    is_type_only: true,
+                    line: 5,
+                    col: 0,
+                    span_start: 40,
+                    is_re_export: false,
+                },
+            ),
+        );
         results
             .unused_dependencies
             .push(fallow_types::results::UnusedDependency {
@@ -2830,17 +2856,19 @@ mod tests {
         // All 3 exports are unused
         let mut results = fallow_types::results::AnalysisResults::default();
         for name in ["foo", "bar", "baz"] {
-            results
-                .unused_exports
-                .push(fallow_types::results::UnusedExport {
-                    path: path_a.clone(),
-                    export_name: name.into(),
-                    is_type_only: false,
-                    line: 1,
-                    col: 0,
-                    span_start: 0,
-                    is_re_export: name == "baz",
-                });
+            results.unused_exports.push(
+                fallow_types::output_dead_code::UnusedExportFinding::with_actions(
+                    fallow_types::results::UnusedExport {
+                        path: path_a.clone(),
+                        export_name: name.into(),
+                        is_type_only: false,
+                        line: 1,
+                        col: 0,
+                        span_start: 0,
+                        is_re_export: name == "baz",
+                    },
+                ),
+            );
         }
 
         let output = fallow_core::AnalysisOutput {

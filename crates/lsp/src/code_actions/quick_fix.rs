@@ -30,9 +30,17 @@ pub fn build_remove_export_actions(
 ) -> Vec<CodeActionOrCommand> {
     let mut actions = Vec::new();
 
+    let exports_iter = results.unused_exports.iter().map(|f| &f.export);
+    let types_iter = results.unused_types.iter().map(|f| &f.export);
     for (exports, msg_prefix) in [
-        (&results.unused_exports, "Export"),
-        (&results.unused_types, "Type export"),
+        (
+            Box::new(exports_iter) as Box<dyn Iterator<Item = &fallow_core::results::UnusedExport>>,
+            "Export",
+        ),
+        (
+            Box::new(types_iter) as Box<dyn Iterator<Item = &fallow_core::results::UnusedExport>>,
+            "Type export",
+        ),
     ] {
         for export in exports {
             if export.path != file_path {
@@ -588,7 +596,7 @@ pub fn build_delete_file_actions(
     let mut actions = Vec::new();
 
     for file in &results.unused_files {
-        if file.path != file_path {
+        if file.file.path != file_path {
             continue;
         }
 
@@ -636,7 +644,7 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    use fallow_core::results::{UnusedExport, UnusedFile};
+    use fallow_core::results::{UnusedExport, UnusedFile, UnusedFileFinding, UnusedTypeFinding};
 
     fn test_root() -> PathBuf {
         if cfg!(windows) {
@@ -659,8 +667,13 @@ mod tests {
         }
     }
 
-    fn make_unused_export(path: &Path, name: &str, line: u32, col: u32) -> UnusedExport {
-        UnusedExport {
+    fn make_unused_export(
+        path: &Path,
+        name: &str,
+        line: u32,
+        col: u32,
+    ) -> fallow_core::results::UnusedExportFinding {
+        fallow_core::results::UnusedExportFinding::with_actions(UnusedExport {
             path: path.to_path_buf(),
             export_name: name.to_string(),
             is_type_only: false,
@@ -668,7 +681,7 @@ mod tests {
             col,
             span_start: 0,
             is_re_export: false,
-        }
+        })
     }
 
     fn unwrap_code_action(action: &CodeActionOrCommand) -> &CodeAction {
@@ -823,15 +836,17 @@ mod tests {
         let uri = Url::from_file_path(&file).unwrap();
 
         let mut results = AnalysisResults::default();
-        results.unused_types.push(UnusedExport {
-            path: file.clone(),
-            export_name: "MyType".to_string(),
-            is_type_only: true,
-            line: 1,
-            col: 12,
-            span_start: 0,
-            is_re_export: false,
-        });
+        results
+            .unused_types
+            .push(UnusedTypeFinding::with_actions(UnusedExport {
+                path: file.clone(),
+                export_name: "MyType".to_string(),
+                is_type_only: true,
+                line: 1,
+                col: 12,
+                span_start: 0,
+                is_re_export: false,
+            }));
 
         let lines = vec!["export type MyType = string;"];
         let actions = build_remove_export_actions(&results, &file, &uri, &make_range(0, 0), &lines);
@@ -858,15 +873,17 @@ mod tests {
         results
             .unused_exports
             .push(make_unused_export(&file, "foo", 1, 13));
-        results.unused_types.push(UnusedExport {
-            path: file.clone(),
-            export_name: "Bar".to_string(),
-            is_type_only: true,
-            line: 2,
-            col: 12,
-            span_start: 0,
-            is_re_export: false,
-        });
+        results
+            .unused_types
+            .push(UnusedTypeFinding::with_actions(UnusedExport {
+                path: file.clone(),
+                export_name: "Bar".to_string(),
+                is_type_only: true,
+                line: 2,
+                col: 12,
+                span_start: 0,
+                is_re_export: false,
+            }));
 
         let lines = vec!["export const foo = 1;", "export type Bar = string;"];
         let actions = build_remove_export_actions(&results, &file, &uri, &make_range(0, 1), &lines);
@@ -1079,7 +1096,9 @@ mod tests {
         let uri_b = Url::from_file_path(&file_b).unwrap();
 
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile { path: file_a });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile { path: file_a }));
 
         let actions = build_delete_file_actions(&results, &file_b, &uri_b, &make_range(0, 10));
         assert!(actions.is_empty());
@@ -1092,7 +1111,11 @@ mod tests {
         let uri = Url::from_file_path(&file).unwrap();
 
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile { path: file.clone() });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: file.clone(),
+            }));
 
         // Cursor starts at line 1, but diagnostic is at line 0
         let actions = build_delete_file_actions(&results, &file, &uri, &make_range(1, 5));
@@ -1106,7 +1129,11 @@ mod tests {
         let uri = Url::from_file_path(&file).unwrap();
 
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile { path: file.clone() });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: file.clone(),
+            }));
 
         let actions = build_delete_file_actions(&results, &file, &uri, &make_range(0, 0));
 
@@ -1124,7 +1151,11 @@ mod tests {
         let uri = Url::from_file_path(&file).unwrap();
 
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile { path: file.clone() });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: file.clone(),
+            }));
 
         let actions = build_delete_file_actions(&results, &file, &uri, &make_range(0, 0));
         let ca = unwrap_code_action(&actions[0]);
@@ -1155,7 +1186,11 @@ mod tests {
         let uri = Url::from_file_path(&file).unwrap();
 
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile { path: file.clone() });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: file.clone(),
+            }));
 
         let actions = build_delete_file_actions(&results, &file, &uri, &make_range(0, 0));
         let ca = unwrap_code_action(&actions[0]);
@@ -1182,7 +1217,11 @@ mod tests {
         let uri = Url::from_file_path(&file).unwrap();
 
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile { path: file.clone() });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: file.clone(),
+            }));
 
         // Cursor from line 0 to line 50 — should still trigger because start.line == 0
         let actions = build_delete_file_actions(&results, &file, &uri, &make_range(0, 50));
@@ -1197,8 +1236,16 @@ mod tests {
 
         let mut results = AnalysisResults::default();
         // Unlikely in practice, but tests that the loop iterates all entries
-        results.unused_files.push(UnusedFile { path: file.clone() });
-        results.unused_files.push(UnusedFile { path: file.clone() });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: file.clone(),
+            }));
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: file.clone(),
+            }));
 
         let actions = build_delete_file_actions(&results, &file, &uri, &make_range(0, 0));
         assert_eq!(actions.len(), 2);
@@ -1215,7 +1262,11 @@ mod tests {
         let uri = Url::from_file_path(&file).unwrap();
 
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile { path: file.clone() });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: file.clone(),
+            }));
         results
             .unused_exports
             .push(make_unused_export(&file, "helper", 1, 16));

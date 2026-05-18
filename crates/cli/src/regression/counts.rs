@@ -242,18 +242,22 @@ mod tests {
     #[test]
     fn check_counts_from_results() {
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile {
-            path: PathBuf::from("a.ts"),
-        });
-        results.unused_exports.push(UnusedExport {
-            path: PathBuf::from("b.ts"),
-            export_name: "foo".into(),
-            is_type_only: false,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: PathBuf::from("a.ts"),
+            }));
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: PathBuf::from("b.ts"),
+                export_name: "foo".into(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
         let counts = CheckCounts::from_results(&results);
         assert_eq!(counts.total_issues, 2);
         assert_eq!(counts.unused_files, 1);

@@ -10,7 +10,7 @@ fn unused_export_names(results: &fallow_core::results::AnalysisResults) -> Vec<&
     results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect()
 }
 
@@ -18,7 +18,14 @@ fn unused_file_names(results: &fallow_core::results::AnalysisResults) -> Vec<Str
     results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect()
 }
 

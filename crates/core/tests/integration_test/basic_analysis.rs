@@ -10,7 +10,14 @@ fn basic_project_detects_unused_files() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
 
     assert!(
@@ -28,7 +35,7 @@ fn basic_project_detects_unused_exports() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     assert!(
@@ -55,7 +62,7 @@ fn basic_project_detects_unused_types() {
     let unused_type_names: Vec<&str> = results
         .unused_types
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     assert!(
@@ -117,7 +124,14 @@ fn cjs_project_detects_orphan() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
 
     assert!(
@@ -139,7 +153,7 @@ fn namespace_import_makes_all_exports_used() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     assert!(
@@ -165,7 +179,7 @@ fn namespace_import_used_through_object_alias_and_star_barrel() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     assert!(
@@ -191,7 +205,7 @@ fn namespace_import_used_through_object_alias_across_workspace_packages() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     assert!(
@@ -219,7 +233,7 @@ fn namespace_import_used_through_object_alias_across_packages_via_star_barrel() 
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     assert!(
@@ -256,7 +270,7 @@ fn namespace_import_used_through_object_alias_across_multi_hop_barrel_chain() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     assert!(
@@ -296,7 +310,7 @@ fn namespace_re_export_via_named_import_credits_target_members() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     // Variant A: accessed members credited, stillUnused stays flagged.
@@ -373,7 +387,7 @@ fn namespace_object_alias_chains_through_namespace_re_export_target() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     // Positive case 1 (single hop): `used` must be credited through
@@ -421,7 +435,7 @@ fn namespace_object_alias_chains_through_namespace_re_export_target() {
     let unused_file_paths: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.display().to_string())
+        .map(|f| f.file.path.display().to_string())
         .collect();
     for required in ["leaf.ts", "barrel.ts", "deeper-barrel.ts", "deeper-leaf.ts"] {
         assert!(
@@ -448,7 +462,7 @@ fn namespace_export_members_not_reported_as_unused() {
         results
             .unused_exports
             .iter()
-            .map(|e| e.export_name.as_str())
+            .map(|e| e.export.export_name.as_str())
             .collect::<Vec<_>>()
     );
     assert!(
@@ -457,7 +471,7 @@ fn namespace_export_members_not_reported_as_unused() {
         results
             .unused_types
             .iter()
-            .map(|e| e.export_name.as_str())
+            .map(|e| e.export.export_name.as_str())
             .collect::<Vec<_>>()
     );
     assert!(results.unused_files.is_empty(), "No unused files expected");
@@ -495,7 +509,14 @@ fn default_export_flagged_when_not_imported() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
 
     assert!(
@@ -517,8 +538,13 @@ fn default_export_flagged_when_only_named_imported() {
         .iter()
         .map(|e| {
             (
-                e.export_name.as_str(),
-                e.path.file_name().unwrap().to_string_lossy().to_string(),
+                e.export.export_name.as_str(),
+                e.export
+                    .path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string(),
             )
         })
         .collect();
@@ -535,7 +561,7 @@ fn default_export_flagged_when_only_named_imported() {
         !results
             .unused_exports
             .iter()
-            .any(|e| e.export_name == "usedNamed"),
+            .any(|e| e.export.export_name == "usedNamed"),
         "usedNamed should NOT be detected as unused"
     );
 }
@@ -551,7 +577,14 @@ fn side_effect_import_makes_file_reachable() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
 
     // setup.ts is imported via side-effect import, so it should be reachable
@@ -599,7 +632,7 @@ fn circular_import_does_not_crash() {
         !results.circular_dependencies.is_empty(),
         "should detect circular dependency between a.ts and b.ts"
     );
-    assert_eq!(results.circular_dependencies[0].length, 2);
+    assert_eq!(results.circular_dependencies[0].cycle.length, 2);
 }
 
 #[test]

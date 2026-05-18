@@ -1337,29 +1337,29 @@ fn dead_code_keys(
     for item in &results.unused_files {
         keys.insert(format!(
             "unused-file:{}",
-            relative_key_path(&item.path, root)
+            relative_key_path(&item.file.path, root)
         ));
     }
     for item in &results.unused_exports {
         keys.insert(format!(
             "unused-export:{}:{}",
-            relative_key_path(&item.path, root),
-            item.export_name
+            relative_key_path(&item.export.path, root),
+            item.export.export_name
         ));
     }
     for item in &results.unused_types {
         keys.insert(format!(
             "unused-type:{}:{}",
-            relative_key_path(&item.path, root),
-            item.export_name
+            relative_key_path(&item.export.path, root),
+            item.export.export_name
         ));
     }
     for item in &results.private_type_leaks {
         keys.insert(format!(
             "private-type-leak:{}:{}:{}",
-            relative_key_path(&item.path, root),
-            item.export_name,
-            item.type_name
+            relative_key_path(&item.leak.path, root),
+            item.leak.export_name,
+            item.leak.type_name
         ));
     }
     for item in results
@@ -1371,16 +1371,16 @@ fn dead_code_keys(
         keys.insert(unused_dependency_key(item, root));
     }
     for item in &results.unused_enum_members {
-        keys.insert(unused_member_key("unused-enum-member", item, root));
+        keys.insert(unused_member_key("unused-enum-member", &item.member, root));
     }
     for item in &results.unused_class_members {
-        keys.insert(unused_member_key("unused-class-member", item, root));
+        keys.insert(unused_member_key("unused-class-member", &item.member, root));
     }
     for item in &results.unresolved_imports {
         keys.insert(format!(
             "unresolved-import:{}:{}",
-            relative_key_path(&item.path, root),
-            item.specifier
+            relative_key_path(&item.import.path, root),
+            item.import.specifier
         ));
     }
     for item in &results.unlisted_dependencies {
@@ -1416,6 +1416,7 @@ fn dead_code_keys(
     }
     for item in &results.circular_dependencies {
         let mut files: Vec<String> = item
+            .cycle
             .files
             .iter()
             .map(|path| relative_key_path(path, root))
@@ -1426,9 +1427,9 @@ fn dead_code_keys(
     for item in &results.boundary_violations {
         keys.insert(format!(
             "boundary-violation:{}:{}:{}",
-            relative_key_path(&item.from_path, root),
-            relative_key_path(&item.to_path, root),
-            item.import_specifier
+            relative_key_path(&item.violation.from_path, root),
+            relative_key_path(&item.violation.to_path, root),
+            item.violation.import_specifier
         ));
     }
     for item in &results.stale_suppressions {
@@ -1483,21 +1484,21 @@ fn retain_introduced_dead_code(
     results.unused_files.retain(|item| {
         !base.contains(&format!(
             "unused-file:{}",
-            relative_key_path(&item.path, root)
+            relative_key_path(&item.file.path, root)
         ))
     });
     results.unused_exports.retain(|item| {
         !base.contains(&format!(
             "unused-export:{}:{}",
-            relative_key_path(&item.path, root),
-            item.export_name
+            relative_key_path(&item.export.path, root),
+            item.export.export_name
         ))
     });
     results.unused_types.retain(|item| {
         !base.contains(&format!(
             "unused-type:{}:{}",
-            relative_key_path(&item.path, root),
-            item.export_name
+            relative_key_path(&item.export.path, root),
+            item.export.export_name
         ))
     });
     // The verdict path only needs correct issue counts and severities. For the
@@ -1510,9 +1511,9 @@ fn retain_introduced_dead_code(
     results.private_type_leaks.retain(|item| {
         keep(format!(
             "private-type-leak:{}:{}:{}",
-            relative_key_path(&item.path, root),
-            item.export_name,
-            item.type_name
+            relative_key_path(&item.leak.path, root),
+            item.leak.export_name,
+            item.leak.type_name
         ))
     });
     results
@@ -1526,15 +1527,15 @@ fn retain_introduced_dead_code(
         .retain(|item| keep(unused_dependency_key(item, root)));
     results
         .unused_enum_members
-        .retain(|item| keep(unused_member_key("unused-enum-member", item, root)));
+        .retain(|item| keep(unused_member_key("unused-enum-member", &item.member, root)));
     results
         .unused_class_members
-        .retain(|item| keep(unused_member_key("unused-class-member", item, root)));
+        .retain(|item| keep(unused_member_key("unused-class-member", &item.member, root)));
     results.unresolved_imports.retain(|item| {
         keep(format!(
             "unresolved-import:{}:{}",
-            relative_key_path(&item.path, root),
-            item.specifier
+            relative_key_path(&item.import.path, root),
+            item.import.specifier
         ))
     });
     results
@@ -1570,6 +1571,7 @@ fn retain_introduced_dead_code(
     });
     results.circular_dependencies.retain(|item| {
         let mut files: Vec<String> = item
+            .cycle
             .files
             .iter()
             .map(|path| relative_key_path(path, root))
@@ -1580,9 +1582,9 @@ fn retain_introduced_dead_code(
     results.boundary_violations.retain(|item| {
         keep(format!(
             "boundary-violation:{}:{}:{}",
-            relative_key_path(&item.from_path, root),
-            relative_key_path(&item.to_path, root),
-            item.import_specifier
+            relative_key_path(&item.violation.from_path, root),
+            relative_key_path(&item.violation.to_path, root),
+            item.violation.import_specifier
         ))
     });
     results.stale_suppressions.retain(|item| {
@@ -1658,7 +1660,7 @@ fn annotate_dead_code_json(
         "unused_files",
         results.unused_files.iter().map(|item| {
             issue_was_introduced(
-                &format!("unused-file:{}", relative_key_path(&item.path, root)),
+                &format!("unused-file:{}", relative_key_path(&item.file.path, root)),
                 base,
             )
         }),
@@ -1670,8 +1672,8 @@ fn annotate_dead_code_json(
             issue_was_introduced(
                 &format!(
                     "unused-export:{}:{}",
-                    relative_key_path(&item.path, root),
-                    item.export_name
+                    relative_key_path(&item.export.path, root),
+                    item.export.export_name
                 ),
                 base,
             )
@@ -1684,8 +1686,8 @@ fn annotate_dead_code_json(
             issue_was_introduced(
                 &format!(
                     "unused-type:{}:{}",
-                    relative_key_path(&item.path, root),
-                    item.export_name
+                    relative_key_path(&item.export.path, root),
+                    item.export.export_name
                 ),
                 base,
             )
@@ -1698,9 +1700,9 @@ fn annotate_dead_code_json(
             issue_was_introduced(
                 &format!(
                     "private-type-leak:{}:{}:{}",
-                    relative_key_path(&item.path, root),
-                    item.export_name,
-                    item.type_name
+                    relative_key_path(&item.leak.path, root),
+                    item.leak.export_name,
+                    item.leak.type_name
                 ),
                 base,
             )
@@ -1734,14 +1736,20 @@ fn annotate_dead_code_json(
         json,
         "unused_enum_members",
         results.unused_enum_members.iter().map(|item| {
-            issue_was_introduced(&unused_member_key("unused-enum-member", item, root), base)
+            issue_was_introduced(
+                &unused_member_key("unused-enum-member", &item.member, root),
+                base,
+            )
         }),
     );
     annotate_issue_array(
         json,
         "unused_class_members",
         results.unused_class_members.iter().map(|item| {
-            issue_was_introduced(&unused_member_key("unused-class-member", item, root), base)
+            issue_was_introduced(
+                &unused_member_key("unused-class-member", &item.member, root),
+                base,
+            )
         }),
     );
     annotate_issue_array(
@@ -1751,8 +1759,8 @@ fn annotate_dead_code_json(
             issue_was_introduced(
                 &format!(
                     "unresolved-import:{}:{}",
-                    relative_key_path(&item.path, root),
-                    item.specifier
+                    relative_key_path(&item.import.path, root),
+                    item.import.specifier
                 ),
                 base,
             )
@@ -1820,6 +1828,7 @@ fn annotate_dead_code_json(
         "circular_dependencies",
         results.circular_dependencies.iter().map(|item| {
             let mut files: Vec<String> = item
+                .cycle
                 .files
                 .iter()
                 .map(|path| relative_key_path(path, root))
@@ -1835,9 +1844,9 @@ fn annotate_dead_code_json(
             issue_was_introduced(
                 &format!(
                     "boundary-violation:{}:{}:{}",
-                    relative_key_path(&item.from_path, root),
-                    relative_key_path(&item.to_path, root),
-                    item.import_specifier
+                    relative_key_path(&item.violation.from_path, root),
+                    relative_key_path(&item.violation.to_path, root),
+                    item.violation.import_specifier
                 ),
                 base,
             )

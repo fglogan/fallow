@@ -824,19 +824,19 @@ fn build_static_signal_index(
     let mut index = StaticSignalIndex::default();
 
     for file in &analysis_output.results.unused_files {
-        index.unused_files.insert(file.path.clone());
+        index.unused_files.insert(file.file.path.clone());
     }
     for export in &analysis_output.results.unused_exports {
         index
             .unused_export_names
-            .entry(export.path.clone())
+            .entry(export.export.path.clone())
             .or_default()
-            .insert(export.export_name.clone());
+            .insert(export.export.export_name.clone());
         index
             .unused_export_lines
-            .entry(export.path.clone())
+            .entry(export.export.path.clone())
             .or_default()
-            .insert(export.line);
+            .insert(export.export.line);
     }
 
     let module_by_id: FxHashMap<_, _> = modules

@@ -83,7 +83,7 @@ fn unresolved_imports_detected() {
     let unresolved_specifiers: Vec<&str> = results
         .unresolved_imports
         .iter()
-        .map(|u| u.specifier.as_str())
+        .map(|u| u.import.specifier.as_str())
         .collect();
 
     assert!(
@@ -298,7 +298,7 @@ fn subpath_imports_resolve_correctly() {
         results
             .unresolved_imports
             .iter()
-            .map(|u| u.specifier.as_str())
+            .map(|u| u.import.specifier.as_str())
             .collect::<Vec<_>>()
     );
 
@@ -317,7 +317,7 @@ fn subpath_imports_resolve_correctly() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
     assert!(
         unused_export_names.contains(&"unused"),

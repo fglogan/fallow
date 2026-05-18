@@ -25,13 +25,21 @@ pub fn filter_to_workspaces(
     let in_pkg_jsons = |p: &Path| pkg_jsons.iter().any(|pkg| p == pkg);
 
     // File-scoped issues: retain only those under any workspace root
-    results.unused_files.retain(|f| any_under(&f.path));
-    results.unused_exports.retain(|e| any_under(&e.path));
-    results.unused_types.retain(|e| any_under(&e.path));
-    results.private_type_leaks.retain(|e| any_under(&e.path));
-    results.unused_enum_members.retain(|m| any_under(&m.path));
-    results.unused_class_members.retain(|m| any_under(&m.path));
-    results.unresolved_imports.retain(|i| any_under(&i.path));
+    results.unused_files.retain(|f| any_under(&f.file.path));
+    results.unused_exports.retain(|e| any_under(&e.export.path));
+    results.unused_types.retain(|e| any_under(&e.export.path));
+    results
+        .private_type_leaks
+        .retain(|e| any_under(&e.leak.path));
+    results
+        .unused_enum_members
+        .retain(|m| any_under(&m.member.path));
+    results
+        .unused_class_members
+        .retain(|m| any_under(&m.member.path));
+    results
+        .unresolved_imports
+        .retain(|i| any_under(&i.import.path));
 
     // Dependency issues: scope to matching workspaces' package.json files
     results
@@ -64,12 +72,12 @@ pub fn filter_to_workspaces(
     // Circular deps: keep cycles where at least one file is in a matched workspace
     results
         .circular_dependencies
-        .retain(|c| c.files.iter().any(|f| any_under(f)));
+        .retain(|c| c.cycle.files.iter().any(|f| any_under(f)));
 
     // Boundary violations: keep if the importing file is in a matched workspace
     results
         .boundary_violations
-        .retain(|v| any_under(&v.from_path));
+        .retain(|v| any_under(&v.violation.from_path));
 
     // Stale suppressions: keep if the file is in a matched workspace
     results.stale_suppressions.retain(|s| any_under(&s.path));
@@ -401,19 +409,23 @@ mod tests {
     #[test]
     fn filter_to_workspace_keeps_files_under_ws_root() {
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile {
-            path: PathBuf::from("/project/packages/ui/src/button.ts"),
-        });
-        results.unused_files.push(UnusedFile {
-            path: PathBuf::from("/project/packages/api/src/handler.ts"),
-        });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: PathBuf::from("/project/packages/ui/src/button.ts"),
+            }));
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: PathBuf::from("/project/packages/api/src/handler.ts"),
+            }));
 
         let ws_root = PathBuf::from("/project/packages/ui");
         filter_to_workspace(&mut results, &ws_root);
 
         assert_eq!(results.unused_files.len(), 1);
         assert_eq!(
-            results.unused_files[0].path,
+            results.unused_files[0].file.path,
             PathBuf::from("/project/packages/ui/src/button.ts")
         );
     }
@@ -525,41 +537,47 @@ mod tests {
     #[test]
     fn filter_to_workspace_scopes_exports_and_types() {
         let mut results = AnalysisResults::default();
-        results.unused_exports.push(UnusedExport {
-            path: PathBuf::from("/project/packages/ui/src/a.ts"),
-            export_name: "A".into(),
-            is_type_only: false,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
-        results.unused_exports.push(UnusedExport {
-            path: PathBuf::from("/project/packages/api/src/b.ts"),
-            export_name: "B".into(),
-            is_type_only: false,
-            line: 2,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
-        results.unused_types.push(UnusedExport {
-            path: PathBuf::from("/project/packages/ui/src/types.ts"),
-            export_name: "T".into(),
-            is_type_only: true,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: PathBuf::from("/project/packages/ui/src/a.ts"),
+                export_name: "A".into(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: PathBuf::from("/project/packages/api/src/b.ts"),
+                export_name: "B".into(),
+                is_type_only: false,
+                line: 2,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
+        results
+            .unused_types
+            .push(UnusedTypeFinding::with_actions(UnusedExport {
+                path: PathBuf::from("/project/packages/ui/src/types.ts"),
+                export_name: "T".into(),
+                is_type_only: true,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
 
         let ws_root = PathBuf::from("/project/packages/ui");
         filter_to_workspace(&mut results, &ws_root);
 
         assert_eq!(results.unused_exports.len(), 1);
-        assert_eq!(results.unused_exports[0].export_name, "A");
+        assert_eq!(results.unused_exports[0].export.export_name, "A");
         assert_eq!(results.unused_types.len(), 1);
-        assert_eq!(results.unused_types[0].export_name, "T");
+        assert_eq!(results.unused_types[0].export.export_name, "T");
     }
 
     #[test]
@@ -586,38 +604,44 @@ mod tests {
     #[test]
     fn filter_to_workspace_scopes_enum_and_class_members() {
         let mut results = AnalysisResults::default();
-        results.unused_enum_members.push(UnusedMember {
-            path: PathBuf::from("/project/packages/ui/src/enums.ts"),
-            parent_name: "Color".into(),
-            member_name: "Red".into(),
-            kind: MemberKind::EnumMember,
-            line: 2,
-            col: 0,
-        });
-        results.unused_enum_members.push(UnusedMember {
-            path: PathBuf::from("/project/packages/api/src/enums.ts"),
-            parent_name: "Status".into(),
-            member_name: "Active".into(),
-            kind: MemberKind::EnumMember,
-            line: 3,
-            col: 0,
-        });
-        results.unused_class_members.push(UnusedMember {
-            path: PathBuf::from("/project/packages/ui/src/service.ts"),
-            parent_name: "Svc".into(),
-            member_name: "init".into(),
-            kind: MemberKind::ClassMethod,
-            line: 5,
-            col: 0,
-        });
+        results
+            .unused_enum_members
+            .push(UnusedEnumMemberFinding::with_actions(UnusedMember {
+                path: PathBuf::from("/project/packages/ui/src/enums.ts"),
+                parent_name: "Color".into(),
+                member_name: "Red".into(),
+                kind: MemberKind::EnumMember,
+                line: 2,
+                col: 0,
+            }));
+        results
+            .unused_enum_members
+            .push(UnusedEnumMemberFinding::with_actions(UnusedMember {
+                path: PathBuf::from("/project/packages/api/src/enums.ts"),
+                parent_name: "Status".into(),
+                member_name: "Active".into(),
+                kind: MemberKind::EnumMember,
+                line: 3,
+                col: 0,
+            }));
+        results
+            .unused_class_members
+            .push(UnusedClassMemberFinding::with_actions(UnusedMember {
+                path: PathBuf::from("/project/packages/ui/src/service.ts"),
+                parent_name: "Svc".into(),
+                member_name: "init".into(),
+                kind: MemberKind::ClassMethod,
+                line: 5,
+                col: 0,
+            }));
 
         let ws_root = PathBuf::from("/project/packages/ui");
         filter_to_workspace(&mut results, &ws_root);
 
         assert_eq!(results.unused_enum_members.len(), 1);
-        assert_eq!(results.unused_enum_members[0].member_name, "Red");
+        assert_eq!(results.unused_enum_members[0].member.member_name, "Red");
         assert_eq!(results.unused_class_members.len(), 1);
-        assert_eq!(results.unused_class_members[0].member_name, "init");
+        assert_eq!(results.unused_class_members[0].member.member_name, "init");
     }
 
     // ── filter_changed_files ────────────────────────────────────────
@@ -625,12 +649,16 @@ mod tests {
     #[test]
     fn filter_changed_files_keeps_only_changed() {
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile {
-            path: PathBuf::from("/project/src/a.ts"),
-        });
-        results.unused_files.push(UnusedFile {
-            path: PathBuf::from("/project/src/b.ts"),
-        });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: PathBuf::from("/project/src/a.ts"),
+            }));
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: PathBuf::from("/project/src/b.ts"),
+            }));
 
         let mut changed = rustc_hash::FxHashSet::default();
         changed.insert(PathBuf::from("/project/src/a.ts"));
@@ -639,7 +667,7 @@ mod tests {
 
         assert_eq!(results.unused_files.len(), 1);
         assert_eq!(
-            results.unused_files[0].path,
+            results.unused_files[0].file.path,
             PathBuf::from("/project/src/a.ts")
         );
     }
@@ -674,24 +702,28 @@ mod tests {
     #[test]
     fn filter_changed_files_filters_exports_by_path() {
         let mut results = AnalysisResults::default();
-        results.unused_exports.push(UnusedExport {
-            path: PathBuf::from("/project/src/a.ts"),
-            export_name: "foo".into(),
-            is_type_only: false,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
-        results.unused_exports.push(UnusedExport {
-            path: PathBuf::from("/project/src/b.ts"),
-            export_name: "bar".into(),
-            is_type_only: false,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: PathBuf::from("/project/src/a.ts"),
+                export_name: "foo".into(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: PathBuf::from("/project/src/b.ts"),
+                export_name: "bar".into(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
 
         let mut changed = rustc_hash::FxHashSet::default();
         changed.insert(PathBuf::from("/project/src/b.ts"));
@@ -699,7 +731,7 @@ mod tests {
         filter_changed_files(&mut results, &changed);
 
         assert_eq!(results.unused_exports.len(), 1);
-        assert_eq!(results.unused_exports[0].export_name, "bar");
+        assert_eq!(results.unused_exports[0].export.export_name, "bar");
     }
 
     #[test]
@@ -733,16 +765,20 @@ mod tests {
     #[test]
     fn filter_changed_files_keeps_circular_deps_if_any_file_changed() {
         let mut results = AnalysisResults::default();
-        results.circular_dependencies.push(CircularDependency {
-            files: vec![
-                PathBuf::from("/project/src/a.ts"),
-                PathBuf::from("/project/src/b.ts"),
-            ],
-            length: 2,
-            line: 1,
-            col: 0,
-            is_cross_package: false,
-        });
+        results
+            .circular_dependencies
+            .push(CircularDependencyFinding::with_actions(
+                CircularDependency {
+                    files: vec![
+                        PathBuf::from("/project/src/a.ts"),
+                        PathBuf::from("/project/src/b.ts"),
+                    ],
+                    length: 2,
+                    line: 1,
+                    col: 0,
+                    is_cross_package: false,
+                },
+            ));
 
         let mut changed = rustc_hash::FxHashSet::default();
         changed.insert(PathBuf::from("/project/src/b.ts"));
@@ -755,16 +791,20 @@ mod tests {
     #[test]
     fn filter_changed_files_removes_circular_deps_if_no_file_changed() {
         let mut results = AnalysisResults::default();
-        results.circular_dependencies.push(CircularDependency {
-            files: vec![
-                PathBuf::from("/project/src/a.ts"),
-                PathBuf::from("/project/src/b.ts"),
-            ],
-            length: 2,
-            line: 1,
-            col: 0,
-            is_cross_package: false,
-        });
+        results
+            .circular_dependencies
+            .push(CircularDependencyFinding::with_actions(
+                CircularDependency {
+                    files: vec![
+                        PathBuf::from("/project/src/a.ts"),
+                        PathBuf::from("/project/src/b.ts"),
+                    ],
+                    length: 2,
+                    line: 1,
+                    col: 0,
+                    is_cross_package: false,
+                },
+            ));
 
         let mut changed = rustc_hash::FxHashSet::default();
         changed.insert(PathBuf::from("/project/src/c.ts"));
@@ -868,33 +908,41 @@ mod tests {
     #[test]
     fn filter_to_workspace_scopes_circular_dependencies() {
         let mut results = AnalysisResults::default();
-        results.circular_dependencies.push(CircularDependency {
-            files: vec![
-                PathBuf::from("/project/packages/ui/src/a.ts"),
-                PathBuf::from("/project/packages/ui/src/b.ts"),
-            ],
-            length: 2,
-            line: 1,
-            col: 0,
-            is_cross_package: false,
-        });
-        results.circular_dependencies.push(CircularDependency {
-            files: vec![
-                PathBuf::from("/project/packages/api/src/x.ts"),
-                PathBuf::from("/project/packages/api/src/y.ts"),
-            ],
-            length: 2,
-            line: 1,
-            col: 0,
-            is_cross_package: false,
-        });
+        results
+            .circular_dependencies
+            .push(CircularDependencyFinding::with_actions(
+                CircularDependency {
+                    files: vec![
+                        PathBuf::from("/project/packages/ui/src/a.ts"),
+                        PathBuf::from("/project/packages/ui/src/b.ts"),
+                    ],
+                    length: 2,
+                    line: 1,
+                    col: 0,
+                    is_cross_package: false,
+                },
+            ));
+        results
+            .circular_dependencies
+            .push(CircularDependencyFinding::with_actions(
+                CircularDependency {
+                    files: vec![
+                        PathBuf::from("/project/packages/api/src/x.ts"),
+                        PathBuf::from("/project/packages/api/src/y.ts"),
+                    ],
+                    length: 2,
+                    line: 1,
+                    col: 0,
+                    is_cross_package: false,
+                },
+            ));
 
         let ws_root = PathBuf::from("/project/packages/ui");
         filter_to_workspace(&mut results, &ws_root);
 
         assert_eq!(results.circular_dependencies.len(), 1);
         assert_eq!(
-            results.circular_dependencies[0].files[0],
+            results.circular_dependencies[0].cycle.files[0],
             PathBuf::from("/project/packages/ui/src/a.ts")
         );
     }
@@ -902,16 +950,20 @@ mod tests {
     #[test]
     fn filter_to_workspace_keeps_circular_dep_if_any_file_in_workspace() {
         let mut results = AnalysisResults::default();
-        results.circular_dependencies.push(CircularDependency {
-            files: vec![
-                PathBuf::from("/project/packages/ui/src/a.ts"),
-                PathBuf::from("/project/packages/api/src/b.ts"),
-            ],
-            length: 2,
-            line: 1,
-            col: 0,
-            is_cross_package: false,
-        });
+        results
+            .circular_dependencies
+            .push(CircularDependencyFinding::with_actions(
+                CircularDependency {
+                    files: vec![
+                        PathBuf::from("/project/packages/ui/src/a.ts"),
+                        PathBuf::from("/project/packages/api/src/b.ts"),
+                    ],
+                    length: 2,
+                    line: 1,
+                    col: 0,
+                    is_cross_package: false,
+                },
+            ));
 
         let ws_root = PathBuf::from("/project/packages/ui");
         filter_to_workspace(&mut results, &ws_root);
@@ -923,26 +975,30 @@ mod tests {
     #[test]
     fn filter_to_workspace_scopes_unresolved_imports() {
         let mut results = AnalysisResults::default();
-        results.unresolved_imports.push(UnresolvedImport {
-            path: PathBuf::from("/project/packages/ui/src/a.ts"),
-            specifier: "./missing".into(),
-            line: 1,
-            col: 0,
-            specifier_col: 0,
-        });
-        results.unresolved_imports.push(UnresolvedImport {
-            path: PathBuf::from("/project/packages/api/src/b.ts"),
-            specifier: "./gone".into(),
-            line: 2,
-            col: 0,
-            specifier_col: 0,
-        });
+        results
+            .unresolved_imports
+            .push(UnresolvedImportFinding::with_actions(UnresolvedImport {
+                path: PathBuf::from("/project/packages/ui/src/a.ts"),
+                specifier: "./missing".into(),
+                line: 1,
+                col: 0,
+                specifier_col: 0,
+            }));
+        results
+            .unresolved_imports
+            .push(UnresolvedImportFinding::with_actions(UnresolvedImport {
+                path: PathBuf::from("/project/packages/api/src/b.ts"),
+                specifier: "./gone".into(),
+                line: 2,
+                col: 0,
+                specifier_col: 0,
+            }));
 
         let ws_root = PathBuf::from("/project/packages/ui");
         filter_to_workspace(&mut results, &ws_root);
 
         assert_eq!(results.unresolved_imports.len(), 1);
-        assert_eq!(results.unresolved_imports[0].specifier, "./missing");
+        assert_eq!(results.unresolved_imports[0].import.specifier, "./missing");
     }
 
     #[test]
@@ -958,24 +1014,28 @@ mod tests {
     #[test]
     fn filter_changed_files_filters_types_by_path() {
         let mut results = AnalysisResults::default();
-        results.unused_types.push(UnusedExport {
-            path: PathBuf::from("/project/src/types.ts"),
-            export_name: "Foo".into(),
-            is_type_only: true,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
-        results.unused_types.push(UnusedExport {
-            path: PathBuf::from("/project/src/other.ts"),
-            export_name: "Bar".into(),
-            is_type_only: true,
-            line: 2,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
+        results
+            .unused_types
+            .push(UnusedTypeFinding::with_actions(UnusedExport {
+                path: PathBuf::from("/project/src/types.ts"),
+                export_name: "Foo".into(),
+                is_type_only: true,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
+        results
+            .unused_types
+            .push(UnusedTypeFinding::with_actions(UnusedExport {
+                path: PathBuf::from("/project/src/other.ts"),
+                export_name: "Bar".into(),
+                is_type_only: true,
+                line: 2,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
 
         let mut changed = rustc_hash::FxHashSet::default();
         changed.insert(PathBuf::from("/project/src/types.ts"));
@@ -983,28 +1043,32 @@ mod tests {
         filter_changed_files(&mut results, &changed);
 
         assert_eq!(results.unused_types.len(), 1);
-        assert_eq!(results.unused_types[0].export_name, "Foo");
+        assert_eq!(results.unused_types[0].export.export_name, "Foo");
     }
 
     #[test]
     fn filter_changed_files_filters_enum_members_by_path() {
         let mut results = AnalysisResults::default();
-        results.unused_enum_members.push(UnusedMember {
-            path: PathBuf::from("/project/src/enums.ts"),
-            parent_name: "Color".into(),
-            member_name: "Red".into(),
-            kind: MemberKind::EnumMember,
-            line: 2,
-            col: 0,
-        });
-        results.unused_enum_members.push(UnusedMember {
-            path: PathBuf::from("/project/src/other.ts"),
-            parent_name: "Status".into(),
-            member_name: "Active".into(),
-            kind: MemberKind::EnumMember,
-            line: 3,
-            col: 0,
-        });
+        results
+            .unused_enum_members
+            .push(UnusedEnumMemberFinding::with_actions(UnusedMember {
+                path: PathBuf::from("/project/src/enums.ts"),
+                parent_name: "Color".into(),
+                member_name: "Red".into(),
+                kind: MemberKind::EnumMember,
+                line: 2,
+                col: 0,
+            }));
+        results
+            .unused_enum_members
+            .push(UnusedEnumMemberFinding::with_actions(UnusedMember {
+                path: PathBuf::from("/project/src/other.ts"),
+                parent_name: "Status".into(),
+                member_name: "Active".into(),
+                kind: MemberKind::EnumMember,
+                line: 3,
+                col: 0,
+            }));
 
         let mut changed = rustc_hash::FxHashSet::default();
         changed.insert(PathBuf::from("/project/src/enums.ts"));
@@ -1012,28 +1076,32 @@ mod tests {
         filter_changed_files(&mut results, &changed);
 
         assert_eq!(results.unused_enum_members.len(), 1);
-        assert_eq!(results.unused_enum_members[0].member_name, "Red");
+        assert_eq!(results.unused_enum_members[0].member.member_name, "Red");
     }
 
     #[test]
     fn filter_changed_files_filters_class_members_by_path() {
         let mut results = AnalysisResults::default();
-        results.unused_class_members.push(UnusedMember {
-            path: PathBuf::from("/project/src/service.ts"),
-            parent_name: "Svc".into(),
-            member_name: "init".into(),
-            kind: MemberKind::ClassMethod,
-            line: 5,
-            col: 0,
-        });
-        results.unused_class_members.push(UnusedMember {
-            path: PathBuf::from("/project/src/other.ts"),
-            parent_name: "Other".into(),
-            member_name: "run".into(),
-            kind: MemberKind::ClassMethod,
-            line: 10,
-            col: 0,
-        });
+        results
+            .unused_class_members
+            .push(UnusedClassMemberFinding::with_actions(UnusedMember {
+                path: PathBuf::from("/project/src/service.ts"),
+                parent_name: "Svc".into(),
+                member_name: "init".into(),
+                kind: MemberKind::ClassMethod,
+                line: 5,
+                col: 0,
+            }));
+        results
+            .unused_class_members
+            .push(UnusedClassMemberFinding::with_actions(UnusedMember {
+                path: PathBuf::from("/project/src/other.ts"),
+                parent_name: "Other".into(),
+                member_name: "run".into(),
+                kind: MemberKind::ClassMethod,
+                line: 10,
+                col: 0,
+            }));
 
         let mut changed = rustc_hash::FxHashSet::default();
         changed.insert(PathBuf::from("/project/src/service.ts"));
@@ -1041,7 +1109,7 @@ mod tests {
         filter_changed_files(&mut results, &changed);
 
         assert_eq!(results.unused_class_members.len(), 1);
-        assert_eq!(results.unused_class_members[0].member_name, "init");
+        assert_eq!(results.unused_class_members[0].member.member_name, "init");
     }
 
     #[test]
@@ -1107,50 +1175,62 @@ mod tests {
     #[test]
     fn filter_changed_files_empty_set_clears_file_scoped_issues() {
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile {
-            path: PathBuf::from("/project/src/a.ts"),
-        });
-        results.unused_exports.push(UnusedExport {
-            path: PathBuf::from("/project/src/b.ts"),
-            export_name: "foo".into(),
-            is_type_only: false,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
-        results.unused_types.push(UnusedExport {
-            path: PathBuf::from("/project/src/c.ts"),
-            export_name: "T".into(),
-            is_type_only: true,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
-        results.unused_enum_members.push(UnusedMember {
-            path: PathBuf::from("/project/src/d.ts"),
-            parent_name: "E".into(),
-            member_name: "A".into(),
-            kind: MemberKind::EnumMember,
-            line: 1,
-            col: 0,
-        });
-        results.unused_class_members.push(UnusedMember {
-            path: PathBuf::from("/project/src/e.ts"),
-            parent_name: "C".into(),
-            member_name: "m".into(),
-            kind: MemberKind::ClassMethod,
-            line: 1,
-            col: 0,
-        });
-        results.unresolved_imports.push(UnresolvedImport {
-            path: PathBuf::from("/project/src/f.ts"),
-            specifier: "./x".into(),
-            line: 1,
-            col: 0,
-            specifier_col: 0,
-        });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: PathBuf::from("/project/src/a.ts"),
+            }));
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: PathBuf::from("/project/src/b.ts"),
+                export_name: "foo".into(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
+        results
+            .unused_types
+            .push(UnusedTypeFinding::with_actions(UnusedExport {
+                path: PathBuf::from("/project/src/c.ts"),
+                export_name: "T".into(),
+                is_type_only: true,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
+        results
+            .unused_enum_members
+            .push(UnusedEnumMemberFinding::with_actions(UnusedMember {
+                path: PathBuf::from("/project/src/d.ts"),
+                parent_name: "E".into(),
+                member_name: "A".into(),
+                kind: MemberKind::EnumMember,
+                line: 1,
+                col: 0,
+            }));
+        results
+            .unused_class_members
+            .push(UnusedClassMemberFinding::with_actions(UnusedMember {
+                path: PathBuf::from("/project/src/e.ts"),
+                parent_name: "C".into(),
+                member_name: "m".into(),
+                kind: MemberKind::ClassMethod,
+                line: 1,
+                col: 0,
+            }));
+        results
+            .unresolved_imports
+            .push(UnresolvedImportFinding::with_actions(UnresolvedImport {
+                path: PathBuf::from("/project/src/f.ts"),
+                specifier: "./x".into(),
+                line: 1,
+                col: 0,
+                specifier_col: 0,
+            }));
 
         let changed = rustc_hash::FxHashSet::default();
 
@@ -1205,20 +1285,24 @@ mod tests {
     #[test]
     fn filter_changed_files_filters_unresolved_imports_by_path() {
         let mut results = AnalysisResults::default();
-        results.unresolved_imports.push(UnresolvedImport {
-            path: PathBuf::from("/project/src/a.ts"),
-            specifier: "./missing".into(),
-            line: 1,
-            col: 0,
-            specifier_col: 0,
-        });
-        results.unresolved_imports.push(UnresolvedImport {
-            path: PathBuf::from("/project/src/b.ts"),
-            specifier: "./gone".into(),
-            line: 2,
-            col: 0,
-            specifier_col: 0,
-        });
+        results
+            .unresolved_imports
+            .push(UnresolvedImportFinding::with_actions(UnresolvedImport {
+                path: PathBuf::from("/project/src/a.ts"),
+                specifier: "./missing".into(),
+                line: 1,
+                col: 0,
+                specifier_col: 0,
+            }));
+        results
+            .unresolved_imports
+            .push(UnresolvedImportFinding::with_actions(UnresolvedImport {
+                path: PathBuf::from("/project/src/b.ts"),
+                specifier: "./gone".into(),
+                line: 2,
+                col: 0,
+                specifier_col: 0,
+            }));
 
         let mut changed = rustc_hash::FxHashSet::default();
         changed.insert(PathBuf::from("/project/src/a.ts"));
@@ -1226,7 +1310,7 @@ mod tests {
         filter_changed_files(&mut results, &changed);
 
         assert_eq!(results.unresolved_imports.len(), 1);
-        assert_eq!(results.unresolved_imports[0].specifier, "./missing");
+        assert_eq!(results.unresolved_imports[0].import.specifier, "./missing");
     }
 
     // ── multi-workspace resolution ──────────────────────────────────
@@ -1343,15 +1427,21 @@ mod tests {
     #[test]
     fn filter_to_workspaces_unions_multiple_roots() {
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile {
-            path: PathBuf::from("/project/packages/ui/src/a.ts"),
-        });
-        results.unused_files.push(UnusedFile {
-            path: PathBuf::from("/project/packages/api/src/b.ts"),
-        });
-        results.unused_files.push(UnusedFile {
-            path: PathBuf::from("/project/packages/legacy/src/c.ts"),
-        });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: PathBuf::from("/project/packages/ui/src/a.ts"),
+            }));
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: PathBuf::from("/project/packages/api/src/b.ts"),
+            }));
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: PathBuf::from("/project/packages/legacy/src/c.ts"),
+            }));
 
         let roots = [
             PathBuf::from("/project/packages/ui"),
@@ -1407,9 +1497,11 @@ mod tests {
     #[test]
     fn filter_to_workspaces_empty_slice_drops_everything() {
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile {
-            path: PathBuf::from("/project/packages/ui/src/a.ts"),
-        });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: PathBuf::from("/project/packages/ui/src/a.ts"),
+            }));
         filter_to_workspaces(&mut results, &[]);
         assert_eq!(results.unused_files.len(), 0);
     }

@@ -11,7 +11,14 @@ fn nextjs_page_default_export_not_flagged() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
 
     // page.tsx is a Next.js App Router entry point, so it should NOT be unused
@@ -39,11 +46,11 @@ fn nextjs_unused_util_export_flagged() {
     let has_unused_export = results
         .unused_exports
         .iter()
-        .any(|e| e.export_name == "unusedUtil");
+        .any(|e| e.export.export_name == "unusedUtil");
     let has_unused_file = results
         .unused_files
         .iter()
-        .any(|f| f.path.file_name().is_some_and(|n| n == "utils.ts"));
+        .any(|f| f.file.path.file_name().is_some_and(|n| n == "utils.ts"));
 
     assert!(
         has_unused_export || has_unused_file,
@@ -60,7 +67,7 @@ fn nextjs_convention_exports_are_not_flagged() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     for expected_used in [
@@ -96,8 +103,13 @@ fn nextjs_special_file_exports_are_not_flagged() {
         .iter()
         .map(|e| {
             (
-                e.path.file_name().unwrap().to_string_lossy().to_string(),
-                e.export_name.clone(),
+                e.export
+                    .path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string(),
+                e.export.export_name.clone(),
             )
         })
         .collect();
@@ -208,9 +220,10 @@ fn turborepo_generator_config_is_used_without_globbing_generator_directory() {
         .unused_files
         .iter()
         .map(|file| {
-            file.path
+            file.file
+                .path
                 .strip_prefix(&root)
-                .unwrap_or(&file.path)
+                .unwrap_or(&file.file.path)
                 .to_string_lossy()
                 .replace('\\', "/")
         })
@@ -248,9 +261,10 @@ fn tap_test_files_are_not_flagged_unused() {
         .unused_files
         .iter()
         .map(|f| {
-            f.path
+            f.file
+                .path
                 .strip_prefix(&root)
-                .unwrap_or(&f.path)
+                .unwrap_or(&f.file.path)
                 .to_string_lossy()
                 .to_string()
         })
@@ -272,9 +286,10 @@ fn tsd_test_files_are_not_flagged_unused() {
         .unused_files
         .iter()
         .map(|f| {
-            f.path
+            f.file
+                .path
                 .strip_prefix(&root)
-                .unwrap_or(&f.path)
+                .unwrap_or(&f.file.path)
                 .to_string_lossy()
                 .to_string()
         })
@@ -318,7 +333,14 @@ fn path_aliases_mixed_exports_no_false_positive_unused_files() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
 
     // types.ts and helpers.ts have SOME used exports (imported via @/ path alias)
@@ -342,7 +364,7 @@ fn path_aliases_mixed_exports_no_false_positive_unused_files() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
     assert!(
         unused_export_names.contains(&"unusedExport"),
@@ -385,7 +407,7 @@ fn css_apply_marks_tailwind_as_used() {
     let unused_files: Vec<&str> = results
         .unused_files
         .iter()
-        .filter_map(|f| f.path.file_name())
+        .filter_map(|f| f.file.path.file_name())
         .filter_map(|f| f.to_str())
         .collect();
     assert!(
@@ -403,7 +425,7 @@ fn css_package_subpath_imports_resolve_from_node_modules() {
     let unresolved_specs: Vec<&str> = results
         .unresolved_imports
         .iter()
-        .map(|u| u.specifier.as_str())
+        .map(|u| u.import.specifier.as_str())
         .collect();
     assert!(
         !unresolved_specs
@@ -450,7 +472,7 @@ fn css_package_subpath_imports_resolve_from_node_modules() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .filter_map(|f| f.path.file_name())
+        .filter_map(|f| f.file.path.file_name())
         .filter_map(|f| f.to_str())
         .map(String::from)
         .collect();
@@ -487,7 +509,7 @@ fn tailwind_plugin_directive_marks_plugin_targets_used() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .filter_map(|f| f.path.file_name())
+        .filter_map(|f| f.file.path.file_name())
         .filter_map(|f| f.to_str())
         .map(String::from)
         .collect();
@@ -505,8 +527,12 @@ fn tailwind_plugin_directive_marks_plugin_targets_used() {
         .iter()
         .map(|e| {
             (
-                e.path.file_name().and_then(|f| f.to_str()).unwrap_or(""),
-                e.export_name.as_str(),
+                e.export
+                    .path
+                    .file_name()
+                    .and_then(|f| f.to_str())
+                    .unwrap_or(""),
+                e.export.export_name.as_str(),
             )
         })
         .collect();
@@ -525,7 +551,7 @@ fn pandacss_config_is_not_flagged_unused() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .filter_map(|f| f.path.file_name())
+        .filter_map(|f| f.file.path.file_name())
         .filter_map(|f| f.to_str())
         .map(String::from)
         .collect();
@@ -558,7 +584,7 @@ fn vite_aliases_from_config_resolve_internal_modules() {
     let unresolved_specs: Vec<&str> = results
         .unresolved_imports
         .iter()
-        .map(|u| u.specifier.as_str())
+        .map(|u| u.import.specifier.as_str())
         .collect();
     assert!(
         !unresolved_specs.contains(&"@/utils/messages"),
@@ -568,7 +594,14 @@ fn vite_aliases_from_config_resolve_internal_modules() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
     assert!(
         !unused_file_names.contains(&"messages.ts".to_string()),
@@ -578,7 +611,7 @@ fn vite_aliases_from_config_resolve_internal_modules() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
     assert!(
         unused_export_names.contains(&"unusedMessage"),
@@ -609,7 +642,14 @@ fn webpack_aliases_from_config_resolve_internal_modules() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
     assert!(
         !unused_file_names.contains(&"app.ts".to_string()),
@@ -627,7 +667,7 @@ fn webpack_aliases_from_config_resolve_internal_modules() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
     assert!(
         unused_export_names.contains(&"unusedMessage"),
@@ -644,7 +684,14 @@ fn webpack_descriptor_without_context_resolves_relative_entry() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
     assert!(
         !unused_file_names.contains(&"app.ts".to_string()),
@@ -660,7 +707,7 @@ fn webpack_descriptor_without_context_resolves_relative_entry() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
     assert!(
         unused_export_names.contains(&"unusedGreet"),
@@ -677,7 +724,7 @@ fn sveltekit_aliases_from_config_resolve_internal_modules() {
     let unresolved_specs: Vec<&str> = results
         .unresolved_imports
         .iter()
-        .map(|u| u.specifier.as_str())
+        .map(|u| u.import.specifier.as_str())
         .collect();
     assert!(
         !unresolved_specs.contains(&"$utils/greeting"),
@@ -687,7 +734,14 @@ fn sveltekit_aliases_from_config_resolve_internal_modules() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
     assert!(
         !unused_file_names.contains(&"greeting.ts".to_string()),
@@ -697,7 +751,7 @@ fn sveltekit_aliases_from_config_resolve_internal_modules() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
     assert!(
         unused_export_names.contains(&"unusedGreeting"),
@@ -714,7 +768,7 @@ fn nuxt_custom_dirs_and_aliases_reduce_false_positives() {
     let unresolved_specs: Vec<&str> = results
         .unresolved_imports
         .iter()
-        .map(|u| u.specifier.as_str())
+        .map(|u| u.import.specifier.as_str())
         .collect();
     assert!(
         !unresolved_specs.contains(&"@shared/utils"),
@@ -724,7 +778,14 @@ fn nuxt_custom_dirs_and_aliases_reduce_false_positives() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
     assert!(
         !unused_file_names.contains(&"utils.ts".to_string()),
@@ -742,7 +803,7 @@ fn nuxt_custom_dirs_and_aliases_reduce_false_positives() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
     assert!(
         unused_export_names.contains(&"unusedShared"),
@@ -759,7 +820,7 @@ fn nuxt_src_dir_config_reduces_false_positives() {
     let unresolved_specs: Vec<&str> = results
         .unresolved_imports
         .iter()
-        .map(|u| u.specifier.as_str())
+        .map(|u| u.import.specifier.as_str())
         .collect();
     assert!(
         !unresolved_specs.contains(&"@shared/utils"),
@@ -769,7 +830,14 @@ fn nuxt_src_dir_config_reduces_false_positives() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
     for expected_used in [
         "utils.ts",
@@ -788,7 +856,7 @@ fn nuxt_src_dir_config_reduces_false_positives() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
     assert!(
         unused_export_names.contains(&"unusedShared"),
@@ -805,7 +873,14 @@ fn nuxt_default_scan_keeps_nested_plugin_index_but_not_nested_helpers() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
 
     for expected_unused in ["useHidden.ts", "format.ts", "helper.ts"] {
@@ -836,7 +911,14 @@ fn nuxt_runtime_conventions_report_dead_named_exports_without_unused_file_noise(
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
     for expected_used in ["RootBadge.vue", "bootstrap.ts", "auth.ts", "logger.ts"] {
         assert!(
@@ -850,8 +932,13 @@ fn nuxt_runtime_conventions_report_dead_named_exports_without_unused_file_noise(
         .iter()
         .map(|e| {
             (
-                e.path.file_name().unwrap().to_string_lossy().to_string(),
-                e.export_name.clone(),
+                e.export
+                    .path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string(),
+                e.export.export_name.clone(),
             )
         })
         .collect();
@@ -879,7 +966,14 @@ fn nuxt_configured_runtime_paths_reduce_false_positives_and_keep_dead_exports_vi
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
     for expected_used in [
         "FeatureCard.vue",
@@ -898,8 +992,13 @@ fn nuxt_configured_runtime_paths_reduce_false_positives_and_keep_dead_exports_vi
         .iter()
         .map(|e| {
             (
-                e.path.file_name().unwrap().to_string_lossy().to_string(),
-                e.export_name.clone(),
+                e.export
+                    .path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string(),
+                e.export.export_name.clone(),
             )
         })
         .collect();
@@ -929,7 +1028,7 @@ fn nuxt_css_tilde_alias_keeps_app_assets_alive() {
     let unused_files: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.to_string_lossy().replace('\\', "/"))
+        .map(|f| f.file.path.to_string_lossy().replace('\\', "/"))
         .collect();
 
     assert!(
@@ -951,8 +1050,13 @@ fn nuxt_convention_exports_preserve_defaults_but_report_dead_helpers() {
         .iter()
         .map(|e| {
             (
-                e.path.file_name().unwrap().to_string_lossy().to_string(),
-                e.export_name.clone(),
+                e.export
+                    .path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string(),
+                e.export.export_name.clone(),
             )
         })
         .collect();
