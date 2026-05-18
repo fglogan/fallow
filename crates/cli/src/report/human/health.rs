@@ -1072,7 +1072,7 @@ fn render_coverage_gaps(
         let shown_files = gaps.files.len().min(MAX_FLAT_ITEMS);
         lines.push(format!("  {}", "Files".dimmed()));
         for item in &gaps.files[..shown_files] {
-            let file_str = relative_path(&item.path, root).display().to_string();
+            let file_str = relative_path(&item.file.path, root).display().to_string();
             let (dir, filename) = split_dir_filename(&file_str);
             lines.push(format!("  {}{}", dir.dimmed(), filename));
         }
@@ -1093,16 +1093,18 @@ fn render_coverage_gaps(
         lines.push(format!("  {}", "Exports".dimmed()));
 
         // Group exports by file for barrel file collapsing
-        let mut by_file: Vec<(&std::path::Path, Vec<&crate::health_types::UntestedExport>)> =
-            Vec::new();
+        let mut by_file: Vec<(
+            &std::path::Path,
+            Vec<&crate::health_types::UntestedExportFinding>,
+        )> = Vec::new();
         for item in &gaps.exports {
             if let Some(entry) = by_file
                 .last_mut()
-                .filter(|(p, _)| *p == item.path.as_path())
+                .filter(|(p, _)| *p == item.export.path.as_path())
             {
                 entry.1.push(item);
             } else {
-                by_file.push((item.path.as_path(), vec![item]));
+                by_file.push((item.export.path.as_path(), vec![item]));
             }
         }
 
@@ -1128,8 +1130,8 @@ fn render_coverage_gaps(
                     lines.push(format!(
                         "  {}:{} `{}`",
                         file_str.dimmed(),
-                        item.line,
-                        item.export_name,
+                        item.export.line,
+                        item.export.export_name,
                     ));
                     shown += 1;
                 }
@@ -1938,6 +1940,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
         report.runtime_coverage = Some(crate::health_types::RuntimeCoverageReport {
+            schema_version: crate::health_types::RuntimeCoverageSchemaVersion::V1,
             verdict: crate::health_types::RuntimeCoverageReportVerdict::ColdCodeDetected,
             signals: Vec::new(),
             summary: crate::health_types::RuntimeCoverageSummary {
@@ -2002,6 +2005,7 @@ mod tests {
         quality: Option<crate::health_types::RuntimeCoverageCaptureQuality>,
     ) -> crate::health_types::RuntimeCoverageReport {
         crate::health_types::RuntimeCoverageReport {
+            schema_version: crate::health_types::RuntimeCoverageSchemaVersion::V1,
             verdict: crate::health_types::RuntimeCoverageReportVerdict::Clean,
             signals: Vec::new(),
             summary: crate::health_types::RuntimeCoverageSummary {
@@ -2109,16 +2113,22 @@ mod tests {
                 untested_files: 1,
                 untested_exports: 1,
             },
-            files: vec![UntestedFile {
-                path: root.join("src/app.ts"),
-                value_export_count: 2,
-            }],
-            exports: vec![UntestedExport {
-                path: root.join("src/app.ts"),
-                export_name: "loader".into(),
-                line: 12,
-                col: 4,
-            }],
+            files: vec![UntestedFileFinding::with_actions(
+                UntestedFile {
+                    path: root.join("src/app.ts"),
+                    value_export_count: 2,
+                },
+                &root,
+            )],
+            exports: vec![UntestedExportFinding::with_actions(
+                UntestedExport {
+                    path: root.join("src/app.ts"),
+                    export_name: "loader".into(),
+                    line: 12,
+                    col: 4,
+                },
+                &root,
+            )],
         });
 
         let text = plain(&build_health_human_lines(&report, &root));

@@ -1191,6 +1191,7 @@ fn compute_filtered_file_scores(
         changed_files,
         analysis_output,
         istanbul_coverage,
+        &config.root,
     ) {
         Ok(mut output) => {
             if let Some(ws) = ws_roots {
@@ -1296,10 +1297,16 @@ fn filter_coverage_gaps(
     runtime_paths
         .retain(|path| path_in_health_scope(path, config, changed_files, ws_roots, ignore_set));
     coverage_gaps.files.retain(|item| {
-        path_in_health_scope(&item.path, config, changed_files, ws_roots, ignore_set)
+        path_in_health_scope(&item.file.path, config, changed_files, ws_roots, ignore_set)
     });
     coverage_gaps.exports.retain(|item| {
-        path_in_health_scope(&item.path, config, changed_files, ws_roots, ignore_set)
+        path_in_health_scope(
+            &item.export.path,
+            config,
+            changed_files,
+            ws_roots,
+            ignore_set,
+        )
     });
 
     runtime_paths.sort();
@@ -2890,6 +2897,7 @@ mod tests {
             target_keys: vec![],
         };
         let mut report = crate::health_types::RuntimeCoverageReport {
+            schema_version: crate::health_types::RuntimeCoverageSchemaVersion::V1,
             verdict: crate::health_types::RuntimeCoverageReportVerdict::ColdCodeDetected,
             signals: Vec::new(),
             summary: fx_summary(3, 0, 2, 1),
@@ -2988,6 +2996,7 @@ mod tests {
             target_keys: vec![],
         };
         let mut report = crate::health_types::RuntimeCoverageReport {
+            schema_version: crate::health_types::RuntimeCoverageSchemaVersion::V1,
             verdict: crate::health_types::RuntimeCoverageReportVerdict::ColdCodeDetected,
             signals: Vec::new(),
             summary: fx_summary(2, 1, 1, 0),
@@ -3032,6 +3041,7 @@ mod tests {
         let mut changed_files = FxHashSet::default();
         changed_files.insert(PathBuf::from("/project/src/hot.ts"));
         let mut report = crate::health_types::RuntimeCoverageReport {
+            schema_version: crate::health_types::RuntimeCoverageSchemaVersion::V1,
             verdict: crate::health_types::RuntimeCoverageReportVerdict::Clean,
             signals: Vec::new(),
             summary: fx_summary(2, 2, 0, 0),
@@ -3069,6 +3079,7 @@ mod tests {
         let mut changed_files = FxHashSet::default();
         changed_files.insert(PathBuf::from("/project/src/other.ts"));
         let mut report = crate::health_types::RuntimeCoverageReport {
+            schema_version: crate::health_types::RuntimeCoverageSchemaVersion::V1,
             verdict: crate::health_types::RuntimeCoverageReportVerdict::Clean,
             signals: Vec::new(),
             summary: fx_summary(2, 2, 0, 0),
@@ -3105,6 +3116,7 @@ mod tests {
         hot_paths: Vec<crate::health_types::RuntimeCoverageHotPath>,
     ) -> crate::health_types::RuntimeCoverageReport {
         crate::health_types::RuntimeCoverageReport {
+            schema_version: crate::health_types::RuntimeCoverageSchemaVersion::V1,
             verdict: crate::health_types::RuntimeCoverageReportVerdict::Clean,
             signals: Vec::new(),
             summary: fx_summary(2, 2, 0, 0),
@@ -3337,6 +3349,7 @@ mod tests {
         let mut changed_files = FxHashSet::default();
         changed_files.insert(PathBuf::from("/project/src/hot.ts"));
         let mut report = crate::health_types::RuntimeCoverageReport {
+            schema_version: crate::health_types::RuntimeCoverageSchemaVersion::V1,
             verdict: crate::health_types::RuntimeCoverageReportVerdict::ColdCodeDetected,
             signals: Vec::new(),
             summary: fx_summary(2, 1, 1, 0),
@@ -3385,6 +3398,7 @@ mod tests {
         // PR context.
         let root = Path::new("/project");
         let mut report = crate::health_types::RuntimeCoverageReport {
+            schema_version: crate::health_types::RuntimeCoverageSchemaVersion::V1,
             verdict: crate::health_types::RuntimeCoverageReportVerdict::Clean,
             signals: Vec::new(),
             summary: fx_summary(2, 1, 1, 0),
@@ -3426,6 +3440,7 @@ mod tests {
         let mut changed_files = FxHashSet::default();
         changed_files.insert(PathBuf::from("/project/src/hot.ts"));
         let mut report = crate::health_types::RuntimeCoverageReport {
+            schema_version: crate::health_types::RuntimeCoverageSchemaVersion::V1,
             verdict: crate::health_types::RuntimeCoverageReportVerdict::LicenseExpiredGrace,
             signals: Vec::new(),
             summary: fx_summary(2, 1, 1, 0),
@@ -3512,6 +3527,7 @@ mod tests {
         let result = HealthResult {
             report: crate::health_types::HealthReport {
                 runtime_coverage: Some(crate::health_types::RuntimeCoverageReport {
+                    schema_version: crate::health_types::RuntimeCoverageSchemaVersion::V1,
                     verdict: crate::health_types::RuntimeCoverageReportVerdict::ColdCodeDetected,
                     signals: Vec::new(),
                     summary: fx_summary(1, 0, 1, 0),

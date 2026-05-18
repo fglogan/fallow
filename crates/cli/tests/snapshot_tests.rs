@@ -1979,6 +1979,7 @@ fn sample_health_report(root: &Path) -> HealthReport {
 fn health_report_with_runtime_coverage(root: &Path) -> HealthReport {
     let mut report = sample_health_report(root);
     report.runtime_coverage = Some(RuntimeCoverageReport {
+        schema_version: RuntimeCoverageSchemaVersion::V1,
         verdict: RuntimeCoverageReportVerdict::ColdCodeDetected,
         signals: Vec::new(),
         summary: RuntimeCoverageSummary {
@@ -2233,6 +2234,64 @@ fn json_health_with_runtime_coverage_snapshot() {
         "json_health_with_runtime_coverage",
         redact_version(&json_str)
     );
+}
+
+/// Build a health report with coverage_gaps populated (untested files +
+/// untested exports). Locks down the wire shape so the typed-wrapper refactor
+/// stays byte-identical.
+fn health_report_with_coverage_gaps(root: &Path) -> HealthReport {
+    let mut report = sample_health_report(root);
+    report.coverage_gaps = Some(CoverageGaps {
+        summary: CoverageGapSummary {
+            runtime_files: 8,
+            covered_files: 5,
+            file_coverage_pct: 62.5,
+            untested_files: 2,
+            untested_exports: 1,
+        },
+        files: vec![
+            UntestedFileFinding::with_actions(
+                UntestedFile {
+                    path: root.join("src/untested-one.ts"),
+                    value_export_count: 3,
+                },
+                root,
+            ),
+            UntestedFileFinding::with_actions(
+                UntestedFile {
+                    path: root.join("src/untested-two.ts"),
+                    value_export_count: 1,
+                },
+                root,
+            ),
+        ],
+        exports: vec![UntestedExportFinding::with_actions(
+            UntestedExport {
+                path: root.join("src/partial.ts"),
+                export_name: "helper".to_string(),
+                line: 12,
+                col: 7,
+            },
+            root,
+        )],
+    });
+    report
+}
+
+#[test]
+fn json_health_with_coverage_gaps_snapshot() {
+    let root = PathBuf::from("/project");
+    let report = health_report_with_coverage_gaps(&root);
+    let value = build_health_json(
+        &report,
+        &root,
+        Duration::ZERO,
+        false,
+        fallow_cli::report::HealthActionOptions::default(),
+    )
+    .expect("health JSON build should succeed");
+    let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
+    insta::assert_snapshot!("json_health_with_coverage_gaps", redact_version(&json_str));
 }
 
 // ── Health score snapshots ──────────────────────────────────────

@@ -39,7 +39,8 @@ use fallow_cli::health_types::{
     HealthFinding, HealthScore, HealthScorePenalties, HealthSummary, HealthTrend, HotspotEntry,
     HotspotSummary, LargeFunctionEntry, OwnershipMetrics, RecommendationCategory,
     RefactoringTarget, RiskProfile, RuntimeCoverageReport, TargetThresholds, TrendCount,
-    UntestedExport, UntestedFile, VitalSigns, VitalSignsCounts,
+    UntestedExport, UntestedExportFinding, UntestedFile, UntestedFileFinding, VitalSigns,
+    VitalSignsCounts,
 };
 use fallow_cli::output_envelope::{
     AuditCommand, AuditOutput, BoundariesListLogicalGroup, BoundariesListRule, BoundariesListZone,
@@ -53,6 +54,9 @@ use fallow_cli::output_envelope::{
     ListBoundariesOutput, ReviewCheckConclusion, ReviewComment, ReviewEnvelopeEvent,
     ReviewEnvelopeMeta, ReviewEnvelopeOutput, ReviewEnvelopeSchema, ReviewProvider,
     ReviewReconcileOutput, ReviewReconcileSchema,
+};
+use fallow_cli::report::dupes_grouping::{
+    AttributedCloneGroup, AttributedInstance, DuplicationGroup,
 };
 use fallow_config::{AuthoredRule, LogicalGroup, LogicalGroupStatus};
 use fallow_core::duplicates::{
@@ -233,7 +237,9 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
         "TargetThresholds",
         "TrendCount",
         "UntestedExport",
+        "UntestedExportFinding",
         "UntestedFile",
+        "UntestedFileFinding",
         "VitalSigns",
         "VitalSignsCounts",
         // crates/types/src/output_health.rs - per-finding action wrappers
@@ -318,6 +324,11 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
         "AuthoredRule",
         "LogicalGroup",
         "LogicalGroupStatus",
+        // crates/cli/src/report/dupes_grouping.rs - per-group duplication
+        // attribution payload (`fallow dupes --group-by`).
+        "AttributedCloneGroup",
+        "AttributedInstance",
+        "DuplicationGroup",
     ]
 }
 
@@ -369,14 +380,12 @@ fn finding_definition_names() -> &'static [&'static str] {
         "HotspotEntry",
         "RefactoringTarget",
         // Coverage-gap items (`coverage_gaps.files[]` and
-        // `coverage_gaps.exports[]`). `inject_health_actions` walks both
-        // arrays and appends an `actions` field to every item, but the
-        // Rust source structs do not carry the field, so the schema
-        // augmentation pass grafts it on per `finding_augmentation`.
-        // Neither flows through `fallow audit`, so `introduced` is
-        // omitted.
-        "UntestedExport",
-        "UntestedFile",
+        // `coverage_gaps.exports[]`) have been migrated to typed
+        // `UntestedFileFinding` / `UntestedExportFinding` envelope
+        // wrappers in `crates/cli/src/health_types/coverage.rs`, so the
+        // bare `UntestedFile` / `UntestedExport` definitions are no
+        // longer augmented; their wrappers carry the typed `actions`
+        // array natively via schemars.
         // Duplication findings (`clone_groups[]` and `clone_families[]`).
         // `inject_dupes_actions` in `crates/cli/src/report/json.rs` walks
         // both arrays and appends an `actions` field to every item; the
@@ -386,6 +395,10 @@ fn finding_definition_names() -> &'static [&'static str] {
         // `fallow audit` attributes clone groups; `CloneFamily` does not.
         "CloneFamily",
         "CloneGroup",
+        // Per-group attribution wrapper (`fallow dupes --group-by`). Same
+        // augmentation as `CloneGroup` because `inject_dupes_actions` walks
+        // the same `clone_groups` field name on every level of nesting.
+        "AttributedCloneGroup",
     ]
 }
 
@@ -429,14 +442,6 @@ fn finding_augmentation(name: &str) -> FindingAugmentation {
             actions_item_ref: "#/definitions/RefactoringTargetAction",
             include_introduced: false,
         },
-        "UntestedFile" => FindingAugmentation {
-            actions_item_ref: "#/definitions/UntestedFileAction",
-            include_introduced: false,
-        },
-        "UntestedExport" => FindingAugmentation {
-            actions_item_ref: "#/definitions/UntestedExportAction",
-            include_introduced: false,
-        },
         "CloneFamily" => FindingAugmentation {
             actions_item_ref: "#/definitions/CloneFamilyAction",
             include_introduced: false,
@@ -444,6 +449,10 @@ fn finding_augmentation(name: &str) -> FindingAugmentation {
         "CloneGroup" => FindingAugmentation {
             actions_item_ref: "#/definitions/CloneGroupAction",
             include_introduced: true,
+        },
+        "AttributedCloneGroup" => FindingAugmentation {
+            actions_item_ref: "#/definitions/CloneGroupAction",
+            include_introduced: false,
         },
         _ => DEFAULT_FINDING_AUGMENTATION,
     }
@@ -454,6 +463,10 @@ fn finding_augmentation(name: &str) -> FindingAugmentation {
 /// Registering each type as a subschema (rather than a root schema) collects
 /// every transitively-referenced definition into a single map keyed by the
 /// Rust type name, which we then merge into the schema's `definitions`.
+#[expect(
+    clippy::too_many_lines,
+    reason = "this function is fundamentally a registration list: one `subschema_for::<T>()` call per type in the public output contract. Splitting by module obscures the registration set; the linear list is the cleanest representation."
+)]
 fn derived_definitions() -> Map<String, Value> {
     let mut generator = SchemaSettings::draft07().into_generator();
 
@@ -506,6 +519,11 @@ fn derived_definitions() -> Map<String, Value> {
     let _ = generator.subschema_for::<RefactoringSuggestion>();
     let _ = generator.subschema_for::<CloneFamily>();
     let _ = generator.subschema_for::<MirroredDirectory>();
+
+    // Per-group duplication attribution (crates/cli/src/report/dupes_grouping.rs).
+    let _ = generator.subschema_for::<AttributedInstance>();
+    let _ = generator.subschema_for::<AttributedCloneGroup>();
+    let _ = generator.subschema_for::<DuplicationGroup>();
     let _ = generator.subschema_for::<DuplicationStats>();
 
     // JSON-output augmentation types from `crates/types/src/output.rs`.
@@ -544,7 +562,9 @@ fn derived_definitions() -> Map<String, Value> {
     let _ = generator.subschema_for::<CoverageGaps>();
     let _ = generator.subschema_for::<CoverageGapSummary>();
     let _ = generator.subschema_for::<UntestedFile>();
+    let _ = generator.subschema_for::<UntestedFileFinding>();
     let _ = generator.subschema_for::<UntestedExport>();
+    let _ = generator.subschema_for::<UntestedExportFinding>();
     let _ = generator.subschema_for::<HealthScore>();
     let _ = generator.subschema_for::<HealthScorePenalties>();
     let _ = generator.subschema_for::<VitalSigns>();
@@ -687,9 +707,6 @@ fn merge_with_committed(derived: &Map<String, Value>) -> Result<Value, String> {
         if finding_names.contains(name) {
             augment_finding_definition(&mut value, finding_augmentation(name))?;
         }
-        if *name == "RuntimeCoverageReport" {
-            augment_runtime_coverage_report(&mut value)?;
-        }
         definitions.insert((*name).to_string(), value);
     }
 
@@ -775,62 +792,6 @@ fn augment_finding_definition(
         && !arr.iter().any(|v| v.as_str() == Some("actions"))
     {
         arr.push(Value::String("actions".to_string()));
-    }
-
-    Ok(())
-}
-
-/// Add the runtime-coverage `schema_version` envelope marker to the derived
-/// `RuntimeCoverageReport` schema.
-///
-/// The CLI injects `runtime_coverage.schema_version: "1"` into every JSON
-/// output that carries a runtime coverage block (see
-/// `crates/cli/src/report/json.rs::inject_runtime_coverage_report_schema_version`).
-/// The Rust source struct does not carry a matching field today, so the
-/// derived schema would otherwise miss it and the drift gate would fire.
-/// Graft the property + `required` entry on derivation so the public
-/// contract stays in lock-step with the wire.
-///
-/// MAINTENANCE: the `enum: ["1"]` constraint is tightly coupled to
-/// `RUNTIME_COVERAGE_SCHEMA_VERSION` in
-/// `crates/cli/src/report/json.rs`. Bumping that constant requires
-/// updating the enum list here in the same PR; otherwise the drift gate
-/// stays green while the emitted document quietly disagrees with the
-/// wire.
-///
-/// Idempotent: if a future PR adds a typed `schema_version` field to
-/// `RuntimeCoverageReport`, schemars derives the property natively and the
-/// augmentation step skips.
-fn augment_runtime_coverage_report(value: &mut Value) -> Result<(), String> {
-    let object = value
-        .as_object_mut()
-        .ok_or_else(|| "RuntimeCoverageReport definition is not a JSON object".to_string())?;
-
-    let properties = object
-        .entry("properties")
-        .or_insert_with(|| Value::Object(Map::new()));
-    let properties = properties
-        .as_object_mut()
-        .ok_or_else(|| "RuntimeCoverageReport `properties` is not a JSON object".to_string())?;
-
-    if !properties.contains_key("schema_version") {
-        properties.insert(
-            "schema_version".to_string(),
-            serde_json::json!({
-                "type": "string",
-                "enum": ["1"],
-                "description": "Runtime coverage JSON contract version. This is scoped to the runtime_coverage block and is independent of the top-level fallow JSON schema_version."
-            }),
-        );
-    }
-
-    let required = object
-        .entry("required")
-        .or_insert_with(|| Value::Array(Vec::new()));
-    if let Value::Array(arr) = required
-        && !arr.iter().any(|v| v.as_str() == Some("schema_version"))
-    {
-        arr.push(Value::String("schema_version".to_string()));
     }
 
     Ok(())
@@ -932,12 +893,21 @@ fn normalize_schema(value: &mut Value) {
 mod drift_tests {
     //! Drift gate for the Rust → `docs/output-schema.json` chain.
     //!
-    //! The test reads the committed schema's `definitions` block and the
-    //! derived schemas for every name in `derived_definition_names()`,
-    //! normalizes both sides to a canonical form that erases the documented
-    //! cosmetic differences (doc-comment prose, schemars-style `nullable`
-    //! integer formats, `oneOf` vs `anyOf`, single-arm `allOf` wrappers), and
-    //! asserts the result is structurally equal.
+    //! The structural gate walks every definition schemars produces (not just
+    //! the explicit `derived_definition_names()` allow-list) and compares it
+    //! against the matching entry in the committed schema after
+    //! canonicalization. Transitive helpers (`AnalysisResults`, `MemberKind`,
+    //! `FixActionType`, every kebab-case enum, every utility newtype) are
+    //! drift-checked alongside the explicitly-registered envelopes.
+    //!
+    //! Canonicalization erases documented cosmetic differences (doc-comment
+    //! prose, schemars-style `nullable` integer formats, `oneOf` vs `anyOf`,
+    //! single-arm `allOf` wrappers) so the comparison fires only on real
+    //! structural drift.
+    //!
+    //! `derived_definition_names()` survives as the allow-list for the
+    //! post-derivation augmentation (`actions` / `introduced` graft on
+    //! findings); the drift tests below iterate the full derived map.
     //!
     //! Real drift fires loudly: a renamed Rust field, a new struct field, or
     //! a type change shows up as a property/required/type mismatch on the
@@ -1054,26 +1024,28 @@ mod drift_tests {
             .expect("committed docs/output-schema.json must carry `definitions`")
     }
 
+    /// Build the full set of derived definitions for drift comparison: every
+    /// key schemars emits, normalized; augmented only for entries in
+    /// `derived_definition_names()` (the post-pass `actions`/`introduced` graft
+    /// applies to findings). Transitive helpers (e.g., `AnalysisResults`,
+    /// `MemberKind`, `FixActionType`, every kebab-case enum) are included
+    /// without augmentation so the strict gate covers every committed
+    /// definition, not just the explicit allow-list.
     fn derived_definitions_for_drift() -> Map<String, Value> {
         let raw = derived_definitions();
         let mut out = Map::new();
         let finding_names: rustc_hash::FxHashSet<&'static str> =
             finding_definition_names().iter().copied().collect();
-        for name in derived_definition_names() {
-            let derived_schema = raw
-                .get(*name)
-                .unwrap_or_else(|| panic!("derived schema missing for '{name}'"));
-            let mut value = derived_schema.clone();
+        let in_scope: rustc_hash::FxHashSet<&'static str> =
+            derived_definition_names().iter().copied().collect();
+        for (name, raw_value) in &raw {
+            let mut value = raw_value.clone();
             normalize_schema(&mut value);
-            if finding_names.contains(name) {
+            if in_scope.contains(name.as_str()) && finding_names.contains(name.as_str()) {
                 augment_finding_definition(&mut value, finding_augmentation(name))
                     .expect("augment_finding_definition must not fail");
             }
-            if *name == "RuntimeCoverageReport" {
-                augment_runtime_coverage_report(&mut value)
-                    .expect("augment_runtime_coverage_report must not fail");
-            }
-            out.insert((*name).to_string(), value);
+            out.insert(name.clone(), value);
         }
         out
     }
@@ -1173,16 +1145,16 @@ mod drift_tests {
         const AUGMENTATION_KEYS: &[&str] = &["actions", "introduced"];
 
         let mut failures: Vec<String> = Vec::new();
-        for name in derived_definition_names() {
-            let Some(committed_entry) = committed.get(*name) else {
+        for name in derived.keys() {
+            let Some(committed_entry) = committed.get(name) else {
                 failures.push(format!(
                     "definition `{name}` is missing from `docs/output-schema.json`. Add a stub entry to `definitions` (the drift test only compares; it does not insert)."
                 ));
                 continue;
             };
             let derived_entry = derived
-                .get(*name)
-                .expect("derived map covers every registered name (asserted by earlier test)");
+                .get(name)
+                .expect("iterating derived's own keys; entry must exist");
 
             let committed_props = committed_entry.get("properties").and_then(Value::as_object);
             let derived_props = derived_entry.get("properties").and_then(Value::as_object);
@@ -1273,11 +1245,11 @@ mod drift_tests {
         let derived = derived_definitions_for_drift();
         let mut failures: Vec<String> = Vec::new();
 
-        for name in derived_definition_names() {
-            let Some(committed_entry) = committed.get(*name) else {
+        for name in derived.keys() {
+            let Some(committed_entry) = committed.get(name) else {
                 continue;
             };
-            let Some(derived_entry) = derived.get(*name) else {
+            let Some(derived_entry) = derived.get(name) else {
                 continue;
             };
 
@@ -1404,19 +1376,14 @@ mod drift_tests {
         let committed = committed_definitions();
         let derived = derived_definitions_for_drift();
         let mut failures: Vec<String> = Vec::new();
-        for name in derived_definition_names() {
-            let Some(committed_value) = committed.get(*name) else {
+        for (name, derived_value) in &derived {
+            let Some(committed_value) = committed.get(name) else {
                 failures.push(format!(
                     "definition `{name}` is missing from `docs/output-schema.json`."
                 ));
                 continue;
             };
-            let derived_entry = canonicalize(
-                derived
-                    .get(*name)
-                    .expect("derived map covers every registered name")
-                    .clone(),
-            );
+            let derived_entry = canonicalize(derived_value.clone());
             let committed_entry = canonicalize(committed_value.clone());
             if committed_entry != derived_entry {
                 let committed_pretty = serde_json::to_string_pretty(&committed_entry)
@@ -1425,6 +1392,47 @@ mod drift_tests {
                     .unwrap_or_else(|_| "<unprintable>".to_string());
                 failures.push(format!(
                     "drift on `{name}`:\n--- committed (canonicalized) ---\n{committed_pretty}\n--- derived (canonicalized) ---\n{derived_pretty}"
+                ));
+            }
+        }
+        // Catch orphans in the committed file: any definition listed in
+        // `docs/output-schema.json` that schemars no longer emits is a stale
+        // hand-edit waiting to drift. After Phase 8 every helper is
+        // overwritten on regen, so an orphan can only land via a manual edit.
+        //
+        // The allow-list below holds definitions that are legitimately
+        // hand-maintained pending other #384 items. Each entry MUST link to
+        // the issue item that will retire it; this is not a permanent
+        // escape hatch.
+        const HAND_MAINTAINED_ALLOW_LIST: &[(&str, &str)] = &[
+            // Action types referenced by `augment_finding_definition` for
+            // duplication findings. Will be retired by #384 item 1 (typed
+            // action wrappers for every finding, same shape as
+            // `HotspotAction` / `RefactoringTargetAction`).
+            (
+                "CloneFamilyAction",
+                "retired by #384 item 1 (typed action wrappers)",
+            ),
+            (
+                "CloneGroupAction",
+                "retired by #384 item 1 (typed action wrappers)",
+            ),
+            // Envelope for `fallow coverage analyze --format json`, still
+            // built via `serde_json::json!` in `crates/cli/src/coverage/`.
+            // Will be retired by #384 item 3 follow-up (typed envelope).
+            (
+                "CoverageAnalyzeOutput",
+                "retired by #384 item 3 (typed envelope builders)",
+            ),
+        ];
+        let allow_list: rustc_hash::FxHashSet<&'static str> = HAND_MAINTAINED_ALLOW_LIST
+            .iter()
+            .map(|(name, _)| *name)
+            .collect();
+        for name in committed.keys() {
+            if !derived.contains_key(name) && !allow_list.contains(name.as_str()) {
+                failures.push(format!(
+                    "orphan in `docs/output-schema.json`: definition `{name}` is not produced by `derived_definitions()`. Either register the type via `subschema_for::<{name}>()` in `derived_definitions`, or delete the stale entry. (If the entry is hand-maintained pending another #384 item, add it to `HAND_MAINTAINED_ALLOW_LIST` with a reason linking the issue.)"
                 ));
             }
         }

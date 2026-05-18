@@ -287,6 +287,10 @@ export type UntestedExportActionType = ("add-test-import" | "suppress-file")
  */
 export type ChurnTrend = ("accelerating" | "stable" | "cooling")
 /**
+ * Format discriminator for [`ContributorEntry::identifier`].
+ */
+export type ContributorIdentifierFormat = ("raw" | "handle" | "hash")
+/**
  * Discriminant for [`HotspotAction::kind`].
  */
 export type HotspotActionType = ("refactor-file" | "add-tests" | "low-bus-factor" | "unowned-hotspot" | "ownership-drift")
@@ -295,6 +299,12 @@ export type HotspotActionType = ("refactor-file" | "add-tests" | "low-bus-factor
  * an `unowned-hotspot` action.
  */
 export type HotspotActionHeuristic = "directory-deepest"
+/**
+ * Runtime coverage JSON contract version. This is scoped to the
+ * `runtime_coverage` block and is independent of the top-level fallow
+ * JSON `schema_version`.
+ */
+export type RuntimeCoverageSchemaVersion = "1"
 /**
  * Top-level verdict for the whole runtime-coverage report. Mirrors
  * `fallow_cov_protocol::ReportVerdict`. The verdict is the SINGLE most
@@ -2494,13 +2504,15 @@ crap_above_threshold: number
 export interface CoverageGaps {
 summary: CoverageGapSummary
 /**
- * Runtime files with no test dependency path.
+ * Runtime files with no test dependency path. Each entry carries its
+ * own `actions` array via [`UntestedFileFinding`].
  */
-files?: UntestedFile[]
+files?: UntestedFileFinding[]
 /**
- * Runtime exports with no test-reachable reference chain.
+ * Runtime exports with no test-reachable reference chain. Each entry
+ * carries its own `actions` array via [`UntestedExportFinding`].
  */
-exports?: UntestedExport[]
+exports?: UntestedExportFinding[]
 }
 /**
  * Aggregate coverage-gap counters for the current analysis scope.
@@ -2528,9 +2540,14 @@ untested_files: number
 untested_exports: number
 }
 /**
- * Runtime code that no test dependency path reaches.
+ * Wire-shape envelope for an [`UntestedFile`] finding. Carries the bare
+ * [`UntestedFile`] flattened in plus a typed `actions` array. The action
+ * vec is computed at construction time using a project-root-relative path
+ * so descriptions match `strip_root_prefix`'s post-pass output on the inner
+ * `path` field. Schemars derives the merged shape natively; this retires
+ * the `augment_finding_definition` graft for `UntestedFile`.
  */
-export interface UntestedFile {
+export interface UntestedFileFinding {
 /**
  * Absolute file path.
  */
@@ -2540,7 +2557,8 @@ path: string
  */
 value_export_count: number
 /**
- * Suggested actions to resolve this issue.
+ * Suggested next steps: an `add-tests` primary and a `suppress-file`
+ * secondary. Always emitted (possibly empty for forward-compat).
  */
 actions: UntestedFileAction[]
 }
@@ -2579,9 +2597,11 @@ note?: (string | null)
 comment?: (string | null)
 }
 /**
- * Runtime export that no test-reachable module references.
+ * Wire-shape envelope for an [`UntestedExport`] finding. Same pattern as
+ * [`UntestedFileFinding`]: flattens the bare finding and carries a typed
+ * `actions` array computed at construction time.
  */
-export interface UntestedExport {
+export interface UntestedExportFinding {
 /**
  * Absolute file path.
  */
@@ -2599,7 +2619,8 @@ line: number
  */
 col: number
 /**
- * Suggested actions to resolve this issue.
+ * Suggested next steps: an `add-test-import` primary and a
+ * `suppress-file` secondary.
  */
 actions: UntestedExportAction[]
 }
@@ -2776,10 +2797,7 @@ export interface ContributorEntry {
  * (e.g. `mailto:`) would be wrong.
  */
 identifier: string
-/**
- * Total commits by this contributor in the analysis window.
- */
-commits: number
+format: ContributorIdentifierFormat
 /**
  * Recency-weighted share of total weighted commits (0..1, three decimals).
  */
@@ -2788,6 +2806,10 @@ share: number
  * Days since this contributor last touched the file.
  */
 stale_days: number
+/**
+ * Total commits by this contributor in the analysis window.
+ */
+commits: number
 }
 /**
  * Suggested action attached to a [`HotspotEntry`].
@@ -2862,6 +2884,7 @@ shallow_clone: boolean
  * analysis.
  */
 export interface RuntimeCoverageReport {
+schema_version: RuntimeCoverageSchemaVersion
 verdict: RuntimeCoverageReportVerdict
 /**
  * All signals captured by post-processing. Independent of `verdict`,
@@ -2900,10 +2923,6 @@ watermark?: (RuntimeCoverageWatermark | null)
  * Non-fatal merge or coverage diagnostics. Omitted when empty.
  */
 warnings?: RuntimeCoverageMessage[]
-/**
- * Runtime coverage JSON contract version. This is scoped to the runtime_coverage block and is independent of the top-level fallow JSON schema_version.
- */
-schema_version: "1"
 }
 /**
  * Summary block mirroring `fallow_cov_protocol::Summary` (0.3 shape).
@@ -3315,7 +3334,7 @@ cognitive: number
  * declaration site), so a per-line placement hint would have no
  * referent. Consumers that want the placement metadata should follow
  * the target's `evidence.complex_functions` back to the matching
- * [`HealthFinding`] and read placement from THAT action instead.
+ * `HealthFinding` and read placement from THAT action instead.
  * 
  * [`RefactoringTarget`]: ../../fallow-cli/src/health_types/targets.rs
  */
@@ -3885,15 +3904,101 @@ total_issues?: (number | null)
  * attributed to its largest-owner key (most instances; alphabetical
  * tiebreak). Sort: most clone groups first, then alphabetical, with
  * `(unowned)` pinned last.
+ * 
+ * Runtime emission still goes through a `serde_json::Value` post-pass in
+ * `crates/cli/src/report/json.rs::build_grouped_duplication_json` so the
+ * per-group `actions` augmentation can run on every `AttributedCloneGroup`
+ * and `CloneFamily`; the typed field here is the schema source of truth
+ * so validators and generated TS consumers can reach the typed shape.
  */
-groups?: {
-[k: string]: unknown
-}
+groups?: (DuplicationGroup[] | null)
 /**
  * `_meta` block with metric / rule definitions, emitted when `--explain`
  * is passed (always present in MCP responses).
  */
 _meta?: (Meta | null)
+}
+/**
+ * A single grouped duplication bucket. Per-group `stats` are dedup-aware and
+ * computed over the FULL group BEFORE any `--top` truncation.
+ */
+export interface DuplicationGroup {
+/**
+ * Group label (owner / directory / package / section). `(unowned)` for
+ * files with no CODEOWNERS rule, `(no section)` for pre-section rules in
+ * section mode.
+ */
+key: string
+stats: DuplicationStats
+/**
+ * Clone groups attributed to this owner. Each group's `primary_owner` is
+ * its largest-owner key; per-instance `owner` lets consumers see
+ * cross-bucket fan-out without re-resolving paths.
+ */
+clone_groups: AttributedCloneGroup[]
+clone_families: CloneFamily[]
+}
+/**
+ * A clone group annotated with its largest-owner attribution and per-instance
+ * owner keys.
+ */
+export interface AttributedCloneGroup {
+/**
+ * Largest-owner attribution: the resolver key with the most instances in
+ * this clone group. Ties broken alphabetically (smallest key wins).
+ */
+primary_owner: string
+token_count: number
+line_count: number
+/**
+ * Each instance carries its own `owner` field alongside the standard
+ * CloneInstance shape.
+ */
+instances: AttributedInstance[]
+/**
+ * Suggested actions to resolve this issue.
+ */
+actions: CloneGroupAction[]
+}
+/**
+ * A clone instance plus its per-instance owner key (for inline JSON / SARIF
+ * rendering).
+ * 
+ * Each instance carries its own `owner` field alongside the standard
+ * `CloneInstance` shape (file / start_line / end_line / start_col / end_col /
+ * fragment), so consumers can attribute instances to resolver keys without
+ * re-resolving paths.
+ */
+export interface AttributedInstance {
+/**
+ * Path to the file containing this clone instance.
+ */
+file: string
+/**
+ * 1-based start line of the clone.
+ */
+start_line: number
+/**
+ * 1-based end line of the clone.
+ */
+end_line: number
+/**
+ * 0-based start column.
+ */
+start_col: number
+/**
+ * 0-based end column.
+ */
+end_col: number
+/**
+ * The actual source code fragment.
+ */
+fragment: string
+/**
+ * Resolver key for this specific instance (per-instance, not the
+ * group-level largest-owner).
+ */
+owner: string
 }
 /**
  * Envelope emitted by `fallow audit --format json`. Combines dead code,
@@ -4022,11 +4127,10 @@ docs: string
  * `members` carries one entry per detected runtime package; `runtime_targets`
  * is the union of all member targets.
  * 
- * The runtime path in `crates/cli/src/coverage/mod.rs::build_setup_json`
- * still constructs the wire shape via `serde_json::json!` macros (one per
- * member, snippet, and file-to-edit). The typed struct here serves as the
- * schema source of truth via the drift gate; a follow-up can swap the
- * runtime over without changing the wire.
+ * Constructed at runtime by
+ * `crates/cli/src/coverage/mod.rs::build_setup_envelope`; the wire is
+ * `serde_json::to_value(&envelope)`. The drift gate keeps this struct
+ * aligned with `docs/output-schema.json`.
  */
 export interface CoverageSetupOutput {
 schema_version: CoverageSetupSchemaVersion
