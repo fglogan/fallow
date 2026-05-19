@@ -1,3 +1,8 @@
+#![expect(
+    deprecated,
+    reason = "ADR-008: benchmark exercises the workspace path-dep fallow_core::analyze surface"
+)]
+
 use std::path::PathBuf;
 
 use criterion::{Criterion, criterion_group, criterion_main};

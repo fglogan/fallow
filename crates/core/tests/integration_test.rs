@@ -1,3 +1,8 @@
+#![expect(
+    deprecated,
+    reason = "ADR-008: integration tests exercise the workspace path-dep fallow_core::analyze* surface; the deprecation warning targets external crates.io consumers"
+)]
+
 #[path = "integration_test/common.rs"]
 mod common;
 

@@ -251,6 +251,10 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
 
     // Core analysis
     let use_trace = opts.trace_opts.any_active();
+    #[expect(
+        deprecated,
+        reason = "ADR-008 deprecates fallow_core::analyze* externally; the CLI still uses the workspace path dependency"
+    )]
     let (
         mut results,
         trace_graph,

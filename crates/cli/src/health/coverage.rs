@@ -1927,6 +1927,10 @@ const fn verdict_rank(verdict: RuntimeCoverageVerdict) -> u8 {
 }
 
 #[cfg(test)]
+#[expect(
+    deprecated,
+    reason = "ADR-008 deprecates fallow_core::analyze_with_parse_result externally; tests exercise the workspace path dependency"
+)]
 mod tests {
     use super::{
         AccumulatedFunction, BINARY_SIGNING_VERIFY_KEY, FunctionIdentity, PackageManagerOutput,

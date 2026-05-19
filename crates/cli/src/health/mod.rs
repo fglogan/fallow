@@ -367,6 +367,10 @@ fn execute_health_inner(
         || opts.force_full
         || enforce_crap;
     let needs_analysis_output = needs_file_scores || opts.runtime_coverage.is_some();
+    #[expect(
+        deprecated,
+        reason = "ADR-008 deprecates fallow_core::analyze_with_parse_result externally; health still uses the workspace path dependency"
+    )]
     let mut shared_analysis_output = if needs_analysis_output {
         if let Some(pre) = pre_computed_analysis {
             Some(pre)
@@ -1218,6 +1222,10 @@ fn compute_filtered_file_scores(
     istanbul_coverage: Option<&scoring::IstanbulCoverage>,
     pre_computed: Option<fallow_core::AnalysisOutput>,
 ) -> Result<FileScoreResult, ExitCode> {
+    #[expect(
+        deprecated,
+        reason = "ADR-008 deprecates fallow_core::analyze_with_parse_result externally; health still uses the workspace path dependency"
+    )]
     let analysis_output = if let Some(pre) = pre_computed {
         pre
     } else {

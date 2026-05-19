@@ -173,6 +173,10 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
 
     // Run dead code analysis for cross-reference (flags guarding dead code).
     // Uses pre-parsed modules to avoid re-parsing.
+    #[expect(
+        deprecated,
+        reason = "ADR-008 deprecates fallow_core::analyze_with_parse_result and the feature_flags helpers externally; flags still uses the workspace path dependency"
+    )]
     if let Ok(analysis_output) =
         fallow_core::analyze_with_parse_result(&config, &parse_result.modules)
     {

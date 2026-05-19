@@ -238,6 +238,10 @@ fn package_name_from_lock_key(raw_key: &str) -> Option<String> {
 /// target package (and parent, when present) is not declared in any workspace
 /// `package.json` or resolved in `pnpm-lock.yaml`.
 #[must_use]
+#[deprecated(
+    since = "2.76.0",
+    note = "fallow_core is internal; use fallow_cli::programmatic::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/fallow-core-migration.md and ADR-008."
+)]
 pub fn find_unused_dependency_overrides(
     state: &PnpmOverrideState,
     config: &ResolvedConfig,
@@ -334,6 +338,10 @@ fn collect_unused_from_source(
 /// Emit one `MisconfiguredDependencyOverride` for every entry whose key cannot
 /// be parsed or whose value is missing.
 #[must_use]
+#[deprecated(
+    since = "2.76.0",
+    note = "fallow_core is internal; use fallow_cli::programmatic::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/fallow-core-migration.md and ADR-008."
+)]
 pub fn find_misconfigured_dependency_overrides(
     state: &PnpmOverrideState,
     config: &ResolvedConfig,

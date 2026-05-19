@@ -30,20 +30,44 @@ use fallow_types::output_dead_code::{
 use crate::results::{AnalysisResults, CircularDependency};
 use crate::suppress::IssueKind;
 
+#[expect(
+    deprecated,
+    reason = "ADR-008 deprecates detector helpers for external callers; core orchestration still calls them internally"
+)]
 use unused_catalog::{
     find_empty_catalog_groups, find_unresolved_catalog_references, find_unused_catalog_entries,
     gather_pnpm_catalog_state,
 };
+#[expect(
+    deprecated,
+    reason = "ADR-008 deprecates detector helpers for external callers; core orchestration still calls them internally"
+)]
 use unused_deps::{
     find_test_only_dependencies, find_type_only_dependencies, find_unlisted_dependencies,
     find_unresolved_imports, find_unused_dependencies,
 };
+#[expect(
+    deprecated,
+    reason = "ADR-008 deprecates detector helpers for external callers; core orchestration still calls them internally"
+)]
 use unused_exports::{
     collect_export_usages, find_duplicate_exports, find_private_type_leaks, find_unused_exports,
     suppress_signature_backing_types,
 };
+#[expect(
+    deprecated,
+    reason = "ADR-008 deprecates detector helpers for external callers; core orchestration still calls them internally"
+)]
 use unused_files::find_unused_files;
+#[expect(
+    deprecated,
+    reason = "ADR-008 deprecates detector helpers for external callers; core orchestration still calls them internally"
+)]
 use unused_members::find_unused_members;
+#[expect(
+    deprecated,
+    reason = "ADR-008 deprecates detector helpers for external callers; core orchestration still calls them internally"
+)]
 use unused_overrides::{
     find_misconfigured_dependency_overrides, find_unused_dependency_overrides,
     gather_pnpm_override_state,
@@ -51,10 +75,12 @@ use unused_overrides::{
 
 /// Pre-computed line offset tables indexed by `FileId`, built during parse and
 /// carried through the cache. Eliminates redundant file reads during analysis.
+#[doc(hidden)]
 pub type LineOffsetsMap<'a> = FxHashMap<FileId, &'a [u32]>;
 
 /// Convert a byte offset to (line, col) using pre-computed line offsets.
 /// Falls back to `(1, byte_offset)` when no line table is available.
+#[doc(hidden)]
 pub fn byte_offset_to_line_col(
     line_offsets_map: &LineOffsetsMap<'_>,
     file_id: FileId,
@@ -210,6 +236,14 @@ fn find_circular_dependencies(
 }
 
 /// Find all dead code, with optional resolved module data, plugin context, and workspace info.
+#[expect(
+    deprecated,
+    reason = "ADR-008 deprecates detector helpers for external callers; core orchestration still calls them internally"
+)]
+#[deprecated(
+    since = "2.76.0",
+    note = "fallow_core is internal; use fallow_cli::programmatic::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/fallow-core-migration.md and ADR-008."
+)]
 #[expect(
     clippy::too_many_lines,
     reason = "orchestration function calling all detectors; each call is one-line and the sequence is easier to follow in one place"
@@ -664,6 +698,10 @@ pub fn find_dead_code_full(
 }
 
 #[cfg(test)]
+#[expect(
+    deprecated,
+    reason = "ADR-008 keeps direct analyzer unit tests while the public warning targets external callers"
+)]
 mod tests {
     use fallow_types::extract::{byte_offset_to_line_col, compute_line_offsets};
 

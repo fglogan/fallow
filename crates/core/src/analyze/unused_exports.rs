@@ -222,6 +222,10 @@ fn ignore_matchers_for_module<'a>(
 }
 
 /// Find exports that are never imported by other files.
+#[deprecated(
+    since = "2.76.0",
+    note = "fallow_core is internal; use fallow_cli::programmatic::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/fallow-core-migration.md and ADR-008."
+)]
 pub fn find_unused_exports(
     graph: &ModuleGraph,
     modules: &[ModuleInfo],
@@ -717,6 +721,10 @@ fn collect_dynamic_reexport_sources(
 /// `resolved_modules` is the set of modules with their resolved dynamic imports.
 /// Pass `&[]` to opt out of dynamic-import re-export detection (existing static
 /// `export { X } from '...'` re-exports are still recognized).
+#[deprecated(
+    since = "2.76.0",
+    note = "fallow_core is internal; use fallow_cli::programmatic::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/fallow-core-migration.md and ADR-008."
+)]
 pub fn find_duplicate_exports(
     graph: &ModuleGraph,
     config: &ResolvedConfig,
@@ -1015,6 +1023,10 @@ pub fn collect_export_usages(
 }
 
 #[cfg(test)]
+#[expect(
+    deprecated,
+    reason = "ADR-008 keeps direct detector unit tests while the public warning targets external callers"
+)]
 mod tests {
     use super::*;
     use crate::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};

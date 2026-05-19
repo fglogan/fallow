@@ -263,6 +263,10 @@ fn analyze_project_root(
             let detail = config_load_error_detail(project_root, config_path, &e);
             config_messages.push((MessageType::WARNING, detail));
             if config_path.is_none() {
+                #[expect(
+                    deprecated,
+                    reason = "ADR-008 deprecates fallow_core::analyze_project externally; the LSP still uses the workspace path dependency"
+                )]
                 if let Ok(results) = fallow_core::analyze_project(project_root) {
                     merge_results(merged_results, results);
                 }
@@ -277,6 +281,10 @@ fn analyze_project_root(
     };
     config_messages.push(message);
 
+    #[expect(
+        deprecated,
+        reason = "ADR-008 deprecates fallow_core::analyze_with_usages externally; the LSP still uses the workspace path dependency"
+    )]
     if let Ok(results) = fallow_core::analyze_with_usages(&config) {
         merge_results(merged_results, results);
     }

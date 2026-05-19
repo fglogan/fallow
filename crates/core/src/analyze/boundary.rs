@@ -14,6 +14,10 @@ use super::{LineOffsetsMap, byte_offset_to_line_col};
 /// For each reachable module, classifies it into a zone and checks all its
 /// import targets. If the target is in a different zone that the source zone
 /// is not allowed to import from, a `BoundaryViolation` is emitted.
+#[deprecated(
+    since = "2.76.0",
+    note = "fallow_core is internal; use fallow_cli::programmatic::detect_boundary_violations instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/fallow-core-migration.md and ADR-008."
+)]
 pub fn find_boundary_violations(
     graph: &ModuleGraph,
     config: &ResolvedConfig,
@@ -138,6 +142,10 @@ pub fn find_boundary_violations(
 }
 
 #[cfg(test)]
+#[expect(
+    deprecated,
+    reason = "ADR-008 keeps direct detector unit tests while the public warning targets external callers"
+)]
 mod tests {
     use super::*;
     use crate::discover::{DiscoveredFile, EntryPoint, EntryPointSource};

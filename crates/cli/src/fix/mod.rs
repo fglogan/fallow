@@ -54,6 +54,10 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
         Err(code) => return code,
     };
 
+    #[expect(
+        deprecated,
+        reason = "ADR-008 deprecates fallow_core::analyze externally; the CLI still uses the workspace path dependency"
+    )]
     let results = match fallow_core::analyze(&config) {
         Ok(r) => r,
         Err(e) => {

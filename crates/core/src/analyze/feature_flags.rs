@@ -16,6 +16,10 @@ use crate::graph::ModuleGraph;
 /// Maps extraction-level `FlagUse` (per-file, no path) to result-level
 /// `FeatureFlag` (with full path, confidence). Resolves guard span byte
 /// offsets to line numbers using per-file line offset tables.
+#[deprecated(
+    since = "2.76.0",
+    note = "fallow_core is internal; there is no programmatic equivalent today. Use the `fallow flags --format json` CLI output for feature-flag data. See docs/fallow-core-migration.md and ADR-008."
+)]
 pub fn collect_feature_flags(modules: &[ModuleInfo], graph: &ModuleGraph) -> Vec<FeatureFlag> {
     let mut flags = Vec::new();
 
@@ -54,6 +58,10 @@ pub fn collect_feature_flags(modules: &[ModuleInfo], graph: &ModuleGraph) -> Vec
 /// For each flag that guards a code span, check if any dead code findings
 /// (unused exports) fall within that span. Populates `guarded_dead_exports`
 /// on each flag.
+#[deprecated(
+    since = "2.76.0",
+    note = "fallow_core is internal; there is no programmatic equivalent today. Use the `fallow flags --format json` CLI output (the `guarded_dead_exports` field carries the same correlation). See docs/fallow-core-migration.md and ADR-008."
+)]
 pub fn correlate_with_dead_code(flags: &mut [FeatureFlag], results: &AnalysisResults) {
     if results.unused_exports.is_empty() && results.unused_types.is_empty() {
         return;

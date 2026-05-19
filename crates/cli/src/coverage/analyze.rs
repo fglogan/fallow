@@ -318,6 +318,10 @@ fn build_static_index(ctx: &RunContext<'_>, production: bool) -> Result<StaticIn
         fallow_core::cache::CacheStore::load(&config.cache_dir)
     };
     let parse_result = fallow_core::extract::parse_all_files(&files, cache.as_ref(), true);
+    #[expect(
+        deprecated,
+        reason = "ADR-008 deprecates fallow_core::analyze_with_parse_result externally; the CLI still uses the workspace path dependency"
+    )]
     let analysis_output = fallow_core::analyze_with_parse_result(&config, &parse_result.modules)
         .map_err(|err| emit_error(&format!("analysis failed: {err}"), 2, ctx.output))?;
     let file_paths: FxHashMap<_, _> = files.iter().map(|file| (file.id, &file.path)).collect();

@@ -9,6 +9,11 @@
 //! Output is printed in a machine-parseable `key: value` format so that
 //! `scripts/alloc-check.sh` can compare against a saved baseline.
 
+#![expect(
+    deprecated,
+    reason = "ADR-008: benchmark exercises the workspace path-dep fallow_core::analyze surface"
+)]
+
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
