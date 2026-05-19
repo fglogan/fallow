@@ -3698,4 +3698,107 @@ mod tests {
             );
         }
     }
+
+    /// Regression for issue #412: prevent reintroduction of the legacy
+    /// `inject_*` / `augment_*` post-pass pattern in this file. Every
+    /// JSON `actions[]` array on every finding type should flow from a
+    /// typed `serde(flatten)` envelope, not from a post-construction
+    /// mutation of a `serde_json::Value` tree.
+    ///
+    /// The allow-list mirrors the `HAND_MAINTAINED_ALLOW_LIST` pattern
+    /// in `crates/cli/src/bin/schema_emit.rs`: each entry pairs a name
+    /// with the issue that retires it. After #408 + #409 land, the
+    /// allow-list MUST be empty; any further addition needs an issue
+    /// reference in the same commit. The gate also asserts no STALE
+    /// entries, so removing a function without removing its allow-list
+    /// entry fails the test and forces the cleanup commit.
+    #[test]
+    fn no_new_post_pass_helpers_in_json_rs() {
+        const POST_PASS_ALLOW_LIST: &[(&str, &str)] = &[
+            (
+                "inject_health_post_pass_actions",
+                "retired by #408 (typed HotspotFinding + RefactoringTargetFinding wrappers)",
+            ),
+            (
+                "inject_dupes_actions",
+                "retired by #409 (typed CloneFamily / CloneGroup / AttributedCloneGroup wrappers)",
+            ),
+        ];
+        let source_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("report")
+            .join("json.rs");
+        let source = std::fs::read_to_string(&source_path).expect(
+            "crates/cli/src/report/json.rs must be readable for the post-pass drift-guard test",
+        );
+        let mut found: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for line in source.lines() {
+            if let Some(name) = extract_post_pass_fn_name(line) {
+                found.insert(name.to_owned());
+            }
+        }
+        let allow: std::collections::BTreeSet<&'static str> =
+            POST_PASS_ALLOW_LIST.iter().map(|(name, _)| *name).collect();
+        let unexpected: Vec<&str> = found
+            .iter()
+            .filter(|name| !allow.contains(name.as_str()))
+            .map(String::as_str)
+            .collect();
+        let stale: Vec<&str> = allow
+            .iter()
+            .filter(|name| !found.contains(**name))
+            .copied()
+            .collect();
+        assert!(
+            unexpected.is_empty(),
+            "new post-pass helper(s) defined in crates/cli/src/report/json.rs are not in \
+             POST_PASS_ALLOW_LIST: {unexpected:?}.\n\
+             The typed `serde(flatten)` envelope is the source of truth for `actions[]` on \
+             every finding. If a new post-pass is genuinely needed, file a tracking issue, \
+             add the entry to POST_PASS_ALLOW_LIST with the issue link as the reason, and \
+             reference the issue in the PR body. See issue #412 for context."
+        );
+        assert!(
+            stale.is_empty(),
+            "stale entries in POST_PASS_ALLOW_LIST (function no longer defined in \
+             crates/cli/src/report/json.rs): {stale:?}.\n\
+             Remove them in the same commit that retired the function."
+        );
+    }
+
+    /// Extracts an `inject_<name>` or `augment_<name>` identifier from a
+    /// Rust function-definition line, handling `pub`, `pub(...)`,
+    /// `async`, `const`, and `unsafe` modifiers. Returns `None` for
+    /// non-definition lines (comments, call sites, doc strings).
+    fn extract_post_pass_fn_name(line: &str) -> Option<&str> {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("//") {
+            return None;
+        }
+        let mut rest = trimmed;
+        if let Some(after) = rest.strip_prefix("pub") {
+            let after = after.trim_start();
+            rest = if let Some(after) = after.strip_prefix('(') {
+                let close = after.find(')')?;
+                after[close + 1..].trim_start()
+            } else {
+                after
+            };
+        }
+        for prefix in ["async ", "const ", "unsafe "] {
+            if let Some(after) = rest.strip_prefix(prefix) {
+                rest = after.trim_start();
+            }
+        }
+        let after_fn = rest.strip_prefix("fn ")?;
+        let name_end = after_fn
+            .find(|c: char| !c.is_alphanumeric() && c != '_')
+            .unwrap_or(after_fn.len());
+        let name = &after_fn[..name_end];
+        if name.starts_with("inject_") || name.starts_with("augment_") {
+            Some(name)
+        } else {
+            None
+        }
+    }
 }
