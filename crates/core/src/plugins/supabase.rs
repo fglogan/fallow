@@ -74,7 +74,7 @@ mod tests {
 
     #[test]
     fn activates_on_config_toml() {
-        let temp = std::env::temp_dir().join("fallow-supabase-config-test");
+        let temp = std::env::temp_dir().join("plow-supabase-config-test");
         let _ = std::fs::remove_dir_all(&temp);
         std::fs::create_dir_all(temp.join("supabase")).unwrap();
         std::fs::write(temp.join("supabase/config.toml"), "project_id = \"x\"\n").unwrap();
@@ -87,7 +87,7 @@ mod tests {
 
     #[test]
     fn activates_on_functions_directory() {
-        let temp = std::env::temp_dir().join("fallow-supabase-functions-test");
+        let temp = std::env::temp_dir().join("plow-supabase-functions-test");
         let _ = std::fs::remove_dir_all(&temp);
         std::fs::create_dir_all(temp.join("supabase/functions/hello")).unwrap();
 
@@ -99,7 +99,7 @@ mod tests {
 
     #[test]
     fn does_not_activate_without_any_signal() {
-        let temp = std::env::temp_dir().join("fallow-supabase-negative-test");
+        let temp = std::env::temp_dir().join("plow-supabase-negative-test");
         let _ = std::fs::remove_dir_all(&temp);
         std::fs::create_dir_all(&temp).unwrap();
 

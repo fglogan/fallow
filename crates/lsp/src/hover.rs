@@ -3,8 +3,8 @@ use std::path::Path;
 
 use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position, Range};
 
-use fallow_core::duplicates::DuplicationReport;
-use fallow_core::results::AnalysisResults;
+use plow_core::duplicates::DuplicationReport;
+use plow_core::results::AnalysisResults;
 
 use crate::markdown::format_inline_code;
 
@@ -69,7 +69,7 @@ fn check_unused_file(results: &AnalysisResults, file_path: &Path) -> Option<Hove
     Some(Hover {
         contents: HoverContents::Markup(MarkupContent {
             kind: MarkupKind::Markdown,
-            value: "**fallow**: This file is not imported by any other file and is not reachable \
+            value: "**plow**: This file is not imported by any other file and is not reachable \
                     from any entry point."
                 .to_string(),
         }),
@@ -92,12 +92,12 @@ fn check_unused_export(
     for (exports, kind_label) in [
         (
             Box::new(unused_exports_iter)
-                as Box<dyn Iterator<Item = &fallow_core::results::UnusedExport>>,
+                as Box<dyn Iterator<Item = &plow_core::results::UnusedExport>>,
             "Export",
         ),
         (
             Box::new(unused_types_iter)
-                as Box<dyn Iterator<Item = &fallow_core::results::UnusedExport>>,
+                as Box<dyn Iterator<Item = &plow_core::results::UnusedExport>>,
             "Type export",
         ),
     ] {
@@ -115,7 +115,7 @@ fn check_unused_export(
             }
 
             let value = format!(
-                "**fallow**: {kind_label} {} is not imported by any other file.",
+                "**plow**: {kind_label} {} is not imported by any other file.",
                 format_inline_code(&export.export_name),
             );
 
@@ -176,7 +176,7 @@ fn check_used_export(
         };
 
         let mut value = format!(
-            "**fallow**: Export {} is used by {} {ref_word}",
+            "**plow**: Export {} is used by {} {ref_word}",
             format_inline_code(&usage.export_name),
             usage.reference_count,
         );
@@ -241,11 +241,11 @@ fn check_unused_member(
     let class_iter = results.unused_class_members.iter().map(|f| &f.member);
     for (members, kind_label) in [
         (
-            Box::new(enum_iter) as Box<dyn Iterator<Item = &fallow_core::results::UnusedMember>>,
+            Box::new(enum_iter) as Box<dyn Iterator<Item = &plow_core::results::UnusedMember>>,
             "Enum member",
         ),
         (
-            Box::new(class_iter) as Box<dyn Iterator<Item = &fallow_core::results::UnusedMember>>,
+            Box::new(class_iter) as Box<dyn Iterator<Item = &plow_core::results::UnusedMember>>,
             "Class member",
         ),
     ] {
@@ -267,7 +267,7 @@ fn check_unused_member(
             // break out. `format_inline_code` handles the fence.
             let qualified = format!("{}.{}", member.parent_name, member.member_name);
             let value = format!(
-                "**fallow**: {kind_label} {} is never used outside its declaration.",
+                "**plow**: {kind_label} {} is never used outside its declaration.",
                 format_inline_code(&qualified),
             );
 
@@ -318,7 +318,7 @@ fn check_unresolved_import(
         }
 
         let value = format!(
-            "**fallow**: Cannot resolve import {}. The module may be missing, misspelled, \
+            "**plow**: Cannot resolve import {}. The module may be missing, misspelled, \
              or not installed.",
             format_inline_code(&import.import.specifier),
         );
@@ -376,7 +376,7 @@ fn check_duplication(
             };
 
             let mut value = format!(
-                "**fallow**: Duplicated code block ({} lines, {} tokens). \
+                "**plow**: Duplicated code block ({} lines, {} tokens). \
                  {other_count} other {instance_word}",
                 group.line_count, group.token_count,
             );
@@ -441,9 +441,9 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    use fallow_core::duplicates::{CloneGroup, CloneInstance, DuplicationStats};
-    use fallow_core::extract::MemberKind;
-    use fallow_core::results::{
+    use plow_core::duplicates::{CloneGroup, CloneInstance, DuplicationStats};
+    use plow_core::extract::MemberKind;
+    use plow_core::results::{
         ExportUsage, ReferenceLocation, UnresolvedImport, UnresolvedImportFinding,
         UnusedClassMemberFinding, UnusedEnumMemberFinding, UnusedExport, UnusedExportFinding,
         UnusedFile, UnusedFileFinding, UnusedMember, UnusedTypeFinding,

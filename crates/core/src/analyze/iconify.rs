@@ -13,7 +13,7 @@
 //! from "unused"; it never produces a finding, so a stray non-icon
 //! `name="foo:bar"` whose `@iconify-json/foo` is not declared is a no-op.
 
-use fallow_config::{PackageJson, WorkspaceInfo};
+use plow_config::{PackageJson, WorkspaceInfo};
 use rustc_hash::FxHashSet;
 
 use crate::extract::ModuleInfo;

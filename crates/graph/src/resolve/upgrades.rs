@@ -91,8 +91,8 @@ mod tests {
 
     use rustc_hash::FxHashSet;
 
-    use fallow_types::discover::FileId;
-    use fallow_types::extract::{ImportInfo, ImportedName, ReExportInfo};
+    use plow_types::discover::FileId;
+    use plow_types::extract::{ImportInfo, ImportedName, ReExportInfo};
     use oxc_span::Span;
 
     use super::super::types::{ResolvedImport, ResolvedReExport};

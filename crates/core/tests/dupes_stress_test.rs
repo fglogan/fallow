@@ -3,10 +3,10 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
-use fallow_core::duplicates::DetectionMode;
-use fallow_core::duplicates::detect::CloneDetector;
-use fallow_core::duplicates::normalize::{HashedToken, normalize_and_hash};
-use fallow_core::duplicates::tokenize::{FileTokens, SourceToken, TokenKind};
+use plow_core::duplicates::DetectionMode;
+use plow_core::duplicates::detect::CloneDetector;
+use plow_core::duplicates::normalize::{HashedToken, normalize_and_hash};
+use plow_core::duplicates::tokenize::{FileTokens, SourceToken, TokenKind};
 use oxc_span::Span;
 
 // ── Helpers ────────────────────────────────────────────────
@@ -320,7 +320,7 @@ function handlePayload(payload) {
 }
 "#;
 
-    use fallow_core::duplicates::tokenize::tokenize_file;
+    use plow_core::duplicates::tokenize::tokenize_file;
 
     let ft_a = tokenize_file(&PathBuf::from("a.ts"), code_a, false);
     let ft_b = tokenize_file(&PathBuf::from("b.ts"), code_b, false);

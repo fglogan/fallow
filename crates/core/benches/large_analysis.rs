@@ -1,6 +1,6 @@
 #![expect(
     deprecated,
-    reason = "ADR-008: benchmark exercises the workspace path-dep fallow_core::analyze surface"
+    reason = "ADR-008: benchmark exercises the workspace path-dep plow_core::analyze surface"
 )]
 
 use std::time::Duration;
@@ -14,7 +14,7 @@ fn bench_full_pipeline_5000(c: &mut Criterion) {
 
     c.bench_function("full_pipeline_5000_files", |b| {
         b.iter(|| {
-            let _ = fallow_core::analyze(&config);
+            let _ = plow_core::analyze(&config);
         });
     });
 
@@ -25,11 +25,11 @@ fn bench_full_pipeline_1000_warm(c: &mut Criterion) {
     let (temp_dir, config) = helpers::create_synthetic_project_with_cache("1000-warm", 1000, false);
 
     // Populate the cache
-    let _ = fallow_core::analyze(&config);
+    let _ = plow_core::analyze(&config);
 
     c.bench_function("full_pipeline_1000_files_warm_cache", |b| {
         b.iter(|| {
-            let _ = fallow_core::analyze(&config);
+            let _ = plow_core::analyze(&config);
         });
     });
 
@@ -40,11 +40,11 @@ fn bench_full_pipeline_5000_warm(c: &mut Criterion) {
     let (temp_dir, config) = helpers::create_synthetic_project_with_cache("5000-warm", 5000, false);
 
     // Populate the cache
-    let _ = fallow_core::analyze(&config);
+    let _ = plow_core::analyze(&config);
 
     c.bench_function("full_pipeline_5000_files_warm_cache", |b| {
         b.iter(|| {
-            let _ = fallow_core::analyze(&config);
+            let _ = plow_core::analyze(&config);
         });
     });
 
@@ -55,12 +55,12 @@ fn bench_full_pipeline_5000_warm(c: &mut Criterion) {
 
 fn bench_dupes_full_1000(c: &mut Criterion) {
     let (temp_dir, config) = helpers::create_dupe_project("1000", 1000);
-    let files = fallow_core::discover::discover_files(&config);
-    let dupes_config = fallow_config::DuplicatesConfig::default();
+    let files = plow_core::discover::discover_files(&config);
+    let dupes_config = plow_config::DuplicatesConfig::default();
 
     c.bench_function("dupes_full_pipeline_1000_files", |b| {
         b.iter(|| {
-            fallow_core::duplicates::find_duplicates(&config.root, &files, &dupes_config);
+            plow_core::duplicates::find_duplicates(&config.root, &files, &dupes_config);
         });
     });
 
@@ -69,12 +69,12 @@ fn bench_dupes_full_1000(c: &mut Criterion) {
 
 fn bench_dupes_full_5000(c: &mut Criterion) {
     let (temp_dir, config) = helpers::create_dupe_project("5000", 5000);
-    let files = fallow_core::discover::discover_files(&config);
-    let dupes_config = fallow_config::DuplicatesConfig::default();
+    let files = plow_core::discover::discover_files(&config);
+    let dupes_config = plow_config::DuplicatesConfig::default();
 
     c.bench_function("dupes_full_pipeline_5000_files", |b| {
         b.iter(|| {
-            fallow_core::duplicates::find_duplicates(&config.root, &files, &dupes_config);
+            plow_core::duplicates::find_duplicates(&config.root, &files, &dupes_config);
         });
     });
 

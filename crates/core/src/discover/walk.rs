@@ -2,8 +2,8 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use fallow_config::ResolvedConfig;
-use fallow_types::discover::{DiscoveredFile, FileId};
+use plow_config::ResolvedConfig;
+use plow_types::discover::{DiscoveredFile, FileId};
 use ignore::WalkBuilder;
 
 use super::ALLOWED_HIDDEN_DIRS;
@@ -291,7 +291,7 @@ mod tests {
         assert!(!is_allowed_hidden_dir(OsStr::new(".git")));
         assert!(!is_allowed_hidden_dir(OsStr::new(".cache")));
         assert!(!is_allowed_hidden_dir(OsStr::new(".vscode")));
-        assert!(!is_allowed_hidden_dir(OsStr::new(".fallow")));
+        assert!(!is_allowed_hidden_dir(OsStr::new(".plow")));
         assert!(!is_allowed_hidden_dir(OsStr::new(".next")));
     }
 
@@ -434,8 +434,8 @@ mod tests {
     mod discover_files_integration {
         use std::path::PathBuf;
 
-        use fallow_config::{
-            DuplicatesConfig, FallowConfig, FlagsConfig, HealthConfig, OutputFormat, ResolveConfig,
+        use plow_config::{
+            DuplicatesConfig, PlowConfig, FlagsConfig, HealthConfig, OutputFormat, ResolveConfig,
             RulesConfig,
         };
 
@@ -443,7 +443,7 @@ mod tests {
 
         /// Create a minimal ResolvedConfig pointing at the given root directory.
         fn make_config(root: PathBuf, production: bool) -> ResolvedConfig {
-            FallowConfig {
+            PlowConfig {
                 production: production.into(),
                 ..Default::default()
             }
@@ -815,7 +815,7 @@ mod tests {
 
         /// Create a config with custom ignore patterns.
         fn make_config_with_ignores(root: PathBuf, ignores: Vec<String>) -> ResolvedConfig {
-            FallowConfig {
+            PlowConfig {
                 schema: None,
                 extends: vec![],
                 entry: vec![],
@@ -827,29 +827,29 @@ mod tests {
                 ignore_exports: vec![],
                 ignore_catalog_references: vec![],
                 ignore_dependency_overrides: vec![],
-                ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(
+                ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(
                 ),
                 used_class_members: vec![],
                 ignore_decorators: vec![],
                 duplicates: DuplicatesConfig::default(),
                 health: HealthConfig::default(),
                 rules: RulesConfig::default(),
-                boundaries: fallow_config::BoundaryConfig::default(),
+                boundaries: plow_config::BoundaryConfig::default(),
                 production: false.into(),
                 plugins: vec![],
                 dynamically_loaded: vec![],
                 overrides: vec![],
                 regression: None,
-                audit: fallow_config::AuditConfig::default(),
+                audit: plow_config::AuditConfig::default(),
                 codeowners: None,
                 public_packages: vec![],
                 flags: FlagsConfig::default(),
-                fix: fallow_config::FixConfig::default(),
+                fix: plow_config::FixConfig::default(),
                 resolve: ResolveConfig::default(),
                 sealed: false,
                 include_entry_exports: false,
                 auto_imports: false,
-                cache: fallow_config::CacheConfig::default(),
+                cache: plow_config::CacheConfig::default(),
             }
             .resolve(root, OutputFormat::Human, 1, true, true, None)
         }

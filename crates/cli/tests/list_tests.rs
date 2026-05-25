@@ -1,13 +1,13 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use common::{CommandOutput, fallow_bin, parse_json, run_fallow};
+use common::{CommandOutput, plow_bin, parse_json, run_plow};
 
 use std::process::Command;
 
-/// Run `fallow list` with the given args and return structured output.
+/// Run `plow list` with the given args and return structured output.
 fn run_list(fixture: &str, args: &[&str]) -> CommandOutput {
-    run_fallow("list", fixture, args)
+    run_plow("list", fixture, args)
 }
 
 // ── show_all behavior ────────────────────────────────────────────
@@ -834,14 +834,14 @@ fn list_production_mode_flag_accepted() {
 
 #[test]
 fn list_invalid_root_returns_error() {
-    let bin = fallow_bin();
+    let bin = plow_bin();
     let output = Command::new(&bin)
         .arg("list")
         .arg("--root")
         .arg("/nonexistent/path/that/does/not/exist")
         .env("RUST_LOG", "")
         .output()
-        .expect("failed to run fallow binary");
+        .expect("failed to run plow binary");
 
     assert_ne!(
         output.status.code().unwrap_or(0),
@@ -929,7 +929,7 @@ fn list_nextjs_project_app_page_is_plugin_entry_point() {
 #[test]
 fn list_files_includes_plugin_scoped_hidden_dirs_for_react_router() {
     // React Router's `.client` and `.server` convention folders must surface in
-    // `fallow list --files`; otherwise commands that consume the file walk lose
+    // `plow list --files`; otherwise commands that consume the file walk lose
     // visibility into a real chunk of the project.
     let output = run_list("react-router-conventions", &["--files", "--format", "json"]);
     assert_eq!(output.code, 0, "stderr was: {}", output.stderr);

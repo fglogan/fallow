@@ -1,7 +1,7 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use common::{fallow_bin, parse_json, run_fallow_raw};
+use common::{plow_bin, parse_json, run_plow_raw};
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -143,11 +143,11 @@ fn write_branchy_istanbul_coverage(coverage_path: &std::path::Path, coverage_sou
     fs::write(coverage_path, serde_json::to_string(&coverage).unwrap()).unwrap();
 }
 
-fn run_fallow_raw_with_env(
+fn run_plow_raw_with_env(
     args: &[&str],
     env: &[(&str, &std::path::Path)],
 ) -> common::CommandOutput {
-    let mut cmd = Command::new(fallow_bin());
+    let mut cmd = Command::new(plow_bin());
     cmd.env("RUST_LOG", "").env("NO_COLOR", "1");
     for (key, value) in env {
         cmd.env(key, value);
@@ -155,7 +155,7 @@ fn run_fallow_raw_with_env(
     for arg in args {
         cmd.arg(arg);
     }
-    let output = cmd.output().expect("failed to run fallow binary");
+    let output = cmd.output().expect("failed to run plow binary");
     common::CommandOutput {
         stdout: String::from_utf8_lossy(&output.stdout).to_string(),
         stderr: String::from_utf8_lossy(&output.stderr).to_string(),
@@ -170,7 +170,7 @@ fn run_fallow_raw_with_env(
 #[test]
 fn audit_json_has_verdict_and_schema() {
     let dir = create_audit_fixture("verdict");
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "audit",
         "--root",
         dir.path().to_str().unwrap(),
@@ -207,7 +207,7 @@ fn audit_json_has_verdict_and_schema() {
 #[test]
 fn audit_pass_verdict_when_no_changes() {
     let dir = create_audit_fixture("nochanges");
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "audit",
         "--root",
         dir.path().to_str().unwrap(),
@@ -281,7 +281,7 @@ fn audit_parallel_output_is_deterministic() {
     }
 
     let mut canonicalized: Vec<String> = std::iter::repeat_with(|| {
-        let output = run_fallow_raw(&[
+        let output = run_plow_raw(&[
             "audit",
             "--root",
             dir.path().to_str().unwrap(),
@@ -340,7 +340,7 @@ fn audit_json_has_summary_with_changes() {
         .output()
         .unwrap();
 
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "audit",
         "--root",
         dir.path().to_str().unwrap(),
@@ -445,7 +445,7 @@ fn create_audit_baseline_fixture() -> TempDir {
 #[test]
 fn audit_default_gate_ignores_inherited_issues() {
     let tmp = create_audit_baseline_fixture();
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "audit",
         "--root",
         tmp.path().to_str().unwrap(),
@@ -494,15 +494,15 @@ fn audit_default_gate_ignores_inherited_issues() {
 #[test]
 fn audit_gate_all_reports_preexisting_issues() {
     let tmp = create_audit_baseline_fixture();
-    fs::write(tmp.path().join("fallow.toml"), "[audit]\ngate = \"all\"\n").unwrap();
-    let output = run_fallow_raw(&[
+    fs::write(tmp.path().join("plow.toml"), "[audit]\ngate = \"all\"\n").unwrap();
+    let output = run_plow_raw(&[
         "audit",
         "--root",
         tmp.path().to_str().unwrap(),
         "--base",
         "main",
         "--config",
-        tmp.path().join("fallow.toml").to_str().unwrap(),
+        tmp.path().join("plow.toml").to_str().unwrap(),
         "--format",
         "json",
         "--quiet",
@@ -537,7 +537,7 @@ fn audit_gate_all_reports_preexisting_issues() {
 #[test]
 fn audit_gate_cli_flag_overrides_default() {
     let tmp = create_audit_baseline_fixture();
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "audit",
         "--root",
         tmp.path().to_str().unwrap(),
@@ -567,7 +567,7 @@ fn audit_gate_cli_flag_overrides_default() {
 
 #[test]
 fn audit_help_documents_gate() {
-    let output = run_fallow_raw(&["audit", "--help"]);
+    let output = run_plow_raw(&["audit", "--help"]);
     assert_eq!(output.code, 0, "audit --help should succeed");
     assert!(
         output.stdout.contains("--gate <GATE>"),
@@ -586,7 +586,7 @@ fn audit_base_preserves_node_modules_tsconfig_extends_context() {
     let tmp = TempDir::new().expect("failed to create temp dir");
     let dir = tmp.path();
     fs::create_dir_all(dir.join("src")).unwrap();
-    fs::write(dir.join(".gitignore"), "node_modules\n.fallow\n").unwrap();
+    fs::write(dir.join(".gitignore"), "node_modules\n.plow\n").unwrap();
     fs::write(
         dir.join("package.json"),
         r#"{"name":"audit-rn-alias","main":"src/index.ts","dependencies":{"@react-native/typescript-config":"1.0.0"}}"#,
@@ -629,7 +629,7 @@ fn audit_base_preserves_node_modules_tsconfig_extends_context() {
     .unwrap();
     commit_all(dir, "introduce new export");
 
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "audit",
         "--root",
         dir.to_str().unwrap(),
@@ -700,7 +700,7 @@ fn audit_new_unlisted_dependency_import_site_is_introduced() {
     .unwrap();
     commit_all(dir, "add b");
 
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "audit",
         "--root",
         dir.to_str().unwrap(),
@@ -763,7 +763,7 @@ fn audit_empty_catalog_group_changed_manifest_is_introduced() {
     )
     .unwrap();
 
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "audit",
         "--root",
         dir.to_str().unwrap(),
@@ -825,7 +825,7 @@ fn audit_dependency_location_change_is_introduced() {
     .unwrap();
     commit_all(dir, "move dependency");
 
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "audit",
         "--root",
         dir.to_str().unwrap(),
@@ -857,7 +857,7 @@ fn audit_dependency_location_change_is_introduced() {
 fn audit_with_dead_code_baseline_filters_preexisting_issues() {
     let tmp = create_audit_baseline_fixture();
     let dir = tmp.path();
-    let baseline_path = dir.join(".fallow-dead-code-baseline.json");
+    let baseline_path = dir.join(".plow-dead-code-baseline.json");
 
     // Save baseline from `main` state (before touching the file).
     // Switch back to main, save, then back to feature.
@@ -877,7 +877,7 @@ fn audit_with_dead_code_baseline_filters_preexisting_issues() {
             .expect("git command failed")
     };
     git(&["checkout", "main"]);
-    let save = run_fallow_raw(&[
+    let save = run_plow_raw(&[
         "dead-code",
         "--root",
         dir.to_str().unwrap(),
@@ -900,7 +900,7 @@ fn audit_with_dead_code_baseline_filters_preexisting_issues() {
     git(&["checkout", "feature"]);
 
     // Now audit with the dead-code baseline.
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "audit",
         "--root",
         dir.to_str().unwrap(),
@@ -934,7 +934,7 @@ fn audit_with_dead_code_baseline_filters_preexisting_issues() {
 #[test]
 fn audit_rejects_global_baseline_flag() {
     let tmp = create_audit_baseline_fixture();
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "--baseline",
         "anything.json",
         "audit",
@@ -964,7 +964,7 @@ fn audit_rejects_global_baseline_flag() {
 #[test]
 fn audit_rejects_global_save_baseline_flag() {
     let tmp = create_audit_baseline_fixture();
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "--save-baseline",
         "anywhere.json",
         "audit",
@@ -998,7 +998,7 @@ fn audit_rejects_global_save_baseline_flag() {
 #[test]
 fn audit_badge_format_exits_2() {
     let dir = create_audit_fixture("badge");
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "audit",
         "--root",
         dir.path().to_str().unwrap(),
@@ -1026,7 +1026,7 @@ fn audit_max_crap_flag_fails_when_threshold_crossed() {
     // exceed the threshold.
     write_branchy_change(dir.path());
 
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "audit",
         "--root",
         dir.path().to_str().unwrap(),
@@ -1056,7 +1056,7 @@ fn audit_max_crap_flag_fails_when_threshold_crossed() {
 // ---------------------------------------------------------------------------
 
 fn audit_with_env(root: &Path, env: &[(&str, &str)]) -> common::CommandOutput {
-    let bin = fallow_bin();
+    let bin = plow_bin();
     let mut cmd = Command::new(&bin);
     cmd.args([
         "audit",
@@ -1073,7 +1073,7 @@ fn audit_with_env(root: &Path, env: &[(&str, &str)]) -> common::CommandOutput {
     for (key, value) in env {
         cmd.env(key, value);
     }
-    let output = cmd.output().expect("failed to run fallow binary");
+    let output = cmd.output().expect("failed to run plow binary");
     common::CommandOutput {
         stdout: String::from_utf8_lossy(&output.stdout).to_string(),
         stderr: String::from_utf8_lossy(&output.stderr).to_string(),
@@ -1083,11 +1083,11 @@ fn audit_with_env(root: &Path, env: &[(&str, &str)]) -> common::CommandOutput {
 
 /// Regression test for issue #301. When git invokes hooks (`pre-commit`,
 /// `pre-push`), it sets `GIT_INDEX_FILE=.git/index` (relative path) plus
-/// related repo-state vars. Before the fix in #301, fallow inherited these
+/// related repo-state vars. Before the fix in #301, plow inherited these
 /// into its own git invocations and `git worktree add` failed because the
 /// relative index path no longer resolved from the temporary worktree dir.
 ///
-/// The test runs `fallow audit` under each of the ambient repo-state vars
+/// The test runs `plow audit` under each of the ambient repo-state vars
 /// individually and asserts the audit succeeds, mirroring the leak shapes a
 /// hook subprocess actually sees.
 #[test]
@@ -1096,7 +1096,7 @@ fn audit_succeeds_when_ambient_git_env_vars_leak_from_a_hook() {
     let root = dir.path();
 
     // `GIT_INDEX_FILE=.git/index` is the exact leak shape `git commit`
-    // produces; absolute form must also remain a no-op since fallow strips it.
+    // produces; absolute form must also remain a no-op since plow strips it.
     let abs_index = root.join(".git/index").to_string_lossy().to_string();
     let cases: &[(&str, &str)] = &[
         ("GIT_INDEX_FILE", ".git/index"),
@@ -1128,7 +1128,7 @@ fn audit_coverage_and_coverage_root_feed_crap_scoring() {
     let dir = create_audit_fixture("coverage-root");
     write_branchy_change(dir.path());
 
-    let without_coverage = run_fallow_raw(&[
+    let without_coverage = run_plow_raw(&[
         "audit",
         "--root",
         dir.path().to_str().unwrap(),
@@ -1149,7 +1149,7 @@ fn audit_coverage_and_coverage_root_feed_crap_scoring() {
     let coverage_path = dir.path().join("artifacts/coverage-final.json");
     write_branchy_istanbul_coverage(&coverage_path, "/ci/workspace/src/index.ts");
 
-    let with_coverage = run_fallow_raw(&[
+    let with_coverage = run_plow_raw(&[
         "audit",
         "--root",
         dir.path().to_str().unwrap(),
@@ -1178,7 +1178,7 @@ fn audit_coverage_and_coverage_root_feed_crap_scoring() {
 fn audit_rejects_relative_coverage_root() {
     let dir = create_audit_fixture("coverage-root-relative-rejected");
 
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "audit",
         "--root",
         dir.path().to_str().unwrap(),
@@ -1224,7 +1224,7 @@ fn audit_coverage_relative_path_resolves_against_root_through_base_snapshot() {
 
     // Pass --coverage as a relative path; --root is the project. Resolution
     // must happen against --root, not against the binary's process cwd.
-    let with_relative = run_fallow_raw(&[
+    let with_relative = run_plow_raw(&[
         "audit",
         "--root",
         dir.path().to_str().unwrap(),
@@ -1256,7 +1256,7 @@ fn audit_coverage_env_fallback_feeds_crap_scoring() {
     let branchy_source = dir.path().join("src/index.ts");
     write_branchy_istanbul_coverage(&coverage_path, &branchy_source.to_string_lossy());
 
-    let without_env = run_fallow_raw(&[
+    let without_env = run_plow_raw(&[
         "audit",
         "--root",
         dir.path().to_str().unwrap(),
@@ -1270,11 +1270,11 @@ fn audit_coverage_env_fallback_feeds_crap_scoring() {
     ]);
     assert_eq!(
         without_env.code, 1,
-        "static CRAP estimate should fail before FALLOW_COVERAGE is supplied. stderr: {}",
+        "static CRAP estimate should fail before PLOW_COVERAGE is supplied. stderr: {}",
         without_env.stderr
     );
 
-    let output = run_fallow_raw_with_env(
+    let output = run_plow_raw_with_env(
         &[
             "audit",
             "--root",
@@ -1287,11 +1287,11 @@ fn audit_coverage_env_fallback_feeds_crap_scoring() {
             "json",
             "--quiet",
         ],
-        &[("FALLOW_COVERAGE", coverage_path.as_path())],
+        &[("PLOW_COVERAGE", coverage_path.as_path())],
     );
     assert_eq!(
         output.code, 0,
-        "FALLOW_COVERAGE should feed audit's health sub-analysis. stderr: {}",
+        "PLOW_COVERAGE should feed audit's health sub-analysis. stderr: {}",
         output.stderr
     );
     let json = parse_json(&output);

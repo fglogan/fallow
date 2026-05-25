@@ -335,7 +335,7 @@ fn collect_workspace_patterns(root: &Path) -> Result<Vec<String>, WorkspaceLoadE
     }
 
     // Check pnpm-workspace.yaml. Yaml read/parse failures stay silent here:
-    // pnpm itself surfaces them at install time and adding a fallow-side
+    // pnpm itself surfaces them at install time and adding a plow-side
     // diagnostic would double-report the error.
     let pnpm_workspace = root.join("pnpm-workspace.yaml");
     if pnpm_workspace.exists()
@@ -427,7 +427,7 @@ fn expand_patterns_to_workspaces(
             // expand_workspace_glob_with_diagnostics. A parse failure HERE is
             // the declared-workspace malformed case: emit a diagnostic and
             // continue (the user's own pnpm/npm install would fail too, but
-            // fallow stays useful so the user can fix the typo).
+            // plow stays useful so the user can fix the typo).
             let ws_pkg_path = dir.join("package.json");
             match PackageJson::load(&ws_pkg_path) {
                 Ok(pkg) => {
@@ -643,7 +643,7 @@ mod tests {
 
     #[test]
     fn discover_workspaces_from_tsconfig_references() {
-        let temp_dir = std::env::temp_dir().join("fallow-test-ws-tsconfig-refs");
+        let temp_dir = std::env::temp_dir().join("plow-test-ws-tsconfig-refs");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(temp_dir.join("packages/core")).unwrap();
         std::fs::create_dir_all(temp_dir.join("packages/ui")).unwrap();
@@ -673,7 +673,7 @@ mod tests {
 
     #[test]
     fn tsconfig_references_outside_root_rejected() {
-        let temp_dir = std::env::temp_dir().join("fallow-test-tsconfig-outside");
+        let temp_dir = std::env::temp_dir().join("plow-test-tsconfig-outside");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(temp_dir.join("project/packages/core")).unwrap();
         // "outside" is a sibling of "project", not inside it
@@ -969,7 +969,7 @@ mod tests {
         std::fs::create_dir_all(&deep).unwrap();
 
         std::fs::write(benchmarks.join("package.json"), r#"{"name": "benchmarks"}"#).unwrap();
-        std::fs::write(vscode.join("package.json"), r#"{"name": "fallow-vscode"}"#).unwrap();
+        std::fs::write(vscode.join("package.json"), r#"{"name": "plow-vscode"}"#).unwrap();
         std::fs::write(deep.join("package.json"), r#"{"name": "deep-fixture"}"#).unwrap();
 
         let workspaces = discover_workspaces(dir.path());
@@ -980,7 +980,7 @@ mod tests {
             "top-level nested package should be discovered: {workspaces:?}"
         );
         assert!(
-            names.contains(&"fallow-vscode"),
+            names.contains(&"plow-vscode"),
             "second-level nested package should be discovered: {workspaces:?}"
         );
         assert!(
@@ -1506,7 +1506,7 @@ mod tests {
     #[test]
     fn shallow_scan_malformed_package_json_stays_silent() {
         // Severity policy: when the user has not declared workspaces and
-        // fallow falls back to shallow scanning, a malformed nested
+        // plow falls back to shallow scanning, a malformed nested
         // package.json must NOT produce a diagnostic. The user did not
         // declare the directory; the heuristic should not generate noise.
         let dir = tempfile::tempdir().expect("create temp dir");

@@ -2,7 +2,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use colored::Colorize;
-use fallow_core::duplicates::DuplicationReport;
+use plow_core::duplicates::DuplicationReport;
 
 use super::{
     MAX_FLAT_ITEMS, format_path, plural, print_explain_tip_if_tty, relative_path,
@@ -11,7 +11,7 @@ use super::{
 use crate::report::dupes_grouping::DuplicationGrouping;
 
 /// Docs base URL for duplication explanations.
-const DOCS_DUPLICATION: &str = "https://docs.fallow.tools/explanations/duplication";
+const DOCS_DUPLICATION: &str = "https://docs.genesis-plow.dev/explanations/duplication";
 
 /// Maximum clone groups shown in duplication output.
 const MAX_CLONE_GROUPS: usize = 10;
@@ -108,7 +108,7 @@ fn build_duplication_human_lines_with_explain(
     }
 
     // Sort clone groups by line count descending for most impactful first
-    let mut sorted_groups: Vec<&fallow_core::duplicates::CloneGroup> =
+    let mut sorted_groups: Vec<&plow_core::duplicates::CloneGroup> =
         report.clone_groups.iter().collect();
     sorted_groups.sort_by_key(|b| std::cmp::Reverse(b.line_count));
 
@@ -122,7 +122,7 @@ fn build_duplication_human_lines_with_explain(
             .cyan()
             .bold()
     ));
-    if explain && let Some(rule) = crate::explain::rule_by_id("fallow/code-duplication") {
+    if explain && let Some(rule) = crate::explain::rule_by_id("plow/code-duplication") {
         lines.push(format!(
             "  {}",
             format!("Description: {}", rule.full).dimmed()
@@ -319,11 +319,11 @@ pub(super) struct MirroredDirs {
 ///
 /// Minimum 3 families must share a pattern to qualify as "mirrored".
 pub(super) fn detect_mirrored_families<'a>(
-    families: &'a [fallow_core::duplicates::CloneFamily],
+    families: &'a [plow_core::duplicates::CloneFamily],
     root: &Path,
 ) -> (
     Vec<MirroredDirs>,
-    Vec<&'a fallow_core::duplicates::CloneFamily>,
+    Vec<&'a plow_core::duplicates::CloneFamily>,
 ) {
     const MIN_MIRROR_FAMILIES: usize = 3;
 
@@ -388,7 +388,7 @@ pub(super) fn detect_mirrored_families<'a>(
     // Sort mirrors by total lines descending
     mirrors.sort_by_key(|b| std::cmp::Reverse(b.total_lines));
 
-    let non_mirrored: Vec<&fallow_core::duplicates::CloneFamily> = families
+    let non_mirrored: Vec<&plow_core::duplicates::CloneFamily> = families
         .iter()
         .enumerate()
         .filter(|(idx, _)| !mirrored_indices.contains(idx))
@@ -614,7 +614,7 @@ pub(in crate::report) fn print_grouped_duplication_human(
 mod tests {
     use super::super::plain;
     use super::*;
-    use fallow_core::duplicates::{
+    use plow_core::duplicates::{
         CloneFamily, CloneGroup, CloneInstance, DuplicationStats, RefactoringKind,
         RefactoringSuggestion,
     };

@@ -5,7 +5,7 @@ import { runTests } from "@vscode/test-electron";
 
 const extensionDevelopmentPath = path.resolve(__dirname, "../../..");
 const extensionTestsPath = path.resolve(__dirname, "suite/index.js");
-const vscodeTestCachePath = path.join(os.tmpdir(), "fallow-vscode-test-cache");
+const vscodeTestCachePath = path.join(os.tmpdir(), "plow-vscode-test-cache");
 const fixtureWorkspacePath = path.resolve(
   extensionDevelopmentPath,
   "test/integration/fixtures/workspace/package.json"
@@ -17,7 +17,7 @@ const writeExecutable = (filePath: string, contents: string): void => {
 };
 
 const createFakeLsp = (binDir: string): string => {
-  const lspPath = path.join(binDir, "fallow-lsp");
+  const lspPath = path.join(binDir, "plow-lsp");
   writeExecutable(
     lspPath,
     `#!/usr/bin/env node
@@ -76,8 +76,8 @@ process.stdin.on("data", (chunk) => {
 };
 
 const createFakeCli = (binDir: string): void => {
-  const cliPath = path.join(binDir, "fallow");
-  const logPath = path.join(path.dirname(binDir), ".fallow-cli-log.jsonl");
+  const cliPath = path.join(binDir, "plow");
+  const logPath = path.join(path.dirname(binDir), ".plow-cli-log.jsonl");
 
   writeExecutable(
     cliPath,
@@ -209,7 +209,7 @@ const outputs = {
 
 const output = outputs[command];
 if (!output) {
-  console.error("Unsupported fake fallow command:", command);
+  console.error("Unsupported fake plow command:", command);
   process.exit(2);
 }
 
@@ -246,8 +246,8 @@ const createWorkspace = (): string => {
     path.join(vscodeDir, "settings.json"),
     JSON.stringify(
       {
-        "fallow.autoDownload": false,
-        "fallow.lspPath": lspPath,
+        "plow.autoDownload": false,
+        "plow.lspPath": lspPath,
       },
       null,
       2

@@ -52,16 +52,16 @@ pub const NAMESPACE_BARREL_HINT: &str = "If every location is the sole `index.*`
 /// `value` payload. Pinned to the main branch so users browsing the action
 /// value can navigate directly to the rule shape.
 const IGNORE_EXPORTS_VALUE_SCHEMA: &str =
-    "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreExports";
+    "https://raw.githubusercontent.com/plow-rs/plow/main/schema.json#/properties/ignoreExports";
 
 /// JSON Schema fragment URL for the `ignoreCatalogReferences` rule items
 /// referenced by `add-to-config` actions on `unresolved-catalog-references`.
-const IGNORE_CATALOG_REFERENCES_VALUE_SCHEMA: &str = "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreCatalogReferences/items";
+const IGNORE_CATALOG_REFERENCES_VALUE_SCHEMA: &str = "https://raw.githubusercontent.com/plow-rs/plow/main/schema.json#/properties/ignoreCatalogReferences/items";
 
 /// JSON Schema fragment URL for the `ignoreDependencyOverrides` rule items
 /// referenced by `add-to-config` actions on both the unused- and
 /// misconfigured-override findings.
-const IGNORE_DEPENDENCY_OVERRIDES_VALUE_SCHEMA: &str = "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencyOverrides/items";
+const IGNORE_DEPENDENCY_OVERRIDES_VALUE_SCHEMA: &str = "https://raw.githubusercontent.com/plow-rs/plow/main/schema.json#/properties/ignoreDependencyOverrides/items";
 
 /// Wire-shape envelope for an [`UnusedFile`] finding. The bare finding
 /// flattens in via `#[serde(flatten)]`, with a typed `actions` array
@@ -105,7 +105,7 @@ impl UnusedFileFinding {
                 auto_fixable: false,
                 description: "Suppress with a file-level comment at the top of the file"
                     .to_string(),
-                comment: "// fallow-ignore-file unused-file".to_string(),
+                comment: "// plow-ignore-file unused-file".to_string(),
             }),
         ];
         Self {
@@ -153,7 +153,7 @@ impl PrivateTypeLeakFinding {
                 kind: SuppressLineKind::SuppressLine,
                 auto_fixable: false,
                 description: "Suppress with an inline comment above the line".to_string(),
-                comment: "// fallow-ignore-next-line private-type-leak".to_string(),
+                comment: "// plow-ignore-next-line private-type-leak".to_string(),
                 scope: None,
             }),
         ];
@@ -203,13 +203,13 @@ impl UnresolvedImportFinding {
                 kind: AddToConfigKind::AddToConfig,
                 auto_fixable: false,
                 description: format!(
-                    "Add \"{}\" to ignoreUnresolvedImports in fallow config",
+                    "Add \"{}\" to ignoreUnresolvedImports in plow config",
                     import.specifier
                 ),
                 config_key: "ignoreUnresolvedImports".to_string(),
                 value: AddToConfigValue::Scalar(import.specifier.clone()),
                 value_schema: Some(
-                    "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreUnresolvedImports/items"
+                    "https://raw.githubusercontent.com/plow-rs/plow/main/schema.json#/properties/ignoreUnresolvedImports/items"
                         .to_string(),
                 ),
             }),
@@ -217,7 +217,7 @@ impl UnresolvedImportFinding {
                 kind: SuppressLineKind::SuppressLine,
                 auto_fixable: false,
                 description: "Suppress with an inline comment above the line".to_string(),
-                comment: "// fallow-ignore-next-line unresolved-import".to_string(),
+                comment: "// plow-ignore-next-line unresolved-import".to_string(),
                 scope: None,
             }),
         ];
@@ -269,7 +269,7 @@ impl CircularDependencyFinding {
                 kind: SuppressLineKind::SuppressLine,
                 auto_fixable: false,
                 description: "Suppress with an inline comment above the line".to_string(),
-                comment: "// fallow-ignore-next-line circular-dependency".to_string(),
+                comment: "// plow-ignore-next-line circular-dependency".to_string(),
                 scope: None,
             }),
         ];
@@ -286,7 +286,7 @@ impl CircularDependencyFinding {
 /// typed `actions` array (`refactor-re-export-cycle` informational primary
 /// plus `suppress-file` secondary; cycles are file-scoped so a single
 /// file-level suppression on the alphabetically-first member breaks the
-/// cycle, and no `// fallow-ignore-next-line` form makes sense because the
+/// cycle, and no `// plow-ignore-next-line` form makes sense because the
 /// diagnostic is anchored at line 1 col 0 of each member).
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -350,7 +350,7 @@ impl ReExportCycleFinding {
                 kind: SuppressFileKind::SuppressFile,
                 auto_fixable: false,
                 description: suppress_description,
-                comment: "// fallow-ignore-file re-export-cycle".to_string(),
+                comment: "// plow-ignore-file re-export-cycle".to_string(),
             }),
         ];
         Self {
@@ -401,7 +401,7 @@ impl BoundaryViolationFinding {
                 kind: SuppressLineKind::SuppressLine,
                 auto_fixable: false,
                 description: "Suppress with an inline comment above the line".to_string(),
-                comment: "// fallow-ignore-next-line boundary-violation".to_string(),
+                comment: "// plow-ignore-next-line boundary-violation".to_string(),
                 scope: None,
             }),
         ];
@@ -459,7 +459,7 @@ impl UnusedExportFinding {
                 kind: SuppressLineKind::SuppressLine,
                 auto_fixable: false,
                 description: "Suppress with an inline comment above the line".to_string(),
-                comment: "// fallow-ignore-next-line unused-export".to_string(),
+                comment: "// plow-ignore-next-line unused-export".to_string(),
                 scope: None,
             }),
         ];
@@ -518,7 +518,7 @@ impl UnusedTypeFinding {
                 kind: SuppressLineKind::SuppressLine,
                 auto_fixable: false,
                 description: "Suppress with an inline comment above the line".to_string(),
-                comment: "// fallow-ignore-next-line unused-type".to_string(),
+                comment: "// plow-ignore-next-line unused-type".to_string(),
                 scope: None,
             }),
         ];
@@ -564,7 +564,7 @@ impl UnusedEnumMemberFinding {
                 kind: SuppressLineKind::SuppressLine,
                 auto_fixable: false,
                 description: "Suppress with an inline comment above the line".to_string(),
-                comment: "// fallow-ignore-next-line unused-enum-member".to_string(),
+                comment: "// plow-ignore-next-line unused-enum-member".to_string(),
                 scope: None,
             }),
         ];
@@ -617,7 +617,7 @@ impl UnusedClassMemberFinding {
                 kind: SuppressLineKind::SuppressLine,
                 auto_fixable: false,
                 description: "Suppress with an inline comment above the line".to_string(),
-                comment: "// fallow-ignore-next-line unused-class-member".to_string(),
+                comment: "// plow-ignore-next-line unused-class-member".to_string(),
                 scope: None,
             }),
         ];
@@ -638,7 +638,7 @@ impl UnusedClassMemberFinding {
 /// share the cross-workspace swap (when `dep.used_in_workspaces` is
 /// non-empty the primary fix flips from `remove-dependency` to
 /// `move-dependency` because the dep is imported by ANOTHER workspace and
-/// `fallow fix` cannot safely remove it).
+/// `plow fix` cannot safely remove it).
 fn build_unused_dependency_actions(
     dep: &UnusedDependency,
     package_json_location: &str,
@@ -653,7 +653,7 @@ fn build_unused_dependency_actions(
             description: "Move this dependency to the workspace package.json that imports it"
                 .to_string(),
             note: Some(
-                "fallow fix will not remove dependencies that are imported by another workspace"
+                "plow fix will not remove dependencies that are imported by another workspace"
                     .to_string(),
             ),
             available_in_catalogs: None,
@@ -681,7 +681,7 @@ fn build_unused_dependency_actions(
 /// dependency-family wrappers (unused / unlisted / type-only / test-only).
 /// The `_suppress_issue_kind` argument is currently unused; the pre-2.76
 /// `inject_actions` post-pass also did not embed the issue kind in this
-/// shape (no inline `// fallow-ignore-next-line ...` comment because the
+/// shape (no inline `// plow-ignore-next-line ...` comment because the
 /// finding is anchored at a package.json line, not at a source-file line).
 fn build_ignore_dependencies_suppress_action(
     package_name: &str,
@@ -690,11 +690,11 @@ fn build_ignore_dependencies_suppress_action(
     IssueAction::AddToConfig(AddToConfigAction {
         kind: AddToConfigKind::AddToConfig,
         auto_fixable: false,
-        description: format!("Add \"{package_name}\" to ignoreDependencies in fallow config"),
+        description: format!("Add \"{package_name}\" to ignoreDependencies in plow config"),
         config_key: "ignoreDependencies".to_string(),
         value: AddToConfigValue::Scalar(package_name.to_string()),
         value_schema: Some(
-            "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencies/items"
+            "https://raw.githubusercontent.com/plow-rs/plow/main/schema.json#/properties/ignoreDependencies/items"
                 .to_string(),
         ),
     })
@@ -973,7 +973,7 @@ impl DuplicateExportFinding {
     /// defaulting to `false`. The CLI's `build_json_with_config_fixable`
     /// path layers the actual `config_fixable` signal via
     /// [`Self::set_config_fixable`] right before serialization (the
-    /// fix-applier readiness check lives in `fallow-cli::fix` and is not
+    /// fix-applier readiness check lives in `plow-cli::fix` and is not
     /// reachable from the analyzer layer where wrappers are first built).
     /// Embedders that build `AnalysisResults` directly and never route
     /// through the CLI's JSON path keep the conservative default.
@@ -1005,7 +1005,7 @@ impl DuplicateExportFinding {
             kind: SuppressLineKind::SuppressLine,
             auto_fixable: false,
             description: "Suppress with an inline comment above the line".to_string(),
-            comment: "// fallow-ignore-next-line duplicate-export".to_string(),
+            comment: "// plow-ignore-next-line duplicate-export".to_string(),
             scope: Some(SuppressLineScope::PerLocation),
         }));
 
@@ -1037,7 +1037,7 @@ fn build_duplicate_exports_ignore_rules(
     let mut entries: Vec<IgnoreExportsRule> = Vec::with_capacity(export.locations.len());
     for loc in &export.locations {
         // Normalize separators to forward slashes so pasting the action value
-        // into `.fallowrc.json` produces a portable rule. On Windows
+        // into `.plowrc.json` produces a portable rule. On Windows
         // `to_string_lossy` preserves backslashes, which the old
         // `inject_actions` post-pass implicitly normalized because it read
         // the path AFTER `strip_root_prefix` had already run through
@@ -1082,7 +1082,7 @@ pub struct UnusedCatalogEntryFinding {
 
 impl UnusedCatalogEntryFinding {
     /// Build the wrapper. Per-instance `auto_fixable` is `true` only when
-    /// `hardcoded_consumers` is empty; otherwise `fallow fix` skips the
+    /// `hardcoded_consumers` is empty; otherwise `plow fix` skips the
     /// entry to avoid breaking `pnpm install` on the holdout consumer.
     #[must_use]
     pub fn with_actions(entry: UnusedCatalogEntry) -> Self {
@@ -1103,7 +1103,7 @@ impl UnusedCatalogEntryFinding {
                 kind: SuppressLineKind::SuppressLine,
                 auto_fixable: false,
                 description: "Suppress with a YAML comment above the line".to_string(),
-                comment: "# fallow-ignore-next-line unused-catalog-entry".to_string(),
+                comment: "# plow-ignore-next-line unused-catalog-entry".to_string(),
                 scope: None,
             }),
         ];
@@ -1153,7 +1153,7 @@ impl EmptyCatalogGroupFinding {
                 kind: SuppressLineKind::SuppressLine,
                 auto_fixable: false,
                 description: "Suppress with a YAML comment above the line".to_string(),
-                comment: "# fallow-ignore-next-line empty-catalog-group".to_string(),
+                comment: "# plow-ignore-next-line empty-catalog-group".to_string(),
                 scope: None,
             }),
         ];
@@ -1259,7 +1259,7 @@ impl UnresolvedCatalogReferenceFinding {
         let suppress = IssueAction::AddToConfig(AddToConfigAction {
             kind: AddToConfigKind::AddToConfig,
             auto_fixable: false,
-            description: "Suppress this reference via ignoreCatalogReferences in fallow config (use when the catalog edit is intentionally landing in a separate PR or the package is a placeholder).".to_string(),
+            description: "Suppress this reference via ignoreCatalogReferences in plow config (use when the catalog edit is intentionally landing in a separate PR or the package is a placeholder).".to_string(),
             config_key: "ignoreCatalogReferences".to_string(),
             value: AddToConfigValue::RuleObject(suppress_value),
             value_schema: Some(IGNORE_CATALOG_REFERENCES_VALUE_SCHEMA.to_string()),
@@ -1404,7 +1404,7 @@ fn build_ignore_dependency_overrides_suppress(
     Some(IssueAction::AddToConfig(AddToConfigAction {
         kind: AddToConfigKind::AddToConfig,
         auto_fixable: false,
-        description: "Suppress this override finding via ignoreDependencyOverrides in fallow config (use for CVE-fix overrides that target a purely-transitive package).".to_string(),
+        description: "Suppress this override finding via ignoreDependencyOverrides in plow config (use for CVE-fix overrides that target a purely-transitive package).".to_string(),
         config_key: "ignoreDependencyOverrides".to_string(),
         value: AddToConfigValue::RuleObject(value),
         value_schema: Some(IGNORE_DEPENDENCY_OVERRIDES_VALUE_SCHEMA.to_string()),
@@ -1487,7 +1487,7 @@ mod position_0_invariants {
         assert_eq!(
             action.value_schema.as_deref(),
             Some(
-                "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreUnresolvedImports/items"
+                "https://raw.githubusercontent.com/plow-rs/plow/main/schema.json#/properties/ignoreUnresolvedImports/items"
             )
         );
     }

@@ -22,7 +22,7 @@ pub struct AngularComponentMetadata {
     pub inline_template: Option<String>,
     /// Source span of the matched `@Component`/`@Directive` decorator.
     /// Used to anchor synthetic `<template>` complexity findings to a useful
-    /// line/col in the host `.ts` file, and to honour `// fallow-ignore-next-line`
+    /// line/col in the host `.ts` file, and to honour `// plow-ignore-next-line`
     /// comments placed above the decorator. Always populated when this struct
     /// is returned (the loop that constructs it runs over `class.decorators`).
     pub decorator_span: Span,

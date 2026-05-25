@@ -165,7 +165,7 @@ define_plugin!(
 
         // angular.json: projects.*.architect.build.options.stylePreprocessorOptions.includePaths
         // Angular CLI resolves bare SCSS imports (`@import 'variables'`) by
-        // searching these directories. Without threading them into fallow's
+        // searching these directories. Without threading them into plow's
         // SCSS resolver, the imports become false-positive unresolved imports.
         // Paths are resolved relative to the workspace/project root per the
         // Angular workspace configuration reference. See issue #103.

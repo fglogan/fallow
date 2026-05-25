@@ -14,7 +14,7 @@ const runRealWorld = args.includes("--real-world") || !hasFilter;
 const RUNS = parseInt(args.find((a) => a.startsWith("--runs="))?.split("=")[1] ?? "5");
 const WARMUP = parseInt(args.find((a) => a.startsWith("--warmup="))?.split("=")[1] ?? "2");
 
-console.log("Building fallow (release)...");
+console.log("Building plow (release)...");
 const buildResult = spawnSync("cargo", ["build", "--release"], {
   cwd: rootDir,
   stdio: "pipe",
@@ -24,14 +24,14 @@ if (buildResult.status !== 0) {
   console.error("Build failed:", buildResult.stderr?.toString());
   process.exit(1);
 }
-const fallowBin = join(rootDir, "target", "release", "fallow");
+const plowBin = join(rootDir, "target", "release", "plow");
 const jscpdBin = join(__dirname, "node_modules", ".bin", "jscpd");
 if (!existsSync(jscpdBin)) {
   console.error("jscpd not found. Run: cd benchmarks && npm install");
   process.exit(1);
 }
 
-const fallowVersion = spawnSync(fallowBin, ["--version"], { stdio: "pipe" })
+const plowVersion = spawnSync(plowBin, ["--version"], { stdio: "pipe" })
   .stdout?.toString()
   .trim();
 const jscpdVersion = spawnSync(jscpdBin, ["--version"], { stdio: "pipe" })
@@ -39,10 +39,10 @@ const jscpdVersion = spawnSync(jscpdBin, ["--version"], { stdio: "pipe" })
   .trim();
 const rustVersion = spawnSync("rustc", ["--version"], { stdio: "pipe" }).stdout?.toString().trim();
 
-console.log(`\n=== Fallow Dupes vs jscpd Benchmark Suite ===\n`);
+console.log(`\n=== Plow Dupes vs jscpd Benchmark Suite ===\n`);
 printEnvironment();
 console.log(
-  `Tools:\n  fallow dupes  ${fallowVersion}\n  jscpd         ${jscpdVersion}\nConfig: ${RUNS} runs, ${WARMUP} warmup\n`,
+  `Tools:\n  plow dupes  ${plowVersion}\n  jscpd         ${jscpdVersion}\nConfig: ${RUNS} runs, ${WARMUP} warmup\n`,
 );
 
 function printEnvironment() {
@@ -126,7 +126,7 @@ function timeRunWithMemory(cmd, cmdArgs, cwd) {
   };
 }
 
-function parseFallowCloneCount(stdout) {
+function parsePlowCloneCount(stdout) {
   try {
     const data = JSON.parse(stdout);
     return {
@@ -180,7 +180,7 @@ function benchmarkProject(name, dir) {
   const files = countSourceFiles(dir);
   console.log(`### ${name} (${files} source files)\n`);
 
-  // fallow dupes: JSON output, no cache (cold)
+  // plow dupes: JSON output, no cache (cold)
   const fArgsCold = ["dupes", "--format", "json", "--no-cache"];
 
   // jscpd: JSON reporter, output to temp dir
@@ -204,7 +204,7 @@ function benchmarkProject(name, dir) {
 
   // Warmup
   for (let i = 0; i < WARMUP; i++) {
-    timeRun(fallowBin, fArgsCold, dir);
+    timeRun(plowBin, fArgsCold, dir);
     if (existsSync(jscpdReportDir)) rmSync(jscpdReportDir, { recursive: true });
     timeRun(jscpdBin, jArgs, dir);
     if (existsSync(jscpdReportDir)) rmSync(jscpdReportDir, { recursive: true });
@@ -219,10 +219,10 @@ function benchmarkProject(name, dir) {
     jPeakRss = 0;
 
   for (let i = 0; i < RUNS; i++) {
-    const fr = timeRunWithMemory(fallowBin, fArgsCold, dir);
+    const fr = timeRunWithMemory(plowBin, fArgsCold, dir);
     fTimesCold.push(fr.elapsed);
     if (i === 0) {
-      fClones = parseFallowCloneCount(fr.stdout);
+      fClones = parsePlowCloneCount(fr.stdout);
       fPeakRss = fr.peakRssBytes;
     }
 
@@ -242,7 +242,7 @@ function benchmarkProject(name, dir) {
 
   console.table([
     {
-      Tool: "fallow dupes",
+      Tool: "plow dupes",
       Min: fmt(fsCold.min),
       Mean: fmt(fsCold.mean),
       Median: fmt(fsCold.median),
@@ -264,10 +264,10 @@ function benchmarkProject(name, dir) {
       "Dup %": `${jClones.pct}%`,
     },
   ]);
-  console.log(`  fallow: [${fTimesCold.map((t) => t.toFixed(0)).join(", ")}]`);
+  console.log(`  plow: [${fTimesCold.map((t) => t.toFixed(0)).join(", ")}]`);
   console.log(`  jscpd:  [${jTimes.map((t) => t.toFixed(0)).join(", ")}]\n`);
 
-  return { name, files, fallow: fsCold, jscpd: js, speedup, fClones, jClones, fPeakRss, jPeakRss };
+  return { name, files, plow: fsCold, jscpd: js, speedup, fClones, jClones, fPeakRss, jPeakRss };
 }
 
 const results = [];
@@ -305,12 +305,12 @@ if (results.length > 0) {
     results.map((r) => ({
       Project: r.name,
       Files: r.files,
-      "Fallow (median)": fmt(r.fallow.median),
+      "Plow (median)": fmt(r.plow.median),
       "jscpd (median)": fmt(r.jscpd.median),
       Speedup: `${r.speedup.toFixed(1)}x`,
-      "Fallow RSS": fmtMem(r.fPeakRss),
+      "Plow RSS": fmtMem(r.fPeakRss),
       "jscpd RSS": fmtMem(r.jPeakRss),
-      "Fallow clones": r.fClones.groups,
+      "Plow clones": r.fClones.groups,
       "jscpd clones": r.jClones.groups,
     })),
   );

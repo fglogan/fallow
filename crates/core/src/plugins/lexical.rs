@@ -22,7 +22,7 @@
 //! rather than a module-load side effect, so unused-export detection is not in
 //! scope for this plugin; it only handles the reflectively-invoked members.
 
-use fallow_config::{ScopedUsedClassMemberRule, UsedClassMemberRule};
+use plow_config::{ScopedUsedClassMemberRule, UsedClassMemberRule};
 
 use super::Plugin;
 

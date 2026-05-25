@@ -1,7 +1,7 @@
 use std::path::Path;
 
-use fallow_core::duplicates::DuplicationReport;
-use fallow_core::results::{AnalysisResults, UnusedExport, UnusedMember};
+use plow_core::duplicates::DuplicationReport;
+use plow_core::results::{AnalysisResults, UnusedExport, UnusedMember};
 
 use super::grouping::ResultGroup;
 use super::{normalize_uri, relative_path};
@@ -130,8 +130,8 @@ pub fn build_compact_lines(results: &AnalysisResults, root: &Path) -> Vec<String
         let chain: Vec<String> = cycle.cycle.files.iter().map(|p| rel(p)).collect();
         let first_file = chain.first().map_or_else(String::new, Clone::clone);
         let kind_tag = match cycle.cycle.kind {
-            fallow_core::results::ReExportCycleKind::SelfLoop => " (self-loop)",
-            fallow_core::results::ReExportCycleKind::MultiNode => "",
+            plow_core::results::ReExportCycleKind::SelfLoop => " (self-loop)",
+            plow_core::results::ReExportCycleKind::MultiNode => "",
         };
         // Re-export cycles are file-scoped; no useful line/col anchor (the
         // diagnostic spans the whole file). Match `unlisted-dep:` /
@@ -475,8 +475,8 @@ mod tests {
         RuntimeCoverageVerdict,
     };
     use crate::report::test_helpers::sample_results;
-    use fallow_core::extract::MemberKind;
-    use fallow_core::results::*;
+    use plow_core::extract::MemberKind;
+    use plow_core::results::*;
     use std::path::PathBuf;
 
     #[test]

@@ -1,6 +1,6 @@
 //! Allocation tracking benchmark using dhat.
 //!
-//! This benchmark measures heap allocation statistics for the fallow analysis
+//! This benchmark measures heap allocation statistics for the plow analysis
 //! pipeline. It cannot be a Criterion benchmark because dhat requires being
 //! the global allocator.
 //!
@@ -11,7 +11,7 @@
 
 #![expect(
     deprecated,
-    reason = "ADR-008: benchmark exercises the workspace path-dep fallow_core::analyze surface"
+    reason = "ADR-008: benchmark exercises the workspace path-dep plow_core::analyze surface"
 )]
 
 #[global_allocator]
@@ -26,7 +26,7 @@ fn main() {
     // ── Profile the analysis pipeline ──────────────────────────────────
     let profiler = dhat::Profiler::builder().testing().build();
 
-    let _ = fallow_core::analyze(&config);
+    let _ = plow_core::analyze(&config);
 
     let stats = dhat::HeapStats::get();
     drop(profiler);

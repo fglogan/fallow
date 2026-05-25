@@ -21,13 +21,13 @@ pub(crate) use unused_deps::matches_virtual_prefix;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_config::{PackageJson, ResolvedConfig, Severity};
+use plow_config::{PackageJson, ResolvedConfig, Severity};
 
 use crate::discover::FileId;
 use crate::extract::ModuleInfo;
 use crate::graph::ModuleGraph;
 use crate::resolve::ResolvedModule;
-use fallow_types::output_dead_code::{
+use plow_types::output_dead_code::{
     BoundaryViolationFinding, CircularDependencyFinding, DuplicateExportFinding,
     EmptyCatalogGroupFinding, MisconfiguredDependencyOverrideFinding, PrivateTypeLeakFinding,
     ReExportCycleFinding, TestOnlyDependencyFinding, TypeOnlyDependencyFinding,
@@ -96,7 +96,7 @@ pub fn byte_offset_to_line_col(
     line_offsets_map
         .get(&file_id)
         .map_or((1, byte_offset), |offsets| {
-            fallow_types::extract::byte_offset_to_line_col(offsets, byte_offset)
+            plow_types::extract::byte_offset_to_line_col(offsets, byte_offset)
         })
 }
 
@@ -155,7 +155,7 @@ fn read_source(path: &std::path::Path) -> String {
 /// only cycles between two distinct named workspaces are flagged.
 fn is_cross_package_cycle(
     files: &[std::path::PathBuf],
-    workspaces: &[fallow_config::WorkspaceInfo],
+    workspaces: &[plow_config::WorkspaceInfo],
 ) -> bool {
     let find_workspace = |path: &std::path::Path| -> Option<&std::path::Path> {
         workspaces
@@ -180,7 +180,7 @@ fn is_cross_package_cycle(
 
 fn public_workspace_roots<'a>(
     public_packages: &[String],
-    workspaces: &'a [fallow_config::WorkspaceInfo],
+    workspaces: &'a [plow_config::WorkspaceInfo],
 ) -> Vec<&'a std::path::Path> {
     if public_packages.is_empty() || workspaces.is_empty() {
         return Vec::new();
@@ -288,7 +288,7 @@ fn public_api_package_entry_points(
     graph: &ModuleGraph,
     config: &ResolvedConfig,
     root_pkg: Option<&PackageJson>,
-    workspaces: &[fallow_config::WorkspaceInfo],
+    workspaces: &[plow_config::WorkspaceInfo],
 ) -> FxHashSet<FileId> {
     let mut public_api_entry_points = FxHashSet::default();
     let path_to_file_id = graph_path_to_file_id(graph);
@@ -337,7 +337,7 @@ fn find_circular_dependencies(
     graph: &ModuleGraph,
     line_offsets_map: &LineOffsetsMap<'_>,
     suppressions: &crate::suppress::SuppressionContext<'_>,
-    workspaces: &[fallow_config::WorkspaceInfo],
+    workspaces: &[plow_config::WorkspaceInfo],
 ) -> Vec<CircularDependency> {
     let cycles = graph.find_cycles();
     let mut dependencies: Vec<CircularDependency> = cycles
@@ -384,7 +384,7 @@ fn run_circular_dep_detector(
     config: &ResolvedConfig,
     line_offsets_by_file: &LineOffsetsMap<'_>,
     suppressions: &crate::suppress::SuppressionContext<'_>,
-    workspaces: &[fallow_config::WorkspaceInfo],
+    workspaces: &[plow_config::WorkspaceInfo],
 ) -> Vec<CircularDependencyFinding> {
     if config.rules.circular_dependencies == Severity::Off {
         return Vec::new();
@@ -429,7 +429,7 @@ fn run_export_usages_collector(
 )]
 #[deprecated(
     since = "2.76.0",
-    note = "fallow_core is internal; use fallow_cli::programmatic::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/fallow-core-migration.md and ADR-008."
+    note = "plow_core is internal; use plow_cli::programmatic::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/plow-core-migration.md and ADR-008."
 )]
 #[expect(
     clippy::too_many_lines,
@@ -440,7 +440,7 @@ pub fn find_dead_code_full(
     config: &ResolvedConfig,
     resolved_modules: &[ResolvedModule],
     plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
-    workspaces: &[fallow_config::WorkspaceInfo],
+    workspaces: &[plow_config::WorkspaceInfo],
     modules: &[ModuleInfo],
     collect_usages: bool,
 ) -> AnalysisResults {
@@ -923,7 +923,7 @@ pub fn find_dead_code_full(
     reason = "ADR-008 keeps direct analyzer unit tests while the public warning targets external callers"
 )]
 mod tests {
-    use fallow_types::extract::{byte_offset_to_line_col, compute_line_offsets};
+    use plow_types::extract::{byte_offset_to_line_col, compute_line_offsets};
 
     // Helper: compute line offsets from source and convert byte offset
     fn line_col(source: &str, byte_offset: u32) -> (u32, u32) {
@@ -1032,7 +1032,7 @@ mod tests {
 
     mod orchestration {
         use super::super::*;
-        use fallow_config::{FallowConfig, OutputFormat, RulesConfig, Severity};
+        use plow_config::{PlowConfig, OutputFormat, RulesConfig, Severity};
         use std::path::PathBuf;
 
         fn find_dead_code(graph: &ModuleGraph, config: &ResolvedConfig) -> AnalysisResults {
@@ -1040,7 +1040,7 @@ mod tests {
         }
 
         fn make_config_with_rules(rules: RulesConfig) -> ResolvedConfig {
-            FallowConfig {
+            PlowConfig {
                 rules,
                 ..Default::default()
             }

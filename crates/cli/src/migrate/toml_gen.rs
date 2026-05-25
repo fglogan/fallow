@@ -21,7 +21,7 @@ pub(super) fn generate_toml(result: &MigrationResult) -> String {
         .expect("config is always an Object");
 
     // Top-level simple fields first
-    // Note: fallow config uses #[serde(rename_all = "camelCase")] so TOML keys must be camelCase
+    // Note: plow config uses #[serde(rename_all = "camelCase")] so TOML keys must be camelCase
     for key in &["entry", "ignorePatterns", "ignoreDependencies"] {
         if let Some(value) = obj.get(*key)
             && let Some(arr) = value.as_array()

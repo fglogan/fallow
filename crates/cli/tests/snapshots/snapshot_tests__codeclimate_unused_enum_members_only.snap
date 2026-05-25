@@ -5,13 +5,13 @@ expression: json_str
 [
   {
     "type": "issue",
-    "check_name": "fallow/unused-enum-member",
+    "check_name": "plow/unused-enum-member",
     "description": "Enum member 'Status.Deprecated' is never referenced",
     "categories": [
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "090d4d65832bf868",
+    "fingerprint": "4fdc52289547d8e7",
     "location": {
       "path": "src/enums.ts",
       "lines": {

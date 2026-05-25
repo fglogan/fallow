@@ -16,7 +16,7 @@ use crate::{
     DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName, ImportInfo, ImportedName,
     MemberAccess, MemberInfo, MemberKind, ModuleInfo, ReExportInfo, RequireCallInfo, VisibilityTag,
 };
-use fallow_types::extract::{
+use plow_types::extract::{
     ClassHeritageInfo, LocalTypeDeclaration, PublicSignatureTypeReference,
 };
 use helpers::LitCustomElementDecorator;
@@ -93,7 +93,7 @@ pub(crate) struct InlineTemplateFinding {
     pub(crate) template_source: String,
     /// Byte offset of the matched `@Component`/`@Directive` decorator's `@`
     /// in the host file. Used to remap the synthetic finding's line/col so
-    /// jump-to-source lands on the decorator and `// fallow-ignore-next-line`
+    /// jump-to-source lands on the decorator and `// plow-ignore-next-line`
     /// comments above the decorator suppress the finding via the existing
     /// health-side check.
     pub(crate) decorator_start: u32,
@@ -737,7 +737,7 @@ impl ModuleInfoExtractor {
     /// accesses (`API.foo.bar` should mark `bar` as used on `./bar.ts` even
     /// though the namespace `foo` is only ever destructured into the object
     /// literal `export const API = { foo }`). See issue #303.
-    fn collect_namespace_object_aliases(&self) -> Vec<fallow_types::extract::NamespaceObjectAlias> {
+    fn collect_namespace_object_aliases(&self) -> Vec<plow_types::extract::NamespaceObjectAlias> {
         if self.binding_target_names.is_empty() || self.namespace_binding_names.is_empty() {
             return Vec::new();
         }
@@ -761,7 +761,7 @@ impl ModuleInfoExtractor {
                     ExportName::Named(name) => name.clone(),
                     ExportName::Default => "default".to_string(),
                 };
-                aliases.push(fallow_types::extract::NamespaceObjectAlias {
+                aliases.push(plow_types::extract::NamespaceObjectAlias {
                     via_export_name: canonical_name,
                     suffix: suffix.to_string(),
                     namespace_local: target_name.clone(),
@@ -788,7 +788,7 @@ impl ModuleInfoExtractor {
     /// Convert this extractor into a `ModuleInfo`, consuming its fields.
     pub(crate) fn into_module_info(
         mut self,
-        file_id: fallow_types::discover::FileId,
+        file_id: plow_types::discover::FileId,
         content_hash: u64,
         parsed: ParsedSuppressions,
     ) -> ModuleInfo {
@@ -1033,7 +1033,7 @@ pub fn extract_import_from_return_body<'a, 'b>(
 
 /// Peel a callable expression that wraps a single dynamic `import('SPEC')`.
 ///
-/// This is the shared "callable → import" peel used wherever fallow needs to
+/// This is the shared "callable → import" peel used wherever plow needs to
 /// look inside a deferred-loader thunk. Three shapes are accepted:
 ///
 /// - Concise arrow body: `() => import('SPEC')` — runs the body expression
@@ -1051,7 +1051,7 @@ pub fn extract_import_from_return_body<'a, 'b>(
 ///
 /// Used by `try_extract_arrow_wrapped_import` (call-argument navigation),
 /// `try_extract_property_callback_import` (object-property navigation), and
-/// the config-parser array-element navigation in `fallow-core`. Each caller
+/// the config-parser array-element navigation in `plow-core`. Each caller
 /// owns its outer search; this helper owns the inner peel.
 #[must_use]
 pub fn extract_import_from_callable<'a, 'b>(

@@ -54,7 +54,7 @@ fn eslint_relative_extends_config_is_not_reported_unused() {
         .expect("source file");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files: Vec<String> = results
         .unused_files
@@ -89,7 +89,7 @@ fn eslint_relative_extends_config_is_not_reported_unused() {
 fn type_only_bidirectional_import_not_reported_as_cycle() {
     let root = fixture_path("type-only-cycle");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     // user.ts and post.ts have `import type` from each other.
     // This is NOT a runtime cycle and should not be reported.
@@ -108,7 +108,7 @@ fn type_only_bidirectional_import_not_reported_as_cycle() {
 fn type_only_cycle_still_detects_unused_exports() {
     let root = fixture_path("type-only-cycle");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     // The value exports (createUser, createPost) are used by index.ts.
     // No files should be reported as unused.
@@ -140,7 +140,7 @@ fn type_only_cycle_still_detects_unused_exports() {
 fn unrelated_route_files_not_flagged_as_duplicate_exports() {
     let root = fixture_path("route-duplicate-exports");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     // foo/page.ts and bar/page.ts both export `Area` and `handler`.
     // Each page is imported by its own router (foo/router.ts, bar/router.ts),
@@ -162,7 +162,7 @@ fn unrelated_route_files_not_flagged_as_duplicate_exports() {
 fn shared_util_duplicates_with_common_importer_still_flagged() {
     let root = fixture_path("route-duplicate-exports");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     // shared/utils.ts and shared/helpers.ts both export `formatDate`.
     // Both are imported by index.ts (shared importer) -- should be flagged.
@@ -197,7 +197,7 @@ fn broken_tsconfig_extends_does_not_poison_sibling_resolution() {
     // `resolver.resolve(dir, specifier)`, bypassing tsconfig discovery.
     let root = fixture_path("tsconfig-broken-extends");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.unresolved_imports.is_empty(),
@@ -215,7 +215,7 @@ fn broken_tsconfig_extends_does_not_poison_sibling_resolution() {
 fn broken_tsconfig_path_alias_is_not_misclassified_as_unlisted_dependency() {
     let root = fixture_path("tsconfig-broken-path-alias").join("app");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unlisted_names: Vec<&str> = results
         .unlisted_dependencies
@@ -244,7 +244,7 @@ fn broken_tsconfig_path_alias_is_not_misclassified_as_unlisted_dependency() {
 fn bun_bare_runtime_module_is_not_unlisted() {
     let root = fixture_path("issue-642-bun-builtin");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unresolved_specifiers: Vec<&str> = results
         .unresolved_imports
@@ -273,7 +273,7 @@ fn bun_bare_runtime_module_is_not_unlisted() {
 fn wildcard_tsconfig_paths_do_not_misclassify_bare_imports() {
     let root = fixture_path("issue-327-wildcard-paths-node-builtins");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unresolved_specifiers: Vec<&str> = results
         .unresolved_imports
@@ -395,7 +395,7 @@ export const app = Button;
     .expect("generic button");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unresolved_specifiers: Vec<&str> = results
         .unresolved_imports
@@ -471,7 +471,7 @@ export const app = Button;
     .expect("ios button");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.unresolved_imports.is_empty(),
@@ -541,7 +541,7 @@ export const app = Screen;
     .expect("generic screen");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.unresolved_imports.is_empty(),
@@ -608,7 +608,7 @@ export const app = Button;
     .expect("generic button");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.unresolved_imports.is_empty(),
@@ -700,7 +700,7 @@ export const app = [env, feature, nested, theme, api, shared].join("-");
     std::fs::write(root.join("src/theme.ts"), "export const theme = 'theme';\n").expect("theme");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.unresolved_imports.is_empty(),
@@ -780,7 +780,7 @@ export const app = [staticValue, requiredValue].join("-");
     }
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.unresolved_imports.is_empty(),
@@ -857,7 +857,7 @@ export const app = value;
     .expect("package shared value");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.unresolved_imports.is_empty(),
@@ -916,7 +916,7 @@ export const app = date;
     .expect("date");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unlisted_names: Vec<&str> = results
         .unlisted_dependencies
@@ -983,7 +983,7 @@ export const app = Button;
     .expect("wild");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files: Vec<String> = results
         .unused_files
@@ -1057,7 +1057,7 @@ export const app = theme;
     .expect("theme");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.unresolved_imports.is_empty(),
@@ -1149,7 +1149,7 @@ export const app = message;
     .expect("spec message");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.unresolved_imports.is_empty(),
@@ -1238,7 +1238,7 @@ export const app = child + base;
     .expect("base value");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unresolved_specifiers: Vec<&str> = results
         .unresolved_imports
@@ -1318,7 +1318,7 @@ export const view = generated;
     .expect("generated");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.unresolved_imports.is_empty(),
@@ -1390,7 +1390,7 @@ export const app = value;
     .expect("shared value");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.unresolved_imports.is_empty(),
@@ -1459,7 +1459,7 @@ export const app = value;
     .expect("lib value");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.unresolved_imports.is_empty(),
@@ -1528,7 +1528,7 @@ export const app = pkg;
     .expect("pkg index");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.unresolved_imports.is_empty(),
@@ -1588,7 +1588,7 @@ export const view = generated;
     .expect("generated");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.unresolved_imports.is_empty(),
@@ -1612,7 +1612,7 @@ export const view = generated;
 fn glimmer_typescript_imports_use_tsconfig_path_aliases() {
     let root = fixture_path("glimmer-path-aliases");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     // Normalise to forward slashes so the `ends_with("app/services/...")`
     // assertions below match on Windows too. The sibling
@@ -1654,7 +1654,7 @@ fn glimmer_typescript_imports_use_tsconfig_path_aliases() {
 fn interface_member_usage_does_not_flag_implementer_members() {
     let root = fixture_path("interface-member-usage");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_members: Vec<String> = results
         .unused_class_members
@@ -1721,7 +1721,7 @@ export default defineConfig({
     .expect("prisma.config.ts");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused: Vec<String> = results
         .unused_files
@@ -1804,7 +1804,7 @@ generator json {
     .expect("tsconfig");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_dev: Vec<String> = results
         .unused_dev_dependencies
@@ -1880,7 +1880,7 @@ model User {
     .expect("tsconfig");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_dev: Vec<String> = results
         .unused_dev_dependencies
@@ -1952,7 +1952,7 @@ generator erd {
     .expect("tsconfig");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_dev: Vec<String> = results
         .unused_dev_dependencies
@@ -2015,7 +2015,7 @@ model User {
     .expect("tsconfig");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_dev: Vec<String> = results
         .unused_dev_dependencies
@@ -2091,7 +2091,7 @@ model User {
     .expect("tsconfig");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_dev: Vec<String> = results
         .unused_dev_dependencies
@@ -2141,7 +2141,7 @@ fn node_module_register_loader_is_credited_as_used_dependency() {
     std::fs::write(root.join("src/index.ts"), "export const hello = 'world';\n").expect("entry");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_dev: Vec<&str> = results
         .unused_dev_dependencies
@@ -2192,7 +2192,7 @@ fn node_module_register_new_url_loader_hooks_are_used_exports() {
     .expect("loader file");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused_exports: Vec<(String, String)> = results
         .unused_exports
         .iter()
@@ -2270,7 +2270,7 @@ fn node_module_register_legacy_loader_hook_exports_are_used() {
     .expect("loader file");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused_exports: Vec<(String, String)> = results
         .unused_exports
         .iter()
@@ -2334,7 +2334,7 @@ fn dangerfile_ts_is_recognized_as_tooling_entry() {
     .expect("dangerfile");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files = unused_file_paths(&results);
     assert!(
@@ -2389,7 +2389,7 @@ fn stryker_config_mjs_credits_runner_checker_and_plugin_packages() {
     .expect("stryker config");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files = unused_file_paths(&results);
     assert!(
@@ -2447,7 +2447,7 @@ fn stryker_json_config_credits_known_runner_without_js_parsing() {
     .expect("stryker json config");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files = unused_file_paths(&results);
     assert!(
@@ -2511,7 +2511,7 @@ fn stryker_workspace_config_is_recognized_from_root_dev_dependency() {
     .expect("workspace stryker config");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files = unused_file_paths(&results);
     assert!(
@@ -2578,7 +2578,7 @@ fn wuchale_workspace_config_is_recognized_from_root_dependency() {
     .expect("wuchale config");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files = unused_file_paths(&results);
     assert!(
@@ -2629,7 +2629,7 @@ fn wuchale_config_file_activates_plugin_without_enabler_dependency() {
     .expect("wuchale config");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files = unused_file_paths(&results);
     assert!(
@@ -2704,7 +2704,7 @@ fn wuchale_vite_config_file_keeps_custom_js_config_reachable() {
     .expect("custom wuchale config");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files = unused_file_paths(&results);
     assert!(
@@ -2755,7 +2755,7 @@ fn wuchale_unsupported_ts_config_remains_reportable() {
     .expect("unsupported config");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files = unused_file_paths(&results);
     assert!(
@@ -2766,7 +2766,7 @@ fn wuchale_unsupported_ts_config_remains_reportable() {
     );
 }
 
-fn unused_file_paths(results: &fallow_core::results::AnalysisResults) -> Vec<String> {
+fn unused_file_paths(results: &plow_core::results::AnalysisResults) -> Vec<String> {
     results
         .unused_files
         .iter()
@@ -2774,7 +2774,7 @@ fn unused_file_paths(results: &fallow_core::results::AnalysisResults) -> Vec<Str
         .collect()
 }
 
-fn unused_dev_dependencies(results: &fallow_core::results::AnalysisResults) -> Vec<String> {
+fn unused_dev_dependencies(results: &plow_core::results::AnalysisResults) -> Vec<String> {
     results
         .unused_dev_dependencies
         .iter()

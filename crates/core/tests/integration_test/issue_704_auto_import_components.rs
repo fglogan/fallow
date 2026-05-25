@@ -12,7 +12,7 @@
 use std::path::Path;
 
 use super::common::{create_config, fixture_path};
-use fallow_types::results::AnalysisResults;
+use plow_types::results::AnalysisResults;
 
 fn unused_file_paths(results: &AnalysisResults, root: &Path) -> Vec<String> {
     results
@@ -36,7 +36,7 @@ fn flag_off_keeps_all_components_alive() {
     let config = create_config(root.clone());
     assert!(!config.auto_imports, "default is additive (flag off)");
 
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused = unused_file_paths(&results, &root);
 
     // Additive guarantee: components/** stays an entry pattern, so even the
@@ -53,7 +53,7 @@ fn flag_on_reports_unreferenced_component_and_keeps_referenced_ones() {
     let mut config = create_config(root.clone());
     config.auto_imports = true;
 
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused = unused_file_paths(&results, &root);
 
     // The genuinely-unreferenced component now surfaces (the recall win).

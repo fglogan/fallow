@@ -19,7 +19,7 @@ pub struct CacheStore {
     /// active external plugin names + inline framework definition names).
     /// A mismatch at load time discards the cache, matching how
     /// `CACHE_VERSION` works but invalidating on a user-driven config change
-    /// rather than on a fallow upgrade. See ADR-009 for the ingredient list.
+    /// rather than on a plow upgrade. See ADR-009 for the ingredient list.
     config_hash: u64,
     /// Map from file path to cached module data.
     entries: FxHashMap<String, CachedModule>,
@@ -41,7 +41,7 @@ impl CacheStore {
     /// Returns `None` when:
     /// - the file does not exist or cannot be read,
     /// - the on-disk size exceeds the configured `max_size_bytes` (matches the
-    ///   user's `cache.maxSizeMb` / `FALLOW_CACHE_MAX_SIZE` setting, with the
+    ///   user's `cache.maxSizeMb` / `PLOW_CACHE_MAX_SIZE` setting, with the
     ///   built-in `DEFAULT_CACHE_MAX_SIZE` as the lower bound so a misconfigured
     ///   tiny cap cannot push a still-valid larger cache into discard),
     /// - bitcode decoding fails or the decoded version differs from
@@ -60,7 +60,7 @@ impl CacheStore {
         let cache_file = cache_dir.join("cache.bin");
         let data = std::fs::read(&cache_file).ok()?;
         // Honour both the user's cap AND the built-in default so a
-        // misconfigured tiny cap (e.g. `FALLOW_CACHE_MAX_SIZE=1`) does NOT
+        // misconfigured tiny cap (e.g. `PLOW_CACHE_MAX_SIZE=1`) does NOT
         // throw away a valid existing cache on the load path; the user's
         // cap takes effect at the NEXT save via the eviction logic.
         let safety_ceiling = max_size_bytes.max(DEFAULT_CACHE_MAX_SIZE);
@@ -265,7 +265,7 @@ impl CacheStore {
 
     /// Remove cache entries for files that are no longer in the project.
     /// Keeps the cache from growing unboundedly as files are deleted.
-    pub fn retain_paths(&mut self, files: &[fallow_types::discover::DiscoveredFile]) {
+    pub fn retain_paths(&mut self, files: &[plow_types::discover::DiscoveredFile]) {
         use rustc_hash::FxHashSet;
         let current_paths: FxHashSet<String> = files
             .iter()
@@ -313,7 +313,7 @@ fn atomic_write(cache_file: &Path, data: &[u8]) -> Result<(), String> {
         f.write_all(data)
             .map_err(|e| format!("Failed to write cache tmp: {e}"))?;
         // Best-effort fsync. Failures here are non-fatal because the
-        // rename below is still atomic on every platform fallow targets;
+        // rename below is still atomic on every platform plow targets;
         // the fsync just reduces the chance of post-power-loss corruption.
         let _ = f.sync_all();
     }

@@ -1,6 +1,5 @@
 ---
 source: crates/cli/tests/snapshot_tests.rs
-assertion_line: 606
 expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"CARGO_PKG_VERSION\")),\n\"\\\"version\\\": \\\"[VERSION]\\\"\",)"
 ---
 {
@@ -53,7 +52,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "type": "suppress-line",
           "auto_fixable": false,
           "description": "Suppress with an inline comment above the line",
-          "comment": "// fallow-ignore-next-line unused-export"
+          "comment": "// plow-ignore-next-line unused-export"
         }
       ]
     }

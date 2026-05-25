@@ -1,4 +1,4 @@
-//! Cross-platform path handling tests for the fallow-graph crate.
+//! Cross-platform path handling tests for the plow-graph crate.
 //!
 //! Exercises path separator normalization, case sensitivity, unicode paths,
 //! long paths, relative path resolution, and dotfile/hidden directory handling.
@@ -7,8 +7,8 @@ use std::ffi::OsStr;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
-use fallow_graph::resolve::{extract_package_name, is_path_alias};
-use fallow_types::discover::{DiscoveredFile, FileId};
+use plow_graph::resolve::{extract_package_name, is_path_alias};
+use plow_types::discover::{DiscoveredFile, FileId};
 use rustc_hash::FxHashMap;
 
 // ---------------------------------------------------------------------------
@@ -304,7 +304,7 @@ fn curdir_in_path_normalized_by_components() {
     let path = PathBuf::from("/project/./src/./utils.ts");
     let components: Vec<_> = path.components().collect();
     // Rust's PathBuf::components() normalizes away `.` (CurDir) components
-    // on all platforms. This is important for fallow's path handling: even
+    // on all platforms. This is important for plow's path handling: even
     // if a path string contains `./`, the components iterator won't include
     // CurDir entries, so path comparisons remain consistent.
     let curdir_count = components

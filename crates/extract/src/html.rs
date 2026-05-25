@@ -16,7 +16,7 @@ use oxc_span::Span;
 use crate::asset_url::normalize_asset_url;
 use crate::sfc_template::angular::{self, ANGULAR_TPL_SENTINEL};
 use crate::{ImportInfo, ImportedName, MemberAccess, ModuleInfo};
-use fallow_types::discover::FileId;
+use plow_types::discover::FileId;
 
 /// Regex to match HTML comments (`<!-- ... -->`) for stripping before extraction.
 static HTML_COMMENT_RE: LazyLock<regex::Regex> =
@@ -49,7 +49,7 @@ static LINK_HREF_REVERSE_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
 });
 
 /// Check if a path is an HTML file.
-// Keep in sync with fallow_core::analyze::predicates::is_html_file (crate boundary prevents sharing)
+// Keep in sync with plow_core::analyze::predicates::is_html_file (crate boundary prevents sharing)
 pub(crate) fn is_html_file(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
@@ -205,7 +205,7 @@ pub(crate) fn parse_html_to_module_with_complexity(
         unused_import_bindings: Vec::new(),
         type_referenced_import_bindings: Vec::new(),
         value_referenced_import_bindings: Vec::new(),
-        line_offsets: fallow_types::extract::compute_line_offsets(source),
+        line_offsets: plow_types::extract::compute_line_offsets(source),
         complexity,
         flag_uses: Vec::new(),
         class_heritage: vec![],
@@ -672,7 +672,7 @@ mod tests {
     fn suppression_comments_extracted() {
         let info = parse_html_to_module(
             FileId(0),
-            "<!-- fallow-ignore-file -->\n<script src=\"./entry.js\"></script>",
+            "<!-- plow-ignore-file -->\n<script src=\"./entry.js\"></script>",
             0,
         );
         // HTML comments use <!-- --> not //, so suppression parsing

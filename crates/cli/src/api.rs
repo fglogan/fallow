@@ -1,7 +1,7 @@
-//! Shared HTTP layer for fallow-cloud backend calls.
+//! Shared HTTP layer for plow-cloud backend calls.
 //!
 //! Provides a common `ureq::Agent` builder, URL resolution (respecting the
-//! `FALLOW_API_URL` env override), typed error-envelope parsing, and an
+//! `PLOW_API_URL` env override), typed error-envelope parsing, and an
 //! actionable-hint mapper for backend error codes. Consumed by:
 //!
 //! - `license/`: trial activation, license refresh (5s connect, 10s total).
@@ -19,16 +19,16 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use ureq::tls::{PemItem, RootCerts, TlsConfig};
 
-/// Default fallow cloud API base URL.
-pub const DEFAULT_API_URL: &str = "https://api.fallow.cloud";
+/// Default plow cloud API base URL.
+pub const DEFAULT_API_URL: &str = "https://api.plow.cloud";
 
 /// Exit code for network failures (connect error, timeout, auth rejection).
-/// Used by any subcommand that reaches fallow cloud; keeps error classification
+/// Used by any subcommand that reaches plow cloud; keeps error classification
 /// consistent across `license` and `coverage` surfaces.
 pub const NETWORK_EXIT_CODE: u8 = 7;
 
-/// Environment variable pointing at a PEM trust bundle for fallow cloud calls.
-pub const CA_BUNDLE_ENV: &str = "FALLOW_CA_BUNDLE";
+/// Environment variable pointing at a PEM trust bundle for plow cloud calls.
+pub const CA_BUNDLE_ENV: &str = "PLOW_CA_BUNDLE";
 
 /// Maximum Retry-After sleep accepted from the server.
 pub const RETRY_MAX_WAIT_SECONDS: u64 = 60;
@@ -68,7 +68,7 @@ pub fn api_agent_with_timeout(connect_timeout_secs: u64, total_timeout_secs: u64
 
 /// Construct a fallible `ureq::Agent` with custom timeouts.
 ///
-/// This variant reports invalid `FALLOW_CA_BUNDLE` configuration as a typed
+/// This variant reports invalid `PLOW_CA_BUNDLE` configuration as a typed
 /// setup error so user-facing commands can exit with the network failure code
 /// instead of panicking.
 pub fn try_api_agent_with_timeout(
@@ -143,17 +143,17 @@ fn tls_config_from_env() -> Result<Option<TlsConfig>, ApiClientError> {
 
 /// Resolve an API endpoint path to a full URL.
 ///
-/// Honors `FALLOW_API_URL` for staging/local development. Trailing slashes on
+/// Honors `PLOW_API_URL` for staging/local development. Trailing slashes on
 /// the base are trimmed so `/v1/...` paths never double-slash.
 pub fn api_url(path: &str) -> String {
-    let base = std::env::var("FALLOW_API_URL")
+    let base = std::env::var("PLOW_API_URL")
         .ok()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| DEFAULT_API_URL.to_owned());
     format!("{}{path}", base.trim_end_matches('/'))
 }
 
-/// Structured error payload returned by fallow cloud on non-2xx responses.
+/// Structured error payload returned by plow cloud on non-2xx responses.
 #[derive(Debug, Deserialize, Default)]
 pub struct ErrorEnvelope {
     /// Machine-readable code (e.g. `rate_limit_exceeded`, `payload_too_large`).
@@ -164,7 +164,7 @@ pub struct ErrorEnvelope {
     pub message: Option<String>,
 }
 
-/// Result of parsing a fallow-cloud error body.
+/// Result of parsing a plow-cloud error body.
 #[derive(Debug)]
 pub enum ParsedErrorEnvelope {
     Parsed(ErrorEnvelope),
@@ -231,7 +231,7 @@ pub fn response_message_suffix(body: &str, envelope: &ParsedErrorEnvelope) -> St
     String::new()
 }
 
-/// Whether a fallow-cloud response status should be retried by upload clients.
+/// Whether a plow-cloud response status should be retried by upload clients.
 pub const fn should_retry_status(status: u16) -> bool {
     status == 429 || matches!(status, 502..=504)
 }
@@ -276,24 +276,24 @@ fn clamp_retry_delay(delay: Duration) -> Duration {
 pub fn actionable_error_hint(operation: &str, code: &str) -> Option<&'static str> {
     match (operation, code) {
         ("refresh", "token_stale") => Some(
-            "your stored license is too stale to refresh. Reactivate with: fallow license activate --trial --email <addr>",
+            "your stored license is too stale to refresh. Reactivate with: plow license activate --trial --email <addr>",
         ),
         ("refresh", "invalid_token") => Some(
-            "your stored license token is missing required claims. Reactivate with: fallow license activate --trial --email <addr>",
+            "your stored license token is missing required claims. Reactivate with: plow license activate --trial --email <addr>",
         ),
         // Trial + refresh are license-JWT flows: a stale / invalid JWT is
         // fixed by reactivating via the trial endpoint.
         ("refresh" | "trial", "unauthorized") => Some(
-            "authentication failed. Reactivate with: fallow license activate --trial --email <addr>",
+            "authentication failed. Reactivate with: plow license activate --trial --email <addr>",
         ),
-        // upload-inventory uses a separate API key (`fallow_live_k1_*`), not
+        // upload-inventory uses a separate API key (`plow_live_k1_*`), not
         // the license JWT. Reactivating the trial does NOT rotate the API
         // key. Point users at key generation instead.
         ("upload-inventory", "unauthorized") => Some(
-            "authentication failed. Generate an API key at https://fallow.cloud/settings#api-keys and set FALLOW_API_KEY on the runner. Note: this key is separate from the license JWT; `fallow license activate --trial` will not fix this error.",
+            "authentication failed. Generate an API key at https://plow.cloud/settings#api-keys and set PLOW_API_KEY on the runner. Note: this key is separate from the license JWT; `plow license activate --trial` will not fix this error.",
         ),
         ("trial", "rate_limit_exceeded") => Some(
-            "trial creation is rate-limited to 5 per hour per IP. Wait an hour or retry from a different network (in CI, start the trial locally and set FALLOW_LICENSE on the runner).",
+            "trial creation is rate-limited to 5 per hour per IP. Wait an hour or retry from a different network (in CI, start the trial locally and set PLOW_LICENSE on the runner).",
         ),
         ("upload-inventory", "payload_too_large") => Some(
             "inventory exceeds the 200,000-function server limit. Scope the walk with --exclude-paths, or open an issue if this is a legitimately large repo.",
@@ -340,7 +340,7 @@ impl ResponseBodyReader for http::Response<ureq::Body> {
 /// logs. Route every `format!("{err}")` against a ureq error through this
 /// helper to mask the secret before it reaches the user.
 ///
-/// Token charset matches the JWT + fallow API-key alphabets
+/// Token charset matches the JWT + plow API-key alphabets
 /// (`A-Za-z0-9_.\-=`); the scan stops at the first byte outside that set so
 /// punctuation following the secret (e.g. `Bearer abc123.\n`) is preserved.
 pub fn sanitize_network_error(detail: &str) -> String {
@@ -484,7 +484,7 @@ mod tests {
         };
         let message = http_status_message(&mut response, "refresh");
         assert!(
-            message.contains("Reactivate with: fallow license activate --trial"),
+            message.contains("Reactivate with: plow license activate --trial"),
             "expected reactivation hint, got: {message}"
         );
         assert!(message.contains("token_stale"));
@@ -515,12 +515,12 @@ mod tests {
         // require the disqualifier to appear adjacent to "will not fix".
         // Regression test for BLOCK 3 from the public-readiness panel.
         assert!(
-            message.contains("https://fallow.cloud/settings#api-keys"),
+            message.contains("https://plow.cloud/settings#api-keys"),
             "expected api-keys URL, got: {message}"
         );
         assert!(
-            message.contains("FALLOW_API_KEY"),
-            "expected FALLOW_API_KEY mention, got: {message}"
+            message.contains("PLOW_API_KEY"),
+            "expected PLOW_API_KEY mention, got: {message}"
         );
         assert!(
             message.contains("will not fix"),
@@ -536,7 +536,7 @@ mod tests {
         };
         let message = http_status_message(&mut response, "trial");
         assert!(message.contains("5 per hour per IP"));
-        assert!(message.contains("FALLOW_LICENSE"));
+        assert!(message.contains("PLOW_LICENSE"));
     }
 
     #[test]
@@ -625,9 +625,9 @@ mod tests {
         let prior = std::env::var(CA_BUNDLE_ENV).ok();
         // SAFETY: env mutation is unsafe because it is not thread-safe. This
         // test serializes its own writes and restores the prior value before
-        // returning; no other test in this module touches FALLOW_CA_BUNDLE.
+        // returning; no other test in this module touches PLOW_CA_BUNDLE.
         unsafe {
-            std::env::set_var(CA_BUNDLE_ENV, "/definitely/missing/fallow-ca.pem");
+            std::env::set_var(CA_BUNDLE_ENV, "/definitely/missing/plow-ca.pem");
         }
         let err = try_api_agent().expect_err("missing bundle should fail");
         let message = err.to_string();
@@ -645,14 +645,14 @@ mod tests {
 
     #[test]
     fn sanitize_network_error_redacts_bearer_token() {
-        let input = "tls handshake failed; sent Authorization: Bearer fallow_live_abc123.def456";
+        let input = "tls handshake failed; sent Authorization: Bearer plow_live_abc123.def456";
         let output = sanitize_network_error(input);
         assert!(
             output.ends_with("Bearer ***"),
             "expected sanitized tail, got: {output}"
         );
         assert!(
-            !output.contains("fallow_live_abc123"),
+            !output.contains("plow_live_abc123"),
             "secret leaked: {output}"
         );
     }
@@ -684,14 +684,14 @@ mod tests {
 
     #[test]
     fn sanitize_network_error_passes_through_when_no_bearer() {
-        let input = "connection refused (dns lookup failed for api.fallow.cloud)";
+        let input = "connection refused (dns lookup failed for api.plow.cloud)";
         let output = sanitize_network_error(input);
         assert_eq!(output, input);
     }
 
     #[test]
     fn sanitize_network_error_preserves_trailing_punctuation_after_token() {
-        let input = "Bearer fallow_live_xyz, retry next.";
+        let input = "Bearer plow_live_xyz, retry next.";
         let output = sanitize_network_error(input);
         assert_eq!(output, "Bearer ***, retry next.");
     }
@@ -714,26 +714,26 @@ mod tests {
     }
 
     // Env-var assertions run in one test to avoid interleaving with parallel
-    // tests that also touch `FALLOW_API_URL`. Restores the prior value.
+    // tests that also touch `PLOW_API_URL`. Restores the prior value.
     #[test]
     #[expect(unsafe_code, reason = "env var mutation requires unsafe")]
     fn api_url_respects_env_override_and_default() {
-        let prior = std::env::var("FALLOW_API_URL").ok();
+        let prior = std::env::var("PLOW_API_URL").ok();
 
         // SAFETY: env mutation is unsafe because it is not thread-safe. This
         // test serializes its own writes and restores the prior value before
-        // returning; no other test in this module touches FALLOW_API_URL.
+        // returning; no other test in this module touches PLOW_API_URL.
         unsafe {
-            std::env::remove_var("FALLOW_API_URL");
+            std::env::remove_var("PLOW_API_URL");
         }
         assert_eq!(
             api_url("/v1/coverage/repo/inventory"),
-            "https://api.fallow.cloud/v1/coverage/repo/inventory",
+            "https://api.plow.cloud/v1/coverage/repo/inventory",
         );
 
         // SAFETY: see the `remove_var` safety note above.
         unsafe {
-            std::env::set_var("FALLOW_API_URL", "http://127.0.0.1:3000/");
+            std::env::set_var("PLOW_API_URL", "http://127.0.0.1:3000/");
         }
         assert_eq!(
             api_url("/v1/coverage/a/inventory"),
@@ -743,9 +743,9 @@ mod tests {
         // SAFETY: see the `remove_var` safety note above.
         unsafe {
             if let Some(value) = prior {
-                std::env::set_var("FALLOW_API_URL", value);
+                std::env::set_var("PLOW_API_URL", value);
             } else {
-                std::env::remove_var("FALLOW_API_URL");
+                std::env::remove_var("PLOW_API_URL");
             }
         }
     }

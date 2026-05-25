@@ -22,8 +22,8 @@
 
 use std::path::Path;
 
-use fallow_config::{CatalogPrecedingCommentPolicy, OutputFormat};
-use fallow_core::results::{
+use plow_config::{CatalogPrecedingCommentPolicy, OutputFormat};
+use plow_core::results::{
     EmptyCatalogGroup, EmptyCatalogGroupFinding, UnusedCatalogEntry, UnusedCatalogEntryFinding,
 };
 
@@ -86,7 +86,7 @@ pub(super) fn apply_catalog_entry_fixes(
                 fixes.push(skip_record(
                     entry,
                     "multi_document_yaml",
-                    "Skipped: pnpm-workspace.yaml contains a `---` document separator; fallow fix does not support multi-document YAML",
+                    "Skipped: pnpm-workspace.yaml contains a `---` document separator; plow fix does not support multi-document YAML",
                     output,
                     relative_path,
                 ));
@@ -104,7 +104,7 @@ pub(super) fn apply_catalog_entry_fixes(
                 summary.skipped += 1;
                 let consumer_summary = format_consumer_summary(&entry.hardcoded_consumers);
                 let description = format!(
-                    "Skipped: {consumer_summary} still pin `{}` with a hardcoded version. Switch the consumer(s) to \"{}\": \"catalog:{}\" first, then rerun fallow fix.",
+                    "Skipped: {consumer_summary} still pin `{}` with a hardcoded version. Switch the consumer(s) to \"{}\": \"catalog:{}\" first, then rerun plow fix.",
                     entry.entry_name,
                     entry.entry_name,
                     if entry.catalog_name == "default" {
@@ -129,7 +129,7 @@ pub(super) fn apply_catalog_entry_fixes(
                 fixes.push(skip_record(
                     entry,
                     "line_out_of_range",
-                    "Skipped: the reported line is past the end of pnpm-workspace.yaml; the file may have been edited since fallow check ran",
+                    "Skipped: the reported line is past the end of pnpm-workspace.yaml; the file may have been edited since plow check ran",
                     output,
                     relative_path,
                 ));
@@ -286,7 +286,7 @@ pub(super) fn apply_empty_catalog_group_fixes(
                 fixes.push(skip_group_record(
                     group,
                     "multi_document_yaml",
-                    "Skipped: pnpm-workspace.yaml contains a `---` document separator; fallow fix does not support multi-document YAML",
+                    "Skipped: pnpm-workspace.yaml contains a `---` document separator; plow fix does not support multi-document YAML",
                     output,
                     relative_path,
                 ));
@@ -303,7 +303,7 @@ pub(super) fn apply_empty_catalog_group_fixes(
                 fixes.push(skip_group_record(
                     group,
                     "line_out_of_range",
-                    "Skipped: the reported line is past the end of pnpm-workspace.yaml; the file may have been edited since fallow check ran",
+                    "Skipped: the reported line is past the end of pnpm-workspace.yaml; the file may have been edited since plow check ran",
                     output,
                     relative_path,
                 ));
@@ -435,12 +435,12 @@ fn comment_block_start(
         return None;
     }
 
-    // Per-block escape hatch (`# fallow-keep`): any line in the block bearing
+    // Per-block escape hatch (`# plow-keep`): any line in the block bearing
     // this marker preserves the entire block regardless of policy. Mirrors
-    // fallow's existing `fallow-ignore-next-line` / `fallow-ignore-file`
+    // plow's existing `plow-ignore-next-line` / `plow-ignore-file`
     // inline-suppression convention so users discover it without docs.
     let block = &lines[comment_start..entry_idx];
-    if block.iter().any(|line| line.contains("fallow-keep")) {
+    if block.iter().any(|line| line.contains("plow-keep")) {
         return None;
     }
 
@@ -1063,11 +1063,11 @@ mod tests {
     }
 
     #[test]
-    fn auto_preserves_block_with_fallow_keep_marker() {
-        // `# fallow-keep` on any line in the contiguous comment block
+    fn auto_preserves_block_with_plow_keep_marker() {
+        // `# plow-keep` on any line in the contiguous comment block
         // protects the entire block from deletion regardless of policy.
         let dir = tempfile::tempdir().unwrap();
-        let content = "catalog:\n  # fallow-keep: audit trail for CVE-2024-XXXX\n  is-even: ^1.0.0\n  is-odd: ^1.0.0\n";
+        let content = "catalog:\n  # plow-keep: audit trail for CVE-2024-XXXX\n  is-even: ^1.0.0\n  is-odd: ^1.0.0\n";
         seed_workspace_file(dir.path(), content);
 
         let entries = vec![make_entry("is-even", "default", 3)];
@@ -1084,18 +1084,18 @@ mod tests {
         let result = std::fs::read_to_string(dir.path().join("pnpm-workspace.yaml")).unwrap();
         assert_eq!(
             result,
-            "catalog:\n  # fallow-keep: audit trail for CVE-2024-XXXX\n  is-odd: ^1.0.0\n"
+            "catalog:\n  # plow-keep: audit trail for CVE-2024-XXXX\n  is-odd: ^1.0.0\n"
         );
         assert_eq!(summary.comment_lines_removed, 0);
     }
 
     #[test]
-    fn always_preserves_block_with_fallow_keep_marker() {
-        // `# fallow-keep` is a per-block escape hatch that overrides even
+    fn always_preserves_block_with_plow_keep_marker() {
+        // `# plow-keep` is a per-block escape hatch that overrides even
         // the `always` policy. The marker is the user's explicit intent
         // to keep this specific block.
         let dir = tempfile::tempdir().unwrap();
-        let content = "catalog:\n  # fallow-keep\n  is-even: ^1.0.0\n  is-odd: ^1.0.0\n";
+        let content = "catalog:\n  # plow-keep\n  is-even: ^1.0.0\n  is-odd: ^1.0.0\n";
         seed_workspace_file(dir.path(), content);
 
         let entries = vec![make_entry("is-even", "default", 3)];
@@ -1110,7 +1110,7 @@ mod tests {
         );
 
         let result = std::fs::read_to_string(dir.path().join("pnpm-workspace.yaml")).unwrap();
-        assert_eq!(result, "catalog:\n  # fallow-keep\n  is-odd: ^1.0.0\n");
+        assert_eq!(result, "catalog:\n  # plow-keep\n  is-odd: ^1.0.0\n");
     }
 
     #[test]
@@ -1148,7 +1148,7 @@ mod tests {
         // The `always` policy still deletes banner-shaped blocks. The
         // banner heuristic is an Auto-only refinement; users who opt
         // into `always` get aggressive deletion. To protect a banner
-        // under `always`, add a `# fallow-keep` marker.
+        // under `always`, add a `# plow-keep` marker.
         let dir = tempfile::tempdir().unwrap();
         let content = "catalog:\n  # ====\n  is-even: ^1.0.0\n  is-odd: ^1.0.0\n";
         seed_workspace_file(dir.path(), content);

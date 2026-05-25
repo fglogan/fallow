@@ -19,7 +19,7 @@ use crate::html::is_remote_url;
 use crate::sfc::SfcScript;
 use crate::visitor::ModuleInfoExtractor;
 use crate::{ImportInfo, ImportedName, ModuleInfo};
-use fallow_types::discover::FileId;
+use plow_types::discover::FileId;
 
 /// Regex to extract Astro frontmatter (content between `---` delimiters at file start).
 static ASTRO_FRONTMATTER_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
@@ -85,7 +85,7 @@ pub(crate) fn parse_astro_to_module(
     content_hash: u64,
 ) -> ModuleInfo {
     let parsed_suppressions = crate::suppress::parse_suppressions_from_source(source);
-    let line_offsets = fallow_types::extract::compute_line_offsets(source);
+    let line_offsets = plow_types::extract::compute_line_offsets(source);
 
     let frontmatter = extract_astro_frontmatter(source);
     let template_offset = frontmatter
@@ -377,7 +377,7 @@ mod tests {
 
     #[test]
     fn parse_astro_to_module_has_suppressions() {
-        let source = "---\n// fallow-ignore-file\nconst x = 1;\n---\n<div />";
+        let source = "---\n// plow-ignore-file\nconst x = 1;\n---\n<div />";
         let info = parse_astro_to_module(FileId(0), source, 0);
         assert!(!info.suppressions.is_empty());
         assert_eq!(info.suppressions[0].line, 0);

@@ -1,8 +1,8 @@
 use super::common::{create_config, fixture_path};
 
-fn create_private_type_leak_config(root: std::path::PathBuf) -> fallow_config::ResolvedConfig {
+fn create_private_type_leak_config(root: std::path::PathBuf) -> plow_config::ResolvedConfig {
     let mut config = create_config(root);
-    config.rules.private_type_leaks = fallow_config::Severity::Warn;
+    config.rules.private_type_leaks = plow_config::Severity::Warn;
     config
 }
 
@@ -10,7 +10,7 @@ fn create_private_type_leak_config(root: std::path::PathBuf) -> fallow_config::R
 fn exported_signatures_report_same_file_private_types() {
     let root = fixture_path("private-type-leaks");
     let config = create_private_type_leak_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let leaks: Vec<(&str, &str)> = results
         .private_type_leaks
@@ -40,7 +40,7 @@ fn exported_signatures_report_same_file_private_types() {
 fn exported_signature_backing_types_are_not_unused_type_exports() {
     let root = fixture_path("private-type-leaks");
     let config = create_private_type_leak_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_types: Vec<&str> = results
         .unused_types
@@ -58,7 +58,7 @@ fn exported_signature_backing_types_are_not_unused_type_exports() {
 fn storybook_story_files_are_skipped() {
     let root = fixture_path("private-type-leaks");
     let config = create_private_type_leak_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     // The fixture's Component.stories.ts uses the canonical
     // `type Story = StoryObj<...>; export const Default: Story = ...`
@@ -82,7 +82,7 @@ fn storybook_story_files_are_skipped() {
 fn route_convention_files_are_skipped() {
     let root = fixture_path("private-type-leaks");
     let config = create_private_type_leak_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     // Each fixture file declares a local type and uses it across 2+ exports,
     // the canonical noise pattern for framework routing conventions. Without

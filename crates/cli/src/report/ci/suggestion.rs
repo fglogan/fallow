@@ -14,7 +14,7 @@ pub fn suggestion_block(provider: Provider, issue: &CiIssue) -> Option<String> {
         return None;
     }
 
-    let root = std::env::var_os("FALLOW_ROOT").map_or_else(|| PathBuf::from("."), PathBuf::from);
+    let root = std::env::var_os("PLOW_ROOT").map_or_else(|| PathBuf::from("."), PathBuf::from);
     let path = root.join(&issue.path);
     let source = std::fs::read_to_string(path).ok()?;
     let line = source.lines().nth(issue.line.saturating_sub(1) as usize)?;
@@ -45,7 +45,7 @@ pub fn suggestion_block_for_issue_line(
 /// the review-comment API, so we surface guidance for the human reader.
 #[must_use]
 fn unused_file_hint() -> String {
-    "\n\n> Run `fallow fix --files` or delete this file.".to_owned()
+    "\n\n> Run `plow fix --files` or delete this file.".to_owned()
 }
 
 fn unused_export_suggestion(provider: Provider, line: &str) -> Option<String> {
@@ -124,7 +124,7 @@ mod tests {
         assert_eq!(
             suggestion_block_for_issue_line(
                 Provider::Github,
-                "fallow/unused-export",
+                "plow/unused-export",
                 "export const value = 1;"
             )
             .as_deref(),
@@ -137,7 +137,7 @@ mod tests {
         assert_eq!(
             suggestion_block_for_issue_line(
                 Provider::Gitlab,
-                "fallow/unused-export",
+                "plow/unused-export",
                 "export default thing;"
             )
             .as_deref(),
@@ -150,7 +150,7 @@ mod tests {
         assert_eq!(
             suggestion_block_for_issue_line(
                 Provider::Github,
-                "fallow/unused-type",
+                "plow/unused-type",
                 "export type Legacy = { id: string };"
             )
             .as_deref(),
@@ -159,7 +159,7 @@ mod tests {
         assert_eq!(
             suggestion_block_for_issue_line(
                 Provider::Gitlab,
-                "fallow/unused-type",
+                "plow/unused-type",
                 "export interface Legacy { id: string }"
             )
             .as_deref(),
@@ -172,7 +172,7 @@ mod tests {
         assert_eq!(
             suggestion_block_for_issue_line(
                 Provider::Github,
-                "fallow/unused-type",
+                "plow/unused-type",
                 "  export type Indented = string;"
             ),
             None
@@ -180,7 +180,7 @@ mod tests {
         assert_eq!(
             suggestion_block_for_issue_line(
                 Provider::Github,
-                "fallow/unused-type",
+                "plow/unused-type",
                 "type Local = string;"
             ),
             None
@@ -188,7 +188,7 @@ mod tests {
         assert_eq!(
             suggestion_block_for_issue_line(
                 Provider::Github,
-                "fallow/unused-type",
+                "plow/unused-type",
                 "const used = 1; export type Legacy = string;"
             ),
             None
@@ -200,7 +200,7 @@ mod tests {
         assert_eq!(
             suggestion_block_for_issue_line(
                 Provider::Github,
-                "fallow/unused-import",
+                "plow/unused-import",
                 "import { unused } from './module';"
             )
             .as_deref(),
@@ -213,7 +213,7 @@ mod tests {
         assert_eq!(
             suggestion_block_for_issue_line(
                 Provider::Github,
-                "fallow/unused-import",
+                "plow/unused-import",
                 "import './setup';"
             ),
             None
@@ -225,7 +225,7 @@ mod tests {
         assert_eq!(
             suggestion_block_for_issue_line(
                 Provider::Github,
-                "fallow/unused-import",
+                "plow/unused-import",
                 "import { used, unused } from './module';"
             ),
             None
@@ -239,7 +239,7 @@ mod tests {
         assert_eq!(
             suggestion_block_for_issue_line(
                 Provider::Github,
-                "fallow/unused-enum-member",
+                "plow/unused-enum-member",
                 "  Deprecated,"
             )
             .as_deref(),
@@ -248,7 +248,7 @@ mod tests {
         assert_eq!(
             suggestion_block_for_issue_line(
                 Provider::Gitlab,
-                "fallow/unused-enum-member",
+                "plow/unused-enum-member",
                 "  Deprecated,"
             )
             .as_deref(),
@@ -261,7 +261,7 @@ mod tests {
         assert_eq!(
             suggestion_block_for_issue_line(
                 Provider::Github,
-                "fallow/unused-class-member",
+                "plow/unused-class-member",
                 "  legacyMethod() { return null; }"
             )
             .as_deref(),
@@ -275,7 +275,7 @@ mod tests {
         // GitLab same. We surface a one-liner hint instead of a misleading
         // suggestion block that would not apply.
         let issue = CiIssue {
-            rule_id: "fallow/unused-file".to_owned(),
+            rule_id: "plow/unused-file".to_owned(),
             description: "File is not reachable".to_owned(),
             severity: "major".to_owned(),
             path: "src/dead.ts".to_owned(),
@@ -284,14 +284,14 @@ mod tests {
         };
         let body = suggestion_block(Provider::Github, &issue).expect("hint");
         assert!(!body.contains("```suggestion"), "must not be a code block");
-        assert!(body.contains("fallow fix --files"));
+        assert!(body.contains("plow fix --files"));
     }
 
     #[test]
     fn delete_line_suggestion_skips_blank_lines() {
         // Edge case: if the source line is empty, deleting it again is a no-op.
         assert_eq!(
-            suggestion_block_for_issue_line(Provider::Github, "fallow/unused-enum-member", "   "),
+            suggestion_block_for_issue_line(Provider::Github, "plow/unused-enum-member", "   "),
             None
         );
     }

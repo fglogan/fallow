@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use bitcode::{Decode, Encode};
-use fallow_config::ResolvedNormalization;
+use plow_config::ResolvedNormalization;
 use oxc_span::Span;
 use rustc_hash::FxHashMap;
 use tempfile::NamedTempFile;
@@ -328,13 +328,13 @@ fn metadata_key(metadata: &std::fs::Metadata) -> (u64, u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_config::DetectionMode;
+    use plow_config::DetectionMode;
 
     fn mode() -> TokenCacheMode {
         TokenCacheMode::new(
             ResolvedNormalization::resolve(
                 DetectionMode::Mild,
-                &fallow_config::NormalizationConfig::default(),
+                &plow_config::NormalizationConfig::default(),
             ),
             false,
             false,
@@ -460,7 +460,7 @@ mod tests {
         let changed_mode = TokenCacheMode::new(
             ResolvedNormalization::resolve(
                 DetectionMode::Semantic,
-                &fallow_config::NormalizationConfig::default(),
+                &plow_config::NormalizationConfig::default(),
             ),
             false,
             false,

@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use fallow_config::PackageJson;
+use plow_config::PackageJson;
 
 use super::Plugin;
 

@@ -1,4 +1,4 @@
-use fallow_types::extract::{ExportName, ImportedName, MemberKind};
+use plow_types::extract::{ExportName, ImportedName, MemberKind};
 
 use crate::tests::parse_ts as parse_source;
 

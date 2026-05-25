@@ -11,14 +11,14 @@ pub struct CommandOutput {
     pub code: i32,
 }
 
-/// Returns the path to the compiled `fallow` binary for testing.
-pub fn fallow_bin() -> PathBuf {
-    std::env::var_os("CARGO_BIN_EXE_fallow").map_or_else(
+/// Returns the path to the compiled `plow` binary for testing.
+pub fn plow_bin() -> PathBuf {
+    std::env::var_os("CARGO_BIN_EXE_plow").map_or_else(
         || {
             let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
             path.pop(); // crates/
             path.pop(); // project root
-            path.push("target/debug/fallow");
+            path.push("target/debug/plow");
             if cfg!(windows) {
                 path.set_extension("exe");
             }
@@ -38,18 +38,18 @@ pub fn fixture_path(name: &str) -> PathBuf {
     path
 }
 
-/// Run an arbitrary fallow command against a fixture, returning structured output.
+/// Run an arbitrary plow command against a fixture, returning structured output.
 ///
 /// Sets `NO_COLOR=1` and `RUST_LOG=""` for deterministic output.
 /// Injects `--root <fixture_path>` before the caller's args.
-pub fn run_fallow(subcommand: &str, fixture: &str, args: &[&str]) -> CommandOutput {
+pub fn run_plow(subcommand: &str, fixture: &str, args: &[&str]) -> CommandOutput {
     let root = fixture_path(fixture);
-    run_fallow_in_root(subcommand, &root, args)
+    run_plow_in_root(subcommand, &root, args)
 }
 
-/// Run an arbitrary fallow command against an explicit project root.
-pub fn run_fallow_in_root(subcommand: &str, root: &Path, args: &[&str]) -> CommandOutput {
-    let bin = fallow_bin();
+/// Run an arbitrary plow command against an explicit project root.
+pub fn run_plow_in_root(subcommand: &str, root: &Path, args: &[&str]) -> CommandOutput {
+    let bin = plow_bin();
     let mut cmd = Command::new(&bin);
     cmd.arg(subcommand)
         .arg("--root")
@@ -59,7 +59,7 @@ pub fn run_fallow_in_root(subcommand: &str, root: &Path, args: &[&str]) -> Comma
     for arg in args {
         cmd.arg(arg);
     }
-    let output = cmd.output().expect("failed to run fallow binary");
+    let output = cmd.output().expect("failed to run plow binary");
     CommandOutput {
         stdout: String::from_utf8_lossy(&output.stdout).to_string(),
         stderr: String::from_utf8_lossy(&output.stderr).to_string(),
@@ -67,9 +67,9 @@ pub fn run_fallow_in_root(subcommand: &str, root: &Path, args: &[&str]) -> Comma
     }
 }
 
-/// Run fallow with no subcommand (combined mode) against a fixture.
-pub fn run_fallow_combined(fixture: &str, args: &[&str]) -> CommandOutput {
-    let bin = fallow_bin();
+/// Run plow with no subcommand (combined mode) against a fixture.
+pub fn run_plow_combined(fixture: &str, args: &[&str]) -> CommandOutput {
+    let bin = plow_bin();
     let root = fixture_path(fixture);
     let mut cmd = Command::new(&bin);
     cmd.arg("--root")
@@ -79,7 +79,7 @@ pub fn run_fallow_combined(fixture: &str, args: &[&str]) -> CommandOutput {
     for arg in args {
         cmd.arg(arg);
     }
-    let output = cmd.output().expect("failed to run fallow binary");
+    let output = cmd.output().expect("failed to run plow binary");
     CommandOutput {
         stdout: String::from_utf8_lossy(&output.stdout).to_string(),
         stderr: String::from_utf8_lossy(&output.stderr).to_string(),
@@ -87,15 +87,15 @@ pub fn run_fallow_combined(fixture: &str, args: &[&str]) -> CommandOutput {
     }
 }
 
-/// Run fallow with raw args (no --root injection). Useful for error path tests.
-pub fn run_fallow_raw(args: &[&str]) -> CommandOutput {
-    let bin = fallow_bin();
+/// Run plow with raw args (no --root injection). Useful for error path tests.
+pub fn run_plow_raw(args: &[&str]) -> CommandOutput {
+    let bin = plow_bin();
     let mut cmd = Command::new(&bin);
     cmd.env("RUST_LOG", "").env("NO_COLOR", "1");
     for arg in args {
         cmd.arg(arg);
     }
-    let output = cmd.output().expect("failed to run fallow binary");
+    let output = cmd.output().expect("failed to run plow binary");
     CommandOutput {
         stdout: String::from_utf8_lossy(&output.stdout).to_string(),
         stderr: String::from_utf8_lossy(&output.stderr).to_string(),

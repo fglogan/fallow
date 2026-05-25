@@ -92,7 +92,7 @@ pub(super) const CACHE_VERSION: u32 = 102;
 pub const DUPES_CACHE_VERSION: u32 = 4;
 
 /// Default maximum cache size (256 MB). Overridable per-project via
-/// `cache.maxSizeMb` in the config file or `FALLOW_CACHE_MAX_SIZE` env var.
+/// `cache.maxSizeMb` in the config file or `PLOW_CACHE_MAX_SIZE` env var.
 /// Also used as the hard ceiling on load-time deserialization as a defence
 /// against pathological on-disk files.
 pub const DEFAULT_CACHE_MAX_SIZE: usize = 256 * 1024 * 1024;
@@ -142,9 +142,9 @@ assert_cached_type_size!(CachedReExport, 88);
 assert_cached_type_size!(CachedMember, 64);
 assert_cached_type_size!(CachedDynamicImportPattern, 56);
 assert_cached_type_size!(crate::MemberAccess, 48);
-assert_cached_type_size!(fallow_types::extract::FunctionComplexity, 72);
-assert_cached_type_size!(fallow_types::extract::FlagUse, 80);
-assert_cached_type_size!(fallow_types::extract::ClassHeritageInfo, 96);
+assert_cached_type_size!(plow_types::extract::FunctionComplexity, 72);
+assert_cached_type_size!(plow_types::extract::FlagUse, 80);
+assert_cached_type_size!(plow_types::extract::ClassHeritageInfo, 96);
 
 /// Cached data for a single module.
 #[derive(Debug, Clone, Encode, Decode)]
@@ -199,11 +199,11 @@ pub struct CachedModule {
     /// Pre-computed line-start byte offsets for O(log N) byte-to-line/col conversion.
     pub line_offsets: Vec<u32>,
     /// Per-function complexity metrics.
-    pub complexity: Vec<fallow_types::extract::FunctionComplexity>,
+    pub complexity: Vec<plow_types::extract::FunctionComplexity>,
     /// Feature flag use sites.
-    pub flag_uses: Vec<fallow_types::extract::FlagUse>,
+    pub flag_uses: Vec<plow_types::extract::FlagUse>,
     /// Heritage metadata for exported classes.
-    pub class_heritage: Vec<fallow_types::extract::ClassHeritageInfo>,
+    pub class_heritage: Vec<plow_types::extract::ClassHeritageInfo>,
     /// Local type-capable declarations.
     pub local_type_declarations: Vec<CachedLocalTypeDeclaration>,
     /// Type references from exported public signatures.
@@ -270,7 +270,7 @@ pub struct CachedSuppression {
 pub struct CachedUnknownSuppressionKind {
     /// 1-based line where the comment itself appears.
     pub comment_line: u32,
-    /// True when the marker was `fallow-ignore-file`.
+    /// True when the marker was `plow-ignore-file`.
     pub is_file_level: bool,
     /// The verbatim token that did not parse.
     pub token: String,
@@ -342,7 +342,7 @@ pub struct CachedDynamicImport {
     pub destructured_names: Vec<String>,
     /// Local variable name for namespace imports.
     pub local_name: Option<String>,
-    /// True when this dynamic import was synthesised by fallow (see
+    /// True when this dynamic import was synthesised by plow (see
     /// `DynamicImportInfo::is_speculative`).
     pub is_speculative: bool,
 }

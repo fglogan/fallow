@@ -1,9 +1,9 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use fallow_config::OutputFormat;
-use fallow_core::git_env::clear_ambient_git_env;
-use fallow_core::results::AnalysisResults;
+use plow_config::OutputFormat;
+use plow_core::git_env::clear_ambient_git_env;
+use plow_core::results::AnalysisResults;
 
 use super::counts::{CheckCounts, DupesCounts, REGRESSION_SCHEMA_VERSION, RegressionBaseline};
 use super::outcome::RegressionOutcome;
@@ -21,7 +21,7 @@ const SECS_PER_DAY: u64 = 86_400;
 pub enum SaveRegressionTarget<'a> {
     /// Don't save.
     None,
-    /// Save into the config file (.fallowrc.json / .fallowrc.jsonc / fallow.toml / .fallow.toml).
+    /// Save into the config file (.plowrc.json / .plowrc.jsonc / plow.toml / .plow.toml).
     Config,
     /// Save to an explicit file path.
     File(&'a Path),
@@ -82,7 +82,7 @@ pub fn save_regression_baseline(
 ) -> Result<(), ExitCode> {
     let baseline = RegressionBaseline {
         schema_version: REGRESSION_SCHEMA_VERSION,
-        fallow_version: env!("CARGO_PKG_VERSION").to_string(),
+        plow_version: env!("CARGO_PKG_VERSION").to_string(),
         timestamp: chrono_now(),
         git_sha: current_git_sha(root),
         check: check_counts.cloned(),
@@ -225,7 +225,7 @@ fn find_json_key(content: &str, key: &str) -> Option<usize> {
 
 fn update_json_regression(
     content: &str,
-    baseline: &fallow_config::RegressionBaseline,
+    baseline: &plow_config::RegressionBaseline,
 ) -> Result<String, String> {
     let baseline_json =
         serde_json::to_string_pretty(baseline).map_err(|e| format!("serialization error: {e}"))?;
@@ -302,7 +302,7 @@ fn update_json_regression(
 }
 
 /// Update a TOML config file with regression baseline.
-fn update_toml_regression(content: &str, baseline: &fallow_config::RegressionBaseline) -> String {
+fn update_toml_regression(content: &str, baseline: &plow_config::RegressionBaseline) -> String {
     use std::fmt::Write;
     // Build the TOML section
     let mut section = String::from("[regression.baseline]\n");
@@ -401,30 +401,30 @@ fn format_schema_mismatch_error(
     if actual == 0 {
         format!(
             "regression baseline '{path_display}' appears to predate schema versioning \
-             (schema_version is 0; this fallow build expects {expected}).\n\
-             The baseline was written by fallow {writer_version}.\n\
-             Regenerate it by running: fallow check --save-regression-baseline {path_display}"
+             (schema_version is 0; this plow build expects {expected}).\n\
+             The baseline was written by plow {writer_version}.\n\
+             Regenerate it by running: plow check --save-regression-baseline {path_display}"
         )
     } else {
         format!(
-            "regression baseline '{path_display}' has schema_version {actual} but this fallow build expects {expected}.\n\
-             The baseline was written by fallow {writer_version}.\n\
-             Regenerate it by running: fallow check --save-regression-baseline {path_display}"
+            "regression baseline '{path_display}' has schema_version {actual} but this plow build expects {expected}.\n\
+             The baseline was written by plow {writer_version}.\n\
+             Regenerate it by running: plow check --save-regression-baseline {path_display}"
         )
     }
 }
 
 /// Build the message for a baseline missing `schema_version` entirely. Pre-versioning
-/// baselines (hand-edited or written by a very old fallow) hit this path; the raw
+/// baselines (hand-edited or written by a very old plow) hit this path; the raw
 /// serde error ("missing field `schema_version`") is unhelpful to a CI user.
 fn format_missing_schema_version_error(path: &Path) -> String {
     let path_display = path.display();
     let expected = REGRESSION_SCHEMA_VERSION;
     format!(
         "regression baseline '{path_display}' is missing the schema_version field; \
-         this fallow build expects schema_version {expected}.\n\
+         this plow build expects schema_version {expected}.\n\
          The baseline likely predates schema versioning or was hand-edited.\n\
-         Regenerate it by running: fallow check --save-regression-baseline {path_display}"
+         Regenerate it by running: plow check --save-regression-baseline {path_display}"
     )
 }
 
@@ -484,7 +484,7 @@ pub fn load_regression_baseline(
             path,
             REGRESSION_SCHEMA_VERSION,
             baseline.schema_version,
-            &baseline.fallow_version,
+            &baseline.plow_version,
         );
         return Err(emit_error(&message, 2, output));
     }
@@ -505,7 +505,7 @@ pub fn load_regression_baseline(
 pub fn compare_check_regression(
     results: &AnalysisResults,
     opts: &RegressionOpts<'_>,
-    config_baseline: Option<&fallow_config::RegressionBaseline>,
+    config_baseline: Option<&plow_config::RegressionBaseline>,
 ) -> Result<Option<RegressionOutcome>, ExitCode> {
     if !opts.fail_on_regression {
         return Ok(None);
@@ -537,7 +537,7 @@ pub fn compare_check_regression(
         };
         counts
     } else if let Some(config_baseline) = config_baseline {
-        // Config-embedded baseline: read from .fallowrc.json / .fallowrc.jsonc / fallow.toml / .fallow.toml
+        // Config-embedded baseline: read from .plowrc.json / .plowrc.jsonc / plow.toml / .plow.toml
         CheckCounts::from_config_baseline(config_baseline)
     } else {
         return Err(emit_error(
@@ -599,13 +599,13 @@ fn chrono_now() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_core::results::*;
+    use plow_core::results::*;
     use std::path::PathBuf;
 
     // ── update_json_regression ──────────────────────────────────────
 
-    fn sample_baseline() -> fallow_config::RegressionBaseline {
-        fallow_config::RegressionBaseline {
+    fn sample_baseline() -> plow_config::RegressionBaseline {
+        plow_config::RegressionBaseline {
             total_issues: 5,
             unused_files: 2,
             ..Default::default()
@@ -798,7 +798,7 @@ mod tests {
         let counts = CheckCounts {
             total_issues: 5,
             unused_files: 5,
-            ..CheckCounts::from_config_baseline(&fallow_config::RegressionBaseline::default())
+            ..CheckCounts::from_config_baseline(&plow_config::RegressionBaseline::default())
         };
 
         save_regression_baseline(&path, dir.path(), Some(&counts), None, OutputFormat::Human)
@@ -817,7 +817,7 @@ mod tests {
         let counts = CheckCounts {
             total_issues: 1,
             unused_files: 1,
-            ..CheckCounts::from_config_baseline(&fallow_config::RegressionBaseline::default())
+            ..CheckCounts::from_config_baseline(&plow_config::RegressionBaseline::default())
         };
 
         save_regression_baseline(&path, dir.path(), Some(&counts), None, OutputFormat::Human)
@@ -848,14 +848,14 @@ mod tests {
     #[test]
     fn save_baseline_to_json_config() {
         let dir = tempfile::tempdir().unwrap();
-        let config_path = dir.path().join(".fallowrc.json");
+        let config_path = dir.path().join(".plowrc.json");
         std::fs::write(&config_path, r#"{"entry": ["src/main.ts"]}"#).unwrap();
 
         let counts = CheckCounts {
             total_issues: 7,
             unused_files: 3,
             unused_exports: 4,
-            ..CheckCounts::from_config_baseline(&fallow_config::RegressionBaseline::default())
+            ..CheckCounts::from_config_baseline(&plow_config::RegressionBaseline::default())
         };
         save_baseline_to_config(&config_path, &counts, OutputFormat::Human).unwrap();
 
@@ -869,14 +869,14 @@ mod tests {
     #[test]
     fn save_baseline_to_toml_config() {
         let dir = tempfile::tempdir().unwrap();
-        let config_path = dir.path().join("fallow.toml");
+        let config_path = dir.path().join("plow.toml");
         std::fs::write(&config_path, "[rules]\nunused-files = \"warn\"\n").unwrap();
 
         let counts = CheckCounts {
             total_issues: 7,
             unused_files: 3,
             unused_exports: 4,
-            ..CheckCounts::from_config_baseline(&fallow_config::RegressionBaseline::default())
+            ..CheckCounts::from_config_baseline(&plow_config::RegressionBaseline::default())
         };
         save_baseline_to_config(&config_path, &counts, OutputFormat::Human).unwrap();
 
@@ -889,13 +889,13 @@ mod tests {
     #[test]
     fn save_baseline_to_nonexistent_json_config() {
         let dir = tempfile::tempdir().unwrap();
-        let config_path = dir.path().join(".fallowrc.json");
+        let config_path = dir.path().join(".plowrc.json");
         // File doesn't exist — should create it from scratch
 
         let counts = CheckCounts {
             total_issues: 1,
             unused_files: 1,
-            ..CheckCounts::from_config_baseline(&fallow_config::RegressionBaseline::default())
+            ..CheckCounts::from_config_baseline(&plow_config::RegressionBaseline::default())
         };
         save_baseline_to_config(&config_path, &counts, OutputFormat::Human).unwrap();
 
@@ -907,11 +907,11 @@ mod tests {
     #[test]
     fn save_baseline_to_nonexistent_toml_config() {
         let dir = tempfile::tempdir().unwrap();
-        let config_path = dir.path().join("fallow.toml");
+        let config_path = dir.path().join("plow.toml");
 
         let counts = CheckCounts {
             total_issues: 0,
-            ..CheckCounts::from_config_baseline(&fallow_config::RegressionBaseline::default())
+            ..CheckCounts::from_config_baseline(&plow_config::RegressionBaseline::default())
         };
         save_baseline_to_config(&config_path, &counts, OutputFormat::Human).unwrap();
 
@@ -1026,7 +1026,7 @@ mod tests {
     fn compare_returns_none_when_disabled() {
         let results = AnalysisResults::default();
         let opts = make_opts(false, Tolerance::Absolute(0), false, None);
-        let config_baseline = fallow_config::RegressionBaseline {
+        let config_baseline = plow_config::RegressionBaseline {
             total_issues: 5,
             ..Default::default()
         };
@@ -1038,7 +1038,7 @@ mod tests {
     fn compare_returns_skipped_when_scoped() {
         let results = AnalysisResults::default();
         let opts = make_opts(true, Tolerance::Absolute(0), true, None);
-        let config_baseline = fallow_config::RegressionBaseline {
+        let config_baseline = plow_config::RegressionBaseline {
             total_issues: 5,
             ..Default::default()
         };
@@ -1050,7 +1050,7 @@ mod tests {
     fn compare_pass_with_config_baseline() {
         let results = AnalysisResults::default(); // 0 issues
         let opts = make_opts(true, Tolerance::Absolute(0), false, None);
-        let config_baseline = fallow_config::RegressionBaseline {
+        let config_baseline = plow_config::RegressionBaseline {
             total_issues: 0,
             ..Default::default()
         };
@@ -1081,7 +1081,7 @@ mod tests {
                 path: PathBuf::from("b.ts"),
             }));
         let opts = make_opts(true, Tolerance::Absolute(0), false, None);
-        let config_baseline = fallow_config::RegressionBaseline {
+        let config_baseline = plow_config::RegressionBaseline {
             total_issues: 0,
             ..Default::default()
         };
@@ -1108,7 +1108,7 @@ mod tests {
                 path: PathBuf::from("a.ts"),
             }));
         let opts = make_opts(true, Tolerance::Absolute(5), false, None);
-        let config_baseline = fallow_config::RegressionBaseline {
+        let config_baseline = plow_config::RegressionBaseline {
             total_issues: 0,
             ..Default::default()
         };
@@ -1121,7 +1121,7 @@ mod tests {
         // Current has fewer issues than baseline
         let results = AnalysisResults::default(); // 0 issues
         let opts = make_opts(true, Tolerance::Absolute(0), false, None);
-        let config_baseline = fallow_config::RegressionBaseline {
+        let config_baseline = plow_config::RegressionBaseline {
             total_issues: 10,
             unused_files: 5,
             unused_exports: 5,
@@ -1149,7 +1149,7 @@ mod tests {
         let counts = CheckCounts {
             total_issues: 5,
             unused_files: 5,
-            ..CheckCounts::from_config_baseline(&fallow_config::RegressionBaseline::default())
+            ..CheckCounts::from_config_baseline(&plow_config::RegressionBaseline::default())
         };
         save_regression_baseline(
             &baseline_path,
@@ -1225,7 +1225,7 @@ mod tests {
             }));
 
         let opts = make_opts(true, Tolerance::Absolute(0), false, None);
-        let config_baseline = fallow_config::RegressionBaseline {
+        let config_baseline = plow_config::RegressionBaseline {
             total_issues: 0,
             ..Default::default()
         };
@@ -1254,7 +1254,7 @@ mod tests {
         // baseline=10, 50% of 10 = 5, delta=1-10=-9 (improvement, should pass)
         // Wait, total_issues in config is the baseline for comparison.
         // results has 1 issue, baseline has 10 -> improvement -> pass
-        let config_baseline = fallow_config::RegressionBaseline {
+        let config_baseline = plow_config::RegressionBaseline {
             total_issues: 10,
             unused_files: 10,
             ..Default::default()
@@ -1270,7 +1270,7 @@ mod tests {
         let body = format!(
             r#"{{
   "schema_version": {version},
-  "fallow_version": "3.0.0",
+  "plow_version": "3.0.0",
   "timestamp": "2026-05-21T00:00:00Z",
   "check": {{
     "total_issues": 0,
@@ -1316,7 +1316,7 @@ mod tests {
         std::fs::write(
             &path,
             r#"{
-  "fallow_version": "1.0.0",
+  "plow_version": "1.0.0",
   "timestamp": "2026-05-21T00:00:00Z",
   "check": {}
 }"#,
@@ -1329,12 +1329,12 @@ mod tests {
     #[test]
     fn format_schema_mismatch_error_too_high() {
         let msg =
-            format_schema_mismatch_error(Path::new("/repo/.fallow-baseline.json"), 1, 99, "3.0.0");
+            format_schema_mismatch_error(Path::new("/repo/.plow-baseline.json"), 1, 99, "3.0.0");
         assert!(msg.contains("schema_version 99"));
         assert!(msg.contains("expects 1"));
-        assert!(msg.contains("fallow 3.0.0"));
+        assert!(msg.contains("plow 3.0.0"));
         assert!(
-            msg.contains("fallow check --save-regression-baseline /repo/.fallow-baseline.json")
+            msg.contains("plow check --save-regression-baseline /repo/.plow-baseline.json")
         );
         // No abbreviations, no "refresh"
         assert!(!msg.to_lowercase().contains("refresh"));
@@ -1345,11 +1345,11 @@ mod tests {
     #[test]
     fn format_schema_mismatch_error_actual_zero_special_case() {
         let msg =
-            format_schema_mismatch_error(Path::new("/repo/.fallow-baseline.json"), 1, 0, "2.0.0");
+            format_schema_mismatch_error(Path::new("/repo/.plow-baseline.json"), 1, 0, "2.0.0");
         assert!(msg.contains("predate"));
-        assert!(msg.contains("fallow 2.0.0"));
+        assert!(msg.contains("plow 2.0.0"));
         assert!(
-            msg.contains("fallow check --save-regression-baseline /repo/.fallow-baseline.json")
+            msg.contains("plow check --save-regression-baseline /repo/.plow-baseline.json")
         );
     }
 
@@ -1357,7 +1357,7 @@ mod tests {
     fn format_missing_schema_version_error_includes_regenerate_command() {
         let msg = format_missing_schema_version_error(Path::new("/repo/baseline.json"));
         assert!(msg.contains("missing the schema_version field"));
-        assert!(msg.contains("fallow check --save-regression-baseline /repo/baseline.json"));
+        assert!(msg.contains("plow check --save-regression-baseline /repo/baseline.json"));
     }
 
     #[test]
@@ -1369,7 +1369,7 @@ mod tests {
         let counts = CheckCounts {
             total_issues: 1,
             unused_files: 1,
-            ..CheckCounts::from_config_baseline(&fallow_config::RegressionBaseline::default())
+            ..CheckCounts::from_config_baseline(&plow_config::RegressionBaseline::default())
         };
         save_regression_baseline(&path, dir.path(), Some(&counts), None, OutputFormat::Human)
             .unwrap();

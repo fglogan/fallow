@@ -140,10 +140,10 @@ pub const VALID_DUPES_MODES: &[&str] = &["strict", "mild", "weak", "semantic"];
 /// Valid gate values for the `audit` tool.
 pub const VALID_AUDIT_GATES: &[&str] = &["new-only", "all"];
 
-/// Build a structured validation error body matching the shape `run_fallow` emits
+/// Build a structured validation error body matching the shape `run_plow` emits
 /// for CLI-level errors: `{"error": true, "message": "...", "exit_code": 0}`.
 ///
-/// Used by arg builders to reject invalid input before spawning fallow. `exit_code`
+/// Used by arg builders to reject invalid input before spawning plow. `exit_code`
 /// is `0` because no subprocess ran, disambiguating validation failures from CLI
 /// error exits (which use the real exit code). The returned string is compact JSON
 /// ready to be wrapped in `CallToolResult::error(vec![Content::text(body)])`.
@@ -156,9 +156,9 @@ pub fn validation_error_body(message: impl Into<String>) -> String {
     .to_string()
 }
 
-/// Read the subprocess timeout from `FALLOW_TIMEOUT_SECS` or fall back to the default.
+/// Read the subprocess timeout from `PLOW_TIMEOUT_SECS` or fall back to the default.
 fn timeout_duration() -> Duration {
-    std::env::var("FALLOW_TIMEOUT_SECS")
+    std::env::var("PLOW_TIMEOUT_SECS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
         .map_or(
@@ -167,12 +167,12 @@ fn timeout_duration() -> Duration {
         )
 }
 
-/// Execute the fallow CLI binary with the given arguments and return the result.
-pub async fn run_fallow(binary: &str, args: &[String]) -> Result<CallToolResult, McpError> {
-    run_fallow_with_timeout(binary, args, timeout_duration()).await
+/// Execute the plow CLI binary with the given arguments and return the result.
+pub async fn run_plow(binary: &str, args: &[String]) -> Result<CallToolResult, McpError> {
+    run_plow_with_timeout(binary, args, timeout_duration()).await
 }
 
-pub async fn run_fallow_with_timeout(
+pub async fn run_plow_with_timeout(
     binary: &str,
     args: &[String],
     timeout: Duration,
@@ -189,8 +189,8 @@ pub async fn run_fallow_with_timeout(
     .map_err(|_| {
         McpError::internal_error(
             format!(
-                "fallow subprocess timed out after {}s. \
-                 Set FALLOW_TIMEOUT_SECS to increase the limit.",
+                "plow subprocess timed out after {}s. \
+                 Set PLOW_TIMEOUT_SECS to increase the limit.",
                 timeout.as_secs()
             ),
             None,
@@ -199,9 +199,9 @@ pub async fn run_fallow_with_timeout(
     .map_err(|e| {
         McpError::internal_error(
             format!(
-                "Failed to execute fallow binary '{binary}': {e}. \
-                 Ensure fallow is installed and available in PATH, \
-                 or set the FALLOW_BIN environment variable."
+                "Failed to execute plow binary '{binary}': {e}. \
+                 Ensure plow is installed and available in PATH, \
+                 or set the PLOW_BIN environment variable."
             ),
             None,
         )
@@ -235,7 +235,7 @@ pub async fn run_fallow_with_timeout(
         }
 
         let message = if stderr.is_empty() {
-            format!("fallow exited with code {exit_code}")
+            format!("plow exited with code {exit_code}")
         } else {
             stderr.trim().to_string()
         };
@@ -262,13 +262,13 @@ pub async fn run_fallow_with_timeout(
     )]))
 }
 
-/// Execute fallow and ensure successful JSON responses have a top-level
+/// Execute plow and ensure successful JSON responses have a top-level
 /// `warnings` array for agent-facing runtime context tools.
-pub async fn run_fallow_with_top_level_warnings(
+pub async fn run_plow_with_top_level_warnings(
     binary: &str,
     args: &[String],
 ) -> Result<CallToolResult, McpError> {
-    let result = run_fallow(binary, args).await?;
+    let result = run_plow(binary, args).await?;
     if result.is_error == Some(true) {
         return Ok(result);
     }

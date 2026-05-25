@@ -8,8 +8,8 @@ const RUN_BINARY = path.join(__dirname, "run-binary.js");
 // Run a child that installs guardBrokenStdout, then emits a synthetic stdout
 // 'error' with the given code. Node delivers a broken-pipe failure as exactly
 // this event ("Emitted 'error' event on Socket instance"), so emitting it is a
-// faithful reproduction of `fallow --version | head` without needing a live
-// pipe or an installed @fallow-cli platform package. Requiring run-binary.js
+// faithful reproduction of `plow --version | head` without needing a live
+// pipe or an installed @plow-cli platform package. Requiring run-binary.js
 // has no side effects beyond defining functions, so no binary is resolved.
 function runGuardChild(errorCode) {
   const script =

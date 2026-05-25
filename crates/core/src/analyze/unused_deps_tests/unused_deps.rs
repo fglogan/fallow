@@ -115,7 +115,7 @@ fn ignore_dependencies_config_filters_deps() {
     let (graph, _) = build_graph_with_npm_imports(&[]);
     let pkg = make_pkg(&["my-internal-pkg"], &[], &[]);
 
-    let config = FallowConfig {
+    let config = PlowConfig {
         ignore_dependencies: vec!["my-internal-pkg".to_string()],
         ignore_unresolved_imports: vec![],
         ..Default::default()

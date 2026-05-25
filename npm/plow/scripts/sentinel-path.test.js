@@ -12,7 +12,7 @@ const {
 } = require("./sentinel-path");
 
 function mkTmp() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "fallow-sentinel-path-"));
+  return fs.mkdtempSync(path.join(os.tmpdir(), "plow-sentinel-path-"));
 }
 
 function cleanup(dir) {
@@ -20,9 +20,9 @@ function cleanup(dir) {
 }
 
 test("packageIdToFilename normalises scoped package names", () => {
-  assert.equal(packageIdToFilename("@fallow-cli/darwin-arm64"), "fallow-cli__darwin-arm64.json");
-  assert.equal(packageIdToFilename("@fallow-cli/linux-x64-gnu"), "fallow-cli__linux-x64-gnu.json");
-  assert.equal(packageIdToFilename("fallow"), "fallow.json");
+  assert.equal(packageIdToFilename("@plow-cli/darwin-arm64"), "plow-cli__darwin-arm64.json");
+  assert.equal(packageIdToFilename("@plow-cli/linux-x64-gnu"), "plow-cli__linux-x64-gnu.json");
+  assert.equal(packageIdToFilename("plow"), "plow.json");
   assert.equal(packageIdToFilename(""), "unknown.json");
   assert.equal(packageIdToFilename(undefined), "unknown.json");
 });
@@ -62,7 +62,7 @@ test("resolveSentinelPath prefers the platform pkg dir when writable", () => {
   try {
     const result = resolveSentinelPath({
       platformPkgDir,
-      packageName: "@fallow-cli/darwin-arm64",
+      packageName: "@plow-cli/darwin-arm64",
       env: {},
     });
     assert.equal(result.location, "platform-pkg");
@@ -73,23 +73,23 @@ test("resolveSentinelPath prefers the platform pkg dir when writable", () => {
   }
 });
 
-test("resolveSentinelPath falls back to FALLOW_VERIFY_CACHE_DIR when platform pkg dir is non-writable", () => {
+test("resolveSentinelPath falls back to PLOW_VERIFY_CACHE_DIR when platform pkg dir is non-writable", () => {
   const cacheDir = mkTmp();
   try {
     const result = resolveSentinelPath({
       platformPkgDir: "/dev/null/not-a-dir",
-      packageName: "@fallow-cli/darwin-arm64",
-      env: { FALLOW_VERIFY_CACHE_DIR: cacheDir },
+      packageName: "@plow-cli/darwin-arm64",
+      env: { PLOW_VERIFY_CACHE_DIR: cacheDir },
     });
     assert.equal(result.location, "cache-dir-env");
     assert.equal(result.writable, true);
-    assert.equal(result.path, path.join(cacheDir, "fallow-cli__darwin-arm64.json"));
+    assert.equal(result.path, path.join(cacheDir, "plow-cli__darwin-arm64.json"));
   } finally {
     cleanup(cacheDir);
   }
 });
 
-test("resolveSentinelPath honors FALLOW_VERIFY_CACHE_DIR even when platform pkg dir IS writable", () => {
+test("resolveSentinelPath honors PLOW_VERIFY_CACHE_DIR even when platform pkg dir IS writable", () => {
   // Per the cascade documented in the source, the platform pkg dir wins when
   // writable. The cache-dir env is the FALLBACK for when the platform dir is
   // read-only. We pass a non-existent platform dir to force the fallback.
@@ -97,11 +97,11 @@ test("resolveSentinelPath honors FALLOW_VERIFY_CACHE_DIR even when platform pkg 
   try {
     const result = resolveSentinelPath({
       platformPkgDir: undefined,
-      packageName: "@fallow-cli/linux-x64-gnu",
-      env: { FALLOW_VERIFY_CACHE_DIR: cacheDir },
+      packageName: "@plow-cli/linux-x64-gnu",
+      env: { PLOW_VERIFY_CACHE_DIR: cacheDir },
     });
     assert.equal(result.location, "cache-dir-env");
-    assert.equal(result.path, path.join(cacheDir, "fallow-cli__linux-x64-gnu.json"));
+    assert.equal(result.path, path.join(cacheDir, "plow-cli__linux-x64-gnu.json"));
   } finally {
     cleanup(cacheDir);
   }
@@ -114,7 +114,7 @@ test("resolveSentinelPath falls back to XDG_CACHE_HOME on Linux/macOS", () => {
   try {
     const result = resolveSentinelPath({
       platformPkgDir: undefined,
-      packageName: "@fallow-cli/darwin-arm64",
+      packageName: "@plow-cli/darwin-arm64",
       env: { XDG_CACHE_HOME: xdg },
       homedir: homeDir,
       platform: "darwin",
@@ -123,10 +123,10 @@ test("resolveSentinelPath falls back to XDG_CACHE_HOME on Linux/macOS", () => {
     assert.equal(result.writable, true);
     assert.equal(
       result.path,
-      path.join(xdg, "fallow", "sentinels", "fallow-cli__darwin-arm64.json"),
+      path.join(xdg, "plow", "sentinels", "plow-cli__darwin-arm64.json"),
     );
-    // The fallow/sentinels/ subdir must have been created.
-    assert.equal(fs.existsSync(path.join(xdg, "fallow", "sentinels")), true);
+    // The plow/sentinels/ subdir must have been created.
+    assert.equal(fs.existsSync(path.join(xdg, "plow", "sentinels")), true);
   } finally {
     cleanup(homeDir);
   }
@@ -137,7 +137,7 @@ test("resolveSentinelPath falls back to ~/.cache on Linux/macOS when XDG_CACHE_H
   try {
     const result = resolveSentinelPath({
       platformPkgDir: undefined,
-      packageName: "@fallow-cli/linux-x64-gnu",
+      packageName: "@plow-cli/linux-x64-gnu",
       env: {},
       homedir: homeDir,
       platform: "linux",
@@ -145,7 +145,7 @@ test("resolveSentinelPath falls back to ~/.cache on Linux/macOS when XDG_CACHE_H
     assert.equal(result.location, "home-cache");
     assert.equal(
       result.path,
-      path.join(homeDir, ".cache", "fallow", "sentinels", "fallow-cli__linux-x64-gnu.json"),
+      path.join(homeDir, ".cache", "plow", "sentinels", "plow-cli__linux-x64-gnu.json"),
     );
   } finally {
     cleanup(homeDir);
@@ -157,7 +157,7 @@ test("resolveSentinelPath uses LOCALAPPDATA on Windows", () => {
   try {
     const result = resolveSentinelPath({
       platformPkgDir: undefined,
-      packageName: "@fallow-cli/win32-x64-msvc",
+      packageName: "@plow-cli/win32-x64-msvc",
       env: { LOCALAPPDATA: localAppData },
       homedir: "/c/Users/test",
       platform: "win32",
@@ -166,7 +166,7 @@ test("resolveSentinelPath uses LOCALAPPDATA on Windows", () => {
     assert.equal(result.writable, true);
     assert.equal(
       result.path,
-      path.join(localAppData, "fallow", "sentinels", "fallow-cli__win32-x64-msvc.json"),
+      path.join(localAppData, "plow", "sentinels", "plow-cli__win32-x64-msvc.json"),
     );
   } finally {
     cleanup(localAppData);
@@ -176,7 +176,7 @@ test("resolveSentinelPath uses LOCALAPPDATA on Windows", () => {
 test("resolveSentinelPath returns no path when every location is non-writable", () => {
   const result = resolveSentinelPath({
     platformPkgDir: undefined,
-    packageName: "@fallow-cli/darwin-arm64",
+    packageName: "@plow-cli/darwin-arm64",
     env: {},
     homedir: undefined,
     platform: "darwin",
@@ -189,7 +189,7 @@ test("resolveSentinelPath returns no path when every location is non-writable", 
 test("resolveSentinelPath returns no path on Windows without LOCALAPPDATA", () => {
   const result = resolveSentinelPath({
     platformPkgDir: undefined,
-    packageName: "@fallow-cli/win32-x64-msvc",
+    packageName: "@plow-cli/win32-x64-msvc",
     env: {},
     homedir: undefined,
     platform: "win32",
@@ -202,7 +202,7 @@ test("resolveSentinelPath honors injected isWritable + ensureDir for full test i
   const calls = [];
   const result = resolveSentinelPath({
     platformPkgDir: "/synthetic/pkg-dir",
-    packageName: "@fallow-cli/darwin-arm64",
+    packageName: "@plow-cli/darwin-arm64",
     env: {},
     isWritable: (dir) => {
       calls.push(["isWritable", dir]);
@@ -218,14 +218,14 @@ test("resolveSentinelPath honors injected isWritable + ensureDir for full test i
 });
 
 test("resolveSentinelPath skips cache-dir-env when ensureDir fails for it", () => {
-  // FALLOW_VERIFY_CACHE_DIR points at a non-creatable path, XDG points at a
+  // PLOW_VERIFY_CACHE_DIR points at a non-creatable path, XDG points at a
   // creatable one. Confirm the resolver moves past the env override.
   const homeDir = mkTmp();
   try {
     const result = resolveSentinelPath({
       platformPkgDir: undefined,
-      packageName: "@fallow-cli/darwin-arm64",
-      env: { FALLOW_VERIFY_CACHE_DIR: "/dev/null/inside/a/file" },
+      packageName: "@plow-cli/darwin-arm64",
+      env: { PLOW_VERIFY_CACHE_DIR: "/dev/null/inside/a/file" },
       homedir: homeDir,
       platform: "darwin",
     });

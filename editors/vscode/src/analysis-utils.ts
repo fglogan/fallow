@@ -1,6 +1,6 @@
-import type { FallowCheckResult } from "./types.js";
+import type { PlowCheckResult } from "./types.js";
 
-export const countCheckIssues = (result: FallowCheckResult | null): number => {
+export const countCheckIssues = (result: PlowCheckResult | null): number => {
   if (!result) {
     return 0;
   }

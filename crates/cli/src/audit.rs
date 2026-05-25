@@ -6,8 +6,8 @@ use std::process::{Command, ExitCode};
 use std::time::{Duration, Instant, SystemTime};
 
 use colored::Colorize;
-use fallow_config::{AuditConfig, AuditGate, OutputFormat};
-use fallow_core::git_env::clear_ambient_git_env;
+use plow_config::{AuditConfig, AuditGate, OutputFormat};
+use plow_core::git_env::clear_ambient_git_env;
 use rustc_hash::FxHashSet;
 use xxhash_rust::xxh3::xxh3_64;
 
@@ -96,11 +96,11 @@ pub struct AuditOptions<'a> {
     pub explain_skipped: bool,
     pub performance: bool,
     pub group_by: Option<crate::GroupBy>,
-    /// Baseline file for dead-code analysis (as produced by `fallow dead-code --save-baseline`).
+    /// Baseline file for dead-code analysis (as produced by `plow dead-code --save-baseline`).
     pub dead_code_baseline: Option<&'a std::path::Path>,
-    /// Baseline file for health analysis (as produced by `fallow health --save-baseline`).
+    /// Baseline file for health analysis (as produced by `plow health --save-baseline`).
     pub health_baseline: Option<&'a std::path::Path>,
-    /// Baseline file for duplication analysis (as produced by `fallow dupes --save-baseline`).
+    /// Baseline file for duplication analysis (as produced by `plow dupes --save-baseline`).
     pub dupes_baseline: Option<&'a std::path::Path>,
     /// Maximum CRAP score threshold (overrides `health.maxCrap` from config).
     /// Functions meeting or exceeding this score cause audit to fail.
@@ -115,7 +115,7 @@ pub struct AuditOptions<'a> {
     /// Paid runtime-coverage sidecar input (V8 directory, V8 JSON, or
     /// Istanbul coverage map). Forwarded into the embedded health pass so
     /// audit surfaces the `hot-path-touched` verdict alongside dead-code
-    /// and complexity findings without requiring a second `fallow health`
+    /// and complexity findings without requiring a second `plow health`
     /// invocation in CI.
     pub runtime_coverage: Option<&'a std::path::Path>,
     /// Threshold for hot-path classification, forwarded to the sidecar.
@@ -124,7 +124,7 @@ pub struct AuditOptions<'a> {
     // parsed diff index from the process-wide cache in
     // `crate::report::ci::diff_filter::shared_diff_index()`, populated
     // by `main()`. The cache covers `--diff-file PATH`, `--diff-file -`,
-    // `--diff-stdin`, and the `$FALLOW_DIFF_FILE` env var.
+    // `--diff-stdin`, and the `$PLOW_DIFF_FILE` env var.
 }
 
 // ── Auto-detect base branch ──────────────────────────────────────
@@ -215,7 +215,7 @@ fn compute_verdict(
 
     // Complexity: findings that exceeded configured thresholds are always errors.
     // Health rules don't have a warn-severity concept — any finding above the
-    // threshold is a quality gate failure, matching `fallow health` exit code semantics.
+    // threshold is a quality gate failure, matching `plow health` exit code semantics.
     if let Some(result) = health
         && !result.report.findings.is_empty()
     {
@@ -444,7 +444,7 @@ fn cached_from_snapshot(
 }
 
 fn audit_base_snapshot_cache_dir(root: &Path) -> PathBuf {
-    root.join(".fallow")
+    root.join(".plow")
         .join("cache")
         .join(format!("audit-base-v{AUDIT_BASE_SNAPSHOT_CACHE_VERSION}"))
 }
@@ -512,20 +512,20 @@ fn git_rev_parse(root: &Path, rev: &str) -> Option<String> {
     Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-/// If fallow's process inherited any ambient git repo-state env vars (typical
+/// If plow's process inherited any ambient git repo-state env vars (typical
 /// when invoked from a `pre-commit` / `pre-push` hook or a tool wrapping git),
 /// surface the most likely culprit so a user hitting an unexpected worktree
 /// failure can short-circuit the diagnosis. Returns `None` otherwise.
 fn ambient_git_env_hint() -> Option<String> {
-    use fallow_core::git_env::AMBIENT_GIT_ENV_VARS;
+    use plow_core::git_env::AMBIENT_GIT_ENV_VARS;
     for var in AMBIENT_GIT_ENV_VARS {
         if let Ok(value) = std::env::var(var)
             && !value.is_empty()
         {
             return Some(format!(
-                "{var}={value} is set in the environment; if fallow is being \
+                "{var}={value} is set in the environment; if plow is being \
 invoked from a git hook this can interfere with worktree operations. Re-run \
-with `env -u {var} fallow audit` to confirm."
+with `env -u {var} plow audit` to confirm."
             ));
         }
     }
@@ -551,7 +551,7 @@ fn normalized_changed_files(root: &Path, changed_files: &FxHashSet<PathBuf>) -> 
 
 fn config_file_fingerprint(opts: &AuditOptions<'_>) -> Result<serde_json::Value, ExitCode> {
     let loaded = if let Some(path) = opts.config_path {
-        let config = fallow_config::FallowConfig::load(path).map_err(|e| {
+        let config = plow_config::PlowConfig::load(path).map_err(|e| {
             emit_error(
                 &format!("failed to load config '{}': {e}", path.display()),
                 2,
@@ -560,7 +560,7 @@ fn config_file_fingerprint(opts: &AuditOptions<'_>) -> Result<serde_json::Value,
         })?;
         Some((config, path.clone()))
     } else {
-        fallow_config::FallowConfig::find_and_load(opts.root)
+        plow_config::PlowConfig::find_and_load(opts.root)
             .map_err(|e| emit_error(&e, 2, opts.output))?
     };
 
@@ -673,7 +673,7 @@ fn compute_base_snapshot(
     let current_config_path = opts
         .config_path
         .clone()
-        .or_else(|| fallow_config::FallowConfig::find_config_path(opts.root));
+        .or_else(|| plow_config::PlowConfig::find_config_path(opts.root));
     let base_opts = AuditOptions {
         root: &base_root,
         config_path: &current_config_path,
@@ -801,14 +801,14 @@ fn can_reuse_current_as_base(
     // relative diff entry, so changed-file paths land canonical even when
     // `opts.root` itself was passed un-canonical (typical in tests). Match
     // against both forms so the cache-artifact check works in either case.
-    let cache_dir = opts.root.join(".fallow");
+    let cache_dir = opts.root.join(".plow");
     // `dunce::canonicalize` strips Windows `\\?\` verbatim prefix so the
     // `starts_with` checks below compare against a shape that matches the
     // changed_files paths (which also flow through dunce-canonicalised
     // `resolve_git_toplevel`). On POSIX dunce is identical to std.
     let canonical_cache_dir = dunce::canonicalize(&cache_dir).ok();
     changed_files.iter().all(|path| {
-        if is_fallow_cache_artifact(path, &cache_dir, canonical_cache_dir.as_deref()) {
+        if is_plow_cache_artifact(path, &cache_dir, canonical_cache_dir.as_deref()) {
             return true;
         }
         if !is_analysis_input(path) {
@@ -830,14 +830,14 @@ fn can_reuse_current_as_base(
     })
 }
 
-// `cache_dir` is the project-local cache root (`<opts.root>/.fallow`).
-// Anything under it is a fallow internal artifact (token cache, parse cache,
+// `cache_dir` is the project-local cache root (`<opts.root>/.plow`).
+// Anything under it is a plow internal artifact (token cache, parse cache,
 // gitignore stubs) with no semantic effect on analysis, so a "changed" entry
 // inside it must not block the audit-gate base-snapshot fast path. We accept
 // both the as-given and the canonicalized cache_dir because changed-file
 // paths from `try_get_changed_files` are joined onto the canonical git
 // toplevel while `opts.root` may be un-canonical in tests.
-fn is_fallow_cache_artifact(
+fn is_plow_cache_artifact(
     path: &Path,
     cache_dir: &Path,
     canonical_cache_dir: Option<&Path>,
@@ -857,7 +857,7 @@ fn git_toplevel(root: &Path) -> Option<PathBuf> {
         return None;
     }
     let path = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
-    // Mirror `fallow_core::changed_files::resolve_git_toplevel`: use
+    // Mirror `plow_core::changed_files::resolve_git_toplevel`: use
     // `dunce::canonicalize` to strip Windows `\\?\` verbatim prefix so this
     // canonical form matches the shape `opts.root` and finding paths use
     // downstream. `std::fs::canonicalize` would diverge on Windows.
@@ -911,7 +911,7 @@ fn is_non_behavioral_doc(path: &Path) -> bool {
 }
 
 fn js_ts_tokens_equivalent(path: &Path, current: &str, base: &str) -> bool {
-    if current.contains("fallow-ignore") || base.contains("fallow-ignore") {
+    if current.contains("plow-ignore") || base.contains("plow-ignore") {
         return false;
     }
     if !matches!(
@@ -920,8 +920,8 @@ fn js_ts_tokens_equivalent(path: &Path, current: &str, base: &str) -> bool {
     ) {
         return false;
     }
-    let current_tokens = fallow_core::duplicates::tokenize::tokenize_file(path, current, false);
-    let base_tokens = fallow_core::duplicates::tokenize::tokenize_file(path, base, false);
+    let current_tokens = plow_core::duplicates::tokenize::tokenize_file(path, current, false);
+    let base_tokens = plow_core::duplicates::tokenize::tokenize_file(path, base, false);
     current_tokens
         .tokens
         .iter()
@@ -978,7 +978,7 @@ impl BaseWorktree {
             return Some(worktree);
         }
         let path = std::env::temp_dir().join(format!(
-            "fallow-audit-base-{}-{}",
+            "plow-audit-base-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -1183,7 +1183,7 @@ fn reusable_worktree_lock_path(reusable_path: &Path) -> PathBuf {
 const DEFAULT_AUDIT_CACHE_MAX_AGE_DAYS: u32 = 30;
 
 /// Env var that overrides `audit.cacheMaxAgeDays` from the config.
-const AUDIT_CACHE_MAX_AGE_ENV: &str = "FALLOW_AUDIT_CACHE_MAX_AGE_DAYS";
+const AUDIT_CACHE_MAX_AGE_ENV: &str = "PLOW_AUDIT_CACHE_MAX_AGE_DAYS";
 
 /// Sidecar filename suffix used to track last-use of a reusable worktree.
 const REUSABLE_LAST_USED_SUFFIX: &str = ".last-used";
@@ -1229,7 +1229,7 @@ fn touch_last_used(reusable_path: &Path) {
 
 /// Resolve the GC threshold for persistent reusable caches.
 ///
-/// Precedence: `FALLOW_AUDIT_CACHE_MAX_AGE_DAYS` env var > `audit.cacheMaxAgeDays`
+/// Precedence: `PLOW_AUDIT_CACHE_MAX_AGE_DAYS` env var > `audit.cacheMaxAgeDays`
 /// config field > 30-day default. `0` from either source disables the sweep
 /// entirely (returns `None`). Invalid env values (non-integer) silently fall
 /// back to config / default; audits do not fail on a typo in a runner env var.
@@ -1240,7 +1240,7 @@ fn resolve_cache_max_age(opts: &AuditOptions<'_>) -> Option<Duration> {
         }
         tracing::debug!(
             value = %raw,
-            "FALLOW_AUDIT_CACHE_MAX_AGE_DAYS is not a valid u32; falling back to config/default",
+            "PLOW_AUDIT_CACHE_MAX_AGE_DAYS is not a valid u32; falling back to config/default",
         );
     }
     if let Some(days) = load_audit_config(opts).and_then(|c| c.cache_max_age_days) {
@@ -1261,11 +1261,11 @@ fn days_to_duration(days: u32) -> Option<Duration> {
 /// back to `None`; the caller defaults to a 30-day window.
 fn load_audit_config(opts: &AuditOptions<'_>) -> Option<AuditConfig> {
     if let Some(path) = opts.config_path {
-        return fallow_config::FallowConfig::load(path)
+        return plow_config::PlowConfig::load(path)
             .ok()
             .map(|config| config.audit);
     }
-    fallow_config::FallowConfig::find_and_load(opts.root)
+    plow_config::PlowConfig::find_and_load(opts.root)
         .ok()
         .flatten()
         .map(|(config, _path)| config.audit)
@@ -1275,7 +1275,7 @@ fn load_audit_config(opts: &AuditOptions<'_>) -> Option<AuditConfig> {
 /// `.last-used` file is older than `max_age`.
 ///
 /// Concurrency: each candidate is gated by [`ReusableWorktreeLock`] before
-/// removal, so an in-flight `fallow audit` mid-rebuild against the same
+/// removal, so an in-flight `plow audit` mid-rebuild against the same
 /// cache entry will not be disturbed (the sweep skips on contention).
 ///
 /// Pre-upgrade caches lacking a sidecar are NOT removed: instead the sweep
@@ -1351,7 +1351,7 @@ fn sweep_old_reusable_caches(repo_root: &Path, max_age: Duration, quiet: bool) {
         let s = plural(removed as usize);
         let _ = writeln!(
             std::io::stderr(),
-            "fallow: reclaimed {removed} stale base-snapshot cache{s}",
+            "plow: reclaimed {removed} stale base-snapshot cache{s}",
         );
     }
 }
@@ -1364,7 +1364,7 @@ fn reusable_audit_worktree_path(repo_root: &Path, base_sha: &str) -> PathBuf {
     let repo_hash = xxh3_64(repo_root.to_string_lossy().as_bytes());
     let sha_prefix = base_sha.get(..16).unwrap_or(base_sha);
     std::env::temp_dir().join(format!(
-        "fallow-audit-base-cache-{repo_hash:016x}-{sha_prefix}"
+        "plow-audit-base-cache-{repo_hash:016x}-{sha_prefix}"
     ))
 }
 
@@ -1406,7 +1406,7 @@ fn paths_equal(left: &Path, right: &Path) -> bool {
 /// far outweighs the residual drift.
 ///
 /// The meta-framework entries must stay aligned with the set recognized by
-/// `missing_meta_framework_prerequisites` in `fallow_core`'s plugin registry.
+/// `missing_meta_framework_prerequisites` in `plow_core`'s plugin registry.
 /// Adding a framework's prepare-dir warning there without extending this list
 /// silently reintroduces the broken-tsconfig-chain bug on the base pass for
 /// that framework.
@@ -1486,7 +1486,7 @@ fn sweep_orphan_audit_worktrees(repo_root: &Path) {
     };
     let mut removed_any = false;
     for path in worktrees {
-        if !is_fallow_audit_worktree_path(&path)
+        if !is_plow_audit_worktree_path(&path)
             || is_reusable_audit_worktree_path(&path)
             || audit_worktree_process_is_alive(&path)
         {
@@ -1526,21 +1526,21 @@ fn parse_worktree_list(output: &str) -> Vec<PathBuf> {
         .lines()
         .filter_map(|line| line.strip_prefix("worktree "))
         .map(PathBuf::from)
-        .filter(|path| is_fallow_audit_worktree_path(path))
+        .filter(|path| is_plow_audit_worktree_path(path))
         .collect()
 }
 
-fn is_fallow_audit_worktree_path(path: &Path) -> bool {
+fn is_plow_audit_worktree_path(path: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
         return false;
     };
-    name.starts_with("fallow-audit-base-") && path_is_inside_temp_dir(path)
+    name.starts_with("plow-audit-base-") && path_is_inside_temp_dir(path)
 }
 
 fn is_reusable_audit_worktree_path(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
-        .is_some_and(|name| name.starts_with("fallow-audit-base-cache-"))
+        .is_some_and(|name| name.starts_with("plow-audit-base-cache-"))
 }
 
 fn path_is_inside_temp_dir(path: &Path) -> bool {
@@ -1550,7 +1550,7 @@ fn path_is_inside_temp_dir(path: &Path) -> bool {
     // (synthetic test paths, real canonical paths from std OR dunce) without
     // requiring the path to actually exist on disk. The earlier
     // `dunce::canonicalize` attempt failed for the synthetic test paths in
-    // `audit_worktree_helpers_filter_to_fallow_temp_prefix` because the
+    // `audit_worktree_helpers_filter_to_plow_temp_prefix` because the
     // worktree dirs are constructed in-memory and never written.
     let simple_path = dunce::simplified(path);
     let simple_temp = dunce::simplified(&temp);
@@ -1582,7 +1582,7 @@ fn audit_worktree_process_is_alive(path: &Path) -> bool {
 }
 
 fn audit_worktree_pid(name: &str) -> Option<u32> {
-    name.strip_prefix("fallow-audit-base-")?
+    name.strip_prefix("plow-audit-base-")?
         .split('-')
         .next()?
         .parse()
@@ -1724,17 +1724,17 @@ fn relative_key_path(path: &Path, root: &Path) -> String {
         .replace('\\', "/")
 }
 
-fn dependency_location_key(location: &fallow_core::results::DependencyLocation) -> &'static str {
+fn dependency_location_key(location: &plow_core::results::DependencyLocation) -> &'static str {
     match location {
-        fallow_core::results::DependencyLocation::Dependencies => "unused-dependency",
-        fallow_core::results::DependencyLocation::DevDependencies => "unused-dev-dependency",
-        fallow_core::results::DependencyLocation::OptionalDependencies => {
+        plow_core::results::DependencyLocation::Dependencies => "unused-dependency",
+        plow_core::results::DependencyLocation::DevDependencies => "unused-dev-dependency",
+        plow_core::results::DependencyLocation::OptionalDependencies => {
             "unused-optional-dependency"
         }
     }
 }
 
-fn unused_dependency_key(item: &fallow_core::results::UnusedDependency, root: &Path) -> String {
+fn unused_dependency_key(item: &plow_core::results::UnusedDependency, root: &Path) -> String {
     format!(
         "{}:{}:{}",
         dependency_location_key(&item.location),
@@ -1743,7 +1743,7 @@ fn unused_dependency_key(item: &fallow_core::results::UnusedDependency, root: &P
     )
 }
 
-fn unlisted_dependency_key(item: &fallow_core::results::UnlistedDependency, root: &Path) -> String {
+fn unlisted_dependency_key(item: &plow_core::results::UnlistedDependency, root: &Path) -> String {
     let mut sites = item
         .imported_from
         .iter()
@@ -1767,7 +1767,7 @@ fn unlisted_dependency_key(item: &fallow_core::results::UnlistedDependency, root
 
 fn unused_member_key(
     rule_id: &str,
-    item: &fallow_core::results::UnusedMember,
+    item: &plow_core::results::UnusedMember,
     root: &Path,
 ) -> String {
     format!(
@@ -1780,7 +1780,7 @@ fn unused_member_key(
 }
 
 fn unused_catalog_entry_key(
-    item: &fallow_core::results::UnusedCatalogEntry,
+    item: &plow_core::results::UnusedCatalogEntry,
     root: &Path,
 ) -> String {
     format!(
@@ -1792,7 +1792,7 @@ fn unused_catalog_entry_key(
     )
 }
 
-fn empty_catalog_group_key(item: &fallow_core::results::EmptyCatalogGroup, root: &Path) -> String {
+fn empty_catalog_group_key(item: &plow_core::results::EmptyCatalogGroup, root: &Path) -> String {
     format!(
         "empty-catalog-group:{}:{}:{}",
         relative_key_path(&item.path, root),
@@ -1806,7 +1806,7 @@ fn empty_catalog_group_key(item: &fallow_core::results::EmptyCatalogGroup, root:
     reason = "one key-builder block per issue type keeps the audit-attribution key shape local and easy to audit; the count grows linearly with new issue types"
 )]
 fn dead_code_keys(
-    results: &fallow_core::results::AnalysisResults,
+    results: &plow_core::results::AnalysisResults,
     root: &Path,
 ) -> FxHashSet<String> {
     let mut keys = FxHashSet::default();
@@ -1907,8 +1907,8 @@ fn dead_code_keys(
         // cannot keyspace-collide with future single-file multi-node shapes
         // (panel catch #7; same rationale as `baseline.rs::re_export_cycle_key`).
         let kind = match item.cycle.kind {
-            fallow_core::results::ReExportCycleKind::MultiNode => "multi-node",
-            fallow_core::results::ReExportCycleKind::SelfLoop => "self-loop",
+            plow_core::results::ReExportCycleKind::MultiNode => "multi-node",
+            plow_core::results::ReExportCycleKind::SelfLoop => "self-loop",
         };
         let mut files: Vec<String> = item
             .cycle
@@ -1973,7 +1973,7 @@ fn dead_code_keys(
     reason = "one retain block per issue type keeps the gate-filter local and grep-friendly; the count grows linearly with new issue types and parallels dead_code_keys"
 )]
 fn retain_introduced_dead_code(
-    results: &mut fallow_core::results::AnalysisResults,
+    results: &mut plow_core::results::AnalysisResults,
     root: &Path,
     base: Option<&FxHashSet<String>>,
 ) {
@@ -2081,8 +2081,8 @@ fn retain_introduced_dead_code(
     });
     results.re_export_cycles.retain(|item| {
         let kind = match item.cycle.kind {
-            fallow_core::results::ReExportCycleKind::MultiNode => "multi-node",
-            fallow_core::results::ReExportCycleKind::SelfLoop => "self-loop",
+            plow_core::results::ReExportCycleKind::MultiNode => "multi-node",
+            plow_core::results::ReExportCycleKind::SelfLoop => "self-loop",
         };
         let mut files: Vec<String> = item
             .cycle
@@ -2165,7 +2165,7 @@ where
 )]
 fn annotate_dead_code_json(
     json: &mut serde_json::Value,
-    results: &fallow_core::results::AnalysisResults,
+    results: &plow_core::results::AnalysisResults,
     root: &Path,
     base: &FxHashSet<String>,
 ) {
@@ -2357,8 +2357,8 @@ fn annotate_dead_code_json(
         "re_export_cycles",
         results.re_export_cycles.iter().map(|item| {
             let kind = match item.cycle.kind {
-                fallow_core::results::ReExportCycleKind::MultiNode => "multi-node",
-                fallow_core::results::ReExportCycleKind::SelfLoop => "self-loop",
+                plow_core::results::ReExportCycleKind::MultiNode => "multi-node",
+                plow_core::results::ReExportCycleKind::SelfLoop => "self-loop",
             };
             let mut files: Vec<String> = item
                 .cycle
@@ -2493,7 +2493,7 @@ fn annotate_health_json(
 
 fn annotate_dupes_json(
     json: &mut serde_json::Value,
-    report: &fallow_core::duplicates::DuplicationReport,
+    report: &plow_core::duplicates::DuplicationReport,
     root: &Path,
     base: &FxHashSet<String>,
 ) {
@@ -2531,7 +2531,7 @@ fn health_finding_key(finding: &crate::health_types::ComplexityViolation, root: 
 }
 
 fn dupes_keys(
-    report: &fallow_core::duplicates::DuplicationReport,
+    report: &plow_core::duplicates::DuplicationReport,
     root: &Path,
 ) -> FxHashSet<String> {
     report
@@ -2541,7 +2541,7 @@ fn dupes_keys(
         .collect()
 }
 
-fn dupe_group_key(group: &fallow_core::duplicates::CloneGroup, root: &Path) -> String {
+fn dupe_group_key(group: &plow_core::duplicates::CloneGroup, root: &Path) -> String {
     let mut files: Vec<String> = group
         .instances
         .iter()
@@ -2624,7 +2624,7 @@ pub fn execute_audit(opts: &AuditOptions<'_>) -> Result<AuditResult, ExitCode> {
     // every invocation (not gated on whether this audit needs a real
     // base snapshot) so disk-reclaim happens even when this run is fully
     // cache-warm. Skipped entirely when the user sets
-    // `FALLOW_AUDIT_CACHE_MAX_AGE_DAYS=0` or `audit.cacheMaxAgeDays = 0`.
+    // `PLOW_AUDIT_CACHE_MAX_AGE_DAYS=0` or `audit.cacheMaxAgeDays = 0`.
     if let Some(max_age) = resolve_cache_max_age(opts) {
         sweep_old_reusable_caches(opts.root, max_age, opts.quiet);
     }
@@ -2873,7 +2873,7 @@ fn run_audit_dupes<'a>(
     opts: &'a AuditOptions<'a>,
     changed_since: Option<&'a str>,
     changed_files: Option<&'a FxHashSet<PathBuf>>,
-    pre_discovered: Option<Vec<fallow_types::discover::DiscoveredFile>>,
+    pre_discovered: Option<Vec<plow_types::discover::DiscoveredFile>>,
 ) -> Result<Option<DupesResult>, ExitCode> {
     let dupes_cfg = match crate::load_config_for_analysis(
         opts.root,
@@ -2884,7 +2884,7 @@ fn run_audit_dupes<'a>(
         opts.production_dupes
             .or_else(|| opts.production.then_some(true)),
         opts.quiet,
-        fallow_config::ProductionAnalysis::Dupes,
+        plow_config::ProductionAnalysis::Dupes,
     ) {
         Ok(c) => c.duplicates,
         Err(code) => return Err(code),
@@ -3106,7 +3106,7 @@ fn print_audit_human(result: &AuditResult, quiet: bool, explain: bool, output: O
         if show_headers && std::io::stdout().is_terminal() {
             println!(
                 "{}",
-                "Tip: run `fallow explain <issue label>`; spaces and hyphens both work, e.g. `fallow explain unused files`."
+                "Tip: run `plow explain <issue label>`; spaces and hyphens both work, e.g. `plow explain unused files`."
                     .dimmed()
             );
             println!();
@@ -3150,9 +3150,9 @@ fn print_audit_human(result: &AuditResult, quiet: bool, explain: bool, output: O
                 eprintln!();
                 eprintln!("── Complexity ─────────────────────────────────────");
             }
-            // `fallow audit` does not surface the health score / trend block
+            // `plow audit` does not surface the health score / trend block
             // (no orientation header), so let the standalone health renderer
-            // emit it inline like `fallow health`.
+            // emit it inline like `plow health`.
             crate::health::print_health_result(
                 health, quiet, explain, None, None, false, true, false, false,
             );
@@ -3439,15 +3439,15 @@ fn print_audit_sarif(result: &AuditResult) -> ExitCode {
         let run = serde_json::json!({
             "tool": {
                 "driver": {
-                    "name": "fallow",
+                    "name": "plow",
                     "version": env!("CARGO_PKG_VERSION"),
-                    "informationUri": "https://github.com/fallow-rs/fallow",
+                    "informationUri": "https://github.com/plow-rs/plow",
                 }
             },
-            "automationDetails": { "id": "fallow/audit/dupes" },
+            "automationDetails": { "id": "plow/audit/dupes" },
             "results": dupes.report.clone_groups.iter().enumerate().map(|(i, g)| {
                 serde_json::json!({
-                    "ruleId": "fallow/code-duplication",
+                    "ruleId": "plow/code-duplication",
                     "level": "warning",
                     "message": { "text": format!("Clone group {} ({} lines, {} instances)", i + 1, g.line_count, g.instances.len()) },
                 })
@@ -3574,14 +3574,14 @@ mod tests {
     }
 
     #[test]
-    fn audit_worktree_helpers_filter_to_fallow_temp_prefix() {
+    fn audit_worktree_helpers_filter_to_plow_temp_prefix() {
         let temp = std::env::temp_dir();
-        let audit_path = temp.join("fallow-audit-base-123-456");
-        let reusable_path = temp.join("fallow-audit-base-cache-abcd-1234");
+        let audit_path = temp.join("plow-audit-base-123-456");
+        let reusable_path = temp.join("plow-audit-base-cache-abcd-1234");
         let canonical_audit_path = temp
             .canonicalize()
             .unwrap_or_else(|_| temp.clone())
-            .join("fallow-audit-base-456-789");
+            .join("plow-audit-base-456-789");
         let unrelated_temp = temp.join("other-worktree");
         let output = format!(
             "worktree /repo\nHEAD abc\n\nworktree {}\nHEAD def\n\nworktree {}\nHEAD ghi\n\nworktree {}\nHEAD jkl\n",
@@ -3594,14 +3594,14 @@ mod tests {
             parse_worktree_list(&output),
             vec![audit_path, reusable_path.clone()]
         );
-        assert!(is_fallow_audit_worktree_path(&canonical_audit_path));
+        assert!(is_plow_audit_worktree_path(&canonical_audit_path));
         assert!(is_reusable_audit_worktree_path(&reusable_path));
-        assert_eq!(audit_worktree_pid("fallow-audit-base-123-456"), Some(123));
+        assert_eq!(audit_worktree_pid("plow-audit-base-123-456"), Some(123));
         assert_eq!(
-            audit_worktree_pid("fallow-audit-base-cache-abcd-1234"),
+            audit_worktree_pid("plow-audit-base-cache-abcd-1234"),
             None
         );
-        assert_eq!(audit_worktree_pid("not-fallow-audit-base-123"), None);
+        assert_eq!(audit_worktree_pid("not-plow-audit-base-123"), None);
     }
 
     /// Initialize a throwaway git repo with a single commit and return its root.
@@ -3629,7 +3629,7 @@ mod tests {
     fn worktree_cleanup_guard_runs_on_drop() {
         let tmp = tempfile::TempDir::new().expect("temp dir should be created");
         let repo = init_throwaway_repo(tmp.path(), "repo");
-        let worktree_path = tmp.path().join("fallow-audit-base-1234-5678");
+        let worktree_path = tmp.path().join("plow-audit-base-1234-5678");
 
         // Register a real worktree with git so the guard's `git worktree remove`
         // has something concrete to roll back.
@@ -3666,7 +3666,7 @@ mod tests {
     fn worktree_cleanup_guard_defused_skips_drop() {
         let tmp = tempfile::TempDir::new().expect("temp dir should be created");
         let repo = init_throwaway_repo(tmp.path(), "repo");
-        let worktree_path = tmp.path().join("fallow-audit-base-1234-5679");
+        let worktree_path = tmp.path().join("plow-audit-base-1234-5679");
 
         git(
             &repo,
@@ -3719,7 +3719,7 @@ mod tests {
         // The sweep only considers worktrees whose parent is the system temp dir.
         // Mirror that here so the test exercises the real filter path.
         let worktree_path = std::env::temp_dir().join(format!(
-            "fallow-audit-base-{}-{}",
+            "plow-audit-base-{}-{}",
             DEAD_PID,
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -3761,7 +3761,7 @@ mod tests {
         let repo = init_throwaway_repo(tmp.path(), "repo");
 
         let worktree_path = std::env::temp_dir().join(format!(
-            "fallow-audit-base-{}-{}",
+            "plow-audit-base-{}-{}",
             live_pid,
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -3804,7 +3804,7 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .expect("clock should be after epoch")
             .as_nanos();
-        std::env::temp_dir().join(format!("fallow-audit-base-cache-{label}-{nanos:032x}"))
+        std::env::temp_dir().join(format!("plow-audit-base-cache-{label}-{nanos:032x}"))
     }
 
     /// Register a worktree with the parent repo at `path` checked out at HEAD.
@@ -4064,19 +4064,19 @@ mod tests {
 
     #[test]
     fn reusable_worktree_last_used_path_lives_next_to_cache_dir() {
-        let cache_dir = std::env::temp_dir().join("fallow-audit-base-cache-abcd-1234");
+        let cache_dir = std::env::temp_dir().join("plow-audit-base-cache-abcd-1234");
         let sidecar = reusable_worktree_last_used_path(&cache_dir);
         assert_eq!(sidecar.parent(), cache_dir.parent());
         assert_eq!(
             sidecar.file_name().and_then(|s| s.to_str()),
-            Some("fallow-audit-base-cache-abcd-1234.last-used"),
+            Some("plow-audit-base-cache-abcd-1234.last-used"),
         );
     }
 
     #[test]
     fn touch_last_used_creates_sidecar_if_missing() {
         let tmp = tempfile::TempDir::new().expect("temp dir should be created");
-        let cache_dir = tmp.path().join("fallow-audit-base-cache-touchtest-0000");
+        let cache_dir = tmp.path().join("plow-audit-base-cache-touchtest-0000");
         fs::create_dir(&cache_dir).expect("cache dir should be created");
         let sidecar = reusable_worktree_last_used_path(&cache_dir);
         assert!(!sidecar.exists(), "sidecar should not exist before touch");
@@ -4101,7 +4101,7 @@ mod tests {
         let tmp = tempfile::TempDir::new().expect("temp dir should be created");
         // Use a stable reusable-path-shaped value inside the tempdir so the
         // lock file lives somewhere we can clean up automatically.
-        let reusable = tmp.path().join("fallow-audit-base-cache-deadbeef-0000");
+        let reusable = tmp.path().join("plow-audit-base-cache-deadbeef-0000");
         let lock_path = reusable_worktree_lock_path(&reusable);
 
         let first = ReusableWorktreeLock::try_acquire(&reusable)
@@ -4114,7 +4114,7 @@ mod tests {
         // macOS flock(2) can keep the lock visible to other open file
         // descriptions in the same process for a brief window after close,
         // and this test would flake under parallel `cargo test` execution.
-        // The cross-process release path is exercised by every real `fallow
+        // The cross-process release path is exercised by every real `plow
         // audit` invocation; the in-process exclusion above is the actual
         // invariant we need to guarantee here.
         drop(first);
@@ -4148,7 +4148,7 @@ mod tests {
         let tmp = tempfile::TempDir::new().expect("temp dir should be created");
         let root = tmp.path();
         fs::create_dir_all(root.join("src")).expect("src dir should be created");
-        fs::write(root.join(".gitignore"), "node_modules\n.fallow\n")
+        fs::write(root.join(".gitignore"), "node_modules\n.plow\n")
             .expect("gitignore should be written");
         fs::write(
             root.join("package.json"),
@@ -4366,7 +4366,7 @@ mod tests {
     fn audit_reusable_base_worktree_refreshes_current_node_modules_context() {
         let tmp = tempfile::TempDir::new().expect("temp dir should be created");
         let root = tmp.path();
-        fs::write(root.join(".gitignore"), "node_modules\n.fallow\n")
+        fs::write(root.join(".gitignore"), "node_modules\n.plow\n")
             .expect("gitignore should be written");
         fs::write(root.join("package.json"), r#"{"name":"audit-reusable"}"#)
             .expect("package.json should be written");
@@ -4458,7 +4458,7 @@ mod tests {
         let tmp = tempfile::TempDir::new().expect("temp dir should be created");
         let root = tmp.path();
         fs::write(
-            root.join(".fallowrc.json"),
+            root.join(".plowrc.json"),
             r#"{"extends":"base.json","entry":["src/index.ts"]}"#,
         )
         .expect("config should be written");
@@ -4587,7 +4587,7 @@ mod tests {
         )
         .expect("package.json should be written");
         fs::write(
-            root.join(".fallowrc.json"),
+            root.join(".plowrc.json"),
             r#"{"duplicates":{"minTokens":5,"minLines":2,"mode":"strict"}}"#,
         )
         .expect("config should be written");
@@ -4603,10 +4603,10 @@ mod tests {
             &["-c", "commit.gpgsign=false", "commit", "-m", "initial"],
         );
         fs::write(root.join("README.md"), "after\n").expect("readme should be modified");
-        fs::create_dir_all(root.join(".fallow/cache/dupes-tokens-v2"))
+        fs::create_dir_all(root.join(".plow/cache/dupes-tokens-v2"))
             .expect("cache dir should be created");
         fs::write(
-            root.join(".fallow/cache/dupes-tokens-v2/cache.bin"),
+            root.join(".plow/cache/dupes-tokens-v2/cache.bin"),
             b"cache",
         )
         .expect("cache artifact should be written");
@@ -4922,7 +4922,7 @@ mod tests {
         )
         .expect("package.json should be written");
         fs::write(
-            root.join(".fallowrc.json"),
+            root.join(".plowrc.json"),
             r#"{"duplicates":{"minTokens":10,"minLines":3,"mode":"strict"}}"#,
         )
         .expect("config should be written");
@@ -5287,7 +5287,7 @@ export function App() {
             &["-c", "commit.gpgsign=false", "commit", "-m", "initial"],
         );
 
-        let explicit_config = root.join(".fallowrc.json");
+        let explicit_config = root.join(".plowrc.json");
         fs::write(&explicit_config, r#"{"rules":{"unused-files":"error"}}"#)
             .expect("new config should be written");
         fs::write(root.join("src/index.ts"), "export const used = 2;\n")
@@ -5342,7 +5342,7 @@ export function App() {
         )
         .expect("package.json should be written");
         fs::write(
-            root.join(".fallowrc.json"),
+            root.join(".plowrc.json"),
             r#"{"rules":{"unused-dependencies":"off"}}"#,
         )
         .expect("base config should be written");
@@ -5357,7 +5357,7 @@ export function App() {
         );
 
         fs::write(
-            root.join(".fallowrc.json"),
+            root.join(".plowrc.json"),
             r#"{"rules":{"unused-dependencies":"error"}}"#,
         )
         .expect("current config should be written");
@@ -5422,7 +5422,7 @@ export function App() {
         )
         .expect("package.json should be written");
         fs::write(
-            root.join(".fallowrc.json"),
+            root.join(".plowrc.json"),
             r#"{"rules":{"unused-dependencies":"off"}}"#,
         )
         .expect("base config should be written");
@@ -5437,7 +5437,7 @@ export function App() {
         );
 
         fs::write(
-            root.join(".fallowrc.json"),
+            root.join(".plowrc.json"),
             r#"{"rules":{"unused-dependencies":"error"}}"#,
         )
         .expect("current config should be written");
@@ -5523,7 +5523,7 @@ export function App() {
         )
         .expect("package.json should be written");
         fs::write(
-            root.join(".fallowrc.json"),
+            root.join(".plowrc.json"),
             r#"{"duplicates":{"minTokens":5,"minLines":2,"mode":"strict"}}"#,
         )
         .expect("config should be written");

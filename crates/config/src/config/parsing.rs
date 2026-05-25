@@ -1,22 +1,22 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use fallow_types::path_util::is_absolute_path_any_platform;
+use plow_types::path_util::is_absolute_path_any_platform;
 use rustc_hash::FxHashSet;
 
-use super::FallowConfig;
+use super::PlowConfig;
 
 /// Supported config file names in priority order.
 ///
 /// `find_and_load` checks these names in order within each directory,
-/// returning the first match found. `.fallowrc.json` wins over
-/// `.fallowrc.jsonc` if both exist (mirrors `tsconfig.json` >
+/// returning the first match found. `.plowrc.json` wins over
+/// `.plowrc.jsonc` if both exist (mirrors `tsconfig.json` >
 /// `tsconfig.jsonc` precedence).
 pub(super) const CONFIG_NAMES: &[&str] = &[
-    ".fallowrc.json",
-    ".fallowrc.jsonc",
-    "fallow.toml",
-    ".fallow.toml",
+    ".plowrc.json",
+    ".plowrc.jsonc",
+    "plow.toml",
+    ".plow.toml",
 ];
 
 pub(super) const MAX_EXTENDS_DEPTH: usize = 10;
@@ -215,12 +215,12 @@ fn resolve_package_exports(pkg: &serde_json::Value, package_dir: &Path) -> Optio
     }
 }
 
-/// Find a fallow config file inside an npm package directory.
+/// Find a plow config file inside an npm package directory.
 ///
 /// Resolution order:
 /// 1. `package.json` `exports` field (default entry point)
 /// 2. `package.json` `main` field
-/// 3. Standard config file names (`.fallowrc.json`, `.fallowrc.jsonc`, `fallow.toml`, `.fallow.toml`)
+/// 3. Standard config file names (`.plowrc.json`, `.plowrc.jsonc`, `plow.toml`, `.plow.toml`)
 ///
 /// Paths from `exports`/`main` are confined to the package directory to prevent
 /// path traversal attacks from malicious packages.
@@ -270,7 +270,7 @@ fn find_config_in_npm_package(
     }
 
     Err(miette::miette!(
-        "No fallow config found in npm package at {}. \
+        "No plow config found in npm package at {}. \
          Expected package.json with main/exports pointing to a config file, \
          or one of: {}",
         package_dir.display(),
@@ -371,12 +371,12 @@ fn normalize_url_for_dedup(url: &str) -> String {
     }
 }
 
-/// Read the `FALLOW_EXTENDS_TIMEOUT_SECS` env var, falling back to [`DEFAULT_URL_TIMEOUT_SECS`].
+/// Read the `PLOW_EXTENDS_TIMEOUT_SECS` env var, falling back to [`DEFAULT_URL_TIMEOUT_SECS`].
 ///
 /// A value of `0` is treated as invalid and falls back to the default (a zero-duration
 /// timeout would make every request fail immediately with an opaque timeout error).
 fn url_timeout() -> Duration {
-    std::env::var("FALLOW_EXTENDS_TIMEOUT_SECS")
+    std::env::var("PLOW_EXTENDS_TIMEOUT_SECS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok().filter(|&n| n > 0))
         .map_or(
@@ -699,7 +699,7 @@ pub(super) fn collect_unknown_rule_keys(
 thread_local! {
     /// Per-thread capture of unknown-rule findings, for the wiring regression
     /// test in this module. Each test installs a fresh capture via
-    /// [`capture_unknown_rule_warnings`], runs `FallowConfig::load`, and reads
+    /// [`capture_unknown_rule_warnings`], runs `PlowConfig::load`, and reads
     /// back the findings. Thread-local so parallel test execution does not
     /// race; bypassed entirely in production code (`UnknownRuleCapture::None`).
     #[cfg(test)]
@@ -728,7 +728,7 @@ pub(super) fn capture_unknown_rule_warnings<F: FnOnce() -> R, R>(
 /// the warning text AND in the dedupe key so two different config files with
 /// the same typo each warn once instead of the second one being silenced.
 ///
-/// Deduplicates within the process: `FallowConfig::load` runs multiple times
+/// Deduplicates within the process: `PlowConfig::load` runs multiple times
 /// per analysis (combined mode runs check + dupes + health, each through the
 /// same config load path), so without a dedupe the same typo emits 3+ warnings
 /// per run.
@@ -777,8 +777,8 @@ fn warn_on_unknown_rule_keys(config_path: &Path, merged: &serde_json::Value) {
     }
 }
 
-impl FallowConfig {
-    /// Load config from a fallow config file (TOML or JSON/JSONC).
+impl PlowConfig {
+    /// Load config from a plow config file (TOML or JSON/JSONC).
     ///
     /// The format is detected from the file extension:
     /// - `.toml` → TOML
@@ -911,7 +911,7 @@ impl FallowConfig {
         }
 
         // Inline framework plugins. Shares validation logic with external
-        // plugin files loaded from `.fallow/plugins/` / `fallow-plugin-*`
+        // plugin files loaded from `.plow/plugins/` / `plow-plugin-*`
         // (see `ExternalPluginDef::validate_user_globs`), so an inline
         // `framework[]` block and a file-loaded plugin get identical checks.
         // The `detection.fileExists.pattern` field is the security-critical
@@ -986,13 +986,13 @@ impl FallowConfig {
     /// Generate JSON Schema for the configuration format.
     #[must_use]
     pub fn json_schema() -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(FallowConfig)).unwrap_or_default()
+        serde_json::to_value(schemars::schema_for!(PlowConfig)).unwrap_or_default()
     }
 
     /// Validate boundary zone references and zone-root-prefix conflicts AFTER
     /// preset and auto-discover expansion.
     ///
-    /// Runs the same expand sequence as [`FallowConfig::resolve`] (preset
+    /// Runs the same expand sequence as [`PlowConfig::resolve`] (preset
     /// expansion gated on tsconfig `rootDir`, then `expand_auto_discover`)
     /// before invoking
     /// [`BoundaryConfig::validate_zone_references`](super::boundaries::BoundaryConfig::validate_zone_references)
@@ -1027,7 +1027,7 @@ impl FallowConfig {
         // resolve() takes `self` by value and runs the same expansion in-place.
         let mut boundaries = self.boundaries.clone();
         if boundaries.preset.is_some() {
-            // Mirror the source-root detection in `FallowConfig::resolve`:
+            // Mirror the source-root detection in `PlowConfig::resolve`:
             // tsconfig.json's `rootDir` wins when it points at a relative,
             // non-traversal subtree; otherwise default to `src`.
             let source_root = crate::workspace::parse_tsconfig_root_dir(root)
@@ -1071,17 +1071,17 @@ mod tests {
     }
 
     #[test]
-    fn fallow_config_deserialize_minimal() {
+    fn plow_config_deserialize_minimal() {
         let toml_str = r#"
 entry = ["src/main.ts"]
 "#;
-        let config: FallowConfig = toml::from_str(toml_str).unwrap();
+        let config: PlowConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(config.entry, vec!["src/main.ts"]);
         assert!(config.ignore_patterns.is_empty());
     }
 
     #[test]
-    fn fallow_config_deserialize_ignore_exports() {
+    fn plow_config_deserialize_ignore_exports() {
         let toml_str = r#"
 [[ignoreExports]]
 file = "src/types/*.ts"
@@ -1091,7 +1091,7 @@ exports = ["*"]
 file = "src/constants.ts"
 exports = ["FOO", "BAR"]
 "#;
-        let config: FallowConfig = toml::from_str(toml_str).unwrap();
+        let config: PlowConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(config.ignore_exports.len(), 2);
         assert_eq!(config.ignore_exports[0].file, "src/types/*.ts");
         assert_eq!(config.ignore_exports[0].exports, vec!["*"]);
@@ -1099,20 +1099,20 @@ exports = ["FOO", "BAR"]
     }
 
     #[test]
-    fn fallow_config_deserialize_ignore_dependencies() {
+    fn plow_config_deserialize_ignore_dependencies() {
         let toml_str = r#"
 ignoreDependencies = ["autoprefixer", "postcss"]
 "#;
-        let config: FallowConfig = toml::from_str(toml_str).unwrap();
+        let config: PlowConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(config.ignore_dependencies, vec!["autoprefixer", "postcss"]);
     }
 
     #[test]
-    fn fallow_config_deserialize_ignore_unresolved_imports() {
+    fn plow_config_deserialize_ignore_unresolved_imports() {
         let toml_str = r#"
 ignoreUnresolvedImports = ["@example/icons", "@example/icons/**", "../generated/**"]
 "#;
-        let config: FallowConfig = toml::from_str(toml_str).unwrap();
+        let config: PlowConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(
             config.ignore_unresolved_imports,
             vec!["@example/icons", "@example/icons/**", "../generated/**"]
@@ -1120,8 +1120,8 @@ ignoreUnresolvedImports = ["@example/icons", "@example/icons/**", "../generated/
     }
 
     #[test]
-    fn fallow_config_resolve_default_ignores() {
-        let config = FallowConfig::default();
+    fn plow_config_resolve_default_ignores() {
+        let config = PlowConfig::default();
         let resolved = config.resolve(
             PathBuf::from("/tmp/test"),
             OutputFormat::Human,
@@ -1142,8 +1142,8 @@ ignoreUnresolvedImports = ["@example/icons", "@example/icons/**", "../generated/
     }
 
     #[test]
-    fn fallow_config_resolve_custom_ignores() {
-        let config = FallowConfig {
+    fn plow_config_resolve_custom_ignores() {
+        let config = PlowConfig {
             entry: vec!["src/**/*.ts".to_string()],
             ignore_patterns: vec!["**/*.generated.ts".to_string()],
             ..Default::default()
@@ -1164,8 +1164,8 @@ ignoreUnresolvedImports = ["@example/icons", "@example/icons/**", "../generated/
     }
 
     #[test]
-    fn fallow_config_resolve_cache_dir() {
-        let config = FallowConfig::default();
+    fn plow_config_resolve_cache_dir() {
+        let config = PlowConfig::default();
         let resolved = config.resolve(
             PathBuf::from("/tmp/project"),
             OutputFormat::Human,
@@ -1174,7 +1174,7 @@ ignoreUnresolvedImports = ["@example/icons", "@example/icons/**", "../generated/
             true,
             None,
         );
-        assert_eq!(resolved.cache_dir, PathBuf::from("/tmp/project/.fallow"));
+        assert_eq!(resolved.cache_dir, PathBuf::from("/tmp/project/.plow"));
         assert!(resolved.no_cache);
     }
 
@@ -1277,7 +1277,7 @@ unused-files = "error"
 unused-exports = "warn"
 unused-types = "off"
 "#;
-        let config: FallowConfig = toml::from_str(toml_str).unwrap();
+        let config: PlowConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(config.rules.unused_files, Severity::Error);
         assert_eq!(config.rules.unused_exports, Severity::Warn);
         assert_eq!(config.rules.unused_types, Severity::Off);
@@ -1290,29 +1290,29 @@ unused-types = "off"
         let toml_str = r#"
 entry = ["src/main.ts"]
 "#;
-        let config: FallowConfig = toml::from_str(toml_str).unwrap();
+        let config: PlowConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(config.rules.unused_files, Severity::Error);
         assert_eq!(config.rules.unused_exports, Severity::Error);
     }
 
     #[test]
-    fn fallow_config_denies_unknown_fields() {
+    fn plow_config_denies_unknown_fields() {
         let toml_str = r"
 unknown_field = true
 ";
-        let result: Result<FallowConfig, _> = toml::from_str(toml_str);
+        let result: Result<PlowConfig, _> = toml::from_str(toml_str);
         assert!(result.is_err());
     }
 
     #[test]
-    fn fallow_config_deserialize_json() {
+    fn plow_config_deserialize_json() {
         let json_str = r#"{"entry": ["src/main.ts"]}"#;
-        let config: FallowConfig = serde_json::from_str(json_str).unwrap();
+        let config: PlowConfig = serde_json::from_str(json_str).unwrap();
         assert_eq!(config.entry, vec!["src/main.ts"]);
     }
 
     #[test]
-    fn fallow_config_deserialize_jsonc() {
+    fn plow_config_deserialize_jsonc() {
         let jsonc_str = r#"{
             // This is a comment
             "entry": ["src/main.ts"],
@@ -1320,21 +1320,21 @@ unknown_field = true
                 "unused-files": "warn"
             }
         }"#;
-        let config: FallowConfig = crate::jsonc::parse_to_value(jsonc_str).unwrap();
+        let config: PlowConfig = crate::jsonc::parse_to_value(jsonc_str).unwrap();
         assert_eq!(config.entry, vec!["src/main.ts"]);
         assert_eq!(config.rules.unused_files, Severity::Warn);
     }
 
     #[test]
-    fn fallow_config_json_with_schema_field() {
-        let json_str = r#"{"$schema": "https://fallow.dev/schema.json", "entry": ["src/main.ts"]}"#;
-        let config: FallowConfig = serde_json::from_str(json_str).unwrap();
+    fn plow_config_json_with_schema_field() {
+        let json_str = r#"{"$schema": "https://plow.dev/schema.json", "entry": ["src/main.ts"]}"#;
+        let config: PlowConfig = serde_json::from_str(json_str).unwrap();
         assert_eq!(config.entry, vec!["src/main.ts"]);
     }
 
     #[test]
-    fn fallow_config_json_schema_generation() {
-        let schema = FallowConfig::json_schema();
+    fn plow_config_json_schema_generation() {
+        let schema = PlowConfig::json_schema();
         assert!(schema.is_object());
         let obj = schema.as_object().unwrap();
         assert!(obj.contains_key("properties"));
@@ -1343,42 +1343,42 @@ unknown_field = true
     #[test]
     fn config_format_detection() {
         assert!(matches!(
-            ConfigFormat::from_path(Path::new("fallow.toml")),
+            ConfigFormat::from_path(Path::new("plow.toml")),
             ConfigFormat::Toml
         ));
         assert!(matches!(
-            ConfigFormat::from_path(Path::new(".fallowrc.json")),
+            ConfigFormat::from_path(Path::new(".plowrc.json")),
             ConfigFormat::Json
         ));
         assert!(matches!(
-            ConfigFormat::from_path(Path::new(".fallowrc.jsonc")),
+            ConfigFormat::from_path(Path::new(".plowrc.jsonc")),
             ConfigFormat::Json
         ));
         assert!(matches!(
-            ConfigFormat::from_path(Path::new(".fallow.toml")),
+            ConfigFormat::from_path(Path::new(".plow.toml")),
             ConfigFormat::Toml
         ));
     }
 
     #[test]
     fn config_names_priority_order() {
-        assert_eq!(CONFIG_NAMES[0], ".fallowrc.json");
-        assert_eq!(CONFIG_NAMES[1], ".fallowrc.jsonc");
-        assert_eq!(CONFIG_NAMES[2], "fallow.toml");
-        assert_eq!(CONFIG_NAMES[3], ".fallow.toml");
+        assert_eq!(CONFIG_NAMES[0], ".plowrc.json");
+        assert_eq!(CONFIG_NAMES[1], ".plowrc.jsonc");
+        assert_eq!(CONFIG_NAMES[2], "plow.toml");
+        assert_eq!(CONFIG_NAMES[3], ".plow.toml");
     }
 
     #[test]
     fn load_json_config_file() {
         let dir = test_dir("json-config");
-        let config_path = dir.path().join(".fallowrc.json");
+        let config_path = dir.path().join(".plowrc.json");
         std::fs::write(
             &config_path,
             r#"{"entry": ["src/index.ts"], "rules": {"unused-exports": "warn"}}"#,
         )
         .unwrap();
 
-        let config = FallowConfig::load(&config_path).unwrap();
+        let config = PlowConfig::load(&config_path).unwrap();
         assert_eq!(config.entry, vec!["src/index.ts"]);
         assert_eq!(config.rules.unused_exports, Severity::Warn);
     }
@@ -1386,7 +1386,7 @@ unknown_field = true
     #[test]
     fn load_jsonc_config_file() {
         let dir = test_dir("jsonc-config");
-        let config_path = dir.path().join(".fallowrc.json");
+        let config_path = dir.path().join(".plowrc.json");
         std::fs::write(
             &config_path,
             r#"{
@@ -1400,15 +1400,15 @@ unknown_field = true
         )
         .unwrap();
 
-        let config = FallowConfig::load(&config_path).unwrap();
+        let config = PlowConfig::load(&config_path).unwrap();
         assert_eq!(config.entry, vec!["src/index.ts"]);
         assert_eq!(config.rules.unused_exports, Severity::Warn);
     }
 
     #[test]
-    fn load_fallowrc_jsonc_extension() {
+    fn load_plowrc_jsonc_extension() {
         let dir = test_dir("jsonc-extension");
-        let config_path = dir.path().join(".fallowrc.jsonc");
+        let config_path = dir.path().join(".plowrc.jsonc");
         std::fs::write(
             &config_path,
             r#"{
@@ -1420,7 +1420,7 @@ unknown_field = true
         )
         .unwrap();
 
-        let config = FallowConfig::load(&config_path).unwrap();
+        let config = PlowConfig::load(&config_path).unwrap();
         assert_eq!(config.entry, vec!["src/index.ts"]);
         assert_eq!(
             config.ignore_dependencies,
@@ -1431,14 +1431,14 @@ unknown_field = true
     #[test]
     fn json_config_ignore_dependencies_camel_case() {
         let json_str = r#"{"ignoreDependencies": ["autoprefixer", "postcss"]}"#;
-        let config: FallowConfig = serde_json::from_str(json_str).unwrap();
+        let config: PlowConfig = serde_json::from_str(json_str).unwrap();
         assert_eq!(config.ignore_dependencies, vec!["autoprefixer", "postcss"]);
     }
 
     #[test]
     fn json_config_ignore_unresolved_imports_camel_case() {
         let json_str = r#"{"ignoreUnresolvedImports": ["@example/icons", "@example/icons/**"]}"#;
-        let config: FallowConfig = serde_json::from_str(json_str).unwrap();
+        let config: PlowConfig = serde_json::from_str(json_str).unwrap();
         assert_eq!(
             config.ignore_unresolved_imports,
             vec!["@example/icons", "@example/icons/**"]
@@ -1468,7 +1468,7 @@ unknown_field = true
                 "skipLocal": true
             }
         }"#;
-        let config: FallowConfig = serde_json::from_str(json_str).unwrap();
+        let config: PlowConfig = serde_json::from_str(json_str).unwrap();
         assert_eq!(config.ignore_dependencies, vec!["lodash"]);
         assert_eq!(config.rules.unused_files, Severity::Off);
         assert_eq!(config.rules.unused_exports, Severity::Warn);
@@ -1490,12 +1490,12 @@ unknown_field = true
         )
         .unwrap();
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"extends": ["base.json"], "entry": ["src/index.ts"]}"#,
         )
         .unwrap();
 
-        let config = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap();
+        let config = PlowConfig::load(&dir.path().join(".plowrc.json")).unwrap();
         assert_eq!(config.rules.unused_files, Severity::Warn);
         assert_eq!(config.entry, vec!["src/index.ts"]);
         // Unset fields from base still default
@@ -1512,12 +1512,12 @@ unknown_field = true
         )
         .unwrap();
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"extends": ["base.json"], "rules": {"unused-files": "error"}}"#,
         )
         .unwrap();
 
-        let config = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap();
+        let config = PlowConfig::load(&dir.path().join(".plowrc.json")).unwrap();
         // Overlay overrides base
         assert_eq!(config.rules.unused_files, Severity::Error);
         // Base value preserved when not overridden
@@ -1539,12 +1539,12 @@ unknown_field = true
         )
         .unwrap();
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"extends": ["parent.json"]}"#,
         )
         .unwrap();
 
-        let config = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap();
+        let config = PlowConfig::load(&dir.path().join(".plowrc.json")).unwrap();
         // grandparent: off -> parent: warn -> child: inherits warn
         assert_eq!(config.rules.unused_files, Severity::Warn);
         // grandparent: warn, not overridden
@@ -1558,7 +1558,7 @@ unknown_field = true
         std::fs::write(dir.path().join("a.json"), r#"{"extends": ["b.json"]}"#).unwrap();
         std::fs::write(dir.path().join("b.json"), r#"{"extends": ["a.json"]}"#).unwrap();
 
-        let result = FallowConfig::load(&dir.path().join("a.json"));
+        let result = PlowConfig::load(&dir.path().join("a.json"));
         assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
         assert!(
@@ -1572,12 +1572,12 @@ unknown_field = true
         let dir = test_dir("extends-missing");
 
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"extends": ["nonexistent.json"]}"#,
         )
         .unwrap();
 
-        let result = FallowConfig::load(&dir.path().join(".fallowrc.json"));
+        let result = PlowConfig::load(&dir.path().join(".plowrc.json"));
         assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
         assert!(
@@ -1597,12 +1597,12 @@ unknown_field = true
         )
         .unwrap();
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"sealed": true, "extends": ["./base.json"]}"#,
         )
         .unwrap();
 
-        let config = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap();
+        let config = PlowConfig::load(&dir.path().join(".plowrc.json")).unwrap();
         assert!(config.sealed);
         assert_eq!(config.ignore_patterns, vec!["gen/**"]);
     }
@@ -1620,12 +1620,12 @@ unknown_field = true
         )
         .unwrap();
         std::fs::write(
-            sub.join(".fallowrc.json"),
+            sub.join(".plowrc.json"),
             r#"{"sealed": true, "extends": ["../../base.json"]}"#,
         )
         .unwrap();
 
-        let result = FallowConfig::load(&sub.join(".fallowrc.json"));
+        let result = PlowConfig::load(&sub.join(".plowrc.json"));
         assert!(
             result.is_err(),
             "Expected sealed config to reject escaping extends"
@@ -1645,12 +1645,12 @@ unknown_field = true
     fn sealed_rejects_https_extends() {
         let dir = test_dir("sealed-rejects-https");
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"sealed": true, "extends": ["https://example.com/base.json"]}"#,
         )
         .unwrap();
 
-        let result = FallowConfig::load(&dir.path().join(".fallowrc.json"));
+        let result = PlowConfig::load(&dir.path().join(".plowrc.json"));
         assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
         assert!(
@@ -1667,12 +1667,12 @@ unknown_field = true
     fn sealed_rejects_npm_extends() {
         let dir = test_dir("sealed-rejects-npm");
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"sealed": true, "extends": ["npm:@scope/config"]}"#,
         )
         .unwrap();
 
-        let result = FallowConfig::load(&dir.path().join(".fallowrc.json"));
+        let result = PlowConfig::load(&dir.path().join(".plowrc.json"));
         assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
         assert!(
@@ -1688,8 +1688,8 @@ unknown_field = true
     #[test]
     fn sealed_default_is_false() {
         let dir = test_dir("sealed-default");
-        std::fs::write(dir.path().join(".fallowrc.json"), "{}").unwrap();
-        let config = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap();
+        std::fs::write(dir.path().join(".plowrc.json"), "{}").unwrap();
+        let config = PlowConfig::load(&dir.path().join(".plowrc.json")).unwrap();
         assert!(!config.sealed);
     }
 
@@ -1706,12 +1706,12 @@ unknown_field = true
         )
         .unwrap();
         std::fs::write(
-            sub.join(".fallowrc.json"),
+            sub.join(".plowrc.json"),
             r#"{"extends": ["../../base.json"]}"#,
         )
         .unwrap();
 
-        let config = FallowConfig::load(&sub.join(".fallowrc.json")).unwrap();
+        let config = PlowConfig::load(&sub.join(".plowrc.json")).unwrap();
         assert!(!config.sealed);
         assert_eq!(config.ignore_patterns, vec!["dist/**"]);
     }
@@ -1727,12 +1727,12 @@ unknown_field = true
         .unwrap();
         // String form instead of array
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"extends": "base.json"}"#,
         )
         .unwrap();
 
-        let config = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap();
+        let config = PlowConfig::load(&dir.path().join(".plowrc.json")).unwrap();
         assert_eq!(config.ignore_patterns, vec!["gen/**"]);
     }
 
@@ -1742,12 +1742,12 @@ unknown_field = true
 
         std::fs::write(dir.path().join("base.json"), r#"{"entry": ["src/a.ts"]}"#).unwrap();
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"extends": ["base.json"], "entry": ["src/b.ts"]}"#,
         )
         .unwrap();
 
-        let config = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap();
+        let config = PlowConfig::load(&dir.path().join(".plowrc.json")).unwrap();
         // Arrays are replaced, not merged (overlay replaces base)
         assert_eq!(config.entry, vec!["src/b.ts"]);
     }
@@ -1758,7 +1758,7 @@ unknown_field = true
     fn create_npm_package(root: &Path, name: &str, config_json: &str) {
         let pkg_dir = root.join("node_modules").join(name);
         std::fs::create_dir_all(&pkg_dir).unwrap();
-        std::fs::write(pkg_dir.join(".fallowrc.json"), config_json).unwrap();
+        std::fs::write(pkg_dir.join(".plowrc.json"), config_json).unwrap();
     }
 
     /// Set up a fake npm package with `package.json` `main` field.
@@ -1778,16 +1778,16 @@ unknown_field = true
         let dir = test_dir("npm-basic");
         create_npm_package(
             dir.path(),
-            "fallow-config-acme",
+            "plow-config-acme",
             r#"{"rules": {"unused-files": "warn"}}"#,
         );
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
-            r#"{"extends": "npm:fallow-config-acme"}"#,
+            dir.path().join(".plowrc.json"),
+            r#"{"extends": "npm:plow-config-acme"}"#,
         )
         .unwrap();
 
-        let config = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap();
+        let config = PlowConfig::load(&dir.path().join(".plowrc.json")).unwrap();
         assert_eq!(config.rules.unused_files, Severity::Warn);
     }
 
@@ -1796,16 +1796,16 @@ unknown_field = true
         let dir = test_dir("npm-scoped");
         create_npm_package(
             dir.path(),
-            "@company/fallow-config",
+            "@company/plow-config",
             r#"{"rules": {"unused-exports": "off"}, "ignorePatterns": ["generated/**"]}"#,
         );
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
-            r#"{"extends": "npm:@company/fallow-config"}"#,
+            dir.path().join(".plowrc.json"),
+            r#"{"extends": "npm:@company/plow-config"}"#,
         )
         .unwrap();
 
-        let config = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap();
+        let config = PlowConfig::load(&dir.path().join(".plowrc.json")).unwrap();
         assert_eq!(config.rules.unused_exports, Severity::Off);
         assert_eq!(config.ignore_patterns, vec!["generated/**"]);
     }
@@ -1813,7 +1813,7 @@ unknown_field = true
     #[test]
     fn extends_npm_with_subpath() {
         let dir = test_dir("npm-subpath");
-        let pkg_dir = dir.path().join("node_modules/@company/fallow-config");
+        let pkg_dir = dir.path().join("node_modules/@company/plow-config");
         std::fs::create_dir_all(&pkg_dir).unwrap();
         std::fs::write(
             pkg_dir.join("strict.json"),
@@ -1822,12 +1822,12 @@ unknown_field = true
         .unwrap();
 
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
-            r#"{"extends": "npm:@company/fallow-config/strict.json"}"#,
+            dir.path().join(".plowrc.json"),
+            r#"{"extends": "npm:@company/plow-config/strict.json"}"#,
         )
         .unwrap();
 
-        let config = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap();
+        let config = PlowConfig::load(&dir.path().join(".plowrc.json")).unwrap();
         assert_eq!(config.rules.unused_files, Severity::Error);
         assert_eq!(config.rules.unused_exports, Severity::Error);
     }
@@ -1837,28 +1837,28 @@ unknown_field = true
         let dir = test_dir("npm-main");
         create_npm_package_with_main(
             dir.path(),
-            "fallow-config-acme",
+            "plow-config-acme",
             "config.json",
             r#"{"rules": {"unused-types": "off"}}"#,
         );
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
-            r#"{"extends": "npm:fallow-config-acme"}"#,
+            dir.path().join(".plowrc.json"),
+            r#"{"extends": "npm:plow-config-acme"}"#,
         )
         .unwrap();
 
-        let config = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap();
+        let config = PlowConfig::load(&dir.path().join(".plowrc.json")).unwrap();
         assert_eq!(config.rules.unused_types, Severity::Off);
     }
 
     #[test]
     fn extends_npm_package_json_exports_string() {
         let dir = test_dir("npm-exports-str");
-        let pkg_dir = dir.path().join("node_modules/fallow-config-co");
+        let pkg_dir = dir.path().join("node_modules/plow-config-co");
         std::fs::create_dir_all(&pkg_dir).unwrap();
         std::fs::write(
             pkg_dir.join("package.json"),
-            r#"{"name": "fallow-config-co", "exports": "./base.json"}"#,
+            r#"{"name": "plow-config-co", "exports": "./base.json"}"#,
         )
         .unwrap();
         std::fs::write(
@@ -1868,12 +1868,12 @@ unknown_field = true
         .unwrap();
 
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
-            r#"{"extends": "npm:fallow-config-co"}"#,
+            dir.path().join(".plowrc.json"),
+            r#"{"extends": "npm:plow-config-co"}"#,
         )
         .unwrap();
 
-        let config = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap();
+        let config = PlowConfig::load(&dir.path().join(".plowrc.json")).unwrap();
         assert_eq!(config.rules.circular_dependencies, Severity::Warn);
     }
 
@@ -1884,18 +1884,18 @@ unknown_field = true
         std::fs::create_dir_all(&pkg_dir).unwrap();
         std::fs::write(
             pkg_dir.join("package.json"),
-            r#"{"name": "@co/cfg", "exports": {".": {"default": "./fallow.json"}}}"#,
+            r#"{"name": "@co/cfg", "exports": {".": {"default": "./plow.json"}}}"#,
         )
         .unwrap();
-        std::fs::write(pkg_dir.join("fallow.json"), r#"{"entry": ["src/app.ts"]}"#).unwrap();
+        std::fs::write(pkg_dir.join("plow.json"), r#"{"entry": ["src/app.ts"]}"#).unwrap();
 
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"extends": "npm:@co/cfg"}"#,
         )
         .unwrap();
 
-        let config = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap();
+        let config = PlowConfig::load(&dir.path().join(".plowrc.json")).unwrap();
         assert_eq!(config.entry, vec!["src/app.ts"]);
     }
 
@@ -1921,12 +1921,12 @@ unknown_field = true
         .unwrap();
 
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"extends": "npm:my-config"}"#,
         )
         .unwrap();
 
-        let config = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap();
+        let config = PlowConfig::load(&dir.path().join(".plowrc.json")).unwrap();
         // exports takes priority over main
         assert_eq!(config.rules.unused_files, Severity::Warn);
     }
@@ -1944,12 +1944,12 @@ unknown_field = true
         let sub = dir.path().join("packages/app");
         std::fs::create_dir_all(&sub).unwrap();
         std::fs::write(
-            sub.join(".fallowrc.json"),
+            sub.join(".plowrc.json"),
             r#"{"extends": "npm:shared-config"}"#,
         )
         .unwrap();
 
-        let config = FallowConfig::load(&sub.join(".fallowrc.json")).unwrap();
+        let config = PlowConfig::load(&sub.join(".plowrc.json")).unwrap();
         assert_eq!(config.rules.unused_files, Severity::Warn);
     }
 
@@ -1962,12 +1962,12 @@ unknown_field = true
             r#"{"rules": {"unused-files": "warn", "unused-exports": "off"}, "entry": ["src/base.ts"]}"#,
         );
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"extends": "npm:@company/base", "rules": {"unused-files": "error"}, "entry": ["src/app.ts"]}"#,
         )
         .unwrap();
 
-        let config = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap();
+        let config = PlowConfig::load(&dir.path().join(".plowrc.json")).unwrap();
         assert_eq!(config.rules.unused_files, Severity::Error);
         assert_eq!(config.rules.unused_exports, Severity::Off);
         assert_eq!(config.entry, vec!["src/app.ts"]);
@@ -1985,18 +1985,18 @@ unknown_field = true
         )
         .unwrap();
         std::fs::write(
-            pkg_dir.join(".fallowrc.json"),
+            pkg_dir.join(".plowrc.json"),
             r#"{"extends": ["base.json"], "rules": {"unused-exports": "off"}}"#,
         )
         .unwrap();
 
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"extends": "npm:my-config"}"#,
         )
         .unwrap();
 
-        let config = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap();
+        let config = PlowConfig::load(&dir.path().join(".plowrc.json")).unwrap();
         assert_eq!(config.rules.unused_files, Severity::Warn);
         assert_eq!(config.rules.unused_exports, Severity::Off);
     }
@@ -2015,12 +2015,12 @@ unknown_field = true
         )
         .unwrap();
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"extends": ["npm:shared-base", "local-overrides.json"]}"#,
         )
         .unwrap();
 
-        let config = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap();
+        let config = PlowConfig::load(&dir.path().join(".plowrc.json")).unwrap();
         // local-overrides is later in the array, so it wins
         assert_eq!(config.rules.unused_files, Severity::Warn);
     }
@@ -2029,12 +2029,12 @@ unknown_field = true
     fn extends_npm_missing_package_errors() {
         let dir = test_dir("npm-missing");
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"extends": "npm:nonexistent-package"}"#,
         )
         .unwrap();
 
-        let result = FallowConfig::load(&dir.path().join(".fallowrc.json"));
+        let result = PlowConfig::load(&dir.path().join(".plowrc.json"));
         assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
         assert!(
@@ -2060,17 +2060,17 @@ unknown_field = true
         std::fs::write(pkg_dir.join("README.md"), "# empty").unwrap();
 
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"extends": "npm:empty-pkg"}"#,
         )
         .unwrap();
 
-        let result = FallowConfig::load(&dir.path().join(".fallowrc.json"));
+        let result = PlowConfig::load(&dir.path().join(".plowrc.json"));
         assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
         assert!(
-            err_msg.contains("No fallow config found"),
-            "Expected 'No fallow config found' error, got: {err_msg}"
+            err_msg.contains("No plow config found"),
+            "Expected 'No plow config found' error, got: {err_msg}"
         );
     }
 
@@ -2081,12 +2081,12 @@ unknown_field = true
         std::fs::create_dir_all(&pkg_dir).unwrap();
 
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"extends": "npm:@co/config/nonexistent.json"}"#,
         )
         .unwrap();
 
-        let result = FallowConfig::load(&dir.path().join(".fallowrc.json"));
+        let result = PlowConfig::load(&dir.path().join(".plowrc.json"));
         assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
         assert!(
@@ -2098,9 +2098,9 @@ unknown_field = true
     #[test]
     fn extends_npm_empty_specifier_errors() {
         let dir = test_dir("npm-empty");
-        std::fs::write(dir.path().join(".fallowrc.json"), r#"{"extends": "npm:"}"#).unwrap();
+        std::fs::write(dir.path().join(".plowrc.json"), r#"{"extends": "npm:"}"#).unwrap();
 
-        let result = FallowConfig::load(&dir.path().join(".fallowrc.json"));
+        let result = PlowConfig::load(&dir.path().join(".plowrc.json"));
         assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
         assert!(
@@ -2114,17 +2114,17 @@ unknown_field = true
         let dir = test_dir("npm-space");
         create_npm_package(
             dir.path(),
-            "fallow-config-acme",
+            "plow-config-acme",
             r#"{"rules": {"unused-files": "warn"}}"#,
         );
         // Space after npm: — should be trimmed and resolve correctly
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
-            r#"{"extends": "npm: fallow-config-acme"}"#,
+            dir.path().join(".plowrc.json"),
+            r#"{"extends": "npm: plow-config-acme"}"#,
         )
         .unwrap();
 
-        let config = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap();
+        let config = PlowConfig::load(&dir.path().join(".plowrc.json")).unwrap();
         assert_eq!(config.rules.unused_files, Severity::Warn);
     }
 
@@ -2145,12 +2145,12 @@ unknown_field = true
         .unwrap();
 
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"extends": "npm:node-config"}"#,
         )
         .unwrap();
 
-        let config = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap();
+        let config = PlowConfig::load(&dir.path().join(".plowrc.json")).unwrap();
         assert_eq!(config.rules.unused_files, Severity::Off);
     }
 
@@ -2172,24 +2172,24 @@ unknown_field = true
     #[test]
     fn parse_npm_specifier_scoped() {
         assert_eq!(
-            parse_npm_specifier("@company/fallow-config"),
-            ("@company/fallow-config", None)
+            parse_npm_specifier("@company/plow-config"),
+            ("@company/plow-config", None)
         );
     }
 
     #[test]
     fn parse_npm_specifier_scoped_with_subpath() {
         assert_eq!(
-            parse_npm_specifier("@company/fallow-config/strict.json"),
-            ("@company/fallow-config", Some("strict.json"))
+            parse_npm_specifier("@company/plow-config/strict.json"),
+            ("@company/plow-config", Some("strict.json"))
         );
     }
 
     #[test]
     fn parse_npm_specifier_scoped_with_nested_subpath() {
         assert_eq!(
-            parse_npm_specifier("@company/fallow-config/presets/strict.json"),
-            ("@company/fallow-config", Some("presets/strict.json"))
+            parse_npm_specifier("@company/plow-config/presets/strict.json"),
+            ("@company/plow-config", Some("presets/strict.json"))
         );
     }
 
@@ -2208,12 +2208,12 @@ unknown_field = true
         .unwrap();
 
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"extends": "npm:evil-pkg/../../secret.json"}"#,
         )
         .unwrap();
 
-        let result = FallowConfig::load(&dir.path().join(".fallowrc.json"));
+        let result = PlowConfig::load(&dir.path().join(".plowrc.json"));
         assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
         assert!(
@@ -2226,12 +2226,12 @@ unknown_field = true
     fn extends_npm_dotdot_package_name_rejected() {
         let dir = test_dir("npm-dotdot-name");
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"extends": "npm:../relative"}"#,
         )
         .unwrap();
 
-        let result = FallowConfig::load(&dir.path().join(".fallowrc.json"));
+        let result = PlowConfig::load(&dir.path().join(".plowrc.json"));
         assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
         assert!(
@@ -2244,12 +2244,12 @@ unknown_field = true
     fn extends_npm_scoped_without_name_rejected() {
         let dir = test_dir("npm-scope-only");
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"extends": "npm:@scope"}"#,
         )
         .unwrap();
 
-        let result = FallowConfig::load(&dir.path().join(".fallowrc.json"));
+        let result = PlowConfig::load(&dir.path().join(".plowrc.json"));
         assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
         assert!(
@@ -2266,12 +2266,12 @@ unknown_field = true
         std::fs::write(pkg_dir.join("package.json"), "{ not valid json }").unwrap();
 
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"extends": "npm:bad-pkg"}"#,
         )
         .unwrap();
 
-        let result = FallowConfig::load(&dir.path().join(".fallowrc.json"));
+        let result = PlowConfig::load(&dir.path().join(".plowrc.json"));
         assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
         assert!(
@@ -2298,12 +2298,12 @@ unknown_field = true
         .unwrap();
 
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"extends": "npm:evil-exports"}"#,
         )
         .unwrap();
 
-        let result = FallowConfig::load(&dir.path().join(".fallowrc.json"));
+        let result = PlowConfig::load(&dir.path().join(".plowrc.json"));
         assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
         assert!(
@@ -2387,7 +2387,7 @@ unknown_field = true
                 "unused-types": "off"
             }
         }"#;
-        let config: FallowConfig = serde_json::from_str(json_str).unwrap();
+        let config: PlowConfig = serde_json::from_str(json_str).unwrap();
         assert_eq!(config.rules.unused_files, Severity::Error);
         assert_eq!(config.rules.unused_exports, Severity::Warn);
         assert_eq!(config.rules.unused_types, Severity::Off);
@@ -2400,7 +2400,7 @@ unknown_field = true
                 "unused-files": "warn"
             }
         }"#;
-        let config: FallowConfig = serde_json::from_str(json_str).unwrap();
+        let config: PlowConfig = serde_json::from_str(json_str).unwrap();
         assert_eq!(config.rules.unused_files, Severity::Warn);
         // All other rules default to error
         assert_eq!(config.rules.unused_exports, Severity::Error);
@@ -2422,31 +2422,31 @@ unknown_field = true
         // Create a .git dir so it stops searching
         std::fs::create_dir(dir.path().join(".git")).unwrap();
 
-        let result = FallowConfig::find_and_load(dir.path()).unwrap();
+        let result = PlowConfig::find_and_load(dir.path()).unwrap();
         assert!(result.is_none());
     }
 
     #[test]
-    fn find_and_load_finds_fallowrc_json() {
+    fn find_and_load_finds_plowrc_json() {
         let dir = test_dir("find-json");
         std::fs::create_dir(dir.path().join(".git")).unwrap();
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"entry": ["src/main.ts"]}"#,
         )
         .unwrap();
 
-        let (config, path) = FallowConfig::find_and_load(dir.path()).unwrap().unwrap();
+        let (config, path) = PlowConfig::find_and_load(dir.path()).unwrap().unwrap();
         assert_eq!(config.entry, vec!["src/main.ts"]);
-        assert!(path.ends_with(".fallowrc.json"));
+        assert!(path.ends_with(".plowrc.json"));
     }
 
     #[test]
-    fn find_and_load_finds_fallowrc_jsonc() {
+    fn find_and_load_finds_plowrc_jsonc() {
         let dir = test_dir("find-jsonc");
         std::fs::create_dir(dir.path().join(".git")).unwrap();
         std::fs::write(
-            dir.path().join(".fallowrc.jsonc"),
+            dir.path().join(".plowrc.jsonc"),
             r#"{
                 // jsonc with comments, picked up by auto-discovery
                 "entry": ["src/main.ts"]
@@ -2454,64 +2454,64 @@ unknown_field = true
         )
         .unwrap();
 
-        let (config, path) = FallowConfig::find_and_load(dir.path()).unwrap().unwrap();
+        let (config, path) = PlowConfig::find_and_load(dir.path()).unwrap().unwrap();
         assert_eq!(config.entry, vec!["src/main.ts"]);
-        assert!(path.ends_with(".fallowrc.jsonc"));
+        assert!(path.ends_with(".plowrc.jsonc"));
     }
 
     #[test]
-    fn find_and_load_prefers_fallowrc_json_over_jsonc() {
-        // First-match-wins: `.fallowrc.json` ranks above `.fallowrc.jsonc`
+    fn find_and_load_prefers_plowrc_json_over_jsonc() {
+        // First-match-wins: `.plowrc.json` ranks above `.plowrc.jsonc`
         // in `CONFIG_NAMES`, mirroring tsconfig.json > tsconfig.jsonc precedence.
         let dir = test_dir("find-json-vs-jsonc");
         std::fs::create_dir(dir.path().join(".git")).unwrap();
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"entry": ["from-json.ts"]}"#,
         )
         .unwrap();
         std::fs::write(
-            dir.path().join(".fallowrc.jsonc"),
+            dir.path().join(".plowrc.jsonc"),
             r#"{"entry": ["from-jsonc.ts"]}"#,
         )
         .unwrap();
 
-        let (config, path) = FallowConfig::find_and_load(dir.path()).unwrap().unwrap();
+        let (config, path) = PlowConfig::find_and_load(dir.path()).unwrap().unwrap();
         assert_eq!(config.entry, vec!["from-json.ts"]);
-        assert!(path.ends_with(".fallowrc.json"));
+        assert!(path.ends_with(".plowrc.json"));
     }
 
     #[test]
-    fn find_and_load_prefers_fallowrc_json_over_toml() {
+    fn find_and_load_prefers_plowrc_json_over_toml() {
         let dir = test_dir("find-priority");
         std::fs::create_dir(dir.path().join(".git")).unwrap();
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"entry": ["from-json.ts"]}"#,
         )
         .unwrap();
         std::fs::write(
-            dir.path().join("fallow.toml"),
+            dir.path().join("plow.toml"),
             "entry = [\"from-toml.ts\"]\n",
         )
         .unwrap();
 
-        let (config, path) = FallowConfig::find_and_load(dir.path()).unwrap().unwrap();
+        let (config, path) = PlowConfig::find_and_load(dir.path()).unwrap().unwrap();
         assert_eq!(config.entry, vec!["from-json.ts"]);
-        assert!(path.ends_with(".fallowrc.json"));
+        assert!(path.ends_with(".plowrc.json"));
     }
 
     #[test]
-    fn find_and_load_finds_fallow_toml() {
+    fn find_and_load_finds_plow_toml() {
         let dir = test_dir("find-toml");
         std::fs::create_dir(dir.path().join(".git")).unwrap();
         std::fs::write(
-            dir.path().join("fallow.toml"),
+            dir.path().join("plow.toml"),
             "entry = [\"src/index.ts\"]\n",
         )
         .unwrap();
 
-        let (config, _) = FallowConfig::find_and_load(dir.path()).unwrap().unwrap();
+        let (config, _) = PlowConfig::find_and_load(dir.path()).unwrap().unwrap();
         assert_eq!(config.entry, vec!["src/index.ts"]);
     }
 
@@ -2525,19 +2525,19 @@ unknown_field = true
         // Config file above .git should not be found from sub
         // (sub has no .git or package.json, so it keeps searching up to parent)
         // But parent has .git, so it stops there without finding config
-        let result = FallowConfig::find_and_load(&sub).unwrap();
+        let result = PlowConfig::find_and_load(&sub).unwrap();
         assert!(result.is_none());
     }
 
     #[test]
     fn find_and_load_walks_past_package_json_in_monorepo() {
-        // Simulate a pnpm/npm/yarn workspace: root has `.git` + `.fallowrc.json`,
+        // Simulate a pnpm/npm/yarn workspace: root has `.git` + `.plowrc.json`,
         // sub-package has its own `package.json`. Config search from the
         // sub-package must walk past its `package.json` and find the root config.
         let dir = test_dir("find-monorepo");
         std::fs::create_dir(dir.path().join(".git")).unwrap();
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"entry": ["src/index.ts"]}"#,
         )
         .unwrap();
@@ -2546,9 +2546,9 @@ unknown_field = true
         std::fs::create_dir_all(&sub).unwrap();
         std::fs::write(sub.join("package.json"), r#"{"name": "@scope/app"}"#).unwrap();
 
-        let (config, path) = FallowConfig::find_and_load(&sub).unwrap().unwrap();
+        let (config, path) = PlowConfig::find_and_load(&sub).unwrap().unwrap();
         assert_eq!(config.entry, vec!["src/index.ts"]);
-        assert_eq!(path, dir.path().join(".fallowrc.json"));
+        assert_eq!(path, dir.path().join(".plowrc.json"));
     }
 
     #[test]
@@ -2558,7 +2558,7 @@ unknown_field = true
         let dir = test_dir("find-monorepo-override");
         std::fs::create_dir(dir.path().join(".git")).unwrap();
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"entry": ["src/root.ts"]}"#,
         )
         .unwrap();
@@ -2566,11 +2566,11 @@ unknown_field = true
         let sub = dir.path().join("packages").join("app");
         std::fs::create_dir_all(&sub).unwrap();
         std::fs::write(sub.join("package.json"), r#"{"name": "@scope/app"}"#).unwrap();
-        std::fs::write(sub.join(".fallowrc.json"), r#"{"entry": ["src/sub.ts"]}"#).unwrap();
+        std::fs::write(sub.join(".plowrc.json"), r#"{"entry": ["src/sub.ts"]}"#).unwrap();
 
-        let (config, path) = FallowConfig::find_and_load(&sub).unwrap().unwrap();
+        let (config, path) = PlowConfig::find_and_load(&sub).unwrap().unwrap();
         assert_eq!(config.entry, vec!["src/sub.ts"]);
-        assert_eq!(path, sub.join(".fallowrc.json"));
+        assert_eq!(path, sub.join(".plowrc.json"));
     }
 
     #[test]
@@ -2582,7 +2582,7 @@ unknown_field = true
         let dir = test_dir("find-git-file");
         std::fs::create_dir(dir.path().join(".git")).unwrap();
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"entry": ["src/parent.ts"]}"#,
         )
         .unwrap();
@@ -2592,7 +2592,7 @@ unknown_field = true
         // Simulate submodule: `.git` as a file pointing to parent's .git/modules
         std::fs::write(submodule.join(".git"), "gitdir: ../../.git/modules/lib\n").unwrap();
 
-        let result = FallowConfig::find_and_load(&submodule).unwrap();
+        let result = PlowConfig::find_and_load(&submodule).unwrap();
         assert!(
             result.is_none(),
             "submodule boundary should stop config walk",
@@ -2606,7 +2606,7 @@ unknown_field = true
         std::fs::create_dir(&sub).unwrap();
         std::fs::create_dir(dir.path().join(".hg")).unwrap();
 
-        let result = FallowConfig::find_and_load(&sub).unwrap();
+        let result = PlowConfig::find_and_load(&sub).unwrap();
         assert!(result.is_none());
     }
 
@@ -2615,12 +2615,12 @@ unknown_field = true
         let dir = test_dir("find-invalid");
         std::fs::create_dir(dir.path().join(".git")).unwrap();
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r"{ this is not valid json }",
         )
         .unwrap();
 
-        let result = FallowConfig::find_and_load(dir.path());
+        let result = PlowConfig::find_and_load(dir.path());
         assert!(result.is_err());
     }
 
@@ -2629,7 +2629,7 @@ unknown_field = true
     #[test]
     fn load_toml_config_file() {
         let dir = test_dir("toml-config");
-        let config_path = dir.path().join("fallow.toml");
+        let config_path = dir.path().join("plow.toml");
         std::fs::write(
             &config_path,
             r#"
@@ -2645,7 +2645,7 @@ minTokens = 100
         )
         .unwrap();
 
-        let config = FallowConfig::load(&config_path).unwrap();
+        let config = PlowConfig::load(&config_path).unwrap();
         assert_eq!(config.entry, vec!["src/index.ts"]);
         assert_eq!(config.ignore_patterns, vec!["dist/**"]);
         assert_eq!(config.rules.unused_files, Severity::Warn);
@@ -2665,9 +2665,9 @@ minTokens = 100
         let abs_path = "C:\\absolute\\path\\config.json";
 
         let json = format!(r#"{{"extends": ["{}"]}}"#, abs_path.replace('\\', "\\\\"));
-        std::fs::write(dir.path().join(".fallowrc.json"), json).unwrap();
+        std::fs::write(dir.path().join(".plowrc.json"), json).unwrap();
 
-        let result = FallowConfig::load(&dir.path().join(".fallowrc.json"));
+        let result = PlowConfig::load(&dir.path().join(".plowrc.json"));
         assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
         assert!(
@@ -2681,12 +2681,12 @@ minTokens = 100
         let dir = test_dir("extends-windows-absolute");
 
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"extends": ["C:\\absolute\\path\\config.json"]}"#,
         )
         .unwrap();
 
-        let result = FallowConfig::load(&dir.path().join(".fallowrc.json"));
+        let result = PlowConfig::load(&dir.path().join(".plowrc.json"));
         assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
         assert!(
@@ -2701,12 +2701,12 @@ minTokens = 100
         let dir = test_dir("extends-posix-rooted-absolute");
 
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"extends": ["/absolute/path/config.json"]}"#,
         )
         .unwrap();
 
-        let result = FallowConfig::load(&dir.path().join(".fallowrc.json"));
+        let result = PlowConfig::load(&dir.path().join(".plowrc.json"));
         assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
         assert!(
@@ -2719,7 +2719,7 @@ minTokens = 100
 
     #[test]
     fn resolve_production_mode_disables_dev_deps() {
-        let config = FallowConfig {
+        let config = PlowConfig {
             production: true.into(),
             ..Default::default()
         };
@@ -2744,26 +2744,26 @@ minTokens = 100
     #[test]
     fn include_entry_exports_deserializes_from_camelcase_json() {
         let json = r#"{ "includeEntryExports": true }"#;
-        let config: FallowConfig = serde_json::from_str(json).unwrap();
+        let config: PlowConfig = serde_json::from_str(json).unwrap();
         assert!(config.include_entry_exports);
     }
 
     #[test]
     fn include_entry_exports_deserializes_from_camelcase_toml() {
         let toml_str = "includeEntryExports = true\n";
-        let config: FallowConfig = toml::from_str(toml_str).unwrap();
+        let config: PlowConfig = toml::from_str(toml_str).unwrap();
         assert!(config.include_entry_exports);
     }
 
     #[test]
     fn include_entry_exports_default_is_false() {
-        let config: FallowConfig = serde_json::from_str("{}").unwrap();
+        let config: PlowConfig = serde_json::from_str("{}").unwrap();
         assert!(!config.include_entry_exports);
     }
 
     #[test]
     fn include_entry_exports_propagates_through_resolve() {
-        let config = FallowConfig {
+        let config = PlowConfig {
             include_entry_exports: true,
             auto_imports: false,
             cache: CacheConfig::default(),
@@ -2818,13 +2818,13 @@ minTokens = 100
     fn extends_non_string_non_array_ignored() {
         let dir = test_dir("extends-numeric");
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"extends": 42, "entry": ["src/index.ts"]}"#,
         )
         .unwrap();
 
         // extends=42 is neither string nor array, so it's treated as no extends
-        let config = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap();
+        let config = PlowConfig::load(&dir.path().join(".plowrc.json")).unwrap();
         assert_eq!(config.entry, vec!["src/index.ts"]);
     }
 
@@ -2845,12 +2845,12 @@ minTokens = 100
         )
         .unwrap();
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"extends": ["base-a.json", "base-b.json"]}"#,
         )
         .unwrap();
 
-        let config = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap();
+        let config = PlowConfig::load(&dir.path().join(".plowrc.json")).unwrap();
         // base-b is later in the array, so its value should win
         assert_eq!(config.rules.unused_files, Severity::Off);
     }
@@ -2858,15 +2858,15 @@ minTokens = 100
     // ── config with production flag ──────────────────────────────
 
     #[test]
-    fn fallow_config_deserialize_production() {
+    fn plow_config_deserialize_production() {
         let json_str = r#"{"production": true}"#;
-        let config: FallowConfig = serde_json::from_str(json_str).unwrap();
+        let config: PlowConfig = serde_json::from_str(json_str).unwrap();
         assert!(config.production);
     }
 
     #[test]
-    fn fallow_config_production_defaults_false() {
-        let config: FallowConfig = serde_json::from_str("{}").unwrap();
+    fn plow_config_production_defaults_false() {
+        let config: PlowConfig = serde_json::from_str("{}").unwrap();
         assert!(!config.production);
     }
 
@@ -2893,48 +2893,48 @@ minTokens = 100
     // ── find_config_path ────────────────────────────────────────────
 
     #[test]
-    fn find_config_path_returns_fallowrc_json() {
+    fn find_config_path_returns_plowrc_json() {
         let dir = test_dir("find-path-json");
         std::fs::create_dir(dir.path().join(".git")).unwrap();
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"entry": ["src/main.ts"]}"#,
         )
         .unwrap();
 
-        let path = FallowConfig::find_config_path(dir.path());
+        let path = PlowConfig::find_config_path(dir.path());
         assert!(path.is_some());
-        assert!(path.unwrap().ends_with(".fallowrc.json"));
+        assert!(path.unwrap().ends_with(".plowrc.json"));
     }
 
     #[test]
-    fn find_config_path_returns_fallow_toml() {
+    fn find_config_path_returns_plow_toml() {
         let dir = test_dir("find-path-toml");
         std::fs::create_dir(dir.path().join(".git")).unwrap();
         std::fs::write(
-            dir.path().join("fallow.toml"),
+            dir.path().join("plow.toml"),
             "entry = [\"src/main.ts\"]\n",
         )
         .unwrap();
 
-        let path = FallowConfig::find_config_path(dir.path());
+        let path = PlowConfig::find_config_path(dir.path());
         assert!(path.is_some());
-        assert!(path.unwrap().ends_with("fallow.toml"));
+        assert!(path.unwrap().ends_with("plow.toml"));
     }
 
     #[test]
-    fn find_config_path_returns_dot_fallow_toml() {
+    fn find_config_path_returns_dot_plow_toml() {
         let dir = test_dir("find-path-dot-toml");
         std::fs::create_dir(dir.path().join(".git")).unwrap();
         std::fs::write(
-            dir.path().join(".fallow.toml"),
+            dir.path().join(".plow.toml"),
             "entry = [\"src/main.ts\"]\n",
         )
         .unwrap();
 
-        let path = FallowConfig::find_config_path(dir.path());
+        let path = PlowConfig::find_config_path(dir.path());
         assert!(path.is_some());
-        assert!(path.unwrap().ends_with(".fallow.toml"));
+        assert!(path.unwrap().ends_with(".plow.toml"));
     }
 
     #[test]
@@ -2942,14 +2942,14 @@ minTokens = 100
         let dir = test_dir("find-path-priority");
         std::fs::create_dir(dir.path().join(".git")).unwrap();
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"entry": ["json.ts"]}"#,
         )
         .unwrap();
-        std::fs::write(dir.path().join("fallow.toml"), "entry = [\"toml.ts\"]\n").unwrap();
+        std::fs::write(dir.path().join("plow.toml"), "entry = [\"toml.ts\"]\n").unwrap();
 
-        let path = FallowConfig::find_config_path(dir.path());
-        assert!(path.unwrap().ends_with(".fallowrc.json"));
+        let path = PlowConfig::find_config_path(dir.path());
+        assert!(path.unwrap().ends_with(".plowrc.json"));
     }
 
     #[test]
@@ -2957,7 +2957,7 @@ minTokens = 100
         let dir = test_dir("find-path-none");
         std::fs::create_dir(dir.path().join(".git")).unwrap();
 
-        let path = FallowConfig::find_config_path(dir.path());
+        let path = PlowConfig::find_config_path(dir.path());
         assert!(path.is_none());
     }
 
@@ -2966,7 +2966,7 @@ minTokens = 100
         let dir = test_dir("find-path-monorepo");
         std::fs::create_dir(dir.path().join(".git")).unwrap();
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"entry": ["src/index.ts"]}"#,
         )
         .unwrap();
@@ -2975,8 +2975,8 @@ minTokens = 100
         std::fs::create_dir_all(&sub).unwrap();
         std::fs::write(sub.join("package.json"), r#"{"name": "@scope/app"}"#).unwrap();
 
-        let path = FallowConfig::find_config_path(&sub).unwrap();
-        assert_eq!(path, dir.path().join(".fallowrc.json"));
+        let path = PlowConfig::find_config_path(&sub).unwrap();
+        assert_eq!(path, dir.path().join(".plowrc.json"));
     }
 
     // ── TOML extends support ────────────────────────────────────────
@@ -2991,12 +2991,12 @@ minTokens = 100
         )
         .unwrap();
         std::fs::write(
-            dir.path().join("fallow.toml"),
+            dir.path().join("plow.toml"),
             "extends = [\"base.json\"]\nentry = [\"src/index.ts\"]\n",
         )
         .unwrap();
 
-        let config = FallowConfig::load(&dir.path().join("fallow.toml")).unwrap();
+        let config = PlowConfig::load(&dir.path().join("plow.toml")).unwrap();
         assert_eq!(config.rules.unused_files, Severity::Warn);
         assert_eq!(config.entry, vec!["src/index.ts"]);
     }
@@ -3037,10 +3037,10 @@ minTokens = 100
     #[test]
     fn config_names_has_four_entries() {
         assert_eq!(CONFIG_NAMES.len(), 4);
-        // All names should start with "." or "fallow"
+        // All names should start with "." or "plow"
         for name in CONFIG_NAMES {
             assert!(
-                name.starts_with('.') || name.starts_with("fallow"),
+                name.starts_with('.') || name.starts_with("plow"),
                 "unexpected config name: {name}"
             );
         }
@@ -3072,7 +3072,7 @@ minTokens = 100
             "scripts": {
                 "build": "tsc",
                 "test": "vitest",
-                "lint": "fallow check"
+                "lint": "plow check"
             }
         }"#,
         )
@@ -3080,7 +3080,7 @@ minTokens = 100
         let scripts = pkg.scripts.unwrap();
         assert_eq!(scripts.len(), 3);
         assert_eq!(scripts.get("build"), Some(&"tsc".to_string()));
-        assert_eq!(scripts.get("lint"), Some(&"fallow check".to_string()));
+        assert_eq!(scripts.get("lint"), Some(&"plow check".to_string()));
     }
 
     // ── Extends with TOML-to-TOML chain ─────────────────────────────
@@ -3100,12 +3100,12 @@ minTokens = 100
         )
         .unwrap();
         std::fs::write(
-            dir.path().join("fallow.toml"),
+            dir.path().join("plow.toml"),
             "extends = [\"middle.json\"]\n",
         )
         .unwrap();
 
-        let config = FallowConfig::load(&dir.path().join("fallow.toml")).unwrap();
+        let config = PlowConfig::load(&dir.path().join("plow.toml")).unwrap();
         assert_eq!(config.entry, vec!["src/base.ts"]);
         assert_eq!(config.rules.unused_files, Severity::Off);
     }
@@ -3118,23 +3118,23 @@ minTokens = 100
         let sub = dir.path().join("src").join("deep");
         std::fs::create_dir_all(&sub).unwrap();
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"entry": ["src/main.ts"]}"#,
         )
         .unwrap();
         // Create .git in root to stop search there
         std::fs::create_dir(dir.path().join(".git")).unwrap();
 
-        let (config, path) = FallowConfig::find_and_load(&sub).unwrap().unwrap();
+        let (config, path) = PlowConfig::find_and_load(&sub).unwrap().unwrap();
         assert_eq!(config.entry, vec!["src/main.ts"]);
-        assert!(path.ends_with(".fallowrc.json"));
+        assert!(path.ends_with(".plowrc.json"));
     }
 
     // ── JSON schema generation ──────────────────────────────────────
 
     #[test]
     fn json_schema_contains_entry_field() {
-        let schema = FallowConfig::json_schema();
+        let schema = PlowConfig::json_schema();
         let obj = schema.as_object().unwrap();
         let props = obj.get("properties").and_then(|v| v.as_object());
         assert!(props.is_some(), "schema should have properties");
@@ -3144,10 +3144,10 @@ minTokens = 100
         );
     }
 
-    // ── Duplicates config via JSON in FallowConfig ──────────────────
+    // ── Duplicates config via JSON in PlowConfig ──────────────────
 
     #[test]
-    fn fallow_config_json_duplicates_all_fields() {
+    fn plow_config_json_duplicates_all_fields() {
         let json = r#"{
             "duplicates": {
                 "enabled": true,
@@ -3164,7 +3164,7 @@ minTokens = 100
                 }
             }
         }"#;
-        let config: FallowConfig = serde_json::from_str(json).unwrap();
+        let config: PlowConfig = serde_json::from_str(json).unwrap();
         assert!(config.duplicates.enabled);
         assert_eq!(
             config.duplicates.mode,
@@ -3227,8 +3227,8 @@ minTokens = 100
     fn normalize_url_preserves_path_case() {
         // Path component casing is significant (server-dependent), only scheme+host lowercase.
         assert_eq!(
-            normalize_url_for_dedup("https://GitHub.COM/Org/Repo/Fallow.json"),
-            "https://github.com/Org/Repo/Fallow.json"
+            normalize_url_for_dedup("https://GitHub.COM/Org/Repo/Plow.json"),
+            "https://github.com/Org/Repo/Plow.json"
         );
     }
 
@@ -3273,12 +3273,12 @@ minTokens = 100
     fn extends_http_rejected() {
         let dir = test_dir("http-rejected");
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"extends": "http://example.com/config.json"}"#,
         )
         .unwrap();
 
-        let result = FallowConfig::load(&dir.path().join(".fallowrc.json"));
+        let result = PlowConfig::load(&dir.path().join(".plowrc.json"));
         assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
         assert!(
@@ -3369,12 +3369,12 @@ minTokens = 100
         )
         .unwrap();
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"extends": ["local.json", "https://unreachable.invalid/config.json"]}"#,
         )
         .unwrap();
 
-        let result = FallowConfig::load(&dir.path().join(".fallowrc.json"));
+        let result = PlowConfig::load(&dir.path().join(".plowrc.json"));
         assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
         assert!(
@@ -3387,12 +3387,12 @@ minTokens = 100
     fn extends_https_url_unreachable_errors() {
         let dir = test_dir("url-unreachable");
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"extends": "https://unreachable.invalid/config.json"}"#,
         )
         .unwrap();
 
-        let result = FallowConfig::load(&dir.path().join(".fallowrc.json"));
+        let result = PlowConfig::load(&dir.path().join(".plowrc.json"));
         assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
         assert!(
@@ -3483,7 +3483,7 @@ minTokens = 100
 
     #[test]
     fn load_wires_warn_on_unknown_rule_keys_into_load_path() {
-        // Wiring regression test: asserts FallowConfig::load actually invokes
+        // Wiring regression test: asserts PlowConfig::load actually invokes
         // the warn pass on the merged value. If a future refactor removes the
         // `warn_on_unknown_rule_keys` line from `load`, the helper tests still
         // pass but this capture-based assertion fails because no finding is
@@ -3495,7 +3495,7 @@ minTokens = 100
         // process-wide dedupe set does not suppress the finding if another
         // test happens to load a config with the same typo earlier.
         let dir = test_dir("wiring");
-        let path = dir.path().join(".fallowrc.json");
+        let path = dir.path().join(".plowrc.json");
         let typo = format!(
             "wiring-probe-{}-{}",
             std::process::id(),
@@ -3505,7 +3505,7 @@ minTokens = 100
         );
         std::fs::write(&path, format!(r#"{{"rules": {{"{typo}": "warn"}}}}"#)).unwrap();
 
-        let (config_res, captured) = capture_unknown_rule_warnings(|| FallowConfig::load(&path));
+        let (config_res, captured) = capture_unknown_rule_warnings(|| PlowConfig::load(&path));
 
         assert!(
             config_res.is_ok(),
@@ -3515,7 +3515,7 @@ minTokens = 100
         assert_eq!(
             captured.len(),
             1,
-            "FallowConfig::load must invoke warn_on_unknown_rule_keys exactly once for one new unknown key, got: {captured:?}"
+            "PlowConfig::load must invoke warn_on_unknown_rule_keys exactly once for one new unknown key, got: {captured:?}"
         );
         assert_eq!(captured[0].key, typo);
         assert_eq!(captured[0].context, "rules");
@@ -3528,12 +3528,12 @@ minTokens = 100
         // hard error.
         let dir = test_dir("misspelled-rule");
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"rules": {"unsued-files": "warn"}}"#,
         )
         .unwrap();
 
-        let config = FallowConfig::load(&dir.path().join(".fallowrc.json"))
+        let config = PlowConfig::load(&dir.path().join(".plowrc.json"))
             .expect("load should succeed in phase 1");
 
         // Typo'd rule had no effect; unused_files stays at its default (Error).
@@ -3545,7 +3545,7 @@ minTokens = 100
     #[test]
     fn validate_resolved_boundaries_passes_on_valid_config() {
         let dir = test_dir("boundaries-valid");
-        let config = FallowConfig {
+        let config = PlowConfig {
             boundaries: crate::BoundaryConfig {
                 preset: None,
                 zones: vec![
@@ -3568,7 +3568,7 @@ minTokens = 100
                     allow_type_only: vec![],
                 }],
             },
-            ..FallowConfig::default()
+            ..PlowConfig::default()
         };
         config
             .validate_resolved_boundaries(dir.path())
@@ -3578,7 +3578,7 @@ minTokens = 100
     #[test]
     fn validate_resolved_boundaries_aggregates_unknown_zone_refs() {
         let dir = test_dir("boundaries-unknown-zones");
-        let config = FallowConfig {
+        let config = PlowConfig {
             boundaries: crate::BoundaryConfig {
                 preset: None,
                 zones: vec![crate::BoundaryZone {
@@ -3600,7 +3600,7 @@ minTokens = 100
                     },
                 ],
             },
-            ..FallowConfig::default()
+            ..PlowConfig::default()
         };
 
         let errors = config
@@ -3636,7 +3636,7 @@ minTokens = 100
     #[test]
     fn validate_resolved_boundaries_flags_redundant_root_prefix() {
         let dir = test_dir("boundaries-redundant-prefix");
-        let config = FallowConfig {
+        let config = PlowConfig {
             boundaries: crate::BoundaryConfig {
                 preset: None,
                 zones: vec![crate::BoundaryZone {
@@ -3647,16 +3647,16 @@ minTokens = 100
                 }],
                 rules: vec![],
             },
-            ..FallowConfig::default()
+            ..PlowConfig::default()
         };
 
         let errors = config
             .validate_resolved_boundaries(dir.path())
             .expect_err("redundant root prefix should fail");
         assert_eq!(errors.len(), 1, "got: {errors:?}");
-        // Display preserves the legacy FALLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX tag.
+        // Display preserves the legacy PLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX tag.
         let rendered = errors[0].to_string();
-        assert!(rendered.contains("FALLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX"));
+        assert!(rendered.contains("PLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX"));
         assert!(rendered.contains("zone 'ui'"));
     }
 
@@ -3665,7 +3665,7 @@ minTokens = 100
         // One config, two distinct failure classes; the user should see both
         // in a single diagnostic run instead of fixing one and re-running.
         let dir = test_dir("boundaries-mixed-errors");
-        let config = FallowConfig {
+        let config = PlowConfig {
             boundaries: crate::BoundaryConfig {
                 preset: None,
                 zones: vec![crate::BoundaryZone {
@@ -3680,7 +3680,7 @@ minTokens = 100
                     allow_type_only: vec![],
                 }],
             },
-            ..FallowConfig::default()
+            ..PlowConfig::default()
         };
         let errors = config
             .validate_resolved_boundaries(dir.path())
@@ -3695,7 +3695,7 @@ minTokens = 100
         assert!(
             rendered
                 .iter()
-                .any(|m| m.contains("FALLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX"))
+                .any(|m| m.contains("PLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX"))
         );
     }
 
@@ -3709,13 +3709,13 @@ minTokens = 100
         let dir = test_dir("boundaries-bulletproof");
         // Create a stub `src/features/auth` child so auto-discover finds it.
         std::fs::create_dir_all(dir.path().join("src/features/auth")).unwrap();
-        let config = FallowConfig {
+        let config = PlowConfig {
             boundaries: crate::BoundaryConfig {
                 preset: Some(crate::BoundaryPreset::Bulletproof),
                 zones: vec![],
                 rules: vec![],
             },
-            ..FallowConfig::default()
+            ..PlowConfig::default()
         };
         config
             .validate_resolved_boundaries(dir.path())

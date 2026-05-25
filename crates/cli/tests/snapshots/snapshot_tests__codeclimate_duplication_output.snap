@@ -5,13 +5,13 @@ expression: json_str
 [
   {
     "type": "issue",
-    "check_name": "fallow/code-duplication",
+    "check_name": "plow/code-duplication",
     "description": "Code clone group 1 (11 lines, 2 instances)",
     "categories": [
       "Duplication"
     ],
     "severity": "minor",
-    "fingerprint": "c8bb21b8fea30c1f",
+    "fingerprint": "345cae8fb0953084",
     "location": {
       "path": "src/utils.ts",
       "lines": {
@@ -21,13 +21,13 @@ expression: json_str
   },
   {
     "type": "issue",
-    "check_name": "fallow/code-duplication",
+    "check_name": "plow/code-duplication",
     "description": "Code clone group 1 (11 lines, 2 instances)",
     "categories": [
       "Duplication"
     ],
     "severity": "minor",
-    "fingerprint": "b0286cc194f9734d",
+    "fingerprint": "9bd1ed63213bb254",
     "location": {
       "path": "src/helpers.ts",
       "lines": {

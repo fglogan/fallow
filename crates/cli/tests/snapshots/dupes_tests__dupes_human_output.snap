@@ -13,4 +13,4 @@ expression: redacted
     src/original.ts:1-21
     src/partial.ts:2-17
 
-  Identical code blocks detected via suffix-array analysis — https://docs.fallow.tools/explanations/duplication#clone-groups
+  Identical code blocks detected via suffix-array analysis — https://docs.genesis-plow.dev/explanations/duplication#clone-groups

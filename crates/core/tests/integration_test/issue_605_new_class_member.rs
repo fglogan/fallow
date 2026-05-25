@@ -9,8 +9,8 @@ fn new_expression_receivers_credit_class_members() {
     //     `new OptionBuilder().addDefault(...).addFromCli(...).build()`
     let root = fixture_path("issue-605-new-class-member");
     let mut config = create_config(root);
-    config.rules.unused_class_members = fallow_config::Severity::Error;
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    config.rules.unused_class_members = plow_config::Severity::Error;
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused: Vec<String> = results
         .unused_class_members

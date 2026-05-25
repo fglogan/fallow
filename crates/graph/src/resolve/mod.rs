@@ -42,9 +42,9 @@ use std::sync::Mutex;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_config::{AutoImportKind, AutoImportRule};
-use fallow_types::discover::{DiscoveredFile, FileId};
-use fallow_types::extract::{ImportInfo, ImportedName, ModuleInfo};
+use plow_config::{AutoImportKind, AutoImportRule};
+use plow_types::discover::{DiscoveredFile, FileId};
+use plow_types::extract::{ImportInfo, ImportedName, ModuleInfo};
 use oxc_span::Span;
 
 use dynamic_imports::{resolve_dynamic_imports, resolve_dynamic_patterns};
@@ -66,7 +66,7 @@ use upgrades::apply_specifier_upgrades;
 pub fn resolve_all_imports(
     modules: &[ModuleInfo],
     files: &[DiscoveredFile],
-    workspaces: &[fallow_config::WorkspaceInfo],
+    workspaces: &[plow_config::WorkspaceInfo],
     active_plugins: &[String],
     path_aliases: &[(String, String)],
     auto_imports: &[AutoImportRule],
@@ -90,7 +90,7 @@ pub fn resolve_all_imports(
         .collect();
     let root_canonical = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     let mut package_manifests = Vec::new();
-    if let Ok(package_json) = fallow_config::PackageJson::load(&root.join("package.json")) {
+    if let Ok(package_json) = plow_config::PackageJson::load(&root.join("package.json")) {
         package_manifests.push(PackageManifestInfo {
             root: root.to_path_buf(),
             canonical_root: root_canonical,
@@ -99,7 +99,7 @@ pub fn resolve_all_imports(
         });
     }
     for (ws, canonical_root) in workspaces.iter().zip(canonical_ws_roots.iter()) {
-        if let Ok(package_json) = fallow_config::PackageJson::load(&ws.root.join("package.json")) {
+        if let Ok(package_json) = plow_config::PackageJson::load(&ws.root.join("package.json")) {
             package_manifests.push(PackageManifestInfo {
                 root: ws.root.clone(),
                 canonical_root: canonical_root.clone(),

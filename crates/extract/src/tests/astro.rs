@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use fallow_types::discover::FileId;
+use plow_types::discover::FileId;
 
 use crate::parse::parse_source_to_module;
 

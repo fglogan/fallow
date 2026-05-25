@@ -1,4 +1,4 @@
-use fallow_config::Severity;
+use plow_config::Severity;
 
 use crate::output_envelope::CodeClimateSeverity;
 

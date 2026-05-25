@@ -12,7 +12,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use oxc_span::Span;
 
 use crate::ExportName;
-use fallow_types::extract::{NamespaceObjectAlias, VisibilityTag};
+use plow_types::extract::{NamespaceObjectAlias, VisibilityTag};
 
 /// Seconds-since-Unix-epoch from the wall clock, saturating to 0 if the
 /// system clock is set before the epoch. Used as the LRU bookkeeping
@@ -38,14 +38,14 @@ use super::types::{
 #[must_use]
 pub fn cached_to_module(
     cached: &CachedModule,
-    file_id: fallow_types::discover::FileId,
+    file_id: plow_types::discover::FileId,
 ) -> crate::ModuleInfo {
     cached_to_module_opts(cached, file_id, true)
 }
 
 /// Reconstruct a [`ModuleInfo`](crate::ModuleInfo) from a [`CachedModule`], skipping
 /// the per-function complexity vec when `need_complexity` is `false`. Avoids the
-/// `Vec<FunctionComplexity>` clone on warm runs of commands (e.g. `fallow check`)
+/// `Vec<FunctionComplexity>` clone on warm runs of commands (e.g. `plow check`)
 /// that don't consume complexity, which adds up across tens of thousands of files.
 #[must_use]
 #[expect(
@@ -54,7 +54,7 @@ pub fn cached_to_module(
 )]
 pub fn cached_to_module_opts(
     cached: &CachedModule,
-    file_id: fallow_types::discover::FileId,
+    file_id: plow_types::discover::FileId,
     need_complexity: bool,
 ) -> crate::ModuleInfo {
     use crate::{
@@ -182,7 +182,7 @@ pub fn cached_to_module_opts(
     let unknown_suppression_kinds = cached
         .unknown_suppression_kinds
         .iter()
-        .map(|u| fallow_types::suppress::UnknownSuppressionKind {
+        .map(|u| plow_types::suppress::UnknownSuppressionKind {
             comment_line: u.comment_line,
             is_file_level: u.is_file_level,
             token: u.token.clone(),

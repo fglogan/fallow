@@ -5,7 +5,7 @@
 
 use std::path::Path;
 
-use fallow_graph::resolve::extract_package_name;
+use plow_graph::resolve::extract_package_name;
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
     Argument, CallExpression, Expression, FunctionBody, ObjectExpression, Statement,

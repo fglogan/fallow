@@ -4,7 +4,7 @@ use super::common::{create_config, fixture_path};
 fn public_tag_prevents_unused_export_detection() {
     let root = fixture_path("visibility-tags");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -41,7 +41,7 @@ fn public_tag_prevents_unused_export_detection() {
 fn untagged_unused_export_still_detected() {
     let root = fixture_path("visibility-tags");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports

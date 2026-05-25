@@ -5,7 +5,7 @@ use tower_lsp::lsp_types::{
     Position, Range, Url,
 };
 
-use fallow_core::results::AnalysisResults;
+use plow_core::results::AnalysisResults;
 
 use super::{FIRST_LINE_RANGE, doc_link};
 
@@ -66,7 +66,7 @@ pub fn push_circular_dep_diagnostics(
                     },
                 },
                 severity: Some(DiagnosticSeverity::WARNING),
-                source: Some("fallow".to_string()),
+                source: Some("plow".to_string()),
                 code: Some(NumberOrString::String("circular-dependency".to_string())),
                 code_description: doc_link("circular-dependencies"),
                 message,
@@ -98,11 +98,11 @@ pub fn push_re_export_cycle_diagnostics(
             })
             .collect();
         let (kind_label, fix_hint) = match cycle.cycle.kind {
-            fallow_core::results::ReExportCycleKind::SelfLoop => (
+            plow_core::results::ReExportCycleKind::SelfLoop => (
                 "Self-loop",
                 "Remove the `export * from './'` (or equivalent) inside this file.",
             ),
-            fallow_core::results::ReExportCycleKind::MultiNode => (
+            plow_core::results::ReExportCycleKind::MultiNode => (
                 "Cycle",
                 "Remove one `export * from` statement on any one member to break the cycle.",
             ),
@@ -153,7 +153,7 @@ pub fn push_re_export_cycle_diagnostics(
             map.entry(uri).or_default().push(Diagnostic {
                 range: FIRST_LINE_RANGE,
                 severity: Some(DiagnosticSeverity::WARNING),
-                source: Some("fallow".to_string()),
+                source: Some("plow".to_string()),
                 code: Some(NumberOrString::String("re-export-cycle".to_string())),
                 code_description: doc_link("re-export-cycles"),
                 message: message.clone(),
@@ -211,7 +211,7 @@ pub fn push_boundary_violation_diagnostics(
                 },
             },
             severity: Some(DiagnosticSeverity::WARNING),
-            source: Some("fallow".to_string()),
+            source: Some("plow".to_string()),
             code: Some(NumberOrString::String("boundary-violation".to_string())),
             code_description: doc_link("boundary-violations"),
             message,
@@ -225,8 +225,8 @@ pub fn push_boundary_violation_diagnostics(
 mod tests {
     use std::path::PathBuf;
 
-    use fallow_core::duplicates::{DuplicationReport, DuplicationStats};
-    use fallow_core::results::{
+    use plow_core::duplicates::{DuplicationReport, DuplicationStats};
+    use plow_core::results::{
         AnalysisResults, BoundaryViolation, BoundaryViolationFinding, CircularDependency,
         CircularDependencyFinding,
     };
@@ -369,7 +369,7 @@ mod tests {
 
     #[test]
     fn re_export_cycle_multi_node_emits_one_diagnostic_per_member() {
-        use fallow_core::results::{ReExportCycle, ReExportCycleFinding, ReExportCycleKind};
+        use plow_core::results::{ReExportCycle, ReExportCycleFinding, ReExportCycleKind};
 
         let root = test_root();
         let file_a = root.join("src/api/index.ts");
@@ -435,7 +435,7 @@ mod tests {
 
     #[test]
     fn re_export_cycle_self_loop_emits_self_loop_message_and_no_related_info() {
-        use fallow_core::results::{ReExportCycle, ReExportCycleFinding, ReExportCycleKind};
+        use plow_core::results::{ReExportCycle, ReExportCycleFinding, ReExportCycleKind};
 
         let root = test_root();
         let file = root.join("src/utils/index.ts");
@@ -532,7 +532,7 @@ mod tests {
         let uri = Url::from_file_path(&from_file).unwrap();
         let d = &diags[&uri][0];
         assert_eq!(d.severity, Some(DiagnosticSeverity::WARNING));
-        assert_eq!(d.source, Some("fallow".to_string()));
+        assert_eq!(d.source, Some("plow".to_string()));
     }
 
     #[test]

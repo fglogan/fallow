@@ -1,16 +1,16 @@
-//! `fallow setup-hooks`: generate or remove Claude Code PreToolUse gate
+//! `plow setup-hooks`: generate or remove Claude Code PreToolUse gate
 //! files for this repo (and optionally an `AGENTS.md` fallback block for
 //! Codex).
 //!
 //! The gate intercepts Claude's Bash tool when the command is `git commit`
-//! or `git push`, runs `fallow audit --format json --quiet --explain`, and
+//! or `git push`, runs `plow audit --format json --quiet --explain`, and
 //! blocks only on `verdict: "fail"`. The audit JSON is written to stderr so
 //! the agent can read `_meta.docs` links and `actions`, fix the findings,
 //! and retry.
 //!
 //! This is the legacy *agent-hook* command. The clearer namespace is
-//! `fallow hooks install --target agent`. For the *git pre-commit* hook
-//! scaffolder, see `fallow hooks install --target git`. The two targets write
+//! `plow hooks install --target agent`. For the *git pre-commit* hook
+//! scaffolder, see `plow hooks install --target git`. The two targets write
 //! to different surfaces: Git hooks write into `.git/hooks/` or `.husky/`, and
 //! agent hooks write into `.claude/` / `AGENTS.md`.
 
@@ -27,7 +27,7 @@ pub enum HookAgentArg {
     Codex,
 }
 
-/// CLI options for `fallow setup-hooks`.
+/// CLI options for `plow setup-hooks`.
 pub struct SetupHooksOptions<'a> {
     pub root: &'a Path,
     pub agent: Option<HookAgentArg>,
@@ -38,51 +38,51 @@ pub struct SetupHooksOptions<'a> {
     pub uninstall: bool,
 }
 
-/// Template content of `.claude/hooks/fallow-gate.sh`. Contains the
-/// `@@FALLOW_INSTALLER_VERSION@@` placeholder; use [`rendered_gate_script`] to
+/// Template content of `.claude/hooks/plow-gate.sh`. Contains the
+/// `@@PLOW_INSTALLER_VERSION@@` placeholder; use [`rendered_gate_script`] to
 /// obtain the install-ready bytes.
-pub const FALLOW_GATE_SCRIPT: &str = include_str!("setup_hooks/fallow-gate.sh");
+pub const PLOW_GATE_SCRIPT: &str = include_str!("setup_hooks/plow-gate.sh");
 
 /// Marker substituted at install time by [`rendered_gate_script`]. Follows the
 /// autotools `@@NAME@@` convention: grep-friendly, bash-safe, unambiguously
 /// "already rendered" when read in an installed script.
-const INSTALLER_VERSION_PLACEHOLDER: &str = "@@FALLOW_INSTALLER_VERSION@@";
+const INSTALLER_VERSION_PLACEHOLDER: &str = "@@PLOW_INSTALLER_VERSION@@";
 
 /// Render the gate script with install-time substitutions applied. Stamps the
-/// fallow version that invoked `setup-hooks` into a header comment for
-/// forensics; the enforced `FALLOW_GATE_MIN_VERSION` default stays hand-bumped
+/// plow version that invoked `setup-hooks` into a header comment for
+/// forensics; the enforced `PLOW_GATE_MIN_VERSION` default stays hand-bumped
 /// by maintainers when a correctness-affecting filtering fix lands, and is
 /// intentionally NOT substituted here.
 #[must_use]
 pub fn rendered_gate_script() -> String {
-    FALLOW_GATE_SCRIPT.replace(INSTALLER_VERSION_PLACEHOLDER, env!("CARGO_PKG_VERSION"))
+    PLOW_GATE_SCRIPT.replace(INSTALLER_VERSION_PLACEHOLDER, env!("CARGO_PKG_VERSION"))
 }
 
 /// Static content of `.claude/settings.json` when no prior file exists.
 pub const CLAUDE_SETTINGS_DEFAULT: &str = include_str!("setup_hooks/settings.json");
 
 /// Managed-block start marker for the AGENTS.md Codex fallback.
-pub const AGENTS_BLOCK_START: &str = "<!-- fallow:setup-hooks:start -->";
+pub const AGENTS_BLOCK_START: &str = "<!-- plow:setup-hooks:start -->";
 /// Managed-block end marker for the AGENTS.md Codex fallback.
-pub const AGENTS_BLOCK_END: &str = "<!-- fallow:setup-hooks:end -->";
+pub const AGENTS_BLOCK_END: &str = "<!-- plow:setup-hooks:end -->";
 
-/// Body of the managed block that `fallow setup-hooks` maintains in
+/// Body of the managed block that `plow setup-hooks` maintains in
 /// `AGENTS.md`. The `start` and `end` markers bracket this body so re-runs
 /// replace it in place rather than appending duplicates.
-pub const AGENTS_BLOCK_BODY: &str = "## Fallow local gate
+pub const AGENTS_BLOCK_BODY: &str = "## Plow local gate
 
-Before any `git commit` or `git push`, run `fallow audit --format json --quiet --explain`. If the verdict is `fail`, fix the reported findings before retrying. Treat JSON runtime errors like `{ \"error\": true, ... }` as non-blocking.
+Before any `git commit` or `git push`, run `plow audit --format json --quiet --explain`. If the verdict is `fail`, fix the reported findings before retrying. Treat JSON runtime errors like `{ \"error\": true, ... }` as non-blocking.
 
-Audit defaults to `gate=new-only`: only findings introduced by the current changeset affect the verdict. Inherited findings on touched files are reported under `attribution` and annotated with `introduced: false`, but do not block the commit. Set `[audit] gate = \"all\"` in `fallow.toml` to gate every finding in changed files.
+Audit defaults to `gate=new-only`: only findings introduced by the current changeset affect the verdict. Inherited findings on touched files are reported under `attribution` and annotated with `introduced: false`, but do not block the commit. Set `[audit] gate = \"all\"` in `plow.toml` to gate every finding in changed files.
 ";
 
 /// Marker embedded in generated hook scripts so uninstall (and upgrades)
 /// can recognize a previously-generated file and remove it without `--force`.
-const HOOK_SCRIPT_MARKER: &str = "# Generated by fallow setup-hooks.";
-const PROJECT_FALLOW_HANDLER_COMMAND: &str = "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/fallow-gate.sh";
-const USER_FALLOW_HANDLER_COMMAND: &str = "\"$HOME\"/.claude/hooks/fallow-gate.sh";
-const FALLOW_GATE_POSIX_SUFFIX: &str = "/.claude/hooks/fallow-gate.sh";
-const FALLOW_GATE_WINDOWS_SUFFIX: &str = "\\.claude\\hooks\\fallow-gate.sh";
+const HOOK_SCRIPT_MARKER: &str = "# Generated by plow setup-hooks.";
+const PROJECT_PLOW_HANDLER_COMMAND: &str = "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/plow-gate.sh";
+const USER_PLOW_HANDLER_COMMAND: &str = "\"$HOME\"/.claude/hooks/plow-gate.sh";
+const PLOW_GATE_POSIX_SUFFIX: &str = "/.claude/hooks/plow-gate.sh";
+const PLOW_GATE_WINDOWS_SUFFIX: &str = "\\.claude\\hooks\\plow-gate.sh";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Mode {
@@ -90,12 +90,12 @@ enum Mode {
     Uninstall,
 }
 
-/// Entry point for the `fallow setup-hooks` subcommand.
+/// Entry point for the `plow setup-hooks` subcommand.
 pub fn run_setup_hooks(opts: &SetupHooksOptions<'_>) -> ExitCode {
-    run_setup_hooks_with_label(opts, "fallow setup-hooks")
+    run_setup_hooks_with_label(opts, "plow setup-hooks")
 }
 
-/// Entry point used by the `fallow hooks ... --target agent` namespace while
+/// Entry point used by the `plow hooks ... --target agent` namespace while
 /// reusing the same installation engine and summary renderer.
 pub fn run_setup_hooks_with_label(opts: &SetupHooksOptions<'_>, command_label: &str) -> ExitCode {
     let mode = if opts.uninstall {
@@ -217,7 +217,7 @@ impl ClaudeTargets {
         };
         Ok(Self {
             settings_path: base.join(".claude").join("settings.json"),
-            script_path: base.join(".claude").join("hooks").join("fallow-gate.sh"),
+            script_path: base.join(".claude").join("hooks").join("plow-gate.sh"),
         })
     }
 
@@ -447,21 +447,21 @@ fn desired_claude_settings(user: bool) -> Result<serde_json::Value, String> {
             "internal default settings.json does not contain a Claude hook command".to_string(),
         );
     };
-    *command = serde_json::Value::String(fallow_handler_command(user).to_string());
+    *command = serde_json::Value::String(plow_handler_command(user).to_string());
     Ok(desired)
 }
 
-const fn fallow_handler_command(user: bool) -> &'static str {
+const fn plow_handler_command(user: bool) -> &'static str {
     if user {
-        USER_FALLOW_HANDLER_COMMAND
+        USER_PLOW_HANDLER_COMMAND
     } else {
-        PROJECT_FALLOW_HANDLER_COMMAND
+        PROJECT_PLOW_HANDLER_COMMAND
     }
 }
 
-/// Remove any fallow-owned handlers from `settings.json`, collapsing empty
+/// Remove any plow-owned handlers from `settings.json`, collapsing empty
 /// scaffolding (`Bash` group, `PreToolUse`, `hooks`) as it drops to zero
-/// entries. Leaves non-fallow handlers and unrelated top-level keys alone.
+/// entries. Leaves non-plow handlers and unrelated top-level keys alone.
 fn uninstall_claude_settings(path: &Path, dry_run: bool) -> Result<SettingsOutcome, String> {
     let Some(raw) =
         read_optional_text(path).map_err(|e| format!("Failed to read {}: {e}", path.display()))?
@@ -480,7 +480,7 @@ fn uninstall_claude_settings(path: &Path, dry_run: bool) -> Result<SettingsOutco
         }
     };
 
-    let (next, removed, preserved) = strip_fallow_handlers(&current)?;
+    let (next, removed, preserved) = strip_plow_handlers(&current)?;
     if removed == 0 {
         return Ok(SettingsOutcome::Unchanged {
             handlers_preserved: preserved,
@@ -512,13 +512,13 @@ fn uninstall_claude_settings(path: &Path, dry_run: bool) -> Result<SettingsOutco
 ///
 /// Ensures `$schema` sits at position 0, `hooks.PreToolUse` exists as an
 /// array, and the `{"matcher": "Bash"}` group is present. Any pre-existing
-/// fallow handlers (identified by command path ending in `/fallow-gate.sh`)
-/// are replaced by the desired handler so upgrades from earlier fallow
+/// plow handlers (identified by command path ending in `/plow-gate.sh`)
+/// are replaced by the desired handler so upgrades from earlier plow
 /// versions do not leave stale or duplicate entries.
 ///
 /// Returns the merged value and the tuple `(added, removed, preserved)`
 /// where `preserved` counts handlers in the `Bash` matcher group that are
-/// NOT owned by fallow (the existing typecheck/lint / user's own handlers).
+/// NOT owned by plow (the existing typecheck/lint / user's own handlers).
 fn merge_settings_value(
     current: &serde_json::Value,
     desired: &serde_json::Value,
@@ -593,7 +593,7 @@ fn merge_settings_value(
             .as_array_mut()
             .ok_or_else(|| "PreToolUse group `hooks` must be an array".to_string())?;
         let before = group_hooks.len();
-        group_hooks.retain(|handler| !is_fallow_handler(handler));
+        group_hooks.retain(|handler| !is_plow_handler(handler));
         removed_existing += before - group_hooks.len();
         preserved += group_hooks.len();
     }
@@ -619,13 +619,13 @@ fn merge_settings_value(
     Ok((out, added_now, removed_existing, preserved))
 }
 
-/// Strip fallow-owned handlers from a settings `serde_json::Value`,
+/// Strip plow-owned handlers from a settings `serde_json::Value`,
 /// collapsing empty scaffolding as it drops to zero entries.
 ///
-/// Returns the updated value, the number of fallow handlers removed, and
-/// the number of non-fallow handlers preserved in the `Bash` matcher group
+/// Returns the updated value, the number of plow handlers removed, and
+/// the number of non-plow handlers preserved in the `Bash` matcher group
 /// (for reporting).
-fn strip_fallow_handlers(
+fn strip_plow_handlers(
     current: &serde_json::Value,
 ) -> Result<(serde_json::Value, usize, usize), String> {
     let mut out = current.clone();
@@ -662,7 +662,7 @@ fn strip_fallow_handlers(
             continue;
         };
         let before = group_hooks.len();
-        group_hooks.retain(|handler| !is_fallow_handler(handler));
+        group_hooks.retain(|handler| !is_plow_handler(handler));
         removed += before - group_hooks.len();
         preserved += group_hooks.len();
     }
@@ -689,22 +689,22 @@ fn strip_fallow_handlers(
 }
 
 /// Handlers the tool owns are identified by a `command` field whose path
-/// ends in `/fallow-gate.sh`. Non-fallow handlers in the same matcher group
+/// ends in `/plow-gate.sh`. Non-plow handlers in the same matcher group
 /// are left untouched.
-fn is_fallow_handler(handler: &serde_json::Value) -> bool {
+fn is_plow_handler(handler: &serde_json::Value) -> bool {
     handler
         .get("command")
         .and_then(serde_json::Value::as_str)
-        .is_some_and(|cmd| is_owned_fallow_command(cmd.trim()))
+        .is_some_and(|cmd| is_owned_plow_command(cmd.trim()))
 }
 
-fn is_owned_fallow_command(command: &str) -> bool {
-    is_canonical_fallow_command(command)
-        || is_canonical_fallow_command(trim_outer_quotes(command))
-        || is_legacy_fallow_path(trim_outer_quotes(command))
+fn is_owned_plow_command(command: &str) -> bool {
+    is_canonical_plow_command(command)
+        || is_canonical_plow_command(trim_outer_quotes(command))
+        || is_legacy_plow_path(trim_outer_quotes(command))
 }
 
-fn is_canonical_fallow_command(command: &str) -> bool {
+fn is_canonical_plow_command(command: &str) -> bool {
     [
         "\"$CLAUDE_PROJECT_DIR\"",
         "$CLAUDE_PROJECT_DIR",
@@ -715,11 +715,11 @@ fn is_canonical_fallow_command(command: &str) -> bool {
     ]
     .into_iter()
     .filter_map(|prefix| command.strip_prefix(prefix))
-    .any(has_fallow_gate_suffix)
+    .any(has_plow_gate_suffix)
 }
 
-fn is_legacy_fallow_path(command: &str) -> bool {
-    has_fallow_gate_suffix(command)
+fn is_legacy_plow_path(command: &str) -> bool {
+    has_plow_gate_suffix(command)
         && (command.starts_with("~/")
             || command.starts_with("~\\")
             || command.starts_with('/')
@@ -728,11 +728,11 @@ fn is_legacy_fallow_path(command: &str) -> bool {
             || is_windows_drive_path(command))
 }
 
-fn has_fallow_gate_suffix(command: &str) -> bool {
-    command == FALLOW_GATE_POSIX_SUFFIX
-        || command == FALLOW_GATE_WINDOWS_SUFFIX
-        || command.ends_with(FALLOW_GATE_POSIX_SUFFIX)
-        || command.ends_with(FALLOW_GATE_WINDOWS_SUFFIX)
+fn has_plow_gate_suffix(command: &str) -> bool {
+    command == PLOW_GATE_POSIX_SUFFIX
+        || command == PLOW_GATE_WINDOWS_SUFFIX
+        || command.ends_with(PLOW_GATE_POSIX_SUFFIX)
+        || command.ends_with(PLOW_GATE_WINDOWS_SUFFIX)
 }
 
 fn is_windows_drive_path(command: &str) -> bool {
@@ -755,7 +755,7 @@ fn trim_outer_quotes(command: &str) -> &str {
 /// Write an executable shell script. On Unix sets mode `0o755`.
 ///
 /// If the existing file carries the generator marker, it is overwritten so
-/// upgrades to new `fallow` versions propagate automatically. Only truly
+/// upgrades to new `plow` versions propagate automatically. Only truly
 /// user-edited scripts (marker removed or replaced) require `--force`.
 fn write_executable_script(
     path: &Path,
@@ -779,7 +779,7 @@ fn write_executable_script(
             let looks_generated = prev.contains(HOOK_SCRIPT_MARKER);
             if !looks_generated && !force {
                 return Err(format!(
-                    "{} already exists and does not look like a fallow-generated script; re-run with --force to overwrite.",
+                    "{} already exists and does not look like a plow-generated script; re-run with --force to overwrite.",
                     path.display()
                 ));
             }
@@ -1069,7 +1069,7 @@ fn describe_settings(outcome: &SettingsOutcome) -> String {
                 "unchanged".to_string()
             } else {
                 format!(
-                    "unchanged ({handlers_preserved} non-fallow handler{} preserved)",
+                    "unchanged ({handlers_preserved} non-plow handler{} preserved)",
                     plural(*handlers_preserved)
                 )
             }
@@ -1088,7 +1088,7 @@ fn describe_script(outcome: &ScriptOutcome, dry_run: bool, mode: Mode) -> String
         (ScriptOutcome::Removed, _, false) => "removed".to_string(),
         (ScriptOutcome::Removed, _, true) => "would remove".to_string(),
         (ScriptOutcome::UserEditedPreserved, _, _) => {
-            "preserved (no fallow marker; re-run with --force to remove)".to_string()
+            "preserved (no plow marker; re-run with --force to remove)".to_string()
         }
         (ScriptOutcome::NotPresent, _, _) => "not present".to_string(),
     }
@@ -1180,7 +1180,7 @@ mod tests {
         let code = run_setup_hooks(&o);
         assert_eq!(code, ExitCode::SUCCESS);
         assert!(tmp.path().join(".claude/settings.json").is_file());
-        assert!(tmp.path().join(".claude/hooks/fallow-gate.sh").is_file());
+        assert!(tmp.path().join(".claude/hooks/plow-gate.sh").is_file());
     }
 
     #[test]
@@ -1229,7 +1229,7 @@ mod tests {
                         "hooks": [
                             {
                                 "type": "command",
-                                "command": PROJECT_FALLOW_HANDLER_COMMAND,
+                                "command": PROJECT_PLOW_HANDLER_COMMAND,
                             }
                         ],
                     }
@@ -1300,7 +1300,7 @@ mod tests {
     fn script_refuses_to_clobber_user_edited_without_force() {
         let tmp = tempdir().unwrap();
         std::fs::create_dir_all(tmp.path().join(".claude/hooks")).unwrap();
-        let script_path = tmp.path().join(".claude/hooks/fallow-gate.sh");
+        let script_path = tmp.path().join(".claude/hooks/plow-gate.sh");
         std::fs::write(&script_path, "#!/bin/sh\necho user-owned\n").unwrap();
 
         let mut o = opts(tmp.path());
@@ -1312,11 +1312,11 @@ mod tests {
     }
 
     #[test]
-    fn script_upgrades_previous_fallow_generated_file() {
+    fn script_upgrades_previous_plow_generated_file() {
         let tmp = tempdir().unwrap();
         std::fs::create_dir_all(tmp.path().join(".claude/hooks")).unwrap();
-        let script_path = tmp.path().join(".claude/hooks/fallow-gate.sh");
-        let prior = "#!/usr/bin/env bash\n# Generated by fallow setup-hooks.\nexit 0\n";
+        let script_path = tmp.path().join(".claude/hooks/plow-gate.sh");
+        let prior = "#!/usr/bin/env bash\n# Generated by plow setup-hooks.\nexit 0\n";
         std::fs::write(&script_path, prior).unwrap();
 
         let mut o = opts(tmp.path());
@@ -1344,7 +1344,7 @@ mod tests {
     fn rendered_script_preserves_correctness_floor() {
         let rendered = rendered_gate_script();
         assert!(
-            rendered.contains("FALLOW_GATE_MIN_VERSION-2.46.0"),
+            rendered.contains("PLOW_GATE_MIN_VERSION-2.46.0"),
             "enforced floor must stay maintainer-bumped, not installer-pinned; \
              rendered script was:\n{rendered}"
         );
@@ -1358,11 +1358,11 @@ mod tests {
         // semver, which is stable across GNU and BSD sort. Prerelease ordering
         // (`2.48.0-alpha.1` vs `2.48.0`) diverges between platforms: GNU places
         // the prerelease BELOW the release (semver-correct), BSD places it
-        // ABOVE. Fallow's shipped floor is always a plain version and
+        // ABOVE. Plow's shipped floor is always a plain version and
         // `CARGO_PKG_VERSION` stamped at install is plain on published
         // releases, so this divergence does not affect the common flow. The
         // gate script's header notes the quirk for anyone setting
-        // `FALLOW_GATE_MIN_VERSION` to a prerelease explicitly.
+        // `PLOW_GATE_MIN_VERSION` to a prerelease explicitly.
         let output = std::process::Command::new("bash")
             .arg("-c")
             .arg("printf '%s\\n' 2.46.0 2.30.0 2.48.0 2.46.0 2.46.1 | sort -V")
@@ -1378,19 +1378,19 @@ mod tests {
             vec!["2.30.0", "2.46.0", "2.46.0", "2.46.1", "2.48.0"],
             "plain semver ordering via sort -V must place lower first; the gate's \
              floor check reads `head -n1` of this ordering to decide if the user's \
-             fallow is below the floor"
+             plow is below the floor"
         );
     }
 
     #[cfg(unix)]
     #[test]
-    fn gate_blocks_stale_fallow_on_path() {
+    fn gate_blocks_stale_plow_on_path() {
         // End-to-end regression: the fix is a floor check that blocks a
-        // fallow on PATH older than the uncommitted-changes inclusion fix
+        // plow on PATH older than the uncommitted-changes inclusion fix
         // (aabb8e1b, v2.46.0). The sibling `rendered_script_*` tests cover
         // substitution mechanics but would all still pass if the floor
         // block were ripped out. This test exercises the actual bug: write
-        // the rendered script, prepend a fake fallow reporting v2.30.0 to
+        // the rendered script, prepend a fake plow reporting v2.30.0 to
         // PATH, pipe a `git commit` hook input, assert the gate exits 2
         // with an upgrade hint instead of passing through.
         use std::io::Write;
@@ -1410,25 +1410,25 @@ mod tests {
         let tmp = tempdir().unwrap();
         let fake_bin = tmp.path().join("bin");
         std::fs::create_dir_all(&fake_bin).unwrap();
-        let fallow_path = fake_bin.join("fallow");
+        let plow_path = fake_bin.join("plow");
         // Fake reports v2.30.0 (below the 2.46.0 floor). No audit stub is
         // needed because the floor check exits before audit is reached.
         std::fs::write(
-            &fallow_path,
-            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'fallow 2.30.0'; exit 0; fi\nexit 0\n",
+            &plow_path,
+            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'plow 2.30.0'; exit 0; fi\nexit 0\n",
         )
         .unwrap();
-        let mut perms = std::fs::metadata(&fallow_path).unwrap().permissions();
+        let mut perms = std::fs::metadata(&plow_path).unwrap().permissions();
         perms.set_mode(0o755);
-        std::fs::set_permissions(&fallow_path, perms).unwrap();
+        std::fs::set_permissions(&plow_path, perms).unwrap();
 
-        let script_path = tmp.path().join("fallow-gate.sh");
+        let script_path = tmp.path().join("plow-gate.sh");
         std::fs::write(&script_path, rendered_gate_script()).unwrap();
         let mut perms = std::fs::metadata(&script_path).unwrap().permissions();
         perms.set_mode(0o755);
         std::fs::set_permissions(&script_path, perms).unwrap();
 
-        // Prepend fake dir to PATH so `command -v fallow` finds the stale
+        // Prepend fake dir to PATH so `command -v plow` finds the stale
         // version first while jq / sort / head / grep still resolve normally.
         let existing_path = std::env::var("PATH").unwrap_or_default();
         let new_path = format!("{}:{existing_path}", fake_bin.display());
@@ -1448,7 +1448,7 @@ mod tests {
         assert_eq!(
             output.status.code(),
             Some(2),
-            "gate must block a fallow below the floor with exit 2. \
+            "gate must block a plow below the floor with exit 2. \
              stdout={:?} stderr={:?}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
@@ -1459,7 +1459,7 @@ mod tests {
             "stderr must mention the required floor; got:\n{stderr}"
         );
         assert!(
-            stderr.contains("fallow 2.30.0"),
+            stderr.contains("plow 2.30.0"),
             "stderr must name the stale version; got:\n{stderr}"
         );
     }
@@ -1494,7 +1494,7 @@ mod tests {
         assert_eq!(run_setup_hooks(&o), ExitCode::SUCCESS);
 
         let contents = std::fs::read_to_string(&agents_path).unwrap();
-        assert!(contents.contains("Fallow local gate"));
+        assert!(contents.contains("Plow local gate"));
         assert!(!contents.contains("stale body"));
         assert!(contents.contains("below"));
     }
@@ -1527,7 +1527,7 @@ mod tests {
         let mut o = opts(tmp.path());
         o.agent = Some(HookAgentArg::Claude);
         assert_eq!(run_setup_hooks(&o), ExitCode::SUCCESS);
-        let mode = std::fs::metadata(tmp.path().join(".claude/hooks/fallow-gate.sh"))
+        let mode = std::fs::metadata(tmp.path().join(".claude/hooks/plow-gate.sh"))
             .unwrap()
             .permissions()
             .mode();
@@ -1557,7 +1557,7 @@ mod tests {
     }
 
     #[test]
-    fn stale_fallow_handler_is_replaced_on_upgrade() {
+    fn stale_plow_handler_is_replaced_on_upgrade() {
         let tmp = tempdir().unwrap();
         std::fs::create_dir_all(tmp.path().join(".claude")).unwrap();
         let existing = r#"{
@@ -1567,8 +1567,8 @@ mod tests {
         "matcher": "Bash",
         "hooks": [
           { "type": "command", "command": "bun run lint" },
-          { "type": "command", "if": "Bash(git commit *)", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh" },
-          { "type": "command", "if": "Bash(git push *)", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh" }
+          { "type": "command", "if": "Bash(git commit *)", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/plow-gate.sh" },
+          { "type": "command", "if": "Bash(git push *)", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/plow-gate.sh" }
         ]
       }
     ]
@@ -1584,10 +1584,10 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap();
         let bash_group = &parsed["hooks"]["PreToolUse"][0]["hooks"];
         let entries = bash_group.as_array().unwrap();
-        let fallow_count = entries.iter().filter(|e| is_fallow_handler(e)).count();
+        let plow_count = entries.iter().filter(|e| is_plow_handler(e)).count();
         assert_eq!(
-            fallow_count, 1,
-            "stale fallow handlers should collapse to one"
+            plow_count, 1,
+            "stale plow handlers should collapse to one"
         );
         let lint_count = entries
             .iter()
@@ -1597,7 +1597,7 @@ mod tests {
     }
 
     #[test]
-    fn stale_fallow_handlers_are_removed_from_all_bash_groups() {
+    fn stale_plow_handlers_are_removed_from_all_bash_groups() {
         let tmp = tempdir().unwrap();
         std::fs::create_dir_all(tmp.path().join(".claude")).unwrap();
         let existing = r#"{
@@ -1612,7 +1612,7 @@ mod tests {
       {
         "matcher": "Bash",
         "hooks": [
-          { "type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh" }
+          { "type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/plow-gate.sh" }
         ]
       }
     ]
@@ -1627,14 +1627,14 @@ mod tests {
         let raw = std::fs::read_to_string(tmp.path().join(".claude/settings.json")).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap();
         let groups = parsed["hooks"]["PreToolUse"].as_array().unwrap();
-        let fallow_count = groups
+        let plow_count = groups
             .iter()
             .flat_map(|group| group["hooks"].as_array().into_iter().flatten())
-            .filter(|handler| is_fallow_handler(handler))
+            .filter(|handler| is_plow_handler(handler))
             .count();
         assert_eq!(
-            fallow_count, 1,
-            "expected a single canonical fallow handler"
+            plow_count, 1,
+            "expected a single canonical plow handler"
         );
     }
 
@@ -1648,7 +1648,7 @@ mod tests {
       {
         "matcher": "Bash",
         "hooks": [
-          { "type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh" }
+          { "type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/plow-gate.sh" }
         ]
       },
       {
@@ -1674,7 +1674,7 @@ mod tests {
         assert_eq!(
             first_group_hooks
                 .iter()
-                .filter(|handler| is_fallow_handler(handler))
+                .filter(|handler| is_plow_handler(handler))
                 .count(),
             1
         );
@@ -1691,7 +1691,7 @@ mod tests {
         assert_eq!(
             second_group_hooks
                 .iter()
-                .filter(|handler| is_fallow_handler(handler))
+                .filter(|handler| is_plow_handler(handler))
                 .count(),
             0
         );
@@ -1738,26 +1738,26 @@ mod tests {
     }
 
     #[test]
-    fn is_fallow_handler_matches_canonical_and_legacy_paths() {
-        let unix = serde_json::json!({ "type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh" });
-        let windows = serde_json::json!({ "type": "command", "command": "$CLAUDE_PROJECT_DIR\\.claude\\hooks\\fallow-gate.sh" });
-        let quoted = serde_json::json!({ "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/fallow-gate.sh" });
-        let user_home = serde_json::json!({ "type": "command", "command": "\"$HOME\"/.claude/hooks/fallow-gate.sh" });
+    fn is_plow_handler_matches_canonical_and_legacy_paths() {
+        let unix = serde_json::json!({ "type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/plow-gate.sh" });
+        let windows = serde_json::json!({ "type": "command", "command": "$CLAUDE_PROJECT_DIR\\.claude\\hooks\\plow-gate.sh" });
+        let quoted = serde_json::json!({ "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/plow-gate.sh" });
+        let user_home = serde_json::json!({ "type": "command", "command": "\"$HOME\"/.claude/hooks/plow-gate.sh" });
         let legacy_home =
-            serde_json::json!({ "type": "command", "command": "~/.claude/hooks/fallow-gate.sh" });
-        let legacy_absolute = serde_json::json!({ "type": "command", "command": "\"/Users/bartwaardenburg/project/.claude/hooks/fallow-gate.sh\"" });
-        let legacy_windows_absolute = serde_json::json!({ "type": "command", "command": "\"C:/Users/bart/project/.claude/hooks/fallow-gate.sh\"" });
+            serde_json::json!({ "type": "command", "command": "~/.claude/hooks/plow-gate.sh" });
+        let legacy_absolute = serde_json::json!({ "type": "command", "command": "\"/Users/bartwaardenburg/project/.claude/hooks/plow-gate.sh\"" });
+        let legacy_windows_absolute = serde_json::json!({ "type": "command", "command": "\"C:/Users/bart/project/.claude/hooks/plow-gate.sh\"" });
         let unrelated = serde_json::json!({ "type": "command", "command": "bun run lint" });
-        let mentions_path = serde_json::json!({ "type": "command", "command": "bash -lc 'cp /tmp/fallow-gate.sh /tmp/fallow-gate.sh.bak && bun run lint'" });
-        assert!(is_fallow_handler(&unix));
-        assert!(is_fallow_handler(&windows));
-        assert!(is_fallow_handler(&quoted));
-        assert!(is_fallow_handler(&user_home));
-        assert!(is_fallow_handler(&legacy_home));
-        assert!(is_fallow_handler(&legacy_absolute));
-        assert!(is_fallow_handler(&legacy_windows_absolute));
-        assert!(!is_fallow_handler(&unrelated));
-        assert!(!is_fallow_handler(&mentions_path));
+        let mentions_path = serde_json::json!({ "type": "command", "command": "bash -lc 'cp /tmp/plow-gate.sh /tmp/plow-gate.sh.bak && bun run lint'" });
+        assert!(is_plow_handler(&unix));
+        assert!(is_plow_handler(&windows));
+        assert!(is_plow_handler(&quoted));
+        assert!(is_plow_handler(&user_home));
+        assert!(is_plow_handler(&legacy_home));
+        assert!(is_plow_handler(&legacy_absolute));
+        assert!(is_plow_handler(&legacy_windows_absolute));
+        assert!(!is_plow_handler(&unrelated));
+        assert!(!is_plow_handler(&mentions_path));
     }
 
     #[test]
@@ -1770,7 +1770,7 @@ mod tests {
       {
         "matcher": "Bash",
         "hooks": [
-          { "type": "command", "command": "/Users/bartwaardenburg/project/.claude/hooks/fallow-gate.sh" }
+          { "type": "command", "command": "/Users/bartwaardenburg/project/.claude/hooks/plow-gate.sh" }
         ]
       }
     ]
@@ -1787,12 +1787,12 @@ mod tests {
         let hooks = parsed["hooks"]["PreToolUse"][0]["hooks"]
             .as_array()
             .unwrap();
-        let fallow_commands: Vec<_> = hooks
+        let plow_commands: Vec<_> = hooks
             .iter()
-            .filter(|handler| is_fallow_handler(handler))
+            .filter(|handler| is_plow_handler(handler))
             .filter_map(|handler| handler.get("command").and_then(serde_json::Value::as_str))
             .collect();
-        assert_eq!(fallow_commands, vec![PROJECT_FALLOW_HANDLER_COMMAND]);
+        assert_eq!(plow_commands, vec![PROJECT_PLOW_HANDLER_COMMAND]);
     }
 
     #[test]
@@ -1801,7 +1801,7 @@ mod tests {
         let command = desired["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
             .as_str()
             .unwrap();
-        assert_eq!(command, USER_FALLOW_HANDLER_COMMAND);
+        assert_eq!(command, USER_PLOW_HANDLER_COMMAND);
     }
 
     #[test]
@@ -1835,14 +1835,14 @@ mod tests {
         install.agent = Some(HookAgentArg::Claude);
         assert_eq!(run_setup_hooks(&install), ExitCode::SUCCESS);
         assert!(tmp.path().join(".claude/settings.json").is_file());
-        assert!(tmp.path().join(".claude/hooks/fallow-gate.sh").is_file());
+        assert!(tmp.path().join(".claude/hooks/plow-gate.sh").is_file());
 
         // Uninstall.
         let mut uninstall = opts(tmp.path());
         uninstall.agent = Some(HookAgentArg::Claude);
         uninstall.uninstall = true;
         assert_eq!(run_setup_hooks(&uninstall), ExitCode::SUCCESS);
-        assert!(!tmp.path().join(".claude/hooks/fallow-gate.sh").exists());
+        assert!(!tmp.path().join(".claude/hooks/plow-gate.sh").exists());
         let raw = std::fs::read_to_string(tmp.path().join(".claude/settings.json")).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap();
         // `hooks` should have been collapsed because the Bash group only
@@ -1854,7 +1854,7 @@ mod tests {
     }
 
     #[test]
-    fn uninstall_preserves_non_fallow_handlers() {
+    fn uninstall_preserves_non_plow_handlers() {
         let tmp = tempdir().unwrap();
         std::fs::create_dir_all(tmp.path().join(".claude")).unwrap();
         let existing = r#"{
@@ -1864,7 +1864,7 @@ mod tests {
         "matcher": "Bash",
         "hooks": [
           { "type": "command", "command": "bun run lint" },
-          { "type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh" }
+          { "type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/plow-gate.sh" }
         ]
       }
     ]
@@ -1925,7 +1925,7 @@ mod tests {
     fn uninstall_preserves_user_edited_script() {
         let tmp = tempdir().unwrap();
         std::fs::create_dir_all(tmp.path().join(".claude/hooks")).unwrap();
-        let script_path = tmp.path().join(".claude/hooks/fallow-gate.sh");
+        let script_path = tmp.path().join(".claude/hooks/plow-gate.sh");
         std::fs::write(&script_path, "#!/bin/sh\necho user-owned\n").unwrap();
 
         let mut o = opts(tmp.path());
@@ -1942,7 +1942,7 @@ mod tests {
     fn uninstall_force_removes_user_edited_script() {
         let tmp = tempdir().unwrap();
         std::fs::create_dir_all(tmp.path().join(".claude/hooks")).unwrap();
-        let script_path = tmp.path().join(".claude/hooks/fallow-gate.sh");
+        let script_path = tmp.path().join(".claude/hooks/plow-gate.sh");
         std::fs::write(&script_path, "#!/bin/sh\necho user-owned\n").unwrap();
 
         let mut o = opts(tmp.path());
@@ -1969,7 +1969,7 @@ mod tests {
 
         let contents = std::fs::read_to_string(&agents_path).unwrap();
         assert!(!contents.contains(AGENTS_BLOCK_START));
-        assert!(!contents.contains("Fallow local gate"));
+        assert!(!contents.contains("Plow local gate"));
         assert!(contents.contains("prose before."));
     }
 
@@ -1990,6 +1990,6 @@ mod tests {
 
         // Files still there.
         assert!(tmp.path().join(".claude/settings.json").is_file());
-        assert!(tmp.path().join(".claude/hooks/fallow-gate.sh").is_file());
+        assert!(tmp.path().join(".claude/hooks/plow-gate.sh").is_file());
     }
 }

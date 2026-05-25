@@ -16,7 +16,7 @@ use oxc_ast_visit::Visit;
 use oxc_ast_visit::walk;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_types::extract::{FlagUse, FlagUseKind, byte_offset_to_line_col};
+use plow_types::extract::{FlagUse, FlagUseKind, byte_offset_to_line_col};
 
 /// Built-in SDK function patterns: (function_name, name_arg_index, provider_label).
 const BUILTIN_SDK_PATTERNS: &[(&str, usize, &str)] = &[
@@ -569,7 +569,7 @@ pub fn extract_flags_from_source(
     let source_type = oxc_span::SourceType::from_path(path).unwrap_or_default();
     let allocator = oxc_allocator::Allocator::default();
     let parser_return = oxc_parser::Parser::new(&allocator, source, source_type).parse();
-    let line_offsets = fallow_types::extract::compute_line_offsets(source);
+    let line_offsets = plow_types::extract::compute_line_offsets(source);
     extract_flags(
         &parser_return.program,
         &line_offsets,
@@ -589,14 +589,14 @@ mod tests {
     fn extract_from_source(source: &str) -> Vec<FlagUse> {
         let allocator = Allocator::default();
         let parser_return = Parser::new(&allocator, source, SourceType::tsx()).parse();
-        let line_offsets = fallow_types::extract::compute_line_offsets(source);
+        let line_offsets = plow_types::extract::compute_line_offsets(source);
         extract_flags(&parser_return.program, &line_offsets, &[], &[], false)
     }
 
     fn extract_with_config_objects(source: &str) -> Vec<FlagUse> {
         let allocator = Allocator::default();
         let parser_return = Parser::new(&allocator, source, SourceType::tsx()).parse();
-        let line_offsets = fallow_types::extract::compute_line_offsets(source);
+        let line_offsets = plow_types::extract::compute_line_offsets(source);
         extract_flags(&parser_return.program, &line_offsets, &[], &[], true)
     }
 
@@ -843,7 +843,7 @@ mod tests {
         let allocator = Allocator::default();
         let source = "isFeatureActive('my-flag');";
         let parser_return = Parser::new(&allocator, source, SourceType::tsx()).parse();
-        let line_offsets = fallow_types::extract::compute_line_offsets(source);
+        let line_offsets = plow_types::extract::compute_line_offsets(source);
         let custom = vec![("isFeatureActive".to_string(), 0, "Internal".to_string())];
         let flags = extract_flags(&parser_return.program, &line_offsets, &custom, &[], false);
         assert_eq!(flags.len(), 1);
@@ -856,7 +856,7 @@ mod tests {
         let allocator = Allocator::default();
         let source = "flag('internal-flag');";
         let parser_return = Parser::new(&allocator, source, SourceType::tsx()).parse();
-        let line_offsets = fallow_types::extract::compute_line_offsets(source);
+        let line_offsets = plow_types::extract::compute_line_offsets(source);
         let custom = vec![("flag".to_string(), 0, "Internal".to_string())];
         let flags = extract_flags(&parser_return.program, &line_offsets, &custom, &[], false);
         assert_eq!(flags.len(), 1);
@@ -871,7 +871,7 @@ mod tests {
         let allocator = Allocator::default();
         let source = "if (process.env.MYAPP_ENABLE_V2) {}";
         let parser_return = Parser::new(&allocator, source, SourceType::tsx()).parse();
-        let line_offsets = fallow_types::extract::compute_line_offsets(source);
+        let line_offsets = plow_types::extract::compute_line_offsets(source);
         let custom_prefixes = vec!["MYAPP_ENABLE_".to_string()];
         let flags = extract_flags(
             &parser_return.program,

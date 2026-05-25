@@ -4,7 +4,7 @@ use super::common::{create_config, fixture_path};
 fn scss_partial_files_resolved_via_underscore_convention() {
     let root = fixture_path("scss-partial-project");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     // _variables.scss and _mixins.scss should NOT be reported as unused files
     let unused_file_names: Vec<String> = results
@@ -68,7 +68,7 @@ fn angular_style_preprocessor_include_paths_resolve_bare_scss_imports() {
     // graph resolver retries failing bare SCSS specifiers against each path.
     let root = fixture_path("angular-scss-include-paths");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unresolved_specs: Vec<&str> = results
         .unresolved_imports
@@ -112,7 +112,7 @@ fn scss_bare_specifiers_resolve_from_node_modules() {
     // `node_modules/animate.css/animate.min.css` (CSS extension append).
     let root = fixture_path("scss-node-modules-resolution");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unresolved_specs: Vec<&str> = results
         .unresolved_imports
@@ -172,7 +172,7 @@ fn external_package_scss_subpaths_credit_nested_style_dependencies() {
     // external package source tree.
     let root = fixture_path("external-style-package-deps");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_dep_names: Vec<&str> = results
         .unused_dependencies
@@ -207,7 +207,7 @@ fn scss_bare_import_does_not_collide_with_sibling_tsx() {
     // `.tsx` component file and its `.scss` style sheet existed alongside.
     let root = fixture_path("scss-bare-import-tsx-collision");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.circular_dependencies.is_empty(),

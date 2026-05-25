@@ -11,7 +11,7 @@ use super::{
 use crate::health::scoring::{FileScoreConcern, file_score_concern_axis};
 
 /// Docs base URL for health explanations.
-const DOCS_HEALTH: &str = "https://docs.fallow.tools/explanations/health";
+const DOCS_HEALTH: &str = "https://docs.genesis-plow.dev/explanations/health";
 
 pub(in crate::report) fn print_health_human(
     report: &crate::health_types::HealthReport,
@@ -170,7 +170,7 @@ fn inject_explain_blocks(lines: Vec<String>) -> Vec<String> {
 
 fn health_explain_for_header(line: &str) -> Option<String> {
     if line.contains("Runtime coverage:") {
-        return rule_full("fallow/runtime-coverage");
+        return rule_full("plow/runtime-coverage");
     }
     if line.contains("Health score:") {
         return Some(
@@ -185,10 +185,10 @@ fn health_explain_for_header(line: &str) -> Option<String> {
         );
     }
     if line.contains("Large functions (") {
-        return rule_full("fallow/high-cyclomatic-complexity");
+        return rule_full("plow/high-cyclomatic-complexity");
     }
     if line.contains("High complexity functions (") {
-        return rule_full("fallow/high-complexity");
+        return rule_full("plow/high-complexity");
     }
     if line.contains("Coverage gaps (") {
         return Some(
@@ -203,7 +203,7 @@ fn health_explain_for_header(line: &str) -> Option<String> {
         );
     }
     if line.contains("Refactoring targets (") {
-        return rule_full("fallow/refactoring-target");
+        return rule_full("plow/refactoring-target");
     }
     None
 }
@@ -267,7 +267,7 @@ fn render_runtime_coverage(
         Some(crate::health_types::RuntimeCoverageWatermark::LicenseExpiredGrace)
     ) {
         lines.push(
-            "  license expired grace active; refresh with `fallow license refresh`".to_owned(),
+            "  license expired grace active; refresh with `plow license refresh`".to_owned(),
         );
     }
     render_capture_quality_warning(lines, production);
@@ -400,7 +400,7 @@ fn render_upgrade_prompt(
             .to_owned(),
     );
     lines.push(
-        "  start a trial: `fallow license activate --trial --email you@company.com`".to_owned(),
+        "  start a trial: `plow license activate --trial --email you@company.com`".to_owned(),
     );
 }
 
@@ -849,27 +849,27 @@ fn append_suppression_hints(lines: &mut Vec<String>, report: &crate::health_type
     if has_html_template {
         lines.push(format!(
             "  {}",
-            "To suppress HTML templates: <!-- fallow-ignore-file complexity -->".dimmed()
+            "To suppress HTML templates: <!-- plow-ignore-file complexity -->".dimmed()
         ));
     }
     if has_inline_template {
         lines.push(format!(
             "  {}",
-            "To suppress inline templates: // fallow-ignore-next-line complexity (above @Component)"
+            "To suppress inline templates: // plow-ignore-next-line complexity (above @Component)"
                 .dimmed()
         ));
     }
     if has_component_rollup {
         lines.push(format!(
             "  {}",
-            "To suppress a <component> rollup: suppress the worst class method (// fallow-ignore-next-line complexity above it hides both)"
+            "To suppress a <component> rollup: suppress the worst class method (// plow-ignore-next-line complexity above it hides both)"
                 .dimmed()
         ));
     }
     if has_function_finding && report.findings.len() >= 3 {
         lines.push(format!(
             "  {}",
-            "To suppress: // fallow-ignore-next-line complexity".dimmed()
+            "To suppress: // plow-ignore-next-line complexity".dimmed()
         ));
     }
 }
@@ -885,7 +885,7 @@ fn append_suppression_hints(lines: &mut Vec<String>, report: &crate::health_type
 ///
 /// Renders `template_path` workspace-relative (issue #547) so Angular
 /// projects with many `*.component.html` files unambiguously identify the
-/// template fallow scored.
+/// template plow scored.
 fn render_component_rollup_breakdown(
     finding: &crate::health_types::ComplexityViolation,
     root: &Path,
@@ -1440,7 +1440,7 @@ fn handle_matches_owner(identifier: &str, declared_owner: &str) -> bool {
 /// and stay scannable; full structured data is in the JSON output.
 fn render_ownership_line(
     ownership: &crate::health_types::OwnershipMetrics,
-    trend: fallow_core::churn::ChurnTrend,
+    trend: plow_core::churn::ChurnTrend,
 ) -> String {
     let mut parts: Vec<String> = Vec::new();
 
@@ -1450,7 +1450,7 @@ fn render_ownership_line(
     // the red/bold marker; the common bus=1 case drops to dimmed, which is
     // still present and readable under NO_COLOR but no longer shouts.
     let top_share = ownership.top_contributor.share;
-    let is_accelerating = matches!(trend, fallow_core::churn::ChurnTrend::Accelerating);
+    let is_accelerating = matches!(trend, plow_core::churn::ChurnTrend::Accelerating);
     let is_extreme = top_share >= 0.9 || (ownership.bus_factor == 1 && is_accelerating);
     let bus_str = if top_share >= 0.9999 {
         format!("bus={} (sole author)", ownership.bus_factor)
@@ -1559,13 +1559,13 @@ fn render_hotspots(
 
         // Trend: symbol + color
         let (trend_symbol, trend_colored) = match entry.trend {
-            fallow_core::churn::ChurnTrend::Accelerating => {
+            plow_core::churn::ChurnTrend::Accelerating => {
                 ("\u{25b2}", "\u{25b2} accelerating".red().to_string())
             }
-            fallow_core::churn::ChurnTrend::Cooling => {
+            plow_core::churn::ChurnTrend::Cooling => {
                 ("\u{25bc}", "\u{25bc} cooling".green().to_string())
             }
-            fallow_core::churn::ChurnTrend::Stable => {
+            plow_core::churn::ChurnTrend::Stable => {
                 ("\u{2500}", "\u{2500} stable".dimmed().to_string())
             }
         };
@@ -1574,7 +1574,7 @@ fn render_hotspots(
         let (dir, filename) = split_dir_filename(&file_str);
 
         // Line 1: score + trend symbol + path + optional [test] tag.
-        // The tag signals "fallow saw this is a test file and kept it
+        // The tag signals "plow saw this is a test file and kept it
         // intentionally" so readers don't dismiss the tool as noisy.
         let test_tag = if entry.is_test_path {
             format!(" {}", "[test]".dimmed())
@@ -1585,9 +1585,9 @@ fn render_hotspots(
             "  {} {}  {}{}{}",
             score_colored,
             match entry.trend {
-                fallow_core::churn::ChurnTrend::Accelerating => trend_symbol.red().to_string(),
-                fallow_core::churn::ChurnTrend::Cooling => trend_symbol.green().to_string(),
-                fallow_core::churn::ChurnTrend::Stable => trend_symbol.dimmed().to_string(),
+                plow_core::churn::ChurnTrend::Accelerating => trend_symbol.red().to_string(),
+                plow_core::churn::ChurnTrend::Cooling => trend_symbol.green().to_string(),
+                plow_core::churn::ChurnTrend::Stable => trend_symbol.dimmed().to_string(),
             },
             dir.dimmed(),
             filename,
@@ -1874,7 +1874,7 @@ pub(in crate::report) fn print_health_summary(
 /// D/F red.
 ///
 /// Goes to stdout (the rows are content, not progress) so the block survives
-/// `fallow health --group-by package > out.txt`. The leading blank line,
+/// `plow health --group-by package > out.txt`. The leading blank line,
 /// the `(root)` legend, and the JSON-parity hint go to stderr because they
 /// are display affordances, not data.
 pub(in crate::report) fn print_health_grouping(
@@ -2286,7 +2286,7 @@ mod tests {
             "upgrade prompt body missing in:\n{text}"
         );
         assert!(
-            text.contains("fallow license activate --trial --email you@company.com"),
+            text.contains("plow license activate --trial --email you@company.com"),
             "trial CTA command missing in:\n{text}"
         );
     }
@@ -3144,7 +3144,7 @@ mod tests {
         }];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
-        assert!(text.contains("docs.fallow.tools/explanations/health#file-health-scores"));
+        assert!(text.contains("docs.genesis-plow.dev/explanations/health#file-health-scores"));
     }
 
     // ── render_hotspots ──────────────────────────────────────────
@@ -3163,7 +3163,7 @@ mod tests {
                 lines_deleted: 200,
                 complexity_density: 0.85,
                 fan_in: 10,
-                trend: fallow_core::churn::ChurnTrend::Accelerating,
+                trend: plow_core::churn::ChurnTrend::Accelerating,
                 ownership: None,
                 is_test_path: false,
             }
@@ -3195,7 +3195,7 @@ mod tests {
                 lines_deleted: 30,
                 complexity_density: 0.3,
                 fan_in: 2,
-                trend: fallow_core::churn::ChurnTrend::Cooling,
+                trend: plow_core::churn::ChurnTrend::Cooling,
                 ownership: None,
                 is_test_path: false,
             }
@@ -3221,7 +3221,7 @@ mod tests {
                 lines_deleted: 100,
                 complexity_density: 0.5,
                 fan_in: 5,
-                trend: fallow_core::churn::ChurnTrend::Stable,
+                trend: plow_core::churn::ChurnTrend::Stable,
                 ownership: None,
                 is_test_path: false,
             }
@@ -3247,7 +3247,7 @@ mod tests {
                 lines_deleted: 50,
                 complexity_density: 0.4,
                 fan_in: 3,
-                trend: fallow_core::churn::ChurnTrend::Stable,
+                trend: plow_core::churn::ChurnTrend::Stable,
                 ownership: None,
                 is_test_path: false,
             }
@@ -3280,7 +3280,7 @@ mod tests {
                 lines_deleted: 50,
                 complexity_density: 0.4,
                 fan_in: 3,
-                trend: fallow_core::churn::ChurnTrend::Stable,
+                trend: plow_core::churn::ChurnTrend::Stable,
                 ownership: None,
                 is_test_path: false,
             }
@@ -3313,7 +3313,7 @@ mod tests {
                 lines_deleted: 50,
                 complexity_density: 0.4,
                 fan_in: 3,
-                trend: fallow_core::churn::ChurnTrend::Stable,
+                trend: plow_core::churn::ChurnTrend::Stable,
                 ownership: None,
                 is_test_path: false,
             }
@@ -3321,7 +3321,7 @@ mod tests {
         ];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
-        assert!(text.contains("docs.fallow.tools/explanations/health#hotspot-metrics"));
+        assert!(text.contains("docs.genesis-plow.dev/explanations/health#hotspot-metrics"));
     }
 
     // ── render_refactoring_targets ───────────────────────────────
@@ -3462,7 +3462,7 @@ mod tests {
         ];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
-        assert!(text.contains("docs.fallow.tools/explanations/health#refactoring-targets"));
+        assert!(text.contains("docs.genesis-plow.dev/explanations/health#refactoring-targets"));
     }
 
     #[test]
@@ -3644,7 +3644,7 @@ mod tests {
                 lines_deleted: 100,
                 complexity_density: 0.5,
                 fan_in: 5,
-                trend: fallow_core::churn::ChurnTrend::Accelerating,
+                trend: plow_core::churn::ChurnTrend::Accelerating,
                 ownership: None,
                 is_test_path: false,
             }
@@ -3828,7 +3828,7 @@ mod tests {
         ];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
-        assert!(text.contains("docs.fallow.tools/explanations/health#complexity-metrics"));
+        assert!(text.contains("docs.genesis-plow.dev/explanations/health#complexity-metrics"));
     }
 
     // ── Hotspot score color thresholds ────────────────────────────
@@ -3847,7 +3847,7 @@ mod tests {
                 lines_deleted: 200,
                 complexity_density: 0.9,
                 fan_in: 8,
-                trend: fallow_core::churn::ChurnTrend::Accelerating,
+                trend: plow_core::churn::ChurnTrend::Accelerating,
                 ownership: None,
                 is_test_path: false,
             }
@@ -3861,7 +3861,7 @@ mod tests {
                 lines_deleted: 100,
                 complexity_density: 0.5,
                 fan_in: 4,
-                trend: fallow_core::churn::ChurnTrend::Stable,
+                trend: plow_core::churn::ChurnTrend::Stable,
                 ownership: None,
                 is_test_path: false,
             }
@@ -3875,7 +3875,7 @@ mod tests {
                 lines_deleted: 20,
                 complexity_density: 0.2,
                 fan_in: 1,
-                trend: fallow_core::churn::ChurnTrend::Cooling,
+                trend: plow_core::churn::ChurnTrend::Cooling,
                 ownership: None,
                 is_test_path: false,
             }

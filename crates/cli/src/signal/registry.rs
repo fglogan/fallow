@@ -85,10 +85,10 @@ pub(super) fn drain_and_kill() {
 
 #[cfg(unix)]
 fn kill_pid(pid: u32) {
-    // SIGKILL has the value 9 on every POSIX system fallow targets.
+    // SIGKILL has the value 9 on every POSIX system plow targets.
     // No libc dep in the workspace, so fork `/bin/kill -9 <pid>`
     // instead. Costs one extra process per signal delivery, which
-    // happens at most once per fallow invocation, so the overhead is
+    // happens at most once per plow invocation, so the overhead is
     // negligible. PIDs from Child::id() are always positive; pid 0 / -1
     // (broadcast semantics) cannot occur on this path.
     let _ = std::process::Command::new("kill")

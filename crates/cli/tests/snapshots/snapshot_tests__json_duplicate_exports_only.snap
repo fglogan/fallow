@@ -1,6 +1,5 @@
 ---
 source: crates/cli/tests/snapshot_tests.rs
-assertion_line: 891
 expression: redact_version(&json_str)
 ---
 {
@@ -78,7 +77,7 @@ expression: redact_version(&json_str)
               ]
             }
           ],
-          "value_schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreExports"
+          "value_schema": "https://raw.githubusercontent.com/plow-rs/plow/main/schema.json#/properties/ignoreExports"
         },
         {
           "type": "remove-duplicate",
@@ -90,7 +89,7 @@ expression: redact_version(&json_str)
           "type": "suppress-line",
           "auto_fixable": false,
           "description": "Suppress with an inline comment above the line",
-          "comment": "// fallow-ignore-next-line duplicate-export",
+          "comment": "// plow-ignore-next-line duplicate-export",
           "scope": "per-location"
         }
       ]

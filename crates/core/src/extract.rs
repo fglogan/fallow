@@ -1,11 +1,11 @@
-//! Re-exports from `fallow-extract`.
+//! Re-exports from `plow-extract`.
 //!
-//! All parsing/extraction logic has been moved to the `fallow-extract` crate.
+//! All parsing/extraction logic has been moved to the `plow-extract` crate.
 //! This module provides backwards-compatible re-exports so that
-//! `fallow_core::extract::*` paths continue to resolve.
+//! `plow_core::extract::*` paths continue to resolve.
 
 // Re-export all types
-pub use fallow_extract::{
+pub use plow_extract::{
     ANGULAR_TPL_SENTINEL, DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName,
     FACTORY_CALL_SENTINEL, FLUENT_CHAIN_NEW_SENTINEL, FLUENT_CHAIN_SENTINEL,
     INSTANCE_EXPORT_SENTINEL, ImportInfo, ImportedName, MemberAccess, MemberInfo, MemberKind,
@@ -14,17 +14,17 @@ pub use fallow_extract::{
 };
 
 // Re-export extraction functions
-pub use fallow_extract::{
+pub use plow_extract::{
     extract_astro_frontmatter, extract_css_module_exports, extract_mdx_statements,
     extract_sfc_scripts, is_glimmer_file, is_sfc_file, parse_all_files, parse_from_content,
     parse_single_file, strip_glimmer_templates,
 };
 
 // Re-export sub-modules for code that imports from them directly
-pub use fallow_extract::astro;
-pub use fallow_extract::css;
-pub use fallow_extract::flags;
-pub use fallow_extract::inventory;
-pub use fallow_extract::mdx;
-pub use fallow_extract::sfc;
-pub use fallow_extract::visitor;
+pub use plow_extract::astro;
+pub use plow_extract::css;
+pub use plow_extract::flags;
+pub use plow_extract::inventory;
+pub use plow_extract::mdx;
+pub use plow_extract::sfc;
+pub use plow_extract::visitor;

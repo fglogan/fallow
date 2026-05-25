@@ -1,4 +1,4 @@
-/// Knip rule names mapped to fallow rule names.
+/// Knip rule names mapped to plow rule names.
 pub(super) const KNIP_RULE_MAP: &[(&str, &str)] = &[
     ("files", "unused-files"),
     ("dependencies", "unused-dependencies"),
@@ -14,31 +14,31 @@ pub(super) const KNIP_RULE_MAP: &[(&str, &str)] = &[
 
 /// Knip fields that cannot be mapped and generate warnings.
 pub(super) const KNIP_UNMAPPABLE_FIELDS: &[(&str, &str, Option<&str>)] = &[
-    ("project", "Fallow auto-discovers project files", None),
+    ("project", "Plow auto-discovers project files", None),
     (
         "paths",
-        "Fallow reads path mappings from tsconfig.json automatically",
+        "Plow reads path mappings from tsconfig.json automatically",
         None,
     ),
     (
         "ignoreFiles",
-        "No separate concept in fallow",
+        "No separate concept in plow",
         Some("use the `ignorePatterns` field instead"),
     ),
     (
         "ignoreBinaries",
-        "Binary filtering is not configurable in fallow",
+        "Binary filtering is not configurable in plow",
         None,
     ),
     (
         "ignoreMembers",
-        "Member-level ignoring is not configurable in fallow",
-        Some("use inline suppression comments: // fallow-ignore-next-line"),
+        "Member-level ignoring is not configurable in plow",
+        Some("use inline suppression comments: // plow-ignore-next-line"),
     ),
     (
         "ignoreUnresolved",
-        "Unresolved import filtering is not configurable in fallow",
-        Some("use inline suppression comments: // fallow-ignore-next-line unresolved-imports"),
+        "Unresolved import filtering is not configurable in plow",
+        Some("use inline suppression comments: // plow-ignore-next-line unresolved-imports"),
     ),
     (
         "ignoreWorkspaces",
@@ -47,28 +47,28 @@ pub(super) const KNIP_UNMAPPABLE_FIELDS: &[(&str, &str, Option<&str>)] = &[
     ),
     (
         "ignoreIssues",
-        "No global issue ignoring in fallow",
-        Some("use inline suppression comments: // fallow-ignore-file [issue-type]"),
+        "No global issue ignoring in plow",
+        Some("use inline suppression comments: // plow-ignore-file [issue-type]"),
     ),
     (
         "includeEntryExports",
-        "Entry export inclusion is not configurable in fallow",
+        "Entry export inclusion is not configurable in plow",
         None,
     ),
     (
         "tags",
-        "Tag-based filtering is not supported in fallow",
+        "Tag-based filtering is not supported in plow",
         None,
     ),
     (
         "compilers",
-        "Custom compilers are not supported in fallow (uses Oxc parser)",
+        "Custom compilers are not supported in plow (uses Oxc parser)",
         None,
     ),
-    ("treatConfigHintsAsErrors", "No equivalent in fallow", None),
+    ("treatConfigHintsAsErrors", "No equivalent in plow", None),
 ];
 
-/// Knip issue type names that have no fallow equivalent.
+/// Knip issue type names that have no plow equivalent.
 pub(super) const KNIP_UNMAPPABLE_ISSUE_TYPES: &[&str] = &[
     "optionalPeerDependencies",
     "binaries",
@@ -77,7 +77,7 @@ pub(super) const KNIP_UNMAPPABLE_ISSUE_TYPES: &[&str] = &[
     "catalog",
 ];
 
-/// Known knip plugin config keys (framework-specific). These are auto-detected by fallow plugins.
+/// Known knip plugin config keys (framework-specific). These are auto-detected by plow plugins.
 pub(super) const KNIP_PLUGIN_KEYS: &[&str] = &[
     "angular",
     "astro",
@@ -163,11 +163,11 @@ mod tests {
 
     #[test]
     fn rule_map_has_no_empty_keys_or_values() {
-        for (knip, fallow) in KNIP_RULE_MAP {
+        for (knip, plow) in KNIP_RULE_MAP {
             assert!(!knip.is_empty(), "KNIP_RULE_MAP contains an empty knip key");
             assert!(
-                !fallow.is_empty(),
-                "KNIP_RULE_MAP contains an empty fallow value for key `{knip}`"
+                !plow.is_empty(),
+                "KNIP_RULE_MAP contains an empty plow value for key `{knip}`"
             );
         }
     }
@@ -184,12 +184,12 @@ mod tests {
     }
 
     #[test]
-    fn rule_map_has_no_duplicate_fallow_values() {
+    fn rule_map_has_no_duplicate_plow_values() {
         let mut seen = FxHashSet::default();
-        for (_, fallow) in KNIP_RULE_MAP {
+        for (_, plow) in KNIP_RULE_MAP {
             assert!(
-                seen.insert(*fallow),
-                "KNIP_RULE_MAP has duplicate fallow value `{fallow}`"
+                seen.insert(*plow),
+                "KNIP_RULE_MAP has duplicate plow value `{plow}`"
             );
         }
     }

@@ -14,7 +14,7 @@ use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
 use colored::Colorize;
-use fallow_config::{OutputFormat, ResolvedConfig};
+use plow_config::{OutputFormat, ResolvedConfig};
 use rustc_hash::FxHashSet;
 
 use crate::baseline::{
@@ -32,10 +32,10 @@ use scoring::compute_file_scores;
 
 /// Pre-parsed data from the dead-code pipeline, shared with health to avoid re-analysis.
 pub struct SharedParseData {
-    pub files: Vec<fallow_types::discover::DiscoveredFile>,
-    pub modules: Vec<fallow_types::extract::ModuleInfo>,
+    pub files: Vec<plow_types::discover::DiscoveredFile>,
+    pub modules: Vec<plow_types::extract::ModuleInfo>,
     /// Full analysis output (graph + results) for file scoring.
-    pub analysis_output: Option<fallow_core::AnalysisOutput>,
+    pub analysis_output: Option<plow_core::AnalysisOutput>,
 }
 use targets::{TargetAuxData, compute_refactoring_targets};
 
@@ -96,7 +96,7 @@ pub struct HealthOptions<'a> {
     pub config_activates_coverage_gaps: bool,
     pub hotspots: bool,
     pub ownership: bool,
-    pub ownership_emails: Option<fallow_config::EmailMode>,
+    pub ownership_emails: Option<plow_config::EmailMode>,
     pub targets: bool,
     /// Run the full health pipeline even if some sections are hidden, so score
     /// and snapshot outputs stay accurate.
@@ -148,10 +148,10 @@ struct HealthPipelineTimings {
 
 struct HealthPipelineInput {
     config: ResolvedConfig,
-    files: Vec<fallow_types::discover::DiscoveredFile>,
-    modules: Vec<fallow_types::extract::ModuleInfo>,
+    files: Vec<plow_types::discover::DiscoveredFile>,
+    modules: Vec<plow_types::extract::ModuleInfo>,
     timings: HealthPipelineTimings,
-    pre_computed_analysis: Option<fallow_core::AnalysisOutput>,
+    pre_computed_analysis: Option<plow_core::AnalysisOutput>,
 }
 
 /// Run health analysis using pre-parsed modules from the dead-code pipeline.
@@ -176,7 +176,7 @@ pub fn execute_health_with_shared_parse(
         opts.production_override
             .or_else(|| opts.production.then_some(true)),
         opts.quiet,
-        fallow_config::ProductionAnalysis::Health,
+        plow_config::ProductionAnalysis::Health,
     )?;
     let config_ms = t.elapsed().as_secs_f64() * 1000.0;
     execute_health_inner(
@@ -210,26 +210,26 @@ pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode
         opts.production_override
             .or_else(|| opts.production.then_some(true)),
         opts.quiet,
-        fallow_config::ProductionAnalysis::Health,
+        plow_config::ProductionAnalysis::Health,
     )?;
     let config_ms = t.elapsed().as_secs_f64() * 1000.0;
 
     // Discover and parse files
     let t = Instant::now();
-    let files = fallow_core::discover::discover_files_with_plugin_scopes(&config);
+    let files = plow_core::discover::discover_files_with_plugin_scopes(&config);
     let discover_ms = t.elapsed().as_secs_f64() * 1000.0;
 
     let cache = if config.no_cache {
         None
     } else {
-        fallow_core::cache::CacheStore::load(
+        plow_core::cache::CacheStore::load(
             &config.cache_dir,
             config.cache_config_hash,
-            fallow_core::resolve_cache_max_size_bytes(&config),
+            plow_core::resolve_cache_max_size_bytes(&config),
         )
     };
     let t = Instant::now();
-    let parse_result = fallow_core::extract::parse_all_files(&files, cache.as_ref(), true);
+    let parse_result = plow_core::extract::parse_all_files(&files, cache.as_ref(), true);
     let parse_ms = t.elapsed().as_secs_f64() * 1000.0;
     let parse_cpu_ms = parse_result.parse_cpu_ms;
 
@@ -349,11 +349,11 @@ fn execute_health_inner(
     // Config severity may enable reporting for top-level `health` when the user
     // did not explicitly choose sections, but it must not override callers that
     // intentionally set `coverage_gaps: false` (combined mode, audit, score-only).
-    let config_coverage_enabled = config.rules.coverage_gaps != fallow_config::Severity::Off;
+    let config_coverage_enabled = config.rules.coverage_gaps != plow_config::Severity::Off;
     let report_coverage_gaps =
         opts.coverage_gaps || (opts.config_activates_coverage_gaps && config_coverage_enabled);
     let enforce_coverage_gaps = opts.enforce_coverage_gap_gate
-        && config.rules.coverage_gaps == fallow_config::Severity::Error;
+        && config.rules.coverage_gaps == plow_config::Severity::Error;
 
     // Load Istanbul coverage data for accurate CRAP scoring.
     // Priority: explicit --coverage flag > auto-detected coverage-final.json.
@@ -394,14 +394,14 @@ fn execute_health_inner(
     let needs_analysis_output = needs_file_scores || opts.runtime_coverage.is_some();
     #[expect(
         deprecated,
-        reason = "ADR-008 deprecates fallow_core::analyze_with_parse_result externally; health still uses the workspace path dependency"
+        reason = "ADR-008 deprecates plow_core::analyze_with_parse_result externally; health still uses the workspace path dependency"
     )]
     let mut shared_analysis_output = if needs_analysis_output {
         if let Some(pre) = pre_computed_analysis {
             Some(pre)
         } else {
             Some(
-                fallow_core::analyze_with_parse_result(&config, &modules)
+                plow_core::analyze_with_parse_result(&config, &modules)
                     .map_err(|e| emit_error(&format!("analysis failed: {e}"), 2, opts.output))?,
             )
         }
@@ -689,13 +689,13 @@ fn execute_health_inner(
     if opts.score {
         let scoped_files = filter_files_to_paths(&files, &candidate_paths);
         let dupes_report = if opts.no_cache {
-            fallow_core::duplicates::find_duplicates(
+            plow_core::duplicates::find_duplicates(
                 &config.root,
                 &scoped_files,
                 &config.duplicates,
             )
         } else {
-            fallow_core::duplicates::find_duplicates_cached(
+            plow_core::duplicates::find_duplicates_cached(
                 &config.root,
                 &scoped_files,
                 &config.duplicates,
@@ -1141,7 +1141,7 @@ fn filter_large_functions_by_diff(
 /// context. PR mode flips the precedence so `hot-path-touched` outranks
 /// `cold-code-detected` (event-tied finding wins for THIS diff over the
 /// repo's slow-burn cold-code state). Standalone keeps the older
-/// "cold-code-detected primary" precedence so `fallow health
+/// "cold-code-detected primary" precedence so `plow health
 /// --runtime-coverage <path>` still surfaces dead code first.
 ///
 /// `pr_context` is true when any change-scope signal (diff_index or
@@ -1224,7 +1224,7 @@ fn pick_primary_verdict(
 }
 
 fn collect_candidate_paths(
-    files: &[fallow_types::discover::DiscoveredFile],
+    files: &[plow_types::discover::DiscoveredFile],
     config: &ResolvedConfig,
     changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
     ws_roots: Option<&[std::path::PathBuf]>,
@@ -1240,9 +1240,9 @@ fn collect_candidate_paths(
 }
 
 fn filter_files_to_paths(
-    files: &[fallow_types::discover::DiscoveredFile],
+    files: &[plow_types::discover::DiscoveredFile],
     candidate_paths: &rustc_hash::FxHashSet<std::path::PathBuf>,
-) -> Vec<fallow_types::discover::DiscoveredFile> {
+) -> Vec<plow_types::discover::DiscoveredFile> {
     files
         .iter()
         .filter(|file| candidate_paths.contains(&file.path))
@@ -1253,7 +1253,7 @@ fn filter_files_to_paths(
 fn apply_duplication_metrics(
     vital_signs: &mut crate::health_types::VitalSigns,
     counts: &mut crate::health_types::VitalSignsCounts,
-    dupes_report: &fallow_core::duplicates::DuplicationReport,
+    dupes_report: &plow_core::duplicates::DuplicationReport,
 ) {
     let pct = dupes_report.stats.duplication_percentage;
     vital_signs.duplication_pct = Some((pct * 10.0).round() / 10.0);
@@ -1313,23 +1313,23 @@ type FileScoreResult = (Option<scoring::FileScoreOutput>, Option<usize>, Option<
 )]
 fn compute_filtered_file_scores(
     config: &ResolvedConfig,
-    modules: &[fallow_core::extract::ModuleInfo],
-    file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
+    modules: &[plow_core::extract::ModuleInfo],
+    file_paths: &rustc_hash::FxHashMap<plow_core::discover::FileId, &std::path::PathBuf>,
     changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
     ws_roots: Option<&[std::path::PathBuf]>,
     ignore_set: &globset::GlobSet,
     output: OutputFormat,
     istanbul_coverage: Option<&scoring::IstanbulCoverage>,
-    pre_computed: Option<fallow_core::AnalysisOutput>,
+    pre_computed: Option<plow_core::AnalysisOutput>,
 ) -> Result<FileScoreResult, ExitCode> {
     #[expect(
         deprecated,
-        reason = "ADR-008 deprecates fallow_core::analyze_with_parse_result externally; health still uses the workspace path dependency"
+        reason = "ADR-008 deprecates plow_core::analyze_with_parse_result externally; health still uses the workspace path dependency"
     )]
     let analysis_output = if let Some(pre) = pre_computed {
         pre
     } else {
-        fallow_core::analyze_with_parse_result(config, modules)
+        plow_core::analyze_with_parse_result(config, modules)
             .map_err(|e| emit_error(&format!("analysis failed: {e}"), 2, output))?
     };
     match compute_file_scores(
@@ -1508,8 +1508,8 @@ impl SubsetFilter<'_> {
 )]
 fn compute_vital_signs_and_counts(
     score_output: Option<&scoring::FileScoreOutput>,
-    modules: &[fallow_core::extract::ModuleInfo],
-    file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
+    modules: &[plow_core::extract::ModuleInfo],
+    file_paths: &rustc_hash::FxHashMap<plow_core::discover::FileId, &std::path::PathBuf>,
     needs_file_scores: bool,
     file_scores_slice: &[FileHealthScore],
     needs_hotspots: bool,
@@ -1522,7 +1522,7 @@ fn compute_vital_signs_and_counts(
 ) {
     let analysis_counts =
         score_output.map(|o| o.analysis_snapshot.counts_for(subset, &o.analysis_counts));
-    let module_filter_set: Option<rustc_hash::FxHashSet<fallow_core::discover::FileId>> =
+    let module_filter_set: Option<rustc_hash::FxHashSet<plow_core::discover::FileId>> =
         if subset.is_full() {
             None
         } else {
@@ -1613,7 +1613,7 @@ fn compute_health_trend(
     let snapshots = vital_signs::load_snapshots(opts.root);
     if snapshots.is_empty() && !opts.quiet {
         eprintln!(
-            "No snapshots found. Run `fallow health --save-snapshot` to save a \
+            "No snapshots found. Run `plow health --save-snapshot` to save a \
              baseline, then use --trend on subsequent runs to track progress."
         );
     }
@@ -1839,8 +1839,8 @@ fn assemble_health_report(
 /// that triggers showing the risk profile line). Sorted by line count descending.
 fn collect_large_functions(
     vital_signs: &crate::health_types::VitalSigns,
-    modules: &[fallow_core::extract::ModuleInfo],
-    file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
+    modules: &[plow_core::extract::ModuleInfo],
+    file_paths: &rustc_hash::FxHashMap<plow_core::discover::FileId, &std::path::PathBuf>,
     config_root: &std::path::Path,
     ignore_set: &globset::GlobSet,
     changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
@@ -1891,7 +1891,7 @@ fn collect_large_functions(
 /// Build a glob set from health ignore patterns.
 ///
 /// User patterns were validated at config load time
-/// (see `FallowConfig::validate_user_globs`).
+/// (see `PlowConfig::validate_user_globs`).
 fn build_ignore_set(patterns: &[String]) -> globset::GlobSet {
     let mut builder = globset::GlobSetBuilder::new();
     for pattern in patterns {
@@ -1914,8 +1914,8 @@ fn build_ignore_set(patterns: &[String]) -> globset::GlobSet {
     reason = "filter pipeline mirrors compute_filtered_file_scores"
 )]
 fn collect_findings(
-    modules: &[fallow_core::extract::ModuleInfo],
-    file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
+    modules: &[plow_core::extract::ModuleInfo],
+    file_paths: &rustc_hash::FxHashMap<plow_core::discover::FileId, &std::path::PathBuf>,
     config_root: &std::path::Path,
     ignore_set: &globset::GlobSet,
     changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
@@ -1952,10 +1952,10 @@ fn collect_findings(
         files_analyzed += 1;
         for fc in &module.complexity {
             total_functions += 1;
-            if fallow_core::suppress::is_suppressed(
+            if plow_core::suppress::is_suppressed(
                 &module.suppressions,
                 fc.line,
-                fallow_core::suppress::IssueKind::Complexity,
+                plow_core::suppress::IssueKind::Complexity,
             ) {
                 continue;
             }
@@ -2012,8 +2012,8 @@ fn collect_findings(
 )]
 fn merge_crap_findings(
     findings: &mut Vec<ComplexityViolation>,
-    modules: &[fallow_core::extract::ModuleInfo],
-    file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
+    modules: &[plow_core::extract::ModuleInfo],
+    file_paths: &rustc_hash::FxHashMap<plow_core::discover::FileId, &std::path::PathBuf>,
     config_root: &std::path::Path,
     ignore_set: &globset::GlobSet,
     changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
@@ -2040,7 +2040,7 @@ fn merge_crap_findings(
     // overwrite each other.
     let mut complexity_by_pos: rustc_hash::FxHashMap<
         &std::path::Path,
-        rustc_hash::FxHashMap<(u32, u32), &fallow_types::extract::FunctionComplexity>,
+        rustc_hash::FxHashMap<(u32, u32), &plow_types::extract::FunctionComplexity>,
     > = rustc_hash::FxHashMap::default();
     for module in modules {
         let Some(&path) = file_paths.get(&module.file_id) else {
@@ -2051,7 +2051,7 @@ fn merge_crap_findings(
             entry.insert((fc.line, fc.col), fc);
         }
     }
-    // Track suppressions per file so we can honor `// fallow-ignore-*
+    // Track suppressions per file so we can honor `// plow-ignore-*
     // complexity` for CRAP-only findings too.
     let suppressions_by_path: rustc_hash::FxHashMap<&std::path::Path, _> = modules
         .iter()
@@ -2086,10 +2086,10 @@ fn merge_crap_findings(
                 continue;
             }
             if let Some(sups) = suppressions_by_path.get(path.as_path())
-                && fallow_core::suppress::is_suppressed(
+                && plow_core::suppress::is_suppressed(
                     sups,
                     pf.line,
-                    fallow_core::suppress::IssueKind::Complexity,
+                    plow_core::suppress::IssueKind::Complexity,
                 )
             {
                 continue;
@@ -2180,7 +2180,7 @@ fn merge_crap_findings(
 /// `<component>` `ComplexityViolation` whose `cyclomatic` / `cognitive` totals are
 /// `max(class) + template`. The rollup is anchored at the worst class
 /// function's `(path, line, col)` so an existing
-/// `// fallow-ignore-next-line complexity` placed above that function (or
+/// `// plow-ignore-next-line complexity` placed above that function (or
 /// the `@Component` decorator on inline-template components) continues to
 /// hide both the per-function finding AND the rollup. Per-function and
 /// per-`<template>` findings are NOT removed; the rollup is strictly
@@ -2204,7 +2204,7 @@ fn merge_crap_findings(
 /// A `.ts` file carrying TWO synthetic `<template>` findings is treated
 /// defensively: rollups are skipped (a `.ts` with multiple `@Component`
 /// decorators would need AST-level class attribution to map each template
-/// to its owning class, which is out of scope for the first cut). Fallow
+/// to its owning class, which is out of scope for the first cut). Plow
 /// emits a single rollup per owner per pass.
 ///
 /// `[`ComponentRollup`]`: crate::health_types::ComponentRollup
@@ -2282,7 +2282,7 @@ fn append_component_rollup_findings(
         };
         let worst = &findings[worst_idx];
         // Component identifier: derive from the .ts owner's file stem
-        // (e.g., `host-game.component.ts` -> `host-game.component`). fallow's
+        // (e.g., `host-game.component.ts` -> `host-game.component`). plow's
         // complexity emitter writes bare method names, so the actual class
         // name (`HostGameComponent`) isn't recoverable here; the file stem
         // is the next-best stable identifier and lets agents grep the
@@ -2475,7 +2475,7 @@ pub fn run_health(opts: &HealthOptions<'_>) -> ExitCode {
         opts.summary,
         true,
         true,
-        // Standalone `fallow health`: no upstream orientation header, render
+        // Standalone `plow health`: no upstream orientation header, render
         // the score / trend block inline.
         false,
     )
@@ -2506,10 +2506,10 @@ pub struct HealthResult {
 
 /// Print health results and return appropriate exit code.
 ///
-/// When called from combined mode (`fallow --score` / `fallow --trend`),
+/// When called from combined mode (`plow --score` / `plow --trend`),
 /// `skip_score_and_trend` MUST be `true`: the orientation header already
 /// renders both blocks and rendering them a second time here would duplicate
-/// the lines. Standalone `fallow health` invocations pass `false`.
+/// the lines. Standalone `plow health` invocations pass `false`.
 #[expect(
     clippy::too_many_arguments,
     reason = "thin formatting dispatcher that mirrors HealthOptions presentation knobs; bundling would be churn"
@@ -2600,10 +2600,10 @@ pub fn print_health_result(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_config::{FallowConfig, OutputFormat};
-    use fallow_core::extract::ModuleInfo;
-    use fallow_types::discover::FileId;
-    use fallow_types::extract::FunctionComplexity;
+    use plow_config::{PlowConfig, OutputFormat};
+    use plow_core::extract::ModuleInfo;
+    use plow_types::discover::FileId;
+    use plow_types::extract::FunctionComplexity;
     use rustc_hash::{FxHashMap, FxHashSet};
     use std::path::{Path, PathBuf};
 
@@ -2680,7 +2680,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "validated at config load time")]
     fn build_ignore_set_panics_on_unvalidated_invalid_pattern() {
-        // Per issue #463, user globs are validated by FallowConfig::load
+        // Per issue #463, user globs are validated by PlowConfig::load
         // before reaching this function. A program that constructs a config
         // in-code with an invalid pattern has skipped that validation and
         // is in an unrecoverable state.
@@ -3065,7 +3065,7 @@ mod tests {
                 lines_deleted: 500,
                 complexity_density: 0.4,
                 fan_in: 5,
-                trend: fallow_core::churn::ChurnTrend::Stable,
+                trend: plow_core::churn::ChurnTrend::Stable,
                 ownership: None,
                 is_test_path: false,
             },
@@ -3078,7 +3078,7 @@ mod tests {
                 lines_deleted: 500,
                 complexity_density: 0.4,
                 fan_in: 5,
-                trend: fallow_core::churn::ChurnTrend::Stable,
+                trend: plow_core::churn::ChurnTrend::Stable,
                 ownership: None,
                 is_test_path: false,
             },
@@ -3449,8 +3449,8 @@ mod tests {
         }
     }
 
-    fn test_resolved_config() -> fallow_config::ResolvedConfig {
-        FallowConfig::default().resolve(
+    fn test_resolved_config() -> plow_config::ResolvedConfig {
+        PlowConfig::default().resolve(
             PathBuf::from("/project"),
             OutputFormat::Json,
             1,
@@ -3987,7 +3987,7 @@ mod tests {
         // Standalone mode (no diff_index, no changed_files): hot paths are
         // never elevated to the verdict slot. ColdCodeDetected stays
         // primary (slow-burn finding). This preserves pre-rename behavior
-        // for `fallow health --runtime-coverage <path>` invoked outside
+        // for `plow health --runtime-coverage <path>` invoked outside
         // PR context.
         let root = Path::new("/project");
         let mut report = crate::health_types::RuntimeCoverageReport {

@@ -5,11 +5,11 @@ mod walk;
 
 use std::path::{Component, Path};
 
-use fallow_config::{PackageJson, ResolvedConfig};
+use plow_config::{PackageJson, ResolvedConfig};
 use rustc_hash::FxHashSet;
 
-// Re-export types from fallow-types
-pub use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
+// Re-export types from plow-types
+pub use plow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
 
 // Re-export public functions — preserves the existing `crate::discover::*` API
 pub(crate) use entry_points::resolve_entry_path;
@@ -40,7 +40,7 @@ pub use walk::{
 pub fn collect_plugin_hidden_dir_scopes(
     config: &ResolvedConfig,
     root_pkg: Option<&PackageJson>,
-    workspaces: &[fallow_config::WorkspaceInfo],
+    workspaces: &[plow_config::WorkspaceInfo],
 ) -> Vec<HiddenDirScope> {
     let registry = crate::plugins::PluginRegistry::new(config.external_plugins.clone());
     let mut scopes = Vec::new();
@@ -71,7 +71,7 @@ pub fn collect_plugin_hidden_dir_scopes(
 pub fn collect_hidden_dir_scopes(
     config: &ResolvedConfig,
     root_pkg: Option<&PackageJson>,
-    workspaces: &[fallow_config::WorkspaceInfo],
+    workspaces: &[plow_config::WorkspaceInfo],
 ) -> Vec<HiddenDirScope> {
     let _span = tracing::info_span!("collect_hidden_dir_scopes").entered();
     let registry = crate::plugins::PluginRegistry::new(config.external_plugins.clone());
@@ -120,7 +120,7 @@ fn push_plugin_hidden_dir_scope(
 #[must_use]
 pub fn discover_files_with_plugin_scopes(config: &ResolvedConfig) -> Vec<DiscoveredFile> {
     let root_pkg = PackageJson::load(&config.root.join("package.json")).ok();
-    let workspaces = fallow_config::discover_workspaces(&config.root);
+    let workspaces = plow_config::discover_workspaces(&config.root);
     let scopes = collect_hidden_dir_scopes(config, root_pkg.as_ref(), &workspaces);
     discover_files_with_additional_hidden_dirs(config, &scopes)
 }
@@ -128,7 +128,7 @@ pub fn discover_files_with_plugin_scopes(config: &ResolvedConfig) -> Vec<Discove
 /// Hidden (dot-prefixed) directories that should be included in file discovery.
 ///
 /// Most hidden directories (`.git`, `.cache`, etc.) should be skipped, but certain
-/// convention directories contain source or config files that fallow needs to see:
+/// convention directories contain source or config files that plow needs to see:
 /// - `.storybook` — Storybook configuration (the Storybook plugin depends on this)
 /// - `.vitepress` — VitePress configuration and theme files
 /// - `.well-known` — Standard web convention directory
@@ -164,7 +164,7 @@ const SCRIPT_SCOPE_DENYLIST: &[&str] = &[
     ".docusaurus",
     ".vscode",
     ".idea",
-    ".fallow",
+    ".plow",
     ".husky",
 ];
 
@@ -191,7 +191,7 @@ const SCRIPT_SCOPE_DENYLIST: &[&str] = &[
 pub fn collect_script_hidden_dir_scopes(
     config: &ResolvedConfig,
     root_pkg: Option<&PackageJson>,
-    workspaces: &[fallow_config::WorkspaceInfo],
+    workspaces: &[plow_config::WorkspaceInfo],
 ) -> Vec<HiddenDirScope> {
     let _span = tracing::info_span!("collect_script_hidden_dir_scopes").entered();
     let mut scopes = Vec::new();
@@ -468,9 +468,9 @@ mod tests {
     }
 
     fn make_config(root: std::path::PathBuf) -> ResolvedConfig {
-        fallow_config::FallowConfig::default().resolve(
+        plow_config::PlowConfig::default().resolve(
             root,
-            fallow_config::OutputFormat::Human,
+            plow_config::OutputFormat::Human,
             1,
             true,
             true,
@@ -643,7 +643,7 @@ mod tests {
             r#"{"name":"app","scripts":{"lint":"eslint -c .config/eslint.config.js"}}"#,
         )
         .unwrap();
-        let ws = fallow_config::WorkspaceInfo {
+        let ws = plow_config::WorkspaceInfo {
             root: ws_root.clone(),
             name: "app".to_string(),
             is_internal_dependency: false,

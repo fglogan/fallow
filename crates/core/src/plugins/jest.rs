@@ -260,7 +260,7 @@ fn extract_jest_inline_projects(
 
     // testEnvironment: filter node / jsdom; otherwise just the bare value
     // is credited. Jest accepts both the bare and `jest-environment-*`
-    // resolution forms; whichever the user wrote is what fallow records.
+    // resolution forms; whichever the user wrote is what plow records.
     for value in read("testEnvironment") {
         if !matches!(value.as_str(), "node" | "jsdom") {
             result
@@ -1032,7 +1032,7 @@ mod tests {
         let result = plugin.resolve_config(
             std::path::Path::new("jest.config.js"),
             source,
-            std::path::Path::new("/tmp/fallow-jest-projects-nonexistent-zzz"),
+            std::path::Path::new("/tmp/plow-jest-projects-nonexistent-zzz"),
         );
         assert!(
             result.referenced_dependencies.is_empty(),

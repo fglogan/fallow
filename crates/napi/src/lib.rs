@@ -1,4 +1,4 @@
-use fallow_cli::programmatic;
+use plow_cli::programmatic;
 use napi::bindgen_prelude::{AsyncTask, JsObjectValue, ToNapiValue, Unknown};
 use napi::{Env, ScopedTask, Status};
 use napi_derive::napi;
@@ -377,7 +377,7 @@ fn to_napi_error(env: Env, error: programmatic::ProgrammaticError) -> napi::Erro
         return napi::Error::new(Status::GenericFailure, message);
     };
 
-    let _ = js_error.set_named_property("name", "FallowNodeError");
+    let _ = js_error.set_named_property("name", "PlowNodeError");
     let _ = js_error.set_named_property("exitCode", u32::from(exit_code));
     if let Some(code) = code {
         let _ = js_error.set_named_property("code", code);
@@ -446,7 +446,7 @@ impl<'task> ScopedTask<'task> for ProgrammaticTask {
     fn reject(&mut self, env: &'task Env, err: napi::Error) -> napi::Result<Self::JsValue> {
         let error = self.error.take().unwrap_or_else(|| {
             programmatic::ProgrammaticError::new(err.reason.clone(), 2)
-                .with_code("FALLOW_NODE_ERROR")
+                .with_code("PLOW_NODE_ERROR")
         });
         Err(to_napi_error(*env, error))
     }

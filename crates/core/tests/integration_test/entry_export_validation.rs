@@ -4,7 +4,7 @@ use super::common::{create_config, fixture_path};
 fn entry_exports_skipped_by_default() {
     let root = fixture_path("entry-export-validation");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -28,7 +28,7 @@ fn entry_exports_detected_when_include_entry_exports_enabled() {
     let root = fixture_path("entry-export-validation");
     let mut config = create_config(root);
     config.include_entry_exports = true;
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -55,22 +55,22 @@ fn entry_exports_detected_when_include_entry_exports_enabled() {
 
 #[test]
 fn entry_exports_detected_via_config_file_include_entry_exports() {
-    // Issue #249: fixture has `.fallowrc.json` with `includeEntryExports: true`.
+    // Issue #249: fixture has `.plowrc.json` with `includeEntryExports: true`.
     // Same expectations as the CLI-flag path: meatdata + config flagged, helper not.
     let root = fixture_path("entry-export-validation-config");
-    let (loaded, _path) = fallow_config::FallowConfig::find_and_load(&root)
+    let (loaded, _path) = plow_config::PlowConfig::find_and_load(&root)
         .expect("config load")
-        .expect("fixture has .fallowrc.json");
+        .expect("fixture has .plowrc.json");
     assert!(loaded.include_entry_exports);
     let config = loaded.resolve(
         root,
-        fallow_config::OutputFormat::Human,
+        plow_config::OutputFormat::Human,
         1,
         true,
         true,
         None,
     );
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -97,7 +97,7 @@ fn vitest_config_default_export_is_framework_used_with_include_entry_exports() {
     let root = fixture_path("vitest-include-entry-exports-workspace");
     let mut config = create_config(root);
     config.include_entry_exports = true;
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_exports: Vec<(String, String)> = results
         .unused_exports
@@ -131,7 +131,7 @@ fn vite_config_default_export_is_framework_used_with_include_entry_exports() {
     let root = fixture_path("vite-include-entry-exports-workspace");
     let mut config = create_config(root);
     config.include_entry_exports = true;
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_exports: Vec<(String, String)> = results
         .unused_exports
@@ -163,7 +163,7 @@ fn storybook_exports_are_framework_used_with_include_entry_exports() {
     let root = fixture_path("storybook-include-entry-exports");
     let mut config = create_config(root);
     config.include_entry_exports = true;
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_exports: Vec<(String, String)> = results
         .unused_exports

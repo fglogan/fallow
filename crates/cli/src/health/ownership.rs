@@ -39,8 +39,8 @@ use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 use rustc_hash::{FxHashMap, FxHashSet};
 use xxhash_rust::xxh3::xxh3_64;
 
-use fallow_config::EmailMode;
-use fallow_core::churn::{AuthorContribution, FileChurn};
+use plow_config::EmailMode;
+use plow_core::churn::{AuthorContribution, FileChurn};
 
 use crate::codeowners::CodeOwners;
 use crate::health_types::{
@@ -66,7 +66,7 @@ const DECLARED_OWNER_ACTIVE_DAYS: u64 = 90;
 /// Inputs needed to compute ownership for one file. Built once per analysis
 /// run and reused for every hotspot.
 pub struct OwnershipContext<'a> {
-    /// Author email pool from [`fallow_core::churn::ChurnResult::author_pool`].
+    /// Author email pool from [`plow_core::churn::ChurnResult::author_pool`].
     pub author_pool: &'a [String],
     /// Compiled bot-author globs from the ownership config's `bot_patterns`.
     pub bot_globs: &'a GlobSet,
@@ -497,7 +497,7 @@ mod tests {
             weighted_commits: authors.iter().map(|a| a.2).sum(),
             lines_added: 0,
             lines_deleted: 0,
-            trend: fallow_core::churn::ChurnTrend::Stable,
+            trend: plow_core::churn::ChurnTrend::Stable,
             authors: map,
         }
     }
@@ -653,7 +653,7 @@ mod tests {
         // majority of real human contributors. Ensure default patterns
         // don't fire on a typical human noreply address.
         let globs =
-            compile_bot_globs(&fallow_config::OwnershipConfig::default().bot_patterns).unwrap();
+            compile_bot_globs(&plow_config::OwnershipConfig::default().bot_patterns).unwrap();
         // Real example from a vite contributor.
         assert!(!is_bot(
             "49056869+sapphi-red@users.noreply.github.com",

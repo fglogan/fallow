@@ -1,11 +1,11 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use common::run_fallow_combined;
+use common::run_plow_combined;
 
 #[test]
 fn combined_human_output_hides_internal_info_logs_when_rust_log_is_empty() {
-    let output = run_fallow_combined("basic-project", &["--summary"]);
+    let output = run_plow_combined("basic-project", &["--summary"]);
     assert_ne!(
         output.code, 2,
         "combined run should not hard-fail: stdout={} stderr={}",
@@ -36,7 +36,7 @@ fn combined_human_output_hides_internal_info_logs_when_rust_log_is_empty() {
 
 #[test]
 fn combined_human_summary_logs_loaded_config_once() {
-    let output = run_fallow_combined("config-file-project", &["--summary"]);
+    let output = run_plow_combined("config-file-project", &["--summary"]);
     assert_ne!(
         output.code, 2,
         "combined run should not hard-fail: stdout={} stderr={}",
@@ -53,7 +53,7 @@ fn combined_human_summary_logs_loaded_config_once() {
 
 #[test]
 fn combined_human_summary_uses_section_headers_without_duplicate_summary_titles() {
-    let output = run_fallow_combined("config-file-project", &["--summary"]);
+    let output = run_plow_combined("config-file-project", &["--summary"]);
     assert_ne!(
         output.code, 2,
         "combined run should not hard-fail: stdout={} stderr={}",

@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_config::{ResolvedConfig, WorkspaceInfo};
-use fallow_types::discover::{DiscoveredFile, FileId};
+use plow_config::{ResolvedConfig, WorkspaceInfo};
+use plow_types::discover::{DiscoveredFile, FileId};
 use oxc_span::Span;
 
 use crate::extract::{ImportInfo, ImportedName, parse_from_content};

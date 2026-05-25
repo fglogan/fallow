@@ -1,4 +1,4 @@
-//! Test-only stub `fallow-cov` sidecar used by
+//! Test-only stub `plow-cov` sidecar used by
 //! `crates/cli/tests/runtime_coverage_tests.rs` to exercise the full
 //! spawn/marshalling pipeline without depending on the closed-source sidecar.
 //!
@@ -8,7 +8,7 @@
 //!
 //! Reads a `fallow_cov_protocol::Request` from stdin and emits a
 //! `fallow_cov_protocol::Response` on stdout (or exits with a specific code)
-//! based on the `FALLOW_STUB_MODE` env var:
+//! based on the `PLOW_STUB_MODE` env var:
 //!
 //! - unset / `"ok"`: clean response, exit 0
 //! - `"protocol-mismatch"`: response with `protocol_version = "99.0.0"`, exit 0
@@ -42,7 +42,7 @@ fn main() -> ExitCode {
     let _ = std::io::stdin().read_to_end(&mut buf);
     let parsed: Option<Request> = serde_json::from_slice(&buf).ok();
 
-    let mode = std::env::var("FALLOW_STUB_MODE").unwrap_or_default();
+    let mode = std::env::var("PLOW_STUB_MODE").unwrap_or_default();
     match mode.as_str() {
         "" | "ok" => emit_clean_response(PROTOCOL_VERSION, None),
         "protocol-mismatch" => emit_clean_response("99.0.0", None),
@@ -80,7 +80,7 @@ fn main() -> ExitCode {
             ExitCode::from(6)
         }
         other => {
-            eprintln!("stub sidecar: unknown FALLOW_STUB_MODE={other}");
+            eprintln!("stub sidecar: unknown PLOW_STUB_MODE={other}");
             ExitCode::from(2)
         }
     }

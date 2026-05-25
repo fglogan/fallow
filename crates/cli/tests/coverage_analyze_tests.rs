@@ -6,7 +6,7 @@ use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use common::{fallow_bin, fixture_path, parse_json};
+use common::{plow_bin, fixture_path, parse_json};
 
 fn serve_once(body: &'static str) -> (String, Arc<Mutex<String>>, thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
@@ -64,7 +64,7 @@ fn cloud_body() -> &'static str {
 #[test]
 fn coverage_analyze_cloud_fetches_percent_encoded_runtime_context() {
     let (endpoint, request, handle) = serve_once(cloud_body());
-    let output = std::process::Command::new(fallow_bin())
+    let output = std::process::Command::new(plow_bin())
         .args([
             "coverage",
             "analyze",
@@ -80,10 +80,10 @@ fn coverage_analyze_cloud_fetches_percent_encoded_runtime_context() {
         .arg(fixture_path("coverage-gaps"))
         .env("NO_COLOR", "1")
         .env("RUST_LOG", "")
-        .env("FALLOW_API_KEY", "fallow_live_test")
-        .env_remove("FALLOW_RUNTIME_COVERAGE_SOURCE")
+        .env("PLOW_API_KEY", "plow_live_test")
+        .env_remove("PLOW_RUNTIME_COVERAGE_SOURCE")
         .output()
-        .expect("run fallow");
+        .expect("run plow");
     handle.join().expect("server joins");
     let command_output = common::CommandOutput {
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
@@ -134,7 +134,7 @@ fn coverage_analyze_cloud_fetches_percent_encoded_runtime_context() {
     );
     // ureq is built without the gzip feature; advertising identity-encoding
     // keeps the response body decodable as raw JSON. Caught the missing-gzip
-    // bug live against api.fallow.cloud during the v2.57.0 release smoke.
+    // bug live against api.plow.cloud during the v2.57.0 release smoke.
     let lower = request.to_lowercase();
     assert!(
         lower.contains("accept-encoding: identity"),
@@ -149,7 +149,7 @@ fn coverage_analyze_cloud_fetches_percent_encoded_runtime_context() {
 #[test]
 fn coverage_analyze_env_opt_in_enables_cloud() {
     let (endpoint, _request, handle) = serve_once(cloud_body());
-    let output = std::process::Command::new(fallow_bin())
+    let output = std::process::Command::new(plow_bin())
         .args([
             "coverage",
             "analyze",
@@ -164,10 +164,10 @@ fn coverage_analyze_env_opt_in_enables_cloud() {
         .arg(fixture_path("coverage-gaps"))
         .env("NO_COLOR", "1")
         .env("RUST_LOG", "")
-        .env("FALLOW_API_KEY", "fallow_live_test")
-        .env("FALLOW_RUNTIME_COVERAGE_SOURCE", "cloud")
+        .env("PLOW_API_KEY", "plow_live_test")
+        .env("PLOW_RUNTIME_COVERAGE_SOURCE", "cloud")
         .output()
-        .expect("run fallow");
+        .expect("run plow");
     handle.join().expect("server joins");
     assert!(
         output.status.success(),
@@ -180,7 +180,7 @@ fn coverage_analyze_env_opt_in_enables_cloud() {
 #[test]
 fn coverage_analyze_explain_attaches_meta_block() {
     let (endpoint, _request, handle) = serve_once(cloud_body());
-    let output = std::process::Command::new(fallow_bin())
+    let output = std::process::Command::new(plow_bin())
         .args([
             "--explain",
             "coverage",
@@ -197,10 +197,10 @@ fn coverage_analyze_explain_attaches_meta_block() {
         .arg(fixture_path("coverage-gaps"))
         .env("NO_COLOR", "1")
         .env("RUST_LOG", "")
-        .env("FALLOW_API_KEY", "fallow_live_test")
-        .env_remove("FALLOW_RUNTIME_COVERAGE_SOURCE")
+        .env("PLOW_API_KEY", "plow_live_test")
+        .env_remove("PLOW_RUNTIME_COVERAGE_SOURCE")
         .output()
-        .expect("run fallow");
+        .expect("run plow");
     handle.join().expect("server joins");
     let command_output = common::CommandOutput {
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),

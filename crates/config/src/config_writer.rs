@@ -92,7 +92,7 @@ pub fn preserve_target_mode(_temp: &Path, _target: &Path) {
     // existing file when `persist` swaps in place.
 }
 
-/// Append `ignoreExports` rules to an existing fallow config file.
+/// Append `ignoreExports` rules to an existing plow config file.
 ///
 /// Existing entries keep their order and exact formatting. New entries are
 /// appended only when no existing entry has the same `file` value.
@@ -106,11 +106,11 @@ pub fn add_ignore_exports_rule(path: &Path, entries: &[IgnoreExportRule]) -> Con
     Ok(())
 }
 
-/// Render the proposed content of a fallow config after appending
+/// Render the proposed content of a plow config after appending
 /// `ignoreExports` rules, without touching the filesystem.
 ///
 /// Used by [`add_ignore_exports_rule`] for the apply path and by
-/// `fallow fix --dry-run` to render a diff preview against the current
+/// `plow fix --dry-run` to render a diff preview against the current
 /// on-disk content. Pass an empty string as `content` to render the
 /// create-from-scratch case.
 pub fn add_ignore_exports_rule_to_string(
@@ -154,12 +154,12 @@ fn append_json_ignore_exports(
     let root = CstRootNode::parse(content, &crate::jsonc::parse_options())
         .map_err(ConfigWriteError::JsonParse)?;
     let object = root.object_value_or_create().ok_or_else(|| {
-        ConfigWriteError::InvalidShape("fallow config root must be an object".into())
+        ConfigWriteError::InvalidShape("plow config root must be an object".into())
     })?;
     let array = object
         .array_value_or_create("ignoreExports")
         .ok_or_else(|| {
-            ConfigWriteError::InvalidShape("ignoreExports must be an array in fallow config".into())
+            ConfigWriteError::InvalidShape("ignoreExports must be an array in plow config".into())
         })?;
 
     let mut seen = FxHashSet::default();
@@ -225,7 +225,7 @@ fn append_toml_ignore_exports(
         }
         _ => {
             return Err(ConfigWriteError::InvalidShape(
-                "ignoreExports must be an array of tables or inline array in fallow config".into(),
+                "ignoreExports must be an array of tables or inline array in plow config".into(),
             ));
         }
     }
@@ -345,7 +345,7 @@ mod tests {
     #[test]
     fn appends_json_ignore_exports() {
         let output = add_ignore_exports_rule_to_string(
-            Path::new(".fallowrc.json"),
+            Path::new(".plowrc.json"),
             "{\n}\n",
             &[rule("src/index.ts")],
         )
@@ -359,7 +359,7 @@ mod tests {
     fn appends_jsonc_preserving_comments() {
         let input = "{\n  // keep this\n  \"rules\": {}\n}\n";
         let output = add_ignore_exports_rule_to_string(
-            Path::new(".fallowrc.jsonc"),
+            Path::new(".plowrc.jsonc"),
             input,
             &[rule("src/a.ts")],
         )
@@ -373,7 +373,7 @@ mod tests {
     fn merges_existing_json_ignore_exports_without_reordering_or_replacing() {
         let input = "{\n  \"ignoreExports\": [\n    { \"file\": \"src/a.ts\", \"exports\": [\"*\"] }\n  ],\n  \"rules\": {}\n}\n";
         let output = add_ignore_exports_rule_to_string(
-            Path::new(".fallowrc.json"),
+            Path::new(".plowrc.json"),
             input,
             &[rule("src/a.ts"), rule("src/b.ts")],
         )
@@ -386,7 +386,7 @@ mod tests {
     #[test]
     fn appends_toml_ignore_exports() {
         let output = add_ignore_exports_rule_to_string(
-            Path::new("fallow.toml"),
+            Path::new("plow.toml"),
             "production = true\n",
             &[rule("src/index.ts")],
         )
@@ -398,9 +398,9 @@ mod tests {
     }
 
     #[test]
-    fn appends_dot_fallow_toml_ignore_exports() {
+    fn appends_dot_plow_toml_ignore_exports() {
         let output = add_ignore_exports_rule_to_string(
-            Path::new(".fallow.toml"),
+            Path::new(".plow.toml"),
             "",
             &[rule("src/index.ts")],
         )
@@ -413,7 +413,7 @@ mod tests {
     fn merges_existing_toml_ignore_exports() {
         let input = "[[ignoreExports]]\nfile = \"src/a.ts\"\nexports = [\"*\"]\n";
         let output = add_ignore_exports_rule_to_string(
-            Path::new("fallow.toml"),
+            Path::new("plow.toml"),
             input,
             &[rule("src/a.ts"), rule("src/b.ts")],
         )
@@ -426,7 +426,7 @@ mod tests {
     fn preserves_crlf_line_endings() {
         let input = "{\r\n  \"rules\": {}\r\n}\r\n";
         let output = add_ignore_exports_rule_to_string(
-            Path::new(".fallowrc.json"),
+            Path::new(".plowrc.json"),
             input,
             &[rule("src/a.ts")],
         )
@@ -440,7 +440,7 @@ mod tests {
     fn preserves_toml_crlf_line_endings_without_double_carriage_returns() {
         let input = "production = true\r\n";
         let output =
-            add_ignore_exports_rule_to_string(Path::new("fallow.toml"), input, &[rule("src/a.ts")])
+            add_ignore_exports_rule_to_string(Path::new("plow.toml"), input, &[rule("src/a.ts")])
                 .unwrap();
         assert!(output.contains("\r\n"));
         assert!(!output.contains("\r\r"));
@@ -451,7 +451,7 @@ mod tests {
     fn preserves_utf8_bom_on_json_config() {
         let input = "\u{FEFF}{\n  \"rules\": {}\n}\n";
         let output = add_ignore_exports_rule_to_string(
-            Path::new(".fallowrc.json"),
+            Path::new(".plowrc.json"),
             input,
             &[rule("src/a.ts")],
         )
@@ -465,7 +465,7 @@ mod tests {
     fn preserves_utf8_bom_on_toml_config() {
         let input = "\u{FEFF}production = true\n";
         let output =
-            add_ignore_exports_rule_to_string(Path::new("fallow.toml"), input, &[rule("src/a.ts")])
+            add_ignore_exports_rule_to_string(Path::new("plow.toml"), input, &[rule("src/a.ts")])
                 .unwrap();
         assert!(output.starts_with('\u{FEFF}'), "BOM stripped from output");
         assert!(output.matches('\u{FEFF}').count() == 1, "BOM duplicated");
@@ -476,7 +476,7 @@ mod tests {
     fn no_bom_added_when_input_had_none() {
         let input = "{\n}\n";
         let output = add_ignore_exports_rule_to_string(
-            Path::new(".fallowrc.json"),
+            Path::new(".plowrc.json"),
             input,
             &[rule("src/a.ts")],
         )
@@ -487,7 +487,7 @@ mod tests {
     #[test]
     fn dedupes_existing_absolute_paths_against_relative_emissions() {
         let config_dir = Path::new("/project");
-        let config_path = config_dir.join(".fallowrc.json");
+        let config_path = config_dir.join(".plowrc.json");
         let input = "{\n  \"ignoreExports\": [\n    { \"file\": \"/project/src/a.ts\", \"exports\": [\"*\"] }\n  ]\n}\n";
         let output =
             add_ignore_exports_rule_to_string(&config_path, input, &[rule("src/a.ts")]).unwrap();
@@ -549,7 +549,7 @@ mod tests {
     #[test]
     fn dedupes_existing_absolute_paths_against_relative_emissions_toml() {
         let config_dir = Path::new("/project");
-        let config_path = config_dir.join("fallow.toml");
+        let config_path = config_dir.join("plow.toml");
         let input = "[[ignoreExports]]\nfile = \"/project/src/a.ts\"\nexports = [\"*\"]\n";
         let output =
             add_ignore_exports_rule_to_string(&config_path, input, &[rule("src/a.ts")]).unwrap();

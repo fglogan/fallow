@@ -2,19 +2,19 @@ import * as assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as path from "node:path";
 // VS Code injects this module into the extension host at runtime.
-// fallow-ignore-next-line unlisted-dependency
+// plow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
-import type { FallowCheckResult, FallowDupesResult, FallowFixResult } from "../../../src/types.js";
+import type { PlowCheckResult, PlowDupesResult, PlowFixResult } from "../../../src/types.js";
 
 interface ExtensionApi {
   readonly runAnalysis: (context: vscode.ExtensionContext) => Promise<{
-    check: FallowCheckResult | null;
-    dupes: FallowDupesResult | null;
+    check: PlowCheckResult | null;
+    dupes: PlowDupesResult | null;
   }>;
   readonly runFix: (
     context: vscode.ExtensionContext,
     dryRun: boolean
-  ) => Promise<FallowFixResult | null>;
+  ) => Promise<PlowFixResult | null>;
 }
 
 const defaultIssueTypes = {
@@ -47,7 +47,7 @@ const testContext = (): vscode.ExtensionContext =>
   }) as vscode.ExtensionContext;
 
 const cliLogPath = (): string =>
-  path.join(workspaceFolder().uri.fsPath, ".fallow-cli-log.jsonl");
+  path.join(workspaceFolder().uri.fsPath, ".plow-cli-log.jsonl");
 
 const readCliLog = (): Array<{ command: string; args: string[] }> => {
   const logPath = cliLogPath();
@@ -66,7 +66,7 @@ const readCliLog = (): Array<{ command: string; args: string[] }> => {
 const readFixCommands = (): Array<{ command: string; args: string[] }> =>
   readCliLog().filter((entry) => entry.command === "fix");
 
-describe("Fallow VS Code extension", () => {
+describe("Plow VS Code extension", () => {
   let api: ExtensionApi;
   const windowApi = vscode.window as any;
   const originalShowQuickPick = vscode.window.showQuickPick;
@@ -75,7 +75,7 @@ describe("Fallow VS Code extension", () => {
   const originalShowInformationMessage = vscode.window.showInformationMessage;
 
   before(async () => {
-    const extension = vscode.extensions.getExtension("fallow-rs.fallow-vscode");
+    const extension = vscode.extensions.getExtension("plow-rs.plow-vscode");
     assert.ok(extension, "extension should be discoverable");
     api = (await extension.activate()) as ExtensionApi;
   });
@@ -86,14 +86,14 @@ describe("Fallow VS Code extension", () => {
     }
 
     await vscode.workspace
-      .getConfiguration("fallow")
+      .getConfiguration("plow")
       .update(
         "issueTypes",
         defaultIssueTypes,
         vscode.ConfigurationTarget.Workspace
       );
     await vscode.workspace
-      .getConfiguration("fallow")
+      .getConfiguration("plow")
       .update("changedSince", "", vscode.ConfigurationTarget.Workspace);
 
     windowApi.showQuickPick = originalShowQuickPick;
@@ -105,15 +105,15 @@ describe("Fallow VS Code extension", () => {
   it("registers the expected commands", async () => {
     const commands = await vscode.commands.getCommands(true);
 
-    assert.ok(commands.includes("fallow.analyze"));
-    assert.ok(commands.includes("fallow.fix"));
-    assert.ok(commands.includes("fallow.fixDryRun"));
-    assert.ok(commands.includes("fallow.restart"));
+    assert.ok(commands.includes("plow.analyze"));
+    assert.ok(commands.includes("plow.fix"));
+    assert.ok(commands.includes("plow.fixDryRun"));
+    assert.ok(commands.includes("plow.restart"));
   });
 
   it("runs analysis against the configured CLI and filters disabled issue types", async () => {
     await vscode.workspace
-      .getConfiguration("fallow")
+      .getConfiguration("plow")
       .update(
         "issueTypes",
         {
@@ -149,7 +149,7 @@ describe("Fallow VS Code extension", () => {
 
   it("forwards changedSince to the CLI analysis path", async () => {
     await vscode.workspace
-      .getConfiguration("fallow")
+      .getConfiguration("plow")
       .update("changedSince", "origin/main", vscode.ConfigurationTarget.Workspace);
 
     const result = await api.runAnalysis(testContext());
@@ -219,7 +219,7 @@ describe("Fallow VS Code extension", () => {
 
     assert.ok(result, "apply result should be returned");
     assert.equal(result.fixes.length, 1);
-    assert.equal(infoMessage, "Fallow: applied 1 fix.");
+    assert.equal(infoMessage, "Plow: applied 1 fix.");
     assert.deepEqual(readFixCommands(), [
       {
         command: "fix",

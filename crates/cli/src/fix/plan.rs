@@ -1,4 +1,4 @@
-//! Batch-atomicity layer for `fallow fix`.
+//! Batch-atomicity layer for `plow fix`.
 //!
 //! Each per-issue-type fixer (`exports`, `enum_members`, `deps`, `catalog`)
 //! accumulates `(PathBuf, Vec<u8>)` entries on a shared [`FixPlan`] instead
@@ -36,7 +36,7 @@ pub(super) enum SkipReason {
     /// The file mixes CRLF and bare-LF line endings. The fix pipeline
     /// detects line endings by presence check then splits / joins on the
     /// detected style; on a mixed file that would silently rewrite to the
-    /// wrong offsets. The skip is NOT self-healing: re-running `fallow fix`
+    /// wrong offsets. The skip is NOT self-healing: re-running `plow fix`
     /// does not clear it. The user (or agent) must normalize the file (e.g.
     /// `dos2unix <path>`, `git config core.autocrlf input`, prettier with
     /// `endOfLine: lf`) before re-running. Issue #475.
@@ -44,15 +44,15 @@ pub(super) enum SkipReason {
     /// The file lives in a directory whose consumers are commonly invisible
     /// to static analysis (mocks, e2e suites, fixture / golden harnesses).
     /// Removing the `export` keyword here risks breaking a real consumer
-    /// fallow's graph cannot see (Vitest mock aliases, off-workspace e2e
+    /// plow's graph cannot see (Vitest mock aliases, off-workspace e2e
     /// trees, generated/fixture build steps). Unlike the two skips above,
     /// this is an INTENTIONAL conservative decision, not a recoverable
     /// failure: it does NOT contribute to a non-zero exit code, and
-    /// re-running `fallow fix` will keep skipping. The export is still
-    /// reported by `fallow check`; the user removes it by hand if they have
+    /// re-running `plow fix` will keep skipping. The export is still
+    /// reported by `plow check`; the user removes it by hand if they have
     /// confirmed it is truly unused. Issue #602.
     LowConfidenceOffGraph,
-    /// The file itself has at least one import fallow could not resolve, so
+    /// The file itself has at least one import plow could not resolve, so
     /// its local usage graph is incomplete and any "this export is unused"
     /// conclusion is lower confidence. Same intentional-skip semantics as
     /// [`Self::LowConfidenceOffGraph`] (exit code unaffected, not
@@ -85,19 +85,19 @@ impl SkipReason {
     pub(super) fn human_message(self, path: &Path) -> String {
         match self {
             Self::ContentChanged => format!(
-                "Skipping {}: file content changed since `fallow check` ran. Re-run `fallow fix` to refresh the analysis first.",
+                "Skipping {}: file content changed since `plow check` ran. Re-run `plow fix` to refresh the analysis first.",
                 path.display(),
             ),
             Self::MixedLineEndings => format!(
-                "Skipping {}: file has mixed CRLF/LF line endings. Normalize with `dos2unix` or set `git config core.autocrlf input`, then re-run `fallow fix`.",
+                "Skipping {}: file has mixed CRLF/LF line endings. Normalize with `dos2unix` or set `git config core.autocrlf input`, then re-run `plow fix`.",
                 path.display(),
             ),
             Self::LowConfidenceOffGraph => format!(
-                "Kept unused export(s) in {}: this file is in a test, mock, or fixture directory whose consumers (Vitest mock aliases, e2e suites, fixture harnesses) may import it in ways fallow cannot see. Still listed by `fallow check`; remove by hand if you have confirmed it is unused.",
+                "Kept unused export(s) in {}: this file is in a test, mock, or fixture directory whose consumers (Vitest mock aliases, e2e suites, fixture harnesses) may import it in ways plow cannot see. Still listed by `plow check`; remove by hand if you have confirmed it is unused.",
                 path.display(),
             ),
             Self::LowConfidenceUnresolvedImports => format!(
-                "Kept unused export(s) in {}: this file has imports fallow could not resolve, so its usage may be incomplete. Still listed by `fallow check`; resolve the imports or remove the export by hand.",
+                "Kept unused export(s) in {}: this file has imports plow could not resolve, so its usage may be incomplete. Still listed by `plow check`; resolve the imports or remove the export by hand.",
                 path.display(),
             ),
         }
@@ -136,7 +136,7 @@ impl CommitOutcome {
     }
 }
 
-/// Accumulator for batched writes during a `fallow fix` run.
+/// Accumulator for batched writes during a `plow fix` run.
 pub(super) struct FixPlan {
     entries: Vec<PlannedWrite>,
     skipped: Vec<SkippedFile>,
@@ -195,7 +195,7 @@ impl FixPlan {
     /// document "one entry per skipped file" semantics; this dedupe
     /// preserves that contract regardless of how many fixer invocations
     /// produce the same skip. Caught 2026-05-21 by codex parallel
-    /// /fallow-review on issue #475.
+    /// /plow-review on issue #475.
     pub(super) fn skip(&mut self, path: PathBuf, reason: SkipReason) {
         if self
             .skipped
@@ -233,7 +233,7 @@ impl FixPlan {
         // know every stage succeeded; on staging failure, all handles drop
         // here and the temp files are removed before any rename runs. We
         // also carry the RESOLVED (canonicalized) path so the final
-        // rename writes through symlinks, matching `fallow_config::atomic_write`'s
+        // rename writes through symlinks, matching `plow_config::atomic_write`'s
         // contract; persisting to the original path would replace the
         // symlink itself with a regular file and leave the real target
         // untouched.
@@ -278,7 +278,7 @@ impl FixPlan {
 /// caller asked for (`requested`) and the symlink-resolved path the
 /// rename will actually write through (`resolved`). Tracking both is
 /// required so the rename writes through symlinks (matching
-/// `fallow_config::atomic_write`) while user-facing reporting still
+/// `plow_config::atomic_write`) while user-facing reporting still
 /// references the path the user knows.
 struct StagedEntry {
     handle: NamedTempFile,
@@ -308,7 +308,7 @@ fn stage_one(target: &Path, content: &[u8]) -> std::io::Result<StagedEntry> {
     // the temp with 0600 by default; persisting directly would downgrade a
     // target previously at 0644 (or any other mode) to owner-only, breaking
     // shared workspaces and CI runners that rely on the existing read bit.
-    fallow_config::preserve_target_mode(handle.path(), &resolved);
+    plow_config::preserve_target_mode(handle.path(), &resolved);
     Ok(StagedEntry {
         handle,
         requested: target.to_path_buf(),
@@ -693,7 +693,7 @@ mod tests {
         // config.rs (which is intentionally NOT batched) still works.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.json");
-        fallow_config::atomic_write(&path, b"{}").unwrap();
+        plow_config::atomic_write(&path, b"{}").unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "{}");
     }
 
@@ -701,7 +701,7 @@ mod tests {
 
     #[test]
     fn skip_deduplicates_repeat_entries_for_same_path_and_reason() {
-        // Codex parallel /fallow-review BLOCK on issue #475: every
+        // Codex parallel /plow-review BLOCK on issue #475: every
         // per-issue-type fixer (`apply_export_fixes`, `apply_enum_member_fixes`,
         // `apply_catalog_entry_fixes`) calls `read_source_with_hash_check`
         // independently for files that carry findings of its issue type. If
@@ -753,7 +753,7 @@ mod tests {
 
     #[test]
     fn read_source_with_hash_check_dedupes_mixed_eol_across_two_fixer_calls() {
-        // Codex parallel /fallow-review reproduction: a single mixed-EOL
+        // Codex parallel /plow-review reproduction: a single mixed-EOL
         // file that carries findings for multiple per-issue-type fixers
         // (e.g. an unused export AND an unused enum member) gets two
         // calls into `read_source_with_hash_check`, one per fixer. Each

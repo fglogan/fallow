@@ -1,11 +1,11 @@
 use rustc_hash::FxHashMap;
 
-use fallow_config::ResolvedConfig;
+use plow_config::ResolvedConfig;
 
 use crate::discover::FileId;
 use crate::graph::ModuleGraph;
 use crate::suppress::{IssueKind, SuppressionContext};
-use fallow_types::results::BoundaryViolation;
+use plow_types::results::BoundaryViolation;
 
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 
@@ -16,7 +16,7 @@ use super::{LineOffsetsMap, byte_offset_to_line_col};
 /// is not allowed to import from, a `BoundaryViolation` is emitted.
 #[deprecated(
     since = "2.76.0",
-    note = "fallow_core is internal; use fallow_cli::programmatic::detect_boundary_violations instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/fallow-core-migration.md and ADR-008."
+    note = "plow_core is internal; use plow_cli::programmatic::detect_boundary_violations instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/plow-core-migration.md and ADR-008."
 )]
 pub fn find_boundary_violations(
     graph: &ModuleGraph,
@@ -152,15 +152,15 @@ mod tests {
     use crate::graph::ModuleGraph;
     use crate::resolve::ResolvedModule;
     use crate::suppress::Suppression;
-    use fallow_config::{
-        BoundaryConfig, BoundaryRule, BoundaryZone, FallowConfig, OutputFormat, ResolvedConfig,
+    use plow_config::{
+        BoundaryConfig, BoundaryRule, BoundaryZone, PlowConfig, OutputFormat, ResolvedConfig,
         RulesConfig, Severity,
     };
     use rustc_hash::FxHashSet;
     use std::path::PathBuf;
 
     fn make_config(root: PathBuf, boundaries: BoundaryConfig) -> ResolvedConfig {
-        FallowConfig {
+        PlowConfig {
             rules: RulesConfig {
                 boundary_violation: Severity::Error,
                 ..RulesConfig::default()
@@ -222,9 +222,9 @@ mod tests {
                             target: crate::resolve::ResolveResult::InternalModule(FileId(
                                 to as u32,
                             )),
-                            info: fallow_types::extract::ImportInfo {
+                            info: plow_types::extract::ImportInfo {
                                 source: format!("./{}", file_names[to]),
-                                imported_name: fallow_types::extract::ImportedName::Default,
+                                imported_name: plow_types::extract::ImportedName::Default,
                                 local_name: "x".to_string(),
                                 is_type_only,
                                 from_style: false,

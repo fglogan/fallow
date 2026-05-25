@@ -1,9 +1,9 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use fallow_config::{RulesConfig, Severity};
-use fallow_core::duplicates::DuplicationReport;
-use fallow_core::results::AnalysisResults;
+use plow_config::{RulesConfig, Severity};
+use plow_core::duplicates::DuplicationReport;
+use plow_core::results::AnalysisResults;
 
 use super::ci::{fingerprint, severity};
 use super::grouping::{self, OwnershipResolver};
@@ -14,7 +14,7 @@ use crate::output_envelope::{
     CodeClimateSeverity,
 };
 
-/// Map fallow severity to CodeClimate severity.
+/// Map plow severity to CodeClimate severity.
 fn severity_to_codeclimate(s: Severity) -> CodeClimateSeverity {
     severity::codeclimate_severity(s)
 }
@@ -72,7 +72,7 @@ fn push_dep_cc_issues<'a, I>(
     location_label: &str,
     severity: Severity,
 ) where
-    I: IntoIterator<Item = &'a fallow_core::results::UnusedDependency>,
+    I: IntoIterator<Item = &'a plow_core::results::UnusedDependency>,
 {
     // Map severity lazily: in production mode, rules can resolve to
     // `Severity::Off` and arrive here paired with empty (or filtered-down)
@@ -111,7 +111,7 @@ fn push_dep_cc_issues<'a, I>(
 
 fn push_unused_file_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    files: &[fallow_types::output_dead_code::UnusedFileFinding],
+    files: &[plow_types::output_dead_code::UnusedFileFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -121,9 +121,9 @@ fn push_unused_file_issues(
     let level = severity_to_codeclimate(severity);
     for entry in files {
         let path = cc_path(&entry.file.path, root);
-        let fp = fingerprint_hash(&["fallow/unused-file", &path]);
+        let fp = fingerprint_hash(&["plow/unused-file", &path]);
         issues.push(cc_issue(
-            "fallow/unused-file",
+            "plow/unused-file",
             "File is not reachable from any entry point",
             level,
             "Bug Risk",
@@ -148,7 +148,7 @@ fn push_unused_export_issues<'a, I>(
     re_export_label: &str,
     severity: Severity,
 ) where
-    I: IntoIterator<Item = &'a fallow_core::results::UnusedExport>,
+    I: IntoIterator<Item = &'a plow_core::results::UnusedExport>,
 {
     // Map severity lazily; see `push_dep_cc_issues` for rationale.
     for export in exports {
@@ -178,7 +178,7 @@ fn push_unused_export_issues<'a, I>(
 
 fn push_private_type_leak_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    leaks: &[fallow_types::output_dead_code::PrivateTypeLeakFinding],
+    leaks: &[plow_types::output_dead_code::PrivateTypeLeakFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -191,14 +191,14 @@ fn push_private_type_leak_issues(
         let path = cc_path(&leak.path, root);
         let line_str = leak.line.to_string();
         let fp = fingerprint_hash(&[
-            "fallow/private-type-leak",
+            "plow/private-type-leak",
             &path,
             &line_str,
             &leak.export_name,
             &leak.type_name,
         ]);
         issues.push(cc_issue(
-            "fallow/private-type-leak",
+            "plow/private-type-leak",
             &format!(
                 "Export '{}' references private type '{}'",
                 leak.export_name, leak.type_name
@@ -214,7 +214,7 @@ fn push_private_type_leak_issues(
 
 fn push_type_only_dep_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    deps: &[fallow_core::results::TypeOnlyDependencyFinding],
+    deps: &[plow_core::results::TypeOnlyDependencyFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -226,9 +226,9 @@ fn push_type_only_dep_issues(
         let dep = &entry.dep;
         let path = cc_path(&dep.path, root);
         let line = if dep.line > 0 { Some(dep.line) } else { None };
-        let fp = fingerprint_hash(&["fallow/type-only-dependency", &dep.package_name]);
+        let fp = fingerprint_hash(&["plow/type-only-dependency", &dep.package_name]);
         issues.push(cc_issue(
-            "fallow/type-only-dependency",
+            "plow/type-only-dependency",
             &format!(
                 "Package '{}' is only imported via type-only imports (consider moving to devDependencies)",
                 dep.package_name
@@ -244,7 +244,7 @@ fn push_type_only_dep_issues(
 
 fn push_test_only_dep_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    deps: &[fallow_core::results::TestOnlyDependencyFinding],
+    deps: &[plow_core::results::TestOnlyDependencyFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -256,9 +256,9 @@ fn push_test_only_dep_issues(
         let dep = &entry.dep;
         let path = cc_path(&dep.path, root);
         let line = if dep.line > 0 { Some(dep.line) } else { None };
-        let fp = fingerprint_hash(&["fallow/test-only-dependency", &dep.package_name]);
+        let fp = fingerprint_hash(&["plow/test-only-dependency", &dep.package_name]);
         issues.push(cc_issue(
-            "fallow/test-only-dependency",
+            "plow/test-only-dependency",
             &format!(
                 "Package '{}' is only imported by test files (consider moving to devDependencies)",
                 dep.package_name
@@ -284,7 +284,7 @@ fn push_unused_member_issues<'a, I>(
     entity_label: &str,
     severity: Severity,
 ) where
-    I: IntoIterator<Item = &'a fallow_core::results::UnusedMember>,
+    I: IntoIterator<Item = &'a plow_core::results::UnusedMember>,
 {
     // Map severity lazily; see `push_dep_cc_issues` for rationale.
     for member in members {
@@ -315,7 +315,7 @@ fn push_unused_member_issues<'a, I>(
 
 fn push_unresolved_import_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    imports: &[fallow_types::output_dead_code::UnresolvedImportFinding],
+    imports: &[plow_types::output_dead_code::UnresolvedImportFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -328,13 +328,13 @@ fn push_unresolved_import_issues(
         let path = cc_path(&import.path, root);
         let line_str = import.line.to_string();
         let fp = fingerprint_hash(&[
-            "fallow/unresolved-import",
+            "plow/unresolved-import",
             &path,
             &line_str,
             &import.specifier,
         ]);
         issues.push(cc_issue(
-            "fallow/unresolved-import",
+            "plow/unresolved-import",
             &format!("Import '{}' could not be resolved", import.specifier),
             level,
             "Bug Risk",
@@ -347,7 +347,7 @@ fn push_unresolved_import_issues(
 
 fn push_unlisted_dep_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    deps: &[fallow_core::results::UnlistedDependencyFinding],
+    deps: &[plow_core::results::UnlistedDependencyFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -361,13 +361,13 @@ fn push_unlisted_dep_issues(
             let path = cc_path(&site.path, root);
             let line_str = site.line.to_string();
             let fp = fingerprint_hash(&[
-                "fallow/unlisted-dependency",
+                "plow/unlisted-dependency",
                 &path,
                 &line_str,
                 &dep.package_name,
             ]);
             issues.push(cc_issue(
-                "fallow/unlisted-dependency",
+                "plow/unlisted-dependency",
                 &format!(
                     "Package '{}' is imported but not listed in package.json",
                     dep.package_name
@@ -384,7 +384,7 @@ fn push_unlisted_dep_issues(
 
 fn push_duplicate_export_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    dups: &[fallow_core::results::DuplicateExportFinding],
+    dups: &[plow_core::results::DuplicateExportFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -398,13 +398,13 @@ fn push_duplicate_export_issues(
             let path = cc_path(&loc.path, root);
             let line_str = loc.line.to_string();
             let fp = fingerprint_hash(&[
-                "fallow/duplicate-export",
+                "plow/duplicate-export",
                 &path,
                 &line_str,
                 &dup.export_name,
             ]);
             issues.push(cc_issue(
-                "fallow/duplicate-export",
+                "plow/duplicate-export",
                 &format!("Export '{}' appears in multiple modules", dup.export_name),
                 level,
                 "Bug Risk",
@@ -418,7 +418,7 @@ fn push_duplicate_export_issues(
 
 fn push_circular_dep_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    cycles: &[fallow_types::output_dead_code::CircularDependencyFinding],
+    cycles: &[plow_types::output_dead_code::CircularDependencyFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -434,14 +434,14 @@ fn push_circular_dep_issues(
         let path = cc_path(first, root);
         let chain: Vec<String> = cycle.files.iter().map(|f| cc_path(f, root)).collect();
         let chain_str = chain.join(":");
-        let fp = fingerprint_hash(&["fallow/circular-dependency", &chain_str]);
+        let fp = fingerprint_hash(&["plow/circular-dependency", &chain_str]);
         let line = if cycle.line > 0 {
             Some(cycle.line)
         } else {
             None
         };
         issues.push(cc_issue(
-            "fallow/circular-dependency",
+            "plow/circular-dependency",
             &format!(
                 "Circular dependency{}: {}",
                 if cycle.is_cross_package {
@@ -462,7 +462,7 @@ fn push_circular_dep_issues(
 
 fn push_re_export_cycle_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    cycles: &[fallow_types::output_dead_code::ReExportCycleFinding],
+    cycles: &[plow_types::output_dead_code::ReExportCycleFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -479,19 +479,19 @@ fn push_re_export_cycle_issues(
         let chain: Vec<String> = cycle.files.iter().map(|f| cc_path(f, root)).collect();
         let chain_str = chain.join(":");
         let kind_token = match cycle.kind {
-            fallow_core::results::ReExportCycleKind::SelfLoop => "self-loop",
-            fallow_core::results::ReExportCycleKind::MultiNode => "multi-node",
+            plow_core::results::ReExportCycleKind::SelfLoop => "self-loop",
+            plow_core::results::ReExportCycleKind::MultiNode => "multi-node",
         };
         let kind_tag = match cycle.kind {
-            fallow_core::results::ReExportCycleKind::SelfLoop => " (self-loop)",
-            fallow_core::results::ReExportCycleKind::MultiNode => "",
+            plow_core::results::ReExportCycleKind::SelfLoop => " (self-loop)",
+            plow_core::results::ReExportCycleKind::MultiNode => "",
         };
         // Include `kind_token` in the fingerprint so self-loops cannot
         // keyspace-collide with future single-file multi-node shapes (the
         // same rationale as the baseline `re_export_cycle_key`).
-        let fp = fingerprint_hash(&["fallow/re-export-cycle", kind_token, &chain_str]);
+        let fp = fingerprint_hash(&["plow/re-export-cycle", kind_token, &chain_str]);
         issues.push(cc_issue(
-            "fallow/re-export-cycle",
+            "plow/re-export-cycle",
             &format!("Re-export cycle{}: {}", kind_tag, chain.join(" <-> ")),
             level,
             "Bug Risk",
@@ -504,7 +504,7 @@ fn push_re_export_cycle_issues(
 
 fn push_boundary_violation_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    violations: &[fallow_types::output_dead_code::BoundaryViolationFinding],
+    violations: &[plow_types::output_dead_code::BoundaryViolationFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -516,10 +516,10 @@ fn push_boundary_violation_issues(
         let v = &entry.violation;
         let path = cc_path(&v.from_path, root);
         let to = cc_path(&v.to_path, root);
-        let fp = fingerprint_hash(&["fallow/boundary-violation", &path, &to]);
+        let fp = fingerprint_hash(&["plow/boundary-violation", &path, &to]);
         let line = if v.line > 0 { Some(v.line) } else { None };
         issues.push(cc_issue(
-            "fallow/boundary-violation",
+            "plow/boundary-violation",
             &format!(
                 "Boundary violation: {} -> {} ({} -> {})",
                 path, to, v.from_zone, v.to_zone
@@ -535,7 +535,7 @@ fn push_boundary_violation_issues(
 
 fn push_stale_suppression_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    suppressions: &[fallow_core::results::StaleSuppression],
+    suppressions: &[plow_core::results::StaleSuppression],
     root: &Path,
     severity: Severity,
 ) {
@@ -546,9 +546,9 @@ fn push_stale_suppression_issues(
     for s in suppressions {
         let path = cc_path(&s.path, root);
         let line_str = s.line.to_string();
-        let fp = fingerprint_hash(&["fallow/stale-suppression", &path, &line_str]);
+        let fp = fingerprint_hash(&["plow/stale-suppression", &path, &line_str]);
         issues.push(cc_issue(
-            "fallow/stale-suppression",
+            "plow/stale-suppression",
             &s.display_message(),
             level,
             "Bug Risk",
@@ -561,7 +561,7 @@ fn push_stale_suppression_issues(
 
 fn push_unused_catalog_entry_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    entries: &[fallow_core::results::UnusedCatalogEntryFinding],
+    entries: &[plow_core::results::UnusedCatalogEntryFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -574,7 +574,7 @@ fn push_unused_catalog_entry_issues(
         let path = cc_path(&entry.path, root);
         let line_str = entry.line.to_string();
         let fp = fingerprint_hash(&[
-            "fallow/unused-catalog-entry",
+            "plow/unused-catalog-entry",
             &path,
             &line_str,
             &entry.catalog_name,
@@ -592,7 +592,7 @@ fn push_unused_catalog_entry_issues(
             )
         };
         issues.push(cc_issue(
-            "fallow/unused-catalog-entry",
+            "plow/unused-catalog-entry",
             &description,
             level,
             "Bug Risk",
@@ -605,7 +605,7 @@ fn push_unused_catalog_entry_issues(
 
 fn push_unresolved_catalog_reference_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    findings: &[fallow_core::results::UnresolvedCatalogReferenceFinding],
+    findings: &[plow_core::results::UnresolvedCatalogReferenceFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -618,7 +618,7 @@ fn push_unresolved_catalog_reference_issues(
         let path = cc_path(&finding.path, root);
         let line_str = finding.line.to_string();
         let fp = fingerprint_hash(&[
-            "fallow/unresolved-catalog-reference",
+            "plow/unresolved-catalog-reference",
             &path,
             &line_str,
             &finding.catalog_name,
@@ -648,7 +648,7 @@ fn push_unresolved_catalog_reference_issues(
             );
         }
         issues.push(cc_issue(
-            "fallow/unresolved-catalog-reference",
+            "plow/unresolved-catalog-reference",
             &description,
             level,
             "Bug Risk",
@@ -661,7 +661,7 @@ fn push_unresolved_catalog_reference_issues(
 
 fn push_empty_catalog_group_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    groups: &[fallow_core::results::EmptyCatalogGroupFinding],
+    groups: &[plow_core::results::EmptyCatalogGroupFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -674,13 +674,13 @@ fn push_empty_catalog_group_issues(
         let path = cc_path(&group.path, root);
         let line_str = group.line.to_string();
         let fp = fingerprint_hash(&[
-            "fallow/empty-catalog-group",
+            "plow/empty-catalog-group",
             &path,
             &line_str,
             &group.catalog_name,
         ]);
         issues.push(cc_issue(
-            "fallow/empty-catalog-group",
+            "plow/empty-catalog-group",
             &format!("Catalog group '{}' has no entries", group.catalog_name),
             level,
             "Bug Risk",
@@ -693,7 +693,7 @@ fn push_empty_catalog_group_issues(
 
 fn push_unused_dependency_override_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    findings: &[fallow_core::results::UnusedDependencyOverrideFinding],
+    findings: &[plow_core::results::UnusedDependencyOverrideFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -706,7 +706,7 @@ fn push_unused_dependency_override_issues(
         let path = cc_path(&finding.path, root);
         let line_str = finding.line.to_string();
         let fp = fingerprint_hash(&[
-            "fallow/unused-dependency-override",
+            "plow/unused-dependency-override",
             &path,
             &line_str,
             finding.source.as_label(),
@@ -721,7 +721,7 @@ fn push_unused_dependency_override_issues(
             let _ = write!(description, " ({hint})");
         }
         issues.push(cc_issue(
-            "fallow/unused-dependency-override",
+            "plow/unused-dependency-override",
             &description,
             level,
             "Bug Risk",
@@ -734,7 +734,7 @@ fn push_unused_dependency_override_issues(
 
 fn push_misconfigured_dependency_override_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    findings: &[fallow_core::results::MisconfiguredDependencyOverrideFinding],
+    findings: &[plow_core::results::MisconfiguredDependencyOverrideFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -747,7 +747,7 @@ fn push_misconfigured_dependency_override_issues(
         let path = cc_path(&finding.path, root);
         let line_str = finding.line.to_string();
         let fp = fingerprint_hash(&[
-            "fallow/misconfigured-dependency-override",
+            "plow/misconfigured-dependency-override",
             &path,
             &line_str,
             finding.source.as_label(),
@@ -760,7 +760,7 @@ fn push_misconfigured_dependency_override_issues(
             finding.reason.describe(),
         );
         issues.push(cc_issue(
-            "fallow/misconfigured-dependency-override",
+            "plow/misconfigured-dependency-override",
             &description,
             level,
             "Bug Risk",
@@ -807,7 +807,7 @@ pub fn build_codeclimate(
         &mut issues,
         results.unused_exports.iter().map(|e| &e.export),
         root,
-        "fallow/unused-export",
+        "plow/unused-export",
         "Export",
         "Re-export",
         rules.unused_exports,
@@ -816,7 +816,7 @@ pub fn build_codeclimate(
         &mut issues,
         results.unused_types.iter().map(|e| &e.export),
         root,
-        "fallow/unused-type",
+        "plow/unused-type",
         "Type export",
         "Type re-export",
         rules.unused_types,
@@ -831,7 +831,7 @@ pub fn build_codeclimate(
         &mut issues,
         results.unused_dependencies.iter().map(|f| &f.dep),
         root,
-        "fallow/unused-dependency",
+        "plow/unused-dependency",
         "dependencies",
         rules.unused_dependencies,
     );
@@ -839,7 +839,7 @@ pub fn build_codeclimate(
         &mut issues,
         results.unused_dev_dependencies.iter().map(|f| &f.dep),
         root,
-        "fallow/unused-dev-dependency",
+        "plow/unused-dev-dependency",
         "devDependencies",
         rules.unused_dev_dependencies,
     );
@@ -847,7 +847,7 @@ pub fn build_codeclimate(
         &mut issues,
         results.unused_optional_dependencies.iter().map(|f| &f.dep),
         root,
-        "fallow/unused-optional-dependency",
+        "plow/unused-optional-dependency",
         "optionalDependencies",
         rules.unused_optional_dependencies,
     );
@@ -867,7 +867,7 @@ pub fn build_codeclimate(
         &mut issues,
         results.unused_enum_members.iter().map(|m| &m.member),
         root,
-        "fallow/unused-enum-member",
+        "plow/unused-enum-member",
         "Enum",
         rules.unused_enum_members,
     );
@@ -875,7 +875,7 @@ pub fn build_codeclimate(
         &mut issues,
         results.unused_class_members.iter().map(|m| &m.member),
         root,
-        "fallow/unused-class-member",
+        "plow/unused-class-member",
         "Class",
         rules.unused_class_members,
     );
@@ -1041,13 +1041,13 @@ pub fn build_health_codeclimate(report: &HealthReport, root: &Path) -> Vec<CodeC
             }
         };
         let check_name = match finding.exceeded {
-            ExceededThreshold::Both => "fallow/high-complexity",
-            ExceededThreshold::Cyclomatic => "fallow/high-cyclomatic-complexity",
-            ExceededThreshold::Cognitive => "fallow/high-cognitive-complexity",
+            ExceededThreshold::Both => "plow/high-complexity",
+            ExceededThreshold::Cyclomatic => "plow/high-cyclomatic-complexity",
+            ExceededThreshold::Cognitive => "plow/high-cognitive-complexity",
             ExceededThreshold::Crap
             | ExceededThreshold::CyclomaticCrap
             | ExceededThreshold::CognitiveCrap
-            | ExceededThreshold::All => "fallow/high-crap-score",
+            | ExceededThreshold::All => "plow/high-crap-score",
         };
         // Map finding severity to CodeClimate severity levels
         let severity = match finding.severity {
@@ -1080,19 +1080,19 @@ pub fn build_health_codeclimate(report: &HealthReport, root: &Path) -> Vec<CodeC
             let path = cc_path(&finding.path, root);
             let check_name = match finding.verdict {
                 crate::health_types::RuntimeCoverageVerdict::SafeToDelete => {
-                    "fallow/runtime-safe-to-delete"
+                    "plow/runtime-safe-to-delete"
                 }
                 crate::health_types::RuntimeCoverageVerdict::ReviewRequired => {
-                    "fallow/runtime-review-required"
+                    "plow/runtime-review-required"
                 }
                 crate::health_types::RuntimeCoverageVerdict::LowTraffic => {
-                    "fallow/runtime-low-traffic"
+                    "plow/runtime-low-traffic"
                 }
                 crate::health_types::RuntimeCoverageVerdict::CoverageUnavailable => {
-                    "fallow/runtime-coverage-unavailable"
+                    "plow/runtime-coverage-unavailable"
                 }
                 crate::health_types::RuntimeCoverageVerdict::Active
-                | crate::health_types::RuntimeCoverageVerdict::Unknown => "fallow/runtime-coverage",
+                | crate::health_types::RuntimeCoverageVerdict::Unknown => "plow/runtime-coverage",
             };
             let invocations_hint = finding.invocations.map_or_else(
                 || "untracked".to_owned(),
@@ -1152,9 +1152,9 @@ pub fn build_health_codeclimate(report: &HealthReport, root: &Path) -> Vec<CodeC
                     "s"
                 },
             );
-            let fp = fingerprint_hash(&["fallow/untested-file", &path]);
+            let fp = fingerprint_hash(&["plow/untested-file", &path]);
             issues.push(cc_issue(
-                "fallow/untested-file",
+                "plow/untested-file",
                 &description,
                 CodeClimateSeverity::Minor,
                 "Coverage",
@@ -1172,13 +1172,13 @@ pub fn build_health_codeclimate(report: &HealthReport, root: &Path) -> Vec<CodeC
             );
             let line_str = item.export.line.to_string();
             let fp = fingerprint_hash(&[
-                "fallow/untested-export",
+                "plow/untested-export",
                 &path,
                 &line_str,
                 &item.export.export_name,
             ]);
             issues.push(cc_issue(
-                "fallow/untested-export",
+                "plow/untested-export",
                 &description,
                 CodeClimateSeverity::Minor,
                 "Coverage",
@@ -1259,7 +1259,7 @@ pub fn build_duplication_codeclimate(
             let path = cc_path(&instance.file, root);
             let start_str = instance.start_line.to_string();
             let fp = fingerprint_hash(&[
-                "fallow/code-duplication",
+                "plow/code-duplication",
                 &path,
                 &start_str,
                 &token_str,
@@ -1267,7 +1267,7 @@ pub fn build_duplication_codeclimate(
                 &fragment_prefix,
             ]);
             issues.push(cc_issue(
-                "fallow/code-duplication",
+                "plow/code-duplication",
                 &format!(
                     "Code clone group {} ({} lines, {} instances)",
                     i + 1,
@@ -1346,8 +1346,8 @@ pub(super) fn print_grouped_duplication_codeclimate(
 mod tests {
     use super::*;
     use crate::report::test_helpers::sample_results;
-    use fallow_config::RulesConfig;
-    use fallow_core::results::*;
+    use plow_config::RulesConfig;
+    use plow_core::results::*;
     use std::path::PathBuf;
 
     /// Compute graduated severity for health findings based on threshold ratio.
@@ -1402,7 +1402,7 @@ mod tests {
         let issue = &output.as_array().unwrap()[0];
 
         assert_eq!(issue["type"], "issue");
-        assert_eq!(issue["check_name"], "fallow/unused-file");
+        assert_eq!(issue["check_name"], "plow/unused-file");
         assert!(issue["description"].is_string());
         assert!(issue["categories"].is_array());
         assert!(issue["severity"].is_string());
@@ -1536,8 +1536,8 @@ mod tests {
         let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
         let arr = output.as_array().unwrap();
         assert_eq!(arr.len(), 2);
-        assert_eq!(arr[0]["check_name"], "fallow/unlisted-dependency");
-        assert_eq!(arr[1]["check_name"], "fallow/unlisted-dependency");
+        assert_eq!(arr[0]["check_name"], "plow/unlisted-dependency");
+        assert_eq!(arr[1]["check_name"], "plow/unlisted-dependency");
     }
 
     #[test]
@@ -1652,7 +1652,7 @@ mod tests {
             ));
         let rules = RulesConfig::default();
         let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
-        assert_eq!(output[0]["check_name"], "fallow/type-only-dependency");
+        assert_eq!(output[0]["check_name"], "plow/type-only-dependency");
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("zod"));
         assert!(desc.contains("type-only"));
@@ -1737,7 +1737,7 @@ mod tests {
     /// rule short-circuit clears the vec, but the generic-iterator helpers
     /// in `codeclimate.rs` previously called `severity_to_codeclimate`
     /// before checking emptiness and panicked at `Severity::Off`).
-    /// `fallow check --format codeclimate --production` on any project
+    /// `plow check --format codeclimate --production` on any project
     /// with a `--production`-suppressed dep / export / member rule used to
     /// exit 101 with `entered unreachable code` at `ci/severity.rs:28`.
     /// This test exercises all three previously-vulnerable helpers
@@ -1837,10 +1837,10 @@ mod tests {
         let output = issues_to_value(&build_health_codeclimate(&report, &root));
         let issues = output.as_array().unwrap();
         assert_eq!(issues.len(), 2);
-        assert_eq!(issues[0]["check_name"], "fallow/untested-file");
+        assert_eq!(issues[0]["check_name"], "plow/untested-file");
         assert_eq!(issues[0]["categories"][0], "Coverage");
         assert_eq!(issues[0]["location"]["path"], "src/app.ts");
-        assert_eq!(issues[1]["check_name"], "fallow/untested-export");
+        assert_eq!(issues[1]["check_name"], "plow/untested-export");
         assert_eq!(issues[1]["location"]["lines"]["begin"], 12);
         assert!(
             issues[1]["description"]
@@ -1887,7 +1887,7 @@ mod tests {
         };
         let json = issues_to_value(&build_health_codeclimate(&report, &root));
         let issues = json.as_array().unwrap();
-        assert_eq!(issues[0]["check_name"], "fallow/high-crap-score");
+        assert_eq!(issues[0]["check_name"], "plow/high-crap-score");
         assert_eq!(issues[0]["severity"], "major");
         let description = issues[0]["description"].as_str().unwrap();
         assert!(description.contains("CRAP score"), "desc: {description}");

@@ -1,8 +1,8 @@
 use super::common::fixture_path;
-use fallow_config::{FallowConfig, OutputFormat, RulesConfig};
+use plow_config::{PlowConfig, OutputFormat, RulesConfig};
 
-fn create_production_config(root: std::path::PathBuf) -> fallow_config::ResolvedConfig {
-    FallowConfig {
+fn create_production_config(root: std::path::PathBuf) -> plow_config::ResolvedConfig {
+    PlowConfig {
         schema: None,
         extends: vec![],
         entry: vec![],
@@ -14,28 +14,28 @@ fn create_production_config(root: std::path::PathBuf) -> fallow_config::Resolved
         ignore_exports: vec![],
         ignore_catalog_references: vec![],
         ignore_dependency_overrides: vec![],
-        ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+        ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
-        duplicates: fallow_config::DuplicatesConfig::default(),
-        health: fallow_config::HealthConfig::default(),
+        duplicates: plow_config::DuplicatesConfig::default(),
+        health: plow_config::HealthConfig::default(),
         rules: RulesConfig::default(),
-        boundaries: fallow_config::BoundaryConfig::default(),
+        boundaries: plow_config::BoundaryConfig::default(),
         production: true.into(),
         plugins: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
-        audit: fallow_config::AuditConfig::default(),
+        audit: plow_config::AuditConfig::default(),
         codeowners: None,
         public_packages: vec![],
-        flags: fallow_config::FlagsConfig::default(),
-        fix: fallow_config::FixConfig::default(),
-        resolve: fallow_config::ResolveConfig::default(),
+        flags: plow_config::FlagsConfig::default(),
+        fix: plow_config::FixConfig::default(),
+        resolve: plow_config::ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
         auto_imports: false,
-        cache: fallow_config::CacheConfig::default(),
+        cache: plow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None)
 }
@@ -44,7 +44,7 @@ fn create_production_config(root: std::path::PathBuf) -> fallow_config::Resolved
 fn type_only_import_detected_in_production_mode() {
     let root = fixture_path("type-only-deps");
     let config = create_production_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let type_only_names: Vec<&str> = results
         .type_only_dependencies
@@ -69,7 +69,7 @@ fn type_only_import_detected_in_production_mode() {
 fn type_only_deps_not_reported_outside_production_mode() {
     let root = fixture_path("type-only-deps");
     let config = super::common::create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     // type_only_dependencies is only populated in production mode
     assert!(

@@ -12,7 +12,7 @@ use std::path::Path;
 
 use oxc_span::Span;
 
-use fallow_types::extract::{ImportInfo, ImportedName, RequireCallInfo};
+use plow_types::extract::{ImportInfo, ImportedName, RequireCallInfo};
 
 use super::ResolvedImport;
 use super::specifier::resolve_specifier;

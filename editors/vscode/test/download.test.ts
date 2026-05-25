@@ -74,13 +74,13 @@ const fakeContext = {
 } as any;
 
 const binDir = path.join("/storage", "bin");
-const lspPath = path.join(binDir, "fallow-lsp");
-const cliPath = path.join(binDir, "fallow");
+const lspPath = path.join(binDir, "plow-lsp");
+const cliPath = path.join(binDir, "plow");
 const lspSigPath = `${lspPath}.sig`;
 const cliSigPath = `${cliPath}.sig`;
 const lspDigestPath = `${lspPath}.sha256`;
 const cliDigestPath = `${cliPath}.sha256`;
-const versionPath = path.join(binDir, ".fallow-version");
+const versionPath = path.join(binDir, ".plow-version");
 const binaryBytes = Buffer.from("signed-binary");
 const signatureBytes = Buffer.alloc(64, 1);
 const digestHex = Buffer.from("signed-binary", "utf8")
@@ -121,19 +121,19 @@ describe("getBinaryVersion", () => {
     mockHashInput = "";
   });
 
-  it("parses version from fallow-lsp output", () => {
-    mockExecOutput = "fallow-lsp 2.25.0\n";
-    expect(getBinaryVersion("/bin/fallow-lsp")).toBe("2.25.0");
+  it("parses version from plow-lsp output", () => {
+    mockExecOutput = "plow-lsp 2.25.0\n";
+    expect(getBinaryVersion("/bin/plow-lsp")).toBe("2.25.0");
   });
 
   it("returns null on exec failure", () => {
     mockExecError = true;
-    expect(getBinaryVersion("/bin/fallow-lsp")).toBeNull();
+    expect(getBinaryVersion("/bin/plow-lsp")).toBeNull();
   });
 
   it("returns null on unparsable output", () => {
     mockExecOutput = "unknown";
-    expect(getBinaryVersion("/bin/fallow-lsp")).toBeNull();
+    expect(getBinaryVersion("/bin/plow-lsp")).toBeNull();
   });
 });
 
@@ -237,7 +237,7 @@ describe("getInstalledBinaryPath", () => {
   it("falls back to --version when no marker exists", () => {
     mockFiles[lspPath] = binaryBytes;
     mockFiles[lspSigPath] = signatureBytes;
-    mockExecOutput = "fallow-lsp 2.26.0\n";
+    mockExecOutput = "plow-lsp 2.26.0\n";
 
     expect(getInstalledBinaryPath(fakeContext)).toBe(lspPath);
   });
@@ -254,7 +254,7 @@ describe("getInstalledBinaryPath", () => {
   it("treats mismatched --version as stale when no marker", () => {
     mockFiles[lspPath] = binaryBytes;
     mockFiles[lspSigPath] = signatureBytes;
-    mockExecOutput = "fallow-lsp 2.24.0\n";
+    mockExecOutput = "plow-lsp 2.24.0\n";
 
     expect(getInstalledBinaryPath(fakeContext)).toBeNull();
     expect(mockFiles[lspPath]).toBeUndefined();
@@ -262,7 +262,7 @@ describe("getInstalledBinaryPath", () => {
 
   it("treats missing signature as stale without executing the binary", () => {
     mockFiles[lspPath] = binaryBytes;
-    mockExecOutput = "fallow-lsp 2.26.0\n";
+    mockExecOutput = "plow-lsp 2.26.0\n";
 
     expect(getInstalledBinaryPath(fakeContext)).toBeNull();
     expect(mockFiles[lspPath]).toBeUndefined();

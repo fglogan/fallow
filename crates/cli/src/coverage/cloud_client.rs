@@ -14,7 +14,7 @@ use crate::api::{
 
 const CLOUD_CONNECT_TIMEOUT_SECS: u64 = 5;
 const CLOUD_TOTAL_TIMEOUT_SECS: u64 = 30;
-const RUNTIME_CONTEXT_FORMAT: &str = "fallow-cloud-runtime-v1";
+const RUNTIME_CONTEXT_FORMAT: &str = "plow-cloud-runtime-v1";
 
 #[derive(Clone)]
 pub struct CloudRequest {
@@ -139,7 +139,7 @@ pub struct CloudRuntimeFunction {
     pub file_path: String,
     pub function_name: String,
     /// Cross-surface `FunctionIdentity` join key (`fallow:fn:<hash>`) when the
-    /// cloud has been migrated to emit it (fallow-cloud#63). `None` for the
+    /// cloud has been migrated to emit it (plow-cloud#63). `None` for the
     /// current un-migrated cloud, in which case the join falls back to
     /// `(file_path, function_name, line)` and the fuzzy line tier.
     #[serde(default, rename = "stableId")]
@@ -164,7 +164,7 @@ pub struct CloudRuntimeFunction {
 pub struct CloudRuntimeBlastRadiusEntry {
     pub id: String,
     /// Cross-surface `FunctionIdentity` join key when the cloud emits it
-    /// (fallow-cloud#63). `None` for the current un-migrated cloud.
+    /// (plow-cloud#63). `None` for the current un-migrated cloud.
     #[serde(default, rename = "stableId")]
     pub stable_id: Option<String>,
     pub file: String,
@@ -191,7 +191,7 @@ pub enum CloudRuntimeRiskBand {
 pub struct CloudRuntimeImportanceEntry {
     pub id: String,
     /// Cross-surface `FunctionIdentity` join key when the cloud emits it
-    /// (fallow-cloud#63). `None` for the current un-migrated cloud.
+    /// (plow-cloud#63). `None` for the current un-migrated cloud.
     #[serde(default, rename = "stableId")]
     pub stable_id: Option<String>,
     pub file: String,
@@ -260,10 +260,10 @@ pub fn fetch_runtime_context(request: &CloudRequest) -> Result<CloudRuntimeConte
 
     match (status, code) {
         (401, _) => Err(CloudError::Auth(
-            "Fallow API key is invalid or revoked.".to_owned(),
+            "Plow API key is invalid or revoked.".to_owned(),
         )),
         (403, Some("tier_required")) => Err(CloudError::TierRequired(
-            "cloud-pull is a Team-tier feature. Start a free trial:\n\n  fallow license activate --trial --email <addr>".to_owned(),
+            "cloud-pull is a Team-tier feature. Start a free trial:\n\n  plow license activate --trial --email <addr>".to_owned(),
         )),
         (404, Some("repo_not_found")) => Err(CloudError::NotFound(format!(
             "Repo not accessible to your org: {}",
@@ -282,7 +282,7 @@ pub fn fetch_runtime_context(request: &CloudRequest) -> Result<CloudRuntimeConte
 fn validate_request(request: &CloudRequest) -> Result<(), CloudError> {
     if request.api_key.trim().is_empty() {
         return Err(CloudError::Auth(
-            "Cloud runtime coverage requires an API key.\n\nSet FALLOW_API_KEY or pass --api-key:\n\n  FALLOW_API_KEY=fallow_live_... fallow coverage analyze --cloud --repo owner/repo".to_owned(),
+            "Cloud runtime coverage requires an API key.\n\nSet PLOW_API_KEY or pass --api-key:\n\n  PLOW_API_KEY=plow_live_... plow coverage analyze --cloud --repo owner/repo".to_owned(),
         ));
     }
     if request.repo.trim().is_empty() {
@@ -349,7 +349,7 @@ fn network_message(detail: &str) -> String {
         format!(" ({})", detail.trim())
     };
     format!(
-        "Could not reach fallow.cloud for cloud runtime coverage{suffix}.\n\nCloud mode is explicitly network-backed. Local runtime coverage still works:\n\n  fallow coverage analyze --runtime-coverage ./coverage"
+        "Could not reach plow.cloud for cloud runtime coverage{suffix}.\n\nCloud mode is explicitly network-backed. Local runtime coverage still works:\n\n  plow coverage analyze --runtime-coverage ./coverage"
     )
 }
 
@@ -378,7 +378,7 @@ mod tests {
 
     fn request(repo: &str) -> CloudRequest {
         CloudRequest {
-            api_key: "fallow_live_test".to_owned(),
+            api_key: "plow_live_test".to_owned(),
             api_endpoint: Some("http://127.0.0.1:3000/".to_owned()),
             repo: repo.to_owned(),
             project_id: None,
@@ -393,7 +393,7 @@ mod tests {
         let url = runtime_context_url(&request("acme/web"));
         assert!(url.starts_with("http://127.0.0.1:3000/v1/coverage/acme%2Fweb/runtime-context?"));
         assert!(url.contains("periodDays=30"));
-        assert!(url.contains("format=fallow-cloud-runtime-v1"));
+        assert!(url.contains("format=plow-cloud-runtime-v1"));
     }
 
     #[test]
@@ -425,8 +425,8 @@ mod tests {
         // the type level so the next contributor cannot reintroduce it by
         // accident.
         let req = CloudRequest {
-            api_key: "fallow_live_secret_token_value".to_owned(),
-            api_endpoint: Some("https://api.fallow.cloud".to_owned()),
+            api_key: "plow_live_secret_token_value".to_owned(),
+            api_endpoint: Some("https://api.plow.cloud".to_owned()),
             repo: "acme/web".to_owned(),
             project_id: None,
             period_days: 30,
@@ -435,7 +435,7 @@ mod tests {
         };
         let formatted = format!("{req:?}");
         assert!(
-            !formatted.contains("fallow_live_secret_token_value"),
+            !formatted.contains("plow_live_secret_token_value"),
             "api_key leaked through Debug: {formatted}"
         );
         assert!(
@@ -451,7 +451,7 @@ mod tests {
     fn cloud_error_exit_code_for_validation_is_two() {
         // Regression: HTTP 400 with code=validation_error must surface as
         // CloudError::Validation (exit 2), not CloudError::Server (exit 7).
-        // Caught live against api.fallow.cloud during the v2.57.0 smoke when
+        // Caught live against api.plow.cloud during the v2.57.0 smoke when
         // --environment was rejected with HTTP 400.
         assert_eq!(CloudError::Validation("any".to_owned()).exit_code(), 2);
     }

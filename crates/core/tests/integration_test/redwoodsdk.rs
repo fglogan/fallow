@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 
 use super::common::create_config;
-use fallow_types::results::AnalysisResults;
+use plow_types::results::AnalysisResults;
 
 #[test]
 fn redwoodsdk_worker_entrypoint_is_scoped_to_rwsdk_workspace() {
@@ -11,7 +11,7 @@ fn redwoodsdk_worker_entrypoint_is_scoped_to_rwsdk_workspace() {
     write_redwoodsdk_monorepo(root);
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused_paths = unused_file_paths(&results, root);
 
     assert!(
@@ -49,7 +49,7 @@ fn plain_vite_worker_does_not_activate_redwoodsdk() {
     write_file(root, "src/worker.tsx", "export default {};\n");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused_paths = unused_file_paths(&results, root);
 
     assert!(

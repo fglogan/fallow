@@ -1,13 +1,13 @@
 // Cascading cache-dir resolution for the lazy-verify sentinel.
 //
 // Preference order:
-//   1. <platform-pkg-dir>/.fallow-verified
-//   2. $FALLOW_VERIFY_CACHE_DIR/<package-id>.json
-//   3. $XDG_CACHE_HOME/fallow/sentinels/<package-id>.json   (Linux/macOS)
-//      or %LOCALAPPDATA%\fallow\sentinels\<package-id>.json (Windows)
-//      or ~/.cache/fallow/sentinels/<package-id>.json       (POSIX fallback)
+//   1. <platform-pkg-dir>/.plow-verified
+//   2. $PLOW_VERIFY_CACHE_DIR/<package-id>.json
+//   3. $XDG_CACHE_HOME/plow/sentinels/<package-id>.json   (Linux/macOS)
+//      or %LOCALAPPDATA%\plow\sentinels\<package-id>.json (Windows)
+//      or ~/.cache/plow/sentinels/<package-id>.json       (POSIX fallback)
 //   4. Every location read-only: returns { path: null, location: 'none', writable: false }.
-//      Callers run verify on every invocation and surface FALLOW_SKIP_BINARY_VERIFY=1 as the escape.
+//      Callers run verify on every invocation and surface PLOW_SKIP_BINARY_VERIFY=1 as the escape.
 //
 // Refs RFC 868 (npm/cli#9360). See .plans/rfc-868-lazy-binary-verify.md.
 
@@ -15,7 +15,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
-const SENTINEL_FILENAME = ".fallow-verified";
+const SENTINEL_FILENAME = ".plow-verified";
 
 // Returns true when the directory exists and the current process can create
 // a file in it. Tries an atomic O_CREAT|O_EXCL write so we never disturb an
@@ -37,7 +37,7 @@ function isWritable(dir) {
   // Probe by creating a unique zero-byte file and deleting it. Cross-platform
   // and tolerant of pnpm/yarn/bun store layouts where the dir is real but the
   // package manager owns its contents.
-  const probe = path.join(dir, `.fallow-verify-probe-${process.pid}-${Date.now()}`);
+  const probe = path.join(dir, `.plow-verify-probe-${process.pid}-${Date.now()}`);
   let fd;
   try {
     fd = fs.openSync(probe, "wx");
@@ -73,7 +73,7 @@ function xdgCacheRoot(env, homeDir, platformId) {
   return homeDir ? path.join(homeDir, ".cache") : null;
 }
 
-// Convert an npm package name like "@fallow-cli/darwin-arm64" into a stable
+// Convert an npm package name like "@plow-cli/darwin-arm64" into a stable
 // filesystem-safe identifier used as the sentinel's file basename when the
 // sentinel lives outside the platform package directory.
 function packageIdToFilename(packageName) {
@@ -102,7 +102,7 @@ function tryPlatformPkgDir(platformPkgDir, writableProbe) {
 }
 
 function tryCacheDirEnv(env, filename, ensureDir, writableProbe) {
-  const dir = env.FALLOW_VERIFY_CACHE_DIR;
+  const dir = env.PLOW_VERIFY_CACHE_DIR;
   if (!dir || dir.length === 0) return null;
   if (!ensureDir(dir) || !writableProbe(dir)) return null;
   return { path: path.join(dir, filename), location: "cache-dir-env", writable: true };
@@ -116,7 +116,7 @@ function xdgLocationLabel(env, platformId) {
 function tryXdgFallback(env, homeDir, platformId, filename, ensureDir, writableProbe) {
   const root = xdgCacheRoot(env, homeDir, platformId);
   if (!root) return null;
-  const dir = path.join(root, "fallow", "sentinels");
+  const dir = path.join(root, "plow", "sentinels");
   if (!ensureDir(dir) || !writableProbe(dir)) return null;
   return {
     path: path.join(dir, filename),

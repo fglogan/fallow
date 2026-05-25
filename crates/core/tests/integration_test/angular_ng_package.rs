@@ -12,7 +12,7 @@ use super::common::{create_config, fixture_path};
 fn ng_package_entry_file_keeps_public_api_reachable() {
     let root = fixture_path("ng-package-entrypoint");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     // Full relative path suffixes (separator-normalized) so the primary
     // `src/public-api.ts` and the secondary `client/src/public-api.ts` (same

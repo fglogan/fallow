@@ -1,6 +1,5 @@
 ---
 source: crates/cli/tests/snapshot_tests.rs
-assertion_line: 827
 expression: redact_version(&json_str)
 ---
 {
@@ -62,10 +61,10 @@ expression: redact_version(&json_str)
         {
           "type": "add-to-config",
           "auto_fixable": false,
-          "description": "Add \"chalk\" to ignoreDependencies in fallow config",
+          "description": "Add \"chalk\" to ignoreDependencies in plow config",
           "config_key": "ignoreDependencies",
           "value": "chalk",
-          "value_schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencies/items"
+          "value_schema": "https://raw.githubusercontent.com/plow-rs/plow/main/schema.json#/properties/ignoreDependencies/items"
         }
       ]
     }

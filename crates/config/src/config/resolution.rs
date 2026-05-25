@@ -18,12 +18,12 @@ use super::rules::{PartialRulesConfig, RulesConfig, Severity};
 use super::used_class_members::UsedClassMemberRule;
 use crate::external_plugin::{ExternalPluginDef, discover_external_plugins};
 
-use super::FallowConfig;
+use super::PlowConfig;
 use super::IgnoreExportsUsedInFileConfig;
 
 /// Process-local dedup state for inter-file rule warnings.
 ///
-/// Workspace mode calls `FallowConfig::resolve()` once per package, so a single
+/// Workspace mode calls `PlowConfig::resolve()` once per package, so a single
 /// top-level config with `overrides.rules.{duplicate-exports,circular-dependency}`
 /// would otherwise emit the same warning N times. The set is keyed on a stable
 /// hash of (rule name, sorted glob list) so logically identical override blocks
@@ -31,7 +31,7 @@ use super::IgnoreExportsUsedInFileConfig;
 ///
 /// The state persists across resolves within a single process. That matches the
 /// CLI's "one warning per invocation" expectation. In long-running hosts
-/// (`fallow watch`, the LSP server, NAPI consumers re-using a worker, the MCP
+/// (`plow watch`, the LSP server, NAPI consumers re-using a worker, the MCP
 /// server) the same set survives between re-runs and re-loads, so a user who
 /// edits the config and triggers a re-analysis sees the warning at most once
 /// per process lifetime. That is the documented behavior; restarting the host
@@ -231,12 +231,12 @@ pub struct ResolvedConfig {
     pub threads: usize,
     pub no_cache: bool,
     /// Resolved on-disk cache cap in megabytes. `None` selects the default
-    /// (`fallow_extract::cache::DEFAULT_CACHE_MAX_SIZE`, 256 MB). Computed
-    /// at the CLI layer as `FALLOW_CACHE_MAX_SIZE` env var (if set), else
+    /// (`plow_extract::cache::DEFAULT_CACHE_MAX_SIZE`, 256 MB). Computed
+    /// at the CLI layer as `PLOW_CACHE_MAX_SIZE` env var (if set), else
     /// `cache.maxSizeMb` in the config file. Stored in MB rather than
     /// bytes so that the config crate has no dependency on
-    /// `fallow-extract`; the bytes resolution happens at the callsite
-    /// (`fallow_core::lib::analyze_full`).
+    /// `plow-extract`; the bytes resolution happens at the callsite
+    /// (`plow_core::lib::analyze_full`).
     pub cache_max_size_mb: Option<u32>,
     /// Stable u64 hash of extraction-affecting config fields (currently the
     /// active external plugin names + inline framework definition names).
@@ -270,7 +270,7 @@ pub struct ResolvedConfig {
     /// config resolution so analysis code reads a single list.
     pub used_class_members: Vec<UsedClassMemberRule>,
     /// Decorator paths the user has opted out of the default skip-all-decorated
-    /// behavior for `unused-class-members`. See `FallowConfig::ignore_decorators`
+    /// behavior for `unused-class-members`. See `PlowConfig::ignore_decorators`
     /// for matching semantics. Passed through unchanged from the user config
     /// (no glob compilation; small set, linear scan at the call site).
     pub ignore_decorators: Vec<String>,
@@ -306,7 +306,7 @@ pub struct ResolvedConfig {
     pub resolve: ResolveConfig,
     /// When true, entry file exports are subject to unused-export detection
     /// instead of being automatically marked as used. Set via the global CLI flag
-    /// `--include-entry-exports` or via `includeEntryExports: true` in the fallow
+    /// `--include-entry-exports` or via `includeEntryExports: true` in the plow
     /// config file; the CLI flag ORs with the config value (CLI wins when set).
     pub include_entry_exports: bool,
     /// When true, framework plugins drop the convention entry patterns they can
@@ -347,12 +347,12 @@ fn compute_cache_config_hash(external_plugins: &[ExternalPluginDef]) -> u64 {
     hasher.digest()
 }
 
-impl FallowConfig {
+impl PlowConfig {
     /// Resolve into a fully resolved config with compiled globs.
     ///
     /// `cache_max_size_mb` is the user's override for the cache cap (env var
     /// or in-config `cache.maxSizeMb`). When `None`, the cap defaults to
-    /// `fallow_extract::cache::DEFAULT_CACHE_MAX_SIZE` (256 MB). Env-var
+    /// `plow_extract::cache::DEFAULT_CACHE_MAX_SIZE` (256 MB). Env-var
     /// precedence is resolved at the CLI layer, so the resolver itself only
     /// sees the final value.
     pub fn resolve(
@@ -364,7 +364,7 @@ impl FallowConfig {
         quiet: bool,
         cache_max_size_mb: Option<u32>,
     ) -> ResolvedConfig {
-        // User-supplied patterns are validated by `FallowConfig::load`
+        // User-supplied patterns are validated by `PlowConfig::load`
         // (issue #463). Configs constructed in-code (tests, defaults) bypass
         // load and are assumed to use valid patterns; an invalid pattern here
         // surfaces as a panic, which is correct for a programming error.
@@ -401,7 +401,7 @@ impl FallowConfig {
                     .compile_matcher()
             })
             .collect();
-        let cache_dir = root.join(".fallow");
+        let cache_dir = root.join(".plow");
 
         let mut rules = self.rules;
 
@@ -439,14 +439,14 @@ impl FallowConfig {
         // The returned `logical_groups` records the pre-expansion parent
         // identity (name, children, the user's verbatim `autoDiscover` paths,
         // the authored rule, and discovery status). It is stashed onto
-        // `ResolvedBoundaryConfig` further down so `fallow list --boundaries
+        // `ResolvedBoundaryConfig` further down so `plow list --boundaries
         // --format json` can surface the user's grouping intent even after
         // the parent name is flattened out of `zones[]`. Closes issue #373.
         let logical_groups = boundaries.expand_auto_discover(&root);
 
         // Compile architecture boundary config. Validation errors
         // (`validate_zone_references` + `validate_root_prefixes`) are surfaced
-        // via `FallowConfig::validate_resolved_boundaries` at config load
+        // via `PlowConfig::validate_resolved_boundaries` at config load
         // time (issue #468); by the time `resolve()` runs they have already
         // exited the process with exit code 2. Test fixtures that bypass the
         // load path and construct configs in-code are responsible for keeping
@@ -470,7 +470,7 @@ impl FallowConfig {
                 // up matches, but the finding belongs to a group of paths, not
                 // to one. Warn at load time and point users at the working
                 // escape hatch (`ignoreExports` for duplicates, file-level
-                // `// fallow-ignore-file circular-dependency` for cycles).
+                // `// plow-ignore-file circular-dependency` for cycles).
                 if o.rules.duplicate_exports.is_some()
                     && record_inter_file_warn_seen("duplicate-exports", &o.files)
                 {
@@ -484,7 +484,7 @@ impl FallowConfig {
                 {
                     let files = o.files.join(", ");
                     tracing::warn!(
-                        "overrides.rules.circular-dependency has no effect for files matching [{files}]: circular-dependency is an inter-file rule. Use a file-level `// fallow-ignore-file circular-dependency` comment in one participating file instead."
+                        "overrides.rules.circular-dependency has no effect for files matching [{files}]: circular-dependency is an inter-file rule. Use a file-level `// plow-ignore-file circular-dependency` comment in one participating file instead."
                     );
                 }
                 if o.rules.re_export_cycle.is_some()
@@ -492,7 +492,7 @@ impl FallowConfig {
                 {
                     let files = o.files.join(", ");
                     tracing::warn!(
-                        "overrides.rules.re-export-cycle has no effect for files matching [{files}]: re-export-cycle is an inter-file rule (the cycle spans multiple barrels). Use a file-level `// fallow-ignore-file re-export-cycle` comment in one participating file instead, or set `rules.re-export-cycle: off` at the top level."
+                        "overrides.rules.re-export-cycle has no effect for files matching [{files}]: re-export-cycle is an inter-file rule (the cycle spans multiple barrels). Use a file-level `// plow-ignore-file re-export-cycle` comment in one participating file instead, or set `rules.re-export-cycle: off` at the top level."
                     );
                 }
                 let matchers: Vec<globset::GlobMatcher> = o
@@ -558,8 +558,8 @@ impl FallowConfig {
         // layer (CLI passes either the env-var value or `None`), so here we
         // just fall back to the in-config `cache.maxSizeMb`. The bytes
         // conversion happens at the `CacheStore::save` callsite (in
-        // `fallow_core`), keeping `fallow-config` independent of
-        // `fallow-extract`.
+        // `plow_core`), keeping `plow-config` independent of
+        // `plow-extract`.
         let cache_max_size_mb = cache_max_size_mb.or(self.cache.max_size_mb);
 
         // Compute the cache config hash. The hash invalidates the cache on
@@ -657,7 +657,7 @@ mod tests {
                 }
             }]
         }"#;
-        let config: FallowConfig = serde_json::from_str(json_str).unwrap();
+        let config: PlowConfig = serde_json::from_str(json_str).unwrap();
         assert_eq!(config.overrides.len(), 1);
         assert_eq!(config.overrides[0].files, vec!["*.test.ts"]);
         assert_eq!(
@@ -669,7 +669,7 @@ mod tests {
 
     #[test]
     fn resolve_rules_for_path_no_overrides() {
-        let config = FallowConfig {
+        let config = PlowConfig {
             schema: None,
             extends: vec![],
             entry: vec![],
@@ -718,7 +718,7 @@ mod tests {
 
     #[test]
     fn resolve_rules_for_path_with_matching_override() {
-        let config = FallowConfig {
+        let config = PlowConfig {
             schema: None,
             extends: vec![],
             entry: vec![],
@@ -780,7 +780,7 @@ mod tests {
 
     #[test]
     fn resolve_rules_for_path_later_override_wins() {
-        let config = FallowConfig {
+        let config = PlowConfig {
             schema: None,
             extends: vec![],
             entry: vec![],
@@ -855,7 +855,7 @@ mod tests {
         // override must still resolve cleanly so other co-located rule settings
         // on the same override are honored. The resolver emits a tracing warning;
         // here we assert the override is still installed for non-inter-file rules.
-        let config = FallowConfig {
+        let config = PlowConfig {
             schema: None,
             extends: vec![],
             entry: vec![],
@@ -960,13 +960,13 @@ mod tests {
 
     #[test]
     fn resolve_called_n_times_dedupes_inter_file_warning_to_one() {
-        // Drive `FallowConfig::resolve()` ten times with identical
+        // Drive `PlowConfig::resolve()` ten times with identical
         // `overrides.rules.duplicate-exports` to mirror workspace mode (one
         // resolve per package). The dedup must surface the warn key as
         // already-seen on every call after the first.
         reset_inter_file_warn_dedup_for_test();
         let files = vec!["__test_resolve_dedup/**".to_string()];
-        let build_config = || FallowConfig {
+        let build_config = || PlowConfig {
             schema: None,
             extends: vec![],
             entry: vec![],
@@ -1026,9 +1026,9 @@ mod tests {
         );
     }
 
-    /// Helper to build a FallowConfig with minimal boilerplate.
-    fn make_config(production: bool) -> FallowConfig {
-        FallowConfig {
+    /// Helper to build a PlowConfig with minimal boilerplate.
+    fn make_config(production: bool) -> PlowConfig {
+        PlowConfig {
             schema: None,
             extends: vec![],
             entry: vec![],
@@ -1410,7 +1410,7 @@ mod tests {
             true,
             None,
         );
-        assert_eq!(resolved.cache_dir, PathBuf::from("/my/project/.fallow"));
+        assert_eq!(resolved.cache_dir, PathBuf::from("/my/project/.plow"));
     }
 
     #[test]
@@ -1478,7 +1478,7 @@ mod tests {
     #[should_panic(expected = "validated at config load time")]
     fn resolve_panics_on_unvalidated_invalid_override_glob() {
         // Per issue #463, overrides[].files are validated by
-        // FallowConfig::load before reaching resolve(). A program that
+        // PlowConfig::load before reaching resolve(). A program that
         // constructs a config in-code with an invalid pattern has skipped
         // that validation; resolve() asserts the invariant by panicking.
         let mut config = make_config(false);
@@ -1629,11 +1629,11 @@ mod tests {
                 );
             }
 
-            /// Cache dir is always root/.fallow.
+            /// Cache dir is always root/.plow.
             #[test]
-            fn cache_dir_is_root_fallow(dir_suffix in "[a-zA-Z0-9_]{1,20}") {
+            fn cache_dir_is_root_plow(dir_suffix in "[a-zA-Z0-9_]{1,20}") {
                 let root = PathBuf::from(format!("/project/{dir_suffix}"));
-                let expected_cache = root.join(".fallow");
+                let expected_cache = root.join(".plow");
                 let resolved = make_config(false).resolve(
                     root,
                     OutputFormat::Human,
@@ -1644,7 +1644,7 @@ mod tests {
                 );
                 prop_assert_eq!(
                     resolved.cache_dir, expected_cache,
-                    "Cache dir should be root/.fallow"
+                    "Cache dir should be root/.plow"
                 );
             }
 

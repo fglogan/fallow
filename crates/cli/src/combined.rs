@@ -3,7 +3,7 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use colored::Colorize;
-use fallow_config::OutputFormat;
+use plow_config::OutputFormat;
 
 use crate::check::{CheckOptions, CheckResult, IssueFilters, TraceOptions};
 use crate::dupes::{DupesMode, DupesOptions, DupesResult};
@@ -249,7 +249,7 @@ fn print_combined_report(
                 total_elapsed,
                 opts.explain,
                 opts.config_path.is_some()
-                    || fallow_config::FallowConfig::find_config_path(opts.root).is_some(),
+                    || plow_config::PlowConfig::find_config_path(opts.root).is_some(),
             );
             if code != ExitCode::SUCCESS {
                 return Err(code);
@@ -350,7 +350,7 @@ fn print_human_sections(
     if show_headers && has_any_findings && std::io::stdout().is_terminal() {
         println!(
             "{}",
-            "Tip: run `fallow explain <issue label>`; spaces and hyphens both work, e.g. `fallow explain unused files`."
+            "Tip: run `plow explain <issue label>`; spaces and hyphens both work, e.g. `plow explain unused files`."
                 .dimmed()
         );
         println!();
@@ -524,9 +524,9 @@ fn print_combined_json(
     // The sub-result Options stay `None` here and the per-pass branches
     // below splice the populated values in.
     let envelope = crate::output_envelope::CombinedOutput {
-        schema_version: fallow_types::envelope::SchemaVersion(crate::report::SCHEMA_VERSION),
-        version: fallow_types::envelope::ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
-        elapsed_ms: fallow_types::envelope::ElapsedMs(elapsed.as_millis() as u64),
+        schema_version: plow_types::envelope::SchemaVersion(crate::report::SCHEMA_VERSION),
+        version: plow_types::envelope::ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
+        elapsed_ms: plow_types::envelope::ElapsedMs(elapsed.as_millis() as u64),
         meta: None,
         check: None,
         dupes: None,
@@ -671,15 +671,15 @@ fn print_combined_sarif(
         let run = serde_json::json!({
             "tool": {
                 "driver": {
-                    "name": "fallow",
+                    "name": "plow",
                     "version": env!("CARGO_PKG_VERSION"),
-                    "informationUri": "https://github.com/fallow-rs/fallow",
+                    "informationUri": "https://github.com/plow-rs/plow",
                 }
             },
-            "automationDetails": { "id": "fallow/dupes" },
+            "automationDetails": { "id": "plow/dupes" },
             "results": result.report.clone_groups.iter().enumerate().map(|(i, g)| {
                 serde_json::json!({
-                    "ruleId": "fallow/code-duplication",
+                    "ruleId": "plow/code-duplication",
                     "level": "warning",
                     "message": { "text": format!("Clone group {} ({} lines, {} instances)", i + 1, g.line_count, g.instances.len()) },
                 })
@@ -783,7 +783,7 @@ fn run_combined_dupes(
         opts.production_dupes
             .or_else(|| opts.production.then_some(true)),
         opts.quiet,
-        fallow_config::ProductionAnalysis::Dupes,
+        plow_config::ProductionAnalysis::Dupes,
     )?
     .duplicates;
 
@@ -825,7 +825,7 @@ fn run_combined_dupes(
         explain_skipped: opts.explain_skipped,
         summary: opts.summary,
         group_by: opts.group_by,
-        // Combined mode renders the bare-`fallow` pipeline panel which already
+        // Combined mode renders the bare-`plow` pipeline panel which already
         // shows the duplication stage; the standalone dupes panel is suppressed
         // here to avoid double-printing.
         performance: false,
@@ -915,7 +915,7 @@ fn print_orientation_header(
 ) {
     // Health score + trend (combined-mode fix for issue #557). The helpers
     // early-return when the score / trend is absent, so this is a no-op for
-    // bare `fallow` without `--score` or `--trend`.
+    // bare `plow` without `--score` or `--trend`.
     let mut score_lines: Vec<String> = Vec::new();
     report::render_health_score(&mut score_lines, &health.report);
     report::render_health_trend(&mut score_lines, &health.report);
@@ -1036,7 +1036,7 @@ fn print_orientation_header(
             eprintln!(
                 "{}",
                 format!(
-                    "  {target_count} refactoring target{} \u{2014} try `fallow dead-code --workspace <name>` to scope",
+                    "  {target_count} refactoring target{} \u{2014} try `plow dead-code --workspace <name>` to scope",
                     if target_count == 1 { "" } else { "s" },
                 )
                 .dimmed()
@@ -1132,17 +1132,17 @@ fn is_test_path(path: &std::path::Path) -> bool {
 
 /// Print entry-point detection summary to stderr.
 ///
-/// Shows a dimmed informational line so users can verify that fallow found the
+/// Shows a dimmed informational line so users can verify that plow found the
 /// right entry points. When zero entry points are detected, emits a warning
 /// with a remediation command.
-pub fn print_entry_point_summary(results: &fallow_core::results::AnalysisResults) {
+pub fn print_entry_point_summary(results: &plow_core::results::AnalysisResults) {
     let Some(ref summary) = results.entry_point_summary else {
         return;
     };
     if summary.total == 0 {
         eprintln!(
             "{}",
-            "  \u{26a0} No entry points detected \u{2014} exports may appear unused. Run: fallow list --entry-points"
+            "  \u{26a0} No entry points detected \u{2014} exports may appear unused. Run: plow list --entry-points"
                 .yellow()
         );
         return;

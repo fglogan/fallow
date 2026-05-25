@@ -6,7 +6,7 @@ use super::common::{create_config, fixture_path};
 fn then_callback_makes_modules_reachable() {
     let root = fixture_path("dynamic-import-then");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_names: Vec<String> = results
         .unused_files
@@ -50,7 +50,7 @@ fn then_callback_makes_modules_reachable() {
 fn then_callback_credits_accessed_exports() {
     let root = fixture_path("dynamic-import-then");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<(&str, String)> = results
         .unused_exports

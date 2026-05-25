@@ -5,13 +5,13 @@ expression: json_str
 [
   {
     "type": "issue",
-    "check_name": "fallow/unresolved-import",
+    "check_name": "plow/unresolved-import",
     "description": "Import './missing' could not be resolved",
     "categories": [
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "2763b6c43a5a66e8",
+    "fingerprint": "b3c3560b946d82a9",
     "location": {
       "path": "src/index.ts",
       "lines": {

@@ -1,5 +1,5 @@
 import { countCheckIssues } from "./analysis-utils.js";
-import type { FallowCheckResult, FallowDupesResult } from "./types.js";
+import type { PlowCheckResult, PlowDupesResult } from "./types.js";
 
 export interface AnalysisCompleteParams {
   totalIssues: number;
@@ -35,8 +35,8 @@ export interface AnalysisCompleteParams {
  * source of truth regardless of whether LSP or CLI produced the data.
  */
 export const buildParamsFromCli = (
-  check: FallowCheckResult | null,
-  dupes: FallowDupesResult | null,
+  check: PlowCheckResult | null,
+  dupes: PlowDupesResult | null,
 ): AnalysisCompleteParams => ({
   totalIssues: countCheckIssues(check),
   unusedFiles: check?.unused_files.length ?? 0,
@@ -230,7 +230,7 @@ export const buildStatusBarTooltipMarkdown = (
   params: AnalysisCompleteParams,
   changedSinceRef: string | null = null,
 ): string => {
-  const lines: string[] = ["**Fallow** - Analysis Results\n"];
+  const lines: string[] = ["**Plow** - Analysis Results\n"];
   const duplicationPercentage = getDuplicationPercentage(params.duplicationPercentage);
 
   if (changedSinceRef) {
@@ -256,7 +256,7 @@ export const buildStatusBarTooltipMarkdown = (
 
   lines.push("\n---\n");
   lines.push(
-    "[$(play) Run Analysis](command:fallow.analyze) · [$(wrench) Auto-Fix](command:fallow.fix) · [$(output) Output](command:fallow.showOutput)",
+    "[$(play) Run Analysis](command:plow.analyze) · [$(wrench) Auto-Fix](command:plow.fix) · [$(output) Output](command:plow.showOutput)",
   );
 
   return lines.join("\n\n");

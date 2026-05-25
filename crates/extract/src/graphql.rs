@@ -9,7 +9,7 @@ use std::sync::LazyLock;
 use oxc_span::Span;
 
 use crate::{ImportInfo, ImportedName, ModuleInfo};
-use fallow_types::discover::FileId;
+use plow_types::discover::FileId;
 
 static GRAPHQL_IMPORT_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(r#"(?m)^[ \t]*#\s*import\s+["']([^"'\r\n]+)["']"#).expect("valid regex")
@@ -92,7 +92,7 @@ pub(crate) fn parse_graphql_to_module(
         unused_import_bindings: Vec::new(),
         type_referenced_import_bindings: Vec::new(),
         value_referenced_import_bindings: Vec::new(),
-        line_offsets: fallow_types::extract::compute_line_offsets(source),
+        line_offsets: plow_types::extract::compute_line_offsets(source),
         complexity: Vec::new(),
         flag_uses: Vec::new(),
         class_heritage: Vec::new(),

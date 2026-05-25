@@ -6,7 +6,7 @@ use super::common::{create_config, fixture_path};
 fn html_entry_makes_referenced_script_reachable() {
     let root = fixture_path("html-entry");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_names: Vec<String> = results
         .unused_files
@@ -38,7 +38,7 @@ fn html_entry_makes_referenced_script_reachable() {
 fn html_entry_makes_referenced_stylesheet_reachable() {
     let root = fixture_path("html-entry");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_names: Vec<String> = results
         .unused_files
@@ -64,7 +64,7 @@ fn html_entry_makes_referenced_stylesheet_reachable() {
 fn html_entry_does_not_suppress_unused_exports() {
     let root = fixture_path("html-entry");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     // The `unused` export in helper.ts should still be detected as unused
     let unused_export_names: Vec<&str> = results
@@ -82,7 +82,7 @@ fn html_entry_does_not_suppress_unused_exports() {
 fn html_files_not_reported_as_unused() {
     let root = fixture_path("html-entry");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_names: Vec<String> = results
         .unused_files
@@ -110,7 +110,7 @@ fn html_files_not_reported_as_unused() {
 fn html_entry_no_unresolved_imports() {
     let root = fixture_path("html-entry");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     // All HTML asset references should resolve successfully
     let html_unresolved: Vec<&str> = results
@@ -131,7 +131,7 @@ fn html_entry_no_unresolved_imports() {
 fn html_root_relative_script_is_reachable() {
     let root = fixture_path("html-root-relative");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_names: Vec<String> = results
         .unused_files
@@ -163,7 +163,7 @@ fn html_root_relative_script_is_reachable() {
 fn html_root_relative_stylesheet_is_reachable() {
     let root = fixture_path("html-root-relative");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_names: Vec<String> = results
         .unused_files
@@ -188,7 +188,7 @@ fn html_root_relative_stylesheet_is_reachable() {
 fn html_root_relative_no_unresolved_imports() {
     let root = fixture_path("html-root-relative");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let html_unresolved: Vec<&str> = results
         .unresolved_imports
@@ -208,7 +208,7 @@ fn html_root_relative_no_unresolved_imports() {
 fn html_workspace_root_relative_script_is_reachable() {
     let root = fixture_path("html-workspace-root-relative");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_names: Vec<String> = results
         .unused_files
@@ -241,7 +241,7 @@ fn html_workspace_root_relative_script_is_reachable() {
 fn html_workspace_root_relative_stylesheet_is_reachable() {
     let root = fixture_path("html-workspace-root-relative");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_names: Vec<String> = results
         .unused_files
@@ -266,7 +266,7 @@ fn html_workspace_root_relative_stylesheet_is_reachable() {
 fn html_workspace_root_relative_no_unresolved_imports() {
     let root = fixture_path("html-workspace-root-relative");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let html_unresolved: Vec<&str> = results
         .unresolved_imports

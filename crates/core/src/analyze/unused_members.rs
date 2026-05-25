@@ -1,4 +1,4 @@
-use fallow_config::{ScopedUsedClassMemberRule, UsedClassMemberRule};
+use plow_config::{ScopedUsedClassMemberRule, UsedClassMemberRule};
 use globset::GlobMatcher;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -40,7 +40,7 @@ fn is_native_custom_element_lifecycle_method(member_name: &str, super_class: Opt
 /// Native ECMAScript `Error` constructors. A class extending any of these is an
 /// error type whose `name` member is consumed at runtime (logs, serializers,
 /// `err.name === "..."` discrimination) rather than via a static member access
-/// fallow can see.
+/// plow can see.
 const NATIVE_ERROR_BASE_NAMES: &[&str] = &[
     "Error",
     "TypeError",
@@ -80,7 +80,7 @@ fn is_error_subclass_runtime_member(
 ///
 /// `user_class_member_allowlist` extends the built-in Angular/React lifecycle
 /// allowlist with framework-invoked method names contributed by plugins and
-/// top-level config (see `FallowConfig::used_class_members` and
+/// top-level config (see `PlowConfig::used_class_members` and
 /// `Plugin::used_class_members`). Plain string entries suppress matching member
 /// names or glob patterns globally; scoped object entries only suppress classes
 /// whose heritage clause matches the configured `extends` / `implements`
@@ -247,7 +247,7 @@ fn compile_member_pattern(member: &str) -> Option<GlobMatcher> {
 }
 
 /// User-supplied decorator names that should NOT count as evidence of
-/// reflective use. Built from `FallowConfig::ignore_decorators`.
+/// reflective use. Built from `PlowConfig::ignore_decorators`.
 ///
 /// Matching rule: entries containing `.` match the full dotted path of a
 /// decorator (e.g. `"decorators.log"` matches `@decorators.log` but not
@@ -328,7 +328,7 @@ impl IgnoreDecoratorSet {
     /// decorators (including those on members that never reach the skip
     /// predicate because they were already credited as used). Without this,
     /// the `warn_unmatched` report falsely flags entries whose decorators
-    /// only appear on used members. Caught 2026-05-20 by /fallow-review.
+    /// only appear on used members. Caught 2026-05-20 by /plow-review.
     fn record_seen(&self, decorator_path: &str) {
         if decorator_path.is_empty() {
             return;
@@ -1413,9 +1413,9 @@ fn propagate_class_inheritance(
 
 #[deprecated(
     since = "2.76.0",
-    note = "fallow_core is internal; use fallow_cli::programmatic::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/fallow-core-migration.md and ADR-008."
+    note = "plow_core is internal; use plow_cli::programmatic::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/plow-core-migration.md and ADR-008."
 )]
-#[allow(dead_code, reason = "kept for the deprecated fallow_core helper API")]
+#[allow(dead_code, reason = "kept for the deprecated plow_core helper API")]
 pub fn find_unused_members(
     graph: &ModuleGraph,
     resolved_modules: &[ResolvedModule],
@@ -1872,7 +1872,7 @@ pub(super) fn find_unused_members_with_public_api_entry_points(
                     // reflectively and should not be flagged as unused.
                     //
                     // Users can opt specific decorators out of this skip via
-                    // FallowConfig.ignore_decorators (issue #471). A member
+                    // PlowConfig.ignore_decorators (issue #471). A member
                     // whose every decorator path is in the ignore set is
                     // checked normally; any non-ignored decorator restores
                     // the conservative skip. Members where `has_decorator` is
@@ -1984,8 +1984,8 @@ mod tests {
     };
     use crate::graph::{ExportSymbol, ModuleGraph, SymbolReference};
     use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
-    use fallow_config::{ScopedUsedClassMemberRule, UsedClassMemberRule};
-    use fallow_types::extract::ClassHeritageInfo;
+    use plow_config::{ScopedUsedClassMemberRule, UsedClassMemberRule};
+    use plow_types::extract::ClassHeritageInfo;
     use oxc_span::Span;
     use std::path::PathBuf;
 
@@ -2572,7 +2572,7 @@ mod tests {
         // Direct test of the pre-pass primitive. After `record_seen("step")`,
         // the `@step` entry is considered matched even when no skip predicate
         // has been evaluated yet, so the end-of-run `warn_unmatched` report
-        // does not falsely flag it. Caught 2026-05-20 by /fallow-review.
+        // does not falsely flag it. Caught 2026-05-20 by /plow-review.
         let set = IgnoreDecoratorSet::from_config(&["@step".to_string()]);
         assert!(!set.entries[0].matched.load(Ordering::Relaxed));
         set.record_seen("step");
@@ -2587,7 +2587,7 @@ mod tests {
         // `record_seen("decorators.log")` marks a dotted entry but does NOT
         // mark a sibling dotted entry `decorators.audit`. Pins the dual-match
         // semantics for the pre-pass primitive. Caught 2026-05-20 by
-        // /fallow-review (extends the false-warn regression coverage).
+        // /plow-review (extends the false-warn regression coverage).
         let set = IgnoreDecoratorSet::from_config(&[
             "decorators.log".to_string(),
             "decorators.audit".to_string(),

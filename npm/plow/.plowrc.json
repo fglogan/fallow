@@ -1,9 +1,9 @@
 {
-  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+  "$schema": "https://raw.githubusercontent.com/plow-rs/plow/main/schema.json",
   "entry": [
-    "bin/fallow",
-    "bin/fallow-lsp",
-    "bin/fallow-mcp",
+    "bin/plow",
+    "bin/plow-lsp",
+    "bin/plow-mcp",
     "scripts/platform-package.js",
     "scripts/run-binary.js",
     "scripts/verify-binary.js"

@@ -1,9 +1,8 @@
 ---
 source: crates/cli/tests/snapshot_tests.rs
-assertion_line: 2047
 expression: output
 ---
-## Fallow: 1 high complexity function
+## Plow: 1 high complexity function
 
 | File | Function | Severity | Cyclomatic | Cognitive | CRAP | Lines |
 |:-----|:---------|:---------|:-----------|:----------|:-----|:------|

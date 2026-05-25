@@ -6,7 +6,7 @@ use super::common::{create_config, fixture_path};
 fn vue_project_discovers_vue_files() {
     let root = fixture_path("vue-project");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_names: Vec<String> = results
         .unused_files
@@ -42,7 +42,7 @@ fn vue_project_discovers_vue_files() {
 fn vue_imports_mark_exports_used() {
     let root = fixture_path("vue-project");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -87,7 +87,7 @@ fn vue_imports_mark_exports_used() {
 fn vue_template_event_handlers_mark_class_members_used() {
     let root = fixture_path("vue-project");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_members: Vec<String> = results
         .unused_class_members
@@ -118,7 +118,7 @@ fn vue_template_event_handlers_mark_class_members_used() {
 fn vue_component_tags_mark_component_exports_used() {
     let root = fixture_path("vue-component-tags");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_exports: Vec<(String, String)> = results
         .unused_exports
@@ -154,7 +154,7 @@ fn vue_component_tags_mark_component_exports_used() {
 fn vue_template_edge_cases_mark_exports_used() {
     let root = fixture_path("vue-template-edges");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_exports: Vec<(String, String)> = results
         .unused_exports
@@ -206,7 +206,7 @@ fn vue_template_edge_cases_mark_exports_used() {
 fn vue_split_value_type_exports_are_tracked_across_script_setup_usage() {
     let root = fixture_path("vue-split-type-value-export");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_types: Vec<(String, String)> = results
         .unused_types
@@ -244,7 +244,7 @@ fn vue_split_value_type_exports_are_tracked_across_script_setup_usage() {
 fn svelte_project_discovers_svelte_files() {
     let root = fixture_path("svelte-project");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_names: Vec<String> = results
         .unused_files
@@ -280,7 +280,7 @@ fn svelte_project_discovers_svelte_files() {
 fn svelte_imports_mark_exports_used() {
     let root = fixture_path("svelte-project");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -333,7 +333,7 @@ fn svelte_imports_mark_exports_used() {
 fn svelte_template_event_handlers_mark_class_members_used() {
     let root = fixture_path("svelte-project");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_members: Vec<String> = results
         .unused_class_members
@@ -363,14 +363,14 @@ fn svelte_template_event_handlers_mark_class_members_used() {
 // Regression for knip #1670: a `<script lang="ts">` block whose only use of
 // an imported name is a type annotation must keep the upstream type export
 // reachable. Knip's "real svelte compiler" mode strips types before
-// analysis, so the type vanishes from its view; fallow extracts the raw
+// analysis, so the type vanishes from its view; plow extracts the raw
 // script body and parses it with oxc, so type-only imports survive the SFC
 // boundary and downstream `unused-types` does not fire on the source.
 #[test]
 fn svelte_type_only_import_keeps_upstream_type_used() {
     let root = fixture_path("svelte-project");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_types: Vec<(String, &str)> = results
         .unused_types
@@ -407,7 +407,7 @@ fn svelte_type_only_import_keeps_upstream_type_used() {
 fn sveltekit_virtual_modules_not_unlisted() {
     let root = fixture_path("sveltekit-project");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unlisted_names: Vec<&str> = results
         .unlisted_dependencies
@@ -430,7 +430,7 @@ fn sveltekit_virtual_modules_not_unlisted() {
 fn sveltekit_generated_types_not_unresolved() {
     let root = fixture_path("sveltekit-project");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unresolved_specs: Vec<&str> = results
         .unresolved_imports
@@ -457,7 +457,7 @@ fn sveltekit_generated_types_not_unresolved() {
 fn sveltekit_workspace_types_not_unresolved() {
     let root = fixture_path("workspace-sveltekit");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unresolved_specs: Vec<&str> = results
         .unresolved_imports
@@ -476,7 +476,7 @@ fn sveltekit_workspace_types_not_unresolved() {
 fn sveltekit_param_matchers_keep_match_export_alive() {
     let root = fixture_path("sveltekit-project");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_exports: Vec<(String, String)> = results
         .unused_exports
@@ -508,7 +508,7 @@ fn sveltekit_param_matchers_keep_match_export_alive() {
     );
 }
 
-fn unused_file_names(results: &fallow_core::results::AnalysisResults) -> Vec<String> {
+fn unused_file_names(results: &plow_core::results::AnalysisResults) -> Vec<String> {
     results
         .unused_files
         .iter()
@@ -523,7 +523,7 @@ fn unused_file_names(results: &fallow_core::results::AnalysisResults) -> Vec<Str
         .collect()
 }
 
-fn unused_export_pairs(results: &fallow_core::results::AnalysisResults) -> Vec<(String, String)> {
+fn unused_export_pairs(results: &plow_core::results::AnalysisResults) -> Vec<(String, String)> {
     results
         .unused_exports
         .iter()
@@ -545,7 +545,7 @@ fn unused_export_pairs(results: &fallow_core::results::AnalysisResults) -> Vec<(
 fn sveltekit_remote_files_are_reachable() {
     let root = fixture_path("sveltekit-remote-functions");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let files = unused_file_names(&results);
 
     // Generated-binding-only remote file: reachable only as an entry point.
@@ -570,7 +570,7 @@ fn sveltekit_remote_files_are_reachable() {
 fn sveltekit_remote_exports_are_credited() {
     let root = fixture_path("sveltekit-remote-functions");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let exports = unused_export_pairs(&results);
 
     for (file, name) in [
@@ -594,7 +594,7 @@ fn sveltekit_remote_exports_credited_under_include_entry_exports() {
     // the `used_exports: ["*"]` rule (not just entry-point status) keeps the
     // user-named remote functions exempt.
     config.include_entry_exports = true;
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let exports = unused_export_pairs(&results);
 
     for (file, name) in [

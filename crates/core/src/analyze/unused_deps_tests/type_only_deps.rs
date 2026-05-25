@@ -154,7 +154,7 @@ fn type_only_dep_skips_ignored_deps() {
     let (graph, _) = build_graph_with_npm_imports(&[("zod", true)]);
     let pkg = make_pkg(&["zod"], &[], &[]);
 
-    let config = FallowConfig {
+    let config = PlowConfig {
         ignore_dependencies: vec!["zod".to_string()],
         ignore_unresolved_imports: vec![],
         ..Default::default()

@@ -1,20 +1,20 @@
 use super::common::{create_config, fixture_path};
-use fallow_core::discover::{DiscoveredFile, FileId};
+use plow_core::discover::{DiscoveredFile, FileId};
 use rustc_hash::FxHashSet;
 
 #[test]
 fn duplicate_code_detects_exact_clones() {
     let root = fixture_path("duplicate-code");
     let config = create_config(root.clone());
-    let files = fallow_core::discover::discover_files(&config);
+    let files = plow_core::discover::discover_files(&config);
 
-    let dupes_config = fallow_core::duplicates::DuplicatesConfig {
+    let dupes_config = plow_core::duplicates::DuplicatesConfig {
         min_tokens: 20,
         min_lines: 3,
-        ..fallow_core::duplicates::DuplicatesConfig::default()
+        ..plow_core::duplicates::DuplicatesConfig::default()
     };
 
-    let report = fallow_core::duplicates::find_duplicates(&root, &files, &dupes_config);
+    let report = plow_core::duplicates::find_duplicates(&root, &files, &dupes_config);
 
     assert!(
         !report.clone_groups.is_empty(),
@@ -34,16 +34,16 @@ fn duplicate_code_detects_exact_clones() {
 fn duplicate_code_semantic_mode_detects_type2_clones() {
     let root = fixture_path("duplicate-code");
     let config = create_config(root.clone());
-    let files = fallow_core::discover::discover_files(&config);
+    let files = plow_core::discover::discover_files(&config);
 
-    let dupes_config = fallow_core::duplicates::DuplicatesConfig {
+    let dupes_config = plow_core::duplicates::DuplicatesConfig {
         min_tokens: 20,
         min_lines: 3,
-        mode: fallow_core::duplicates::DetectionMode::Semantic,
-        ..fallow_core::duplicates::DuplicatesConfig::default()
+        mode: plow_core::duplicates::DetectionMode::Semantic,
+        ..plow_core::duplicates::DuplicatesConfig::default()
     };
 
-    let report = fallow_core::duplicates::find_duplicates(&root, &files, &dupes_config);
+    let report = plow_core::duplicates::find_duplicates(&root, &files, &dupes_config);
 
     // In semantic mode, copy2.ts (renamed variables) should also match
     let files_with_clones: rustc_hash::FxHashSet<_> = report
@@ -63,15 +63,15 @@ fn duplicate_code_semantic_mode_detects_type2_clones() {
 fn duplicate_code_unique_file_has_no_clones() {
     let root = fixture_path("duplicate-code");
     let config = create_config(root.clone());
-    let files = fallow_core::discover::discover_files(&config);
+    let files = plow_core::discover::discover_files(&config);
 
-    let dupes_config = fallow_core::duplicates::DuplicatesConfig {
+    let dupes_config = plow_core::duplicates::DuplicatesConfig {
         min_tokens: 20,
         min_lines: 3,
-        ..fallow_core::duplicates::DuplicatesConfig::default()
+        ..plow_core::duplicates::DuplicatesConfig::default()
     };
 
-    let report = fallow_core::duplicates::find_duplicates(&root, &files, &dupes_config);
+    let report = plow_core::duplicates::find_duplicates(&root, &files, &dupes_config);
 
     // unique.ts should not appear in any clone group (its code is distinct)
     let all_clone_files: Vec<String> = report
@@ -91,15 +91,15 @@ fn duplicate_code_unique_file_has_no_clones() {
 fn duplicate_code_json_output_serializable() {
     let root = fixture_path("duplicate-code");
     let config = create_config(root.clone());
-    let files = fallow_core::discover::discover_files(&config);
+    let files = plow_core::discover::discover_files(&config);
 
-    let dupes_config = fallow_core::duplicates::DuplicatesConfig {
+    let dupes_config = plow_core::duplicates::DuplicatesConfig {
         min_tokens: 20,
         min_lines: 3,
-        ..fallow_core::duplicates::DuplicatesConfig::default()
+        ..plow_core::duplicates::DuplicatesConfig::default()
     };
 
-    let report = fallow_core::duplicates::find_duplicates(&root, &files, &dupes_config);
+    let report = plow_core::duplicates::find_duplicates(&root, &files, &dupes_config);
 
     // Should be serializable to JSON
     let json = serde_json::to_string_pretty(&report).expect("report should serialize to JSON");
@@ -112,16 +112,16 @@ fn duplicate_code_json_output_serializable() {
 fn duplicate_code_skip_local_filters_same_directory() {
     let root = fixture_path("duplicate-code");
     let config = create_config(root.clone());
-    let files = fallow_core::discover::discover_files(&config);
+    let files = plow_core::discover::discover_files(&config);
 
-    let dupes_config = fallow_core::duplicates::DuplicatesConfig {
+    let dupes_config = plow_core::duplicates::DuplicatesConfig {
         min_tokens: 20,
         min_lines: 3,
         skip_local: true,
-        ..fallow_core::duplicates::DuplicatesConfig::default()
+        ..plow_core::duplicates::DuplicatesConfig::default()
     };
 
-    let report = fallow_core::duplicates::find_duplicates(&root, &files, &dupes_config);
+    let report = plow_core::duplicates::find_duplicates(&root, &files, &dupes_config);
 
     // All fixture files are in the same directory (src/), so skip_local should filter them all
     assert!(
@@ -134,16 +134,16 @@ fn duplicate_code_skip_local_filters_same_directory() {
 fn duplicate_code_min_tokens_threshold_filters() {
     let root = fixture_path("duplicate-code");
     let config = create_config(root.clone());
-    let files = fallow_core::discover::discover_files(&config);
+    let files = plow_core::discover::discover_files(&config);
 
     // Use very high min_tokens — should find no clones
-    let dupes_config = fallow_core::duplicates::DuplicatesConfig {
+    let dupes_config = plow_core::duplicates::DuplicatesConfig {
         min_tokens: 10000,
         min_lines: 1,
-        ..fallow_core::duplicates::DuplicatesConfig::default()
+        ..plow_core::duplicates::DuplicatesConfig::default()
     };
 
-    let report = fallow_core::duplicates::find_duplicates(&root, &files, &dupes_config);
+    let report = plow_core::duplicates::find_duplicates(&root, &files, &dupes_config);
 
     assert!(
         report.clone_groups.is_empty(),
@@ -155,13 +155,13 @@ fn duplicate_code_min_tokens_threshold_filters() {
 fn duplicate_code_find_duplicates_in_project_convenience() {
     let root = fixture_path("duplicate-code");
 
-    let dupes_config = fallow_core::duplicates::DuplicatesConfig {
+    let dupes_config = plow_core::duplicates::DuplicatesConfig {
         min_tokens: 20,
         min_lines: 3,
-        ..fallow_core::duplicates::DuplicatesConfig::default()
+        ..plow_core::duplicates::DuplicatesConfig::default()
     };
 
-    let report = fallow_core::duplicates::find_duplicates_in_project(&root, &dupes_config);
+    let report = plow_core::duplicates::find_duplicates_in_project(&root, &dupes_config);
 
     assert!(
         !report.clone_groups.is_empty(),
@@ -211,27 +211,27 @@ fn ignore_imports_removes_import_only_clones() {
     ];
 
     // Without ignore_imports: should detect import block duplication
-    let config_with_imports = fallow_core::duplicates::DuplicatesConfig {
+    let config_with_imports = plow_core::duplicates::DuplicatesConfig {
         min_tokens: 10,
         min_lines: 3,
         ..Default::default()
     };
     let report_with =
-        fallow_core::duplicates::find_duplicates(dir.path(), &files, &config_with_imports);
+        plow_core::duplicates::find_duplicates(dir.path(), &files, &config_with_imports);
     assert!(
         !report_with.clone_groups.is_empty(),
         "Without ignore_imports, identical import blocks should be detected as clones"
     );
 
     // With ignore_imports: import block clones should disappear
-    let config_ignore = fallow_core::duplicates::DuplicatesConfig {
+    let config_ignore = plow_core::duplicates::DuplicatesConfig {
         min_tokens: 10,
         min_lines: 3,
         ignore_imports: true,
         ..Default::default()
     };
     let report_without =
-        fallow_core::duplicates::find_duplicates(dir.path(), &files, &config_ignore);
+        plow_core::duplicates::find_duplicates(dir.path(), &files, &config_ignore);
     assert!(
         report_without.clone_groups.is_empty(),
         "With ignore_imports=true, import-only clones should be eliminated, but found {} groups",
@@ -259,7 +259,7 @@ fn default_ignore_fixture_files(root: &std::path::Path) -> Vec<DiscoveredFile> {
 
 fn cloned_relative_files(
     root: &std::path::Path,
-    report: &fallow_core::duplicates::DuplicationReport,
+    report: &plow_core::duplicates::DuplicationReport,
 ) -> FxHashSet<String> {
     report
         .clone_groups
@@ -280,14 +280,14 @@ fn cloned_relative_files(
 fn duplicate_default_ignores_skip_framework_cache_but_not_lib() {
     let root = fixture_path("duplicates_default_ignores");
     let files = default_ignore_fixture_files(&root);
-    let dupes_config = fallow_core::duplicates::DuplicatesConfig {
+    let dupes_config = plow_core::duplicates::DuplicatesConfig {
         min_tokens: 10,
         min_lines: 3,
         cross_language: true,
         ..Default::default()
     };
 
-    let (report, skips) = fallow_core::duplicates::find_duplicates_with_default_ignore_skips(
+    let (report, skips) = plow_core::duplicates::find_duplicates_with_default_ignore_skips(
         &root,
         &files,
         &dupes_config,
@@ -312,7 +312,7 @@ fn duplicate_default_ignores_skip_framework_cache_but_not_lib() {
 fn duplicate_ignore_defaults_false_replaces_defaults_with_user_ignore() {
     let root = fixture_path("duplicates_default_ignores");
     let files = default_ignore_fixture_files(&root);
-    let dupes_config = fallow_core::duplicates::DuplicatesConfig {
+    let dupes_config = plow_core::duplicates::DuplicatesConfig {
         min_tokens: 10,
         min_lines: 3,
         cross_language: true,
@@ -321,7 +321,7 @@ fn duplicate_ignore_defaults_false_replaces_defaults_with_user_ignore() {
         ..Default::default()
     };
 
-    let (report, skips) = fallow_core::duplicates::find_duplicates_with_default_ignore_skips(
+    let (report, skips) = plow_core::duplicates::find_duplicates_with_default_ignore_skips(
         &root,
         &files,
         &dupes_config,

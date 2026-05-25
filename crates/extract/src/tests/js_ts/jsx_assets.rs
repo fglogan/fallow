@@ -5,7 +5,7 @@
 //! `ImportInfo` records by default. HTML files and the bare `html` tagged
 //! template scanner keep their own asset extraction paths.
 
-use fallow_types::extract::ImportedName;
+use plow_types::extract::ImportedName;
 
 use crate::tests::parse_tsx;
 

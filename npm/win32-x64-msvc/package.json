@@ -1,11 +1,11 @@
 {
-  "name": "@fallow-cli/win32-x64-msvc",
+  "name": "@plow-cli/win32-x64-msvc",
   "version": "2.84.0",
-  "description": "Fallow CLI binary for Windows x64 (MSVC)",
+  "description": "Plow CLI binary for Windows x64 (MSVC)",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/fallow-rs/fallow.git"
+    "url": "git+https://github.com/plow-rs/plow.git"
   },
   "os": [
     "win32"
@@ -14,11 +14,11 @@
     "x64"
   ],
   "files": [
-    "fallow.exe",
-    "fallow.exe.sig",
-    "fallow-lsp.exe",
-    "fallow-lsp.exe.sig",
-    "fallow-mcp.exe",
-    "fallow-mcp.exe.sig"
+    "plow.exe",
+    "plow.exe.sig",
+    "plow-lsp.exe",
+    "plow-lsp.exe.sig",
+    "plow-mcp.exe",
+    "plow-mcp.exe.sig"
   ]
 }

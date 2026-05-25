@@ -1,6 +1,6 @@
 //! Validation of user-supplied glob patterns from the config file.
 //!
-//! Fallow accepts filesystem glob patterns in several config fields (`entry`,
+//! Plow accepts filesystem glob patterns in several config fields (`entry`,
 //! `ignorePatterns`, `dynamicallyLoaded`, `duplicates.ignore`, `health.ignore`,
 //! `boundaries.zones[].patterns`, `overrides[].files`, `ignoreExports[].file`,
 //! `ignoreCatalogReferences[].consumer`). All of these are matched against
@@ -57,7 +57,7 @@ impl fmt::Display for GlobValidationError {
                     f,
                     "{field}: '{pattern}' contains a '..' segment; \
                      rewrite the pattern to stay inside the project root, \
-                     or run fallow with --root pointing at the directory you want to scan"
+                     or run plow with --root pointing at the directory you want to scan"
                 )
             }
             Self::InvalidSyntax {
@@ -114,7 +114,7 @@ fn is_absolute_pattern(pattern: &str) -> bool {
 /// Return `true` if any segment of `pattern` is `..`.
 ///
 /// We split on BOTH `/` and `\` so a backslash-separated traversal pattern
-/// (`..\foo`) authored on a Windows machine is rejected even when fallow runs
+/// (`..\foo`) authored on a Windows machine is rejected even when plow runs
 /// on Unix. `Path::components` on Unix treats `\` as a regular character, so
 /// it cannot be relied on as a cross-platform separator detector.
 ///

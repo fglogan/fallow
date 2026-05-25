@@ -17,7 +17,7 @@
 //! Consumers that hand-parse the JSON see no shape change.
 //!
 //! Audit-mode asymmetry: [`HealthFinding`] carries `introduced` because
-//! `fallow audit` attributes complexity findings to the introduced /
+//! `plow audit` attributes complexity findings to the introduced /
 //! inherited diff. [`HotspotFinding`] and [`RefactoringTargetFinding`] do
 //! NOT carry `introduced` because hotspot ranking and refactoring targets
 //! are not produced by the audit base-snapshot classifier; the pre-wrapper
@@ -26,7 +26,7 @@
 //!
 //! [`ComplexityViolation`]: crate::health_types::scores::ComplexityViolation
 
-use fallow_types::output_health::{
+use plow_types::output_health::{
     HealthFindingAction, HealthFindingActionType, HotspotAction, HotspotActionHeuristic,
     HotspotActionType, RefactoringTargetAction, RefactoringTargetActionType,
 };
@@ -56,7 +56,7 @@ const SECONDARY_REFACTOR_BAND: u16 = 5;
 /// health finding. Set when:
 /// - A baseline is active (`opts.baseline.is_some()` or
 ///   `opts.save_baseline.is_some()`): the baseline file already suppresses
-///   findings, and adding `// fallow-ignore-next-line` comments on top
+///   findings, and adding `// plow-ignore-next-line` comments on top
 ///   creates dead annotations once the baseline regenerates.
 /// - The team has opted out via `health.suggestInlineSuppression: false`.
 ///
@@ -332,7 +332,7 @@ pub fn build_health_finding_actions(
                 auto_fixable: false,
                 description: "Suppress with an HTML comment at the top of the template".to_string(),
                 note: None,
-                comment: Some("<!-- fallow-ignore-file complexity -->".to_string()),
+                comment: Some("<!-- plow-ignore-file complexity -->".to_string()),
                 placement: Some("top-of-template".to_string()),
                 target_path: None,
             });
@@ -343,7 +343,7 @@ pub fn build_health_finding_actions(
                 description: "Suppress with an inline comment above the Angular decorator"
                     .to_string(),
                 note: None,
-                comment: Some("// fallow-ignore-next-line complexity".to_string()),
+                comment: Some("// plow-ignore-next-line complexity".to_string()),
                 placement: Some("above-angular-decorator".to_string()),
                 target_path: None,
             });
@@ -358,7 +358,7 @@ pub fn build_health_finding_actions(
                 auto_fixable: false,
                 description: "Suppress with an inline comment above the worst class method (the rollup is anchored at that method's line, so a comment above it hides both the function finding and the rollup)".to_string(),
                 note: None,
-                comment: Some("// fallow-ignore-next-line complexity".to_string()),
+                comment: Some("// plow-ignore-next-line complexity".to_string()),
                 placement: Some("above-component-worst-method".to_string()),
                 target_path: None,
             });
@@ -369,7 +369,7 @@ pub fn build_health_finding_actions(
                 description: "Suppress with an inline comment above the function declaration"
                     .to_string(),
                 note: None,
-                comment: Some("// fallow-ignore-next-line complexity".to_string()),
+                comment: Some("// plow-ignore-next-line complexity".to_string()),
                 placement: Some("above-function-declaration".to_string()),
                 target_path: None,
             });
@@ -767,7 +767,7 @@ fn build_refactoring_target_actions(target: &RefactoringTarget) -> Vec<Refactori
             auto_fixable: false,
             description: "Suppress the underlying complexity finding".to_string(),
             category: None,
-            comment: Some("// fallow-ignore-next-line complexity".to_string()),
+            comment: Some("// plow-ignore-next-line complexity".to_string()),
         });
     }
 
@@ -805,7 +805,7 @@ mod hotspot_target_tests {
     use crate::health_types::scores::{
         ContributorEntry, ContributorIdentifierFormat, OwnershipMetrics, OwnershipState,
     };
-    use fallow_core::churn::ChurnTrend;
+    use plow_core::churn::ChurnTrend;
     use std::path::PathBuf;
 
     fn sample_entry(path: &str) -> HotspotEntry {
@@ -1113,7 +1113,7 @@ mod hotspot_target_tests {
         );
         assert_eq!(
             finding.actions[1].comment.as_deref(),
-            Some("// fallow-ignore-next-line complexity"),
+            Some("// plow-ignore-next-line complexity"),
         );
     }
 

@@ -1,7 +1,7 @@
 use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
 
-use fallow_config::OutputFormat;
+use plow_config::OutputFormat;
 
 use super::enum_helpers::{
     EnumDeclarationRange, declares_exported_enum, removable_exported_enum_range,
@@ -116,7 +116,7 @@ fn detect_folded_enums(lines: &[&str], member_fixes: &[EnumMemberFix]) -> Vec<Fo
 /// - All members removed: leaves the enum body empty (`enum Foo {}`)
 pub(super) fn apply_enum_member_fixes(
     root: &Path,
-    members_by_file: &FxHashMap<PathBuf, Vec<&fallow_core::results::UnusedMember>>,
+    members_by_file: &FxHashMap<PathBuf, Vec<&plow_core::results::UnusedMember>>,
     hashes: &CapturedHashes,
     plan: &mut FixPlan,
     output: OutputFormat,
@@ -332,8 +332,8 @@ fn remove_member_from_single_line(line: &str, member_name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_core::extract::MemberKind;
-    use fallow_core::results::UnusedMember;
+    use plow_core::extract::MemberKind;
+    use plow_core::results::UnusedMember;
 
     fn make_enum_member(path: &Path, parent: &str, name: &str, line: u32) -> UnusedMember {
         UnusedMember {

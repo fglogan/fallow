@@ -6,8 +6,8 @@
 
 use std::path::PathBuf;
 
-use fallow_types::extract::{FlagUse, FlagUseKind, ModuleInfo, byte_offset_to_line_col};
-use fallow_types::results::{AnalysisResults, FeatureFlag, FlagConfidence, FlagKind};
+use plow_types::extract::{FlagUse, FlagUseKind, ModuleInfo, byte_offset_to_line_col};
+use plow_types::results::{AnalysisResults, FeatureFlag, FlagConfidence, FlagKind};
 
 use crate::graph::ModuleGraph;
 
@@ -18,7 +18,7 @@ use crate::graph::ModuleGraph;
 /// offsets to line numbers using per-file line offset tables.
 #[deprecated(
     since = "2.76.0",
-    note = "fallow_core is internal; there is no programmatic equivalent today. Use the `fallow flags --format json` CLI output for feature-flag data. See docs/fallow-core-migration.md and ADR-008."
+    note = "plow_core is internal; there is no programmatic equivalent today. Use the `plow flags --format json` CLI output for feature-flag data. See docs/plow-core-migration.md and ADR-008."
 )]
 pub fn collect_feature_flags(modules: &[ModuleInfo], graph: &ModuleGraph) -> Vec<FeatureFlag> {
     let mut flags = Vec::new();
@@ -60,7 +60,7 @@ pub fn collect_feature_flags(modules: &[ModuleInfo], graph: &ModuleGraph) -> Vec
 /// on each flag.
 #[deprecated(
     since = "2.76.0",
-    note = "fallow_core is internal; there is no programmatic equivalent today. Use the `fallow flags --format json` CLI output (the `guarded_dead_exports` field carries the same correlation). See docs/fallow-core-migration.md and ADR-008."
+    note = "plow_core is internal; there is no programmatic equivalent today. Use the `plow flags --format json` CLI output (the `guarded_dead_exports` field carries the same correlation). See docs/plow-core-migration.md and ADR-008."
 )]
 pub fn correlate_with_dead_code(flags: &mut [FeatureFlag], results: &AnalysisResults) {
     if results.unused_exports.is_empty() && results.unused_types.is_empty() {

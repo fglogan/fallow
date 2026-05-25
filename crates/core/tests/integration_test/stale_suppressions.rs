@@ -1,5 +1,5 @@
-use fallow_config::{PartialRulesConfig, Severity};
-use fallow_types::results::SuppressionOrigin;
+use plow_config::{PartialRulesConfig, Severity};
+use plow_types::results::SuppressionOrigin;
 
 use super::common::{
     create_config, create_config_with_overrides, create_config_with_rules, fixture_path,
@@ -9,7 +9,7 @@ use super::common::{
 fn stale_next_line_suppression_on_used_export() {
     let root = fixture_path("stale-suppressions");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let stale_comments: Vec<_> = results
         .stale_suppressions
@@ -17,7 +17,7 @@ fn stale_next_line_suppression_on_used_export() {
         .filter(|s| matches!(&s.origin, SuppressionOrigin::Comment { .. }))
         .collect();
 
-    // usedHelper has `// fallow-ignore-next-line unused-export` but IS used
+    // usedHelper has `// plow-ignore-next-line unused-export` but IS used
     assert!(
         stale_comments
             .iter()
@@ -32,9 +32,9 @@ fn stale_next_line_suppression_on_used_export() {
 fn active_suppression_not_reported_stale() {
     let root = fixture_path("stale-suppressions");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
-    // unusedHelper has `// fallow-ignore-next-line unused-export` and IS unused
+    // unusedHelper has `// plow-ignore-next-line unused-export` and IS unused
     // Its suppression should NOT be stale
     let stale_for_unused_helper = results.stale_suppressions.iter().any(|s| {
         s.path.ends_with("utils.ts") && s.line == 6 // comment_line of the suppression for unusedHelper
@@ -50,9 +50,9 @@ fn active_suppression_not_reported_stale() {
 fn stale_blanket_suppression() {
     let root = fixture_path("stale-suppressions");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
-    // anotherUsedExport has a blanket `// fallow-ignore-next-line` but no issues on next line
+    // anotherUsedExport has a blanket `// plow-ignore-next-line` but no issues on next line
     let stale_blanket = results.stale_suppressions.iter().any(|s| {
         s.path.ends_with("utils.ts")
             && matches!(
@@ -74,9 +74,9 @@ fn stale_blanket_suppression() {
 fn stale_file_level_suppression() {
     let root = fixture_path("stale-suppressions");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
-    // file-level.ts has `// fallow-ignore-file unused-file` but the file IS reachable
+    // file-level.ts has `// plow-ignore-file unused-file` but the file IS reachable
     let stale_file_level = results.stale_suppressions.iter().any(|s| {
         s.path.ends_with("file-level.ts")
             && matches!(
@@ -99,7 +99,7 @@ fn stale_file_level_suppression() {
 fn expected_unused_tag_stale_when_used() {
     let root = fixture_path("stale-suppressions");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     // usedExport has @expected-unused but IS used by index.ts
     let stale_tag = results.stale_suppressions.iter().any(|s| {
@@ -120,7 +120,7 @@ fn expected_unused_tag_stale_when_used() {
 fn expected_unused_tag_not_stale_when_unused() {
     let root = fixture_path("stale-suppressions");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     // genuinelyUnused has @expected-unused and IS unused (tag is working)
     let stale_for_genuinely_unused = results.stale_suppressions.iter().any(|s| {
@@ -141,7 +141,7 @@ fn expected_unused_tag_not_stale_when_unused() {
 fn expected_unused_not_in_unused_exports() {
     let root = fixture_path("stale-suppressions");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     // Neither @expected-unused export should appear in unused_exports
     let expected_unused_in_results: Vec<_> = results
@@ -160,7 +160,7 @@ fn expected_unused_not_in_unused_exports() {
 fn total_stale_suppressions_count() {
     let root = fixture_path("stale-suppressions");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     // At least 4 specific findings MUST fire on this fixture (each also
     // covered by a dedicated test above): next-line on usedHelper,
@@ -187,7 +187,7 @@ fn total_stale_suppressions_count() {
 fn issue_449_known_kind_suppresses_alongside_unknown_token() {
     let root = fixture_path("issue-449-unknown-kind");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let secret_flagged = results
         .unused_exports
@@ -195,7 +195,7 @@ fn issue_449_known_kind_suppresses_alongside_unknown_token() {
         .any(|e| e.export.path.ends_with("utils.ts") && e.export.export_name == "secret");
     assert!(
         !secret_flagged,
-        "`unused-export` token in `// fallow-ignore-next-line unused-export, complexity-typo` must still suppress `secret`. \
+        "`unused-export` token in `// plow-ignore-next-line unused-export, complexity-typo` must still suppress `secret`. \
          unused_exports: {:?}",
         results
             .unused_exports
@@ -209,7 +209,7 @@ fn issue_449_known_kind_suppresses_alongside_unknown_token() {
 fn issue_449_unknown_token_surfaces_as_stale_with_kind_known_false() {
     let root = fixture_path("issue-449-unknown-kind");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unknown_findings: Vec<_> = results
         .stale_suppressions
@@ -250,7 +250,7 @@ fn issue_449_unknown_token_surfaces_as_stale_with_kind_known_false() {
 fn issue_449_unknown_token_explanation_carries_next_step_copy() {
     let root = fixture_path("issue-449-unknown-kind");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let complexity_typo = results
         .stale_suppressions
@@ -269,7 +269,7 @@ fn issue_449_unknown_token_explanation_carries_next_step_copy() {
 
     let explanation = complexity_typo.explanation();
     assert!(
-        explanation.contains("not a recognized fallow issue kind"),
+        explanation.contains("not a recognized plow issue kind"),
         "unknown-kind explanation must say so explicitly. Got: {explanation}"
     );
     assert!(
@@ -282,7 +282,7 @@ fn issue_449_unknown_token_explanation_carries_next_step_copy() {
 fn issue_449_close_typo_explanation_includes_levenshtein_hint() {
     let root = fixture_path("issue-449-unknown-kind");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unsed_export = results
         .stale_suppressions
@@ -309,7 +309,7 @@ fn issue_449_close_typo_explanation_includes_levenshtein_hint() {
 // ── Issue #482: suppressions for OFF-severity rules are not stale ────────────
 
 /// utils.ts in the stale-suppressions fixture has
-/// `// fallow-ignore-next-line unused-export` on the USED export `usedHelper`.
+/// `// plow-ignore-next-line unused-export` on the USED export `usedHelper`.
 /// Today (rule ON) this surfaces as stale because the detector runs, the
 /// export is referenced, the suppression never matches, and find_stale flags
 /// it. With `rules.unused-exports = "off"` the detector skips emission
@@ -321,7 +321,7 @@ fn stale_skipped_when_kind_severity_off() {
     let config = create_config_with_rules(root, |r| {
         r.unused_exports = Severity::Off;
     });
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let stale_for_used_helper = results.stale_suppressions.iter().any(|s| {
         s.path.ends_with("utils.ts")
@@ -336,13 +336,13 @@ fn stale_skipped_when_kind_severity_off() {
 
     assert!(
         !stale_for_used_helper,
-        "expected no stale-suppression for `// fallow-ignore-next-line unused-export` \
+        "expected no stale-suppression for `// plow-ignore-next-line unused-export` \
          when rules.unused-exports is OFF. Got: {:?}",
         results.stale_suppressions
     );
 }
 
-/// Verifies the BLANKET case is unaffected: `// fallow-ignore-next-line`
+/// Verifies the BLANKET case is unaffected: `// plow-ignore-next-line`
 /// (no kind) is not anchored to any specific dormant rule, so "nothing
 /// matched" still means genuinely stale, even when sibling kinds are OFF.
 #[test]
@@ -351,9 +351,9 @@ fn blanket_marker_still_stale_when_other_kinds_off() {
     let config = create_config_with_rules(root, |r| {
         r.unused_exports = Severity::Off;
     });
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
-    // utils.ts line 11 is the blanket `// fallow-ignore-next-line` above
+    // utils.ts line 11 is the blanket `// plow-ignore-next-line` above
     // anotherUsedExport. With unused-exports OFF AND no other rule firing
     // on that line, the blanket marker is still stale.
     let stale_blanket = results.stale_suppressions.iter().any(|s| {
@@ -390,7 +390,7 @@ fn stale_respects_per_file_override_off() {
             },
         )],
     );
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let stale_for_utils_unused_export = results.stale_suppressions.iter().any(|s| {
         s.path.ends_with("utils.ts")

@@ -76,7 +76,7 @@ pub enum PluginDetection {
 ///
 /// External plugins provide the same static pattern capabilities as built-in
 /// plugins (entry points, always-used files, used exports, tooling dependencies),
-/// but are defined in standalone files or inline in the fallow config rather than
+/// but are defined in standalone files or inline in the plow config rather than
 /// compiled Rust code.
 ///
 /// They cannot do AST-based config parsing (`resolve_config()`), but cover the
@@ -86,7 +86,7 @@ pub enum PluginDetection {
 ///
 /// ```json
 /// {
-///   "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/plugin-schema.json",
+///   "$schema": "https://raw.githubusercontent.com/plow-rs/plow/main/plugin-schema.json",
 ///   "name": "my-framework",
 ///   "enablers": ["my-framework", "@my-framework/core"],
 ///   "entryPoints": ["src/routes/**/*.{ts,tsx}"],
@@ -180,9 +180,9 @@ impl ExternalPluginDef {
     /// including patterns nested inside `detection` combinators (`all` / `any`).
     ///
     /// Pattern names use the same `framework[].<field>` notation used by
-    /// inline plugin definitions in `FallowConfig::validate_user_globs` so the
+    /// inline plugin definitions in `PlowConfig::validate_user_globs` so the
     /// user sees consistent field paths whether the plugin is inline or
-    /// loaded from `.fallow/plugins/` / `fallow-plugin-*.{toml,json,jsonc}`.
+    /// loaded from `.plow/plugins/` / `plow-plugin-*.{toml,json,jsonc}`.
     ///
     /// # Errors
     ///
@@ -248,7 +248,7 @@ fn validate_detection_user_globs(
 /// the per-plugin glob validation step required for security
 /// (see issue #463: `framework[].detection.fileExists.pattern` reaches
 /// `glob::glob` on disk via `root.join(pattern)`, so a `..` segment loaded
-/// from `.fallow/plugins/` would be a real path traversal).
+/// from `.plow/plugins/` would be a real path traversal).
 ///
 /// # Errors
 ///
@@ -328,8 +328,8 @@ fn parse_plugin(content: &str, format: &PluginFormat, path: &Path) -> Option<Ext
 ///
 /// Discovery order (first occurrence of a plugin name wins):
 /// 1. Paths from the `plugins` config field (files or directories)
-/// 2. `.fallow/plugins/` directory (auto-discover `*.toml`, `*.json`, `*.jsonc` files)
-/// 3. Project root `fallow-plugin-*` files (`.toml`, `.json`, `.jsonc`)
+/// 2. `.plow/plugins/` directory (auto-discover `*.toml`, `*.json`, `*.jsonc` files)
+/// 3. Project root `plow-plugin-*` files (`.toml`, `.json`, `.jsonc`)
 pub fn discover_external_plugins(
     root: &Path,
     config_plugin_paths: &[String],
@@ -354,13 +354,13 @@ pub fn discover_external_plugins(
         }
     }
 
-    // 2. .fallow/plugins/ directory
-    let plugins_dir = root.join(".fallow").join("plugins");
+    // 2. .plow/plugins/ directory
+    let plugins_dir = root.join(".plow").join("plugins");
     if plugins_dir.is_dir() && is_within_root(&plugins_dir, &canonical_root) {
         load_plugins_from_dir(&plugins_dir, &canonical_root, &mut plugins, &mut seen_names);
     }
 
-    // 3. Project root fallow-plugin-* files (.toml, .json, .jsonc)
+    // 3. Project root plow-plugin-* files (.toml, .json, .jsonc)
     if let Ok(entries) = std::fs::read_dir(root) {
         let mut plugin_files: Vec<PathBuf> = entries
             .filter_map(Result::ok)
@@ -368,7 +368,7 @@ pub fn discover_external_plugins(
             .filter(|p| {
                 p.is_file()
                     && p.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
-                        n.starts_with("fallow-plugin-") && is_plugin_file(Path::new(n))
+                        n.starts_with("plow-plugin-") && is_plugin_file(Path::new(n))
                     })
             })
             .collect();
@@ -667,7 +667,7 @@ exports = ["default"]
     #[test]
     fn deserialize_json_with_schema_field() {
         let json_str = r#"{
-            "$schema": "https://fallow.dev/plugin-schema.json",
+            "$schema": "https://plow.dev/plugin-schema.json",
             "name": "schema-plugin",
             "enablers": ["my-pkg"]
         }"#;
@@ -685,10 +685,10 @@ exports = ["default"]
     }
 
     #[test]
-    fn discover_plugins_from_fallow_plugins_dir() {
+    fn discover_plugins_from_plow_plugins_dir() {
         let dir =
-            std::env::temp_dir().join(format!("fallow-test-ext-plugins-{}", std::process::id()));
-        let plugins_dir = dir.join(".fallow").join("plugins");
+            std::env::temp_dir().join(format!("plow-test-ext-plugins-{}", std::process::id()));
+        let plugins_dir = dir.join(".plow").join("plugins");
         let _ = std::fs::create_dir_all(&plugins_dir);
 
         std::fs::write(
@@ -709,12 +709,12 @@ entryPoints = ["src/**/*.ts"]
     }
 
     #[test]
-    fn discover_json_plugins_from_fallow_plugins_dir() {
+    fn discover_json_plugins_from_plow_plugins_dir() {
         let dir = std::env::temp_dir().join(format!(
-            "fallow-test-ext-json-plugins-{}",
+            "plow-test-ext-json-plugins-{}",
             std::process::id()
         ));
-        let plugins_dir = dir.join(".fallow").join("plugins");
+        let plugins_dir = dir.join(".plow").join("plugins");
         let _ = std::fs::create_dir_all(&plugins_dir);
 
         std::fs::write(
@@ -743,13 +743,13 @@ entryPoints = ["src/**/*.ts"]
     }
 
     #[test]
-    fn discover_fallow_plugin_files_in_root() {
+    fn discover_plow_plugin_files_in_root() {
         let dir =
-            std::env::temp_dir().join(format!("fallow-test-root-plugins-{}", std::process::id()));
+            std::env::temp_dir().join(format!("plow-test-root-plugins-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
 
         std::fs::write(
-            dir.join("fallow-plugin-custom.toml"),
+            dir.join("plow-plugin-custom.toml"),
             r#"
 name = "custom"
 enablers = ["custom-pkg"]
@@ -768,21 +768,21 @@ enablers = ["custom-pkg"]
     }
 
     #[test]
-    fn discover_fallow_plugin_json_files_in_root() {
+    fn discover_plow_plugin_json_files_in_root() {
         let dir = std::env::temp_dir().join(format!(
-            "fallow-test-root-json-plugins-{}",
+            "plow-test-root-json-plugins-{}",
             std::process::id()
         ));
         let _ = std::fs::create_dir_all(&dir);
 
         std::fs::write(
-            dir.join("fallow-plugin-custom.json"),
+            dir.join("plow-plugin-custom.json"),
             r#"{"name": "json-root", "enablers": ["json-pkg"]}"#,
         )
         .unwrap();
 
         std::fs::write(
-            dir.join("fallow-plugin-custom2.jsonc"),
+            dir.join("plow-plugin-custom2.jsonc"),
             r#"{
                 // JSONC root plugin
                 "name": "jsonc-root",
@@ -793,7 +793,7 @@ enablers = ["custom-pkg"]
 
         // Non-matching extension should be ignored
         std::fs::write(
-            dir.join("fallow-plugin-bad.yaml"),
+            dir.join("plow-plugin-bad.yaml"),
             "name: ignored\nenablers:\n  - pkg\n",
         )
         .unwrap();
@@ -807,8 +807,8 @@ enablers = ["custom-pkg"]
     #[test]
     fn discover_mixed_formats_in_dir() {
         let dir =
-            std::env::temp_dir().join(format!("fallow-test-mixed-plugins-{}", std::process::id()));
-        let plugins_dir = dir.join(".fallow").join("plugins");
+            std::env::temp_dir().join(format!("plow-test-mixed-plugins-{}", std::process::id()));
+        let plugins_dir = dir.join(".plow").join("plugins");
         let _ = std::fs::create_dir_all(&plugins_dir);
 
         std::fs::write(
@@ -848,11 +848,11 @@ enablers = ["toml-pkg"]
     #[test]
     fn deduplicates_by_name() {
         let dir =
-            std::env::temp_dir().join(format!("fallow-test-dedup-plugins-{}", std::process::id()));
-        let plugins_dir = dir.join(".fallow").join("plugins");
+            std::env::temp_dir().join(format!("plow-test-dedup-plugins-{}", std::process::id()));
+        let plugins_dir = dir.join(".plow").join("plugins");
         let _ = std::fs::create_dir_all(&plugins_dir);
 
-        // Same name in .fallow/plugins/ and root
+        // Same name in .plow/plugins/ and root
         std::fs::write(
             plugins_dir.join("my-plugin.toml"),
             r#"
@@ -863,7 +863,7 @@ enablers = ["pkg-a"]
         .unwrap();
 
         std::fs::write(
-            dir.join("fallow-plugin-my-plugin.toml"),
+            dir.join("plow-plugin-my-plugin.toml"),
             r#"
 name = "my-plugin"
 enablers = ["pkg-b"]
@@ -873,7 +873,7 @@ enablers = ["pkg-b"]
 
         let plugins = discover_external_plugins(&dir, &[]);
         assert_eq!(plugins.len(), 1);
-        // First one wins (.fallow/plugins/ before root)
+        // First one wins (.plow/plugins/ before root)
         assert_eq!(plugins[0].enablers, vec!["pkg-a"]);
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -882,7 +882,7 @@ enablers = ["pkg-b"]
     #[test]
     fn config_plugin_paths_take_priority() {
         let dir =
-            std::env::temp_dir().join(format!("fallow-test-config-paths-{}", std::process::id()));
+            std::env::temp_dir().join(format!("plow-test-config-paths-{}", std::process::id()));
         let custom_dir = dir.join("custom-plugins");
         let _ = std::fs::create_dir_all(&custom_dir);
 
@@ -905,7 +905,7 @@ enablers = ["explicit-pkg"]
     #[test]
     fn config_plugin_path_to_single_file() {
         let dir =
-            std::env::temp_dir().join(format!("fallow-test-single-file-{}", std::process::id()));
+            std::env::temp_dir().join(format!("plow-test-single-file-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
 
         std::fs::write(
@@ -927,7 +927,7 @@ enablers = ["single-pkg"]
     #[test]
     fn config_plugin_path_to_single_json_file() {
         let dir = std::env::temp_dir().join(format!(
-            "fallow-test-single-json-file-{}",
+            "plow-test-single-json-file-{}",
             std::process::id()
         ));
         let _ = std::fs::create_dir_all(&dir);
@@ -948,8 +948,8 @@ enablers = ["single-pkg"]
     #[test]
     fn skips_invalid_toml() {
         let dir =
-            std::env::temp_dir().join(format!("fallow-test-invalid-plugin-{}", std::process::id()));
-        let plugins_dir = dir.join(".fallow").join("plugins");
+            std::env::temp_dir().join(format!("plow-test-invalid-plugin-{}", std::process::id()));
+        let plugins_dir = dir.join(".plow").join("plugins");
         let _ = std::fs::create_dir_all(&plugins_dir);
 
         // Invalid: missing required `name` field
@@ -975,10 +975,10 @@ enablers = ["good-pkg"]
     #[test]
     fn skips_invalid_json() {
         let dir = std::env::temp_dir().join(format!(
-            "fallow-test-invalid-json-plugin-{}",
+            "plow-test-invalid-json-plugin-{}",
             std::process::id()
         ));
-        let plugins_dir = dir.join(".fallow").join("plugins");
+        let plugins_dir = dir.join(".plow").join("plugins");
         let _ = std::fs::create_dir_all(&plugins_dir);
 
         // Invalid JSON: missing name
@@ -1011,8 +1011,8 @@ enablers = ["@myorg/"]
     #[test]
     fn skips_empty_name() {
         let dir =
-            std::env::temp_dir().join(format!("fallow-test-empty-name-{}", std::process::id()));
-        let plugins_dir = dir.join(".fallow").join("plugins");
+            std::env::temp_dir().join(format!("plow-test-empty-name-{}", std::process::id()));
+        let plugins_dir = dir.join(".plow").join("plugins");
         let _ = std::fs::create_dir_all(&plugins_dir);
 
         std::fs::write(
@@ -1033,7 +1033,7 @@ enablers = ["pkg"]
     #[test]
     fn rejects_paths_outside_root() {
         let dir =
-            std::env::temp_dir().join(format!("fallow-test-path-escape-{}", std::process::id()));
+            std::env::temp_dir().join(format!("plow-test-path-escape-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
 
         // Attempt to load a plugin from outside the project root
@@ -1221,7 +1221,7 @@ pattern = "next.config.js"
     #[test]
     fn plugin_all_fields_json() {
         let json = r#"{
-            "$schema": "https://fallow.dev/plugin-schema.json",
+            "$schema": "https://plow.dev/plugin-schema.json",
             "name": "full-plugin",
             "detection": {"type": "dependency", "package": "my-pkg"},
             "enablers": ["fallback-enabler"],

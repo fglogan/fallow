@@ -1,17 +1,17 @@
 // VS Code injects this module into the extension host at runtime.
-// fallow-ignore-next-line unlisted-dependency
+// plow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
 import {
   DiagnosticFilter,
   diagnosticCode,
   getDiagnosticCategories,
-  isFallowDiagnostic,
+  isPlowDiagnostic,
 } from "./diagnosticFilter.js";
 
 const DUPLICATE_CODE = "code-duplication";
-const STATUS_ITEM_ID = "fallow.diagnosticMutes";
-const CODE_ACTION_KIND = vscode.CodeActionKind.QuickFix.append("fallow.mute");
-const FALLOW_LANGUAGES = [
+const STATUS_ITEM_ID = "plow.diagnosticMutes";
+const CODE_ACTION_KIND = vscode.CodeActionKind.QuickFix.append("plow.mute");
+const PLOW_LANGUAGES = [
   "javascript",
   "javascriptreact",
   "typescript",
@@ -33,7 +33,7 @@ const muteScopeTooltip = (filter: DiagnosticFilter): vscode.MarkdownString => {
   const mutedAll = filter.isMutedAll();
   const lines: string[] = [];
   if (mutedAll) {
-    lines.push("**All Fallow findings hidden** in the editor.");
+    lines.push("**All Plow findings hidden** in the editor.");
   } else if (muted.length > 0) {
     lines.push(`**Hiding ${muted.length} ${categoryWord(muted.length)}** in the editor:`);
     lines.push("");
@@ -41,11 +41,11 @@ const muteScopeTooltip = (filter: DiagnosticFilter): vscode.MarkdownString => {
       lines.push(`- ${m}`);
     }
   } else {
-    lines.push("All Fallow findings visible.");
+    lines.push("All Plow findings visible.");
   }
   lines.push("");
-  lines.push("Local view filter only. CI and `fallow check` still report every finding.");
-  lines.push("To disable a rule project-wide, edit your fallow config.");
+  lines.push("Local view filter only. CI and `plow check` still report every finding.");
+  lines.push("To disable a rule project-wide, edit your plow config.");
   const md = new vscode.MarkdownString(lines.join("\n"));
   md.isTrusted = false;
   md.supportThemeIcons = true;
@@ -54,10 +54,10 @@ const muteScopeTooltip = (filter: DiagnosticFilter): vscode.MarkdownString => {
 
 const summaryText = (filter: DiagnosticFilter): string => {
   if (filter.isMutedAll()) {
-    return "Fallow: hiding all";
+    return "Plow: hiding all";
   }
   const n = filter.mutedCategoriesSnapshot().size;
-  return `Fallow: hiding ${n} ${categoryWord(n)}`;
+  return `Plow: hiding ${n} ${categoryWord(n)}`;
 };
 
 /** A LanguageStatusItem in the right gutter that surfaces mute state.
@@ -65,14 +65,14 @@ const summaryText = (filter: DiagnosticFilter): string => {
  *  hidden. Click opens the manage-mutes QuickPick. A secondary command
  *  clears all mutes in one click. */
 const createLanguageStatus = (filter: DiagnosticFilter): vscode.LanguageStatusItem => {
-  const selector = FALLOW_LANGUAGES.map((language) => ({
+  const selector = PLOW_LANGUAGES.map((language) => ({
     scheme: "file",
     language,
   }));
   const item = vscode.languages.createLanguageStatusItem(STATUS_ITEM_ID, []);
-  item.name = "Fallow Mute";
+  item.name = "Plow Mute";
   item.accessibilityInformation = {
-    label: "Fallow diagnostic mute status",
+    label: "Plow diagnostic mute status",
     role: "button",
   };
 
@@ -80,7 +80,7 @@ const createLanguageStatus = (filter: DiagnosticFilter): vscode.LanguageStatusIt
     if (!filter.anythingMuted()) {
       item.selector = [];
       item.severity = vscode.LanguageStatusSeverity.Information;
-      item.text = "$(check) Fallow";
+      item.text = "$(check) Plow";
       item.detail = "all findings visible";
       item.command = undefined;
       return;
@@ -90,9 +90,9 @@ const createLanguageStatus = (filter: DiagnosticFilter): vscode.LanguageStatusIt
     item.text = `$(eye-closed) ${summaryText(filter)}`;
     item.detail = "click to manage";
     item.command = {
-      command: "fallow.manageDiagnosticMutes",
+      command: "plow.manageDiagnosticMutes",
       title: "Manage",
-      tooltip: "Manage Fallow diagnostic mutes",
+      tooltip: "Manage Plow diagnostic mutes",
     };
   };
 
@@ -108,24 +108,24 @@ interface ManagePickItem extends vscode.QuickPickItem {
 const TITLE_BUTTONS = {
   toggleAll: {
     iconPath: new vscode.ThemeIcon("eye-closed"),
-    tooltip: "Toggle mute for ALL Fallow findings",
+    tooltip: "Toggle mute for ALL Plow findings",
   },
   clearAll: {
     iconPath: new vscode.ThemeIcon("clear-all"),
-    tooltip: "Show all Fallow findings (clear all mutes)",
+    tooltip: "Show all Plow findings (clear all mutes)",
   },
 } as const;
 
 const showManageQuickPick = async (filter: DiagnosticFilter): Promise<void> => {
   const pick = vscode.window.createQuickPick<ManagePickItem>();
-  pick.title = "Fallow: manage diagnostic mutes (CI is unaffected)";
+  pick.title = "Plow: manage diagnostic mutes (CI is unaffected)";
   pick.placeholder = "Check categories to hide them in the editor. Press Enter to apply.";
   pick.canSelectMany = true;
   pick.matchOnDetail = true;
   pick.buttons = [TITLE_BUTTONS.toggleAll, TITLE_BUTTONS.clearAll];
 
   const globalItem: ManagePickItem = {
-    label: "$(eye-closed) All Fallow Findings",
+    label: "$(eye-closed) All Plow Findings",
     description: filter.isMutedAll() ? "currently hidden" : "currently visible",
     detail: "Global editor-only mute. Use the title buttons to toggle or clear it.",
     code: null,
@@ -179,17 +179,17 @@ const showManageQuickPick = async (filter: DiagnosticFilter): Promise<void> => {
 const updateContextKey = (filter: DiagnosticFilter): void => {
   void vscode.commands.executeCommand(
     "setContext",
-    "fallow.duplicatesMuted",
+    "plow.duplicatesMuted",
     filter.isCategoryMuted(DUPLICATE_CODE) || filter.isMutedAll(),
   );
   void vscode.commands.executeCommand(
     "setContext",
-    "fallow.allDiagnosticsMuted",
+    "plow.allDiagnosticsMuted",
     filter.isMutedAll(),
   );
 };
 
-class FallowMuteCodeActions implements vscode.CodeActionProvider {
+class PlowMuteCodeActions implements vscode.CodeActionProvider {
   public static readonly providedKinds: ReadonlyArray<vscode.CodeActionKind> = [CODE_ACTION_KIND];
 
   public provideCodeActions(
@@ -200,7 +200,7 @@ class FallowMuteCodeActions implements vscode.CodeActionProvider {
     const seen = new Set<string>();
     const actions: vscode.CodeAction[] = [];
     for (const diag of context.diagnostics) {
-      if (!isFallowDiagnostic(diag)) {
+      if (!isPlowDiagnostic(diag)) {
         continue;
       }
       const code = diagnosticCode(diag);
@@ -210,12 +210,12 @@ class FallowMuteCodeActions implements vscode.CodeActionProvider {
       seen.add(code);
       const label = labelFor(code);
       const action = new vscode.CodeAction(
-        `Mute Fallow ${label.toLowerCase()} findings in this workspace`,
+        `Mute Plow ${label.toLowerCase()} findings in this workspace`,
         CODE_ACTION_KIND,
       );
       action.command = {
-        command: "fallow.muteDiagnosticCategory",
-        title: "Mute Fallow category",
+        command: "plow.muteDiagnosticCategory",
+        title: "Mute Plow category",
         arguments: [code],
       };
       action.diagnostics = [diag];
@@ -242,53 +242,53 @@ export const registerDiagnosticMuteUi = (
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("fallow.toggleMuteDuplicates", () => {
+    vscode.commands.registerCommand("plow.toggleMuteDuplicates", () => {
       const nowMuted = filter.toggleCategory(DUPLICATE_CODE);
       void vscode.window.setStatusBarMessage(
         nowMuted
-          ? "Fallow: muted code-duplication findings (CI is unaffected)"
-          : "Fallow: showing code-duplication findings",
+          ? "Plow: muted code-duplication findings (CI is unaffected)"
+          : "Plow: showing code-duplication findings",
         4000,
       );
     }),
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("fallow.toggleAllDiagnostics", () => {
+    vscode.commands.registerCommand("plow.toggleAllDiagnostics", () => {
       const nowMuted = filter.toggleMutedAll();
       void vscode.window.setStatusBarMessage(
-        nowMuted ? "Fallow: muted all findings (CI is unaffected)" : "Fallow: showing all findings",
+        nowMuted ? "Plow: muted all findings (CI is unaffected)" : "Plow: showing all findings",
         4000,
       );
     }),
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("fallow.manageDiagnosticMutes", async () => {
+    vscode.commands.registerCommand("plow.manageDiagnosticMutes", async () => {
       await showManageQuickPick(filter);
     }),
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("fallow.clearDiagnosticMutes", () => {
+    vscode.commands.registerCommand("plow.clearDiagnosticMutes", () => {
       filter.clearAllMutes();
     }),
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("fallow.muteDiagnosticCategory", (code: unknown) => {
+    vscode.commands.registerCommand("plow.muteDiagnosticCategory", (code: unknown) => {
       if (typeof code === "string" && code.length > 0) {
         filter.setCategoryMuted(code, true);
       }
     }),
   );
 
-  for (const language of FALLOW_LANGUAGES) {
+  for (const language of PLOW_LANGUAGES) {
     context.subscriptions.push(
       vscode.languages.registerCodeActionsProvider(
         { scheme: "file", language },
-        new FallowMuteCodeActions(),
-        { providedCodeActionKinds: FallowMuteCodeActions.providedKinds },
+        new PlowMuteCodeActions(),
+        { providedCodeActionKinds: PlowMuteCodeActions.providedKinds },
       ),
     );
   }

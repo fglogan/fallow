@@ -62,7 +62,7 @@ pub fn mint_runtime_coverage_jwt() -> String {
 
     let header = json!({ "alg": "EdDSA", "typ": "JWT" });
     let payload = json!({
-        "iss": "https://test.fallow.cloud",
+        "iss": "https://test.plow.cloud",
         "sub": "test-org",
         "tid": "test-tenant",
         "seats": 1,
@@ -88,7 +88,7 @@ pub fn mint_expired_runtime_coverage_jwt() -> String {
 
     let header = json!({ "alg": "EdDSA", "typ": "JWT" });
     let payload = json!({
-        "iss": "https://test.fallow.cloud",
+        "iss": "https://test.plow.cloud",
         "sub": "test-org",
         "tid": "test-tenant",
         "seats": 1,

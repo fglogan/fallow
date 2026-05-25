@@ -19,11 +19,11 @@ use signal_hook::iterator::Signals;
 use super::handle_signal;
 
 /// Install handlers for SIGINT + SIGTERM. Spawns a daemon thread that
-/// outlives every fallow subcommand; the OS reaps it on process exit.
+/// outlives every plow subcommand; the OS reaps it on process exit.
 pub fn install() -> io::Result<()> {
     let mut signals = Signals::new([SIGINT, SIGTERM])?;
     thread::Builder::new()
-        .name("fallow-signal-listener".into())
+        .name("plow-signal-listener".into())
         .spawn(move || {
             for signal in signals.forever() {
                 let exit_code = match signal {

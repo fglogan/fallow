@@ -2,7 +2,7 @@
 //!
 //! Vital signs are a fixed set of project-wide metrics computed from available
 //! health data. They are always shown as a summary in the health report and can
-//! be persisted to `.fallow/snapshots/` for Phase 2b trend tracking.
+//! be persisted to `.plow/snapshots/` for Phase 2b trend tracking.
 
 use std::path::{Path, PathBuf};
 
@@ -21,13 +21,13 @@ use crate::health_types::{
 /// Fields are `Option` because not all pipelines run in every health invocation.
 pub struct VitalSignsInput<'a> {
     /// All parsed modules (always available).
-    pub modules: &'a [fallow_core::extract::ModuleInfo],
+    pub modules: &'a [plow_core::extract::ModuleInfo],
     /// Optional file-id allowlist used to restrict per-module aggregates
     /// (cyclomatic distribution, total LOC, unit profiles) to a subset.
     /// Used by `--workspace` and `--group-by` to scope project-wide metrics
     /// to a single workspace package without re-parsing.
     /// `None` includes every module in `modules`.
-    pub module_filter: Option<&'a rustc_hash::FxHashSet<fallow_core::discover::FileId>>,
+    pub module_filter: Option<&'a rustc_hash::FxHashSet<plow_core::discover::FileId>>,
     /// File health scores (available when file_scores/hotspots/targets are computed).
     pub file_scores: Option<&'a [FileHealthScore]>,
     /// Hotspot entries (available when hotspots are computed).
@@ -43,7 +43,7 @@ pub struct VitalSignsInput<'a> {
 
 impl<'a> VitalSignsInput<'a> {
     /// Iterate the modules selected by `module_filter`.
-    fn selected_modules(&self) -> impl Iterator<Item = &'a fallow_core::extract::ModuleInfo> + '_ {
+    fn selected_modules(&self) -> impl Iterator<Item = &'a plow_core::extract::ModuleInfo> + '_ {
         let filter = self.module_filter;
         self.modules
             .iter()
@@ -542,7 +542,7 @@ fn git_sha(root: &Path) -> Option<String> {
     command
         .args(["rev-parse", "--short", "HEAD"])
         .current_dir(root);
-    fallow_core::git_env::clear_ambient_git_env(&mut command);
+    plow_core::git_env::clear_ambient_git_env(&mut command);
     command
         .output()
         .ok()
@@ -556,7 +556,7 @@ fn git_branch(root: &Path) -> Option<String> {
     command
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
         .current_dir(root);
-    fallow_core::git_env::clear_ambient_git_env(&mut command);
+    plow_core::git_env::clear_ambient_git_env(&mut command);
     command
         .output()
         .ok()
@@ -633,7 +633,7 @@ const fn days_to_ymd(days: u64) -> (u64, u64, u64) {
 
 /// Save a snapshot to disk.
 ///
-/// If `path` is `None`, writes to `.fallow/snapshots/{timestamp}.json`.
+/// If `path` is `None`, writes to `.plow/snapshots/{timestamp}.json`.
 /// Creates parent directories as needed.
 pub fn save_snapshot(
     snapshot: &VitalSignsSnapshot,
@@ -642,7 +642,7 @@ pub fn save_snapshot(
 ) -> Result<PathBuf, String> {
     let path = explicit_path.map_or_else(
         || {
-            let dir = root.join(".fallow").join("snapshots");
+            let dir = root.join(".plow").join("snapshots");
             // Use the snapshot timestamp for the filename (replace colons for Windows compat)
             let filename = snapshot.timestamp.replace(':', "-");
             dir.join(format!("{filename}.json"))
@@ -668,7 +668,7 @@ pub fn save_snapshot(
 /// Corrupt or unreadable files are skipped with a warning to stderr.
 /// Returns an empty vec if the directory does not exist.
 pub fn load_snapshots(root: &Path) -> Vec<VitalSignsSnapshot> {
-    let dir = root.join(".fallow").join("snapshots");
+    let dir = root.join(".plow").join("snapshots");
     let Ok(entries) = std::fs::read_dir(&dir) else {
         return Vec::new();
     };
@@ -995,9 +995,9 @@ impl RoundTo for f64 {
 mod tests {
     use super::*;
 
-    fn make_module(id: u32, cyclomatic: u16) -> fallow_core::extract::ModuleInfo {
-        fallow_core::extract::ModuleInfo {
-            file_id: fallow_core::discover::FileId(id),
+    fn make_module(id: u32, cyclomatic: u16) -> plow_core::extract::ModuleInfo {
+        plow_core::extract::ModuleInfo {
+            file_id: plow_core::discover::FileId(id),
             exports: Vec::new(),
             imports: Vec::new(),
             re_exports: Vec::new(),
@@ -1022,7 +1022,7 @@ mod tests {
             namespace_object_aliases: Vec::new(),
             iconify_prefixes: Vec::new(),
             auto_import_candidates: Vec::new(),
-            complexity: vec![fallow_types::extract::FunctionComplexity {
+            complexity: vec![plow_types::extract::FunctionComplexity {
                 name: format!("fn_{id}"),
                 line: id + 1,
                 col: 0,
@@ -1039,7 +1039,7 @@ mod tests {
         clippy::cast_possible_truncation,
         reason = "test values are trivially small"
     )]
-    fn make_modules() -> Vec<fallow_core::extract::ModuleInfo> {
+    fn make_modules() -> Vec<plow_core::extract::ModuleInfo> {
         // Cyclomatic values: 2, 4, 6, 8, 10, 12, 14, 16, 18, 20
         (0..10)
             .map(|i| make_module(i, (i as u16 + 1) * 2))
@@ -1112,7 +1112,7 @@ mod tests {
                 lines_deleted: 50,
                 complexity_density: 0.5,
                 fan_in: 5,
-                trend: fallow_core::churn::ChurnTrend::Stable,
+                trend: plow_core::churn::ChurnTrend::Stable,
                 ownership: None,
                 is_test_path: false,
             },
@@ -1125,7 +1125,7 @@ mod tests {
                 lines_deleted: 20,
                 complexity_density: 0.2,
                 fan_in: 2,
-                trend: fallow_core::churn::ChurnTrend::Cooling,
+                trend: plow_core::churn::ChurnTrend::Cooling,
                 ownership: None,
                 is_test_path: false,
             },
@@ -1138,7 +1138,7 @@ mod tests {
                 lines_deleted: 30,
                 complexity_density: 0.4,
                 fan_in: 3,
-                trend: fallow_core::churn::ChurnTrend::Accelerating,
+                trend: plow_core::churn::ChurnTrend::Accelerating,
                 ownership: None,
                 is_test_path: false,
             },
@@ -1201,7 +1201,7 @@ mod tests {
         let saved_path = save_snapshot(&snapshot, root, None).unwrap();
 
         assert!(saved_path.exists());
-        assert!(saved_path.starts_with(root.join(".fallow/snapshots")));
+        assert!(saved_path.starts_with(root.join(".plow/snapshots")));
 
         // Load and verify
         let content = std::fs::read_to_string(&saved_path).unwrap();
@@ -1480,7 +1480,7 @@ mod tests {
     fn load_snapshots_returns_sorted() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        let snap_dir = root.join(".fallow/snapshots");
+        let snap_dir = root.join(".plow/snapshots");
         std::fs::create_dir_all(&snap_dir).unwrap();
 
         let older = make_test_snapshot("2026-01-01T00:00:00Z", Some(72.0));
@@ -1508,7 +1508,7 @@ mod tests {
     fn load_snapshots_skips_corrupt_files() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        let snap_dir = root.join(".fallow/snapshots");
+        let snap_dir = root.join(".plow/snapshots");
         std::fs::create_dir_all(&snap_dir).unwrap();
 
         std::fs::write(snap_dir.join("corrupt.json"), "not valid json").unwrap();
@@ -1528,7 +1528,7 @@ mod tests {
     fn load_snapshots_ignores_non_json() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        let snap_dir = root.join(".fallow/snapshots");
+        let snap_dir = root.join(".plow/snapshots");
         std::fs::create_dir_all(&snap_dir).unwrap();
 
         std::fs::write(snap_dir.join("readme.txt"), "not a snapshot").unwrap();

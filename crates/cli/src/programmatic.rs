@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use fallow_config::{EmailMode, OutputFormat};
-use fallow_core::results::AnalysisResults;
+use plow_config::{EmailMode, OutputFormat};
+use plow_core::results::AnalysisResults;
 use serde::Serialize;
 
 use crate::check::{CheckOptions, IssueFilters, TraceOptions};
@@ -291,7 +291,7 @@ impl AnalysisOptions {
         if self.threads == Some(0) {
             return Err(
                 ProgrammaticError::new("`threads` must be greater than 0", 2)
-                    .with_code("FALLOW_INVALID_THREADS")
+                    .with_code("PLOW_INVALID_THREADS")
                     .with_context("analysis.threads"),
             );
         }
@@ -300,7 +300,7 @@ impl AnalysisOptions {
                 "`workspace` and `changed_workspaces` are mutually exclusive",
                 2,
             )
-            .with_code("FALLOW_MUTUALLY_EXCLUSIVE_OPTIONS")
+            .with_code("PLOW_MUTUALLY_EXCLUSIVE_OPTIONS")
             .with_context("analysis.workspace"));
         }
 
@@ -312,7 +312,7 @@ impl AnalysisOptions {
                     format!("failed to resolve current working directory: {err}"),
                     2,
                 )
-                .with_code("FALLOW_CWD_UNAVAILABLE")
+                .with_code("PLOW_CWD_UNAVAILABLE")
                 .with_context("analysis.root")
             })?
         };
@@ -322,7 +322,7 @@ impl AnalysisOptions {
                 format!("analysis root does not exist: {}", root.display()),
                 2,
             )
-            .with_code("FALLOW_INVALID_ROOT")
+            .with_code("PLOW_INVALID_ROOT")
             .with_context("analysis.root"));
         }
         if !root.is_dir() {
@@ -330,7 +330,7 @@ impl AnalysisOptions {
                 format!("analysis root is not a directory: {}", root.display()),
                 2,
             )
-            .with_code("FALLOW_INVALID_ROOT")
+            .with_code("PLOW_INVALID_ROOT")
             .with_context("analysis.root"));
         }
 
@@ -341,14 +341,14 @@ impl AnalysisOptions {
                 format!("config file does not exist: {}", config_path.display()),
                 2,
             )
-            .with_code("FALLOW_INVALID_CONFIG_PATH")
+            .with_code("PLOW_INVALID_CONFIG_PATH")
             .with_context("analysis.configPath"));
         }
 
         let threads = self.threads.unwrap_or_else(default_threads);
         let pool = crate::rayon_pool::build_thread_pool(threads).map_err(|err| {
             ProgrammaticError::new(format!("failed to build analysis thread pool: {err}"), 2)
-                .with_code("FALLOW_THREAD_POOL_INIT_FAILED")
+                .with_code("PLOW_THREAD_POOL_INIT_FAILED")
                 .with_context("analysis.threads")
         })?;
         let diff = self
@@ -396,7 +396,7 @@ fn load_explicit_diff_file(path: &Path, root: &Path) -> ProgrammaticResult<Loade
             "`diff_file` does not support stdin; pass a file path",
             2,
         )
-        .with_code("FALLOW_INVALID_DIFF_FILE")
+        .with_code("PLOW_INVALID_DIFF_FILE")
         .with_context("analysis.diffFile"));
     }
 
@@ -414,7 +414,7 @@ fn load_explicit_diff_file(path: &Path, root: &Path) -> ProgrammaticResult<Loade
             ),
             2,
         )
-        .with_code("FALLOW_INVALID_DIFF_FILE")
+        .with_code("PLOW_INVALID_DIFF_FILE")
         .with_context("analysis.diffFile")
     })?;
     if !meta.is_file() {
@@ -422,7 +422,7 @@ fn load_explicit_diff_file(path: &Path, root: &Path) -> ProgrammaticResult<Loade
             format!("diff path is not a file: {}", abs.display()),
             2,
         )
-        .with_code("FALLOW_INVALID_DIFF_FILE")
+        .with_code("PLOW_INVALID_DIFF_FILE")
         .with_context("analysis.diffFile"));
     }
     if meta.len() > MAX_DIFF_BYTES {
@@ -434,7 +434,7 @@ fn load_explicit_diff_file(path: &Path, root: &Path) -> ProgrammaticResult<Loade
             ),
             2,
         )
-        .with_code("FALLOW_INVALID_DIFF_FILE")
+        .with_code("PLOW_INVALID_DIFF_FILE")
         .with_context("analysis.diffFile"));
     }
 
@@ -443,7 +443,7 @@ fn load_explicit_diff_file(path: &Path, root: &Path) -> ProgrammaticResult<Loade
             format!("failed to read diff file {}: {err}", abs.display()),
             2,
         )
-        .with_code("FALLOW_INVALID_DIFF_FILE")
+        .with_code("PLOW_INVALID_DIFF_FILE")
         .with_context("analysis.diffFile")
     })?;
 
@@ -469,7 +469,7 @@ fn build_dead_code_json(
         crate::report::build_json_with_config_fixable(results, root, elapsed, config_fixable)
             .map_err(|err| {
                 ProgrammaticError::new(format!("failed to serialize dead-code report: {err}"), 2)
-                    .with_code("FALLOW_SERIALIZE_DEAD_CODE_REPORT")
+                    .with_code("PLOW_SERIALIZE_DEAD_CODE_REPORT")
                     .with_context("dead-code")
             })?;
     if explain {
@@ -504,14 +504,14 @@ fn to_issue_filters(filters: &DeadCodeFilters) -> IssueFilters {
 
 fn generic_analysis_error(command: &str) -> ProgrammaticError {
     let code = format!(
-        "FALLOW_{}_FAILED",
+        "PLOW_{}_FAILED",
         command.replace('-', "_").to_ascii_uppercase()
     );
     ProgrammaticError::new(format!("{command} failed"), 2)
         .with_code(code)
-        .with_context(format!("fallow {command}"))
+        .with_context(format!("plow {command}"))
         .with_help(format!(
-            "Re-run `fallow {command} --format json --quiet` in the target project for CLI diagnostics"
+            "Re-run `plow {command} --format json --quiet` in the target project for CLI diagnostics"
         ))
 }
 
@@ -555,7 +555,7 @@ fn build_check_options<'a>(
             save_target: crate::regression::SaveRegressionTarget::None,
             scoped: false,
             quiet: true,
-            output: fallow_config::OutputFormat::Json,
+            output: plow_config::OutputFormat::Json,
         },
         retain_modules_for_health: false,
         defer_performance: false,
@@ -736,7 +736,7 @@ pub fn detect_duplication(options: &DuplicationOptions) -> ProgrammaticResult<se
         )
         .map_err(|err| {
             ProgrammaticError::new(format!("failed to serialize duplication report: {err}"), 2)
-                .with_code("FALLOW_SERIALIZE_DUPLICATION_REPORT")
+                .with_code("PLOW_SERIALIZE_DUPLICATION_REPORT")
                 .with_context("dupes")
         })
     })
@@ -841,14 +841,14 @@ pub fn compute_complexity(options: &ComplexityOptions) -> ProgrammaticResult<ser
             format!("coverage path does not exist: {}", path.display()),
             2,
         )
-        .with_code("FALLOW_INVALID_COVERAGE_PATH")
+        .with_code("PLOW_INVALID_COVERAGE_PATH")
         .with_context("health.coverage"));
     }
     if let Err(message) =
         crate::health::scoring::validate_coverage_root_absolute(options.coverage_root.as_deref())
     {
         return Err(ProgrammaticError::new(message, 2)
-            .with_code("FALLOW_INVALID_COVERAGE_ROOT")
+            .with_code("PLOW_INVALID_COVERAGE_ROOT")
             .with_context("health.coverage_root"));
     }
 
@@ -864,7 +864,7 @@ pub fn compute_complexity(options: &ComplexityOptions) -> ProgrammaticResult<ser
         )
         .map_err(|err| {
             ProgrammaticError::new(format!("failed to serialize health report: {err}"), 2)
-                .with_code("FALLOW_SERIALIZE_HEALTH_REPORT")
+                .with_code("PLOW_SERIALIZE_HEALTH_REPORT")
                 .with_context("health")
         })
     })
@@ -881,7 +881,7 @@ mod tests {
     use crate::report::test_helpers::sample_results;
     use std::process::Command;
 
-    const SHARED_DIFF_CHILD_ENV: &str = "FALLOW_PROGRAMMATIC_SHARED_DIFF_CHILD";
+    const SHARED_DIFF_CHILD_ENV: &str = "PLOW_PROGRAMMATIC_SHARED_DIFF_CHILD";
     const SHARED_DIFF_CHILD_TEST: &str =
         "programmatic::tests::programmatic_without_diff_file_ignores_shared_diff_cache";
 
@@ -926,7 +926,7 @@ mod tests {
         std::fs::write(root.join("src/index.ts"), "export const ok = 1;\n").unwrap();
         std::fs::write(root.join("src/utils.test.ts"), "export const dead = 1;\n").unwrap();
         std::fs::write(
-            root.join(".fallowrc.json"),
+            root.join(".plowrc.json"),
             r#"{"production":{"deadCode":true,"health":false,"dupes":false}}"#,
         )
         .unwrap();
@@ -960,7 +960,7 @@ mod tests {
         std::fs::write(root.join("src/index.ts"), "export const ok = 1;\n").unwrap();
         std::fs::write(root.join("src/utils.test.ts"), "export const dead = 1;\n").unwrap();
         std::fs::write(
-            root.join(".fallowrc.json"),
+            root.join(".plowrc.json"),
             r#"{"production":{"deadCode":true,"health":false,"dupes":false}}"#,
         )
         .unwrap();
@@ -1145,7 +1145,7 @@ mod tests {
             panic!("stdin sentinel is not part of the programmatic API");
         };
 
-        assert_eq!(error.code.as_deref(), Some("FALLOW_INVALID_DIFF_FILE"));
+        assert_eq!(error.code.as_deref(), Some("PLOW_INVALID_DIFF_FILE"));
         assert_eq!(error.context.as_deref(), Some("analysis.diffFile"));
     }
 

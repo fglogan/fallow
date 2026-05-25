@@ -8,10 +8,10 @@ use zed_extension_api::{
     set_language_server_installation_status, settings::LspSettings,
 };
 
-const LANGUAGE_SERVER_ID: &str = "fallow";
-const RELEASE_REPOSITORY: &str = "fallow-rs/fallow";
-const BINARY_BASENAME: &str = "fallow-lsp";
-const MANAGED_DIR_PREFIX: &str = "fallow-";
+const LANGUAGE_SERVER_ID: &str = "plow";
+const RELEASE_REPOSITORY: &str = "plow-rs/plow";
+const BINARY_BASENAME: &str = "plow-lsp";
+const MANAGED_DIR_PREFIX: &str = "plow-";
 const SIGNATURE_SUFFIX: &str = ".sig";
 const BINARY_SIGNING_VERIFY_KEY: [u8; 32] = [
     131, 78, 111, 215, 115, 51, 230, 238, 223, 119, 147, 71, 199, 16, 172, 180, 3, 210, 216, 35,
@@ -40,32 +40,32 @@ impl Platform {
             (zed::Os::Linux, zed::Architecture::X8664) => Ok(Self::LinuxX8664Gnu),
             (zed::Os::Windows, zed::Architecture::X8664) => Ok(Self::WindowsX8664),
             (_, zed::Architecture::X86) => {
-                Err("32-bit x86 is not supported by Fallow release binaries".to_string())
+                Err("32-bit x86 is not supported by Plow release binaries".to_string())
             }
-            _ => Err("This platform is not supported by the Fallow Zed extension".to_string()),
+            _ => Err("This platform is not supported by the Plow Zed extension".to_string()),
         }
     }
 
     fn release_asset_name(self) -> &'static str {
         match self {
-            Self::DarwinAarch64 => "fallow-lsp-darwin-arm64",
-            Self::DarwinX8664 => "fallow-lsp-darwin-x64",
-            Self::LinuxAarch64Gnu => "fallow-lsp-linux-arm64-gnu",
-            Self::LinuxX8664Gnu => "fallow-lsp-linux-x64-gnu",
-            Self::WindowsX8664 => "fallow-lsp-win32-x64-msvc.exe",
+            Self::DarwinAarch64 => "plow-lsp-darwin-arm64",
+            Self::DarwinX8664 => "plow-lsp-darwin-x64",
+            Self::LinuxAarch64Gnu => "plow-lsp-linux-arm64-gnu",
+            Self::LinuxX8664Gnu => "plow-lsp-linux-x64-gnu",
+            Self::WindowsX8664 => "plow-lsp-win32-x64-msvc.exe",
         }
     }
 
     fn executable_name(self) -> &'static str {
         match self {
-            Self::WindowsX8664 => "fallow-lsp.exe",
+            Self::WindowsX8664 => "plow-lsp.exe",
             _ => BINARY_BASENAME,
         }
     }
 
     fn local_binary_candidates(self) -> &'static [&'static str] {
         match self {
-            Self::WindowsX8664 => &["fallow-lsp.cmd", "fallow-lsp.exe"],
+            Self::WindowsX8664 => &["plow-lsp.cmd", "plow-lsp.exe"],
             _ => &[BINARY_BASENAME],
         }
     }
@@ -83,11 +83,11 @@ struct ResolvedBinary {
 }
 
 #[derive(Default)]
-struct FallowExtension {
+struct PlowExtension {
     cached_binary_path: Option<String>,
 }
 
-impl FallowExtension {
+impl PlowExtension {
     fn resolve_binary(
         &mut self,
         language_server_id: &LanguageServerId,
@@ -155,7 +155,7 @@ impl FallowExtension {
             .find(|asset| asset.name == platform.release_asset_name())
             .ok_or_else(|| {
                 format!(
-                    "No fallow-lsp asset found for {} in release {}",
+                    "No plow-lsp asset found for {} in release {}",
                     platform.release_asset_name(),
                     release.version
                 )
@@ -167,7 +167,7 @@ impl FallowExtension {
             .find(|asset| asset.name == signature_asset_name)
             .ok_or_else(|| {
                 format!(
-                    "No fallow-lsp signature asset found for {} in release {}",
+                    "No plow-lsp signature asset found for {} in release {}",
                     signature_asset_name, release.version
                 )
             })?;
@@ -199,20 +199,20 @@ impl FallowExtension {
             &binary_path_string,
             DownloadedFileType::Uncompressed,
         )
-        .map_err(|error| format!("Failed to download fallow-lsp: {error}"))?;
+        .map_err(|error| format!("Failed to download plow-lsp: {error}"))?;
         zed::download_file(
             &signature_asset.download_url,
             &signature_path_string,
             DownloadedFileType::Uncompressed,
         )
-        .map_err(|error| format!("Failed to download fallow-lsp signature: {error}"))?;
+        .map_err(|error| format!("Failed to download plow-lsp signature: {error}"))?;
 
         verify_binary_signature(&binary_path)
-            .map_err(|error| format!("Failed to verify downloaded fallow-lsp: {error}"))?;
+            .map_err(|error| format!("Failed to verify downloaded plow-lsp: {error}"))?;
 
         if platform.needs_executable_bit() {
             make_file_executable(&binary_path_string)
-                .map_err(|error| format!("Failed to make fallow-lsp executable: {error}"))?;
+                .map_err(|error| format!("Failed to make plow-lsp executable: {error}"))?;
         }
 
         cleanup_stale_managed_dirs(&base_dir, &version_dir_name);
@@ -222,7 +222,7 @@ impl FallowExtension {
     }
 }
 
-impl zed::Extension for FallowExtension {
+impl zed::Extension for PlowExtension {
     fn new() -> Self {
         Self::default()
     }
@@ -234,7 +234,7 @@ impl zed::Extension for FallowExtension {
     ) -> Result<zed::Command> {
         if language_server_id.as_ref() != LANGUAGE_SERVER_ID {
             return Err(format!(
-                "Unrecognized language server for Fallow: {language_server_id}"
+                "Unrecognized language server for Plow: {language_server_id}"
             ));
         }
 
@@ -264,7 +264,7 @@ fn ensure_binary_exists(path: &str) -> Result<()> {
         Ok(())
     } else {
         Err(format!(
-            "Configured fallow-lsp binary does not exist: {path}"
+            "Configured plow-lsp binary does not exist: {path}"
         ))
     }
 }
@@ -386,7 +386,7 @@ fn path_to_string(path: PathBuf) -> String {
     path.to_string_lossy().into_owned()
 }
 
-zed::register_extension!(FallowExtension);
+zed::register_extension!(PlowExtension);
 
 #[cfg(test)]
 mod tests {
@@ -405,25 +405,25 @@ mod tests {
             Platform::from_parts(Os::Mac, Architecture::Aarch64)
                 .expect("mac arm64 platform should resolve")
                 .release_asset_name(),
-            "fallow-lsp-darwin-arm64"
+            "plow-lsp-darwin-arm64"
         );
         assert_eq!(
             Platform::from_parts(Os::Mac, Architecture::X8664)
                 .expect("mac x64 platform should resolve")
                 .release_asset_name(),
-            "fallow-lsp-darwin-x64"
+            "plow-lsp-darwin-x64"
         );
         assert_eq!(
             Platform::from_parts(Os::Linux, Architecture::X8664)
                 .expect("linux x64 platform should resolve")
                 .release_asset_name(),
-            "fallow-lsp-linux-x64-gnu"
+            "plow-lsp-linux-x64-gnu"
         );
         assert_eq!(
             Platform::from_parts(Os::Windows, Architecture::X8664)
                 .expect("windows x64 platform should resolve")
                 .release_asset_name(),
-            "fallow-lsp-win32-x64-msvc.exe"
+            "plow-lsp-win32-x64-msvc.exe"
         );
     }
 
@@ -436,18 +436,18 @@ mod tests {
 
     #[test]
     fn finds_local_workspace_binary_for_unix_and_windows() {
-        let root = unique_temp_dir("fallow-zed-local-binary");
+        let root = unique_temp_dir("plow-zed-local-binary");
         let bin_dir = root.join("node_modules").join(".bin");
         fs::create_dir_all(&bin_dir).expect("failed to create node_modules/.bin");
 
-        let unix_binary = bin_dir.join("fallow-lsp");
+        let unix_binary = bin_dir.join("plow-lsp");
         fs::write(&unix_binary, "#!/bin/sh\n").expect("failed to write unix binary");
         assert_eq!(
             find_local_workspace_binary_path(&root, Platform::DarwinAarch64),
             Some(unix_binary)
         );
 
-        let windows_binary = bin_dir.join("fallow-lsp.cmd");
+        let windows_binary = bin_dir.join("plow-lsp.cmd");
         fs::write(&windows_binary, "@echo off\r\n").expect("failed to write windows binary");
         assert_eq!(
             find_local_workspace_binary_path(&root, Platform::WindowsX8664),
@@ -460,22 +460,22 @@ mod tests {
     #[test]
     fn stale_cleanup_only_targets_managed_dirs() {
         assert!(should_remove_stale_managed_entry(
-            "fallow-v2.44.0",
-            "fallow-v2.45.0"
+            "plow-v2.44.0",
+            "plow-v2.45.0"
         ));
         assert!(!should_remove_stale_managed_entry(
-            "fallow-v2.45.0",
-            "fallow-v2.45.0"
+            "plow-v2.45.0",
+            "plow-v2.45.0"
         ));
         assert!(!should_remove_stale_managed_entry(
             "other-extension",
-            "fallow-v2.45.0"
+            "plow-v2.45.0"
         ));
     }
 
     #[test]
     fn managed_binary_path_is_absolute() {
-        let base_dir = unique_temp_dir("fallow-zed-managed");
+        let base_dir = unique_temp_dir("plow-zed-managed");
         let binary_path = managed_binary_path_for(&base_dir, "v2.45.0", Platform::WindowsX8664);
 
         assert!(
@@ -484,14 +484,14 @@ mod tests {
         );
         assert_eq!(
             binary_path.file_name().and_then(|name| name.to_str()),
-            Some("fallow-lsp.exe")
+            Some("plow-lsp.exe")
         );
         assert_eq!(
             binary_path
                 .parent()
                 .and_then(|parent| parent.file_name())
                 .and_then(|name| name.to_str()),
-            Some("fallow-v2.45.0")
+            Some("plow-v2.45.0")
         );
 
         fs::remove_dir_all(&base_dir).expect("failed to clean temp dir");
@@ -499,12 +499,12 @@ mod tests {
 
     #[test]
     fn verifies_valid_managed_binary_signature() {
-        let root = unique_temp_dir("fallow-zed-signature-ok");
-        let binary_path = root.join("fallow-lsp");
-        fs::write(&binary_path, b"hello from fallow").expect("failed to write binary");
+        let root = unique_temp_dir("plow-zed-signature-ok");
+        let binary_path = root.join("plow-lsp");
+        fs::write(&binary_path, b"hello from plow").expect("failed to write binary");
 
         let signing_key = SigningKey::from_bytes(&[7; 32]);
-        let signature = signing_key.sign(b"hello from fallow");
+        let signature = signing_key.sign(b"hello from plow");
         fs::write(binary_signature_path(&binary_path), signature.to_bytes())
             .expect("failed to write signature");
 
@@ -517,9 +517,9 @@ mod tests {
 
     #[test]
     fn rejects_invalid_managed_binary_signature() {
-        let root = unique_temp_dir("fallow-zed-signature-bad");
-        let binary_path = root.join("fallow-lsp");
-        fs::write(&binary_path, b"hello from fallow").expect("failed to write binary");
+        let root = unique_temp_dir("plow-zed-signature-bad");
+        let binary_path = root.join("plow-lsp");
+        fs::write(&binary_path, b"hello from plow").expect("failed to write binary");
         fs::write(binary_signature_path(&binary_path), [0_u8; 64])
             .expect("failed to write signature");
 

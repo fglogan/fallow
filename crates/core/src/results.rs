@@ -1,5 +1,5 @@
-// Re-export all result types from fallow-types
-pub use fallow_types::output_dead_code::{
+// Re-export all result types from plow-types
+pub use plow_types::output_dead_code::{
     BoundaryViolationFinding, CircularDependencyFinding, DuplicateExportFinding,
     EmptyCatalogGroupFinding, MisconfiguredDependencyOverrideFinding, PrivateTypeLeakFinding,
     ReExportCycleFinding, TestOnlyDependencyFinding, TypeOnlyDependencyFinding,
@@ -8,7 +8,7 @@ pub use fallow_types::output_dead_code::{
     UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
     UnusedExportFinding, UnusedFileFinding, UnusedOptionalDependencyFinding, UnusedTypeFinding,
 };
-pub use fallow_types::results::{
+pub use plow_types::results::{
     AnalysisResults, BoundaryViolation, CircularDependency, DependencyLocation,
     DependencyOverrideMisconfigReason, DependencyOverrideSource, DuplicateExport,
     DuplicateLocation, EmptyCatalogGroup, EntryPointSummary, ExportUsage, ImportSite,
@@ -24,7 +24,7 @@ mod tests {
 
     use super::*;
     use crate::extract::MemberKind;
-    use fallow_types::output_dead_code::{UnresolvedImportFinding, UnusedFileFinding};
+    use plow_types::output_dead_code::{UnresolvedImportFinding, UnusedFileFinding};
 
     #[test]
     fn empty_results_no_issues() {

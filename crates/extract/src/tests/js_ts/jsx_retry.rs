@@ -1,7 +1,7 @@
 use std::path::Path;
 
-use fallow_types::discover::FileId;
-use fallow_types::extract::{ModuleInfo, VisibilityTag};
+use plow_types::discover::FileId;
+use plow_types::extract::{ModuleInfo, VisibilityTag};
 
 use crate::parse::parse_source_to_module;
 
@@ -68,7 +68,7 @@ fn jsx_retry_preserves_suppressions() {
     // Regression: suppression comments were parsed from the original failed parse's
     // comments instead of the retry parse's comments.
     let source = r#"
-// fallow-ignore-next-line unused-export
+// plow-ignore-next-line unused-export
 export const Unused = ({ text }) => <span className="unused-component">{text}</span>;
 "#;
     let info = parse_as_js(source);

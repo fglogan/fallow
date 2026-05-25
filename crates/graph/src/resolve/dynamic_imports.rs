@@ -16,8 +16,8 @@ use std::path::{Path, PathBuf};
 
 use oxc_span::Span;
 
-use fallow_types::discover::{DiscoveredFile, FileId};
-use fallow_types::extract::{DynamicImportInfo, DynamicImportPattern, ImportInfo, ImportedName};
+use plow_types::discover::{DiscoveredFile, FileId};
+use plow_types::extract::{DynamicImportInfo, DynamicImportPattern, ImportInfo, ImportedName};
 
 use super::ResolveResult;
 use super::ResolvedImport;
@@ -45,7 +45,7 @@ pub(super) fn resolve_single_dynamic_import(
 ) -> Vec<ResolvedImport> {
     let target = resolve_specifier(ctx, file_path, &imp.source, false);
 
-    // Speculative imports are synthesised by fallow (e.g. the Vitest
+    // Speculative imports are synthesised by plow (e.g. the Vitest
     // `__mocks__/<file>` auto-mock sibling) to credit a side-effect file when
     // it exists. The user never wrote the synthesised path, so when it fails
     // to resolve drop the entry silently rather than surfacing it as an

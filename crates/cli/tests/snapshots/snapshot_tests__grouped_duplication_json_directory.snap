@@ -46,7 +46,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "type": "suppress-line",
           "auto_fixable": false,
           "description": "Suppress with an inline comment above the duplicated code",
-          "comment": "// fallow-ignore-next-line code-duplication"
+          "comment": "// plow-ignore-next-line code-duplication"
         }
       ]
     },
@@ -81,7 +81,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "type": "suppress-line",
           "auto_fixable": false,
           "description": "Suppress with an inline comment above the duplicated code",
-          "comment": "// fallow-ignore-next-line code-duplication"
+          "comment": "// plow-ignore-next-line code-duplication"
         }
       ]
     }
@@ -149,7 +149,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
               "type": "suppress-line",
               "auto_fixable": false,
               "description": "Suppress with an inline comment above the duplicated code",
-              "comment": "// fallow-ignore-next-line code-duplication"
+              "comment": "// plow-ignore-next-line code-duplication"
             }
           ]
         }
@@ -213,7 +213,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
               "type": "suppress-line",
               "auto_fixable": false,
               "description": "Suppress with an inline comment above the duplicated code",
-              "comment": "// fallow-ignore-next-line code-duplication"
+              "comment": "// plow-ignore-next-line code-duplication"
             }
           ]
         }

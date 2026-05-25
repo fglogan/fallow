@@ -1,11 +1,11 @@
 {
-  "name": "@fallow-cli/darwin-x64",
+  "name": "@plow-cli/darwin-x64",
   "version": "2.84.0",
-  "description": "Fallow CLI binary for macOS x64 (Intel)",
+  "description": "Plow CLI binary for macOS x64 (Intel)",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/fallow-rs/fallow.git"
+    "url": "git+https://github.com/plow-rs/plow.git"
   },
   "os": [
     "darwin"
@@ -14,11 +14,11 @@
     "x64"
   ],
   "files": [
-    "fallow",
-    "fallow.sig",
-    "fallow-lsp",
-    "fallow-lsp.sig",
-    "fallow-mcp",
-    "fallow-mcp.sig"
+    "plow",
+    "plow.sig",
+    "plow-lsp",
+    "plow-lsp.sig",
+    "plow-mcp",
+    "plow-mcp.sig"
   ]
 }

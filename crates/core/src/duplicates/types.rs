@@ -2,10 +2,10 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 
-use fallow_types::serde_path;
+use plow_types::serde_path;
 
-// Re-export the canonical types from fallow-config.
-pub use fallow_config::{DetectionMode, DuplicatesConfig};
+// Re-export the canonical types from plow-config.
+pub use plow_config::{DetectionMode, DuplicatesConfig};
 
 /// A single instance of duplicated code at a specific location.
 #[derive(Debug, Clone, Serialize)]

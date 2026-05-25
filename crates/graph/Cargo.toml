@@ -1,5 +1,5 @@
 [package]
-name = "fallow-graph"
+name = "plow-graph"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,15 +8,15 @@ homepage.workspace = true
 documentation.workspace = true
 keywords.workspace = true
 categories.workspace = true
-description = "Module graph construction and import resolution for fallow codebase intelligence"
+description = "Module graph construction and import resolution for plow codebase intelligence"
 readme = "../../README.md"
 
 [lib]
 doctest = false
 
 [dependencies]
-fallow-types = { workspace = true }
-fallow-config = { workspace = true }
+plow-types = { workspace = true }
+plow-config = { workspace = true }
 
 # Resolution
 dunce = { workspace = true }
@@ -43,7 +43,7 @@ jsonc-parser = { workspace = true }
 [dev-dependencies]
 proptest = { workspace = true }
 tempfile = { workspace = true }
-fallow-types = { workspace = true }
+plow-types = { workspace = true }
 rustc-hash = { workspace = true }
 
 [lints]

@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use colored::Colorize;
-use fallow_core::trace::{CloneTrace, DependencyTrace, ExportTrace, FileTrace};
+use plow_core::trace::{CloneTrace, DependencyTrace, ExportTrace, FileTrace};
 
 use super::{plural, relative_path};
 

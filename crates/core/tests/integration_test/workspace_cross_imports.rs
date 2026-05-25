@@ -17,7 +17,7 @@ fn workspace_cross_import_resolves() {
     }
 
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     // No unresolved imports — cross-workspace @myorg/core should resolve
     assert!(
@@ -48,7 +48,7 @@ fn workspace_cross_import_detects_orphan() {
     }
 
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_names: Vec<String> = results
         .unused_files
@@ -86,7 +86,7 @@ fn workspace_cross_import_detects_unused_export() {
     }
 
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -128,7 +128,7 @@ fn workspace_self_reference_resolves_secondary_entry_points() {
     let root = fixture_path("workspace-self-reference");
 
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_names: Vec<String> = results
         .unused_files

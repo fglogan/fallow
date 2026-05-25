@@ -1,7 +1,7 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
 
-use fallow_config::OutputFormat;
+use plow_config::OutputFormat;
 
 use super::enum_helpers::{EnumDeclarationRange, removable_exported_enum_range};
 use super::plan::{
@@ -9,10 +9,10 @@ use super::plan::{
 };
 
 /// Directory names whose contents are commonly consumed through paths
-/// fallow's static graph cannot see: Vitest / Jest `__mocks__` aliases,
+/// plow's static graph cannot see: Vitest / Jest `__mocks__` aliases,
 /// Playwright / Cypress e2e suites, published-package `examples`, and
 /// fixture / golden harnesses wired up by a build step. Removing an
-/// `export` from a file under any of these is low confidence; `fallow fix`
+/// `export` from a file under any of these is low confidence; `plow fix`
 /// withholds the rewrite (see [`SkipReason::LowConfidenceOffGraph`]).
 ///
 /// Matched against every directory component of the file's
@@ -194,16 +194,16 @@ fn push_export_fix_json(
 /// `unresolved_import_files` is the set of absolute paths that have at
 /// least one unresolved import. A file in that set, or under an off-graph
 /// consumer directory, has its export removals withheld as low confidence
-/// (issue #602): the rewrite would risk breaking a consumer fallow's graph
+/// (issue #602): the rewrite would risk breaking a consumer plow's graph
 /// cannot see. The skip is recorded on `plan` so the orchestrator surfaces
-/// it; the export stays reported by `fallow check`.
+/// it; the export stays reported by `plow check`.
 #[expect(
     clippy::too_many_arguments,
     reason = "per-file fixer threads root + grouped findings + the confidence-gate set + the shared plan + output mode + sink; bundling into a context struct would not reduce the irreducible inputs and hurts locality with the sibling fixers"
 )]
 pub(super) fn apply_export_fixes(
     root: &Path,
-    exports_by_file: &FxHashMap<PathBuf, Vec<&fallow_core::results::UnusedExport>>,
+    exports_by_file: &FxHashMap<PathBuf, Vec<&plow_core::results::UnusedExport>>,
     hashes: &CapturedHashes,
     unresolved_import_files: &FxHashSet<PathBuf>,
     plan: &mut FixPlan,
@@ -386,7 +386,7 @@ pub(super) fn apply_export_fixes(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_core::results::UnusedExport;
+    use plow_core::results::UnusedExport;
 
     fn make_export(path: &Path, name: &str, line: u32) -> UnusedExport {
         UnusedExport {
@@ -1080,7 +1080,7 @@ mod tests {
         let file = root.join("index.ts");
         std::fs::write(&file, "export { Foo as MyFoo, Bar } from \"./mod\";\n").unwrap();
 
-        // The export name reported by fallow is the original name
+        // The export name reported by plow is the original name
         let (_, _) = fix_single(root, &file, "Foo", 1, false);
 
         let content = std::fs::read_to_string(&file).unwrap();

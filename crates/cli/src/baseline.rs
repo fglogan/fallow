@@ -2,7 +2,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use fallow_core::duplicates::DuplicationReport;
+use plow_core::duplicates::DuplicationReport;
 
 /// Strip the project root from a path to produce a portable relative key.
 ///
@@ -45,11 +45,11 @@ pub struct BaselineData {
     pub private_type_leaks: Vec<String>,
     /// Unused dependencies, keyed by `package.json:package_name`. Legacy
     /// bare `package_name` keys are still matched for back-compat with
-    /// baselines saved by older fallow versions.
+    /// baselines saved by older plow versions.
     pub unused_dependencies: Vec<String>,
     /// Unused dev dependencies, keyed by `package.json:package_name`. Legacy
     /// bare `package_name` keys are still matched for back-compat with
-    /// baselines saved by older fallow versions.
+    /// baselines saved by older plow versions.
     pub unused_dev_dependencies: Vec<String>,
     /// Circular dependency chains, keyed by sorted file paths joined with `->`.
     #[serde(default)]
@@ -62,7 +62,7 @@ pub struct BaselineData {
     pub re_export_cycles: Vec<String>,
     /// Unused optional dependencies, keyed by `package.json:package_name`.
     /// Legacy bare `package_name` keys are still matched for back-compat
-    /// with baselines saved by older fallow versions.
+    /// with baselines saved by older plow versions.
     #[serde(default)]
     pub unused_optional_dependencies: Vec<String>,
     /// Unused enum members, keyed by `file:parent.member`.
@@ -82,12 +82,12 @@ pub struct BaselineData {
     pub duplicate_exports: Vec<String>,
     /// Type-only dependencies, keyed by `package.json:package_name`. Legacy
     /// bare `package_name` keys are still matched for back-compat with
-    /// baselines saved by older fallow versions.
+    /// baselines saved by older plow versions.
     #[serde(default)]
     pub type_only_dependencies: Vec<String>,
     /// Test-only dependencies, keyed by `package.json:package_name`. Legacy
     /// bare `package_name` keys are still matched for back-compat with
-    /// baselines saved by older fallow versions.
+    /// baselines saved by older plow versions.
     #[serde(default)]
     pub test_only_dependencies: Vec<String>,
     /// Boundary violations, keyed by `from_path->to_path`.
@@ -118,7 +118,7 @@ impl BaselineData {
         clippy::too_many_lines,
         reason = "one match arm per issue type keeps the baseline key map flat and grep-friendly"
     )]
-    pub fn from_results(results: &fallow_core::results::AnalysisResults, root: &Path) -> Self {
+    pub fn from_results(results: &plow_core::results::AnalysisResults, root: &Path) -> Self {
         Self {
             unused_files: results
                 .unused_files
@@ -314,7 +314,7 @@ impl BaselineData {
 }
 
 /// Generate a stable key for a boundary violation: `from_path->to_path`.
-fn boundary_violation_key(v: &fallow_core::results::BoundaryViolation, root: &Path) -> String {
+fn boundary_violation_key(v: &plow_core::results::BoundaryViolation, root: &Path) -> String {
     format!(
         "{}->{}",
         relative_path(&v.from_path, root),
@@ -323,7 +323,7 @@ fn boundary_violation_key(v: &fallow_core::results::BoundaryViolation, root: &Pa
 }
 
 /// Generate a stable key for a duplicate export: `name|sorted_paths`.
-fn duplicate_export_key(dup: &fallow_core::results::DuplicateExport, root: &Path) -> String {
+fn duplicate_export_key(dup: &plow_core::results::DuplicateExport, root: &Path) -> String {
     let mut locs: Vec<String> = dup
         .locations
         .iter()
@@ -334,7 +334,7 @@ fn duplicate_export_key(dup: &fallow_core::results::DuplicateExport, root: &Path
 }
 
 /// Generate a stable key for a circular dependency based on sorted file paths.
-fn circular_dep_key(dep: &fallow_core::results::CircularDependency, root: &Path) -> String {
+fn circular_dep_key(dep: &plow_core::results::CircularDependency, root: &Path) -> String {
     let mut paths: Vec<String> = dep.files.iter().map(|f| relative_path(f, root)).collect();
     paths.sort();
     paths.join("->")
@@ -345,17 +345,17 @@ fn circular_dep_key(dep: &fallow_core::results::CircularDependency, root: &Path)
 /// it a self-loop on `src/foo.ts` would keyspace-collide with any future
 /// single-file multi-node shape, and the `--baseline new` filter would
 /// silently drop the new one as already-seen (panel catch #7).
-fn re_export_cycle_key(cycle: &fallow_core::results::ReExportCycle, root: &Path) -> String {
+fn re_export_cycle_key(cycle: &plow_core::results::ReExportCycle, root: &Path) -> String {
     let kind = match cycle.kind {
-        fallow_core::results::ReExportCycleKind::MultiNode => "multi-node",
-        fallow_core::results::ReExportCycleKind::SelfLoop => "self-loop",
+        plow_core::results::ReExportCycleKind::MultiNode => "multi-node",
+        plow_core::results::ReExportCycleKind::SelfLoop => "self-loop",
     };
     let mut paths: Vec<String> = cycle.files.iter().map(|f| relative_path(f, root)).collect();
     paths.sort();
     format!("{kind}:{}", paths.join("<->"))
 }
 
-fn private_type_leak_key(leak: &fallow_core::results::PrivateTypeLeak, root: &Path) -> String {
+fn private_type_leak_key(leak: &plow_core::results::PrivateTypeLeak, root: &Path) -> String {
     format!(
         "{}:{}->{}",
         relative_path(&leak.path, root),
@@ -365,7 +365,7 @@ fn private_type_leak_key(leak: &fallow_core::results::PrivateTypeLeak, root: &Pa
 }
 
 fn filter_private_type_leaks(
-    leaks: &mut Vec<fallow_types::output_dead_code::PrivateTypeLeakFinding>,
+    leaks: &mut Vec<plow_types::output_dead_code::PrivateTypeLeakFinding>,
     baseline_keys: &[String],
     root: &Path,
 ) {
@@ -383,10 +383,10 @@ fn filter_private_type_leaks(
     reason = "flat list of per-issue-type retain calls; one block per category keeps each filter local and easy to audit"
 )]
 pub fn filter_new_issues(
-    mut results: fallow_core::results::AnalysisResults,
+    mut results: plow_core::results::AnalysisResults,
     baseline: &BaselineData,
     root: &Path,
-) -> fallow_core::results::AnalysisResults {
+) -> plow_core::results::AnalysisResults {
     let baseline_files: FxHashSet<&str> =
         baseline.unused_files.iter().map(String::as_str).collect();
     let baseline_exports: FxHashSet<&str> =
@@ -653,7 +653,7 @@ impl DuplicationBaselineData {
 }
 
 /// Generate a stable key for a clone group based on its instance locations.
-fn clone_group_key(group: &fallow_core::duplicates::CloneGroup, root: &Path) -> String {
+fn clone_group_key(group: &plow_core::duplicates::CloneGroup, root: &Path) -> String {
     let mut parts: Vec<String> = group
         .instances
         .iter()
@@ -685,8 +685,8 @@ pub fn filter_new_clone_groups(
 
     // Re-generate families from the filtered groups
     report.clone_families =
-        fallow_core::duplicates::families::group_into_families(&report.clone_groups, root);
-    report.mirrored_directories = fallow_core::duplicates::families::detect_mirrored_directories(
+        plow_core::duplicates::families::group_into_families(&report.clone_groups, root);
+    report.mirrored_directories = plow_core::duplicates::families::detect_mirrored_directories(
         &report.clone_families,
         root,
     );
@@ -701,7 +701,7 @@ pub fn filter_new_clone_groups(
 ///
 /// Uses per-file line deduplication (matching `compute_stats` in `detect.rs`)
 /// so overlapping clone instances don't inflate the duplicated line count.
-pub fn recompute_stats(report: &DuplicationReport) -> fallow_core::duplicates::DuplicationStats {
+pub fn recompute_stats(report: &DuplicationReport) -> plow_core::duplicates::DuplicationStats {
     let mut files_with_clones: FxHashSet<&Path> = FxHashSet::default();
     let mut file_dup_lines: FxHashMap<&Path, FxHashSet<usize>> = FxHashMap::default();
     let mut duplicated_tokens = 0usize;
@@ -721,7 +721,7 @@ pub fn recompute_stats(report: &DuplicationReport) -> fallow_core::duplicates::D
 
     let duplicated_lines: usize = file_dup_lines.values().map(FxHashSet::len).sum();
 
-    fallow_core::duplicates::DuplicationStats {
+    plow_core::duplicates::DuplicationStats {
         total_files: report.stats.total_files,
         files_with_clones: files_with_clones.len(),
         total_lines: report.stats.total_lines,
@@ -1193,13 +1193,13 @@ pub struct BaselineDeltas {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_core::duplicates::{CloneGroup, CloneInstance, DuplicationReport, DuplicationStats};
-    use fallow_core::results::{
+    use plow_core::duplicates::{CloneGroup, CloneInstance, DuplicationReport, DuplicationStats};
+    use plow_core::results::{
         AnalysisResults, BoundaryViolationFinding, CircularDependencyFinding, DependencyLocation,
         UnusedDependency, UnusedDependencyFinding, UnusedDevDependencyFinding, UnusedExport,
         UnusedFile,
     };
-    use fallow_types::output_dead_code::{
+    use plow_types::output_dead_code::{
         UnusedExportFinding, UnusedFileFinding, UnusedTypeFinding,
     };
     use std::path::PathBuf;
@@ -1972,7 +1972,7 @@ mod tests {
 
     #[test]
     fn circular_dep_key_is_order_independent() {
-        use fallow_core::results::CircularDependency;
+        use plow_core::results::CircularDependency;
 
         let dep_ab = CircularDependencyFinding::with_actions(CircularDependency {
             files: vec![PathBuf::from("src/a.ts"), PathBuf::from("src/b.ts")],
@@ -1997,7 +1997,7 @@ mod tests {
 
     #[test]
     fn circular_dep_key_different_files_different_keys() {
-        use fallow_core::results::CircularDependency;
+        use plow_core::results::CircularDependency;
 
         let dep1 = CircularDependencyFinding::with_actions(CircularDependency {
             files: vec![PathBuf::from("src/a.ts"), PathBuf::from("src/b.ts")],
@@ -2021,7 +2021,7 @@ mod tests {
 
     #[test]
     fn circular_dep_key_three_files_order_independent() {
-        use fallow_core::results::CircularDependency;
+        use plow_core::results::CircularDependency;
 
         let dep_abc = CircularDependencyFinding::with_actions(CircularDependency {
             files: vec![
@@ -2054,8 +2054,8 @@ mod tests {
     // ── filter_new_issues: extended issue types ────────────────
 
     fn make_full_results() -> AnalysisResults {
-        use fallow_core::extract::MemberKind;
-        use fallow_core::results::*;
+        use plow_core::extract::MemberKind;
+        use plow_core::results::*;
 
         let mut r = make_results();
         r.circular_dependencies
@@ -2097,8 +2097,8 @@ mod tests {
                 col: 0,
             }));
         r.unresolved_imports.push(
-            fallow_types::output_dead_code::UnresolvedImportFinding::with_actions(
-                fallow_core::results::UnresolvedImport {
+            plow_types::output_dead_code::UnresolvedImportFinding::with_actions(
+                plow_core::results::UnresolvedImport {
                     path: PathBuf::from("src/app.ts"),
                     specifier: "./missing".to_string(),
                     line: 3,
@@ -2108,22 +2108,22 @@ mod tests {
             ),
         );
         r.unlisted_dependencies.push(
-            fallow_core::results::UnlistedDependencyFinding::with_actions(UnlistedDependency {
+            plow_core::results::UnlistedDependencyFinding::with_actions(UnlistedDependency {
                 package_name: "chalk".to_string(),
                 imported_from: vec![],
             }),
         );
         r.duplicate_exports
-            .push(fallow_core::results::DuplicateExportFinding::with_actions(
-                fallow_core::results::DuplicateExport {
+            .push(plow_core::results::DuplicateExportFinding::with_actions(
+                plow_core::results::DuplicateExport {
                     export_name: "Config".to_string(),
                     locations: vec![
-                        fallow_core::results::DuplicateLocation {
+                        plow_core::results::DuplicateLocation {
                             path: PathBuf::from("src/a.ts"),
                             line: 1,
                             col: 0,
                         },
-                        fallow_core::results::DuplicateLocation {
+                        plow_core::results::DuplicateLocation {
                             path: PathBuf::from("src/b.ts"),
                             line: 5,
                             col: 0,
@@ -2132,22 +2132,22 @@ mod tests {
                 },
             ));
         r.type_only_dependencies.push(
-            fallow_core::results::TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
+            plow_core::results::TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
                 package_name: "zod".to_string(),
                 path: PathBuf::from("package.json"),
                 line: 8,
             }),
         );
         r.test_only_dependencies.push(
-            fallow_core::results::TestOnlyDependencyFinding::with_actions(TestOnlyDependency {
+            plow_core::results::TestOnlyDependencyFinding::with_actions(TestOnlyDependency {
                 package_name: "vitest".to_string(),
                 path: PathBuf::from("package.json"),
                 line: 10,
             }),
         );
         r.boundary_violations.push(
-            fallow_types::output_dead_code::BoundaryViolationFinding::with_actions(
-                fallow_core::results::BoundaryViolation {
+            plow_types::output_dead_code::BoundaryViolationFinding::with_actions(
+                plow_core::results::BoundaryViolation {
                     from_path: PathBuf::from("src/ui/btn.ts"),
                     to_path: PathBuf::from("src/db/query.ts"),
                     from_zone: "ui".to_string(),
@@ -2204,7 +2204,7 @@ mod tests {
 
     #[test]
     fn filter_keeps_new_circular_deps() {
-        use fallow_core::results::CircularDependency;
+        use plow_core::results::CircularDependency;
         let baseline = BaselineData {
             circular_dependencies: vec!["src/a.ts->src/b.ts".to_string()],
             ..BaselineData::from_results(&AnalysisResults::default(), Path::new(""))
@@ -2239,7 +2239,7 @@ mod tests {
 
     #[test]
     fn filter_keeps_new_boundary_violations() {
-        use fallow_core::results::BoundaryViolation;
+        use plow_core::results::BoundaryViolation;
         let baseline = BaselineData {
             boundary_violations: vec!["src/a.ts->src/b.ts".to_string()],
             ..BaselineData::from_results(&AnalysisResults::default(), Path::new(""))
@@ -2310,7 +2310,7 @@ mod tests {
 
     #[test]
     fn duplicate_export_key_is_sorted() {
-        use fallow_core::results::{DuplicateExport, DuplicateLocation};
+        use plow_core::results::{DuplicateExport, DuplicateLocation};
         let dup_ab = DuplicateExport {
             export_name: "foo".to_string(),
             locations: vec![
@@ -2351,7 +2351,7 @@ mod tests {
 
     #[test]
     fn boundary_violation_key_format() {
-        use fallow_core::results::BoundaryViolation;
+        use plow_core::results::BoundaryViolation;
         let v = BoundaryViolation {
             from_path: PathBuf::from("src/ui/btn.ts"),
             to_path: PathBuf::from("src/db/query.ts"),
@@ -2369,8 +2369,8 @@ mod tests {
 
     /// Build results with absolute paths rooted at the given prefix.
     fn make_absolute_results(root: &str) -> AnalysisResults {
-        use fallow_core::extract::MemberKind;
-        use fallow_core::results::*;
+        use plow_core::extract::MemberKind;
+        use plow_core::results::*;
 
         let p = |rel: &str| PathBuf::from(format!("{root}/{rel}"));
 

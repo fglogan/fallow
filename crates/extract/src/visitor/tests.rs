@@ -6,7 +6,7 @@ use std::path::Path;
 use super::*;
 use crate::tests::parse_ts as parse;
 use crate::{ImportedName, MemberKind};
-use fallow_types::discover::FileId;
+use plow_types::discover::FileId;
 use helpers::regex_pattern_to_suffix;
 
 // ── into_module_info transfers all fields ────────────────────
@@ -3877,7 +3877,7 @@ fn angular_component_style_urls_array_emits_multiple_imports() {
 #[test]
 fn angular_component_template_url_without_dot_slash_normalized() {
     // Angular resolves `'app.component.html'` the same as `'./app.component.html'`.
-    // Fallow must normalize the bare form so downstream resolution doesn't
+    // Plow must normalize the bare form so downstream resolution doesn't
     // misclassify it as an unlisted npm package. Regression test for #99.
     let info = parse(
         r"
@@ -4656,7 +4656,7 @@ fn ts_import_type_inside_actual_dts_file() {
     // Parse with the actual `.d.ts` filename to confirm SourceType + visitor
     // behavior matches the integration scenario.
     use crate::parse::parse_source_to_module;
-    use fallow_types::discover::FileId;
+    use plow_types::discover::FileId;
     use std::path::Path;
 
     let m = parse_source_to_module(

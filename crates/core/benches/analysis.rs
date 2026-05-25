@@ -1,6 +1,6 @@
 #![expect(
     deprecated,
-    reason = "ADR-008: benchmark exercises the workspace path-dep fallow_core::analyze surface"
+    reason = "ADR-008: benchmark exercises the workspace path-dep plow_core::analyze surface"
 )]
 
 use std::path::PathBuf;
@@ -12,7 +12,7 @@ mod helpers;
 
 fn bench_parse_file(c: &mut Criterion) {
     // Create a temporary file with typical TypeScript content
-    let temp_dir = std::env::temp_dir().join("fallow-bench");
+    let temp_dir = std::env::temp_dir().join("plow-bench");
     std::fs::create_dir_all(&temp_dir).unwrap();
 
     let test_file = temp_dir.join("bench.ts");
@@ -93,15 +93,15 @@ export default function App({ name, age }: Props) {
     )
     .unwrap();
 
-    let file = fallow_core::discover::DiscoveredFile {
-        id: fallow_core::discover::FileId(0),
+    let file = plow_core::discover::DiscoveredFile {
+        id: plow_core::discover::FileId(0),
         path: test_file.clone(),
         size_bytes: std::fs::metadata(&test_file).unwrap().len(),
     };
 
     c.bench_function("parse_single_file", |b| {
         b.iter(|| {
-            let _ = fallow_core::extract::parse_single_file(&file);
+            let _ = plow_core::extract::parse_single_file(&file);
         });
     });
 
@@ -111,7 +111,7 @@ export default function App({ name, age }: Props) {
 
 fn bench_full_pipeline(c: &mut Criterion) {
     // Create a small test project
-    let temp_dir = std::env::temp_dir().join("fallow-bench-project");
+    let temp_dir = std::env::temp_dir().join("plow-bench-project");
     let _ = std::fs::remove_dir_all(&temp_dir);
     std::fs::create_dir_all(temp_dir.join("src")).unwrap();
 
@@ -149,7 +149,7 @@ export type Type{i} = {{ value: number }};
 
     c.bench_function("full_pipeline_10_files", |b| {
         b.iter(|| {
-            let _ = fallow_core::analyze(&config);
+            let _ = plow_core::analyze(&config);
         });
     });
 
@@ -162,7 +162,7 @@ fn bench_full_pipeline_100(c: &mut Criterion) {
 
     c.bench_function("full_pipeline_100_files", |b| {
         b.iter(|| {
-            let _ = fallow_core::analyze(&config);
+            let _ = plow_core::analyze(&config);
         });
     });
 
@@ -174,7 +174,7 @@ fn bench_full_pipeline_1000(c: &mut Criterion) {
 
     c.bench_function("full_pipeline_1000_files", |b| {
         b.iter(|| {
-            let _ = fallow_core::analyze(&config);
+            let _ = plow_core::analyze(&config);
         });
     });
 
@@ -190,11 +190,11 @@ fn bench_full_pipeline_1000(c: &mut Criterion) {
     reason = "benchmark with extensive fixture setup"
 )]
 fn bench_resolve_re_export_chains(c: &mut Criterion) {
-    use fallow_core::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
-    use fallow_core::extract::{
+    use plow_core::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
+    use plow_core::extract::{
         ExportInfo, ExportName, ImportInfo, ImportedName, ReExportInfo, VisibilityTag,
     };
-    use fallow_core::resolve::{ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport};
+    use plow_core::resolve::{ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport};
 
     // Build a graph with multiple re-export chains:
     //
@@ -406,7 +406,7 @@ fn bench_resolve_re_export_chains(c: &mut Criterion) {
 
     c.bench_function("resolve_re_export_chains", |b| {
         b.iter(|| {
-            fallow_core::graph::ModuleGraph::build(&resolved_modules, &entry_points, &files);
+            plow_core::graph::ModuleGraph::build(&resolved_modules, &entry_points, &files);
         });
     });
 }
@@ -416,9 +416,9 @@ fn bench_resolve_re_export_chains(c: &mut Criterion) {
     reason = "benchmark with extensive fixture setup"
 )]
 fn bench_cache_round_trip(c: &mut Criterion) {
-    use fallow_core::cache::{cached_to_module, module_to_cached};
-    use fallow_core::discover::FileId;
-    use fallow_core::extract::{
+    use plow_core::cache::{cached_to_module, module_to_cached};
+    use plow_core::discover::FileId;
+    use plow_core::extract::{
         DynamicImportInfo, ExportInfo, ExportName, ImportInfo, ImportedName, MemberAccess,
         MemberInfo, MemberKind, ModuleInfo, ReExportInfo, RequireCallInfo, VisibilityTag,
     };
@@ -666,12 +666,12 @@ fn bench_cache_round_trip(c: &mut Criterion) {
 
 // ── Dupe detection benchmarks ──────────────────────────────────────
 
-fn make_hashed_tokens(hashes: &[u64]) -> Vec<fallow_core::duplicates::normalize::HashedToken> {
+fn make_hashed_tokens(hashes: &[u64]) -> Vec<plow_core::duplicates::normalize::HashedToken> {
     hashes
         .iter()
         .enumerate()
         .map(
-            |(i, &hash)| fallow_core::duplicates::normalize::HashedToken {
+            |(i, &hash)| plow_core::duplicates::normalize::HashedToken {
                 hash,
                 original_index: i,
             },
@@ -683,8 +683,8 @@ fn make_hashed_tokens(hashes: &[u64]) -> Vec<fallow_core::duplicates::normalize:
     clippy::cast_possible_truncation,
     reason = "bench span values are trivially small"
 )]
-fn make_file_tokens_for(count: usize) -> fallow_core::duplicates::tokenize::FileTokens {
-    use fallow_core::duplicates::tokenize::{FileTokens, SourceToken, TokenKind};
+fn make_file_tokens_for(count: usize) -> plow_core::duplicates::tokenize::FileTokens {
+    use plow_core::duplicates::tokenize::{FileTokens, SourceToken, TokenKind};
     use oxc_span::Span;
 
     let tokens: Vec<SourceToken> = (0..count)
@@ -712,8 +712,8 @@ fn make_file_tokens_for(count: usize) -> fallow_core::duplicates::tokenize::File
 
 type DupeInput = Vec<(
     PathBuf,
-    Vec<fallow_core::duplicates::normalize::HashedToken>,
-    fallow_core::duplicates::tokenize::FileTokens,
+    Vec<plow_core::duplicates::normalize::HashedToken>,
+    plow_core::duplicates::tokenize::FileTokens,
 )>;
 
 /// Build N identical files with `tokens_per_file` tokens each.
@@ -746,7 +746,7 @@ fn make_diverse_files(n: usize, tokens_per_file: usize) -> DupeInput {
 }
 
 fn bench_dupe_detect_2x500(c: &mut Criterion) {
-    use fallow_core::duplicates::detect::CloneDetector;
+    use plow_core::duplicates::detect::CloneDetector;
     let data = make_identical_files(2, 500);
     c.bench_function("dupe_detect_2x500_identical", |b| {
         b.iter_batched(
@@ -758,7 +758,7 @@ fn bench_dupe_detect_2x500(c: &mut Criterion) {
 }
 
 fn bench_dupe_detect_2x2000(c: &mut Criterion) {
-    use fallow_core::duplicates::detect::CloneDetector;
+    use plow_core::duplicates::detect::CloneDetector;
     let data = make_identical_files(2, 2000);
     c.bench_function("dupe_detect_2x2000_identical", |b| {
         b.iter_batched(
@@ -770,7 +770,7 @@ fn bench_dupe_detect_2x2000(c: &mut Criterion) {
 }
 
 fn bench_dupe_detect_10x500(c: &mut Criterion) {
-    use fallow_core::duplicates::detect::CloneDetector;
+    use plow_core::duplicates::detect::CloneDetector;
     let data = make_identical_files(10, 500);
     c.bench_function("dupe_detect_10x500_identical", |b| {
         b.iter_batched(
@@ -782,7 +782,7 @@ fn bench_dupe_detect_10x500(c: &mut Criterion) {
 }
 
 fn bench_dupe_detect_50x200_diverse(c: &mut Criterion) {
-    use fallow_core::duplicates::detect::CloneDetector;
+    use plow_core::duplicates::detect::CloneDetector;
     let data = make_diverse_files(50, 200);
     c.bench_function("dupe_detect_50x200_diverse", |b| {
         b.iter_batched(
@@ -794,7 +794,7 @@ fn bench_dupe_detect_50x200_diverse(c: &mut Criterion) {
 }
 
 fn bench_dupe_detect_100x200_mixed(c: &mut Criterion) {
-    use fallow_core::duplicates::detect::CloneDetector;
+    use plow_core::duplicates::detect::CloneDetector;
     // 20 identical + 80 diverse
     let hashes: Vec<u64> = (1..=200).collect();
     let data: DupeInput = (0..100)
@@ -824,7 +824,7 @@ fn bench_dupe_detect_100x200_mixed(c: &mut Criterion) {
 }
 
 fn bench_dupe_detect_100x200_mixed_focused(c: &mut Criterion) {
-    use fallow_core::duplicates::detect::CloneDetector;
+    use plow_core::duplicates::detect::CloneDetector;
     use rustc_hash::FxHashSet;
 
     let hashes: Vec<u64> = (1..=200).collect();
@@ -858,7 +858,7 @@ fn bench_dupe_detect_100x200_mixed_focused(c: &mut Criterion) {
 fn bench_dupe_suffix_array_only(c: &mut Criterion) {
     // Benchmark just the suffix array construction on a large input
     // to isolate its cost. We access it through the public detect() API.
-    use fallow_core::duplicates::detect::CloneDetector;
+    use plow_core::duplicates::detect::CloneDetector;
     let data = make_identical_files(2, 5000);
     c.bench_function("dupe_detect_2x5000_identical", |b| {
         b.iter_batched(

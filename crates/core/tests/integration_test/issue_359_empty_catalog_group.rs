@@ -4,7 +4,7 @@ use super::common::{create_config, fixture_path};
 fn detects_empty_named_catalog_groups_only() {
     let root = fixture_path("issue-359-empty-catalog-group");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let actual: Vec<_> = results
         .empty_catalog_groups

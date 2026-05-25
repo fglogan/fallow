@@ -2,7 +2,7 @@ use super::common::{create_config, fixture_path};
 
 fn unused_file_paths(
     root: &std::path::Path,
-    results: &fallow_types::results::AnalysisResults,
+    results: &plow_types::results::AnalysisResults,
 ) -> Vec<String> {
     results
         .unused_files
@@ -23,7 +23,7 @@ fn unused_file_paths(
 fn issue_612_wxt_config_modules_and_entrypoints_are_reachable() {
     let root = fixture_path("issue-612-wxt-plugin");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_paths = unused_file_paths(&root, &results);
     for reachable in [

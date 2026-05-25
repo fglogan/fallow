@@ -2,9 +2,9 @@ use std::path::{Component, Path, PathBuf};
 
 use super::parse_scripts::extract_script_file_refs;
 use super::walk::SOURCE_EXTENSIONS;
-use fallow_config::{EntryPointRole, PackageJson, ResolvedConfig};
-use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
-use fallow_types::path_util::is_absolute_path_any_platform;
+use plow_config::{EntryPointRole, PackageJson, ResolvedConfig};
+use plow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
+use plow_types::path_util::is_absolute_path_any_platform;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Known output directory names from exports maps.
@@ -191,7 +191,7 @@ fn resolve_entry_path_with_tracking(
     // If the path is in an output directory (dist/, build/, etc.), try mapping to src/ first.
     // This handles exports map targets like `./dist/utils.js` → `./src/utils.ts`.
     // We check this BEFORE the exists() check because even if the dist file exists,
-    // fallow ignores dist/ by default, so we need the source file instead.
+    // plow ignores dist/ by default, so we need the source file instead.
     if let Some(source_path) = try_output_to_source_path(base, entry) {
         return validated_entry_point(&source_path, canonical_root, entry, source, skipped_entries);
     }
@@ -498,7 +498,7 @@ fn discover_entry_points_with_warnings_impl(
 
     // 1. Manual entries from config — batch all patterns into a single GlobSet
     // for O(files) matching instead of O(patterns × files). Patterns were
-    // validated at config load time (see FallowConfig::validate_user_globs);
+    // validated at config load time (see PlowConfig::validate_user_globs);
     // any compile failure here is a bug.
     {
         let mut builder = globset::GlobSetBuilder::new();
@@ -990,7 +990,7 @@ pub fn discover_dynamically_loaded_entry_points(
     }
 
     // Patterns were validated at config load time (see
-    // FallowConfig::validate_user_globs); any compile failure here is a bug.
+    // PlowConfig::validate_user_globs); any compile failure here is a bug.
     let mut builder = globset::GlobSetBuilder::new();
     for pattern in &config.dynamically_loaded {
         builder.add(
@@ -1085,8 +1085,8 @@ pub fn compile_glob_set(patterns: &[String]) -> Option<globset::GlobSet> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_config::{FallowConfig, OutputFormat, RulesConfig};
-    use fallow_types::discover::FileId;
+    use plow_config::{PlowConfig, OutputFormat, RulesConfig};
+    use plow_types::discover::FileId;
     use proptest::prelude::*;
 
     proptest! {
@@ -1162,7 +1162,7 @@ mod tests {
         std::fs::write(root.join("src/setup.ts"), "export const setup = 1;").unwrap();
         std::fs::write(root.join("tests/app.test.ts"), "export const test = 1;").unwrap();
 
-        let config = FallowConfig {
+        let config = PlowConfig {
             schema: None,
             extends: vec![],
             entry: vec![],
@@ -1174,28 +1174,28 @@ mod tests {
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
             ignore_dependency_overrides: vec![],
-            ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+            ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             ignore_decorators: vec![],
-            duplicates: fallow_config::DuplicatesConfig::default(),
-            health: fallow_config::HealthConfig::default(),
+            duplicates: plow_config::DuplicatesConfig::default(),
+            health: plow_config::HealthConfig::default(),
             rules: RulesConfig::default(),
-            boundaries: fallow_config::BoundaryConfig::default(),
+            boundaries: plow_config::BoundaryConfig::default(),
             production: false.into(),
             plugins: vec![],
             dynamically_loaded: vec![],
             overrides: vec![],
             regression: None,
-            audit: fallow_config::AuditConfig::default(),
+            audit: plow_config::AuditConfig::default(),
             codeowners: None,
             public_packages: vec![],
-            flags: fallow_config::FlagsConfig::default(),
-            fix: fallow_config::FixConfig::default(),
-            resolve: fallow_config::ResolveConfig::default(),
+            flags: plow_config::FlagsConfig::default(),
+            fix: plow_config::FixConfig::default(),
+            resolve: plow_config::ResolveConfig::default(),
             sealed: false,
             include_entry_exports: false,
             auto_imports: false,
-            cache: fallow_config::CacheConfig::default(),
+            cache: plow_config::CacheConfig::default(),
         }
         .resolve(root.to_path_buf(), OutputFormat::Human, 4, true, true, None);
 
@@ -1318,7 +1318,7 @@ mod tests {
         )
         .unwrap();
 
-        let config = FallowConfig {
+        let config = PlowConfig {
             schema: None,
             extends: vec![],
             entry: vec![],
@@ -1330,28 +1330,28 @@ mod tests {
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
             ignore_dependency_overrides: vec![],
-            ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+            ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             ignore_decorators: vec![],
-            duplicates: fallow_config::DuplicatesConfig::default(),
-            health: fallow_config::HealthConfig::default(),
+            duplicates: plow_config::DuplicatesConfig::default(),
+            health: plow_config::HealthConfig::default(),
             rules: RulesConfig::default(),
-            boundaries: fallow_config::BoundaryConfig::default(),
+            boundaries: plow_config::BoundaryConfig::default(),
             production: false.into(),
             plugins: vec![],
             dynamically_loaded: vec![],
             overrides: vec![],
             regression: None,
-            audit: fallow_config::AuditConfig::default(),
+            audit: plow_config::AuditConfig::default(),
             codeowners: None,
             public_packages: vec![],
-            flags: fallow_config::FlagsConfig::default(),
-            fix: fallow_config::FixConfig::default(),
-            resolve: fallow_config::ResolveConfig::default(),
+            flags: plow_config::FlagsConfig::default(),
+            fix: plow_config::FixConfig::default(),
+            resolve: plow_config::ResolveConfig::default(),
             sealed: false,
             include_entry_exports: false,
             auto_imports: false,
-            cache: fallow_config::CacheConfig::default(),
+            cache: plow_config::CacheConfig::default(),
         }
         .resolve(root.to_path_buf(), OutputFormat::Human, 4, true, true, None);
 

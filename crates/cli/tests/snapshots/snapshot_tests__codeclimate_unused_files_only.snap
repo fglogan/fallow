@@ -5,13 +5,13 @@ expression: json_str
 [
   {
     "type": "issue",
-    "check_name": "fallow/unused-file",
+    "check_name": "plow/unused-file",
     "description": "File is not reachable from any entry point",
     "categories": [
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "e3912cb6bb9b0212",
+    "fingerprint": "cf1a29e15c023d0d",
     "location": {
       "path": "src/dead.ts",
       "lines": {

@@ -3,7 +3,7 @@
 use rustc_hash::FxHashSet;
 use std::path::{Path, PathBuf};
 
-use fallow_config::{
+use plow_config::{
     AutoImportRule, EntryPointRole, ExternalPluginDef, PackageJson, UsedClassMemberRule,
 };
 
@@ -298,7 +298,7 @@ impl PluginRegistry {
 
             // Phase 3b: Filesystem fallback for JSON config files.
             // JSON files (angular.json, project.json) are not in the discovered file set
-            // because fallow only discovers JS/TS/CSS/Vue/etc. files. In production
+            // because plow only discovers JS/TS/CSS/Vue/etc. files. In production
             // mode, source-extension configs (`*.config.*`, dotfiles) are also
             // excluded from the walker, so the FS walk runs for those patterns too.
             let json_configs = discover_config_files(
@@ -727,7 +727,7 @@ pub(crate) fn detect_enabler_typos(
 
         for enabler in &ext.enablers {
             let candidates = all_deps.iter().map(String::as_str);
-            let Some(suggestion) = fallow_config::levenshtein::closest_match(enabler, candidates)
+            let Some(suggestion) = plow_config::levenshtein::closest_match(enabler, candidates)
             else {
                 continue;
             };
@@ -842,7 +842,7 @@ struct MetaFrameworkWarning {
 /// process-wide dedupe set.
 ///
 /// When adding a framework here, also extend `MATERIALIZED_CONTEXT_DIRS` in
-/// `fallow-cli`'s `audit.rs` with its generated dir, otherwise `fallow audit`'s
+/// `plow-cli`'s `audit.rs` with its generated dir, otherwise `plow audit`'s
 /// base worktree will not symlink that dir and the broken-tsconfig-chain bug
 /// resurfaces on the base pass for the new framework.
 fn missing_meta_framework_prerequisites(
@@ -855,12 +855,12 @@ fn missing_meta_framework_prerequisites(
             "nuxt" if !root.join(".nuxt/tsconfig.json").exists() => Some(MetaFrameworkWarning {
                 dedupe_key: "meta-prereq::nuxt",
                 message: "Nuxt project missing .nuxt/tsconfig.json: run `nuxt prepare` \
-                          before fallow for accurate analysis",
+                          before plow for accurate analysis",
             }),
             "astro" if !root.join(".astro").exists() => Some(MetaFrameworkWarning {
                 dedupe_key: "meta-prereq::astro",
                 message: "Astro project missing .astro/ types: run `astro sync` \
-                          before fallow for accurate analysis",
+                          before plow for accurate analysis",
             }),
             _ => None,
         })

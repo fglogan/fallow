@@ -245,11 +245,11 @@ fn remap_object_name(
 fn wrap_snippet(snippet: &str, kind: TemplateSnippetKind, locals: &[String]) -> String {
     let mut wrapped = String::new();
     if !locals.is_empty() {
-        wrapped.push_str("const __fallow_local = undefined;\n");
+        wrapped.push_str("const __plow_local = undefined;\n");
         for local in locals {
             wrapped.push_str("const ");
             wrapped.push_str(local);
-            wrapped.push_str(" = __fallow_local;\n");
+            wrapped.push_str(" = __plow_local;\n");
         }
     }
 

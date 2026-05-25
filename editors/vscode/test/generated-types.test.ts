@@ -102,7 +102,7 @@ describe("generated/output-contract.d.ts", () => {
           type: "suppress-line",
           auto_fixable: false,
           description: "Add an inline suppression comment",
-          comment: "// fallow-ignore-next-line unused-file",
+          comment: "// plow-ignore-next-line unused-file",
         },
       ],
     };

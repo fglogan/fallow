@@ -1,8 +1,8 @@
 use super::common::{create_config, fixture_path};
-use fallow_config::{FallowConfig, OutputFormat, RulesConfig};
+use plow_config::{PlowConfig, OutputFormat, RulesConfig};
 
-fn create_production_config(root: std::path::PathBuf) -> fallow_config::ResolvedConfig {
-    FallowConfig {
+fn create_production_config(root: std::path::PathBuf) -> plow_config::ResolvedConfig {
+    PlowConfig {
         schema: None,
         extends: vec![],
         entry: vec![],
@@ -14,28 +14,28 @@ fn create_production_config(root: std::path::PathBuf) -> fallow_config::Resolved
         ignore_exports: vec![],
         ignore_catalog_references: vec![],
         ignore_dependency_overrides: vec![],
-        ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+        ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
-        duplicates: fallow_config::DuplicatesConfig::default(),
-        health: fallow_config::HealthConfig::default(),
+        duplicates: plow_config::DuplicatesConfig::default(),
+        health: plow_config::HealthConfig::default(),
         rules: RulesConfig::default(),
-        boundaries: fallow_config::BoundaryConfig::default(),
+        boundaries: plow_config::BoundaryConfig::default(),
         production: true.into(),
         plugins: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
-        audit: fallow_config::AuditConfig::default(),
+        audit: plow_config::AuditConfig::default(),
         codeowners: None,
         public_packages: vec![],
-        flags: fallow_config::FlagsConfig::default(),
-        fix: fallow_config::FixConfig::default(),
-        resolve: fallow_config::ResolveConfig::default(),
+        flags: plow_config::FlagsConfig::default(),
+        fix: plow_config::FixConfig::default(),
+        resolve: plow_config::ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
         auto_imports: false,
-        cache: fallow_config::CacheConfig::default(),
+        cache: plow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None)
 }
@@ -44,7 +44,7 @@ fn create_production_config(root: std::path::PathBuf) -> fallow_config::Resolved
 fn production_mode_excludes_test_files() {
     let root = fixture_path("production-mode");
     let config = create_production_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let all_file_names: Vec<String> = results
         .unused_files
@@ -71,7 +71,7 @@ fn production_mode_excludes_test_files() {
 fn production_mode_disables_dev_dependency_checking() {
     let root = fixture_path("production-mode");
     let config = create_production_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     // In production mode, unused_dev_dependencies should be empty
     // because the rule is forced off.
@@ -90,7 +90,7 @@ fn production_mode_disables_dev_dependency_checking() {
 fn production_mode_still_detects_unused_exports() {
     let root = fixture_path("production-mode");
     let config = create_production_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -111,7 +111,7 @@ fn production_mode_does_not_exclude_nested_config_files() {
     // Regression test for #111: **/*.config.* excluded Angular's src/app/app.config.ts
     let root = fixture_path("angular-production-config");
     let config = create_production_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     // app.config.ts is a runtime file imported by main.ts, NOT a tool config.
     // It must be discovered in production mode so app.routes.ts stays reachable.
@@ -142,7 +142,7 @@ fn production_mode_does_not_exclude_nested_config_files() {
 fn non_production_mode_includes_test_files() {
     let root = fixture_path("production-mode");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_names: Vec<String> = results
         .unused_files
@@ -169,7 +169,7 @@ fn non_production_mode_includes_test_files() {
 fn production_mode_still_parses_vite_config_aliases() {
     let root = fixture_path("vite-alias-project");
     let config = create_production_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unresolved_specs: Vec<&str> = results
         .unresolved_imports
@@ -187,7 +187,7 @@ fn production_mode_still_parses_vite_config_aliases() {
 fn production_mode_resolves_solution_style_tsconfig_paths() {
     let root = fixture_path("vite-solution-tsconfig-paths");
     let config = create_production_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unresolved_specs: Vec<&str> = results
         .unresolved_imports
@@ -237,12 +237,12 @@ fn analyze_project_honors_per_analysis_dead_code_production() {
     std::fs::write(root.join("src/index.ts"), "export const ok = 1;\n").unwrap();
     std::fs::write(root.join("src/utils.test.ts"), "export const dead = 1;\n").unwrap();
     std::fs::write(
-        root.join(".fallowrc.json"),
+        root.join(".plowrc.json"),
         r#"{"production":{"deadCode":true,"health":false,"dupes":false}}"#,
     )
     .unwrap();
 
-    let results = fallow_core::analyze_project(root).expect("analysis should succeed");
+    let results = plow_core::analyze_project(root).expect("analysis should succeed");
 
     let unused_file_names: Vec<String> = results
         .unused_files

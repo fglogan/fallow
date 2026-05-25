@@ -16,8 +16,8 @@ use crate::html::{is_html_file, parse_html_to_module_with_complexity};
 use crate::mdx::{is_mdx_file, parse_mdx_to_module};
 use crate::sfc::{is_sfc_file, parse_sfc_to_module};
 use crate::visitor::ModuleInfoExtractor;
-use fallow_types::discover::FileId;
-use fallow_types::extract::{ImportInfo, VisibilityTag};
+use plow_types::discover::FileId;
+use plow_types::extract::{ImportInfo, VisibilityTag};
 
 fn source_type_for_path(path: &Path) -> SourceType {
     match path.extension().and_then(|ext| ext.to_str()) {
@@ -125,7 +125,7 @@ fn parse_source_to_module_inner(
     );
 
     // Line offsets are always needed (error location reporting in analysis).
-    let line_offsets = fallow_types::extract::compute_line_offsets(source);
+    let line_offsets = plow_types::extract::compute_line_offsets(source);
 
     // Per-function complexity metrics: only computed when the caller needs them
     // (e.g. the `health` command).  The dead-code pipeline never reads this.
@@ -309,11 +309,11 @@ fn collect_glimmer_template_into_extractor(
 /// body itself; we replace those with the host file's line/col for the
 /// matched `@Component`/`@Directive` decorator. Anchoring at the decorator
 /// (rather than the literal's opening backtick) gives a useful jump-to-source
-/// landing inside the decorator block and lets `// fallow-ignore-next-line
+/// landing inside the decorator block and lets `// plow-ignore-next-line
 /// complexity` comments placed directly above the decorator suppress the
 /// finding through the existing health-side check, with no extra plumbing.
 fn append_inline_template_complexity(
-    complexity: &mut Vec<fallow_types::extract::FunctionComplexity>,
+    complexity: &mut Vec<plow_types::extract::FunctionComplexity>,
     findings: &[crate::visitor::InlineTemplateFinding],
     line_offsets: &[u32],
 ) {
@@ -324,7 +324,7 @@ fn append_inline_template_complexity(
             continue;
         };
         let (line, col) =
-            fallow_types::extract::byte_offset_to_line_col(line_offsets, finding.decorator_start);
+            plow_types::extract::byte_offset_to_line_col(line_offsets, finding.decorator_start);
         fc.line = line;
         fc.col = col;
         complexity.push(fc);
@@ -506,7 +506,7 @@ fn extract_jsdoc_import_types(imports: &mut Vec<ImportInfo>, comments: &[Comment
 /// Matches both single and double quoted path literals and extracts the first
 /// identifier segment after `)\.` as the imported member name. Nested member
 /// access (`import('./x').ns.Foo`) yields `ns` as the imported name, which is
-/// correct for fallow's syntactic analysis since the resolver still adds the
+/// correct for plow's syntactic analysis since the resolver still adds the
 /// edge to the target module.
 fn scan_jsdoc_imports_in(body: &str, imports: &mut Vec<ImportInfo>) {
     let bytes = body.as_bytes();
@@ -559,7 +559,7 @@ fn scan_jsdoc_imports_in(body: &str, imports: &mut Vec<ImportInfo>) {
             // reachability hint (still useful to keep the file reachable).
             imports.push(ImportInfo {
                 source: path.to_string(),
-                imported_name: fallow_types::extract::ImportedName::SideEffect,
+                imported_name: plow_types::extract::ImportedName::SideEffect,
                 local_name: String::new(),
                 is_type_only: true,
                 from_style: false,
@@ -581,7 +581,7 @@ fn scan_jsdoc_imports_in(body: &str, imports: &mut Vec<ImportInfo>) {
         cursor = j;
         imports.push(ImportInfo {
             source: path.to_string(),
-            imported_name: fallow_types::extract::ImportedName::Named(member.to_string()),
+            imported_name: plow_types::extract::ImportedName::Named(member.to_string()),
             local_name: String::new(),
             is_type_only: true,
             from_style: false,
@@ -719,7 +719,7 @@ mod tests {
     use super::{
         has_alpha_tag, has_beta_tag, has_internal_tag, has_public_tag, scan_jsdoc_imports_in,
     };
-    use fallow_types::extract::{ImportInfo, ImportedName};
+    use plow_types::extract::{ImportInfo, ImportedName};
 
     // ── has_public_tag ────────────────────────────────────────────
 

@@ -2,8 +2,8 @@
 //! Radix / bits-ui namespace-barrel patterns where many `index.ts` files
 //! intentionally export the same short names (Root, Content, Trigger).
 
-use fallow_config::{
-    FallowConfig, IgnoreExportRule, IgnoreExportsUsedInFileConfig, OutputFormat, RulesConfig,
+use plow_config::{
+    PlowConfig, IgnoreExportRule, IgnoreExportsUsedInFileConfig, OutputFormat, RulesConfig,
 };
 
 use crate::common::fixture_path;
@@ -11,8 +11,8 @@ use crate::common::fixture_path;
 fn make_config(
     root: std::path::PathBuf,
     ignore_exports: Vec<IgnoreExportRule>,
-) -> fallow_config::ResolvedConfig {
-    FallowConfig {
+) -> plow_config::ResolvedConfig {
+    PlowConfig {
         schema: None,
         extends: vec![],
         entry: vec![],
@@ -27,25 +27,25 @@ fn make_config(
         ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
-        duplicates: fallow_config::DuplicatesConfig::default(),
-        health: fallow_config::HealthConfig::default(),
+        duplicates: plow_config::DuplicatesConfig::default(),
+        health: plow_config::HealthConfig::default(),
         rules: RulesConfig::default(),
-        boundaries: fallow_config::BoundaryConfig::default(),
+        boundaries: plow_config::BoundaryConfig::default(),
         production: false.into(),
         plugins: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
-        audit: fallow_config::AuditConfig::default(),
+        audit: plow_config::AuditConfig::default(),
         codeowners: None,
         public_packages: vec![],
-        flags: fallow_config::FlagsConfig::default(),
-        fix: fallow_config::FixConfig::default(),
-        resolve: fallow_config::ResolveConfig::default(),
+        flags: plow_config::FlagsConfig::default(),
+        fix: plow_config::FixConfig::default(),
+        resolve: plow_config::ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
         auto_imports: false,
-        cache: fallow_config::CacheConfig::default(),
+        cache: plow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None)
 }
@@ -58,7 +58,7 @@ fn duplicate_exports_flagged_without_ignore_exports() {
     // is a common importer.
     let root = fixture_path("issue-317-namespace-barrel-ignore-exports");
     let config = make_config(root, vec![]);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let dupe_names: Vec<&str> = results
         .duplicate_exports
@@ -92,7 +92,7 @@ fn ignore_exports_wildcard_clears_duplicate_exports() {
             exports: vec!["*".to_owned()],
         }],
     );
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.duplicate_exports.is_empty(),
@@ -117,7 +117,7 @@ fn ignore_exports_named_clears_only_listed_names() {
             exports: vec!["Root".to_owned()],
         }],
     );
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let dupe_names: Vec<&str> = results
         .duplicate_exports

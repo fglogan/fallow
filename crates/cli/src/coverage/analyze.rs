@@ -1,12 +1,12 @@
-//! `fallow coverage analyze` implementation.
+//! `plow coverage analyze` implementation.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 use std::time::Instant;
 
-use fallow_config::OutputFormat;
-use fallow_core::git_env::clear_ambient_git_env;
+use plow_config::OutputFormat;
+use plow_core::git_env::clear_ambient_git_env;
 use fallow_cov_protocol::function_identity_id;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -93,7 +93,7 @@ pub fn run(args: &AnalyzeArgs, ctx: &RunContext<'_>) -> ExitCode {
 
     let Some(path) = args.runtime_coverage.as_deref() else {
         return emit_error(
-            "No runtime coverage source selected. Pass --runtime-coverage <path>, --cloud, or set FALLOW_RUNTIME_COVERAGE_SOURCE=cloud.",
+            "No runtime coverage source selected. Pass --runtime-coverage <path>, --cloud, or set PLOW_RUNTIME_COVERAGE_SOURCE=cloud.",
             2,
             ctx.output,
         );
@@ -101,7 +101,7 @@ pub fn run(args: &AnalyzeArgs, ctx: &RunContext<'_>) -> ExitCode {
     run_local(path, args, ctx)
 }
 
-/// `fallow coverage analyze` only emits two output formats: structured JSON
+/// `plow coverage analyze` only emits two output formats: structured JSON
 /// (the canonical agent-readable shape, used by every non-`Human` `--format`
 /// today) and the terse human renderer. Other formats (`compact`, `markdown`,
 /// `sarif`, `codeclimate`, `badge`) require shape conversion that this
@@ -120,7 +120,7 @@ fn validate_output_format(output: OutputFormat) -> Result<(), String> {
         | OutputFormat::ReviewGithub
         | OutputFormat::ReviewGitlab
         | OutputFormat::Badge => Err(format!(
-            "fallow coverage analyze only supports --format json or --format human (got {output:?}). Use `fallow coverage analyze --format json` and pipe to your own converter for {output:?}."
+            "plow coverage analyze only supports --format json or --format human (got {output:?}). Use `plow coverage analyze --format json` and pipe to your own converter for {output:?}."
         )),
     }
 }
@@ -184,7 +184,7 @@ fn run_local(path: &Path, args: &AnalyzeArgs, ctx: &RunContext<'_>) -> ExitCode 
         min_severity: None,
         runtime_coverage: Some(runtime_coverage),
         // `coverage analyze` is a focused runtime-only command; PR-scope
-        // line filtering belongs on `fallow audit` and `fallow health`.
+        // line filtering belongs on `plow audit` and `plow health`.
     }) {
         Ok(result) => result,
         Err(code) => return code,
@@ -229,7 +229,7 @@ fn run_cloud(args: &AnalyzeArgs, ctx: &RunContext<'_>) -> ExitCode {
 }
 
 fn runtime_coverage_source_env_is_cloud() -> bool {
-    std::env::var("FALLOW_RUNTIME_COVERAGE_SOURCE")
+    std::env::var("PLOW_RUNTIME_COVERAGE_SOURCE")
         .is_ok_and(|value| value.trim().eq_ignore_ascii_case("cloud"))
 }
 
@@ -237,14 +237,14 @@ fn resolve_api_key(explicit: Option<&str>) -> Result<String, CloudError> {
     if let Some(value) = explicit.map(str::trim).filter(|value| !value.is_empty()) {
         return Ok(value.to_owned());
     }
-    if let Ok(value) = std::env::var("FALLOW_API_KEY") {
+    if let Ok(value) = std::env::var("PLOW_API_KEY") {
         let trimmed = value.trim();
         if !trimmed.is_empty() {
             return Ok(trimmed.to_owned());
         }
     }
     Err(CloudError::Auth(
-        "Cloud runtime coverage requires an API key.\n\nSet FALLOW_API_KEY or pass --api-key:\n\n  FALLOW_API_KEY=fallow_live_... fallow coverage analyze --cloud --repo owner/repo".to_owned(),
+        "Cloud runtime coverage requires an API key.\n\nSet PLOW_API_KEY or pass --api-key:\n\n  PLOW_API_KEY=plow_live_... plow coverage analyze --cloud --repo owner/repo".to_owned(),
     ))
 }
 
@@ -252,7 +252,7 @@ fn resolve_repo(explicit: Option<&str>, root: &Path) -> Result<String, CloudErro
     if let Some(value) = explicit.map(str::trim).filter(|value| !value.is_empty()) {
         return Ok(value.to_owned());
     }
-    if let Ok(value) = std::env::var("FALLOW_REPO") {
+    if let Ok(value) = std::env::var("PLOW_REPO") {
         let trimmed = value.trim();
         if !trimmed.is_empty() {
             return Ok(trimmed.to_owned());
@@ -262,7 +262,7 @@ fn resolve_repo(explicit: Option<&str>, root: &Path) -> Result<String, CloudErro
         return Ok(from_remote);
     }
     Err(CloudError::Validation(
-        "Could not infer repository for cloud runtime coverage.\n\nPass it explicitly:\n\n  fallow coverage analyze --cloud --repo owner/repo\n\nor set:\n\n  FALLOW_REPO=owner/repo".to_owned(),
+        "Could not infer repository for cloud runtime coverage.\n\nPass it explicitly:\n\n  plow coverage analyze --cloud --repo owner/repo\n\nor set:\n\n  PLOW_REPO=owner/repo".to_owned(),
     ))
 }
 
@@ -354,24 +354,24 @@ fn build_static_index(ctx: &RunContext<'_>, production: bool) -> Result<StaticIn
         ctx.threads,
         Some(production),
         ctx.quiet,
-        fallow_config::ProductionAnalysis::Health,
+        plow_config::ProductionAnalysis::Health,
     )?;
-    let files = fallow_core::discover::discover_files_with_plugin_scopes(&config);
+    let files = plow_core::discover::discover_files_with_plugin_scopes(&config);
     let cache = if config.no_cache {
         None
     } else {
-        fallow_core::cache::CacheStore::load(
+        plow_core::cache::CacheStore::load(
             &config.cache_dir,
             config.cache_config_hash,
-            fallow_core::resolve_cache_max_size_bytes(&config),
+            plow_core::resolve_cache_max_size_bytes(&config),
         )
     };
-    let parse_result = fallow_core::extract::parse_all_files(&files, cache.as_ref(), true);
+    let parse_result = plow_core::extract::parse_all_files(&files, cache.as_ref(), true);
     #[expect(
         deprecated,
-        reason = "ADR-008 deprecates fallow_core::analyze_with_parse_result externally; the CLI still uses the workspace path dependency"
+        reason = "ADR-008 deprecates plow_core::analyze_with_parse_result externally; the CLI still uses the workspace path dependency"
     )]
-    let analysis_output = fallow_core::analyze_with_parse_result(&config, &parse_result.modules)
+    let analysis_output = plow_core::analyze_with_parse_result(&config, &parse_result.modules)
         .map_err(|err| emit_error(&format!("analysis failed: {err}"), 2, ctx.output))?;
     let file_paths: FxHashMap<_, _> = files.iter().map(|file| (file.id, &file.path)).collect();
     let codeowners =
@@ -387,9 +387,9 @@ fn build_static_index(ctx: &RunContext<'_>, production: bool) -> Result<StaticIn
 
 fn build_index_from_analysis(
     root: &Path,
-    modules: &[fallow_types::extract::ModuleInfo],
-    analysis_output: &fallow_core::AnalysisOutput,
-    file_paths: &FxHashMap<fallow_types::discover::FileId, &PathBuf>,
+    modules: &[plow_types::extract::ModuleInfo],
+    analysis_output: &plow_core::AnalysisOutput,
+    file_paths: &FxHashMap<plow_types::discover::FileId, &PathBuf>,
     codeowners: Option<&crate::codeowners::CodeOwners>,
 ) -> StaticIndex {
     let unused_files: FxHashSet<PathBuf> = analysis_output
@@ -901,7 +901,7 @@ fn match_cloud_function(
 ) -> Option<StaticFunctionInfo> {
     // Tier 1: cross-surface stable-id join. Strongest match, survives line
     // moves. Only fires when the cloud has been migrated to emit `stableId`
-    // (fallow-cloud#63); `None` for the current cloud.
+    // (plow-cloud#63); `None` for the current cloud.
     if let Some(stable_id) = function.stable_id.as_deref()
         && let Some(info) = static_index.by_stable_id.get(stable_id)
     {
@@ -1061,7 +1061,7 @@ fn print_runtime_json(
     explain: bool,
 ) -> ExitCode {
     use crate::output_envelope::{CoverageAnalyzeOutput, CoverageAnalyzeSchemaVersion};
-    use fallow_types::envelope::{ElapsedMs, ToolVersion};
+    use plow_types::envelope::{ElapsedMs, ToolVersion};
 
     // Schema-derived constant: the schema-version enum has a single variant
     // serialized as `"1"`; the legacy `RUNTIME_COVERAGE_SCHEMA_VERSION`
@@ -1179,14 +1179,14 @@ mod tests {
     fn analyze_args_debug_masks_api_key() {
         let args = AnalyzeArgs {
             cloud: true,
-            api_key: Some("fallow_live_secret_token_value".to_owned()),
-            api_endpoint: Some("https://api.fallow.cloud".to_owned()),
+            api_key: Some("plow_live_secret_token_value".to_owned()),
+            api_endpoint: Some("https://api.plow.cloud".to_owned()),
             repo: Some("acme/web".to_owned()),
             ..AnalyzeArgs::default()
         };
         let formatted = format!("{args:?}");
         assert!(
-            !formatted.contains("fallow_live_secret_token_value"),
+            !formatted.contains("plow_live_secret_token_value"),
             "api_key leaked through Debug: {formatted}"
         );
         assert!(
@@ -1200,8 +1200,8 @@ mod tests {
     #[test]
     fn parse_git_remote_https() {
         assert_eq!(
-            parse_git_remote_to_project_id("https://github.com/fallow-rs/fallow.git"),
-            Some("fallow-rs/fallow".to_owned())
+            parse_git_remote_to_project_id("https://github.com/plow-rs/plow.git"),
+            Some("plow-rs/plow".to_owned())
         );
     }
 
@@ -1359,7 +1359,7 @@ mod tests {
         // Empty window: server adds no_runtime_data; CLI's empty-summary
         // branch must defer to the server's variant unconditionally so the
         // user never sees the same code twice. Caught live against
-        // api.fallow.cloud during the v2.57.0 smoke (both --repo nonexistent
+        // api.plow.cloud during the v2.57.0 smoke (both --repo nonexistent
         // and --project-id apps/dashboard returned duplicates).
         let snapshot = CloudRuntimeContext {
             repo: "nonexistent-repo".to_owned(),
@@ -1399,11 +1399,11 @@ mod tests {
     #[test]
     fn cloud_warnings_dedupe_when_server_message_includes_project_id() {
         // Regression: with --project-id set, the server's no_runtime_data
-        // message embeds the projectId ("... apps/dashboard in fallow-cloud
+        // message embeds the projectId ("... apps/dashboard in plow-cloud
         // ...") while the CLI's variant does not, so dedup-by-(code,message)
         // does not catch the duplicate. Defer to code-only check.
         let snapshot = CloudRuntimeContext {
-            repo: "fallow-cloud".to_owned(),
+            repo: "plow-cloud".to_owned(),
             window: crate::coverage::cloud_client::CloudRuntimeWindow { period_days: 30 },
             summary: crate::coverage::cloud_client::CloudRuntimeSummary {
                 trace_count: 0,
@@ -1421,7 +1421,7 @@ mod tests {
             warnings: vec![CloudRuntimeWarning::Object {
                 code: Some("no_runtime_data".to_owned()),
                 message: Some(
-                    "No runtime coverage data received for apps/dashboard in fallow-cloud in the last 30 days.".to_owned(),
+                    "No runtime coverage data received for apps/dashboard in plow-cloud in the last 30 days.".to_owned(),
                 ),
             }],
         };

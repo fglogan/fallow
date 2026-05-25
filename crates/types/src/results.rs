@@ -20,7 +20,7 @@ use crate::suppress::{IssueKind, closest_known_kind_name};
 /// Summary of detected entry points, grouped by discovery source.
 ///
 /// Used to surface entry-point detection status in human and JSON output,
-/// so library authors can verify that fallow found the right entry points.
+/// so library authors can verify that plow found the right entry points.
 #[derive(Debug, Clone, Default)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct EntryPointSummary {
@@ -36,8 +36,8 @@ pub struct EntryPointSummary {
 /// # Examples
 ///
 /// ```
-/// use fallow_types::output_dead_code::UnusedFileFinding;
-/// use fallow_types::results::{AnalysisResults, UnusedFile};
+/// use plow_types::output_dead_code::UnusedFileFinding;
+/// use plow_types::results::{AnalysisResults, UnusedFile};
 /// use std::path::PathBuf;
 ///
 /// let mut results = AnalysisResults::default();
@@ -201,8 +201,8 @@ impl AnalysisResults {
     /// # Examples
     ///
     /// ```
-    /// use fallow_types::output_dead_code::{UnresolvedImportFinding, UnusedFileFinding};
-    /// use fallow_types::results::{AnalysisResults, UnresolvedImport, UnusedFile};
+    /// use plow_types::output_dead_code::{UnresolvedImportFinding, UnusedFileFinding};
+    /// use plow_types::results::{AnalysisResults, UnresolvedImport, UnusedFile};
     /// use std::path::PathBuf;
     ///
     /// let mut results = AnalysisResults::default();
@@ -574,7 +574,7 @@ pub struct UnusedDependency {
 /// # Examples
 ///
 /// ```
-/// use fallow_types::results::DependencyLocation;
+/// use plow_types::results::DependencyLocation;
 ///
 /// // All three variants are constructible
 /// let loc = DependencyLocation::Dependencies;
@@ -743,8 +743,8 @@ pub struct EmptyCatalogGroup {
 /// at a catalog which does not declare the consumed package.
 ///
 /// `pnpm install` errors at install time with `ERR_PNPM_CATALOG_ENTRY_NOT_FOUND_FOR_CATALOG_PROTOCOL`
-/// when this happens. fallow surfaces it statically so the failure is caught at
-/// `fallow check` time, before any install.
+/// when this happens. plow surfaces it statically so the failure is caught at
+/// `plow check` time, before any install.
 ///
 /// The default catalog (bare `catalog:` references the top-level `catalog:` map)
 /// uses `catalog_name: "default"`. Named catalogs (`catalog:react17`) use the
@@ -1016,7 +1016,7 @@ pub struct BoundaryViolation {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum SuppressionOrigin {
-    /// A `// fallow-ignore-next-line` or `// fallow-ignore-file` comment.
+    /// A `// plow-ignore-next-line` or `// plow-ignore-file` comment.
     Comment {
         /// The issue kind token from the comment (e.g., "unused-exports"), or None for blanket.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1025,7 +1025,7 @@ pub enum SuppressionOrigin {
         is_file_level: bool,
         /// Whether `issue_kind` parses to a known `IssueKind`. False when the
         /// token is a typo or refers to a kind that was renamed or removed in
-        /// a newer fallow release. JSON consumers (CI annotations, MCP agents,
+        /// a newer plow release. JSON consumers (CI annotations, MCP agents,
         /// VS Code) branch on this to choose the right next-step text.
         /// Omitted from the wire when `true` so producers that have not yet
         /// adopted the field stay byte-compatible. See issue #449.
@@ -1098,9 +1098,9 @@ impl StaleSuppression {
                 ..
             } => {
                 let directive = if *is_file_level {
-                    "fallow-ignore-file"
+                    "plow-ignore-file"
                 } else {
-                    "fallow-ignore-next-line"
+                    "plow-ignore-next-line"
                 };
                 match issue_kind {
                     Some(kind) => format!("// {directive} {kind}"),
@@ -1135,10 +1135,10 @@ impl StaleSuppression {
                 match issue_kind {
                     Some(kind) if !*kind_known => match closest_known_kind_name(kind) {
                         Some(suggestion) => format!(
-                            "'{kind}' is not a recognized fallow issue kind. Did you mean '{suggestion}'? Other tokens on this line still apply."
+                            "'{kind}' is not a recognized plow issue kind. Did you mean '{suggestion}'? Other tokens on this line still apply."
                         ),
                         None => format!(
-                            "'{kind}' is not a recognized fallow issue kind. Other tokens on this line still apply."
+                            "'{kind}' is not a recognized plow issue kind. Other tokens on this line still apply."
                         ),
                     },
                     Some(kind) => format!("no {kind} issue found {scope}"),

@@ -1,0 +1,3 @@
+{
+  // plow misses this generated file today
+  "ignoreExports": ["src/generated.ts"]

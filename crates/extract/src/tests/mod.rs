@@ -8,8 +8,8 @@ mod sfc;
 
 use std::path::Path;
 
-use fallow_types::discover::FileId;
-use fallow_types::extract::ModuleInfo;
+use plow_types::discover::FileId;
+use plow_types::extract::ModuleInfo;
 
 use crate::parse::parse_source_to_module;
 
@@ -98,7 +98,7 @@ fn parses_gts_with_multi_template_blocks() {
     assert!(
         info.exports
             .iter()
-            .any(|e| matches!(e.name, fallow_types::extract::ExportName::Default)),
+            .any(|e| matches!(e.name, plow_types::extract::ExportName::Default)),
         "default export should be extracted",
     );
 }
@@ -130,7 +130,7 @@ fn parses_gts_with_standalone_default_template() {
     assert!(
         info.exports
             .iter()
-            .any(|e| matches!(e.name, fallow_types::extract::ExportName::Default)),
+            .any(|e| matches!(e.name, plow_types::extract::ExportName::Default)),
         "default export should be extracted",
     );
 }
@@ -203,7 +203,7 @@ fn bom_stripped_before_hash_so_with_and_without_bom_yield_same_hash() {
 /// file lands on line 1 col 0 (not line 1 col 3).
 #[test]
 fn bom_stripped_before_line_offsets_so_line_numbers_align() {
-    use fallow_types::extract::{byte_offset_to_line_col, compute_line_offsets};
+    use plow_types::extract::{byte_offset_to_line_col, compute_line_offsets};
 
     let body = "export const first = 1;\nexport const second = 2;\n";
     let with_bom = format!("\u{FEFF}{body}");

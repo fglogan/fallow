@@ -2,8 +2,8 @@ use rustc_hash::FxHashSet;
 
 use crate::graph::ModuleGraph;
 use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport};
-use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
-use fallow_types::extract::{ExportName, ImportInfo, ImportedName, VisibilityTag};
+use plow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
+use plow_types::extract::{ExportName, ImportInfo, ImportedName, VisibilityTag};
 use std::path::PathBuf;
 
 #[test]
@@ -55,7 +55,7 @@ fn graph_re_export_chain_propagates_references() {
         ResolvedModule {
             file_id: FileId(1),
             path: PathBuf::from("/project/barrel.ts"),
-            exports: vec![fallow_types::extract::ExportInfo {
+            exports: vec![plow_types::extract::ExportInfo {
                 name: ExportName::Named("foo".to_string()),
                 local_name: Some("foo".to_string()),
                 is_type_only: false,
@@ -66,7 +66,7 @@ fn graph_re_export_chain_propagates_references() {
                 super_class: None,
             }],
             re_exports: vec![ResolvedReExport {
-                info: fallow_types::extract::ReExportInfo {
+                info: plow_types::extract::ReExportInfo {
                     source: "./source".to_string(),
                     imported_name: "foo".to_string(),
                     exported_name: "foo".to_string(),
@@ -81,7 +81,7 @@ fn graph_re_export_chain_propagates_references() {
         ResolvedModule {
             file_id: FileId(2),
             path: PathBuf::from("/project/source.ts"),
-            exports: vec![fallow_types::extract::ExportInfo {
+            exports: vec![plow_types::extract::ExportInfo {
                 name: ExportName::Named("foo".to_string()),
                 local_name: Some("foo".to_string()),
                 is_type_only: false,
@@ -157,7 +157,7 @@ fn barrel_re_export_creates_export_symbol() {
             file_id: FileId(1),
             path: PathBuf::from("/project/barrel.ts"),
             re_exports: vec![ResolvedReExport {
-                info: fallow_types::extract::ReExportInfo {
+                info: plow_types::extract::ReExportInfo {
                     source: "./source".to_string(),
                     imported_name: "foo".to_string(),
                     exported_name: "foo".to_string(),
@@ -171,7 +171,7 @@ fn barrel_re_export_creates_export_symbol() {
         ResolvedModule {
             file_id: FileId(2),
             path: PathBuf::from("/project/source.ts"),
-            exports: vec![fallow_types::extract::ExportInfo {
+            exports: vec![plow_types::extract::ExportInfo {
                 name: ExportName::Named("foo".to_string()),
                 local_name: Some("foo".to_string()),
                 is_type_only: false,
@@ -260,7 +260,7 @@ fn barrel_unused_re_export_has_no_references() {
             path: PathBuf::from("/project/barrel.ts"),
             re_exports: vec![
                 ResolvedReExport {
-                    info: fallow_types::extract::ReExportInfo {
+                    info: plow_types::extract::ReExportInfo {
                         source: "./source".to_string(),
                         imported_name: "foo".to_string(),
                         exported_name: "foo".to_string(),
@@ -270,7 +270,7 @@ fn barrel_unused_re_export_has_no_references() {
                     target: ResolveResult::InternalModule(FileId(2)),
                 },
                 ResolvedReExport {
-                    info: fallow_types::extract::ReExportInfo {
+                    info: plow_types::extract::ReExportInfo {
                         source: "./source".to_string(),
                         imported_name: "bar".to_string(),
                         exported_name: "bar".to_string(),
@@ -286,7 +286,7 @@ fn barrel_unused_re_export_has_no_references() {
             file_id: FileId(2),
             path: PathBuf::from("/project/source.ts"),
             exports: vec![
-                fallow_types::extract::ExportInfo {
+                plow_types::extract::ExportInfo {
                     name: ExportName::Named("foo".to_string()),
                     local_name: Some("foo".to_string()),
                     is_type_only: false,
@@ -296,7 +296,7 @@ fn barrel_unused_re_export_has_no_references() {
                     is_side_effect_used: false,
                     super_class: None,
                 },
-                fallow_types::extract::ExportInfo {
+                plow_types::extract::ExportInfo {
                     name: ExportName::Named("bar".to_string()),
                     local_name: Some("bar".to_string()),
                     is_type_only: false,
@@ -380,7 +380,7 @@ fn type_only_re_export_creates_type_only_export_symbol() {
             path: PathBuf::from("/project/barrel.ts"),
             re_exports: vec![
                 ResolvedReExport {
-                    info: fallow_types::extract::ReExportInfo {
+                    info: plow_types::extract::ReExportInfo {
                         source: "./source".to_string(),
                         imported_name: "UsedType".to_string(),
                         exported_name: "UsedType".to_string(),
@@ -390,7 +390,7 @@ fn type_only_re_export_creates_type_only_export_symbol() {
                     target: ResolveResult::InternalModule(FileId(2)),
                 },
                 ResolvedReExport {
-                    info: fallow_types::extract::ReExportInfo {
+                    info: plow_types::extract::ReExportInfo {
                         source: "./source".to_string(),
                         imported_name: "UnusedType".to_string(),
                         exported_name: "UnusedType".to_string(),
@@ -406,7 +406,7 @@ fn type_only_re_export_creates_type_only_export_symbol() {
             file_id: FileId(2),
             path: PathBuf::from("/project/source.ts"),
             exports: vec![
-                fallow_types::extract::ExportInfo {
+                plow_types::extract::ExportInfo {
                     name: ExportName::Named("UsedType".to_string()),
                     local_name: Some("UsedType".to_string()),
                     is_type_only: true,
@@ -416,7 +416,7 @@ fn type_only_re_export_creates_type_only_export_symbol() {
                     is_side_effect_used: false,
                     super_class: None,
                 },
-                fallow_types::extract::ExportInfo {
+                plow_types::extract::ExportInfo {
                     name: ExportName::Named("UnusedType".to_string()),
                     local_name: Some("UnusedType".to_string()),
                     is_type_only: true,
@@ -505,7 +505,7 @@ fn default_re_export_creates_default_export_symbol() {
             file_id: FileId(1),
             path: PathBuf::from("/project/barrel.ts"),
             re_exports: vec![ResolvedReExport {
-                info: fallow_types::extract::ReExportInfo {
+                info: plow_types::extract::ReExportInfo {
                     source: "./source".to_string(),
                     imported_name: "default".to_string(),
                     exported_name: "Accordion".to_string(),
@@ -519,7 +519,7 @@ fn default_re_export_creates_default_export_symbol() {
         ResolvedModule {
             file_id: FileId(2),
             path: PathBuf::from("/project/source.ts"),
-            exports: vec![fallow_types::extract::ExportInfo {
+            exports: vec![plow_types::extract::ExportInfo {
                 name: ExportName::Default,
                 local_name: None,
                 is_type_only: false,
@@ -610,7 +610,7 @@ fn multi_level_re_export_chain_propagation() {
             file_id: FileId(1),
             path: PathBuf::from("/project/barrel1.ts"),
             re_exports: vec![ResolvedReExport {
-                info: fallow_types::extract::ReExportInfo {
+                info: plow_types::extract::ReExportInfo {
                     source: "./barrel2".to_string(),
                     imported_name: "foo".to_string(),
                     exported_name: "foo".to_string(),
@@ -625,7 +625,7 @@ fn multi_level_re_export_chain_propagation() {
             file_id: FileId(2),
             path: PathBuf::from("/project/barrel2.ts"),
             re_exports: vec![ResolvedReExport {
-                info: fallow_types::extract::ReExportInfo {
+                info: plow_types::extract::ReExportInfo {
                     source: "./source".to_string(),
                     imported_name: "foo".to_string(),
                     exported_name: "foo".to_string(),
@@ -639,7 +639,7 @@ fn multi_level_re_export_chain_propagation() {
         ResolvedModule {
             file_id: FileId(3),
             path: PathBuf::from("/project/source.ts"),
-            exports: vec![fallow_types::extract::ExportInfo {
+            exports: vec![plow_types::extract::ExportInfo {
                 name: ExportName::Named("foo".to_string()),
                 local_name: Some("foo".to_string()),
                 is_type_only: false,
@@ -719,7 +719,7 @@ fn entry_point_named_re_export_propagates_to_source() {
             path: PathBuf::from("/project/src/index.js"),
             re_exports: vec![
                 ResolvedReExport {
-                    info: fallow_types::extract::ReExportInfo {
+                    info: plow_types::extract::ReExportInfo {
                         source: "./render".to_string(),
                         imported_name: "render".to_string(),
                         exported_name: "render".to_string(),
@@ -729,7 +729,7 @@ fn entry_point_named_re_export_propagates_to_source() {
                     target: ResolveResult::InternalModule(FileId(1)),
                 },
                 ResolvedReExport {
-                    info: fallow_types::extract::ReExportInfo {
+                    info: plow_types::extract::ReExportInfo {
                         source: "./render".to_string(),
                         imported_name: "hydrate".to_string(),
                         exported_name: "hydrate".to_string(),
@@ -746,7 +746,7 @@ fn entry_point_named_re_export_propagates_to_source() {
             file_id: FileId(1),
             path: PathBuf::from("/project/src/render.js"),
             exports: vec![
-                fallow_types::extract::ExportInfo {
+                plow_types::extract::ExportInfo {
                     name: ExportName::Named("render".to_string()),
                     local_name: Some("render".to_string()),
                     is_type_only: false,
@@ -756,7 +756,7 @@ fn entry_point_named_re_export_propagates_to_source() {
                     is_side_effect_used: false,
                     super_class: None,
                 },
-                fallow_types::extract::ExportInfo {
+                plow_types::extract::ExportInfo {
                     name: ExportName::Named("hydrate".to_string()),
                     local_name: Some("hydrate".to_string()),
                     is_type_only: false,
@@ -825,7 +825,7 @@ fn entry_point_star_re_export_propagates_to_source() {
             file_id: FileId(0),
             path: PathBuf::from("/project/src/index.js"),
             re_exports: vec![ResolvedReExport {
-                info: fallow_types::extract::ReExportInfo {
+                info: plow_types::extract::ReExportInfo {
                     source: "./utils".to_string(),
                     imported_name: "*".to_string(),
                     exported_name: "*".to_string(),
@@ -840,7 +840,7 @@ fn entry_point_star_re_export_propagates_to_source() {
             file_id: FileId(1),
             path: PathBuf::from("/project/src/utils.js"),
             exports: vec![
-                fallow_types::extract::ExportInfo {
+                plow_types::extract::ExportInfo {
                     name: ExportName::Named("foo".to_string()),
                     local_name: Some("foo".to_string()),
                     is_type_only: false,
@@ -850,7 +850,7 @@ fn entry_point_star_re_export_propagates_to_source() {
                     is_side_effect_used: false,
                     super_class: None,
                 },
-                fallow_types::extract::ExportInfo {
+                plow_types::extract::ExportInfo {
                     name: ExportName::Named("bar".to_string()),
                     local_name: Some("bar".to_string()),
                     is_type_only: false,
@@ -915,7 +915,7 @@ fn entry_point_star_re_export_does_not_mark_default_as_used() {
             file_id: FileId(0),
             path: PathBuf::from("/project/src/index.js"),
             re_exports: vec![ResolvedReExport {
-                info: fallow_types::extract::ReExportInfo {
+                info: plow_types::extract::ReExportInfo {
                     source: "./utils".to_string(),
                     imported_name: "*".to_string(),
                     exported_name: "*".to_string(),
@@ -930,7 +930,7 @@ fn entry_point_star_re_export_does_not_mark_default_as_used() {
             file_id: FileId(1),
             path: PathBuf::from("/project/src/utils.js"),
             exports: vec![
-                fallow_types::extract::ExportInfo {
+                plow_types::extract::ExportInfo {
                     name: ExportName::Named("foo".to_string()),
                     local_name: Some("foo".to_string()),
                     is_type_only: false,
@@ -940,7 +940,7 @@ fn entry_point_star_re_export_does_not_mark_default_as_used() {
                     is_side_effect_used: false,
                     super_class: None,
                 },
-                fallow_types::extract::ExportInfo {
+                plow_types::extract::ExportInfo {
                     name: ExportName::Default,
                     local_name: None,
                     is_type_only: false,
@@ -1012,7 +1012,7 @@ fn entry_point_multi_level_named_re_export_chain() {
             file_id: FileId(0),
             path: PathBuf::from("/project/src/index.ts"),
             re_exports: vec![ResolvedReExport {
-                info: fallow_types::extract::ReExportInfo {
+                info: plow_types::extract::ReExportInfo {
                     source: "./barrel".to_string(),
                     imported_name: "foo".to_string(),
                     exported_name: "foo".to_string(),
@@ -1028,7 +1028,7 @@ fn entry_point_multi_level_named_re_export_chain() {
             file_id: FileId(1),
             path: PathBuf::from("/project/src/barrel.ts"),
             re_exports: vec![ResolvedReExport {
-                info: fallow_types::extract::ReExportInfo {
+                info: plow_types::extract::ReExportInfo {
                     source: "./source".to_string(),
                     imported_name: "foo".to_string(),
                     exported_name: "foo".to_string(),
@@ -1043,7 +1043,7 @@ fn entry_point_multi_level_named_re_export_chain() {
         ResolvedModule {
             file_id: FileId(2),
             path: PathBuf::from("/project/src/source.ts"),
-            exports: vec![fallow_types::extract::ExportInfo {
+            exports: vec![plow_types::extract::ExportInfo {
                 name: ExportName::Named("foo".to_string()),
                 local_name: Some("foo".to_string()),
                 is_type_only: false,
@@ -1142,7 +1142,7 @@ fn star_re_export_through_multiple_barrel_layers() {
             file_id: FileId(1),
             path: PathBuf::from("/project/barrel_a.ts"),
             re_exports: vec![ResolvedReExport {
-                info: fallow_types::extract::ReExportInfo {
+                info: plow_types::extract::ReExportInfo {
                     source: "./barrel_b".to_string(),
                     imported_name: "*".to_string(),
                     exported_name: "*".to_string(),
@@ -1158,7 +1158,7 @@ fn star_re_export_through_multiple_barrel_layers() {
             file_id: FileId(2),
             path: PathBuf::from("/project/barrel_b.ts"),
             re_exports: vec![ResolvedReExport {
-                info: fallow_types::extract::ReExportInfo {
+                info: plow_types::extract::ReExportInfo {
                     source: "./source".to_string(),
                     imported_name: "*".to_string(),
                     exported_name: "*".to_string(),
@@ -1174,7 +1174,7 @@ fn star_re_export_through_multiple_barrel_layers() {
             file_id: FileId(3),
             path: PathBuf::from("/project/source.ts"),
             exports: vec![
-                fallow_types::extract::ExportInfo {
+                plow_types::extract::ExportInfo {
                     name: ExportName::Named("foo".to_string()),
                     local_name: Some("foo".to_string()),
                     is_type_only: false,
@@ -1184,7 +1184,7 @@ fn star_re_export_through_multiple_barrel_layers() {
                     is_side_effect_used: false,
                     super_class: None,
                 },
-                fallow_types::extract::ExportInfo {
+                plow_types::extract::ExportInfo {
                     name: ExportName::Named("bar".to_string()),
                     local_name: Some("bar".to_string()),
                     is_type_only: false,
@@ -1260,7 +1260,7 @@ fn entry_point_star_re_export_through_multiple_barrel_layers() {
             file_id: FileId(0),
             path: PathBuf::from("/project/barrel_a.ts"),
             re_exports: vec![ResolvedReExport {
-                info: fallow_types::extract::ReExportInfo {
+                info: plow_types::extract::ReExportInfo {
                     source: "./barrel_b".to_string(),
                     imported_name: "*".to_string(),
                     exported_name: "*".to_string(),
@@ -1275,7 +1275,7 @@ fn entry_point_star_re_export_through_multiple_barrel_layers() {
             file_id: FileId(1),
             path: PathBuf::from("/project/barrel_b.ts"),
             re_exports: vec![ResolvedReExport {
-                info: fallow_types::extract::ReExportInfo {
+                info: plow_types::extract::ReExportInfo {
                     source: "./barrel_c".to_string(),
                     imported_name: "*".to_string(),
                     exported_name: "*".to_string(),
@@ -1290,7 +1290,7 @@ fn entry_point_star_re_export_through_multiple_barrel_layers() {
             file_id: FileId(2),
             path: PathBuf::from("/project/barrel_c.ts"),
             re_exports: vec![ResolvedReExport {
-                info: fallow_types::extract::ReExportInfo {
+                info: plow_types::extract::ReExportInfo {
                     source: "./source".to_string(),
                     imported_name: "*".to_string(),
                     exported_name: "*".to_string(),
@@ -1304,7 +1304,7 @@ fn entry_point_star_re_export_through_multiple_barrel_layers() {
         ResolvedModule {
             file_id: FileId(3),
             path: PathBuf::from("/project/source.ts"),
-            exports: vec![fallow_types::extract::ExportInfo {
+            exports: vec![plow_types::extract::ExportInfo {
                 name: ExportName::Named("foo".to_string()),
                 local_name: Some("foo".to_string()),
                 is_type_only: false,
@@ -1383,7 +1383,7 @@ fn named_re_export_with_rename() {
             file_id: FileId(1),
             path: PathBuf::from("/project/barrel.ts"),
             re_exports: vec![ResolvedReExport {
-                info: fallow_types::extract::ReExportInfo {
+                info: plow_types::extract::ReExportInfo {
                     source: "./source".to_string(),
                     imported_name: "foo".to_string(),
                     exported_name: "bar".to_string(),
@@ -1398,7 +1398,7 @@ fn named_re_export_with_rename() {
         ResolvedModule {
             file_id: FileId(2),
             path: PathBuf::from("/project/source.ts"),
-            exports: vec![fallow_types::extract::ExportInfo {
+            exports: vec![plow_types::extract::ExportInfo {
                 name: ExportName::Named("foo".to_string()),
                 local_name: Some("foo".to_string()),
                 is_type_only: false,
@@ -1466,7 +1466,7 @@ fn entry_point_star_re_export_source_has_only_default() {
             file_id: FileId(0),
             path: PathBuf::from("/project/src/index.js"),
             re_exports: vec![ResolvedReExport {
-                info: fallow_types::extract::ReExportInfo {
+                info: plow_types::extract::ReExportInfo {
                     source: "./source".to_string(),
                     imported_name: "*".to_string(),
                     exported_name: "*".to_string(),
@@ -1481,7 +1481,7 @@ fn entry_point_star_re_export_source_has_only_default() {
         ResolvedModule {
             file_id: FileId(1),
             path: PathBuf::from("/project/src/source.js"),
-            exports: vec![fallow_types::extract::ExportInfo {
+            exports: vec![plow_types::extract::ExportInfo {
                 name: ExportName::Default,
                 local_name: None,
                 is_type_only: false,
@@ -1546,7 +1546,7 @@ fn cycle_detection_does_not_infinite_loop() {
             file_id: FileId(0),
             path: PathBuf::from("/project/a.ts"),
             re_exports: vec![ResolvedReExport {
-                info: fallow_types::extract::ReExportInfo {
+                info: plow_types::extract::ReExportInfo {
                     source: "./b".to_string(),
                     imported_name: "foo".to_string(),
                     exported_name: "foo".to_string(),
@@ -1562,7 +1562,7 @@ fn cycle_detection_does_not_infinite_loop() {
             file_id: FileId(1),
             path: PathBuf::from("/project/b.ts"),
             re_exports: vec![ResolvedReExport {
-                info: fallow_types::extract::ReExportInfo {
+                info: plow_types::extract::ReExportInfo {
                     source: "./a".to_string(),
                     imported_name: "foo".to_string(),
                     exported_name: "foo".to_string(),
@@ -1631,7 +1631,7 @@ fn star_re_export_cycle_terminates() {
         ResolvedModule {
             file_id: FileId(0),
             path: PathBuf::from("/project/a.ts"),
-            exports: vec![fallow_types::extract::ExportInfo {
+            exports: vec![plow_types::extract::ExportInfo {
                 name: ExportName::Named("x".to_string()),
                 local_name: Some("x".to_string()),
                 is_type_only: false,
@@ -1642,7 +1642,7 @@ fn star_re_export_cycle_terminates() {
                 super_class: None,
             }],
             re_exports: vec![ResolvedReExport {
-                info: fallow_types::extract::ReExportInfo {
+                info: plow_types::extract::ReExportInfo {
                     source: "./b".to_string(),
                     imported_name: "*".to_string(),
                     exported_name: "*".to_string(),
@@ -1658,7 +1658,7 @@ fn star_re_export_cycle_terminates() {
             file_id: FileId(1),
             path: PathBuf::from("/project/b.ts"),
             re_exports: vec![ResolvedReExport {
-                info: fallow_types::extract::ReExportInfo {
+                info: plow_types::extract::ReExportInfo {
                     source: "./a".to_string(),
                     imported_name: "*".to_string(),
                     exported_name: "*".to_string(),
@@ -1772,7 +1772,7 @@ fn mixed_star_and_named_re_exports_from_same_source() {
             path: PathBuf::from("/project/barrel.ts"),
             re_exports: vec![
                 ResolvedReExport {
-                    info: fallow_types::extract::ReExportInfo {
+                    info: plow_types::extract::ReExportInfo {
                         source: "./source".to_string(),
                         imported_name: "*".to_string(),
                         exported_name: "*".to_string(),
@@ -1782,7 +1782,7 @@ fn mixed_star_and_named_re_exports_from_same_source() {
                     target: ResolveResult::InternalModule(FileId(2)),
                 },
                 ResolvedReExport {
-                    info: fallow_types::extract::ReExportInfo {
+                    info: plow_types::extract::ReExportInfo {
                         source: "./source".to_string(),
                         imported_name: "baz".to_string(),
                         exported_name: "bar".to_string(),
@@ -1799,7 +1799,7 @@ fn mixed_star_and_named_re_exports_from_same_source() {
             file_id: FileId(2),
             path: PathBuf::from("/project/source.ts"),
             exports: vec![
-                fallow_types::extract::ExportInfo {
+                plow_types::extract::ExportInfo {
                     name: ExportName::Named("foo".to_string()),
                     local_name: Some("foo".to_string()),
                     is_type_only: false,
@@ -1809,7 +1809,7 @@ fn mixed_star_and_named_re_exports_from_same_source() {
                     is_side_effect_used: false,
                     super_class: None,
                 },
-                fallow_types::extract::ExportInfo {
+                plow_types::extract::ExportInfo {
                     name: ExportName::Named("baz".to_string()),
                     local_name: Some("baz".to_string()),
                     is_type_only: false,
@@ -1881,7 +1881,7 @@ fn entry_point_named_re_export_no_in_graph_consumers_multiple_exports() {
             path: PathBuf::from("/project/src/index.ts"),
             re_exports: vec![
                 ResolvedReExport {
-                    info: fallow_types::extract::ReExportInfo {
+                    info: plow_types::extract::ReExportInfo {
                         source: "./lib".to_string(),
                         imported_name: "create".to_string(),
                         exported_name: "create".to_string(),
@@ -1891,7 +1891,7 @@ fn entry_point_named_re_export_no_in_graph_consumers_multiple_exports() {
                     target: ResolveResult::InternalModule(FileId(1)),
                 },
                 ResolvedReExport {
-                    info: fallow_types::extract::ReExportInfo {
+                    info: plow_types::extract::ReExportInfo {
                         source: "./lib".to_string(),
                         imported_name: "destroy".to_string(),
                         exported_name: "destroy".to_string(),
@@ -1908,7 +1908,7 @@ fn entry_point_named_re_export_no_in_graph_consumers_multiple_exports() {
             file_id: FileId(1),
             path: PathBuf::from("/project/src/lib.ts"),
             exports: vec![
-                fallow_types::extract::ExportInfo {
+                plow_types::extract::ExportInfo {
                     name: ExportName::Named("create".to_string()),
                     local_name: Some("create".to_string()),
                     is_type_only: false,
@@ -1918,7 +1918,7 @@ fn entry_point_named_re_export_no_in_graph_consumers_multiple_exports() {
                     is_side_effect_used: false,
                     super_class: None,
                 },
-                fallow_types::extract::ExportInfo {
+                plow_types::extract::ExportInfo {
                     name: ExportName::Named("destroy".to_string()),
                     local_name: Some("destroy".to_string()),
                     is_type_only: false,
@@ -1928,7 +1928,7 @@ fn entry_point_named_re_export_no_in_graph_consumers_multiple_exports() {
                     is_side_effect_used: false,
                     super_class: None,
                 },
-                fallow_types::extract::ExportInfo {
+                plow_types::extract::ExportInfo {
                     name: ExportName::Named("internal_helper".to_string()),
                     local_name: Some("internal_helper".to_string()),
                     is_type_only: false,
@@ -2004,7 +2004,7 @@ fn entry_point_star_re_export_skips_default() {
             file_id: FileId(0),
             path: PathBuf::from("/project/index.ts"),
             re_exports: vec![ResolvedReExport {
-                info: fallow_types::extract::ReExportInfo {
+                info: plow_types::extract::ReExportInfo {
                     source: "./source".to_string(),
                     imported_name: "*".to_string(),
                     exported_name: "*".to_string(),
@@ -2020,7 +2020,7 @@ fn entry_point_star_re_export_skips_default() {
             file_id: FileId(1),
             path: PathBuf::from("/project/source.ts"),
             exports: vec![
-                fallow_types::extract::ExportInfo {
+                plow_types::extract::ExportInfo {
                     name: ExportName::Default,
                     local_name: None,
                     is_type_only: false,
@@ -2030,7 +2030,7 @@ fn entry_point_star_re_export_skips_default() {
                     is_side_effect_used: false,
                     super_class: None,
                 },
-                fallow_types::extract::ExportInfo {
+                plow_types::extract::ExportInfo {
                     name: ExportName::Named("named".to_string()),
                     local_name: Some("named".to_string()),
                     is_type_only: false,
@@ -2109,7 +2109,7 @@ fn no_re_exports_skips_chain_resolution() {
         ResolvedModule {
             file_id: FileId(1),
             path: PathBuf::from("/project/utils.ts"),
-            exports: vec![fallow_types::extract::ExportInfo {
+            exports: vec![plow_types::extract::ExportInfo {
                 name: ExportName::Named("foo".to_string()),
                 local_name: Some("foo".to_string()),
                 is_type_only: false,
@@ -2203,7 +2203,7 @@ fn star_re_export_many_consumers_no_quadratic_blowup() {
         file_id: barrel_id,
         path: PathBuf::from("/project/barrel.ts"),
         re_exports: vec![ResolvedReExport {
-            info: fallow_types::extract::ReExportInfo {
+            info: plow_types::extract::ReExportInfo {
                 source: "./source".to_string(),
                 imported_name: "*".to_string(),
                 exported_name: "*".to_string(),
@@ -2220,7 +2220,7 @@ fn star_re_export_many_consumers_no_quadratic_blowup() {
         file_id: source_id,
         path: PathBuf::from("/project/source.ts"),
         exports: vec![
-            fallow_types::extract::ExportInfo {
+            plow_types::extract::ExportInfo {
                 name: ExportName::Named("shared".to_string()),
                 local_name: Some("shared".to_string()),
                 is_type_only: false,
@@ -2230,7 +2230,7 @@ fn star_re_export_many_consumers_no_quadratic_blowup() {
                 is_side_effect_used: false,
                 super_class: None,
             },
-            fallow_types::extract::ExportInfo {
+            plow_types::extract::ExportInfo {
                 name: ExportName::Named("other".to_string()),
                 local_name: Some("other".to_string()),
                 is_type_only: false,
@@ -2349,7 +2349,7 @@ fn deep_named_re_export_chain_propagates_25_hops() {
                 file_id: FileId(i),
                 path: PathBuf::from(format!("/project/barrel_{i}.ts")),
                 re_exports: vec![ResolvedReExport {
-                    info: fallow_types::extract::ReExportInfo {
+                    info: plow_types::extract::ReExportInfo {
                         source: next_source,
                         imported_name: "foo".to_string(),
                         exported_name: "foo".to_string(),
@@ -2366,7 +2366,7 @@ fn deep_named_re_export_chain_propagates_25_hops() {
         resolved_modules.push(ResolvedModule {
             file_id: leaf_id,
             path: PathBuf::from("/project/leaf.ts"),
-            exports: vec![fallow_types::extract::ExportInfo {
+            exports: vec![plow_types::extract::ExportInfo {
                 name: ExportName::Named("foo".to_string()),
                 local_name: Some("foo".to_string()),
                 is_type_only: false,
@@ -2453,7 +2453,7 @@ fn re_export_cycle_terminates_and_does_not_block_unrelated_propagation() {
         ResolvedModule {
             file_id: FileId(0),
             path: PathBuf::from("/project/a.ts"),
-            exports: vec![fallow_types::extract::ExportInfo {
+            exports: vec![plow_types::extract::ExportInfo {
                 name: ExportName::Named("x".to_string()),
                 local_name: Some("x".to_string()),
                 is_type_only: false,
@@ -2464,7 +2464,7 @@ fn re_export_cycle_terminates_and_does_not_block_unrelated_propagation() {
                 super_class: None,
             }],
             re_exports: vec![ResolvedReExport {
-                info: fallow_types::extract::ReExportInfo {
+                info: plow_types::extract::ReExportInfo {
                     source: "./b".to_string(),
                     imported_name: "*".to_string(),
                     exported_name: "*".to_string(),
@@ -2480,7 +2480,7 @@ fn re_export_cycle_terminates_and_does_not_block_unrelated_propagation() {
             path: PathBuf::from("/project/b.ts"),
             re_exports: vec![
                 ResolvedReExport {
-                    info: fallow_types::extract::ReExportInfo {
+                    info: plow_types::extract::ReExportInfo {
                         source: "./c".to_string(),
                         imported_name: "*".to_string(),
                         exported_name: "*".to_string(),
@@ -2490,7 +2490,7 @@ fn re_export_cycle_terminates_and_does_not_block_unrelated_propagation() {
                     target: ResolveResult::InternalModule(FileId(2)),
                 },
                 ResolvedReExport {
-                    info: fallow_types::extract::ReExportInfo {
+                    info: plow_types::extract::ReExportInfo {
                         source: "./a".to_string(),
                         imported_name: "*".to_string(),
                         exported_name: "*".to_string(),
@@ -2506,7 +2506,7 @@ fn re_export_cycle_terminates_and_does_not_block_unrelated_propagation() {
             file_id: FileId(2),
             path: PathBuf::from("/project/c.ts"),
             re_exports: vec![ResolvedReExport {
-                info: fallow_types::extract::ReExportInfo {
+                info: plow_types::extract::ReExportInfo {
                     source: "./a".to_string(),
                     imported_name: "*".to_string(),
                     exported_name: "*".to_string(),
@@ -2520,7 +2520,7 @@ fn re_export_cycle_terminates_and_does_not_block_unrelated_propagation() {
         ResolvedModule {
             file_id: FileId(3),
             path: PathBuf::from("/project/outside.ts"),
-            exports: vec![fallow_types::extract::ExportInfo {
+            exports: vec![plow_types::extract::ExportInfo {
                 name: ExportName::Named("y".to_string()),
                 local_name: Some("y".to_string()),
                 is_type_only: false,
@@ -2638,7 +2638,7 @@ fn type_only_star_chain_synthesizes_type_only_stub() {
             file_id: FileId(0),
             path: PathBuf::from("/project/barrel.ts"),
             re_exports: vec![ResolvedReExport {
-                info: fallow_types::extract::ReExportInfo {
+                info: plow_types::extract::ReExportInfo {
                     source: "./source".to_string(),
                     imported_name: "*".to_string(),
                     exported_name: "*".to_string(),
@@ -2654,7 +2654,7 @@ fn type_only_star_chain_synthesizes_type_only_stub() {
             file_id: FileId(1),
             path: PathBuf::from("/project/source.ts"),
             re_exports: vec![ResolvedReExport {
-                info: fallow_types::extract::ReExportInfo {
+                info: plow_types::extract::ReExportInfo {
                     source: "./leaf".to_string(),
                     imported_name: "*".to_string(),
                     exported_name: "*".to_string(),
@@ -2669,7 +2669,7 @@ fn type_only_star_chain_synthesizes_type_only_stub() {
         ResolvedModule {
             file_id: FileId(2),
             path: PathBuf::from("/project/leaf.ts"),
-            exports: vec![fallow_types::extract::ExportInfo {
+            exports: vec![plow_types::extract::ExportInfo {
                 name: ExportName::Named("X".to_string()),
                 local_name: Some("X".to_string()),
                 is_type_only: true,
@@ -2788,7 +2788,7 @@ fn type_only_star_chain_named_consumer_synthesizes_type_only_stub() {
             file_id: FileId(1),
             path: PathBuf::from("/project/barrel.ts"),
             re_exports: vec![ResolvedReExport {
-                info: fallow_types::extract::ReExportInfo {
+                info: plow_types::extract::ReExportInfo {
                     source: "./source".to_string(),
                     imported_name: "*".to_string(),
                     exported_name: "*".to_string(),
@@ -2804,7 +2804,7 @@ fn type_only_star_chain_named_consumer_synthesizes_type_only_stub() {
             file_id: FileId(2),
             path: PathBuf::from("/project/source.ts"),
             re_exports: vec![ResolvedReExport {
-                info: fallow_types::extract::ReExportInfo {
+                info: plow_types::extract::ReExportInfo {
                     source: "./leaf".to_string(),
                     imported_name: "*".to_string(),
                     exported_name: "*".to_string(),
@@ -2819,7 +2819,7 @@ fn type_only_star_chain_named_consumer_synthesizes_type_only_stub() {
         ResolvedModule {
             file_id: FileId(3),
             path: PathBuf::from("/project/leaf.ts"),
-            exports: vec![fallow_types::extract::ExportInfo {
+            exports: vec![plow_types::extract::ExportInfo {
                 name: ExportName::Named("X".to_string()),
                 local_name: Some("X".to_string()),
                 is_type_only: true,
@@ -2950,7 +2950,7 @@ fn mixed_type_only_and_value_star_paths_synthesize_value_stub() {
             file_id: FileId(2),
             path: PathBuf::from("/project/barrel_type.ts"),
             re_exports: vec![ResolvedReExport {
-                info: fallow_types::extract::ReExportInfo {
+                info: plow_types::extract::ReExportInfo {
                     source: "./source".to_string(),
                     imported_name: "*".to_string(),
                     exported_name: "*".to_string(),
@@ -2966,7 +2966,7 @@ fn mixed_type_only_and_value_star_paths_synthesize_value_stub() {
             file_id: FileId(3),
             path: PathBuf::from("/project/barrel_val.ts"),
             re_exports: vec![ResolvedReExport {
-                info: fallow_types::extract::ReExportInfo {
+                info: plow_types::extract::ReExportInfo {
                     source: "./source".to_string(),
                     imported_name: "*".to_string(),
                     exported_name: "*".to_string(),
@@ -2982,7 +2982,7 @@ fn mixed_type_only_and_value_star_paths_synthesize_value_stub() {
             file_id: FileId(4),
             path: PathBuf::from("/project/source.ts"),
             re_exports: vec![ResolvedReExport {
-                info: fallow_types::extract::ReExportInfo {
+                info: plow_types::extract::ReExportInfo {
                     source: "./leaf".to_string(),
                     imported_name: "*".to_string(),
                     exported_name: "*".to_string(),
@@ -2996,7 +2996,7 @@ fn mixed_type_only_and_value_star_paths_synthesize_value_stub() {
         ResolvedModule {
             file_id: FileId(5),
             path: PathBuf::from("/project/leaf.ts"),
-            exports: vec![fallow_types::extract::ExportInfo {
+            exports: vec![plow_types::extract::ExportInfo {
                 name: ExportName::Named("X".to_string()),
                 local_name: Some("X".to_string()),
                 is_type_only: true,
@@ -3053,7 +3053,7 @@ fn self_re_export_does_not_panic() {
         path: PathBuf::from("/project/barrel.ts"),
         // export * from './barrel' (resolves back to self)
         re_exports: vec![ResolvedReExport {
-            info: fallow_types::extract::ReExportInfo {
+            info: plow_types::extract::ReExportInfo {
                 source: "./barrel".to_string(),
                 imported_name: "*".to_string(),
                 exported_name: "*".to_string(),
@@ -3111,7 +3111,7 @@ fn re_export_cycle_payload_lists_member_paths() {
             file_id: FileId(0),
             path: PathBuf::from("/project/cycle_a.ts"),
             re_exports: vec![ResolvedReExport {
-                info: fallow_types::extract::ReExportInfo {
+                info: plow_types::extract::ReExportInfo {
                     source: "./cycle_b".to_string(),
                     imported_name: "*".to_string(),
                     exported_name: "*".to_string(),
@@ -3126,7 +3126,7 @@ fn re_export_cycle_payload_lists_member_paths() {
             file_id: FileId(1),
             path: PathBuf::from("/project/cycle_b.ts"),
             re_exports: vec![ResolvedReExport {
-                info: fallow_types::extract::ReExportInfo {
+                info: plow_types::extract::ReExportInfo {
                     source: "./cycle_c".to_string(),
                     imported_name: "*".to_string(),
                     exported_name: "*".to_string(),
@@ -3141,7 +3141,7 @@ fn re_export_cycle_payload_lists_member_paths() {
             file_id: FileId(2),
             path: PathBuf::from("/project/cycle_c.ts"),
             re_exports: vec![ResolvedReExport {
-                info: fallow_types::extract::ReExportInfo {
+                info: plow_types::extract::ReExportInfo {
                     source: "./cycle_a".to_string(),
                     imported_name: "*".to_string(),
                     exported_name: "*".to_string(),
@@ -3207,7 +3207,7 @@ fn self_re_export_payload_names_file() {
         file_id: FileId(0),
         path: PathBuf::from("/project/self_barrel.ts"),
         re_exports: vec![ResolvedReExport {
-            info: fallow_types::extract::ReExportInfo {
+            info: plow_types::extract::ReExportInfo {
                 source: "./self_barrel".to_string(),
                 imported_name: "*".to_string(),
                 exported_name: "*".to_string(),

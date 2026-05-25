@@ -11,7 +11,7 @@ pub(super) struct EncodingMetadata {
     pub line_ending: &'static str,
     /// True when the input file started with a UTF-8 BOM (`\u{FEFF}`).
     /// `stage_fixed_content` re-prepends the BOM bytes when this flag is
-    /// set so `fallow fix` does not silently re-encode a Windows-authored
+    /// set so `plow fix` does not silently re-encode a Windows-authored
     /// file.
     pub had_bom: bool,
 }
@@ -106,7 +106,7 @@ pub(super) fn bytes_with_optional_bom(body: String, meta: &EncodingMetadata) -> 
     }
 }
 
-pub(super) use fallow_config::atomic_write;
+pub(super) use plow_config::atomic_write;
 
 #[cfg(test)]
 mod tests {

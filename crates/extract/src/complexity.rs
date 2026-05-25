@@ -18,7 +18,7 @@ use oxc_ast_visit::walk;
 use oxc_semantic::ScopeFlags;
 use oxc_span::Span;
 
-use fallow_types::extract::FunctionComplexity;
+use plow_types::extract::FunctionComplexity;
 
 /// Per-function state on the scope stack.
 struct FunctionFrame {
@@ -87,9 +87,9 @@ impl<'a> ComplexityVisitor<'a> {
     fn pop_function(&mut self) {
         if let Some(frame) = self.stack.pop() {
             let (line, col) =
-                fallow_types::extract::byte_offset_to_line_col(self.line_offsets, frame.span.start);
+                plow_types::extract::byte_offset_to_line_col(self.line_offsets, frame.span.start);
             let end_line =
-                fallow_types::extract::byte_offset_to_line_col(self.line_offsets, frame.span.end).0;
+                plow_types::extract::byte_offset_to_line_col(self.line_offsets, frame.span.end).0;
             let source_hash = self.source_hash_for_span(frame.span);
             self.results.push(FunctionComplexity {
                 name: frame.name,
@@ -547,7 +547,7 @@ pub fn compute_complexity(
 #[cfg(all(test, not(miri)))]
 mod tests {
     use super::*;
-    use fallow_types::extract::compute_line_offsets;
+    use plow_types::extract::compute_line_offsets;
     use oxc_allocator::Allocator;
     use oxc_parser::Parser;
     use oxc_span::SourceType;

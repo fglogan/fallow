@@ -6,14 +6,14 @@ import * as https from "node:https";
 import * as os from "node:os";
 import * as path from "node:path";
 // VS Code injects this module into the extension host at runtime.
-// fallow-ignore-next-line unlisted-dependency
+// plow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
 import { getExecutableExtension } from "./binary-utils.js";
 
-const GITHUB_REPO = "fallow-rs/fallow";
-const LSP_BINARY_NAME = "fallow-lsp";
-const CLI_BINARY_NAME = "fallow";
-const VERSION_FILE = ".fallow-version";
+const GITHUB_REPO = "plow-rs/plow";
+const LSP_BINARY_NAME = "plow-lsp";
+const CLI_BINARY_NAME = "plow";
+const VERSION_FILE = ".plow-version";
 const SIGNATURE_SUFFIX = ".sig";
 const SHA256_SUFFIX = ".sha256";
 const BINARY_SIGNING_PUBLIC_KEY = Buffer.from([
@@ -33,7 +33,7 @@ interface GithubRelease {
   }>;
 }
 
-const REQUEST_HEADERS = { "User-Agent": "fallow-vscode" };
+const REQUEST_HEADERS = { "User-Agent": "plow-vscode" };
 
 export const platformTargetFor = (platform: NodeJS.Platform, arch: string): string | null => {
   if (platform === "darwin" && arch === "arm64") return "darwin-arm64";
@@ -162,7 +162,7 @@ export const readVersionMarker = (dir: string): string | null => {
   }
 };
 
-/** Query the version of a fallow binary. Returns the version string or null. */
+/** Query the version of a plow binary. Returns the version string or null. */
 export const getBinaryVersion = (binaryPath: string): string | null => {
   try {
     // execFileSync is safe (no shell injection) — binary path is from our own storage dir.
@@ -170,7 +170,7 @@ export const getBinaryVersion = (binaryPath: string): string | null => {
       timeout: 5000,
       encoding: "utf-8",
     });
-    // Output format: "fallow-lsp 2.18.3" or "fallow 2.18.3"
+    // Output format: "plow-lsp 2.18.3" or "plow 2.18.3"
     const match = output.trim().match(/(\d+\.\d+\.\d+)/);
     return match?.[1] ?? null;
   } catch {
@@ -256,7 +256,7 @@ const ensureManagedBinaryTrusted = (
     }
 
     outputChannel?.appendLine(
-      `Fallow: installed ${label} binary failed Ed25519 signature verification. Re-downloading.`,
+      `Plow: installed ${label} binary failed Ed25519 signature verification. Re-downloading.`,
     );
     purgeManagedBinaries(dir);
     return false;
@@ -265,13 +265,13 @@ const ensureManagedBinaryTrusted = (
   const expectedDigest = readDigestMarker(binaryPath);
   if (expectedDigest && verifyBinaryDigest(binaryPath, expectedDigest)) {
     outputChannel?.appendLine(
-      `Fallow: installed ${label} binary reused via stored SHA-256 digest verification.`,
+      `Plow: installed ${label} binary reused via stored SHA-256 digest verification.`,
     );
     return true;
   }
 
   outputChannel?.appendLine(
-    `Fallow: installed ${label} binary is neither signature-verified nor digest-verified. Re-downloading.`,
+    `Plow: installed ${label} binary is neither signature-verified nor digest-verified. Re-downloading.`,
   );
   purgeManagedBinaries(dir);
   return false;
@@ -283,7 +283,7 @@ const matchesExtensionVersion = (
   label: string,
   outputChannel?: vscode.OutputChannel,
 ): boolean => {
-  const extensionVersion = vscode.extensions.getExtension("fallow-rs.fallow-vscode")?.packageJSON
+  const extensionVersion = vscode.extensions.getExtension("plow-rs.plow-vscode")?.packageJSON
     ?.version as string | undefined;
   if (!extensionVersion) {
     return true;
@@ -295,7 +295,7 @@ const matchesExtensionVersion = (
   }
 
   outputChannel?.appendLine(
-    `Fallow: installed ${label} binary is v${binaryVersion ?? "unknown"}, extension is v${extensionVersion}. Re-downloading.`,
+    `Plow: installed ${label} binary is v${binaryVersion ?? "unknown"}, extension is v${extensionVersion}. Re-downloading.`,
   );
   purgeManagedBinaries(dir);
   return false;
@@ -404,7 +404,7 @@ export const downloadBinary = async (context: vscode.ExtensionContext): Promise<
   const target = getPlatformTarget();
   if (!target) {
     void vscode.window.showErrorMessage(
-      `Fallow: unsupported platform ${os.platform()}-${os.arch()}`,
+      `Plow: unsupported platform ${os.platform()}-${os.arch()}`,
     );
     return null;
   }
@@ -412,7 +412,7 @@ export const downloadBinary = async (context: vscode.ExtensionContext): Promise<
   return vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
-      title: "Fallow: Downloading binaries...",
+      title: "Plow: Downloading binaries...",
       cancellable: false,
     },
     async () => {
@@ -427,14 +427,14 @@ export const downloadBinary = async (context: vscode.ExtensionContext): Promise<
         const lspPath = await downloadAsset(release, LSP_BINARY_NAME, target, dir);
         if (!lspPath) {
           void vscode.window.showErrorMessage(
-            `Fallow: no LSP binary found for ${target} in release ${release.tag_name}`,
+            `Plow: no LSP binary found for ${target} in release ${release.tag_name}`,
           );
           return null;
         }
 
         // Write version marker so future activations can detect stale binaries
         // without needing to execute them.
-        const extensionVersion = vscode.extensions.getExtension("fallow-rs.fallow-vscode")
+        const extensionVersion = vscode.extensions.getExtension("plow-rs.plow-vscode")
           ?.packageJSON?.version as string | undefined;
         if (extensionVersion) {
           writeVersionMarker(dir, extensionVersion);
@@ -446,22 +446,22 @@ export const downloadBinary = async (context: vscode.ExtensionContext): Promise<
           cliPath = await downloadAsset(release, CLI_BINARY_NAME, target, dir);
         } catch (cliErr) {
           const cliMessage = cliErr instanceof Error ? cliErr.message : String(cliErr);
-          void vscode.window.showWarningMessage(`Fallow: CLI download skipped: ${cliMessage}`);
+          void vscode.window.showWarningMessage(`Plow: CLI download skipped: ${cliMessage}`);
         }
         if (cliPath) {
           void vscode.window.showInformationMessage(
-            `Fallow: ${release.tag_name} installed (LSP + CLI).`,
+            `Plow: ${release.tag_name} installed (LSP + CLI).`,
           );
         } else {
           void vscode.window.showInformationMessage(
-            `Fallow: LSP ${release.tag_name} installed. CLI binary not found in release — tree views require the fallow CLI in PATH.`,
+            `Plow: LSP ${release.tag_name} installed. CLI binary not found in release — tree views require the plow CLI in PATH.`,
           );
         }
 
         return lspPath;
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        void vscode.window.showErrorMessage(`Fallow: failed to download binaries: ${message}`);
+        void vscode.window.showErrorMessage(`Plow: failed to download binaries: ${message}`);
         return null;
       }
     },

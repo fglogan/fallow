@@ -1,9 +1,9 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use fallow_config::{RulesConfig, Severity};
-use fallow_core::duplicates::DuplicationReport;
-use fallow_core::results::{
+use plow_config::{RulesConfig, Severity};
+use plow_core::duplicates::DuplicationReport;
+use plow_core::results::{
     AnalysisResults, BoundaryViolation, CircularDependency, DuplicateExportFinding,
     EmptyCatalogGroupFinding, MisconfiguredDependencyOverrideFinding, PrivateTypeLeak,
     StaleSuppression, TestOnlyDependency, TypeOnlyDependency, UnlistedDependencyFinding,
@@ -202,7 +202,7 @@ fn sarif_private_type_leak_fields(
     level: &'static str,
 ) -> SarifFields {
     SarifFields {
-        rule_id: "fallow/private-type-leak",
+        rule_id: "plow/private-type-leak",
         level,
         message: format!(
             "Export '{}' references private type '{}'",
@@ -276,7 +276,7 @@ fn sarif_member_fields(
 
 fn sarif_unused_file_fields(file: &UnusedFile, root: &Path, level: &'static str) -> SarifFields {
     SarifFields {
-        rule_id: "fallow/unused-file",
+        rule_id: "plow/unused-file",
         level,
         message: "File is not reachable from any entry point".to_string(),
         uri: relative_uri(&file.path, root),
@@ -292,7 +292,7 @@ fn sarif_type_only_dep_fields(
     level: &'static str,
 ) -> SarifFields {
     SarifFields {
-        rule_id: "fallow/type-only-dependency",
+        rule_id: "plow/type-only-dependency",
         level,
         message: format!(
             "Package '{}' is only imported via type-only imports (consider moving to devDependencies)",
@@ -315,7 +315,7 @@ fn sarif_test_only_dep_fields(
     level: &'static str,
 ) -> SarifFields {
     SarifFields {
-        rule_id: "fallow/test-only-dependency",
+        rule_id: "plow/test-only-dependency",
         level,
         message: format!(
             "Package '{}' is only imported by test files (consider moving to devDependencies)",
@@ -338,7 +338,7 @@ fn sarif_unresolved_import_fields(
     level: &'static str,
 ) -> SarifFields {
     SarifFields {
-        rule_id: "fallow/unresolved-import",
+        rule_id: "plow/unresolved-import",
         level,
         message: format!("Import '{}' could not be resolved", import.specifier),
         uri: relative_uri(&import.path, root),
@@ -361,7 +361,7 @@ fn sarif_circular_dep_fields(
     let first_uri = chain.first().map_or_else(String::new, Clone::clone);
     let first_path = cycle.files.first().cloned();
     SarifFields {
-        rule_id: "fallow/circular-dependency",
+        rule_id: "plow/circular-dependency",
         level,
         message: format!(
             "Circular dependency{}: {}",
@@ -384,7 +384,7 @@ fn sarif_circular_dep_fields(
 }
 
 fn sarif_re_export_cycle_fields(
-    cycle: &fallow_core::results::ReExportCycle,
+    cycle: &plow_core::results::ReExportCycle,
     root: &Path,
     level: &'static str,
 ) -> SarifFields {
@@ -392,11 +392,11 @@ fn sarif_re_export_cycle_fields(
     let first_uri = chain.first().map_or_else(String::new, Clone::clone);
     let first_path = cycle.files.first().cloned();
     let kind_tag = match cycle.kind {
-        fallow_core::results::ReExportCycleKind::SelfLoop => " (self-loop)",
-        fallow_core::results::ReExportCycleKind::MultiNode => "",
+        plow_core::results::ReExportCycleKind::SelfLoop => " (self-loop)",
+        plow_core::results::ReExportCycleKind::MultiNode => "",
     };
     SarifFields {
-        rule_id: "fallow/re-export-cycle",
+        rule_id: "plow/re-export-cycle",
         level,
         message: format!("Re-export cycle{}: {}", kind_tag, chain.join(" <-> ")),
         uri: first_uri,
@@ -414,7 +414,7 @@ fn sarif_boundary_violation_fields(
     let from_uri = relative_uri(&violation.from_path, root);
     let to_uri = relative_uri(&violation.to_path, root);
     SarifFields {
-        rule_id: "fallow/boundary-violation",
+        rule_id: "plow/boundary-violation",
         level,
         message: format!(
             "Import from zone '{}' to zone '{}' is not allowed ({})",
@@ -437,7 +437,7 @@ fn sarif_stale_suppression_fields(
     level: &'static str,
 ) -> SarifFields {
     SarifFields {
-        rule_id: "fallow/stale-suppression",
+        rule_id: "plow/stale-suppression",
         level,
         message: suppression.display_message(),
         uri: relative_uri(&suppression.path, root),
@@ -465,7 +465,7 @@ fn sarif_unused_catalog_entry_fields(
         )
     };
     SarifFields {
-        rule_id: "fallow/unused-catalog-entry",
+        rule_id: "plow/unused-catalog-entry",
         level,
         message,
         uri: relative_uri(&entry.path, root),
@@ -490,7 +490,7 @@ fn sarif_unused_dependency_override_fields(
         let _ = write!(message, " ({hint})");
     }
     SarifFields {
-        rule_id: "fallow/unused-dependency-override",
+        rule_id: "plow/unused-dependency-override",
         level,
         message,
         uri: relative_uri(&finding.path, root),
@@ -513,7 +513,7 @@ fn sarif_misconfigured_dependency_override_fields(
         finding.reason.describe(),
     );
     SarifFields {
-        rule_id: "fallow/misconfigured-dependency-override",
+        rule_id: "plow/misconfigured-dependency-override",
         level,
         message,
         uri: relative_uri(&finding.path, root),
@@ -553,7 +553,7 @@ fn sarif_unresolved_catalog_reference_fields(
         );
     }
     SarifFields {
-        rule_id: "fallow/unresolved-catalog-reference",
+        rule_id: "plow/unresolved-catalog-reference",
         level,
         message,
         uri: relative_uri(&finding.path, root),
@@ -570,7 +570,7 @@ fn sarif_empty_catalog_group_fields(
 ) -> SarifFields {
     let group = &group.group;
     SarifFields {
-        rule_id: "fallow/empty-catalog-group",
+        rule_id: "plow/empty-catalog-group",
         level,
         message: format!("Catalog group '{}' has no entries", group.catalog_name),
         uri: relative_uri(&group.path, root),
@@ -595,7 +595,7 @@ fn push_sarif_unlisted_deps(
             let uri = relative_uri(&site.path, root);
             let source_snippet = snippets.line(&site.path, site.line);
             sarif_results.push(sarif_result_with_snippet(
-                "fallow/unlisted-dependency",
+                "plow/unlisted-dependency",
                 level,
                 &format!(
                     "Package '{}' is imported but not listed in package.json",
@@ -624,7 +624,7 @@ fn push_sarif_duplicate_exports(
             let uri = relative_uri(&loc.path, root);
             let source_snippet = snippets.line(&loc.path, loc.line);
             sarif_results.push(sarif_result_with_snippet(
-                "fallow/duplicate-export",
+                "plow/duplicate-export",
                 level,
                 &format!("Export '{}' appears in multiple modules", dup.export_name),
                 &uri,
@@ -639,117 +639,117 @@ fn push_sarif_duplicate_exports(
 fn build_sarif_rules(rules: &RulesConfig) -> Vec<serde_json::Value> {
     [
         (
-            "fallow/unused-file",
+            "plow/unused-file",
             "File is not reachable from any entry point",
             rules.unused_files,
         ),
         (
-            "fallow/unused-export",
+            "plow/unused-export",
             "Export is never imported",
             rules.unused_exports,
         ),
         (
-            "fallow/unused-type",
+            "plow/unused-type",
             "Type export is never imported",
             rules.unused_types,
         ),
         (
-            "fallow/private-type-leak",
+            "plow/private-type-leak",
             "Exported signature references a same-file private type",
             rules.private_type_leaks,
         ),
         (
-            "fallow/unused-dependency",
+            "plow/unused-dependency",
             "Dependency listed but never imported",
             rules.unused_dependencies,
         ),
         (
-            "fallow/unused-dev-dependency",
+            "plow/unused-dev-dependency",
             "Dev dependency listed but never imported",
             rules.unused_dev_dependencies,
         ),
         (
-            "fallow/unused-optional-dependency",
+            "plow/unused-optional-dependency",
             "Optional dependency listed but never imported",
             rules.unused_optional_dependencies,
         ),
         (
-            "fallow/type-only-dependency",
+            "plow/type-only-dependency",
             "Production dependency only used via type-only imports",
             rules.type_only_dependencies,
         ),
         (
-            "fallow/test-only-dependency",
+            "plow/test-only-dependency",
             "Production dependency only imported by test files",
             rules.test_only_dependencies,
         ),
         (
-            "fallow/unused-enum-member",
+            "plow/unused-enum-member",
             "Enum member is never referenced",
             rules.unused_enum_members,
         ),
         (
-            "fallow/unused-class-member",
+            "plow/unused-class-member",
             "Class member is never referenced",
             rules.unused_class_members,
         ),
         (
-            "fallow/unresolved-import",
+            "plow/unresolved-import",
             "Import could not be resolved",
             rules.unresolved_imports,
         ),
         (
-            "fallow/unlisted-dependency",
+            "plow/unlisted-dependency",
             "Dependency used but not in package.json",
             rules.unlisted_dependencies,
         ),
         (
-            "fallow/duplicate-export",
+            "plow/duplicate-export",
             "Export name appears in multiple modules",
             rules.duplicate_exports,
         ),
         (
-            "fallow/circular-dependency",
+            "plow/circular-dependency",
             "Circular dependency chain detected",
             rules.circular_dependencies,
         ),
         (
-            "fallow/re-export-cycle",
+            "plow/re-export-cycle",
             "Two or more barrel files re-export from each other in a loop",
             rules.re_export_cycle,
         ),
         (
-            "fallow/boundary-violation",
+            "plow/boundary-violation",
             "Import crosses an architecture boundary",
             rules.boundary_violation,
         ),
         (
-            "fallow/stale-suppression",
+            "plow/stale-suppression",
             "Suppression comment or tag no longer matches any issue",
             rules.stale_suppressions,
         ),
         (
-            "fallow/unused-catalog-entry",
+            "plow/unused-catalog-entry",
             "pnpm catalog entry not referenced by any workspace package",
             rules.unused_catalog_entries,
         ),
         (
-            "fallow/empty-catalog-group",
+            "plow/empty-catalog-group",
             "pnpm named catalog group has no entries",
             rules.empty_catalog_groups,
         ),
         (
-            "fallow/unresolved-catalog-reference",
+            "plow/unresolved-catalog-reference",
             "package.json catalog reference points at a catalog that does not declare the package",
             rules.unresolved_catalog_references,
         ),
         (
-            "fallow/unused-dependency-override",
+            "plow/unused-dependency-override",
             "pnpm dependency override target is not declared or lockfile-resolved",
             rules.unused_dependency_overrides,
         ),
         (
-            "fallow/misconfigured-dependency-override",
+            "plow/misconfigured-dependency-override",
             "pnpm dependency override key or value is malformed",
             rules.misconfigured_dependency_overrides,
         ),
@@ -788,7 +788,7 @@ pub fn build_sarif(
             sarif_export_fields(
                 &e.export,
                 root,
-                "fallow/unused-export",
+                "plow/unused-export",
                 severity_to_sarif_level(rules.unused_exports),
                 "Export",
                 "Re-export",
@@ -803,7 +803,7 @@ pub fn build_sarif(
             sarif_export_fields(
                 &e.export,
                 root,
-                "fallow/unused-type",
+                "plow/unused-type",
                 severity_to_sarif_level(rules.unused_types),
                 "Type export",
                 "Type re-export",
@@ -830,7 +830,7 @@ pub fn build_sarif(
             sarif_dep_fields(
                 &d.dep,
                 root,
-                "fallow/unused-dependency",
+                "plow/unused-dependency",
                 severity_to_sarif_level(rules.unused_dependencies),
                 "dependencies",
             )
@@ -844,7 +844,7 @@ pub fn build_sarif(
             sarif_dep_fields(
                 &d.dep,
                 root,
-                "fallow/unused-dev-dependency",
+                "plow/unused-dev-dependency",
                 severity_to_sarif_level(rules.unused_dev_dependencies),
                 "devDependencies",
             )
@@ -858,7 +858,7 @@ pub fn build_sarif(
             sarif_dep_fields(
                 &d.dep,
                 root,
-                "fallow/unused-optional-dependency",
+                "plow/unused-optional-dependency",
                 severity_to_sarif_level(rules.unused_optional_dependencies),
                 "optionalDependencies",
             )
@@ -896,7 +896,7 @@ pub fn build_sarif(
             sarif_member_fields(
                 &m.member,
                 root,
-                "fallow/unused-enum-member",
+                "plow/unused-enum-member",
                 severity_to_sarif_level(rules.unused_enum_members),
                 "Enum",
             )
@@ -910,7 +910,7 @@ pub fn build_sarif(
             sarif_member_fields(
                 &m.member,
                 root,
-                "fallow/unused-class-member",
+                "plow/unused-class-member",
                 severity_to_sarif_level(rules.unused_class_members),
                 "Class",
             )
@@ -1061,9 +1061,9 @@ pub fn build_sarif(
         "runs": [{
             "tool": {
                 "driver": {
-                    "name": "fallow",
+                    "name": "plow",
                     "version": env!("CARGO_PKG_VERSION"),
-                    "informationUri": "https://github.com/fallow-rs/fallow",
+                    "informationUri": "https://github.com/plow-rs/plow",
                     "rules": build_sarif_rules(rules)
                 }
             },
@@ -1134,7 +1134,7 @@ pub(super) fn print_duplication_sarif(report: &DuplicationReport, root: &Path) -
             let uri = relative_uri(&instance.file, root);
             let source_snippet = snippets.line(&instance.file, instance.start_line as u32);
             sarif_results.push(sarif_result_with_snippet(
-                "fallow/code-duplication",
+                "plow/code-duplication",
                 "warning",
                 &format!(
                     "Code clone group {} ({} lines, {} instances)",
@@ -1155,10 +1155,10 @@ pub(super) fn print_duplication_sarif(report: &DuplicationReport, root: &Path) -
         "runs": [{
             "tool": {
                 "driver": {
-                    "name": "fallow",
+                    "name": "plow",
                     "version": env!("CARGO_PKG_VERSION"),
-                    "informationUri": "https://github.com/fallow-rs/fallow",
-                    "rules": [sarif_rule("fallow/code-duplication", "Duplicated code block", "warning")]
+                    "informationUri": "https://github.com/plow-rs/plow",
+                    "rules": [sarif_rule("plow/code-duplication", "Duplicated code block", "warning")]
                 }
             },
             "results": sarif_results
@@ -1199,7 +1199,7 @@ pub(super) fn print_grouped_duplication_sarif(
             let uri = relative_uri(&instance.file, root);
             let source_snippet = snippets.line(&instance.file, instance.start_line as u32);
             let mut result = sarif_result_with_snippet(
-                "fallow/code-duplication",
+                "plow/code-duplication",
                 "warning",
                 &format!(
                     "Code clone group {} ({} lines, {} instances)",
@@ -1233,10 +1233,10 @@ pub(super) fn print_grouped_duplication_sarif(
         "runs": [{
             "tool": {
                 "driver": {
-                    "name": "fallow",
+                    "name": "plow",
                     "version": env!("CARGO_PKG_VERSION"),
-                    "informationUri": "https://github.com/fallow-rs/fallow",
-                    "rules": [sarif_rule("fallow/code-duplication", "Duplicated code block", "warning")]
+                    "informationUri": "https://github.com/plow-rs/plow",
+                    "rules": [sarif_rule("plow/code-duplication", "Duplicated code block", "warning")]
                 }
             },
             "results": sarif_results
@@ -1272,21 +1272,21 @@ pub fn build_health_sarif(
         // and surface all exceeded dimensions in the message.
         let (rule_id, message) = match finding.exceeded {
             ExceededThreshold::Cyclomatic => (
-                "fallow/high-cyclomatic-complexity",
+                "plow/high-cyclomatic-complexity",
                 format!(
                     "'{}' has cyclomatic complexity {} (threshold: {})",
                     finding.name, finding.cyclomatic, report.summary.max_cyclomatic_threshold,
                 ),
             ),
             ExceededThreshold::Cognitive => (
-                "fallow/high-cognitive-complexity",
+                "plow/high-cognitive-complexity",
                 format!(
                     "'{}' has cognitive complexity {} (threshold: {})",
                     finding.name, finding.cognitive, report.summary.max_cognitive_threshold,
                 ),
             ),
             ExceededThreshold::Both => (
-                "fallow/high-complexity",
+                "plow/high-complexity",
                 format!(
                     "'{}' has cyclomatic complexity {} (threshold: {}) and cognitive complexity {} (threshold: {})",
                     finding.name,
@@ -1306,7 +1306,7 @@ pub fn build_health_sarif(
                     .map(|pct| format!(", coverage {pct:.0}%"))
                     .unwrap_or_default();
                 (
-                    "fallow/high-crap-score",
+                    "plow/high-crap-score",
                     format!(
                         "'{}' has CRAP score {:.1} (threshold: {:.1}, cyclomatic {}{})",
                         finding.name,
@@ -1352,7 +1352,7 @@ pub fn build_health_sarif(
             target.confidence.label(),
         );
         sarif_results.push(sarif_result(
-            "fallow/refactoring-target",
+            "plow/refactoring-target",
             "warning",
             &message,
             &uri,
@@ -1373,7 +1373,7 @@ pub fn build_health_sarif(
                 },
             );
             sarif_results.push(sarif_result(
-                "fallow/untested-file",
+                "plow/untested-file",
                 "warning",
                 &message,
                 &uri,
@@ -1389,7 +1389,7 @@ pub fn build_health_sarif(
             );
             let source_snippet = snippets.line(&item.export.path, item.export.line);
             sarif_results.push(sarif_result_with_snippet(
-                "fallow/untested-export",
+                "plow/untested-export",
                 "warning",
                 &message,
                 &uri,
@@ -1401,62 +1401,62 @@ pub fn build_health_sarif(
 
     let health_rules = vec![
         sarif_rule(
-            "fallow/high-cyclomatic-complexity",
+            "plow/high-cyclomatic-complexity",
             "Function has high cyclomatic complexity",
             "note",
         ),
         sarif_rule(
-            "fallow/high-cognitive-complexity",
+            "plow/high-cognitive-complexity",
             "Function has high cognitive complexity",
             "note",
         ),
         sarif_rule(
-            "fallow/high-complexity",
+            "plow/high-complexity",
             "Function exceeds both complexity thresholds",
             "note",
         ),
         sarif_rule(
-            "fallow/high-crap-score",
+            "plow/high-crap-score",
             "Function has a high CRAP score (high complexity combined with low coverage)",
             "warning",
         ),
         sarif_rule(
-            "fallow/refactoring-target",
+            "plow/refactoring-target",
             "File identified as a high-priority refactoring candidate",
             "warning",
         ),
         sarif_rule(
-            "fallow/untested-file",
+            "plow/untested-file",
             "Runtime-reachable file has no test dependency path",
             "warning",
         ),
         sarif_rule(
-            "fallow/untested-export",
+            "plow/untested-export",
             "Runtime-reachable export has no test dependency path",
             "warning",
         ),
         sarif_rule(
-            "fallow/runtime-safe-to-delete",
+            "plow/runtime-safe-to-delete",
             "Function is statically unused and was never invoked in production",
             "warning",
         ),
         sarif_rule(
-            "fallow/runtime-review-required",
+            "plow/runtime-review-required",
             "Function is statically used but was never invoked in production",
             "warning",
         ),
         sarif_rule(
-            "fallow/runtime-low-traffic",
+            "plow/runtime-low-traffic",
             "Function was invoked below the low-traffic threshold relative to total trace count",
             "note",
         ),
         sarif_rule(
-            "fallow/runtime-coverage-unavailable",
+            "plow/runtime-coverage-unavailable",
             "Runtime coverage could not be resolved for this function",
             "note",
         ),
         sarif_rule(
-            "fallow/runtime-coverage",
+            "plow/runtime-coverage",
             "Runtime coverage finding",
             "note",
         ),
@@ -1468,9 +1468,9 @@ pub fn build_health_sarif(
         "runs": [{
             "tool": {
                 "driver": {
-                    "name": "fallow",
+                    "name": "plow",
                     "version": env!("CARGO_PKG_VERSION"),
-                    "informationUri": "https://github.com/fallow-rs/fallow",
+                    "informationUri": "https://github.com/plow-rs/plow",
                     "rules": health_rules
                 }
             },
@@ -1498,17 +1498,17 @@ fn append_runtime_coverage_sarif_results(
         let uri = relative_uri(&finding.path, root);
         let rule_id = match finding.verdict {
             crate::health_types::RuntimeCoverageVerdict::SafeToDelete => {
-                "fallow/runtime-safe-to-delete"
+                "plow/runtime-safe-to-delete"
             }
             crate::health_types::RuntimeCoverageVerdict::ReviewRequired => {
-                "fallow/runtime-review-required"
+                "plow/runtime-review-required"
             }
-            crate::health_types::RuntimeCoverageVerdict::LowTraffic => "fallow/runtime-low-traffic",
+            crate::health_types::RuntimeCoverageVerdict::LowTraffic => "plow/runtime-low-traffic",
             crate::health_types::RuntimeCoverageVerdict::CoverageUnavailable => {
-                "fallow/runtime-coverage-unavailable"
+                "plow/runtime-coverage-unavailable"
             }
             crate::health_types::RuntimeCoverageVerdict::Active
-            | crate::health_types::RuntimeCoverageVerdict::Unknown => "fallow/runtime-coverage",
+            | crate::health_types::RuntimeCoverageVerdict::Unknown => "plow/runtime-coverage",
         };
         let level = match finding.verdict {
             crate::health_types::RuntimeCoverageVerdict::SafeToDelete
@@ -1594,7 +1594,7 @@ pub(super) fn print_grouped_health_sarif(
 mod tests {
     use super::*;
     use crate::report::test_helpers::sample_results;
-    use fallow_core::results::*;
+    use plow_core::results::*;
     use std::path::PathBuf;
 
     #[test]
@@ -1618,11 +1618,11 @@ mod tests {
         let sarif = build_sarif(&results, &root, &RulesConfig::default());
 
         let driver = &sarif["runs"][0]["tool"]["driver"];
-        assert_eq!(driver["name"], "fallow");
+        assert_eq!(driver["name"], "plow");
         assert!(driver["version"].is_string());
         assert_eq!(
             driver["informationUri"],
-            "https://github.com/fallow-rs/fallow"
+            "https://github.com/plow-rs/plow"
         );
     }
 
@@ -1638,28 +1638,28 @@ mod tests {
         assert_eq!(rules.len(), 23);
 
         let rule_ids: Vec<&str> = rules.iter().map(|r| r["id"].as_str().unwrap()).collect();
-        assert!(rule_ids.contains(&"fallow/unused-file"));
-        assert!(rule_ids.contains(&"fallow/unused-export"));
-        assert!(rule_ids.contains(&"fallow/unused-type"));
-        assert!(rule_ids.contains(&"fallow/private-type-leak"));
-        assert!(rule_ids.contains(&"fallow/unused-dependency"));
-        assert!(rule_ids.contains(&"fallow/unused-dev-dependency"));
-        assert!(rule_ids.contains(&"fallow/unused-optional-dependency"));
-        assert!(rule_ids.contains(&"fallow/type-only-dependency"));
-        assert!(rule_ids.contains(&"fallow/test-only-dependency"));
-        assert!(rule_ids.contains(&"fallow/unused-enum-member"));
-        assert!(rule_ids.contains(&"fallow/unused-class-member"));
-        assert!(rule_ids.contains(&"fallow/unresolved-import"));
-        assert!(rule_ids.contains(&"fallow/unlisted-dependency"));
-        assert!(rule_ids.contains(&"fallow/duplicate-export"));
-        assert!(rule_ids.contains(&"fallow/circular-dependency"));
-        assert!(rule_ids.contains(&"fallow/re-export-cycle"));
-        assert!(rule_ids.contains(&"fallow/boundary-violation"));
-        assert!(rule_ids.contains(&"fallow/unused-catalog-entry"));
-        assert!(rule_ids.contains(&"fallow/empty-catalog-group"));
-        assert!(rule_ids.contains(&"fallow/unresolved-catalog-reference"));
-        assert!(rule_ids.contains(&"fallow/unused-dependency-override"));
-        assert!(rule_ids.contains(&"fallow/misconfigured-dependency-override"));
+        assert!(rule_ids.contains(&"plow/unused-file"));
+        assert!(rule_ids.contains(&"plow/unused-export"));
+        assert!(rule_ids.contains(&"plow/unused-type"));
+        assert!(rule_ids.contains(&"plow/private-type-leak"));
+        assert!(rule_ids.contains(&"plow/unused-dependency"));
+        assert!(rule_ids.contains(&"plow/unused-dev-dependency"));
+        assert!(rule_ids.contains(&"plow/unused-optional-dependency"));
+        assert!(rule_ids.contains(&"plow/type-only-dependency"));
+        assert!(rule_ids.contains(&"plow/test-only-dependency"));
+        assert!(rule_ids.contains(&"plow/unused-enum-member"));
+        assert!(rule_ids.contains(&"plow/unused-class-member"));
+        assert!(rule_ids.contains(&"plow/unresolved-import"));
+        assert!(rule_ids.contains(&"plow/unlisted-dependency"));
+        assert!(rule_ids.contains(&"plow/duplicate-export"));
+        assert!(rule_ids.contains(&"plow/circular-dependency"));
+        assert!(rule_ids.contains(&"plow/re-export-cycle"));
+        assert!(rule_ids.contains(&"plow/boundary-violation"));
+        assert!(rule_ids.contains(&"plow/unused-catalog-entry"));
+        assert!(rule_ids.contains(&"plow/empty-catalog-group"));
+        assert!(rule_ids.contains(&"plow/unresolved-catalog-reference"));
+        assert!(rule_ids.contains(&"plow/unused-dependency-override"));
+        assert!(rule_ids.contains(&"plow/misconfigured-dependency-override"));
     }
 
     #[test]
@@ -1689,7 +1689,7 @@ mod tests {
         assert_eq!(entries.len(), 1);
 
         let entry = &entries[0];
-        assert_eq!(entry["ruleId"], "fallow/unused-file");
+        assert_eq!(entry["ruleId"], "plow/unused-file");
         // Default severity is "error" per RulesConfig::default()
         assert_eq!(entry["level"], "error");
         assert_eq!(
@@ -1716,7 +1716,7 @@ mod tests {
 
         let sarif = build_sarif(&results, &root, &RulesConfig::default());
         let entry = &sarif["runs"][0]["results"][0];
-        assert_eq!(entry["ruleId"], "fallow/unused-export");
+        assert_eq!(entry["ruleId"], "plow/unused-export");
 
         let region = &entry["locations"][0]["physicalLocation"]["region"];
         assert_eq!(region["startLine"], 10);
@@ -1740,7 +1740,7 @@ mod tests {
 
         let sarif = build_sarif(&results, &root, &RulesConfig::default());
         let entry = &sarif["runs"][0]["results"][0];
-        assert_eq!(entry["ruleId"], "fallow/unresolved-import");
+        assert_eq!(entry["ruleId"], "plow/unresolved-import");
         assert_eq!(entry["level"], "error");
     }
 
@@ -1763,7 +1763,7 @@ mod tests {
 
         let sarif = build_sarif(&results, &root, &RulesConfig::default());
         let entry = &sarif["runs"][0]["results"][0];
-        assert_eq!(entry["ruleId"], "fallow/unlisted-dependency");
+        assert_eq!(entry["ruleId"], "plow/unlisted-dependency");
         assert_eq!(entry["level"], "error");
         assert_eq!(
             entry["locations"][0]["physicalLocation"]["artifactLocation"]["uri"],
@@ -1833,8 +1833,8 @@ mod tests {
         let entries = sarif["runs"][0]["results"].as_array().unwrap();
         // One SARIF result per location, not one per DuplicateExport
         assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0]["ruleId"], "fallow/duplicate-export");
-        assert_eq!(entries[1]["ruleId"], "fallow/duplicate-export");
+        assert_eq!(entries[0]["ruleId"], "plow/duplicate-export");
+        assert_eq!(entries[1]["ruleId"], "plow/duplicate-export");
         assert_eq!(
             entries[0]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"],
             "src/a.ts"
@@ -1859,19 +1859,19 @@ mod tests {
             .iter()
             .map(|e| e["ruleId"].as_str().unwrap())
             .collect();
-        assert!(rule_ids.contains(&"fallow/unused-file"));
-        assert!(rule_ids.contains(&"fallow/unused-export"));
-        assert!(rule_ids.contains(&"fallow/unused-type"));
-        assert!(rule_ids.contains(&"fallow/unused-dependency"));
-        assert!(rule_ids.contains(&"fallow/unused-dev-dependency"));
-        assert!(rule_ids.contains(&"fallow/unused-optional-dependency"));
-        assert!(rule_ids.contains(&"fallow/type-only-dependency"));
-        assert!(rule_ids.contains(&"fallow/test-only-dependency"));
-        assert!(rule_ids.contains(&"fallow/unused-enum-member"));
-        assert!(rule_ids.contains(&"fallow/unused-class-member"));
-        assert!(rule_ids.contains(&"fallow/unresolved-import"));
-        assert!(rule_ids.contains(&"fallow/unlisted-dependency"));
-        assert!(rule_ids.contains(&"fallow/duplicate-export"));
+        assert!(rule_ids.contains(&"plow/unused-file"));
+        assert!(rule_ids.contains(&"plow/unused-export"));
+        assert!(rule_ids.contains(&"plow/unused-type"));
+        assert!(rule_ids.contains(&"plow/unused-dependency"));
+        assert!(rule_ids.contains(&"plow/unused-dev-dependency"));
+        assert!(rule_ids.contains(&"plow/unused-optional-dependency"));
+        assert!(rule_ids.contains(&"plow/type-only-dependency"));
+        assert!(rule_ids.contains(&"plow/test-only-dependency"));
+        assert!(rule_ids.contains(&"plow/unused-enum-member"));
+        assert!(rule_ids.contains(&"plow/unused-class-member"));
+        assert!(rule_ids.contains(&"plow/unresolved-import"));
+        assert!(rule_ids.contains(&"plow/unlisted-dependency"));
+        assert!(rule_ids.contains(&"plow/duplicate-export"));
     }
 
     #[test]
@@ -1893,7 +1893,7 @@ mod tests {
         let sarif = build_sarif(&results, &root, &RulesConfig::default());
         let json_str = serde_json::to_string_pretty(&sarif).expect("SARIF should serialize");
 
-        let dir = std::env::temp_dir().join("fallow-test-sarif-file");
+        let dir = std::env::temp_dir().join("plow-test-sarif-file");
         let _ = std::fs::create_dir_all(&dir);
         let sarif_path = dir.join("results.sarif");
         std::fs::write(&sarif_path, &json_str).expect("should write SARIF file");
@@ -1975,7 +1975,7 @@ mod tests {
         };
         let sarif = build_health_sarif(&report, &root);
         let entry = &sarif["runs"][0]["results"][0];
-        assert_eq!(entry["ruleId"], "fallow/high-cyclomatic-complexity");
+        assert_eq!(entry["ruleId"], "plow/high-cyclomatic-complexity");
         assert_eq!(entry["level"], "warning");
         assert!(
             entry["message"]["text"]
@@ -2027,7 +2027,7 @@ mod tests {
         };
         let sarif = build_health_sarif(&report, &root);
         let entry = &sarif["runs"][0]["results"][0];
-        assert_eq!(entry["ruleId"], "fallow/high-cognitive-complexity");
+        assert_eq!(entry["ruleId"], "plow/high-cognitive-complexity");
         assert!(
             entry["message"]["text"]
                 .as_str()
@@ -2073,7 +2073,7 @@ mod tests {
         };
         let sarif = build_health_sarif(&report, &root);
         let entry = &sarif["runs"][0]["results"][0];
-        assert_eq!(entry["ruleId"], "fallow/high-complexity");
+        assert_eq!(entry["ruleId"], "plow/high-complexity");
         let msg = entry["message"]["text"].as_str().unwrap();
         assert!(msg.contains("cyclomatic complexity 30"));
         assert!(msg.contains("cognitive complexity 45"));
@@ -2082,7 +2082,7 @@ mod tests {
     #[test]
     fn health_sarif_crap_only_emits_crap_rule() {
         // CRAP-only: cyclomatic + cognitive below their thresholds, CRAP at or
-        // above the CRAP threshold. Rule must be `fallow/high-crap-score`.
+        // above the CRAP threshold. Rule must be `plow/high-crap-score`.
         let root = PathBuf::from("/project");
         let report = crate::health_types::HealthReport {
             findings: vec![
@@ -2116,7 +2116,7 @@ mod tests {
         };
         let sarif = build_health_sarif(&report, &root);
         let entry = &sarif["runs"][0]["results"][0];
-        assert_eq!(entry["ruleId"], "fallow/high-crap-score");
+        assert_eq!(entry["ruleId"], "plow/high-crap-score");
         let msg = entry["message"]["text"].as_str().unwrap();
         assert!(msg.contains("CRAP score 82.2"), "msg: {msg}");
         assert!(msg.contains("coverage 12%"), "msg: {msg}");
@@ -2164,7 +2164,7 @@ mod tests {
             1,
             "CyclomaticCrap should emit a single SARIF result under the CRAP rule"
         );
-        assert_eq!(results[0]["ruleId"], "fallow/high-crap-score");
+        assert_eq!(results[0]["ruleId"], "plow/high-crap-score");
         let msg = results[0]["message"]["text"].as_str().unwrap();
         assert!(msg.contains("CRAP score 182"), "msg: {msg}");
         // coverage_pct absent => no coverage suffix
@@ -2257,7 +2257,7 @@ mod tests {
 
         let sarif = build_sarif(&results, &root, &RulesConfig::default());
         let entry = &sarif["runs"][0]["results"][0];
-        assert_eq!(entry["ruleId"], "fallow/unused-type");
+        assert_eq!(entry["ruleId"], "plow/unused-type");
         let msg = entry["message"]["text"].as_str().unwrap();
         assert!(msg.starts_with("Type re-export"));
         assert_eq!(entry["properties"]["is_re_export"], true);
@@ -2395,7 +2395,7 @@ mod tests {
 
         let sarif = build_sarif(&results, &root, &RulesConfig::default());
         let entry = &sarif["runs"][0]["results"][0];
-        assert_eq!(entry["ruleId"], "fallow/unused-optional-dependency");
+        assert_eq!(entry["ruleId"], "plow/unused-optional-dependency");
         let msg = entry["message"]["text"].as_str().unwrap();
         assert!(msg.contains("optionalDependencies"));
     }
@@ -2407,11 +2407,11 @@ mod tests {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
         results.unused_enum_members.push(
-            fallow_core::results::UnusedEnumMemberFinding::with_actions(UnusedMember {
+            plow_core::results::UnusedEnumMemberFinding::with_actions(UnusedMember {
                 path: root.join("src/enums.ts"),
                 parent_name: "Color".to_string(),
                 member_name: "Purple".to_string(),
-                kind: fallow_core::extract::MemberKind::EnumMember,
+                kind: plow_core::extract::MemberKind::EnumMember,
                 line: 5,
                 col: 2,
             }),
@@ -2419,7 +2419,7 @@ mod tests {
 
         let sarif = build_sarif(&results, &root, &RulesConfig::default());
         let entry = &sarif["runs"][0]["results"][0];
-        assert_eq!(entry["ruleId"], "fallow/unused-enum-member");
+        assert_eq!(entry["ruleId"], "plow/unused-enum-member");
         let msg = entry["message"]["text"].as_str().unwrap();
         assert!(msg.contains("Enum member 'Color.Purple'"));
         let region = &entry["locations"][0]["physicalLocation"]["region"];
@@ -2431,11 +2431,11 @@ mod tests {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
         results.unused_class_members.push(
-            fallow_core::results::UnusedClassMemberFinding::with_actions(UnusedMember {
+            plow_core::results::UnusedClassMemberFinding::with_actions(UnusedMember {
                 path: root.join("src/service.ts"),
                 parent_name: "API".to_string(),
                 member_name: "fetch".to_string(),
-                kind: fallow_core::extract::MemberKind::ClassMethod,
+                kind: plow_core::extract::MemberKind::ClassMethod,
                 line: 10,
                 col: 4,
             }),
@@ -2443,7 +2443,7 @@ mod tests {
 
         let sarif = build_sarif(&results, &root, &RulesConfig::default());
         let entry = &sarif["runs"][0]["results"][0];
-        assert_eq!(entry["ruleId"], "fallow/unused-class-member");
+        assert_eq!(entry["ruleId"], "plow/unused-class-member");
         let msg = entry["message"]["text"].as_str().unwrap();
         assert!(msg.contains("Class member 'API.fetch'"));
     }
@@ -2456,7 +2456,7 @@ mod tests {
         reason = "test line/col values are trivially small"
     )]
     fn duplication_sarif_structure() {
-        use fallow_core::duplicates::*;
+        use plow_core::duplicates::*;
 
         let root = PathBuf::from("/project");
         let report = DuplicationReport {
@@ -2493,10 +2493,10 @@ mod tests {
             "runs": [{
                 "tool": {
                     "driver": {
-                        "name": "fallow",
+                        "name": "plow",
                         "version": env!("CARGO_PKG_VERSION"),
-                        "informationUri": "https://github.com/fallow-rs/fallow",
-                        "rules": [sarif_rule("fallow/code-duplication", "Duplicated code block", "warning")]
+                        "informationUri": "https://github.com/plow-rs/plow",
+                        "rules": [sarif_rule("plow/code-duplication", "Duplicated code block", "warning")]
                     }
                 },
                 "results": []
@@ -2510,7 +2510,7 @@ mod tests {
         for (i, group) in report.clone_groups.iter().enumerate() {
             for instance in &group.instances {
                 sarif_results.push(sarif_result(
-                    "fallow/code-duplication",
+                    "plow/code-duplication",
                     "warning",
                     &format!(
                         "Code clone group {} ({} lines, {} instances)",
@@ -2524,7 +2524,7 @@ mod tests {
             }
         }
         assert_eq!(sarif_results.len(), 2);
-        assert_eq!(sarif_results[0]["ruleId"], "fallow/code-duplication");
+        assert_eq!(sarif_results[0]["ruleId"], "plow/code-duplication");
         assert!(
             sarif_results[0]["message"]["text"]
                 .as_str()
@@ -2543,14 +2543,14 @@ mod tests {
 
     #[test]
     fn sarif_rule_known_id_has_full_description() {
-        let rule = sarif_rule("fallow/unused-file", "fallback text", "error");
+        let rule = sarif_rule("plow/unused-file", "fallback text", "error");
         assert!(rule.get("fullDescription").is_some());
         assert!(rule.get("helpUri").is_some());
     }
 
     #[test]
     fn sarif_rule_unknown_id_uses_fallback() {
-        let rule = sarif_rule("fallow/nonexistent", "fallback text", "warning");
+        let rule = sarif_rule("plow/nonexistent", "fallback text", "warning");
         assert_eq!(rule["shortDescription"]["text"], "fallback text");
         assert!(rule.get("fullDescription").is_none());
         assert!(rule.get("helpUri").is_none());
@@ -2636,7 +2636,7 @@ mod tests {
         let sarif = build_health_sarif(&report, &root);
         let entries = sarif["runs"][0]["results"].as_array().unwrap();
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0]["ruleId"], "fallow/refactoring-target");
+        assert_eq!(entries[0]["ruleId"], "plow/refactoring-target");
         assert_eq!(entries[0]["level"], "warning");
         let msg = entries[0]["message"]["text"].as_str().unwrap();
         assert!(msg.contains("high impact"));
@@ -2686,7 +2686,7 @@ mod tests {
         let sarif = build_health_sarif(&report, &root);
         let entries = sarif["runs"][0]["results"].as_array().unwrap();
         assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0]["ruleId"], "fallow/untested-file");
+        assert_eq!(entries[0]["ruleId"], "plow/untested-file");
         assert_eq!(
             entries[0]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"],
             "src/app.ts"
@@ -2697,7 +2697,7 @@ mod tests {
                 .unwrap()
                 .contains("2 value exports")
         );
-        assert_eq!(entries[1]["ruleId"], "fallow/untested-export");
+        assert_eq!(entries[1]["ruleId"], "plow/untested-export");
         assert_eq!(
             entries[1]["locations"][0]["physicalLocation"]["region"]["startLine"],
             12

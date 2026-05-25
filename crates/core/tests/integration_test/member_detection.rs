@@ -6,7 +6,7 @@ use super::common::{create_config, create_config_with_ignore_decorators, fixture
 fn enum_class_members_detects_unused_members() {
     let root = fixture_path("enum-class-members");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_enum_member_names: Vec<&str> = results
         .unused_enum_members
@@ -53,7 +53,7 @@ fn enum_class_members_detects_unused_members() {
 fn exported_instance_class_members_are_credited_to_class() {
     let root = fixture_path("exported-instance-class-members");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_class_members: Vec<String> = results
         .unused_class_members
@@ -79,7 +79,7 @@ fn exported_instance_class_members_are_credited_to_class() {
 fn public_api_class_members_reexported_from_entry_points_are_not_reported() {
     let root = fixture_path("issue-643-public-api-class-members");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_class_members: Vec<(String, String, String)> = results
         .unused_class_members
@@ -171,7 +171,7 @@ fn public_api_class_members_reexported_from_entry_points_are_not_reported() {
 fn cross_package_enum_class_members_credit_re_exported_origin() {
     let root = fixture_path("cross-package-enum-class-members");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_enum_member_names: Vec<&str> = results
         .unused_enum_members
@@ -246,7 +246,7 @@ fn cross_package_enum_class_members_credit_re_exported_origin() {
 fn injected_dependency_object_credits_class_member_usage() {
     let root = fixture_path("injected-dependency-class-members");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_class_members: Vec<(&str, &str)> = results
         .unused_class_members
@@ -268,7 +268,7 @@ fn injected_dependency_object_credits_class_member_usage() {
 fn playwright_fixture_pom_methods_are_credited_from_tests() {
     let root = fixture_path("playwright-pom-fixtures");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_class_members: Vec<String> = results
         .unused_class_members
@@ -298,7 +298,7 @@ fn playwright_fixture_pom_methods_are_credited_from_tests() {
 fn playwright_nested_fixture_pom_methods_are_credited_from_tests() {
     let root = fixture_path("playwright-pom-fixtures-nested");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_class_members: Vec<String> = results
         .unused_class_members
@@ -328,7 +328,7 @@ fn playwright_nested_fixture_pom_methods_are_credited_from_tests() {
 fn playwright_helper_function_fixture_pom_methods_are_credited() {
     let root = fixture_path("issue-491-playwright-fixture-helper-function");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_class_members: Vec<String> = results
         .unused_class_members
@@ -358,7 +358,7 @@ fn playwright_helper_function_fixture_pom_methods_are_credited() {
 fn playwright_helper_function_with_local_setup_fixture_pom_methods_are_credited() {
     let root = fixture_path("issue-586-playwright-helper-local-setup");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_class_members: Vec<String> = results
         .unused_class_members
@@ -388,7 +388,7 @@ fn playwright_helper_function_with_local_setup_fixture_pom_methods_are_credited(
 fn playwright_fixture_teardown_credits_factory_getter_member_usage() {
     let root = fixture_path("issue-386-playwright-fixture-teardown");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_class_members: Vec<String> = results
         .unused_class_members
@@ -416,7 +416,7 @@ fn playwright_fixture_teardown_credits_factory_getter_member_usage() {
 fn fluent_builder_chain_credits_intermediate_setters() {
     let root = fixture_path("issue-387-fluent-builder");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_class_members: Vec<String> = results
         .unused_class_members
@@ -453,7 +453,7 @@ fn fluent_builder_chain_credits_intermediate_setters() {
 fn generic_constrained_param_credits_base_class_member() {
     let root = fixture_path("issue-388-generic-constraint");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_class_members: Vec<String> = results
         .unused_class_members
@@ -475,7 +475,7 @@ fn generic_constrained_param_credits_base_class_member() {
 fn angular_inject_fields_credit_service_member_usage() {
     let root = fixture_path("angular-inject-class-members");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_class_members: Vec<String> = results
         .unused_class_members
@@ -503,7 +503,7 @@ fn angular_inject_fields_credit_service_member_usage() {
 fn enum_whole_object_uses_no_false_positives() {
     let root = fixture_path("enum-whole-object");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_enum_member_names: Vec<&str> = results
         .unused_enum_members
@@ -562,7 +562,7 @@ fn enum_whole_object_uses_no_false_positives() {
 fn enum_type_level_usage_no_false_positives() {
     let root = fixture_path("enum-type-level");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_enum_member_names: Vec<&str> = results
         .unused_enum_members
@@ -623,7 +623,7 @@ fn enum_type_level_usage_no_false_positives() {
 fn typed_binding_through_nullable_unions_credits_class_methods() {
     let root = fixture_path("typed-binding-wrappers");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused: Vec<String> = results
         .unused_class_members
@@ -659,7 +659,7 @@ fn typed_binding_through_nullable_unions_credits_class_methods() {
 fn ignore_decorators_unlocks_only_listed_decorators() {
     let root = fixture_path("ignore-decorators-mixed");
     let config = create_config_with_ignore_decorators(root, vec!["@step".to_string()]);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused: Vec<String> = results
         .unused_class_members
@@ -700,7 +700,7 @@ fn ignore_decorators_unlocks_only_listed_decorators() {
 fn ignore_decorators_dotted_entry_matches_exact_path() {
     let root = fixture_path("ignore-decorators-namespaced");
     let config = create_config_with_ignore_decorators(root, vec!["decorators.log".to_string()]);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused: Vec<String> = results
         .unused_class_members
@@ -729,7 +729,7 @@ fn ignore_decorators_dotted_entry_matches_exact_path() {
 fn ignore_decorators_bare_entry_collapses_namespace() {
     let root = fixture_path("ignore-decorators-namespaced");
     let config = create_config_with_ignore_decorators(root, vec!["decorators".to_string()]);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused: Vec<String> = results
         .unused_class_members
@@ -758,7 +758,7 @@ fn ignore_decorators_applies_to_declaring_class_only() {
     // do with the child.
     let root = fixture_path("ignore-decorators-inheritance");
     let config = create_config_with_ignore_decorators(root, vec!["@step".to_string()]);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused: Vec<String> = results
         .unused_class_members

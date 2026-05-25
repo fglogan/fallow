@@ -1,35 +1,35 @@
 {
-  "name": "fallow-vscode",
-  "displayName": "Fallow",
-  "description": "Codebase intelligence for TypeScript and JavaScript. Real-time diagnostics for unused code, duplication, complexity hotspots, and architecture drift, with optional runtime evidence via Fallow Runtime.",
+  "name": "plow-vscode",
+  "displayName": "Plow",
+  "description": "Codebase intelligence for TypeScript and JavaScript. Real-time diagnostics for unused code, duplication, complexity hotspots, and architecture drift, with optional runtime evidence via Plow Runtime.",
   "version": "2.48.1",
   "packageManager": "pnpm@10.33.0",
-  "publisher": "fallow-rs",
+  "publisher": "plow-rs",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/fallow-rs/fallow",
+    "url": "https://github.com/plow-rs/plow",
     "directory": "editors/vscode"
   },
   "icon": "icon.png",
-  "homepage": "https://docs.fallow.tools",
+  "homepage": "https://docs.plow.tools",
   "bugs": {
-    "url": "https://github.com/fallow-rs/fallow/issues"
+    "url": "https://github.com/plow-rs/plow/issues"
   },
-  "qna": "https://github.com/fallow-rs/fallow/issues",
+  "qna": "https://github.com/plow-rs/plow/issues",
   "galleryBanner": {
     "color": "#2d2d2d",
     "theme": "dark"
   },
   "badges": [
     {
-      "url": "https://img.shields.io/visual-studio-marketplace/v/fallow-rs.fallow-vscode",
-      "href": "https://marketplace.visualstudio.com/items?itemName=fallow-rs.fallow-vscode",
+      "url": "https://img.shields.io/visual-studio-marketplace/v/plow-rs.plow-vscode",
+      "href": "https://marketplace.visualstudio.com/items?itemName=plow-rs.plow-vscode",
       "description": "VS Code Marketplace Version"
     },
     {
-      "url": "https://img.shields.io/crates/v/fallow-cli",
-      "href": "https://crates.io/crates/fallow-cli",
+      "url": "https://img.shields.io/crates/v/plow-cli",
+      "href": "https://crates.io/crates/plow-cli",
       "description": "crates.io Version"
     }
   ],
@@ -61,89 +61,89 @@
     "jsonValidation": [
       {
         "fileMatch": [
-          ".fallowrc.json",
-          ".fallowrc.jsonc"
+          ".plowrc.json",
+          ".plowrc.jsonc"
         ],
-        "url": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json"
+        "url": "https://raw.githubusercontent.com/plow-rs/plow/main/schema.json"
       }
     ],
     "commands": [
       {
-        "command": "fallow.analyze",
-        "title": "Fallow: Run Analysis",
+        "command": "plow.analyze",
+        "title": "Plow: Run Analysis",
         "icon": "$(search)"
       },
       {
-        "command": "fallow.fix",
-        "title": "Fallow: Auto-Fix (unexport unused, remove unused deps)"
+        "command": "plow.fix",
+        "title": "Plow: Auto-Fix (unexport unused, remove unused deps)"
       },
       {
-        "command": "fallow.fixDryRun",
-        "title": "Fallow: Preview Fixes (Dry Run)"
+        "command": "plow.fixDryRun",
+        "title": "Plow: Preview Fixes (Dry Run)"
       },
       {
-        "command": "fallow.restart",
-        "title": "Fallow: Restart Language Server"
+        "command": "plow.restart",
+        "title": "Plow: Restart Language Server"
       },
       {
-        "command": "fallow.showOutput",
-        "title": "Fallow: Show Output Channel"
+        "command": "plow.showOutput",
+        "title": "Plow: Show Output Channel"
       },
       {
-        "command": "fallow.openSidebar",
-        "title": "Fallow: Open Sidebar"
+        "command": "plow.openSidebar",
+        "title": "Plow: Open Sidebar"
       },
       {
-        "command": "fallow.openSettings",
-        "title": "Fallow: Open Settings"
+        "command": "plow.openSettings",
+        "title": "Plow: Open Settings"
       },
       {
-        "command": "fallow.noop",
-        "title": "Fallow: No-op (internal)"
+        "command": "plow.noop",
+        "title": "Plow: No-op (internal)"
       },
       {
-        "command": "fallow.toggleMuteDuplicates",
-        "title": "Fallow: Toggle Mute Code-Duplication Findings",
+        "command": "plow.toggleMuteDuplicates",
+        "title": "Plow: Toggle Mute Code-Duplication Findings",
         "icon": "$(eye-closed)"
       },
       {
-        "command": "fallow.toggleAllDiagnostics",
-        "title": "Fallow: Toggle Mute All Findings",
+        "command": "plow.toggleAllDiagnostics",
+        "title": "Plow: Toggle Mute All Findings",
         "icon": "$(eye-closed)"
       },
       {
-        "command": "fallow.manageDiagnosticMutes",
-        "title": "Fallow: Manage Diagnostic Mutes...",
+        "command": "plow.manageDiagnosticMutes",
+        "title": "Plow: Manage Diagnostic Mutes...",
         "icon": "$(filter)"
       },
       {
-        "command": "fallow.clearDiagnosticMutes",
-        "title": "Fallow: Show All Findings (Clear Mutes)"
+        "command": "plow.clearDiagnosticMutes",
+        "title": "Plow: Show All Findings (Clear Mutes)"
       },
       {
-        "command": "fallow.muteDiagnosticCategory",
-        "title": "Fallow: Mute Diagnostic Category"
+        "command": "plow.muteDiagnosticCategory",
+        "title": "Plow: Mute Diagnostic Category"
       }
     ],
     "configuration": {
-      "title": "Fallow",
+      "title": "Plow",
       "properties": {
-        "fallow.lspPath": {
+        "plow.lspPath": {
           "type": "string",
           "default": "",
-          "description": "Path to the fallow-lsp binary. Leave empty for auto-detection."
+          "description": "Path to the plow-lsp binary. Leave empty for auto-detection."
         },
-        "fallow.configPath": {
+        "plow.configPath": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Path to a Fallow config file. Relative paths are resolved from the workspace root (the first folder, in multi-root workspaces). Mirrors the CLI's `--config` flag. Empty = auto-discover `.fallowrc.json`, `.fallowrc.jsonc`, `fallow.toml`, or `.fallow.toml`."
+          "markdownDescription": "Path to a Plow config file. Relative paths are resolved from the workspace root (the first folder, in multi-root workspaces). Mirrors the CLI's `--config` flag. Empty = auto-discover `.plowrc.json`, `.plowrc.jsonc`, `plow.toml`, or `.plow.toml`."
         },
-        "fallow.autoDownload": {
+        "plow.autoDownload": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically download the fallow-lsp binary if not found."
+          "description": "Automatically download the plow-lsp binary if not found."
         },
-        "fallow.issueTypes": {
+        "plow.issueTypes": {
           "type": "object",
           "default": {
             "unused-files": true,
@@ -169,7 +169,7 @@
             "unused-dependency-overrides": true,
             "misconfigured-dependency-overrides": true
           },
-          "description": "Toggle individual issue types on or off. Uses kebab-case names matching fallow's rules config.",
+          "description": "Toggle individual issue types on or off. Uses kebab-case names matching plow's rules config.",
           "properties": {
             "unused-files": {
               "type": "boolean"
@@ -239,13 +239,13 @@
             }
           }
         },
-        "fallow.duplication.threshold": {
+        "plow.duplication.threshold": {
           "type": "number",
           "default": 5,
           "minimum": 1,
           "description": "Minimum number of lines for a code block to be reported as a duplicate."
         },
-        "fallow.duplication.mode": {
+        "plow.duplication.mode": {
           "type": "string",
           "default": "mild",
           "enum": [
@@ -262,17 +262,17 @@
             "Renames variables for semantic matching"
           ]
         },
-        "fallow.production": {
+        "plow.production": {
           "type": "boolean",
           "default": false,
           "description": "Enable production mode (excludes test/dev files, only production scripts)."
         },
-        "fallow.changedSince": {
+        "plow.changedSince": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Show only issues in files changed since the given git ref. Tag your current commit (`git tag fallow-baseline`) and set this to the tag name to keep existing issues hidden while flagging new ones in the Problems panel. Mirrors the CLI's `--changed-since`. Empty = full scope."
+          "markdownDescription": "Show only issues in files changed since the given git ref. Tag your current commit (`git tag plow-baseline`) and set this to the tag name to keep existing issues hidden while flagging new ones in the Problems panel. Mirrors the CLI's `--changed-since`. Empty = full scope."
         },
-        "fallow.trace.server": {
+        "plow.trace.server": {
           "type": "string",
           "default": "off",
           "enum": [
@@ -287,20 +287,20 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "fallow",
-          "title": "Fallow",
+          "id": "plow",
+          "title": "Plow",
           "icon": "assets/icon-sidebar.svg"
         }
       ]
     },
     "views": {
-      "fallow": [
+      "plow": [
         {
-          "id": "fallow.deadCode",
+          "id": "plow.deadCode",
           "name": "Unused Code"
         },
         {
-          "id": "fallow.duplicates",
+          "id": "plow.duplicates",
           "name": "Duplicates"
         }
       ]
@@ -308,92 +308,92 @@
     "menus": {
       "view/title": [
         {
-          "command": "fallow.analyze",
-          "when": "view == fallow.deadCode || view == fallow.duplicates",
+          "command": "plow.analyze",
+          "when": "view == plow.deadCode || view == plow.duplicates",
           "group": "navigation"
         }
       ],
       "commandPalette": [
         {
-          "command": "fallow.muteDiagnosticCategory",
+          "command": "plow.muteDiagnosticCategory",
           "when": "false"
         },
         {
-          "command": "fallow.noop",
+          "command": "plow.noop",
           "when": "false"
         }
       ]
     },
     "viewsWelcome": [
       {
-        "view": "fallow.deadCode",
-        "contents": "No analysis results yet.\n[$(search) Run Analysis](command:fallow.analyze)\nFallow finds unused files, exports, dependencies, and more.",
-        "when": "!fallow.hasAnalyzed"
+        "view": "plow.deadCode",
+        "contents": "No analysis results yet.\n[$(search) Run Analysis](command:plow.analyze)\nPlow finds unused files, exports, dependencies, and more.",
+        "when": "!plow.hasAnalyzed"
       },
       {
-        "view": "fallow.deadCode",
+        "view": "plow.deadCode",
         "contents": "$(check) No unused code found.",
-        "when": "fallow.hasAnalyzed"
+        "when": "plow.hasAnalyzed"
       },
       {
-        "view": "fallow.duplicates",
-        "contents": "No duplication results yet.\n[$(search) Run Analysis](command:fallow.analyze)\nFallow detects duplicated code blocks across your project.",
-        "when": "!fallow.hasAnalyzed"
+        "view": "plow.duplicates",
+        "contents": "No duplication results yet.\n[$(search) Run Analysis](command:plow.analyze)\nPlow detects duplicated code blocks across your project.",
+        "when": "!plow.hasAnalyzed"
       },
       {
-        "view": "fallow.duplicates",
+        "view": "plow.duplicates",
         "contents": "$(check) No code duplication found.",
-        "when": "fallow.hasAnalyzed"
+        "when": "plow.hasAnalyzed"
       }
     ],
     "walkthroughs": [
       {
-        "id": "fallow.gettingStarted",
-        "title": "Get Started with Fallow",
+        "id": "plow.gettingStarted",
+        "title": "Get Started with Plow",
         "description": "Analyze your TypeScript/JavaScript codebase for unused code, circular dependencies, code duplication, complexity hotspots, and architecture boundary violations.",
         "steps": [
           {
-            "id": "fallow.gettingStarted.analyze",
+            "id": "plow.gettingStarted.analyze",
             "title": "Run your first analysis",
-            "description": "Fallow analyzes your codebase for unused code, circular dependencies, code duplication, complexity hotspots, and architecture boundary violations.\n\nOpen the Command Palette and run **Fallow: Run Analysis**, or click the search icon in the Fallow sidebar.\n\n[Run Analysis](command:fallow.analyze)",
+            "description": "Plow analyzes your codebase for unused code, circular dependencies, code duplication, complexity hotspots, and architecture boundary violations.\n\nOpen the Command Palette and run **Plow: Run Analysis**, or click the search icon in the Plow sidebar.\n\n[Run Analysis](command:plow.analyze)",
             "media": {
               "markdown": "media/step-analyze.md"
             },
             "completionEvents": [
-              "onCommand:fallow.analyze"
+              "onCommand:plow.analyze"
             ]
           },
           {
-            "id": "fallow.gettingStarted.explore",
+            "id": "plow.gettingStarted.explore",
             "title": "Explore the results",
-            "description": "After analysis completes, results appear across multiple surfaces in your editor.\n\nClick any item in the Fallow sidebar to jump to it in the editor.\n\n[Open Fallow Sidebar](command:fallow.openSidebar)",
+            "description": "After analysis completes, results appear across multiple surfaces in your editor.\n\nClick any item in the Plow sidebar to jump to it in the editor.\n\n[Open Plow Sidebar](command:plow.openSidebar)",
             "media": {
               "markdown": "media/step-explore.md"
             },
             "completionEvents": [
-              "onCommand:fallow.openSidebar"
+              "onCommand:plow.openSidebar"
             ]
           },
           {
-            "id": "fallow.gettingStarted.fix",
+            "id": "plow.gettingStarted.fix",
             "title": "Fix an issue",
-            "description": "Auto-fix removes the `export` keyword from unused exports (keeping the code) and removes unused dependencies from package.json.\n\n[Auto-Fix](command:fallow.fix) · [Preview Fixes](command:fallow.fixDryRun)",
+            "description": "Auto-fix removes the `export` keyword from unused exports (keeping the code) and removes unused dependencies from package.json.\n\n[Auto-Fix](command:plow.fix) · [Preview Fixes](command:plow.fixDryRun)",
             "media": {
               "markdown": "media/step-fix.md"
             },
             "completionEvents": [
-              "onCommand:fallow.fix"
+              "onCommand:plow.fix"
             ]
           },
           {
-            "id": "fallow.gettingStarted.configure",
+            "id": "plow.gettingStarted.configure",
             "title": "Configure rules",
-            "description": "Customize which checks to run and how strict they are.\n\n[Open Fallow Settings](command:fallow.openSettings)",
+            "description": "Customize which checks to run and how strict they are.\n\n[Open Plow Settings](command:plow.openSettings)",
             "media": {
               "markdown": "media/step-configure.md"
             },
             "completionEvents": [
-              "onCommand:fallow.openSettings"
+              "onCommand:plow.openSettings"
             ]
           }
         ]

@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_types::discover::FileId;
+use plow_types::discover::FileId;
 
 use super::ModuleGraph;
 
@@ -16,9 +16,9 @@ use propagate::{propagate_named_re_export, propagate_star_re_export};
 
 /// A re-export cycle or self-loop detected during Phase 4 chain resolution.
 ///
-/// The graph-layer mirror of `fallow_types::results::ReExportCycle`. Kept in
+/// The graph-layer mirror of `plow_types::results::ReExportCycle`. Kept in
 /// the graph crate so the types crate does not need a dependency arrow back
-/// into graph for the conversion; `fallow_core::analyze::re_export_cycles`
+/// into graph for the conversion; `plow_core::analyze::re_export_cycles`
 /// performs the `GraphReExportCycle` to `ReExportCycle` mapping by reading
 /// `is_self_loop` and routing to the matching `ReExportCycleKind` variant.
 #[derive(Debug, Clone)]
@@ -212,7 +212,7 @@ impl ModuleGraph {
                 re_export_edges = re_export_info.len(),
                 "Re-export chain fixpoint exceeded safety cap; \
                  propagation may be non-monotonic. Please file a bug at \
-                 https://github.com/fallow-rs/fallow/issues with the repro."
+                 https://github.com/plow-rs/plow/issues with the repro."
             );
         }
 
@@ -226,7 +226,7 @@ impl ModuleGraph {
 ///
 /// The `tracing::warn!` emissions remain unchanged from #442 (RUST_LOG=warn
 /// operators still see them). The returned `Vec<GraphReExportCycle>` is the
-/// structured surface that `fallow_core::analyze::re_export_cycles` consumes
+/// structured surface that `plow_core::analyze::re_export_cycles` consumes
 /// and wraps in typed `ReExportCycleFinding`s for end-user output. See
 /// issue #515.
 fn find_re_export_cycles(

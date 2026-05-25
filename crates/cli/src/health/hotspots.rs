@@ -19,8 +19,8 @@ pub(super) fn is_test_path(relative: &std::path::Path) -> bool {
 
 /// Result of fetching churn data, including cache hit/miss info and timing.
 pub(super) struct ChurnFetchResult {
-    pub result: fallow_core::churn::ChurnResult,
-    pub since: fallow_core::churn::SinceDuration,
+    pub result: plow_core::churn::ChurnResult,
+    pub since: plow_core::churn::SinceDuration,
     pub cache_hit: bool,
     pub git_log_ms: f64,
 }
@@ -36,7 +36,7 @@ pub(super) fn fetch_churn_data(
     opts: &HealthOptions<'_>,
     cache_dir: &std::path::Path,
 ) -> Option<ChurnFetchResult> {
-    use fallow_core::churn;
+    use plow_core::churn;
 
     if !churn::is_git_repo(opts.root) {
         if !opts.quiet {
@@ -76,7 +76,7 @@ pub(super) fn fetch_churn_data(
 /// Used to normalize hotspot scores into the 0-100 range.
 pub(super) fn compute_normalization_maxima(
     file_scores: &[FileHealthScore],
-    churn_files: &rustc_hash::FxHashMap<std::path::PathBuf, fallow_core::churn::FileChurn>,
+    churn_files: &rustc_hash::FxHashMap<std::path::PathBuf, plow_core::churn::FileChurn>,
     min_commits: u32,
 ) -> (f64, f64) {
     let mut max_weighted: f64 = 0.0;
@@ -140,7 +140,7 @@ pub(super) fn compute_hotspot_score(
 /// Compute hotspot entries by combining pre-fetched churn data with file health scores.
 pub(super) fn compute_hotspots(
     opts: &HealthOptions<'_>,
-    config: &fallow_config::ResolvedConfig,
+    config: &plow_config::ResolvedConfig,
     file_scores: &[FileHealthScore],
     ignore_set: &globset::GlobSet,
     ws_roots: Option<&[std::path::PathBuf]>,
@@ -408,17 +408,17 @@ mod tests {
         }];
         let mut churn_files: rustc_hash::FxHashMap<
             std::path::PathBuf,
-            fallow_core::churn::FileChurn,
+            plow_core::churn::FileChurn,
         > = rustc_hash::FxHashMap::default();
         churn_files.insert(
             std::path::PathBuf::from("/src/foo.ts"),
-            fallow_core::churn::FileChurn {
+            plow_core::churn::FileChurn {
                 path: std::path::PathBuf::from("/src/foo.ts"),
                 commits: 5,
                 weighted_commits: 4.2,
                 lines_added: 100,
                 lines_deleted: 20,
-                trend: fallow_core::churn::ChurnTrend::Stable,
+                trend: plow_core::churn::ChurnTrend::Stable,
                 authors: rustc_hash::FxHashMap::default(),
             },
         );
@@ -446,17 +446,17 @@ mod tests {
         }];
         let mut churn_files: rustc_hash::FxHashMap<
             std::path::PathBuf,
-            fallow_core::churn::FileChurn,
+            plow_core::churn::FileChurn,
         > = rustc_hash::FxHashMap::default();
         churn_files.insert(
             std::path::PathBuf::from("/src/foo.ts"),
-            fallow_core::churn::FileChurn {
+            plow_core::churn::FileChurn {
                 path: std::path::PathBuf::from("/src/foo.ts"),
                 commits: 2, // below min_commits=3
                 weighted_commits: 4.2,
                 lines_added: 100,
                 lines_deleted: 20,
-                trend: fallow_core::churn::ChurnTrend::Stable,
+                trend: plow_core::churn::ChurnTrend::Stable,
                 authors: rustc_hash::FxHashMap::default(),
             },
         );
@@ -485,17 +485,17 @@ mod tests {
         }];
         let mut churn_files: rustc_hash::FxHashMap<
             std::path::PathBuf,
-            fallow_core::churn::FileChurn,
+            plow_core::churn::FileChurn,
         > = rustc_hash::FxHashMap::default();
         churn_files.insert(
             std::path::PathBuf::from("/src/foo.ts"),
-            fallow_core::churn::FileChurn {
+            plow_core::churn::FileChurn {
                 path: std::path::PathBuf::from("/src/foo.ts"),
                 commits: 5,
                 weighted_commits: 0.0,
                 lines_added: 0,
                 lines_deleted: 0,
-                trend: fallow_core::churn::ChurnTrend::Stable,
+                trend: plow_core::churn::ChurnTrend::Stable,
                 authors: rustc_hash::FxHashMap::default(),
             },
         );
@@ -595,41 +595,41 @@ mod tests {
         ];
         let mut churn_files: rustc_hash::FxHashMap<
             std::path::PathBuf,
-            fallow_core::churn::FileChurn,
+            plow_core::churn::FileChurn,
         > = rustc_hash::FxHashMap::default();
         churn_files.insert(
             std::path::PathBuf::from("/src/a.ts"),
-            fallow_core::churn::FileChurn {
+            plow_core::churn::FileChurn {
                 path: std::path::PathBuf::from("/src/a.ts"),
                 commits: 5,
                 weighted_commits: 3.0,
                 lines_added: 50,
                 lines_deleted: 10,
-                trend: fallow_core::churn::ChurnTrend::Stable,
+                trend: plow_core::churn::ChurnTrend::Stable,
                 authors: rustc_hash::FxHashMap::default(),
             },
         );
         churn_files.insert(
             std::path::PathBuf::from("/src/b.ts"),
-            fallow_core::churn::FileChurn {
+            plow_core::churn::FileChurn {
                 path: std::path::PathBuf::from("/src/b.ts"),
                 commits: 10,
                 weighted_commits: 8.5, // highest weighted
                 lines_added: 200,
                 lines_deleted: 50,
-                trend: fallow_core::churn::ChurnTrend::Accelerating,
+                trend: plow_core::churn::ChurnTrend::Accelerating,
                 authors: rustc_hash::FxHashMap::default(),
             },
         );
         churn_files.insert(
             std::path::PathBuf::from("/src/c.ts"),
-            fallow_core::churn::FileChurn {
+            plow_core::churn::FileChurn {
                 path: std::path::PathBuf::from("/src/c.ts"),
                 commits: 7,
                 weighted_commits: 5.0,
                 lines_added: 100,
                 lines_deleted: 30,
-                trend: fallow_core::churn::ChurnTrend::Cooling,
+                trend: plow_core::churn::ChurnTrend::Cooling,
                 authors: rustc_hash::FxHashMap::default(),
             },
         );
@@ -675,29 +675,29 @@ mod tests {
         ];
         let mut churn_files: rustc_hash::FxHashMap<
             std::path::PathBuf,
-            fallow_core::churn::FileChurn,
+            plow_core::churn::FileChurn,
         > = rustc_hash::FxHashMap::default();
         churn_files.insert(
             std::path::PathBuf::from("/src/frequent.ts"),
-            fallow_core::churn::FileChurn {
+            plow_core::churn::FileChurn {
                 path: std::path::PathBuf::from("/src/frequent.ts"),
                 commits: 10,
                 weighted_commits: 7.0,
                 lines_added: 150,
                 lines_deleted: 40,
-                trend: fallow_core::churn::ChurnTrend::Stable,
+                trend: plow_core::churn::ChurnTrend::Stable,
                 authors: rustc_hash::FxHashMap::default(),
             },
         );
         churn_files.insert(
             std::path::PathBuf::from("/src/rare.ts"),
-            fallow_core::churn::FileChurn {
+            plow_core::churn::FileChurn {
                 path: std::path::PathBuf::from("/src/rare.ts"),
                 commits: 1, // below min_commits=5
                 weighted_commits: 0.9,
                 lines_added: 10,
                 lines_deleted: 2,
-                trend: fallow_core::churn::ChurnTrend::Cooling,
+                trend: plow_core::churn::ChurnTrend::Cooling,
                 authors: rustc_hash::FxHashMap::default(),
             },
         );
@@ -725,7 +725,7 @@ mod tests {
             crap_max: 0.0,
             crap_above_threshold: 0,
         }];
-        let churn_files: rustc_hash::FxHashMap<std::path::PathBuf, fallow_core::churn::FileChurn> =
+        let churn_files: rustc_hash::FxHashMap<std::path::PathBuf, plow_core::churn::FileChurn> =
             rustc_hash::FxHashMap::default();
 
         let (max_w, max_d) = compute_normalization_maxima(&scores, &churn_files, 1);
@@ -752,17 +752,17 @@ mod tests {
         }];
         let mut churn_files: rustc_hash::FxHashMap<
             std::path::PathBuf,
-            fallow_core::churn::FileChurn,
+            plow_core::churn::FileChurn,
         > = rustc_hash::FxHashMap::default();
         churn_files.insert(
             std::path::PathBuf::from("/src/foo.ts"),
-            fallow_core::churn::FileChurn {
+            plow_core::churn::FileChurn {
                 path: std::path::PathBuf::from("/src/foo.ts"),
                 commits: 0,
                 weighted_commits: 0.0,
                 lines_added: 0,
                 lines_deleted: 0,
-                trend: fallow_core::churn::ChurnTrend::Stable,
+                trend: plow_core::churn::ChurnTrend::Stable,
                 authors: rustc_hash::FxHashMap::default(),
             },
         );
@@ -792,17 +792,17 @@ mod tests {
         }];
         let mut churn_files: rustc_hash::FxHashMap<
             std::path::PathBuf,
-            fallow_core::churn::FileChurn,
+            plow_core::churn::FileChurn,
         > = rustc_hash::FxHashMap::default();
         churn_files.insert(
             std::path::PathBuf::from("/src/foo.ts"),
-            fallow_core::churn::FileChurn {
+            plow_core::churn::FileChurn {
                 path: std::path::PathBuf::from("/src/foo.ts"),
                 commits: 3, // exactly at min_commits=3
                 weighted_commits: 2.8,
                 lines_added: 60,
                 lines_deleted: 15,
-                trend: fallow_core::churn::ChurnTrend::Stable,
+                trend: plow_core::churn::ChurnTrend::Stable,
                 authors: rustc_hash::FxHashMap::default(),
             },
         );

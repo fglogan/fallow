@@ -31,8 +31,8 @@
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_types::discover::FileId;
-use fallow_types::extract::ImportedName;
+use plow_types::discover::FileId;
+use plow_types::extract::ImportedName;
 
 use crate::resolve::ResolvedModule;
 
@@ -112,7 +112,7 @@ pub(super) fn propagate_namespace_re_exports(
         let reachable = enumerate_reachable_barrels(graph, *barrel_file_id, exported_name);
 
         // Entry-point barrel: namespace is exposed to external consumers.
-        // Without seeing their code, fallow conservatively credits every
+        // Without seeing their code, plow conservatively credits every
         // target export. Mirrors `propagate_entry_point_star` in Phase 4.
         // `consumer_file_id` is set to the seed barrel itself because there
         // is no real importing file: the barrel is the entry-point and the
@@ -346,8 +346,8 @@ mod tests {
     use super::*;
     use crate::graph::ModuleGraph;
     use crate::resolve::{ResolveResult, ResolvedImport, ResolvedReExport};
-    use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
-    use fallow_types::extract::{
+    use plow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
+    use plow_types::extract::{
         ExportInfo, ExportName, ImportInfo, MemberAccess, ReExportInfo, VisibilityTag,
     };
     use std::path::PathBuf;

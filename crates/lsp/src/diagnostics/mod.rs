@@ -7,11 +7,11 @@ use std::path::Path;
 
 use tower_lsp::lsp_types::{CodeDescription, Diagnostic, Position, Range, Url};
 
-use fallow_core::duplicates::DuplicationReport;
-use fallow_core::results::AnalysisResults;
+use plow_core::duplicates::DuplicationReport;
+use plow_core::results::AnalysisResults;
 
 /// Base URL for diagnostic documentation links.
-const DOCS_BASE: &str = "https://docs.fallow.tools/explanations/dead-code#";
+const DOCS_BASE: &str = "https://docs.genesis-plow.dev/explanations/dead-code#";
 
 /// Build a `CodeDescription` with a documentation URL for the given anchor.
 fn doc_link(anchor: &str) -> Option<CodeDescription> {
@@ -60,8 +60,8 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    use fallow_core::duplicates::{DuplicationReport, DuplicationStats};
-    use fallow_core::results::{
+    use plow_core::duplicates::{DuplicationReport, DuplicationStats};
+    use plow_core::results::{
         AnalysisResults, UnresolvedImport, UnresolvedImportFinding, UnusedExport,
         UnusedExportFinding, UnusedFile, UnusedFileFinding,
     };
@@ -150,7 +150,7 @@ mod tests {
     }
 
     #[test]
-    fn all_diagnostics_have_fallow_source() {
+    fn all_diagnostics_have_plow_source() {
         let root = test_root();
         let mut results = AnalysisResults::default();
         results
@@ -184,7 +184,7 @@ mod tests {
 
         for file_diags in diags.values() {
             for d in file_diags {
-                assert_eq!(d.source, Some("fallow".to_string()));
+                assert_eq!(d.source, Some("plow".to_string()));
             }
         }
     }
@@ -196,7 +196,7 @@ mod tests {
         let desc = link.unwrap();
         assert_eq!(
             desc.href.as_str(),
-            "https://docs.fallow.tools/explanations/dead-code#unused-exports"
+            "https://docs.genesis-plow.dev/explanations/dead-code#unused-exports"
         );
     }
 

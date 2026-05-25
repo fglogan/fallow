@@ -80,7 +80,7 @@ fn check_runtime_coverage_params_all_fields_deserialize() {
     let json = r#"{
         "coverage": "./coverage/coverage-final.json",
         "root": "/project",
-        "config": "fallow.toml",
+        "config": "plow.toml",
         "production": true,
         "workspace": "apps/web",
         "min_invocations_hot": 250,
@@ -95,7 +95,7 @@ fn check_runtime_coverage_params_all_fields_deserialize() {
     let params: CheckRuntimeCoverageParams = serde_json::from_str(json).unwrap();
     assert_eq!(params.coverage, "./coverage/coverage-final.json");
     assert_eq!(params.root.as_deref(), Some("/project"));
-    assert_eq!(params.config.as_deref(), Some("fallow.toml"));
+    assert_eq!(params.config.as_deref(), Some("plow.toml"));
     assert_eq!(params.production, Some(true));
     assert_eq!(params.workspace.as_deref(), Some("apps/web"));
     assert_eq!(params.min_invocations_hot, Some(250));
@@ -141,7 +141,7 @@ fn fix_params_with_global_flags() {
 fn health_params_all_fields_deserialize() {
     let json = r#"{
         "root": "/project",
-        "config": "fallow.toml",
+        "config": "plow.toml",
         "max_cyclomatic": 25,
         "max_cognitive": 30,
         "max_crap": 45.5,
@@ -155,7 +155,7 @@ fn health_params_all_fields_deserialize() {
     }"#;
     let params: HealthParams = serde_json::from_str(json).unwrap();
     assert_eq!(params.root.as_deref(), Some("/project"));
-    assert_eq!(params.config.as_deref(), Some("fallow.toml"));
+    assert_eq!(params.config.as_deref(), Some("plow.toml"));
     assert_eq!(params.max_cyclomatic, Some(25));
     assert_eq!(params.max_cognitive, Some(30));
     assert_eq!(params.max_crap, Some(45.5));
@@ -186,10 +186,10 @@ fn health_params_minimal() {
 
 #[test]
 fn project_info_params_deserialize() {
-    let json = r#"{"root": "/app", "config": ".fallowrc.json"}"#;
+    let json = r#"{"root": "/app", "config": ".plowrc.json"}"#;
     let params: ProjectInfoParams = serde_json::from_str(json).unwrap();
     assert_eq!(params.root.as_deref(), Some("/app"));
-    assert_eq!(params.config.as_deref(), Some(".fallowrc.json"));
+    assert_eq!(params.config.as_deref(), Some(".plowrc.json"));
 }
 
 #[test]
@@ -263,7 +263,7 @@ fn trace_clone_params_require_file_and_line() {
 fn find_dupes_params_all_fields_deserialize() {
     let json = r#"{
         "root": "/project",
-        "config": "fallow.toml",
+        "config": "plow.toml",
         "workspace": "@my/lib",
         "mode": "strict",
         "min_tokens": 100,
@@ -278,7 +278,7 @@ fn find_dupes_params_all_fields_deserialize() {
     }"#;
     let params: FindDupesParams = serde_json::from_str(json).unwrap();
     assert_eq!(params.root.as_deref(), Some("/project"));
-    assert_eq!(params.config.as_deref(), Some("fallow.toml"));
+    assert_eq!(params.config.as_deref(), Some("plow.toml"));
     assert_eq!(params.workspace.as_deref(), Some("@my/lib"));
     assert_eq!(params.mode.as_deref(), Some("strict"));
     assert_eq!(params.min_tokens, Some(100));
@@ -473,7 +473,7 @@ fn fix_params_all_fields_deserialize() {
 fn health_params_all_fields_including_new_deserialize() {
     let json = r#"{
         "root": "/project",
-        "config": "fallow.toml",
+        "config": "plow.toml",
         "max_cyclomatic": 25,
         "max_cognitive": 30,
         "top": 10,
@@ -648,7 +648,7 @@ fn audit_params_minimal() {
 fn audit_params_with_all_fields() {
     let json = r#"{
         "root": "/project",
-        "config": ".fallowrc.json",
+        "config": ".plowrc.json",
         "base": "develop",
         "production": true,
         "production_dead_code": true,
@@ -662,7 +662,7 @@ fn audit_params_with_all_fields() {
     }"#;
     let params: AuditParams = serde_json::from_str(json).unwrap();
     assert_eq!(params.root.as_deref(), Some("/project"));
-    assert_eq!(params.config.as_deref(), Some(".fallowrc.json"));
+    assert_eq!(params.config.as_deref(), Some(".plowrc.json"));
     assert_eq!(params.base.as_deref(), Some("develop"));
     assert_eq!(params.production, Some(true));
     assert_eq!(params.production_dead_code, Some(true));
@@ -693,13 +693,13 @@ fn list_boundaries_params_minimal() {
 fn list_boundaries_params_full() {
     let json = r#"{
         "root": "/project",
-        "config": ".fallowrc.json",
+        "config": ".plowrc.json",
         "no_cache": true,
         "threads": 4
     }"#;
     let params: ListBoundariesParams = serde_json::from_str(json).unwrap();
     assert_eq!(params.root.as_deref(), Some("/project"));
-    assert_eq!(params.config.as_deref(), Some(".fallowrc.json"));
+    assert_eq!(params.config.as_deref(), Some(".plowrc.json"));
     assert_eq!(params.no_cache, Some(true));
     assert_eq!(params.threads, Some(4));
 }

@@ -1,5 +1,5 @@
 // VS Code injects this module into the extension host at runtime.
-// fallow-ignore-next-line unlisted-dependency
+// plow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
 import { countCheckIssues } from "./analysis-utils.js";
 import { startClient, stopClient, restartClient } from "./client.js";
@@ -17,11 +17,11 @@ import {
 } from "./statusBar.js";
 import type { AnalysisCompleteParams } from "./statusBar.js";
 import { DeadCodeTreeProvider, DuplicatesTreeProvider } from "./treeView.js";
-import type { FallowCheckResult, FallowDupesResult } from "./types.js";
+import type { PlowCheckResult, PlowDupesResult } from "./types.js";
 
 let outputChannel: vscode.OutputChannel;
-let lastCheckResult: FallowCheckResult | null = null;
-let lastDupesResult: FallowDupesResult | null = null;
+let lastCheckResult: PlowCheckResult | null = null;
+let lastDupesResult: PlowDupesResult | null = null;
 
 export interface ExtensionApi {
   readonly runAnalysis: typeof runAnalysis;
@@ -29,7 +29,7 @@ export interface ExtensionApi {
 }
 
 export const activate = async (context: vscode.ExtensionContext): Promise<ExtensionApi> => {
-  outputChannel = vscode.window.createOutputChannel("Fallow");
+  outputChannel = vscode.window.createOutputChannel("Plow");
   context.subscriptions.push(outputChannel);
 
   const statusBar = createStatusBar();
@@ -52,7 +52,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     await vscode.window.withProgress(
       {
         location: vscode.ProgressLocation.Notification,
-        title: "Fallow: Analyzing...",
+        title: "Plow: Analyzing...",
         cancellable: false,
       },
       async () => {
@@ -61,24 +61,24 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
           lastCheckResult = check;
           lastDupesResult = dupes;
           updateViews();
-          void vscode.commands.executeCommand("setContext", "fallow.hasAnalyzed", true);
+          void vscode.commands.executeCommand("setContext", "plow.hasAnalyzed", true);
 
           const issueCount = countCheckIssues(check);
 
           if (issueCount > 0) {
             void vscode.window
               .showInformationMessage(
-                `Fallow: found ${issueCount} issue${issueCount === 1 ? "" : "s"}. Open the Fallow sidebar to explore.`,
+                `Plow: found ${issueCount} issue${issueCount === 1 ? "" : "s"}. Open the Plow sidebar to explore.`,
                 "Open Sidebar",
               )
               .then((choice) => {
                 if (choice === "Open Sidebar") {
-                  void vscode.commands.executeCommand("fallow.deadCode.focus");
+                  void vscode.commands.executeCommand("plow.deadCode.focus");
                 }
                 return undefined;
               });
           } else {
-            void vscode.window.showInformationMessage("Fallow: no issues found.");
+            void vscode.window.showInformationMessage("Plow: no issues found.");
           }
         } catch {
           setStatusBarError();
@@ -87,11 +87,11 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     );
   };
 
-  const deadCodeView = vscode.window.createTreeView("fallow.deadCode", {
+  const deadCodeView = vscode.window.createTreeView("plow.deadCode", {
     treeDataProvider: deadCodeProvider,
   });
   deadCodeProvider.setView(deadCodeView);
-  const duplicatesView = vscode.window.createTreeView("fallow.duplicates", {
+  const duplicatesView = vscode.window.createTreeView("plow.duplicates", {
     treeDataProvider: duplicatesProvider,
   });
   context.subscriptions.push(deadCodeView, duplicatesView);
@@ -127,14 +127,14 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
 
   // Register commands
   context.subscriptions.push(
-    vscode.commands.registerCommand("fallow.analyze", async () => {
+    vscode.commands.registerCommand("plow.analyze", async () => {
       cliAnalysisRan = true;
       await triggerCliAnalysis();
     }),
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("fallow.fix", async () => {
+    vscode.commands.registerCommand("plow.fix", async () => {
       // Save dirty editors first so the fix works on up-to-date content
       await vscode.workspace.saveAll(false);
       await runFix(context, false);
@@ -148,57 +148,57 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("fallow.fixDryRun", async () => {
+    vscode.commands.registerCommand("plow.fixDryRun", async () => {
       await runFix(context, true);
     }),
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("fallow.restart", async () => {
+    vscode.commands.registerCommand("plow.restart", async () => {
       outputChannel.appendLine("Restarting language server...");
       await restartClient(context, outputChannel, diagnosticFilter);
     }),
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("fallow.showOutput", () => {
+    vscode.commands.registerCommand("plow.showOutput", () => {
       outputChannel.show();
     }),
   );
 
-  // Open the Fallow sidebar (used by walkthrough completion event)
+  // Open the Plow sidebar (used by walkthrough completion event)
   context.subscriptions.push(
-    vscode.commands.registerCommand("fallow.openSidebar", () => {
-      void vscode.commands.executeCommand("fallow.deadCode.focus");
+    vscode.commands.registerCommand("plow.openSidebar", () => {
+      void vscode.commands.executeCommand("plow.deadCode.focus");
     }),
   );
 
-  // Open Fallow settings (used by walkthrough completion event)
+  // Open Plow settings (used by walkthrough completion event)
   context.subscriptions.push(
-    vscode.commands.registerCommand("fallow.openSettings", () => {
-      void vscode.commands.executeCommand("workbench.action.openSettings", "fallow");
+    vscode.commands.registerCommand("plow.openSettings", () => {
+      void vscode.commands.executeCommand("workbench.action.openSettings", "plow");
     }),
   );
 
   // Fallback command for Code Lens items with 0 references (display-only)
-  context.subscriptions.push(vscode.commands.registerCommand("fallow.noop", () => {}));
+  context.subscriptions.push(vscode.commands.registerCommand("plow.noop", () => {}));
 
   // Watch for config changes
   context.subscriptions.push(
     onConfigChange(async (e) => {
       const needsRestart =
-        e.affectsConfiguration("fallow.lspPath") ||
-        e.affectsConfiguration("fallow.configPath") ||
-        e.affectsConfiguration("fallow.trace.server") ||
-        e.affectsConfiguration("fallow.issueTypes") ||
-        e.affectsConfiguration("fallow.changedSince");
+        e.affectsConfiguration("plow.lspPath") ||
+        e.affectsConfiguration("plow.configPath") ||
+        e.affectsConfiguration("plow.trace.server") ||
+        e.affectsConfiguration("plow.issueTypes") ||
+        e.affectsConfiguration("plow.changedSince");
 
       const needsReanalysis =
-        e.affectsConfiguration("fallow.configPath") ||
-        e.affectsConfiguration("fallow.production") ||
-        e.affectsConfiguration("fallow.duplication") ||
-        e.affectsConfiguration("fallow.issueTypes") ||
-        e.affectsConfiguration("fallow.changedSince");
+        e.affectsConfiguration("plow.configPath") ||
+        e.affectsConfiguration("plow.production") ||
+        e.affectsConfiguration("plow.duplication") ||
+        e.affectsConfiguration("plow.issueTypes") ||
+        e.affectsConfiguration("plow.changedSince");
 
       if (needsRestart) {
         outputChannel.appendLine("Configuration changed, restarting server...");
@@ -221,22 +221,22 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     // Handle custom LSP notification: update status bar from LSP data
     // so the extension shows results immediately without waiting for CLI
     const notificationDisposable = client.onNotification(
-      "fallow/analysisComplete",
+      "plow/analysisComplete",
       (params: AnalysisCompleteParams) => {
         updateStatusBarFromLsp(params);
-        void vscode.commands.executeCommand("setContext", "fallow.hasAnalyzed", true);
+        void vscode.commands.executeCommand("setContext", "plow.hasAnalyzed", true);
       },
     );
     context.subscriptions.push(notificationDisposable);
   }
 
   // Show walkthrough on first install
-  const walkthroughShown = context.globalState.get<boolean>("fallow.walkthroughShown");
+  const walkthroughShown = context.globalState.get<boolean>("plow.walkthroughShown");
   if (!walkthroughShown) {
-    void context.globalState.update("fallow.walkthroughShown", true);
+    void context.globalState.update("plow.walkthroughShown", true);
     void vscode.commands.executeCommand(
       "workbench.action.openWalkthrough",
-      "fallow-rs.fallow-vscode#fallow.gettingStarted",
+      "plow-rs.plow-vscode#plow.gettingStarted",
       false,
     );
   }

@@ -1,5 +1,5 @@
-//! Typed envelope wrappers for the duplication findings emitted by `fallow
-//! dupes --format json` (and the `dupes` block inside `fallow` and `fallow
+//! Typed envelope wrappers for the duplication findings emitted by `plow
+//! dupes --format json` (and the `dupes` block inside `plow` and `plow
 //! audit`).
 //!
 //! Each wrapper flattens the bare finding via `#[serde(flatten)]` so the wire
@@ -13,20 +13,20 @@
 //! directly from Rust and is set by the audit pass only when the clone group
 //! was introduced relative to the merge-base.
 //!
-//! Lives in `fallow-cli` rather than `fallow-types` because `CloneFamily`,
-//! `CloneGroup`, and `MirroredDirectory` are defined in `fallow-core`
+//! Lives in `plow-cli` rather than `plow-types` because `CloneFamily`,
+//! `CloneGroup`, and `MirroredDirectory` are defined in `plow-core`
 //! (`crates/core/src/duplicates/types.rs`) and `AttributedCloneGroup` is
 //! defined in the CLI itself (`crates/cli/src/report/dupes_grouping.rs`);
-//! `fallow-types` is the lower-level crate that neither of those reach.
+//! `plow-types` is the lower-level crate that neither of those reach.
 
 use std::path::PathBuf;
 
-use fallow_core::duplicates::{
+use plow_core::duplicates::{
     CloneFamily, CloneGroup, DuplicationReport, DuplicationStats, MirroredDirectory,
     RefactoringSuggestion,
 };
-use fallow_types::envelope::AuditIntroduced;
-use fallow_types::serde_path;
+use plow_types::envelope::AuditIntroduced;
+use plow_types::serde_path;
 use serde::Serialize;
 
 use crate::report::dupes_grouping::AttributedCloneGroup;
@@ -41,14 +41,14 @@ pub struct CloneGroupAction {
     /// Action type identifier.
     #[serde(rename = "type")]
     pub kind: CloneGroupActionType,
-    /// Whether `fallow fix` can auto-apply this action. Both variants are
+    /// Whether `plow fix` can auto-apply this action. Both variants are
     /// manual today; the field is non-singleton so a future auto-applier
     /// does not need a schema change.
     pub auto_fixable: bool,
     /// Human-readable description of the action.
     pub description: String,
     /// The inline comment to insert (e.g.,
-    /// `// fallow-ignore-next-line code-duplication`). Present on
+    /// `// plow-ignore-next-line code-duplication`). Present on
     /// `suppress-line`; absent on `extract-shared`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub comment: Option<String>,
@@ -62,7 +62,7 @@ pub struct CloneGroupAction {
 pub enum CloneGroupActionType {
     /// Extract the duplicated code into a shared function.
     ExtractShared,
-    /// Suppress the finding with an inline `// fallow-ignore-next-line
+    /// Suppress the finding with an inline `// plow-ignore-next-line
     /// code-duplication` comment above the duplicated code.
     SuppressLine,
 }
@@ -78,7 +78,7 @@ pub struct CloneFamilyAction {
     /// Action type identifier.
     #[serde(rename = "type")]
     pub kind: CloneFamilyActionType,
-    /// Whether `fallow fix` can auto-apply this action. All three variants
+    /// Whether `plow fix` can auto-apply this action. All three variants
     /// are manual today.
     pub auto_fixable: bool,
     /// Human-readable description of the action.
@@ -88,7 +88,7 @@ pub struct CloneFamilyAction {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
     /// The inline comment to insert (e.g.,
-    /// `// fallow-ignore-next-line code-duplication`). Present on
+    /// `// plow-ignore-next-line code-duplication`). Present on
     /// `suppress-line` only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub comment: Option<String>,
@@ -104,12 +104,12 @@ pub enum CloneFamilyActionType {
     /// Apply one of the family's [`RefactoringSuggestion`]s. One action
     /// per suggestion entry on the bare family.
     ApplySuggestion,
-    /// Suppress with an inline `// fallow-ignore-next-line code-duplication`
+    /// Suppress with an inline `// plow-ignore-next-line code-duplication`
     /// comment above the duplicated code.
     SuppressLine,
 }
 
-const SUPPRESS_COMMENT: &str = "// fallow-ignore-next-line code-duplication";
+const SUPPRESS_COMMENT: &str = "// plow-ignore-next-line code-duplication";
 const SUPPRESS_DESCRIPTION: &str = "Suppress with an inline comment above the duplicated code";
 
 /// Wire-shape envelope for a [`CloneGroup`] finding. Flattens the bare
@@ -173,7 +173,7 @@ impl CloneGroupFinding {
 /// [`CloneGroupFinding`] wrapper too (so every nested clone group gets its
 /// own `actions[]` array, matching the legacy post-pass behavior; see issue
 /// #393 regression test). The wire shape stays byte-identical to the
-/// previous post-pass output. No `introduced` field because `fallow audit`
+/// previous post-pass output. No `introduced` field because `plow audit`
 /// attributes clone groups (not families) when running against a base ref.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -264,10 +264,10 @@ fn build_clone_family_actions(
 }
 
 /// Wire-shape envelope for an [`AttributedCloneGroup`] finding (per-bucket
-/// duplication attribution emitted under `fallow dupes --group-by`).
+/// duplication attribution emitted under `plow dupes --group-by`).
 /// Flattens the attributed group and carries the same typed
 /// `CloneGroupAction` array as [`CloneGroupFinding`]; no `introduced`
-/// field because `fallow audit` does not run on grouped output.
+/// field because `plow audit` does not run on grouped output.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AttributedCloneGroupFinding {
@@ -307,7 +307,7 @@ impl AttributedCloneGroupFinding {
     }
 }
 
-/// Wire-shape payload for `fallow dupes --format json` (the body that
+/// Wire-shape payload for `plow dupes --format json` (the body that
 /// flattens into [`crate::output_envelope::DupesOutput`] and is also
 /// emitted under the `dupes` / `duplication` key inside the combined and
 /// audit envelopes).
@@ -365,7 +365,7 @@ impl DupesReportPayload {
 mod tests {
     use std::path::PathBuf;
 
-    use fallow_core::duplicates::{
+    use plow_core::duplicates::{
         CloneInstance, DuplicationStats, RefactoringKind, RefactoringSuggestion,
     };
 

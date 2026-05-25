@@ -15,7 +15,7 @@ use crate::{
     DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName, ImportInfo, ImportedName,
     MemberAccess, ReExportInfo, RequireCallInfo, VisibilityTag,
 };
-use fallow_types::extract::{
+use plow_types::extract::{
     ClassHeritageInfo, LocalTypeDeclaration, PublicSignatureTypeReference,
 };
 
@@ -240,7 +240,7 @@ fn normalize_module_file_relative_path(relative: &str) -> Option<String> {
         return None;
     }
 
-    let normalized = PathBuf::from("__fallow_current_file__").join(relative);
+    let normalized = PathBuf::from("__plow_current_file__").join(relative);
 
     let mut parts = Vec::new();
     for component in normalized.components() {
@@ -256,7 +256,7 @@ fn normalize_module_file_relative_path(relative: &str) -> Option<String> {
 
     if parts
         .first()
-        .is_some_and(|part| part == "__fallow_current_file__")
+        .is_some_and(|part| part == "__plow_current_file__")
         || parts.is_empty()
     {
         return None;

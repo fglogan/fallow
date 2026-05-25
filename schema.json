@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "FallowConfig",
-  "description": "User-facing configuration loaded from `.fallowrc.json`, `.fallowrc.jsonc`, `fallow.toml`, or `.fallow.toml`.\n\n# Examples\n\n```\nuse fallow_config::FallowConfig;\n\n// Default config has sensible defaults\nlet config = FallowConfig::default();\nassert!(config.entry.is_empty());\nassert!(!config.production);\n\n// Deserialize from JSON\nlet config: FallowConfig = serde_json::from_str(r#\"{\n    \"entry\": [\"src/main.ts\"],\n    \"production\": true\n}\"#).unwrap();\nassert_eq!(config.entry, vec![\"src/main.ts\"]);\nassert!(config.production);\n```",
+  "title": "PlowConfig",
+  "description": "User-facing configuration loaded from `.plowrc.json`, `.plowrc.jsonc`, `plow.toml`, or `.plow.toml`.\n\n# Examples\n\n```\nuse plow_config::PlowConfig;\n\n// Default config has sensible defaults\nlet config = PlowConfig::default();\nassert!(config.entry.is_empty());\nassert!(!config.production);\n\n// Deserialize from JSON\nlet config: PlowConfig = serde_json::from_str(r#\"{\n    \"entry\": [\"src/main.ts\"],\n    \"production\": true\n}\"#).unwrap();\nassert_eq!(config.entry, vec![\"src/main.ts\"]);\nassert!(config.production);\n```",
   "type": "object",
   "properties": {
     "$schema": {
@@ -13,7 +13,7 @@
       "writeOnly": true
     },
     "extends": {
-      "description": "Base config files to extend from.\n\nSupports three resolution strategies:\n- **Relative paths**: `\"./base.json\"` — resolved relative to the config file.\n- **npm packages**: `\"npm:@co/config\"` — resolved by walking up `node_modules/`.\n  Package resolution checks `package.json` `exports`/`main` first, then falls back\n  to standard config file names. Subpaths are supported (e.g., `npm:@co/config/strict.json`).\n- **HTTPS URLs**: `\"https://example.com/fallow-base.json\"` — fetched remotely.\n  Only HTTPS is supported (no plain HTTP). URL-sourced configs may extend other\n  URLs or `npm:` packages, but not relative paths. Only JSON/JSONC format is\n  supported for remote configs. Timeout is configurable via\n  `FALLOW_EXTENDS_TIMEOUT_SECS` (default: 5s).\n\nBase configs are loaded first, then this config's values override them.\nLater entries in the array override earlier ones.\n\n**Note:** `npm:` resolution uses `node_modules/` directory walk-up and is\nincompatible with Yarn Plug'n'Play (PnP), which has no `node_modules/`.\nURL extends fetch on every run (no caching). For reliable CI, prefer `npm:`\nfor private or critical configs.",
+      "description": "Base config files to extend from.\n\nSupports three resolution strategies:\n- **Relative paths**: `\"./base.json\"` — resolved relative to the config file.\n- **npm packages**: `\"npm:@co/config\"` — resolved by walking up `node_modules/`.\n  Package resolution checks `package.json` `exports`/`main` first, then falls back\n  to standard config file names. Subpaths are supported (e.g., `npm:@co/config/strict.json`).\n- **HTTPS URLs**: `\"https://example.com/plow-base.json\"` — fetched remotely.\n  Only HTTPS is supported (no plain HTTP). URL-sourced configs may extend other\n  URLs or `npm:` packages, but not relative paths. Only JSON/JSONC format is\n  supported for remote configs. Timeout is configurable via\n  `PLOW_EXTENDS_TIMEOUT_SECS` (default: 5s).\n\nBase configs are loaded first, then this config's values override them.\nLater entries in the array override earlier ones.\n\n**Note:** `npm:` resolution uses `node_modules/` directory walk-up and is\nincompatible with Yarn Plug'n'Play (PnP), which has no `node_modules/`.\nURL extends fetch on every run (no caching). For reliable CI, prefer `npm:`\nfor private or critical configs.",
       "type": "array",
       "items": {
         "type": "string"
@@ -100,7 +100,7 @@
       "default": false
     },
     "ignoreDecorators": {
-      "description": "Decorators that fallow should NOT treat as evidence of reflective use.\nMembers carrying only these decorators are checked for usage as if they\nwere undecorated. Members carrying any decorator NOT in this list stay\nskipped (frameworks like NestJS, Angular, TypeORM rely on reflection so\nthe conservative default is to keep skipping).\n\nMatching rule: entries containing `.` (e.g. `\"decorators.log\"`) match\nthe full dotted path of a decorator. Bare entries (e.g. `\"step\"` or\n`\"decorators\"`) match the leftmost segment; a bare `\"decorators\"` entry\nthus collapses every `@decorators.*` decorator. Both `\"@step\"` and\n`\"step\"` round-trip equivalently (a leading `@` is stripped before\nmatching).\n\nEntries that never match a decorator in the analyzed codebase produce\na one-time warning at end of run, mirroring the existing\n`usedClassMembers` warn-on-unmatched-pattern behavior. See issue #471.",
+      "description": "Decorators that plow should NOT treat as evidence of reflective use.\nMembers carrying only these decorators are checked for usage as if they\nwere undecorated. Members carrying any decorator NOT in this list stay\nskipped (frameworks like NestJS, Angular, TypeORM rely on reflection so\nthe conservative default is to keep skipping).\n\nMatching rule: entries containing `.` (e.g. `\"decorators.log\"`) match\nthe full dotted path of a decorator. Bare entries (e.g. `\"step\"` or\n`\"decorators\"`) match the leftmost segment; a bare `\"decorators\"` entry\nthus collapses every `@decorators.*` decorator. Both `\"@step\"` and\n`\"step\"` round-trip equivalently (a leading `@` is stripped before\nmatching).\n\nEntries that never match a decorator in the analyzed codebase produce\na one-time warning at end of run, mirroring the existing\n`usedClassMembers` warn-on-unmatched-pattern behavior. See issue #471.",
       "type": "array",
       "items": {
         "type": "string"
@@ -222,7 +222,7 @@
       "default": false
     },
     "plugins": {
-      "description": "Paths to external plugin files or directories containing plugin files.\n\nSupports TOML, JSON, and JSONC formats.\n\nIn addition to these explicit paths, fallow automatically discovers:\n- `*.toml`, `*.json`, `*.jsonc` files in `.fallow/plugins/`\n- `fallow-plugin-*.{toml,json,jsonc}` files in the project root",
+      "description": "Paths to external plugin files or directories containing plugin files.\n\nSupports TOML, JSON, and JSONC formats.\n\nIn addition to these explicit paths, plow automatically discovers:\n- `*.toml`, `*.json`, `*.jsonc` files in `.plow/plugins/`\n- `plow-plugin-*.{toml,json,jsonc}` files in the project root",
       "type": "array",
       "items": {
         "type": "string"
@@ -246,7 +246,7 @@
       "default": []
     },
     "codeowners": {
-      "description": "Path to a CODEOWNERS file for `--group-by owner`.\n\nWhen unset, fallow auto-probes `CODEOWNERS`, `.github/CODEOWNERS`,\n`.gitlab/CODEOWNERS`, and `docs/CODEOWNERS`. Set this to use a\nnon-standard location.",
+      "description": "Path to a CODEOWNERS file for `--group-by owner`.\n\nWhen unset, plow auto-probes `CODEOWNERS`, `.github/CODEOWNERS`,\n`.gitlab/CODEOWNERS`, and `docs/CODEOWNERS`. Set this to use a\nnon-standard location.",
       "type": [
         "string",
         "null"
@@ -272,7 +272,7 @@
       ]
     },
     "audit": {
-      "description": "Audit command baseline paths (one per analysis: dead-code, health, dupes).\n\n`fallow audit` runs three analyses and each has its own baseline format.\nPaths in this section are resolved relative to the project root. CLI flags\n(`--dead-code-baseline`, `--health-baseline`, `--dupes-baseline`) override\nthese values when provided.",
+      "description": "Audit command baseline paths (one per analysis: dead-code, health, dupes).\n\n`plow audit` runs three analyses and each has its own baseline format.\nPaths in this section are resolved relative to the project root. CLI flags\n(`--dead-code-baseline`, `--health-baseline`, `--dupes-baseline`) override\nthese values when provided.",
       "$ref": "#/$defs/AuditConfig"
     },
     "sealed": {
@@ -298,7 +298,7 @@
   "additionalProperties": false,
   "$defs": {
     "ExternalPluginDef": {
-      "description": "A declarative plugin definition loaded from a standalone file or inline config.\n\nExternal plugins provide the same static pattern capabilities as built-in\nplugins (entry points, always-used files, used exports, tooling dependencies),\nbut are defined in standalone files or inline in the fallow config rather than\ncompiled Rust code.\n\nThey cannot do AST-based config parsing (`resolve_config()`), but cover the\nvast majority of framework integration use cases.\n\nSupports JSONC, JSON, and TOML formats. All use camelCase field names.\n\n```json\n{\n  \"$schema\": \"https://raw.githubusercontent.com/fallow-rs/fallow/main/plugin-schema.json\",\n  \"name\": \"my-framework\",\n  \"enablers\": [\"my-framework\", \"@my-framework/core\"],\n  \"entryPoints\": [\"src/routes/**/*.{ts,tsx}\"],\n  \"configPatterns\": [\"my-framework.config.{ts,js}\"],\n  \"alwaysUsed\": [\"src/setup.ts\"],\n  \"toolingDependencies\": [\"my-framework-cli\"],\n  \"usedExports\": [\n    { \"pattern\": \"src/routes/**/*.{ts,tsx}\", \"exports\": [\"default\", \"loader\", \"action\"] }\n  ]\n}\n```",
+      "description": "A declarative plugin definition loaded from a standalone file or inline config.\n\nExternal plugins provide the same static pattern capabilities as built-in\nplugins (entry points, always-used files, used exports, tooling dependencies),\nbut are defined in standalone files or inline in the plow config rather than\ncompiled Rust code.\n\nThey cannot do AST-based config parsing (`resolve_config()`), but cover the\nvast majority of framework integration use cases.\n\nSupports JSONC, JSON, and TOML formats. All use camelCase field names.\n\n```json\n{\n  \"$schema\": \"https://raw.githubusercontent.com/plow-rs/plow/main/plugin-schema.json\",\n  \"name\": \"my-framework\",\n  \"enablers\": [\"my-framework\", \"@my-framework/core\"],\n  \"entryPoints\": [\"src/routes/**/*.{ts,tsx}\"],\n  \"configPatterns\": [\"my-framework.config.{ts,js}\"],\n  \"alwaysUsed\": [\"src/setup.ts\"],\n  \"toolingDependencies\": [\"my-framework-cli\"],\n  \"usedExports\": [\n    { \"pattern\": \"src/routes/**/*.{ts,tsx}\", \"exports\": [\"default\", \"loader\", \"action\"] }\n  ]\n}\n```",
       "type": "object",
       "properties": {
         "name": {
@@ -639,7 +639,7 @@
           "type": "boolean"
         },
         {
-          "description": "Knip-compatible fine-grained form. Fallow groups type aliases and\ninterfaces under `unused_types`, so either field enables type-export\nsuppression for same-file references.",
+          "description": "Knip-compatible fine-grained form. Plow groups type aliases and\ninterfaces under `unused_types`, so either field enables type-export\nsuppression for same-file references.",
           "$ref": "#/$defs/IgnoreExportsUsedInFileByKind"
         }
       ]
@@ -751,7 +751,7 @@
       }
     },
     "DetectionMode": {
-      "description": "Detection mode controlling how aggressively tokens are normalized.\n\nSince fallow uses AST-based tokenization (not lexer-based), whitespace and\ncomments are inherently absent from the token stream. The `Strict` and `Mild`\nmodes are currently equivalent. `Weak` mode additionally blinds string\nliterals. `Semantic` mode blinds all identifiers and literal values for\nType-2 (renamed variable) clone detection.",
+      "description": "Detection mode controlling how aggressively tokens are normalized.\n\nSince plow uses AST-based tokenization (not lexer-based), whitespace and\ncomments are inherently absent from the token stream. The `Strict` and `Mild`\nmodes are currently equivalent. `Weak` mode additionally blinds string\nliterals. `Semantic` mode blinds all identifiers and literal values for\nType-2 (renamed variable) clone detection.",
       "oneOf": [
         {
           "description": "All tokens preserved including identifier names and literal values (Type-1 only).",
@@ -803,7 +803,7 @@
       }
     },
     "HealthConfig": {
-      "description": "Configuration for complexity health metrics (`fallow health`).",
+      "description": "Configuration for complexity health metrics (`plow health`).",
       "type": "object",
       "properties": {
         "maxCyclomatic": {
@@ -823,7 +823,7 @@
           "default": 15
         },
         "maxCrap": {
-          "description": "Maximum allowed CRAP (Change Risk Anti-Patterns) score per function\n(default: 30.0). CRAP combines cyclomatic complexity with test\ncoverage: high complexity plus low coverage produces a high CRAP\nscore. Functions meeting or exceeding this threshold are reported.\nUse `--coverage` with Istanbul data for accurate per-function CRAP;\notherwise fallow estimates coverage from the module graph.",
+          "description": "Maximum allowed CRAP (Change Risk Anti-Patterns) score per function\n(default: 30.0). CRAP combines cyclomatic complexity with test\ncoverage: high complexity plus low coverage produces a high CRAP\nscore. Functions meeting or exceeding this threshold are reported.\nUse `--coverage` with Istanbul data for accurate per-function CRAP;\notherwise plow estimates coverage from the module graph.",
           "type": "number",
           "format": "double",
           "default": 30.0
@@ -852,14 +852,14 @@
           }
         },
         "suggestInlineSuppression": {
-          "description": "Whether health JSON output emits `suppress-line` action hints\nalongside complexity findings (default: `true`). Set to `false` to\nopt out across the project: useful for teams that manage suppressions\nexclusively through `// fallow-ignore-*` comments authored by hand or\nthrough the `fallow.suppress` LSP code action, but who do not want\nCI-driven `suppress-line` action hints in their JSON output.\n`--baseline` activates auto-omission regardless of this setting,\nsince baseline files are a separate suppression mechanism.",
+          "description": "Whether health JSON output emits `suppress-line` action hints\nalongside complexity findings (default: `true`). Set to `false` to\nopt out across the project: useful for teams that manage suppressions\nexclusively through `// plow-ignore-*` comments authored by hand or\nthrough the `plow.suppress` LSP code action, but who do not want\nCI-driven `suppress-line` action hints in their JSON output.\n`--baseline` activates auto-omission regardless of this setting,\nsince baseline files are a separate suppression mechanism.",
           "type": "boolean",
           "default": true
         }
       }
     },
     "OwnershipConfig": {
-      "description": "Configuration for ownership analysis (`fallow health --hotspots --ownership`).",
+      "description": "Configuration for ownership analysis (`plow health --hotspots --ownership`).",
       "type": "object",
       "properties": {
         "botPatterns": {
@@ -1036,7 +1036,7 @@
       ]
     },
     "BoundaryConfig": {
-      "description": "Architecture boundary configuration.\n\nDefines zones (directory groupings) and rules (which zones may import from which).\nOptionally uses a built-in preset as a starting point.\n\n# Examples\n\n```\nuse fallow_config::BoundaryConfig;\n\nlet json = r#\"{\n    \"zones\": [\n        { \"name\": \"ui\", \"patterns\": [\"src/components/**\"] },\n        { \"name\": \"db\", \"patterns\": [\"src/db/**\"] }\n    ],\n    \"rules\": [\n        { \"from\": \"ui\", \"allow\": [\"db\"] }\n    ]\n}\"#;\nlet config: BoundaryConfig = serde_json::from_str(json).unwrap();\nassert_eq!(config.zones.len(), 2);\nassert_eq!(config.rules.len(), 1);\n```\n\nUsing a preset:\n\n```\nuse fallow_config::BoundaryConfig;\n\nlet json = r#\"{ \"preset\": \"layered\" }\"#;\nlet mut config: BoundaryConfig = serde_json::from_str(json).unwrap();\nconfig.expand(\"src\");\nassert_eq!(config.zones.len(), 4);\nassert_eq!(config.rules.len(), 4);\n```",
+      "description": "Architecture boundary configuration.\n\nDefines zones (directory groupings) and rules (which zones may import from which).\nOptionally uses a built-in preset as a starting point.\n\n# Examples\n\n```\nuse plow_config::BoundaryConfig;\n\nlet json = r#\"{\n    \"zones\": [\n        { \"name\": \"ui\", \"patterns\": [\"src/components/**\"] },\n        { \"name\": \"db\", \"patterns\": [\"src/db/**\"] }\n    ],\n    \"rules\": [\n        { \"from\": \"ui\", \"allow\": [\"db\"] }\n    ]\n}\"#;\nlet config: BoundaryConfig = serde_json::from_str(json).unwrap();\nassert_eq!(config.zones.len(), 2);\nassert_eq!(config.rules.len(), 1);\n```\n\nUsing a preset:\n\n```\nuse plow_config::BoundaryConfig;\n\nlet json = r#\"{ \"preset\": \"layered\" }\"#;\nlet mut config: BoundaryConfig = serde_json::from_str(json).unwrap();\nconfig.expand(\"src\");\nassert_eq!(config.zones.len(), 4);\nassert_eq!(config.rules.len(), 4);\n```",
       "type": "object",
       "properties": {
         "preset": {
@@ -1069,7 +1069,7 @@
       }
     },
     "BoundaryPreset": {
-      "description": "Built-in architecture presets.\n\nEach preset expands into a set of zones and import rules for a common\narchitecture pattern. User-defined zones and rules merge on top of the\npreset defaults (zones with the same name replace the preset zone;\nrules with the same `from` replace the preset rule).\n\n# Examples\n\n```\nuse fallow_config::BoundaryPreset;\n\nlet preset: BoundaryPreset = serde_json::from_str(r#\"\"layered\"\"#).unwrap();\nassert!(matches!(preset, BoundaryPreset::Layered));\n```",
+      "description": "Built-in architecture presets.\n\nEach preset expands into a set of zones and import rules for a common\narchitecture pattern. User-defined zones and rules merge on top of the\npreset defaults (zones with the same name replace the preset zone;\nrules with the same `from` replace the preset rule).\n\n# Examples\n\n```\nuse plow_config::BoundaryPreset;\n\nlet preset: BoundaryPreset = serde_json::from_str(r#\"\"layered\"\"#).unwrap();\nassert!(matches!(preset, BoundaryPreset::Layered));\n```",
       "oneOf": [
         {
           "description": "Classic layered architecture: presentation → application → domain ← infrastructure.\nInfrastructure may also import from application (common in DI frameworks).",
@@ -1116,7 +1116,7 @@
           }
         },
         "root": {
-          "description": "Optional subtree scope for monorepo per-package boundaries.\n\nWhen set, the zone's `patterns` are matched against paths *relative*\nto this directory rather than the project root. At classification\ntime, fallow checks that a candidate path starts with `root` and\nstrips that prefix before glob-matching the patterns against the\nremainder. Files outside the subtree never match the zone.\n\nUseful for monorepos where each package has the same internal\ndirectory layout: instead of writing `packages/app/src/**` and\n`packages/core/src/**` (which collide on shared zone names), set\n`root: \"packages/app/\"` and `patterns: [\"src/**\"]` per package.\n\nTrailing slash and leading `./` are normalized; backslashes are\nconverted to forward slashes. Patterns must NOT redundantly include\nthe root prefix: `root: \"packages/app/\"` with\n`patterns: [\"packages/app/src/**\"]` is rejected with\n`FALLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX` because patterns are\nresolved relative to the root.",
+          "description": "Optional subtree scope for monorepo per-package boundaries.\n\nWhen set, the zone's `patterns` are matched against paths *relative*\nto this directory rather than the project root. At classification\ntime, plow checks that a candidate path starts with `root` and\nstrips that prefix before glob-matching the patterns against the\nremainder. Files outside the subtree never match the zone.\n\nUseful for monorepos where each package has the same internal\ndirectory layout: instead of writing `packages/app/src/**` and\n`packages/core/src/**` (which collide on shared zone names), set\n`root: \"packages/app/\"` and `patterns: [\"src/**\"]` per package.\n\nTrailing slash and leading `./` are normalized; backslashes are\nconverted to forward slashes. Patterns must NOT redundantly include\nthe root prefix: `root: \"packages/app/\"` with\n`patterns: [\"packages/app/src/**\"]` is rejected with\n`PLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX` because patterns are\nresolved relative to the root.",
           "type": [
             "string",
             "null"
@@ -1156,7 +1156,7 @@
       ]
     },
     "FlagsConfig": {
-      "description": "Feature flag detection configuration.\n\nControls which patterns fallow uses to detect feature flags in source code.\nConfigured via the `flags` section in `.fallowrc.json`, `.fallowrc.jsonc`, `fallow.toml`, or `.fallow.toml`.\n\n# Examples\n\n```json\n{\n  \"flags\": {\n    \"sdkPatterns\": [\n      { \"function\": \"useFlag\", \"nameArg\": 0, \"provider\": \"LaunchDarkly\" }\n    ],\n    \"envPrefixes\": [\"FEATURE_\", \"NEXT_PUBLIC_ENABLE_\"],\n    \"configObjectHeuristics\": false\n  }\n}\n```",
+      "description": "Feature flag detection configuration.\n\nControls which patterns plow uses to detect feature flags in source code.\nConfigured via the `flags` section in `.plowrc.json`, `.plowrc.jsonc`, `plow.toml`, or `.plow.toml`.\n\n# Examples\n\n```json\n{\n  \"flags\": {\n    \"sdkPatterns\": [\n      { \"function\": \"useFlag\", \"nameArg\": 0, \"provider\": \"LaunchDarkly\" }\n    ],\n    \"envPrefixes\": [\"FEATURE_\", \"NEXT_PUBLIC_ENABLE_\"],\n    \"configObjectHeuristics\": false\n  }\n}\n```",
       "type": "object",
       "properties": {
         "sdkPatterns": {
@@ -1252,11 +1252,11 @@
       ]
     },
     "ResolveConfig": {
-      "description": "Module resolver configuration.\n\nControls how fallow resolves import specifiers against package.json\n`exports` / `imports` fields and tsconfig paths. Configured via the\n`resolve` section in `.fallowrc.json`, `.fallowrc.jsonc`, `fallow.toml`, or `.fallow.toml`.\n\n# Examples\n\n```json\n{\n  \"resolve\": {\n    \"conditions\": [\"development\", \"worker\"]\n  }\n}\n```",
+      "description": "Module resolver configuration.\n\nControls how plow resolves import specifiers against package.json\n`exports` / `imports` fields and tsconfig paths. Configured via the\n`resolve` section in `.plowrc.json`, `.plowrc.jsonc`, `plow.toml`, or `.plow.toml`.\n\n# Examples\n\n```json\n{\n  \"resolve\": {\n    \"conditions\": [\"development\", \"worker\"]\n  }\n}\n```",
       "type": "object",
       "properties": {
         "conditions": {
-          "description": "Additional export/import condition names to honor during module\nresolution. Merged with fallow's built-in conditions (`development`,\n`import`, `require`, `default`, `types`, `node`; plus `react-native`\nand `browser` when the React Native or Expo plugin is active).\n\nUser conditions are matched with higher priority than the baseline,\nso a package.json `exports` entry like:\n\n```json\n{ \"./api\": { \"worker\": \"./src/api.worker.ts\", \"import\": \"./dist/api.js\" } }\n```\n\nresolves to the `worker` branch when `\"worker\"` is listed here.\n\nSee <https://nodejs.org/api/packages.html#community-conditions-definitions>\nfor the set of community-defined conditions.",
+          "description": "Additional export/import condition names to honor during module\nresolution. Merged with plow's built-in conditions (`development`,\n`import`, `require`, `default`, `types`, `node`; plus `react-native`\nand `browser` when the React Native or Expo plugin is active).\n\nUser conditions are matched with higher priority than the baseline,\nso a package.json `exports` entry like:\n\n```json\n{ \"./api\": { \"worker\": \"./src/api.worker.ts\", \"import\": \"./dist/api.js\" } }\n```\n\nresolves to the `worker` branch when `\"worker\"` is listed here.\n\nSee <https://nodejs.org/api/packages.html#community-conditions-definitions>\nfor the set of community-defined conditions.",
           "type": "array",
           "items": {
             "type": "string"
@@ -1577,7 +1577,7 @@
       }
     },
     "RegressionConfig": {
-      "description": "Regression baseline counts, embedded in the config file.\n\nWhen `--fail-on-regression` is used without `--regression-baseline <PATH>`,\nfallow reads the baseline from this config section.\nWhen `--save-regression-baseline` is used without a path argument,\nfallow writes the baseline into the config file.",
+      "description": "Regression baseline counts, embedded in the config file.\n\nWhen `--fail-on-regression` is used without `--regression-baseline <PATH>`,\nplow reads the baseline from this config section.\nWhen `--save-regression-baseline` is used without a path argument,\nplow writes the baseline into the config file.",
       "type": "object",
       "properties": {
         "baseline": {
@@ -1702,36 +1702,36 @@
       }
     },
     "AuditConfig": {
-      "description": "Per-analysis baseline paths for the `audit` command.\n\nEach field points to a baseline file produced by the corresponding\nsubcommand (`fallow dead-code --save-baseline`, `fallow health --save-baseline`,\n`fallow dupes --save-baseline`). `audit` passes each baseline through to its\nunderlying analysis; baseline-matched issues are excluded from the verdict.",
+      "description": "Per-analysis baseline paths for the `audit` command.\n\nEach field points to a baseline file produced by the corresponding\nsubcommand (`plow dead-code --save-baseline`, `plow health --save-baseline`,\n`plow dupes --save-baseline`). `audit` passes each baseline through to its\nunderlying analysis; baseline-matched issues are excluded from the verdict.",
       "type": "object",
       "properties": {
         "gate": {
-          "description": "Which findings should make `fallow audit` fail.",
+          "description": "Which findings should make `plow audit` fail.",
           "$ref": "#/$defs/AuditGate"
         },
         "deadCodeBaseline": {
-          "description": "Path to the dead-code baseline (produced by `fallow dead-code --save-baseline`).",
+          "description": "Path to the dead-code baseline (produced by `plow dead-code --save-baseline`).",
           "type": [
             "string",
             "null"
           ]
         },
         "healthBaseline": {
-          "description": "Path to the health baseline (produced by `fallow health --save-baseline`).",
+          "description": "Path to the health baseline (produced by `plow health --save-baseline`).",
           "type": [
             "string",
             "null"
           ]
         },
         "dupesBaseline": {
-          "description": "Path to the duplication baseline (produced by `fallow dupes --save-baseline`).",
+          "description": "Path to the duplication baseline (produced by `plow dupes --save-baseline`).",
           "type": [
             "string",
             "null"
           ]
         },
         "cacheMaxAgeDays": {
-          "description": "Maximum age (in days since last reuse or fresh create) of a persistent\nreusable base-snapshot worktree cache entry. Older entries are removed\nat the top of the next `fallow audit` invocation. The env var\n`FALLOW_AUDIT_CACHE_MAX_AGE_DAYS` wins over this field. Unset on both\nsides defaults to 30 days. Setting either source to `0` disables the\nsweep entirely (escape hatch for CI runners that prune caches\nout-of-band). Invalid env var values (non-integer, negative) silently\nfall back to this field / default rather than failing the audit.",
+          "description": "Maximum age (in days since last reuse or fresh create) of a persistent\nreusable base-snapshot worktree cache entry. Older entries are removed\nat the top of the next `plow audit` invocation. The env var\n`PLOW_AUDIT_CACHE_MAX_AGE_DAYS` wins over this field. Unset on both\nsides defaults to 30 days. Setting either source to `0` disables the\nsweep entirely (escape hatch for CI runners that prune caches\nout-of-band). Invalid env var values (non-integer, negative) silently\nfall back to this field / default rather than failing the audit.",
           "type": [
             "integer",
             "null"
@@ -1742,7 +1742,7 @@
       }
     },
     "AuditGate": {
-      "description": "Gating mode for `fallow audit`.",
+      "description": "Gating mode for `plow audit`.",
       "oneOf": [
         {
           "description": "Only findings introduced by the current changeset affect the verdict.",
@@ -1757,7 +1757,7 @@
       ]
     },
     "CacheConfig": {
-      "description": "Incremental cache configuration.\n\nToday only `maxSizeMb` is exposed. The env var `FALLOW_CACHE_MAX_SIZE`\n(also in MB) wins over this field when both are set. The default cap is\n256 MB; values are interpreted as whole megabytes.",
+      "description": "Incremental cache configuration.\n\nToday only `maxSizeMb` is exposed. The env var `PLOW_CACHE_MAX_SIZE`\n(also in MB) wins over this field when both are set. The default cap is\n256 MB; values are interpreted as whole megabytes.",
       "type": "object",
       "properties": {
         "maxSizeMb": {

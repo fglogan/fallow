@@ -3,8 +3,8 @@ use std::sync::LazyLock;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_config::{CompiledIgnoreExportRule, ResolvedConfig};
-use fallow_types::extract::{ExportInfo, ExportName, ModuleInfo};
+use plow_config::{CompiledIgnoreExportRule, ResolvedConfig};
+use plow_types::extract::{ExportInfo, ExportName, ModuleInfo};
 
 use crate::discover::FileId;
 use crate::graph::{ModuleGraph, ModuleNode};
@@ -224,7 +224,7 @@ fn ignore_matchers_for_module<'a>(
 /// Find exports that are never imported by other files.
 #[deprecated(
     since = "2.76.0",
-    note = "fallow_core is internal; use fallow_cli::programmatic::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/fallow-core-migration.md and ADR-008."
+    note = "plow_core is internal; use plow_cli::programmatic::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/plow-core-migration.md and ADR-008."
 )]
 pub fn find_unused_exports(
     graph: &ModuleGraph,
@@ -329,7 +329,7 @@ pub fn find_unused_exports(
                 // is already filtered to reachable modules above.
                 if matches!(
                     export.visibility,
-                    fallow_types::extract::VisibilityTag::ExpectedUnused
+                    plow_types::extract::VisibilityTag::ExpectedUnused
                 ) {
                     if is_referenced {
                         let (line, col) = byte_offset_to_line_col(
@@ -426,7 +426,7 @@ pub fn find_unused_exports(
 pub fn suppress_signature_backing_types(
     unused_types: &mut Vec<UnusedExport>,
     graph: &ModuleGraph,
-    modules: &[fallow_types::extract::ModuleInfo],
+    modules: &[plow_types::extract::ModuleInfo],
 ) {
     let path_by_id: FxHashMap<FileId, &std::path::Path> = graph
         .modules
@@ -590,7 +590,7 @@ static ROUTE_CONVENTION_GLOBSET: LazyLock<globset::GlobSet> =
 /// are not exported by that same name.
 pub fn find_private_type_leaks(
     graph: &ModuleGraph,
-    modules: &[fallow_types::extract::ModuleInfo],
+    modules: &[plow_types::extract::ModuleInfo],
     config: &ResolvedConfig,
     suppressions: &SuppressionContext<'_>,
     line_offsets_by_file: &LineOffsetsMap<'_>,
@@ -666,7 +666,7 @@ fn collect_dynamic_reexport_sources(
     re_export_sources: &mut FxHashMap<usize, FxHashSet<usize>>,
 ) {
     use crate::extract::ExportName;
-    use fallow_types::extract::ImportedName;
+    use plow_types::extract::ImportedName;
 
     for resolved in resolved_modules {
         let wrapper_idx = resolved.file_id.0 as usize;
@@ -721,7 +721,7 @@ fn collect_dynamic_reexport_sources(
 /// `export { X } from '...'` re-exports are still recognized).
 #[deprecated(
     since = "2.76.0",
-    note = "fallow_core is internal; use fallow_cli::programmatic::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/fallow-core-migration.md and ADR-008."
+    note = "plow_core is internal; use plow_cli::programmatic::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/plow-core-migration.md and ADR-008."
 )]
 pub fn find_duplicate_exports(
     graph: &ModuleGraph,
@@ -993,10 +993,10 @@ pub fn collect_export_usages(
                     } else {
                         let (_, offsets) = source_cache.entry(r.from_file).or_insert_with(|| {
                             let src = read_source(ref_path);
-                            let ofs = fallow_types::extract::compute_line_offsets(&src);
+                            let ofs = plow_types::extract::compute_line_offsets(&src);
                             (src, ofs)
                         });
-                        fallow_types::extract::byte_offset_to_line_col(offsets, r.import_span.start)
+                        plow_types::extract::byte_offset_to_line_col(offsets, r.import_span.start)
                     };
                     Some(ReferenceLocation {
                         path: ref_path.to_path_buf(),
@@ -1086,9 +1086,9 @@ mod tests {
 
     /// Build a default ResolvedConfig for tests.
     fn test_config() -> ResolvedConfig {
-        fallow_config::FallowConfig::default().resolve(
+        plow_config::PlowConfig::default().resolve(
             PathBuf::from("/tmp/test"),
-            fallow_config::OutputFormat::Human,
+            plow_config::OutputFormat::Human,
             1,
             true,
             true,
@@ -1505,7 +1505,7 @@ mod tests {
         imported_name: crate::extract::ImportedName,
     ) -> crate::resolve::ResolvedImport {
         crate::resolve::ResolvedImport {
-            info: fallow_types::extract::ImportInfo {
+            info: plow_types::extract::ImportInfo {
                 source: "./target".to_string(),
                 imported_name,
                 local_name: "_local".to_string(),
@@ -1798,7 +1798,7 @@ mod tests {
         graph.reverse_deps[2] = vec![FileId(0)];
 
         let suppressions = SuppressionContext::empty();
-        let config = test_config_with_ignore_exports(vec![fallow_config::IgnoreExportRule {
+        let config = test_config_with_ignore_exports(vec![plow_config::IgnoreExportRule {
             file: "**/ui/**".to_owned(),
             exports: vec!["*".to_owned()],
         }]);
@@ -1827,7 +1827,7 @@ mod tests {
         graph.reverse_deps[2] = vec![FileId(0)];
 
         let suppressions = SuppressionContext::empty();
-        let config = test_config_with_ignore_exports(vec![fallow_config::IgnoreExportRule {
+        let config = test_config_with_ignore_exports(vec![plow_config::IgnoreExportRule {
             file: "**/ui/**".to_owned(),
             exports: vec!["Root".to_owned()],
         }]);
@@ -1849,16 +1849,16 @@ mod tests {
 
     /// Helper: build a config with ignore_exports rules.
     fn test_config_with_ignore_exports(
-        rules: Vec<fallow_config::IgnoreExportRule>,
+        rules: Vec<plow_config::IgnoreExportRule>,
     ) -> ResolvedConfig {
-        fallow_config::FallowConfig {
+        plow_config::PlowConfig {
             ignore_exports: rules,
-            ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+            ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
             ..Default::default()
         }
         .resolve(
             PathBuf::from("/tmp/test"),
-            fallow_config::OutputFormat::Human,
+            plow_config::OutputFormat::Human,
             1,
             true,
             true,
@@ -2252,11 +2252,11 @@ mod tests {
         graph.modules[2].exports = vec![make_export("MY_CONST", 10, 20)];
 
         let config = test_config_with_ignore_exports(vec![
-            fallow_config::IgnoreExportRule {
+            plow_config::IgnoreExportRule {
                 file: "src/types.ts".to_string(),
                 exports: vec!["*".to_string()],
             },
-            fallow_config::IgnoreExportRule {
+            plow_config::IgnoreExportRule {
                 file: "src/constants.ts".to_string(),
                 exports: vec!["MY_CONST".to_string()],
             },
@@ -2282,10 +2282,10 @@ mod tests {
     #[should_panic(expected = "validated at config load time")]
     fn unused_exports_panics_on_unvalidated_invalid_ignore_glob() {
         // Per issue #463, ignoreExports[].file is validated by
-        // FallowConfig::load before reaching resolve(). A test that
+        // PlowConfig::load before reaching resolve(). A test that
         // constructs a config in-code with an invalid pattern has skipped
         // that validation; resolve() asserts the invariant by panicking.
-        let _ = test_config_with_ignore_exports(vec![fallow_config::IgnoreExportRule {
+        let _ = test_config_with_ignore_exports(vec![plow_config::IgnoreExportRule {
             file: "[invalid".to_string(),
             exports: vec!["*".to_string()],
         }]);
@@ -2302,7 +2302,7 @@ mod tests {
         graph.modules[1].set_reachable(true);
         graph.modules[1].exports = vec![make_export("TypeA", 10, 20), make_export("TypeB", 30, 40)];
 
-        let config = test_config_with_ignore_exports(vec![fallow_config::IgnoreExportRule {
+        let config = test_config_with_ignore_exports(vec![plow_config::IgnoreExportRule {
             file: "src/types.ts".to_string(),
             exports: vec!["*".to_string()],
         }]);
@@ -2335,7 +2335,7 @@ mod tests {
             make_export("reported", 30, 40),
         ];
 
-        let config = test_config_with_ignore_exports(vec![fallow_config::IgnoreExportRule {
+        let config = test_config_with_ignore_exports(vec![plow_config::IgnoreExportRule {
             file: "src/utils.ts".to_string(),
             exports: vec!["ignored".to_string()],
         }]);
@@ -2363,7 +2363,7 @@ mod tests {
         graph.modules[1].set_reachable(true);
         graph.modules[1].exports = vec![make_export("foo", 10, 20)];
 
-        let config = test_config_with_ignore_exports(vec![fallow_config::IgnoreExportRule {
+        let config = test_config_with_ignore_exports(vec![plow_config::IgnoreExportRule {
             file: "src/other.ts".to_string(),
             exports: vec!["*".to_string()],
         }]);
@@ -2480,7 +2480,7 @@ mod tests {
         graph.modules[1].set_reachable(true);
         graph.modules[1].exports = vec![make_export("handler", 10, 20)];
 
-        let config = test_config_with_ignore_exports(vec![fallow_config::IgnoreExportRule {
+        let config = test_config_with_ignore_exports(vec![plow_config::IgnoreExportRule {
             file: "src/api/*.ts".to_string(),
             exports: vec!["handler".to_string()],
         }]);

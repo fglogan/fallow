@@ -166,7 +166,7 @@ mod tests {
     use super::*;
     use crate::duplicates::CloneGroup;
     use crate::results::{UnusedExport, UnusedFile};
-    use fallow_types::output_dead_code::{
+    use plow_types::output_dead_code::{
         UnusedExportFinding, UnusedFileFinding, UnusedTypeFinding,
     };
 

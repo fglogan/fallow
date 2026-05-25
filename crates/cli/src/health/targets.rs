@@ -229,9 +229,9 @@ pub(super) fn compute_refactoring_targets(
                     h.score,
                     h.commits,
                     match h.trend {
-                        fallow_core::churn::ChurnTrend::Accelerating => "accelerating",
-                        fallow_core::churn::ChurnTrend::Cooling => "cooling",
-                        fallow_core::churn::ChurnTrend::Stable => "stable",
+                        plow_core::churn::ChurnTrend::Accelerating => "accelerating",
+                        plow_core::churn::ChurnTrend::Cooling => "cooling",
+                        plow_core::churn::ChurnTrend::Stable => "stable",
                     }
                 ),
             });
@@ -346,7 +346,7 @@ fn try_match_rules(
     // Rule 1: Urgent churn + complexity
     if let Some(h) = hotspot
         && h.score >= 50.0
-        && matches!(h.trend, fallow_core::churn::ChurnTrend::Accelerating)
+        && matches!(h.trend, plow_core::churn::ChurnTrend::Accelerating)
         && score.complexity_density > 0.5
     {
         return Some((
@@ -1029,7 +1029,7 @@ mod tests {
             lines_deleted: 100,
             complexity_density: 0.8,
             fan_in: 5,
-            trend: fallow_core::churn::ChurnTrend::Accelerating,
+            trend: plow_core::churn::ChurnTrend::Accelerating,
             ownership: None,
             is_test_path: false,
         };
@@ -1260,7 +1260,7 @@ mod tests {
             lines_deleted: 100,
             complexity_density: 0.8,
             fan_in: 10,
-            trend: fallow_core::churn::ChurnTrend::Accelerating,
+            trend: plow_core::churn::ChurnTrend::Accelerating,
             ownership: None,
             is_test_path: false,
         };
@@ -1314,7 +1314,7 @@ mod tests {
             lines_deleted: 50,
             complexity_density: 0.5,
             fan_in: 15,
-            trend: fallow_core::churn::ChurnTrend::Stable,
+            trend: plow_core::churn::ChurnTrend::Stable,
             ownership: None,
             is_test_path: false,
         }];

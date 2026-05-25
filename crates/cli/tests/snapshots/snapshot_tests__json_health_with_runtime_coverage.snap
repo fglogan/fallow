@@ -29,7 +29,7 @@ expression: redact_version(&json_str)
           "type": "suppress-line",
           "auto_fixable": false,
           "description": "Suppress with an inline comment above the function declaration",
-          "comment": "// fallow-ignore-next-line complexity",
+          "comment": "// plow-ignore-next-line complexity",
           "placement": "above-function-declaration"
         }
       ]

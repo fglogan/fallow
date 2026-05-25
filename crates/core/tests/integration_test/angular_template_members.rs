@@ -4,12 +4,12 @@ use super::common::{create_config, fixture_path};
 // referencing inherited members (via `extends BaseClass`) or DI-injected service
 // members (`{{ service.method() }}`) must be credited as used and not reported
 // as unused class members. See
-// https://github.com/fallow-rs/fallow/issues/174.
+// https://github.com/plow-rs/plow/issues/174.
 #[test]
 fn angular_external_template_credits_inherited_and_di_injected_members() {
     let root = fixture_path("angular-template-inherited-members");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused: Vec<(&str, &str)> = results
         .unused_class_members
@@ -67,7 +67,7 @@ fn angular_external_template_credits_inherited_and_di_injected_members() {
 fn angular_at_if_alias_credits_condition_member() {
     let root = fixture_path("issue-308-at-if-alias");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused: Vec<(&str, &str)> = results
         .unused_class_members

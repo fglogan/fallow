@@ -56,7 +56,7 @@ vi.mock("vscode", () => {
 });
 
 import { DeadCodeTreeProvider } from "../src/treeView.js";
-import type { FallowCheckResult } from "../src/types.js";
+import type { PlowCheckResult } from "../src/types.js";
 
 interface TestTreeItem {
   readonly label: string;
@@ -75,7 +75,7 @@ interface TestRange {
   readonly endCharacter: number;
 }
 
-const emptyCheck = (): FallowCheckResult => ({
+const emptyCheck = (): PlowCheckResult => ({
   schema_version: 6,
   version: "0.0.0-test",
   elapsed_ms: 0,

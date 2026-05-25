@@ -3,9 +3,9 @@ use serde::{Deserialize, Serialize};
 
 /// Module resolver configuration.
 ///
-/// Controls how fallow resolves import specifiers against package.json
+/// Controls how plow resolves import specifiers against package.json
 /// `exports` / `imports` fields and tsconfig paths. Configured via the
-/// `resolve` section in `.fallowrc.json`, `.fallowrc.jsonc`, `fallow.toml`, or `.fallow.toml`.
+/// `resolve` section in `.plowrc.json`, `.plowrc.jsonc`, `plow.toml`, or `.plow.toml`.
 ///
 /// # Examples
 ///
@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub struct ResolveConfig {
     /// Additional export/import condition names to honor during module
-    /// resolution. Merged with fallow's built-in conditions (`development`,
+    /// resolution. Merged with plow's built-in conditions (`development`,
     /// `import`, `require`, `default`, `types`, `node`; plus `react-native`
     /// and `browser` when the React Native or Expo plugin is active).
     ///

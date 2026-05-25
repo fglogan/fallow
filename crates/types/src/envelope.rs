@@ -8,7 +8,7 @@
 //! reference.
 //!
 //! Gated on the `schema` cargo feature so consumers that do not need the
-//! `schemars::JsonSchema` derive (every crate except `fallow-cli` with
+//! `schemars::JsonSchema` derive (every crate except `plow-cli` with
 //! `--features schema-emit`) skip the schemars compile cost.
 
 use std::collections::BTreeMap;
@@ -39,7 +39,7 @@ use serde::Serialize;
 #[serde(transparent)]
 pub struct SchemaVersion(pub u32);
 
-/// Fallow CLI version that produced this envelope. Renders to the JSON wire as
+/// Plow CLI version that produced this envelope. Renders to the JSON wire as
 /// a bare string (e.g. `"2.74.0"`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -53,7 +53,7 @@ pub struct ToolVersion(pub String);
 #[serde(transparent)]
 pub struct ElapsedMs(pub u64);
 
-/// Audit-mode marker emitted on each finding when `fallow audit --format json`
+/// Audit-mode marker emitted on each finding when `plow audit --format json`
 /// runs with a base ref. `true` means the finding's structural key was not
 /// present at the base ref (introduced by the current changeset); `false`
 /// means it was inherited.

@@ -1,13 +1,13 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use common::{parse_json, run_fallow_raw};
+use common::{parse_json, run_plow_raw};
 use std::fs;
 
 /// Create a temp dir with a knip config for migration testing.
 fn migrate_temp_dir(suffix: &str, config_name: &str, config_content: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!(
-        "fallow-migrate-test-{}-{}",
+        "plow-migrate-test-{}-{}",
         std::process::id(),
         suffix
     ));
@@ -37,7 +37,7 @@ fn migrate_dry_run_outputs_config() {
         "knip.json",
         r#"{"entry": ["src/index.ts"], "ignore": ["dist/**"]}"#,
     );
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "migrate",
         "--dry-run",
         "--root",
@@ -60,7 +60,7 @@ fn migrate_dry_run_outputs_config() {
 #[test]
 fn migrate_dry_run_toml_output() {
     let dir = migrate_temp_dir("toml", "knip.json", r#"{"entry": ["src/index.ts"]}"#);
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "migrate",
         "--dry-run",
         "--toml",
@@ -82,37 +82,37 @@ fn migrate_dry_run_toml_output() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn migrate_writes_fallowrc_json_when_source_is_knip_json() {
+fn migrate_writes_plowrc_json_when_source_is_knip_json() {
     let dir = migrate_temp_dir("out-json", "knip.json", r#"{"entry": ["src/index.ts"]}"#);
-    let output = run_fallow_raw(&["migrate", "--root", dir.to_str().unwrap(), "--quiet"]);
+    let output = run_plow_raw(&["migrate", "--root", dir.to_str().unwrap(), "--quiet"]);
     assert_eq!(output.code, 0, "stderr: {}", output.stderr);
     assert!(
-        dir.join(".fallowrc.json").exists(),
-        ".fallowrc.json should be written for knip.json source"
+        dir.join(".plowrc.json").exists(),
+        ".plowrc.json should be written for knip.json source"
     );
     assert!(
-        !dir.join(".fallowrc.jsonc").exists(),
-        ".fallowrc.jsonc should NOT be written for knip.json source"
+        !dir.join(".plowrc.jsonc").exists(),
+        ".plowrc.jsonc should NOT be written for knip.json source"
     );
     cleanup(&dir);
 }
 
 #[test]
-fn migrate_auto_writes_fallowrc_jsonc_when_source_is_knip_jsonc() {
+fn migrate_auto_writes_plowrc_jsonc_when_source_is_knip_jsonc() {
     let dir = migrate_temp_dir(
         "out-jsonc-auto",
         "knip.jsonc",
         "{\n  // header comment\n  \"entry\": [\"src/index.ts\"]\n}\n",
     );
-    let output = run_fallow_raw(&["migrate", "--root", dir.to_str().unwrap(), "--quiet"]);
+    let output = run_plow_raw(&["migrate", "--root", dir.to_str().unwrap(), "--quiet"]);
     assert_eq!(output.code, 0, "stderr: {}", output.stderr);
     assert!(
-        dir.join(".fallowrc.jsonc").exists(),
-        ".fallowrc.jsonc should be written when source is knip.jsonc"
+        dir.join(".plowrc.jsonc").exists(),
+        ".plowrc.jsonc should be written when source is knip.jsonc"
     );
     assert!(
-        !dir.join(".fallowrc.json").exists(),
-        ".fallowrc.json should NOT be written when source is knip.jsonc"
+        !dir.join(".plowrc.json").exists(),
+        ".plowrc.json should NOT be written when source is knip.jsonc"
     );
     cleanup(&dir);
 }
@@ -124,7 +124,7 @@ fn migrate_explicit_jsonc_flag_overrides_json_source() {
         "knip.json",
         r#"{"entry": ["src/index.ts"]}"#,
     );
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "migrate",
         "--jsonc",
         "--root",
@@ -133,17 +133,17 @@ fn migrate_explicit_jsonc_flag_overrides_json_source() {
     ]);
     assert_eq!(output.code, 0, "stderr: {}", output.stderr);
     assert!(
-        dir.join(".fallowrc.jsonc").exists(),
-        "--jsonc must force .fallowrc.jsonc even when source is knip.json"
+        dir.join(".plowrc.jsonc").exists(),
+        "--jsonc must force .plowrc.jsonc even when source is knip.json"
     );
-    assert!(!dir.join(".fallowrc.json").exists());
+    assert!(!dir.join(".plowrc.json").exists());
     cleanup(&dir);
 }
 
 #[test]
 fn migrate_jsonc_and_toml_are_mutually_exclusive() {
     let dir = migrate_temp_dir("exclusive", "knip.json", r#"{"entry": ["src/index.ts"]}"#);
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "migrate",
         "--jsonc",
         "--toml",
@@ -165,20 +165,20 @@ fn migrate_jsonc_and_toml_are_mutually_exclusive() {
 }
 
 #[test]
-fn migrate_existing_fallowrc_jsonc_blocks_run() {
+fn migrate_existing_plowrc_jsonc_blocks_run() {
     let dir = migrate_temp_dir(
         "blocked-jsonc",
         "knip.json",
         r#"{"entry": ["src/index.ts"]}"#,
     );
-    fs::write(dir.join(".fallowrc.jsonc"), "{}").unwrap();
-    let output = run_fallow_raw(&["migrate", "--root", dir.to_str().unwrap(), "--quiet"]);
+    fs::write(dir.join(".plowrc.jsonc"), "{}").unwrap();
+    let output = run_plow_raw(&["migrate", "--root", dir.to_str().unwrap(), "--quiet"]);
     assert_eq!(
         output.code, 2,
-        "migrate should refuse to overwrite existing .fallowrc.jsonc"
+        "migrate should refuse to overwrite existing .plowrc.jsonc"
     );
     assert!(
-        output.stderr.contains(".fallowrc.jsonc already exists"),
+        output.stderr.contains(".plowrc.jsonc already exists"),
         "stderr should mention the blocking file, got: {}",
         output.stderr
     );
@@ -190,19 +190,19 @@ fn migrate_existing_fallowrc_jsonc_blocks_run() {
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// Glob roundtrip: migrate -> fallow list --files, asserting that fallow's
+// Glob roundtrip: migrate -> plow list --files, asserting that plow's
 // discovered file set matches the set knip's `ignore` globs would exclude
-// from analysis. Catches drift between knip's glob engine and fallow's
+// from analysis. Catches drift between knip's glob engine and plow's
 // `globset` for the highest-value class of patterns: ignore globs
 // (`**/*.test.ts`, `dist/**`, `node_modules/**`, `scripts/**`). The "knip
 // ground truth" is hand-recorded from knip's documented glob semantics; we
 // do not invoke knip in the test (Node dep, network, flake).
 //
-// Note: fallow's source discovery walks every supported source file under
+// Note: plow's source discovery walks every supported source file under
 // `--root` and filters by `ignorePatterns`. The `entry` field marks
 // always-reachable starting points for reachability analysis, not the
 // discovery set, so this test does not directly exercise `entry` glob
-// drift. Knip's `entry` and fallow's `entry` carry the same semantics
+// drift. Knip's `entry` and plow's `entry` carry the same semantics
 // (entry points), so the patterns under test below are still the ones
 // most likely to drift in practice. See issue #457.
 // ---------------------------------------------------------------------------
@@ -211,7 +211,7 @@ fn migrate_existing_fallowrc_jsonc_blocks_run() {
 /// exercise the most common knip glob patterns. Returns the absolute root.
 fn roundtrip_fixture(suffix: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!(
-        "fallow-migrate-roundtrip-{}-{}",
+        "plow-migrate-roundtrip-{}-{}",
         std::process::id(),
         suffix
     ));
@@ -236,12 +236,12 @@ fn roundtrip_fixture(suffix: &str) -> std::path::PathBuf {
         "pages/_app.tsx",
         "pages/api/hello.ts",
     ];
-    // Files that should NOT appear in fallow's discovered set. Two
+    // Files that should NOT appear in plow's discovered set. Two
     // categories:
     //   (1) excluded by patterns that the migrator must actually translate:
     //       `**/*.test.ts` and `scripts/**`. These prove the migrated
     //       ignorePatterns are doing real work.
-    //   (2) excluded by fallow's built-in defaults regardless of migration:
+    //   (2) excluded by plow's built-in defaults regardless of migration:
     //       `dist/**` and `node_modules/**`. These would be excluded even
     //       if the migrator dropped them from the knip `ignore` array, so
     //       they do NOT independently validate migration. Kept in the
@@ -291,21 +291,21 @@ fn migrate_roundtrip_globs_match_knip_documented_semantics() {
     fs::write(dir.join("knip.json"), knip).unwrap();
 
     // Step 1: run the migrator.
-    let migrate = run_fallow_raw(&["migrate", "--root", dir.to_str().unwrap(), "--quiet"]);
+    let migrate = run_plow_raw(&["migrate", "--root", dir.to_str().unwrap(), "--quiet"]);
     assert_eq!(
         migrate.code, 0,
         "migrate should exit 0, stderr: {}",
         migrate.stderr
     );
     assert!(
-        dir.join(".fallowrc.json").exists(),
-        ".fallowrc.json should be written"
+        dir.join(".plowrc.json").exists(),
+        ".plowrc.json should be written"
     );
 
-    // Step 2: run fallow list --files against the migrated config. This is
-    // fallow's source-discovery surface: it returns precisely the set of
+    // Step 2: run plow list --files against the migrated config. This is
+    // plow's source-discovery surface: it returns precisely the set of
     // files scoped by `entry` + `ignorePatterns`.
-    let list = run_fallow_raw(&[
+    let list = run_plow_raw(&[
         "list",
         "--files",
         "--format",
@@ -330,9 +330,9 @@ fn migrate_roundtrip_globs_match_knip_documented_semantics() {
         .collect();
 
     // Step 3: compare against the hand-recorded ground truth derived from
-    // knip's documented glob semantics. If knip and fallow's globset
+    // knip's documented glob semantics. If knip and plow's globset
     // diverge on any of these patterns, this assertion fails loudly. The
-    // list is sorted because `fallow list --files` returns sorted output.
+    // list is sorted because `plow list --files` returns sorted output.
     let expected: Vec<&str> = vec![
         "app/api/route.ts",
         "app/layout.tsx",
@@ -350,9 +350,9 @@ fn migrate_roundtrip_globs_match_knip_documented_semantics() {
     let normalised: Vec<String> = files.iter().map(|f| f.replace('\\', "/")).collect();
     assert_eq!(
         normalised, expected,
-        "fallow's scoped file set diverged from knip's documented glob \
+        "plow's scoped file set diverged from knip's documented glob \
          semantics. If knip recently changed engines this is real drift; \
-         otherwise check fallow's globset or the migrator's pattern copy."
+         otherwise check plow's globset or the migrator's pattern copy."
     );
 
     cleanup(&dir);
@@ -360,12 +360,12 @@ fn migrate_roundtrip_globs_match_knip_documented_semantics() {
 
 #[test]
 fn migrate_no_config_exits_2() {
-    let dir = std::env::temp_dir().join(format!("fallow-migrate-noconfig-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("plow-migrate-noconfig-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     fs::write(dir.join("package.json"), r#"{"name": "no-config"}"#).unwrap();
 
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "migrate",
         "--dry-run",
         "--root",

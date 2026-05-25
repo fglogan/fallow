@@ -40,7 +40,7 @@ pub struct PeerDependencyMeta {
     pub optional: bool,
 }
 
-/// Parsed package.json with fields relevant to fallow.
+/// Parsed package.json with fields relevant to plow.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct PackageJson {
     #[serde(default)]
@@ -352,7 +352,7 @@ mod tests {
 
     #[test]
     fn package_json_load_valid() {
-        let temp_dir = std::env::temp_dir().join("fallow-test-pkg-json");
+        let temp_dir = std::env::temp_dir().join("plow-test-pkg-json");
         let _ = std::fs::create_dir_all(&temp_dir);
         let pkg_path = temp_dir.join("package.json");
         std::fs::write(&pkg_path, r#"{"name": "test", "main": "index.js"}"#).unwrap();
@@ -754,7 +754,7 @@ mod tests {
 
     #[test]
     fn package_json_load_invalid_json() {
-        let temp_dir = std::env::temp_dir().join("fallow-test-invalid-pkg-json");
+        let temp_dir = std::env::temp_dir().join("plow-test-invalid-pkg-json");
         let _ = std::fs::create_dir_all(&temp_dir);
         let pkg_path = temp_dir.join("package.json");
         std::fs::write(&pkg_path, "{ not valid json }").unwrap();

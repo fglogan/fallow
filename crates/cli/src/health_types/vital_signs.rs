@@ -139,7 +139,7 @@ pub struct VitalSignsCounts {
 pub struct VitalSignsSnapshot {
     /// Schema version for snapshot format (independent of report schema_version).
     pub snapshot_schema_version: u32,
-    /// Fallow version that produced this snapshot.
+    /// Plow version that produced this snapshot.
     pub version: String,
     /// ISO 8601 timestamp.
     pub timestamp: String,

@@ -37,7 +37,7 @@ const outputChannel = () => ({
 });
 
 describe("loadDiagnosticCategories", () => {
-  it("loads categories from fallow/issueTypes", async () => {
+  it("loads categories from plow/issueTypes", async () => {
     const out = outputChannel();
     const client = {
       sendRequest: vi.fn(async () => [
@@ -47,12 +47,12 @@ describe("loadDiagnosticCategories", () => {
 
     await loadDiagnosticCategories(client as never, out as never);
 
-    expect(client.sendRequest).toHaveBeenCalledWith("fallow/issueTypes");
+    expect(client.sendRequest).toHaveBeenCalledWith("plow/issueTypes");
     expect(getDiagnosticCategories()).toEqual([
       { code: "future-rule", label: "Future Rule" },
     ]);
     expect(out.lines.at(-1)).toBe(
-      "Loaded 1 diagnostic categories from fallow-lsp."
+      "Loaded 1 diagnostic categories from plow-lsp."
     );
   });
 

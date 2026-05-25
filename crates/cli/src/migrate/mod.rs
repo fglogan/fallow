@@ -42,7 +42,7 @@ struct MigrationResult {
     pub(super) sources: Vec<String>,
 }
 
-/// Output format selection for the generated fallow config.
+/// Output format selection for the generated plow config.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum OutputFormat {
     Json,
@@ -62,7 +62,7 @@ impl OutputFormat {
         if use_jsonc {
             return Self::Jsonc;
         }
-        // Auto-mirror: if any source we read was JSONC-named, default to .fallowrc.jsonc.
+        // Auto-mirror: if any source we read was JSONC-named, default to .plowrc.jsonc.
         // Sources is populated with bare filenames ("knip.jsonc"), full paths
         // ("<dir>/knip.jsonc"), or `<file> (knip key)` / `<file> (jscpd key)` /
         // `<file> (knip config)` / `<file> (jscpd config)` suffixed forms. Strip
@@ -82,9 +82,9 @@ impl OutputFormat {
 
     fn filename(self) -> &'static str {
         match self {
-            Self::Toml => "fallow.toml",
-            Self::Jsonc => ".fallowrc.jsonc",
-            Self::Json => ".fallowrc.json",
+            Self::Toml => "plow.toml",
+            Self::Jsonc => ".plowrc.jsonc",
+            Self::Json => ".plowrc.json",
         }
     }
 }
@@ -92,9 +92,9 @@ impl OutputFormat {
 /// Run the migrate command.
 ///
 /// Output format and filename are picked in priority order: `--toml` writes
-/// `fallow.toml`, `--jsonc` writes `.fallowrc.jsonc`, otherwise the source
-/// extension is mirrored (`knip.jsonc` produces `.fallowrc.jsonc`,
-/// `knip.json` / `package.json` keys produce `.fallowrc.json`). The
+/// `plow.toml`, `--jsonc` writes `.plowrc.jsonc`, otherwise the source
+/// extension is mirrored (`knip.jsonc` produces `.plowrc.jsonc`,
+/// `knip.json` / `package.json` keys produce `.plowrc.json`). The
 /// generated JSONC content includes `//` comments either way; the `.jsonc`
 /// extension exists so editors auto-detect JSON-with-comments syntax
 /// highlighting.
@@ -105,12 +105,12 @@ pub fn run_migrate(
     dry_run: bool,
     from: Option<&Path>,
 ) -> ExitCode {
-    // Check if a fallow config already exists
+    // Check if a plow config already exists
     let existing_names = [
-        ".fallowrc.json",
-        ".fallowrc.jsonc",
-        "fallow.toml",
-        ".fallow.toml",
+        ".plowrc.json",
+        ".plowrc.jsonc",
+        "plow.toml",
+        ".plow.toml",
     ];
     if !dry_run {
         for name in &existing_names {
@@ -178,14 +178,14 @@ pub fn run_migrate(
         }
     }
 
-    // Glob-semantics caveat: knip and fallow use different glob engines, so
+    // Glob-semantics caveat: knip and plow use different glob engines, so
     // migrated `entry` / `ignorePatterns` may match a slightly different file
     // set than they did under knip. Single logical line so narrow terminals
     // can soft-wrap. Issue #457.
     if should_emit_glob_caveat(&result) {
         eprintln!();
         eprintln!(
-            "Note: knip and fallow use different glob engines; verify migrated entry / ignorePatterns with `fallow check` before relying on CI. See https://docs.fallow.tools/migration/from-knip"
+            "Note: knip and plow use different glob engines; verify migrated entry / ignorePatterns with `plow check` before relying on CI. See https://docs.genesis-plow.dev/migration/from-knip"
         );
     }
 
@@ -469,7 +469,7 @@ fn source_head(s: &str) -> &str {
 /// Decide whether the migrate command should print a glob-semantics caveat
 /// after the warnings block. Emitted only when knip contributed to the
 /// migration AND the resulting config carries `entry` or `ignorePatterns`,
-/// since those are the only fields where knip's glob engine and fallow's
+/// since those are the only fields where knip's glob engine and plow's
 /// `globset` can diverge. See issue #457.
 fn should_emit_glob_caveat(result: &MigrationResult) -> bool {
     let knip_contributed = result.sources.iter().any(|s| s.contains("knip"));

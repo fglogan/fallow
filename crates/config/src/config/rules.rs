@@ -497,7 +497,7 @@ pub struct UnknownRuleKey {
 /// Returns an empty `Vec` when `value` is not an object or every key is
 /// recognized (canonical kebab-case or a documented alias). Called from
 /// [`crate::config::parsing`] after `extends` merge and before
-/// `serde_json::from_value::<FallowConfig>`, so the warning lists keys from
+/// `serde_json::from_value::<PlowConfig>`, so the warning lists keys from
 /// the final merged config rather than per-file partials.
 #[must_use]
 pub fn find_unknown_rule_keys(value: &serde_json::Value, context: &str) -> Vec<UnknownRuleKey> {

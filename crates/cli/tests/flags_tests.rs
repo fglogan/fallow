@@ -1,10 +1,10 @@
 mod common;
 
-use common::run_fallow;
+use common::run_plow;
 
 #[test]
 fn feature_flag_suppression_next_line() {
-    let out = run_fallow(
+    let out = run_plow(
         "flags",
         "feature-flag-suppression",
         &["--no-cache", "--format", "json"],
@@ -23,7 +23,7 @@ fn feature_flag_suppression_next_line() {
 
     assert!(
         !flag_names.contains(&"FEATURE_DARK_MODE"),
-        "FEATURE_DARK_MODE should be suppressed via // fallow-ignore-next-line feature-flag, found: {flag_names:?}"
+        "FEATURE_DARK_MODE should be suppressed via // plow-ignore-next-line feature-flag, found: {flag_names:?}"
     );
     assert!(
         flag_names.contains(&"FEATURE_NEW_CHECKOUT"),
@@ -33,7 +33,7 @@ fn feature_flag_suppression_next_line() {
 
 #[test]
 fn feature_flag_suppression_file_wide() {
-    let out = run_fallow(
+    let out = run_plow(
         "flags",
         "feature-flag-suppression",
         &["--no-cache", "--format", "json"],

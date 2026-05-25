@@ -39,8 +39,8 @@ function makeKeypair() {
 }
 
 function makeFixture(binaryBytes, signFn) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fallow-vbtest-"));
-  const binaryPath = path.join(dir, "fallow");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "plow-vbtest-"));
+  const binaryPath = path.join(dir, "plow");
   fs.writeFileSync(binaryPath, binaryBytes);
   if (signFn) {
     fs.writeFileSync(`${binaryPath}.sig`, signFn(binaryBytes));
@@ -135,7 +135,7 @@ test("_verifyWithKey returns sig-missing when the signature file does not exist"
 
 test("_verifyWithKey returns binary-missing when the binary does not exist", () => {
   const { rawPub } = makeKeypair();
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fallow-vbtest-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "plow-vbtest-"));
   try {
     const result = _verifyWithKey(path.join(dir, "nonexistent"), rawPub);
     assert.equal(result.ok, false);
@@ -189,9 +189,9 @@ test("verifyBinaryAt uses the embedded production public key", () => {
 
 function makePlatformDir(privateKey, options) {
   const opts = options || {};
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fallow-vbtest-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "plow-vbtest-"));
   const ext = process.platform === "win32" ? ".exe" : "";
-  for (const base of ["fallow", "fallow-lsp", "fallow-mcp"]) {
+  for (const base of ["plow", "plow-lsp", "plow-mcp"]) {
     const binaryPath = path.join(dir, `${base}${ext}`);
     const content = Buffer.from(`mock ${base} contents`);
     fs.writeFileSync(binaryPath, content);
@@ -276,7 +276,7 @@ test("verifyInstalled with dirOverride returns ok when every binary verifies", a
   assert.equal(result.package, "<override>");
 });
 
-test("verifyInstalled resolves a global npm install from the fallow package directory", async (t) => {
+test("verifyInstalled resolves a global npm install from the plow package directory", async (t) => {
   const pkg = currentPlatformPackage();
   if (!pkg) {
     t.skip("unsupported platform");
@@ -284,10 +284,10 @@ test("verifyInstalled resolves a global npm install from the fallow package dire
   }
 
   const { privateKey, rawPub } = makeKeypair();
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fallow-vbtest-global-"));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "plow-vbtest-global-"));
   t.after(() => cleanup(root));
 
-  const resolveFrom = path.join(root, "node_modules", "fallow");
+  const resolveFrom = path.join(root, "node_modules", "plow");
   const platformDir = path.join(root, "node_modules", ...pkg.split("/"));
   fs.mkdirSync(resolveFrom, { recursive: true });
   fs.mkdirSync(platformDir, { recursive: true });
@@ -297,7 +297,7 @@ test("verifyInstalled resolves a global npm install from the fallow package dire
   );
 
   const ext = process.platform === "win32" ? ".exe" : "";
-  for (const base of ["fallow", "fallow-lsp", "fallow-mcp"]) {
+  for (const base of ["plow", "plow-lsp", "plow-mcp"]) {
     const binaryPath = path.join(platformDir, `${base}${ext}`);
     const content = Buffer.from(`global install ${base}`);
     fs.writeFileSync(binaryPath, content);
@@ -317,7 +317,7 @@ test("verifyInstalled resolves a global npm install from the fallow package dire
 
 test("verifyInstalled with dirOverride fails fast on the first bad signature", async (t) => {
   const { privateKey, rawPub } = makeKeypair();
-  const dir = makePlatformDir(privateKey, { corruptSigFor: "fallow-lsp" });
+  const dir = makePlatformDir(privateKey, { corruptSigFor: "plow-lsp" });
   t.after(() => cleanup(dir));
   const result = await verifyInstalled({
     dirOverride: dir,
@@ -326,12 +326,12 @@ test("verifyInstalled with dirOverride fails fast on the first bad signature", a
   });
   assert.equal(result.ok, false);
   assert.equal(result.code, "sig-invalid");
-  assert.match(result.binary, /fallow-lsp/);
+  assert.match(result.binary, /plow-lsp/);
 });
 
 test("verifyInstalled with dirOverride reports sig-missing when a .sig is absent", async (t) => {
   const { privateKey, rawPub } = makeKeypair();
-  const dir = makePlatformDir(privateKey, { skipSigFor: "fallow-mcp" });
+  const dir = makePlatformDir(privateKey, { skipSigFor: "plow-mcp" });
   t.after(() => cleanup(dir));
   const result = await verifyInstalled({
     dirOverride: dir,
@@ -340,7 +340,7 @@ test("verifyInstalled with dirOverride reports sig-missing when a .sig is absent
   });
   assert.equal(result.ok, false);
   assert.equal(result.code, "sig-missing");
-  assert.match(result.binary, /fallow-mcp/);
+  assert.match(result.binary, /plow-mcp/);
 });
 
 test("verifyInstalled reports digest-mismatch when SHA-256 disagrees with the provider", async (t) => {
@@ -370,7 +370,7 @@ test("verifyInstalled reports digest-unavailable when the provider rejects", asy
   assert.match(result.message, /network down/);
 });
 
-test("verifyInstalled honors FALLOW_SKIP_BINARY_VERIFY", async (t) => {
+test("verifyInstalled honors PLOW_SKIP_BINARY_VERIFY", async (t) => {
   const previous = process.env[SKIP_ENV];
   process.env[SKIP_ENV] = "1";
   t.after(() => {
@@ -385,7 +385,7 @@ test("verifyInstalled honors FALLOW_SKIP_BINARY_VERIFY", async (t) => {
 function computeDigestsForDir(dir) {
   const ext = process.platform === "win32" ? ".exe" : "";
   const out = {};
-  for (const base of ["fallow", "fallow-lsp", "fallow-mcp"]) {
+  for (const base of ["plow", "plow-lsp", "plow-mcp"]) {
     const fileName = `${base}${ext}`;
     const full = path.join(dir, fileName);
     out[fileName] =
@@ -399,37 +399,37 @@ function writeManifest(dir, body) {
 }
 
 test("readEmbeddedDigest returns null when manifest is missing", () => {
-  assert.equal(readEmbeddedDigest("/does/not/exist/package.json", "fallow"), null);
+  assert.equal(readEmbeddedDigest("/does/not/exist/package.json", "plow"), null);
 });
 
-test("readEmbeddedDigest returns null when fallowDigests field is absent", (t) => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fallow-vbtest-emb-"));
+test("readEmbeddedDigest returns null when plowDigests field is absent", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "plow-vbtest-emb-"));
   t.after(() => cleanup(dir));
-  writeManifest(dir, { name: "@fallow-cli/x", version: "1.0.0" });
-  assert.equal(readEmbeddedDigest(path.join(dir, "package.json"), "fallow"), null);
+  writeManifest(dir, { name: "@plow-cli/x", version: "1.0.0" });
+  assert.equal(readEmbeddedDigest(path.join(dir, "package.json"), "plow"), null);
 });
 
 test("readEmbeddedDigest returns null when the per-binary entry is malformed", (t) => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fallow-vbtest-emb-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "plow-vbtest-emb-"));
   t.after(() => cleanup(dir));
   writeManifest(dir, {
-    name: "@fallow-cli/x",
+    name: "@plow-cli/x",
     version: "1.0.0",
-    fallowDigests: { fallow: "not-a-real-digest" },
+    plowDigests: { plow: "not-a-real-digest" },
   });
-  assert.equal(readEmbeddedDigest(path.join(dir, "package.json"), "fallow"), null);
+  assert.equal(readEmbeddedDigest(path.join(dir, "package.json"), "plow"), null);
 });
 
 test("readEmbeddedDigest returns normalized hex for a valid sha256: prefixed entry", (t) => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fallow-vbtest-emb-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "plow-vbtest-emb-"));
   t.after(() => cleanup(dir));
   const hex = "a".repeat(64);
   writeManifest(dir, {
-    name: "@fallow-cli/x",
+    name: "@plow-cli/x",
     version: "1.0.0",
-    fallowDigests: { fallow: "sha256:" + hex },
+    plowDigests: { plow: "sha256:" + hex },
   });
-  assert.equal(readEmbeddedDigest(path.join(dir, "package.json"), "fallow"), hex);
+  assert.equal(readEmbeddedDigest(path.join(dir, "package.json"), "plow"), hex);
 });
 
 test("verifyInstalled uses the embedded digest without calling the provider", async (t) => {
@@ -437,9 +437,9 @@ test("verifyInstalled uses the embedded digest without calling the provider", as
   const dir = makePlatformDir(privateKey);
   t.after(() => cleanup(dir));
   writeManifest(dir, {
-    name: "@fallow-cli/x",
+    name: "@plow-cli/x",
     version: "1.0.0",
-    fallowDigests: computeDigestsForDir(dir),
+    plowDigests: computeDigestsForDir(dir),
   });
   let providerCalls = 0;
   const result = await verifyInstalled({
@@ -474,14 +474,14 @@ test("verifyInstalled falls back to the provider when the embedded digest is mis
   assert.equal(providerCalls, 3);
 });
 
-test("verifyInstalled falls back to the provider when fallowDigests is partial / malformed", async (t) => {
+test("verifyInstalled falls back to the provider when plowDigests is partial / malformed", async (t) => {
   const { privateKey, rawPub } = makeKeypair();
   const dir = makePlatformDir(privateKey);
   t.after(() => cleanup(dir));
   writeManifest(dir, {
-    name: "@fallow-cli/x",
+    name: "@plow-cli/x",
     version: "1.0.0",
-    fallowDigests: { fallow: "not-a-real-digest" },
+    plowDigests: { plow: "not-a-real-digest" },
   });
   let providerCalls = 0;
   const result = await verifyInstalled({
@@ -505,12 +505,12 @@ test("verifyInstalled returns digest-mismatch when the embedded digest disagrees
   t.after(() => cleanup(dir));
   const ext = process.platform === "win32" ? ".exe" : "";
   writeManifest(dir, {
-    name: "@fallow-cli/x",
+    name: "@plow-cli/x",
     version: "1.0.0",
-    fallowDigests: {
-      [`fallow${ext}`]: "sha256:" + "a".repeat(64),
-      [`fallow-lsp${ext}`]: "sha256:" + "a".repeat(64),
-      [`fallow-mcp${ext}`]: "sha256:" + "a".repeat(64),
+    plowDigests: {
+      [`plow${ext}`]: "sha256:" + "a".repeat(64),
+      [`plow-lsp${ext}`]: "sha256:" + "a".repeat(64),
+      [`plow-mcp${ext}`]: "sha256:" + "a".repeat(64),
     },
   });
   const result = await verifyInstalled({
@@ -554,9 +554,9 @@ test("verifyInstalledSync with embedded digests returns ok end-to-end", (t) => {
   const dir = makePlatformDir(privateKey);
   t.after(() => cleanup(dir));
   writeManifest(dir, {
-    name: "@fallow-cli/x",
+    name: "@plow-cli/x",
     version: "9.9.9",
-    fallowDigests: computeDigestsForDir(dir),
+    plowDigests: computeDigestsForDir(dir),
   });
   const result = verifyInstalledSync({
     dirOverride: dir,
@@ -568,12 +568,12 @@ test("verifyInstalledSync with embedded digests returns ok end-to-end", (t) => {
 
 test("verifyInstalledSync fails fast on first bad signature", (t) => {
   const { privateKey, rawPub } = makeKeypair();
-  const dir = makePlatformDir(privateKey, { corruptSigFor: "fallow-lsp" });
+  const dir = makePlatformDir(privateKey, { corruptSigFor: "plow-lsp" });
   t.after(() => cleanup(dir));
   writeManifest(dir, {
-    name: "@fallow-cli/x",
+    name: "@plow-cli/x",
     version: "9.9.9",
-    fallowDigests: computeDigestsForDir(dir),
+    plowDigests: computeDigestsForDir(dir),
   });
   const result = verifyInstalledSync({
     dirOverride: dir,
@@ -581,7 +581,7 @@ test("verifyInstalledSync fails fast on first bad signature", (t) => {
   });
   assert.equal(result.ok, false);
   assert.equal(result.code, "sig-invalid");
-  assert.match(result.binary, /fallow-lsp/);
+  assert.match(result.binary, /plow-lsp/);
 });
 
 test("verifyInstalledSync reports digest-mismatch when bytes diverge from embedded digest", (t) => {
@@ -589,15 +589,15 @@ test("verifyInstalledSync reports digest-mismatch when bytes diverge from embedd
   const dir = makePlatformDir(privateKey);
   t.after(() => cleanup(dir));
   writeManifest(dir, {
-    name: "@fallow-cli/x",
+    name: "@plow-cli/x",
     version: "9.9.9",
-    fallowDigests: {
-      fallow: "sha256:" + "a".repeat(64),
-      "fallow-lsp": "sha256:" + "a".repeat(64),
-      "fallow-mcp": "sha256:" + "a".repeat(64),
-      "fallow.exe": "sha256:" + "a".repeat(64),
-      "fallow-lsp.exe": "sha256:" + "a".repeat(64),
-      "fallow-mcp.exe": "sha256:" + "a".repeat(64),
+    plowDigests: {
+      plow: "sha256:" + "a".repeat(64),
+      "plow-lsp": "sha256:" + "a".repeat(64),
+      "plow-mcp": "sha256:" + "a".repeat(64),
+      "plow.exe": "sha256:" + "a".repeat(64),
+      "plow-lsp.exe": "sha256:" + "a".repeat(64),
+      "plow-mcp.exe": "sha256:" + "a".repeat(64),
     },
   });
   const result = verifyInstalledSync({
@@ -612,14 +612,14 @@ test("verifyInstalledSync reports digest-unavailable when no embedded digest and
   const { privateKey, rawPub } = makeKeypair();
   const dir = makePlatformDir(privateKey);
   t.after(() => cleanup(dir));
-  writeManifest(dir, { name: "@fallow-cli/x", version: "9.9.9" });
+  writeManifest(dir, { name: "@plow-cli/x", version: "9.9.9" });
   const result = verifyInstalledSync({
     dirOverride: dir,
     verifyFn: (p) => _verifyWithKey(p, rawPub),
   });
   assert.equal(result.ok, false);
   assert.equal(result.code, "digest-unavailable");
-  assert.match(result.message, /predates fallow 2\.78\.1/);
+  assert.match(result.message, /predates plow 2\.78\.1/);
   assert.match(result.message, new RegExp(SKIP_ENV));
 });
 
@@ -627,8 +627,8 @@ test("verifyInstalledSync accepts a sync digestProvider for test isolation", (t)
   const { privateKey, rawPub } = makeKeypair();
   const dir = makePlatformDir(privateKey);
   t.after(() => cleanup(dir));
-  // No fallowDigests on manifest; the sync provider supplies them.
-  writeManifest(dir, { name: "@fallow-cli/x", version: "9.9.9" });
+  // No plowDigests on manifest; the sync provider supplies them.
+  writeManifest(dir, { name: "@plow-cli/x", version: "9.9.9" });
   const result = verifyInstalledSync({
     dirOverride: dir,
     verifyFn: (p) => _verifyWithKey(p, rawPub),
@@ -641,7 +641,7 @@ test("verifyInstalledSync surfaces provider errors as digest-unavailable", (t) =
   const { privateKey, rawPub } = makeKeypair();
   const dir = makePlatformDir(privateKey);
   t.after(() => cleanup(dir));
-  writeManifest(dir, { name: "@fallow-cli/x", version: "9.9.9" });
+  writeManifest(dir, { name: "@plow-cli/x", version: "9.9.9" });
   const result = verifyInstalledSync({
     dirOverride: dir,
     verifyFn: (p) => _verifyWithKey(p, rawPub),
@@ -654,7 +654,7 @@ test("verifyInstalledSync surfaces provider errors as digest-unavailable", (t) =
   assert.match(result.message, /disk on fire/);
 });
 
-test("verifyInstalledSync honors FALLOW_SKIP_BINARY_VERIFY", (t) => {
+test("verifyInstalledSync honors PLOW_SKIP_BINARY_VERIFY", (t) => {
   const previous = process.env[SKIP_ENV];
   process.env[SKIP_ENV] = "1";
   t.after(() => {
@@ -677,9 +677,9 @@ test("verifyInstalledSync ignores skip env when allowSkipEnv is false", (t) => {
   const dir = makePlatformDir(privateKey);
   t.after(() => cleanup(dir));
   writeManifest(dir, {
-    name: "@fallow-cli/x",
+    name: "@plow-cli/x",
     version: "9.9.9",
-    fallowDigests: computeDigestsForDir(dir),
+    plowDigests: computeDigestsForDir(dir),
   });
   const result = verifyInstalledSync({
     dirOverride: dir,

@@ -360,7 +360,7 @@ export interface HealthReport {
   _meta?: Record<string, unknown>;
 }
 
-export interface FallowNodeErrorShape {
+export interface PlowNodeErrorShape {
   message: string;
   exitCode: number;
   code?: string;
@@ -368,7 +368,7 @@ export interface FallowNodeErrorShape {
   context?: string;
 }
 
-export type FallowNodeError = Error & FallowNodeErrorShape;
+export type PlowNodeError = Error & PlowNodeErrorShape;
 
 export function detectDeadCode(options?: DeadCodeOptions): Promise<DeadCodeReport>;
 export function detectCircularDependencies(options?: DeadCodeOptions): Promise<DeadCodeReport>;

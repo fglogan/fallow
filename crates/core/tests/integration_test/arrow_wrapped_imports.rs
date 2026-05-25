@@ -4,7 +4,7 @@ use super::common::{create_config, fixture_path};
 fn arrow_wrapped_lazy_imports_make_modules_reachable() {
     let root = fixture_path("arrow-wrapped-dynamic-imports");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_names: Vec<String> = results
         .unused_files
@@ -42,7 +42,7 @@ fn arrow_wrapped_lazy_imports_make_modules_reachable() {
 fn arrow_wrapped_lazy_imports_credit_default_exports() {
     let root = fixture_path("arrow-wrapped-dynamic-imports");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<(&str, String)> = results
         .unused_exports

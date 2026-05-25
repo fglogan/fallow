@@ -15,7 +15,7 @@ expression: output
 | Circular Deps | 1 |
 | Unused Deps | 3 |
 
-## Fallow: 1 high complexity function
+## Plow: 1 high complexity function
 
 | File | Function | Severity | Cyclomatic | Cognitive | CRAP | Lines |
 |:-----|:---------|:---------|:-----------|:----------|:-----|:------|

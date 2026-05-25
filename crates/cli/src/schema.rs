@@ -57,8 +57,8 @@ pub fn build_cli_schema(cmd: &clap::Command) -> serde_json::Value {
         "default_behavior": "Runs all analyses (check + dupes + health). Use --only/--skip to select.",
         "issue_types": issue_types_schema(),
         "suppression_comments": {
-            "next_line": "// fallow-ignore-next-line [issue-type]",
-            "file": "// fallow-ignore-file [issue-type]",
+            "next_line": "// plow-ignore-next-line [issue-type]",
+            "file": "// plow-ignore-file [issue-type]",
             "note": "Omit [issue-type] to suppress all issue types. Unknown tokens are silently ignored."
         },
         "output_formats": ["human", "json", "sarif", "compact", "markdown", "codeclimate", "gitlab-codequality", "pr-comment-github", "pr-comment-gitlab", "review-github", "review-gitlab", "badge"],
@@ -80,7 +80,7 @@ fn issue_types_schema() -> serde_json::Value {
                 "filter_flag": "--unused-files",
                 "fixable": false,
                 "suppressible": true,
-                "suppress_comment": "// fallow-ignore-file unused-file"
+                "suppress_comment": "// plow-ignore-file unused-file"
             },
             {
                 "id": "unused-export",
@@ -88,7 +88,7 @@ fn issue_types_schema() -> serde_json::Value {
                 "filter_flag": "--unused-exports",
                 "fixable": true,
                 "suppressible": true,
-                "suppress_comment": "// fallow-ignore-next-line unused-export"
+                "suppress_comment": "// plow-ignore-next-line unused-export"
             },
             {
                 "id": "unused-type",
@@ -96,7 +96,7 @@ fn issue_types_schema() -> serde_json::Value {
                 "filter_flag": "--unused-types",
                 "fixable": false,
                 "suppressible": true,
-                "suppress_comment": "// fallow-ignore-next-line unused-type"
+                "suppress_comment": "// plow-ignore-next-line unused-type"
             },
             {
                 "id": "private-type-leak",
@@ -104,7 +104,7 @@ fn issue_types_schema() -> serde_json::Value {
                 "filter_flag": "--private-type-leaks",
                 "fixable": false,
                 "suppressible": true,
-                "suppress_comment": "// fallow-ignore-next-line private-type-leak"
+                "suppress_comment": "// plow-ignore-next-line private-type-leak"
             },
             {
                 "id": "unused-dependency",
@@ -128,7 +128,7 @@ fn issue_types_schema() -> serde_json::Value {
                 "filter_flag": "--unused-enum-members",
                 "fixable": true,
                 "suppressible": true,
-                "suppress_comment": "// fallow-ignore-next-line unused-enum-member"
+                "suppress_comment": "// plow-ignore-next-line unused-enum-member"
             },
             {
                 "id": "unused-class-member",
@@ -136,7 +136,7 @@ fn issue_types_schema() -> serde_json::Value {
                 "filter_flag": "--unused-class-members",
                 "fixable": false,
                 "suppressible": true,
-                "suppress_comment": "// fallow-ignore-next-line unused-class-member"
+                "suppress_comment": "// plow-ignore-next-line unused-class-member"
             },
             {
                 "id": "unresolved-import",
@@ -144,7 +144,7 @@ fn issue_types_schema() -> serde_json::Value {
                 "filter_flag": "--unresolved-imports",
                 "fixable": false,
                 "suppressible": true,
-                "suppress_comment": "// fallow-ignore-next-line unresolved-import"
+                "suppress_comment": "// plow-ignore-next-line unresolved-import"
             },
             {
                 "id": "unlisted-dependency",
@@ -159,7 +159,7 @@ fn issue_types_schema() -> serde_json::Value {
                 "filter_flag": "--duplicate-exports",
                 "fixable": false,
                 "suppressible": true,
-                "suppress_comment": "// fallow-ignore-file duplicate-export"
+                "suppress_comment": "// plow-ignore-file duplicate-export"
             },
             {
                 "id": "type-only-dependency",
@@ -175,21 +175,21 @@ fn issue_types_schema() -> serde_json::Value {
                 "filter_flag": "--circular-deps",
                 "fixable": false,
                 "suppressible": true,
-                "suppress_comment": "// fallow-ignore-next-line circular-dependency"
+                "suppress_comment": "// plow-ignore-next-line circular-dependency"
             }
     ])
 }
 
 fn environment_variables_schema() -> serde_json::Value {
     serde_json::json!({
-        "FALLOW_FORMAT": "Default output format (json/human/sarif/compact/markdown/codeclimate/gitlab-codequality/pr-comment-github/pr-comment-gitlab/review-github/review-gitlab/badge). CLI --format flag overrides this.",
-        "FALLOW_QUIET": "Set to \"1\" or \"true\" to suppress progress output. CLI --quiet flag overrides this.",
-        "FALLOW_PRODUCTION": "Set to true/false to override production mode for all analyses.",
-        "FALLOW_PRODUCTION_DEAD_CODE": "Set to true/false to override production mode for dead-code analysis.",
-        "FALLOW_PRODUCTION_HEALTH": "Set to true/false to override production mode for health analysis.",
-        "FALLOW_PRODUCTION_DUPES": "Set to true/false to override production mode for duplication analysis.",
-        "FALLOW_REVIEW_GUIDANCE": "Set to true to append collapsed guidance blocks to review-github/review-gitlab inline comment bodies.",
-        "FALLOW_BIN": "Path to fallow binary (used by fallow-mcp server)."
+        "PLOW_FORMAT": "Default output format (json/human/sarif/compact/markdown/codeclimate/gitlab-codequality/pr-comment-github/pr-comment-gitlab/review-github/review-gitlab/badge). CLI --format flag overrides this.",
+        "PLOW_QUIET": "Set to \"1\" or \"true\" to suppress progress output. CLI --quiet flag overrides this.",
+        "PLOW_PRODUCTION": "Set to true/false to override production mode for all analyses.",
+        "PLOW_PRODUCTION_DEAD_CODE": "Set to true/false to override production mode for dead-code analysis.",
+        "PLOW_PRODUCTION_HEALTH": "Set to true/false to override production mode for health analysis.",
+        "PLOW_PRODUCTION_DUPES": "Set to true/false to override production mode for duplication analysis.",
+        "PLOW_REVIEW_GUIDANCE": "Set to true to append collapsed guidance blocks to review-github/review-gitlab inline comment bodies.",
+        "PLOW_BIN": "Path to plow binary (used by plow-mcp server)."
     })
 }
 
@@ -241,9 +241,9 @@ mod tests {
         let cmd = Cli::command();
         let schema = build_cli_schema(&cmd);
         let env_vars = &schema["environment_variables"];
-        assert!(env_vars["FALLOW_FORMAT"].is_string());
-        assert!(env_vars["FALLOW_QUIET"].is_string());
-        assert!(env_vars["FALLOW_BIN"].is_string());
+        assert!(env_vars["PLOW_FORMAT"].is_string());
+        assert!(env_vars["PLOW_QUIET"].is_string());
+        assert!(env_vars["PLOW_BIN"].is_string());
     }
 
     #[test]
@@ -258,7 +258,7 @@ mod tests {
     fn schema_has_name_and_version() {
         let cmd = Cli::command();
         let schema = build_cli_schema(&cmd);
-        assert_eq!(schema["name"], "fallow");
+        assert_eq!(schema["name"], "plow");
         assert!(schema["version"].is_string());
     }
 

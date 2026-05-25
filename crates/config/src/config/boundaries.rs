@@ -56,7 +56,7 @@ pub struct RedundantRootPrefix {
     pub root: String,
 }
 
-/// Aggregated boundary-config validation error for `FallowConfig::validate_resolved_boundaries`.
+/// Aggregated boundary-config validation error for `PlowConfig::validate_resolved_boundaries`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ZoneValidationError {
     /// A `boundaries.rules[]` entry references a zone NOT present in
@@ -79,7 +79,7 @@ impl fmt::Display for ZoneValidationError {
             ),
             Self::RedundantRootPrefix(err) => write!(
                 f,
-                "FALLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX: zone '{}': pattern '{}' starts with the zone root '{}'. Patterns are now resolved relative to root; remove the redundant prefix from the pattern.",
+                "PLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX: zone '{}': pattern '{}' starts with the zone root '{}'. Patterns are now resolved relative to root; remove the redundant prefix from the pattern.",
                 err.zone_name, err.pattern, err.root,
             ),
         }
@@ -98,7 +98,7 @@ impl std::error::Error for ZoneValidationError {}
 /// # Examples
 ///
 /// ```
-/// use fallow_config::BoundaryPreset;
+/// use plow_config::BoundaryPreset;
 ///
 /// let preset: BoundaryPreset = serde_json::from_str(r#""layered""#).unwrap();
 /// assert!(matches!(preset, BoundaryPreset::Layered));
@@ -255,7 +255,7 @@ impl BoundaryPreset {
 /// # Examples
 ///
 /// ```
-/// use fallow_config::BoundaryConfig;
+/// use plow_config::BoundaryConfig;
 ///
 /// let json = r#"{
 ///     "zones": [
@@ -274,7 +274,7 @@ impl BoundaryPreset {
 /// Using a preset:
 ///
 /// ```
-/// use fallow_config::BoundaryConfig;
+/// use plow_config::BoundaryConfig;
 ///
 /// let json = r#"{ "preset": "layered" }"#;
 /// let mut config: BoundaryConfig = serde_json::from_str(json).unwrap();
@@ -327,7 +327,7 @@ pub struct BoundaryZone {
     ///
     /// When set, the zone's `patterns` are matched against paths *relative*
     /// to this directory rather than the project root. At classification
-    /// time, fallow checks that a candidate path starts with `root` and
+    /// time, plow checks that a candidate path starts with `root` and
     /// strips that prefix before glob-matching the patterns against the
     /// remainder. Files outside the subtree never match the zone.
     ///
@@ -340,7 +340,7 @@ pub struct BoundaryZone {
     /// converted to forward slashes. Patterns must NOT redundantly include
     /// the root prefix: `root: "packages/app/"` with
     /// `patterns: ["packages/app/src/**"]` is rejected with
-    /// `FALLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX` because patterns are
+    /// `PLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX` because patterns are
     /// resolved relative to the root.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub root: Option<String>,
@@ -379,7 +379,7 @@ pub struct ResolvedBoundaryConfig {
     /// Rules indexed by source zone name.
     pub rules: Vec<ResolvedBoundaryRule>,
     /// Pre-expansion logical groups captured during `expand_auto_discover`,
-    /// preserved here for observability (`fallow list --boundaries --format
+    /// preserved here for observability (`plow list --boundaries --format
     /// json`). One entry per `autoDiscover`-bearing zone in user-declaration
     /// order. Empty unless the user (or a preset) wrote at least one
     /// `autoDiscover`. See [`LogicalGroup`] for the per-entry shape.
@@ -387,7 +387,7 @@ pub struct ResolvedBoundaryConfig {
 }
 
 /// A user-declared zone that fanned out into one or more child zones via
-/// `autoDiscover`. Surfaced verbatim through `fallow list --boundaries
+/// `autoDiscover`. Surfaced verbatim through `plow list --boundaries
 /// --format json` so consumers (config UIs, Sankey renderers, agent-driven
 /// config tooling, dashboards) can reconstruct the original grouping intent
 /// after expansion has flattened the parent name out of `zones[]`.
@@ -607,7 +607,7 @@ impl BoundaryConfig {
     /// Returns one [`LogicalGroup`] per pre-expansion zone that carried a
     /// non-empty `autoDiscover`, in user-declaration order. The caller (the
     /// resolution pipeline) stashes the result onto
-    /// [`ResolvedBoundaryConfig::logical_groups`] for `fallow list
+    /// [`ResolvedBoundaryConfig::logical_groups`] for `plow list
     /// --boundaries --format json` to render. Discarding the return is fine
     /// for callers that only need the expansion side effect (classification);
     /// the data is regenerated on the next run.
@@ -916,7 +916,7 @@ impl BoundaryConfig {
     /// matches.
     ///
     /// The rendered diagnostic carries the legacy
-    /// `FALLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX` tag via
+    /// `PLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX` tag via
     /// [`ZoneValidationError`]'s `Display` impl, so CI logs grepping for the
     /// old text continue to work.
     #[must_use]
@@ -996,7 +996,7 @@ impl BoundaryConfig {
     /// Resolve into compiled form with pre-built glob matchers.
     ///
     /// User patterns were validated at config load time
-    /// (see `FallowConfig::validate_user_globs`).
+    /// (see `PlowConfig::validate_user_globs`).
     #[must_use]
     pub fn resolve(&self) -> ResolvedBoundaryConfig {
         let zones = self
@@ -1309,7 +1309,7 @@ impl ResolvedBoundaryConfig {
     ///
     /// Considers `logical_groups` too: when every `autoDiscover` zone
     /// produced zero children, `zones` is empty but the user authored a
-    /// boundaries section that should still be surfaced (so `fallow list
+    /// boundaries section that should still be surfaced (so `plow list
     /// --boundaries` can render the `Empty` / `InvalidPath` status to the
     /// user). Without this, the whole boundaries block silently disappears
     /// from the output the moment discovery finds nothing.
@@ -2527,7 +2527,7 @@ allow = ["db"]
     /// matching the existing globset case-sensitivity for `patterns`. On
     /// case-insensitive filesystems (HFS+, NTFS) two files differing only
     /// in case still classify only when the configured `root` exactly
-    /// matches the path's case as fallow recorded it. Locking this down
+    /// matches the path's case as plow recorded it. Locking this down
     /// prevents silent platform-divergent classification.
     #[test]
     fn zone_root_is_case_sensitive() {
@@ -2609,11 +2609,11 @@ allow = ["db"]
         assert_eq!(errors[0].zone_name, "ui");
         assert_eq!(errors[0].pattern, "packages/app/src/**");
         assert_eq!(errors[0].root, "packages/app/");
-        // Display preserves the legacy FALLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX
+        // Display preserves the legacy PLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX
         // tag so existing CI grep recipes continue to work.
         let rendered = ZoneValidationError::RedundantRootPrefix(errors[0].clone()).to_string();
         assert!(
-            rendered.contains("FALLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX"),
+            rendered.contains("PLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX"),
             "Display should carry legacy tag: {rendered}"
         );
         assert!(
@@ -2671,7 +2671,7 @@ allow = ["db"]
 
     /// Regression: an empty `root` (or `"."`/`"./"`, both of which normalize
     /// to `""`) used to make `starts_with("")` always true, producing a
-    /// spurious FALLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX error for every
+    /// spurious PLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX error for every
     /// pattern in the zone. The validation must skip empty-normalized roots
     /// the same way `classify_zone` does.
     #[test]
@@ -3173,7 +3173,7 @@ allow = ["db"]
         // Regression for issue #373 smoke: a config whose every autoDiscover
         // zone produced zero children ends up with empty `zones[]` but a
         // populated `logical_groups[]`. The boundaries section must still
-        // surface so `fallow list --boundaries` can render the Empty /
+        // surface so `plow list --boundaries` can render the Empty /
         // InvalidPath status (otherwise the whole block silently disappears
         // and the user has no signal that discovery turned up nothing).
         let resolved = ResolvedBoundaryConfig {
@@ -3377,7 +3377,7 @@ allow = ["db"]
     #[should_panic(expected = "validated at config load time")]
     fn resolve_panics_on_unvalidated_invalid_zone_glob() {
         // Per issue #463, boundaries.zones[].patterns are validated by
-        // FallowConfig::load before reaching resolve(). A program that
+        // PlowConfig::load before reaching resolve(). A program that
         // constructs a config in-code with an invalid pattern has skipped
         // that validation; resolve() asserts the invariant by panicking.
         let config = BoundaryConfig {

@@ -67,10 +67,10 @@ pub struct ModuleInfo {
     /// Example: for "abc\ndef\n", `line_offsets` = \[0, 4\].
     pub line_offsets: Vec<u32>,
     /// Per-function complexity metrics computed during AST traversal.
-    /// Used by the `fallow health` subcommand to report high-complexity functions.
+    /// Used by the `plow health` subcommand to report high-complexity functions.
     pub complexity: Vec<FunctionComplexity>,
     /// Feature flag use sites detected during AST traversal.
-    /// Used by the `fallow flags` subcommand to report feature flag patterns.
+    /// Used by the `plow flags` subcommand to report feature flag patterns.
     pub flag_uses: Vec<FlagUse>,
     /// Heritage metadata for exported classes that declare `implements`.
     /// Used to scope `usedClassMembers` rules during analysis.
@@ -138,7 +138,7 @@ pub struct NamespaceObjectAlias {
 /// # Examples
 ///
 /// ```
-/// use fallow_types::extract::compute_line_offsets;
+/// use plow_types::extract::compute_line_offsets;
 ///
 /// let offsets = compute_line_offsets("abc\ndef\nghi");
 /// assert_eq!(offsets, vec![0, 4, 8]);
@@ -170,7 +170,7 @@ pub fn compute_line_offsets(source: &str) -> Vec<u32> {
 /// # Examples
 ///
 /// ```
-/// use fallow_types::extract::{compute_line_offsets, byte_offset_to_line_col};
+/// use plow_types::extract::{compute_line_offsets, byte_offset_to_line_col};
 ///
 /// let offsets = compute_line_offsets("abc\ndef\nghi");
 /// assert_eq!(byte_offset_to_line_col(&offsets, 0), (1, 0)); // 'a' on line 1
@@ -408,7 +408,7 @@ pub struct MemberInfo {
     /// Whether this member has decorators (e.g., `@Column()`, `@Inject()`).
     /// Decorated members are used by frameworks at runtime and should not be
     /// flagged as unused class members, unless every decorator on the member
-    /// is opted out via `FallowConfig.ignore_decorators`.
+    /// is opted out via `PlowConfig.ignore_decorators`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub has_decorator: bool,
     /// Full dotted path of each decorator on this member, in source order.
@@ -443,7 +443,7 @@ pub struct MemberInfo {
 /// # Examples
 ///
 /// ```
-/// use fallow_types::extract::MemberKind;
+/// use plow_types::extract::MemberKind;
 ///
 /// let kind = MemberKind::EnumMember;
 /// assert_eq!(kind, MemberKind::EnumMember);
@@ -469,7 +469,7 @@ pub enum MemberKind {
 /// # Examples
 ///
 /// ```
-/// use fallow_types::extract::MemberAccess;
+/// use plow_types::extract::MemberAccess;
 ///
 /// let access = MemberAccess {
 ///     object: "Status".to_string(),
@@ -503,7 +503,7 @@ fn serialize_span<S: serde::Serializer>(span: &Span, serializer: S) -> Result<S:
 /// # Examples
 ///
 /// ```
-/// use fallow_types::extract::ExportName;
+/// use plow_types::extract::ExportName;
 ///
 /// let named = ExportName::Named("foo".to_string());
 /// assert_eq!(named.to_string(), "foo");
@@ -569,7 +569,7 @@ pub struct ImportInfo {
 /// # Examples
 ///
 /// ```
-/// use fallow_types::extract::ImportedName;
+/// use plow_types::extract::ImportedName;
 ///
 /// let named = ImportedName::Named("useState".to_string());
 /// assert_eq!(named, ImportedName::Named("useState".to_string()));
@@ -640,7 +640,7 @@ pub struct DynamicImportInfo {
     /// The local variable name for `const x = await import(...)`.
     /// Used for namespace import narrowing via member access tracking.
     pub local_name: Option<String>,
-    /// True when this dynamic import was synthesised by fallow rather than
+    /// True when this dynamic import was synthesised by plow rather than
     /// appearing in user source (e.g. the Vitest `__mocks__/<file>` auto-mock
     /// sibling that pairs with a `vi.mock('./foo')` call). When the resolver
     /// cannot find the synthesised target, the entry is dropped silently

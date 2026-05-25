@@ -6,20 +6,20 @@ members = ["crates/*"]
 version = "2.84.0"
 edition = "2024"
 rust-version = "1.92"
-license = "MIT"
-repository = "https://github.com/fallow-rs/fallow"
-homepage = "https://docs.fallow.tools"
-documentation = "https://docs.fallow.tools"
+license = "LicenseRef-Tempext-Commercial"
+repository = "https://github.com/fglogan/genesis-plow"
+homepage = "https://docs.genesis-plow.dev"
+documentation = "https://docs.genesis-plow.dev"
 keywords = ["typescript", "javascript", "lint", "static-analysis", "code-quality"]
 categories = ["command-line-utilities", "development-tools"]
 
 [workspace.dependencies]
-fallow-core = { version = "2.84.0", path = "crates/core" }
-fallow-config = { version = "2.84.0", path = "crates/config" }
-fallow-extract = { version = "2.84.0", path = "crates/extract" }
-fallow-graph = { version = "2.84.0", path = "crates/graph" }
-fallow-types = { version = "2.84.0", path = "crates/types" }
-fallow-cli = { version = "2.84.0", path = "crates/cli" }
+plow-core = { version = "2.84.0", path = "crates/core" }
+plow-config = { version = "2.84.0", path = "crates/config" }
+plow-extract = { version = "2.84.0", path = "crates/extract" }
+plow-graph = { version = "2.84.0", path = "crates/graph" }
+plow-types = { version = "2.84.0", path = "crates/types" }
+plow-cli = { version = "2.84.0", path = "crates/cli" }
 
 # Parsing & analysis
 oxc_allocator = "0.126"

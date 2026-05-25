@@ -3,9 +3,9 @@ use rmcp::model::*;
 #[cfg(unix)]
 use std::time::Duration;
 
-use crate::tools::run_fallow;
+use crate::tools::run_plow;
 #[cfg(unix)]
-use crate::tools::{run_fallow_with_timeout, run_fallow_with_top_level_warnings};
+use crate::tools::{run_plow_with_timeout, run_plow_with_top_level_warnings};
 
 use super::super::resolve_binary;
 
@@ -18,15 +18,15 @@ fn extract_text(result: &CallToolResult) -> &str {
     }
 }
 
-// ── run_fallow: binary execution and exit code handling ───────────
+// ── run_plow: binary execution and exit code handling ───────────
 
 #[tokio::test]
-async fn run_fallow_missing_binary() {
-    let result = run_fallow("nonexistent-binary-12345", &["dead-code".to_string()]).await;
+async fn run_plow_missing_binary() {
+    let result = run_plow("nonexistent-binary-12345", &["dead-code".to_string()]).await;
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(err.message.contains("nonexistent-binary-12345"));
-    assert!(err.message.contains("FALLOW_BIN"));
+    assert!(err.message.contains("PLOW_BIN"));
 }
 
 // The following tests shell out to `/bin/sh` which is Unix-only.
@@ -34,9 +34,9 @@ async fn run_fallow_missing_binary() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn run_fallow_exit_code_0_with_stdout() {
+async fn run_plow_exit_code_0_with_stdout() {
     // `echo '{"ok":true}'` exits 0 and writes to stdout
-    let result = run_fallow(
+    let result = run_plow(
         "/bin/sh",
         &["-c".to_string(), "echo '{\"ok\":true}'".to_string()],
     )
@@ -49,9 +49,9 @@ async fn run_fallow_exit_code_0_with_stdout() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn run_fallow_exit_code_0_empty_stdout_returns_empty_json() {
+async fn run_plow_exit_code_0_empty_stdout_returns_empty_json() {
     // A command that succeeds with no output
-    let result = run_fallow("/bin/sh", &["-c".to_string(), "true".to_string()])
+    let result = run_plow("/bin/sh", &["-c".to_string(), "true".to_string()])
         .await
         .unwrap();
     assert_eq!(result.is_error, Some(false));
@@ -60,8 +60,8 @@ async fn run_fallow_exit_code_0_empty_stdout_returns_empty_json() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn run_fallow_with_top_level_warnings_inserts_empty_array() {
-    let result = run_fallow_with_top_level_warnings(
+async fn run_plow_with_top_level_warnings_inserts_empty_array() {
+    let result = run_plow_with_top_level_warnings(
         "/bin/sh",
         &[
             "-c".to_string(),
@@ -80,9 +80,9 @@ async fn run_fallow_with_top_level_warnings_inserts_empty_array() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn run_fallow_exit_code_1_treated_as_success_with_issues() {
+async fn run_plow_exit_code_1_treated_as_success_with_issues() {
     // Exit code 1 with JSON stdout = issues found (not an error)
-    let result = run_fallow(
+    let result = run_plow(
         "/bin/sh",
         &[
             "-c".to_string(),
@@ -98,8 +98,8 @@ async fn run_fallow_exit_code_1_treated_as_success_with_issues() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn run_fallow_exit_code_1_empty_stdout_returns_empty_json() {
-    let result = run_fallow("/bin/sh", &["-c".to_string(), "exit 1".to_string()])
+async fn run_plow_exit_code_1_empty_stdout_returns_empty_json() {
+    let result = run_plow("/bin/sh", &["-c".to_string(), "exit 1".to_string()])
         .await
         .unwrap();
     assert_eq!(result.is_error, Some(false));
@@ -108,8 +108,8 @@ async fn run_fallow_exit_code_1_empty_stdout_returns_empty_json() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn run_fallow_exit_code_2_with_stderr_returns_structured_json_error() {
-    let result = run_fallow(
+async fn run_plow_exit_code_2_with_stderr_returns_structured_json_error() {
+    let result = run_plow(
         "/bin/sh",
         &[
             "-c".to_string(),
@@ -134,8 +134,8 @@ async fn run_fallow_exit_code_2_with_stderr_returns_structured_json_error() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn run_fallow_exit_code_2_empty_stderr_returns_structured_json_error() {
-    let result = run_fallow("/bin/sh", &["-c".to_string(), "exit 2".to_string()])
+async fn run_plow_exit_code_2_empty_stderr_returns_structured_json_error() {
+    let result = run_plow("/bin/sh", &["-c".to_string(), "exit 2".to_string()])
         .await
         .unwrap();
     assert_eq!(result.is_error, Some(true));
@@ -153,8 +153,8 @@ async fn run_fallow_exit_code_2_empty_stderr_returns_structured_json_error() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn run_fallow_high_exit_code_returns_error() {
-    let result = run_fallow("/bin/sh", &["-c".to_string(), "exit 127".to_string()])
+async fn run_plow_high_exit_code_returns_error() {
+    let result = run_plow("/bin/sh", &["-c".to_string(), "exit 127".to_string()])
         .await
         .unwrap();
     assert_eq!(result.is_error, Some(true));
@@ -165,8 +165,8 @@ async fn run_fallow_high_exit_code_returns_error() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn run_fallow_stderr_is_trimmed_in_error_message() {
-    let result = run_fallow(
+async fn run_plow_stderr_is_trimmed_in_error_message() {
+    let result = run_plow(
         "/bin/sh",
         &[
             "-c".to_string(),
@@ -188,29 +188,29 @@ async fn run_fallow_stderr_is_trimmed_in_error_message() {
 #[test]
 #[expect(unsafe_code, reason = "env var mutation requires unsafe")]
 fn resolve_binary_behavior() {
-    // 1. Without FALLOW_BIN, defaults to "fallow" or a sibling path
+    // 1. Without PLOW_BIN, defaults to "plow" or a sibling path
     // SAFETY: test-only, sequential env access within this single test function
-    unsafe { std::env::remove_var("FALLOW_BIN") };
+    unsafe { std::env::remove_var("PLOW_BIN") };
     let bin = resolve_binary();
-    assert!(bin.contains("fallow"));
+    assert!(bin.contains("plow"));
 
-    // 2. With FALLOW_BIN set, uses the custom path
+    // 2. With PLOW_BIN set, uses the custom path
     // SAFETY: test-only, sequential env access within this single test function
-    unsafe { std::env::set_var("FALLOW_BIN", "/custom/path/fallow") };
+    unsafe { std::env::set_var("PLOW_BIN", "/custom/path/plow") };
     let bin = resolve_binary();
-    assert_eq!(bin, "/custom/path/fallow");
+    assert_eq!(bin, "/custom/path/plow");
 
     // SAFETY: test-only cleanup
-    unsafe { std::env::remove_var("FALLOW_BIN") };
+    unsafe { std::env::remove_var("PLOW_BIN") };
 }
 
-// ── run_fallow: signal termination (exit code None → -1) ──────────
+// ── run_plow: signal termination (exit code None → -1) ──────────
 
 #[cfg(unix)]
 #[tokio::test]
-async fn run_fallow_killed_by_signal_returns_error_with_negative_code() {
+async fn run_plow_killed_by_signal_returns_error_with_negative_code() {
     // `kill -9 $$` kills the shell itself, producing exit code None (signal)
-    let result = run_fallow("/bin/sh", &["-c".to_string(), "kill -9 $$".to_string()])
+    let result = run_plow("/bin/sh", &["-c".to_string(), "kill -9 $$".to_string()])
         .await
         .unwrap();
     assert_eq!(result.is_error, Some(true));
@@ -220,13 +220,13 @@ async fn run_fallow_killed_by_signal_returns_error_with_negative_code() {
     assert_eq!(parsed["exit_code"], -1);
 }
 
-// ── run_fallow: exit code 1 with both stdout and stderr ───────────
+// ── run_plow: exit code 1 with both stdout and stderr ───────────
 
 #[cfg(unix)]
 #[tokio::test]
-async fn run_fallow_exit_code_1_with_stderr_returns_stdout_not_stderr() {
+async fn run_plow_exit_code_1_with_stderr_returns_stdout_not_stderr() {
     // Exit code 1 = issues found. Stdout should be returned, stderr ignored.
-    let result = run_fallow(
+    let result = run_plow(
         "/bin/sh",
         &[
             "-c".to_string(),
@@ -242,12 +242,12 @@ async fn run_fallow_exit_code_1_with_stderr_returns_stdout_not_stderr() {
     assert!(!text.contains("debug warning"));
 }
 
-// ── run_fallow: large output ──────────────────────────────────────
+// ── run_plow: large output ──────────────────────────────────────
 
 #[cfg(unix)]
 #[tokio::test]
-async fn run_fallow_multiline_stdout() {
-    let result = run_fallow(
+async fn run_plow_multiline_stdout() {
+    let result = run_plow(
         "/bin/sh",
         &[
             "-c".to_string(),
@@ -263,14 +263,14 @@ async fn run_fallow_multiline_stdout() {
     assert!(text.contains("line3"));
 }
 
-// ── run_fallow: empty args list ───────────────────────────────────
+// ── run_plow: empty args list ───────────────────────────────────
 
 #[cfg(unix)]
 #[tokio::test]
-async fn run_fallow_empty_args() {
+async fn run_plow_empty_args() {
     // Running /bin/sh with no args would start interactive mode and hang.
     // Instead, test that we can run with a trivially simple command.
-    let result = run_fallow("/bin/sh", &["-c".to_string(), "echo ok".to_string()])
+    let result = run_plow("/bin/sh", &["-c".to_string(), "echo ok".to_string()])
         .await
         .unwrap();
     assert_eq!(result.is_error, Some(false));
@@ -278,12 +278,12 @@ async fn run_fallow_empty_args() {
     assert!(text.contains("ok"));
 }
 
-// ── run_fallow: multiline stderr in error ─────────────────────────
+// ── run_plow: multiline stderr in error ─────────────────────────
 
 #[cfg(unix)]
 #[tokio::test]
-async fn run_fallow_multiline_stderr_in_error() {
-    let result = run_fallow(
+async fn run_plow_multiline_stderr_in_error() {
+    let result = run_plow(
         "/bin/sh",
         &[
             "-c".to_string(),
@@ -300,46 +300,46 @@ async fn run_fallow_multiline_stderr_in_error() {
     assert!(msg.contains("error line 2"));
 }
 
-// ── run_fallow: result always has exactly one content item ─────────
+// ── run_plow: result always has exactly one content item ─────────
 
 #[cfg(unix)]
 #[tokio::test]
-async fn run_fallow_result_has_single_content_item() {
-    let success = run_fallow("/bin/sh", &["-c".to_string(), "echo test".to_string()])
+async fn run_plow_result_has_single_content_item() {
+    let success = run_plow("/bin/sh", &["-c".to_string(), "echo test".to_string()])
         .await
         .unwrap();
     assert_eq!(success.content.len(), 1);
 
-    let error = run_fallow("/bin/sh", &["-c".to_string(), "exit 2".to_string()])
+    let error = run_plow("/bin/sh", &["-c".to_string(), "exit 2".to_string()])
         .await
         .unwrap();
     assert_eq!(error.content.len(), 1);
 
-    let issues = run_fallow("/bin/sh", &["-c".to_string(), "exit 1".to_string()])
+    let issues = run_plow("/bin/sh", &["-c".to_string(), "exit 1".to_string()])
         .await
         .unwrap();
     assert_eq!(issues.content.len(), 1);
 }
 
-// ── run_fallow: missing binary error message quality ──────────────
+// ── run_plow: missing binary error message quality ──────────────
 
 #[tokio::test]
-async fn run_fallow_missing_binary_error_includes_install_hint() {
-    let result = run_fallow("nonexistent-binary-xyz", &[]).await;
+async fn run_plow_missing_binary_error_includes_install_hint() {
+    let result = run_plow("nonexistent-binary-xyz", &[]).await;
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(
-        err.message.contains("Ensure fallow is installed"),
+        err.message.contains("Ensure plow is installed"),
         "error should include install hint"
     );
 }
 
-// ── run_fallow: unicode in stdout ─────────────────────────────────
+// ── run_plow: unicode in stdout ─────────────────────────────────
 
 #[cfg(unix)]
 #[tokio::test]
-async fn run_fallow_unicode_in_stdout() {
-    let result = run_fallow(
+async fn run_plow_unicode_in_stdout() {
+    let result = run_plow(
         "/bin/sh",
         &[
             "-c".to_string(),
@@ -355,8 +355,8 @@ async fn run_fallow_unicode_in_stdout() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn run_fallow_unicode_in_stderr_error() {
-    let result = run_fallow(
+async fn run_plow_unicode_in_stderr_error() {
+    let result = run_plow(
         "/bin/sh",
         &[
             "-c".to_string(),
@@ -372,12 +372,12 @@ async fn run_fallow_unicode_in_stderr_error() {
     assert!(msg.contains("ungültige Konfiguration"));
 }
 
-// ── run_fallow: exit code boundary values ─────────────────────────
+// ── run_plow: exit code boundary values ─────────────────────────
 
 #[cfg(unix)]
 #[tokio::test]
-async fn run_fallow_exit_code_255() {
-    let result = run_fallow("/bin/sh", &["-c".to_string(), "exit 255".to_string()])
+async fn run_plow_exit_code_255() {
+    let result = run_plow("/bin/sh", &["-c".to_string(), "exit 255".to_string()])
         .await
         .unwrap();
     assert_eq!(result.is_error, Some(true));
@@ -386,13 +386,13 @@ async fn run_fallow_exit_code_255() {
     assert_eq!(parsed["exit_code"], 255);
 }
 
-// ── run_fallow: large stderr output ───────────────────────────────
+// ── run_plow: large stderr output ───────────────────────────────
 
 #[cfg(unix)]
 #[tokio::test]
-async fn run_fallow_large_stderr_in_error() {
+async fn run_plow_large_stderr_in_error() {
     // Generate a large stderr message
-    let result = run_fallow(
+    let result = run_plow(
         "/bin/sh",
         &[
             "-c".to_string(),
@@ -409,12 +409,12 @@ async fn run_fallow_large_stderr_in_error() {
     assert!(msg.contains("error line 100"));
 }
 
-// ── run_fallow: stdout with trailing whitespace ───────────────────
+// ── run_plow: stdout with trailing whitespace ───────────────────
 
 #[cfg(unix)]
 #[tokio::test]
-async fn run_fallow_stdout_preserves_content() {
-    let result = run_fallow(
+async fn run_plow_stdout_preserves_content() {
+    let result = run_plow(
         "/bin/sh",
         &[
             "-c".to_string(),
@@ -428,12 +428,12 @@ async fn run_fallow_stdout_preserves_content() {
     assert!(text.contains(r#""key": "value""#));
 }
 
-// ── run_fallow: exit code 1 with only stderr (no stdout) ──────────
+// ── run_plow: exit code 1 with only stderr (no stdout) ──────────
 
 #[cfg(unix)]
 #[tokio::test]
-async fn run_fallow_exit_code_1_only_stderr_returns_empty_json() {
-    let result = run_fallow(
+async fn run_plow_exit_code_1_only_stderr_returns_empty_json() {
+    let result = run_plow(
         "/bin/sh",
         &[
             "-c".to_string(),
@@ -447,13 +447,13 @@ async fn run_fallow_exit_code_1_only_stderr_returns_empty_json() {
     assert_eq!(extract_text(&result), "{}");
 }
 
-// ── run_fallow: process inherits no stdin ─────────────────────────
+// ── run_plow: process inherits no stdin ─────────────────────────
 
 #[cfg(unix)]
 #[tokio::test]
-async fn run_fallow_stdin_is_not_inherited() {
+async fn run_plow_stdin_is_not_inherited() {
     // cat with /dev/null should exit 0 with empty output
-    let result = run_fallow(
+    let result = run_plow(
         "/bin/sh",
         &["-c".to_string(), "cat < /dev/null".to_string()],
     )
@@ -463,12 +463,12 @@ async fn run_fallow_stdin_is_not_inherited() {
     assert_eq!(extract_text(&result), "{}");
 }
 
-// ── run_fallow: timeout ───────────────────────────────────────────
+// ── run_plow: timeout ───────────────────────────────────────────
 
 #[cfg(unix)]
 #[tokio::test]
-async fn run_fallow_timeout_returns_mcp_error() {
-    let result = run_fallow_with_timeout(
+async fn run_plow_timeout_returns_mcp_error() {
+    let result = run_plow_with_timeout(
         "/bin/sh",
         &["-c".to_string(), "sleep 10".to_string()],
         Duration::from_millis(20),
@@ -478,17 +478,17 @@ async fn run_fallow_timeout_returns_mcp_error() {
     assert!(result.is_err(), "timeout should produce an MCP error");
     let err = result.unwrap_err();
     assert!(err.message.contains("timed out"));
-    assert!(err.message.contains("FALLOW_TIMEOUT_SECS"));
+    assert!(err.message.contains("PLOW_TIMEOUT_SECS"));
 }
 
-// ── run_fallow: structured JSON error pass-through ────────────────
+// ── run_plow: structured JSON error pass-through ────────────────
 
 #[cfg(unix)]
 #[tokio::test]
-async fn run_fallow_exit_code_2_with_json_stdout_passes_through() {
+async fn run_plow_exit_code_2_with_json_stdout_passes_through() {
     // When CLI outputs structured JSON error on stdout (--format json behavior),
     // the MCP server should pass it through instead of reconstructing from stderr.
-    let result = run_fallow(
+    let result = run_plow(
         "/bin/sh",
         &[
             "-c".to_string(),
@@ -508,9 +508,9 @@ async fn run_fallow_exit_code_2_with_json_stdout_passes_through() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn run_fallow_exit_code_2_prefers_json_stdout_over_stderr() {
+async fn run_plow_exit_code_2_prefers_json_stdout_over_stderr() {
     // When both stdout (JSON) and stderr exist, stdout JSON should win.
-    let result = run_fallow(
+    let result = run_plow(
         "/bin/sh",
         &[
             "-c".to_string(),

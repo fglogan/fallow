@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use fallow_config::{OutputFormat, WorkspaceInfo, discover_workspaces};
+use plow_config::{OutputFormat, WorkspaceInfo, discover_workspaces};
 use globset::Glob;
 use rustc_hash::FxHashSet;
 
@@ -17,7 +17,7 @@ use crate::error::emit_error;
 /// Any issue whose path starts with one of the roots passes; dependency-level
 /// issues are scoped to the matching workspaces' own `package.json` files.
 pub fn filter_to_workspaces(
-    results: &mut fallow_core::results::AnalysisResults,
+    results: &mut plow_core::results::AnalysisResults,
     ws_roots: &[PathBuf],
 ) {
     let any_under = |p: &Path| ws_roots.iter().any(|r| p.starts_with(r));
@@ -303,11 +303,11 @@ fn find_matches(
 // ── Changed-file filtering ───────────────────────────────────────
 
 // `filter_changed_files`, `try_get_changed_files`, `get_changed_files`, and
-// `ChangedFilesError` were promoted to `fallow_core::changed_files` so the LSP
-// (which depends on `fallow-core` but not `fallow-cli`) can reuse the exact
+// `ChangedFilesError` were promoted to `plow_core::changed_files` so the LSP
+// (which depends on `plow-core` but not `plow-cli`) can reuse the exact
 // same filter and git-resolution logic. Re-exported below for the existing
 // internal call sites in this crate.
-pub use fallow_core::changed_files::{
+pub use plow_core::changed_files::{
     filter_results_by_changed_files as filter_changed_files, get_changed_files,
     try_get_changed_files,
 };
@@ -326,7 +326,7 @@ pub use fallow_core::changed_files::{
 /// reasoning applies to catalog entries, dependency overrides, type-only
 /// deps, and test-only deps. The line filter is a noise-floor reducer for
 /// source-anchored findings; CI must still fail on project-level findings
-/// the PR caused. Mirrors the default `FALLOW_SUMMARY_SCOPE=all` behavior
+/// the PR caused. Mirrors the default `PLOW_SUMMARY_SCOPE=all` behavior
 /// in typed PR-comment rendering.
 ///
 /// `relative_to_diff_path` normalizes the finding's absolute path to the
@@ -335,7 +335,7 @@ pub use fallow_core::changed_files::{
 /// escape), the finding is RETAINED rather than silently dropped: an
 /// unfilterable path is better surfaced than silently hidden.
 pub fn filter_results_by_diff(
-    results: &mut fallow_core::results::AnalysisResults,
+    results: &mut plow_core::results::AnalysisResults,
     diff_index: &crate::report::ci::diff_filter::DiffIndex,
     root: &Path,
 ) {
@@ -439,7 +439,7 @@ pub fn filter_results_by_diff(
         .retain(|v| line_in_diff(&v.violation.from_path, v.violation.line));
 
     // Stale suppressions: drop when the suppression's source line is not
-    // in the diff. A stale `// fallow-ignore-next-line` is still real
+    // in the diff. A stale `// plow-ignore-next-line` is still real
     // even when the PR doesn't touch it, but the diff filter is opt-in
     // noise reduction, so consistent line-level treatment is the choice.
     results
@@ -552,8 +552,8 @@ pub fn resolve_workspace_scope(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_core::extract::MemberKind;
-    use fallow_core::results::*;
+    use plow_core::extract::MemberKind;
+    use plow_core::results::*;
     use std::path::PathBuf;
 
     /// Test shim: single-workspace variant on top of `filter_to_workspaces`.
@@ -1547,15 +1547,15 @@ mod tests {
 
     // ── multi-workspace resolution ──────────────────────────────────
 
-    fn ws(name: &str, rel: &str) -> fallow_config::WorkspaceInfo {
-        fallow_config::WorkspaceInfo {
+    fn ws(name: &str, rel: &str) -> plow_config::WorkspaceInfo {
+        plow_config::WorkspaceInfo {
             root: PathBuf::from("/project").join(rel),
             name: name.to_owned(),
             is_internal_dependency: false,
         }
     }
 
-    fn rel(workspaces: &[fallow_config::WorkspaceInfo]) -> Vec<String> {
+    fn rel(workspaces: &[plow_config::WorkspaceInfo]) -> Vec<String> {
         workspaces
             .iter()
             .map(|w| relative_workspace_path(&w.root, Path::new("/project")))
@@ -1587,7 +1587,7 @@ mod tests {
             "web-[staging]",
             &workspaces,
             &rels,
-            fallow_config::OutputFormat::Human,
+            plow_config::OutputFormat::Human,
         )
         .unwrap();
         assert_eq!(hits, vec![0]);
@@ -1607,7 +1607,7 @@ mod tests {
             "@scope/*",
             &workspaces,
             &rels,
-            fallow_config::OutputFormat::Human,
+            plow_config::OutputFormat::Human,
         )
         .unwrap();
         assert_eq!(hits, vec![0]);
@@ -1617,7 +1617,7 @@ mod tests {
             "apps/*",
             &workspaces,
             &rels,
-            fallow_config::OutputFormat::Human,
+            plow_config::OutputFormat::Human,
         )
         .unwrap();
         assert_eq!(hits, vec![1, 2]);
@@ -1633,7 +1633,7 @@ mod tests {
                 "web-[bad",
                 &workspaces,
                 &rels,
-                fallow_config::OutputFormat::Human,
+                plow_config::OutputFormat::Human,
             )
             .is_err()
         );
@@ -1817,7 +1817,7 @@ mod tests {
         );
     }
 
-    // ChangedFilesError::describe is tested in fallow_core::changed_files
+    // ChangedFilesError::describe is tested in plow_core::changed_files
 
     // ── filter_results_by_diff (issue #424) ────────────────────────
 

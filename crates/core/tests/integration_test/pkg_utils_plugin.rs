@@ -2,7 +2,7 @@ use std::path::Path;
 
 use super::common::{create_config, fixture_path};
 
-fn unused_file_paths(results: &fallow_core::results::AnalysisResults, root: &Path) -> Vec<String> {
+fn unused_file_paths(results: &plow_core::results::AnalysisResults, root: &Path) -> Vec<String> {
     results
         .unused_files
         .iter()
@@ -21,7 +21,7 @@ fn unused_file_paths(results: &fallow_core::results::AnalysisResults, root: &Pat
 fn pkg_utils_build_configs_are_kept_reachable() {
     let root = fixture_path("pkg-utils-build-config");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files = unused_file_paths(&results, &root);
 
@@ -62,7 +62,7 @@ fn package_config_without_pkg_utils_dependency_stays_flagged() {
     // @sanity/pkg-utils keeps reporting a stray package.config.ts as unused.
     let root = fixture_path("pkg-utils-no-dep");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files = unused_file_paths(&results, &root);
 

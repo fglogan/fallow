@@ -1,14 +1,14 @@
 //! V8 `ScriptCoverage` JSON parser and Istanbul-compatible normalizer.
 //!
-//! This is the open-source layer of fallow's runtime-coverage pipeline.
+//! This is the open-source layer of plow's runtime-coverage pipeline.
 //! It performs the mechanical conversion from V8's byte-offset-based coverage
 //! format (as emitted by `node --experimental-test-coverage`, `c8`, the
 //! Inspector protocol, or any V8 isolate) into the line/column-based
-//! [`IstanbulFileCoverage`] shape that fallow's CRAP scoring already
+//! [`IstanbulFileCoverage`] shape that plow's CRAP scoring already
 //! consumes.
 //!
 //! The closed-source three-state cross-reference, combined scoring, hot-path
-//! heuristics and verdict generation live in `fallow-cov` (private) and
+//! heuristics and verdict generation live in `plow-cov` (private) and
 //! consume this crate's normalized output via the `fallow-cov-protocol`
 //! envelope.
 
@@ -76,8 +76,8 @@ pub struct CoverageRange {
 
 // -- Istanbul output types --------------------------------------------------
 
-/// Subset of the Istanbul `FileCoverage` shape that fallow needs for CRAP
-/// scoring. We do not emit statement / branch maps because fallow only needs
+/// Subset of the Istanbul `FileCoverage` shape that plow needs for CRAP
+/// scoring. We do not emit statement / branch maps because plow only needs
 /// per-function call counts.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IstanbulFileCoverage {
@@ -466,7 +466,7 @@ mod tests {
 
     /// Property tests for the byte-offset-to-line/column mapper.
     ///
-    /// The `position` mapper backs every Istanbul range fallow emits for runtime
+    /// The `position` mapper backs every Istanbul range plow emits for runtime
     /// coverage, so its invariants are encoded as properties rather than relying
     /// on hand-picked examples. The line-boundary tests build their input from
     /// known line bodies and join them with a chosen ending, so the expected

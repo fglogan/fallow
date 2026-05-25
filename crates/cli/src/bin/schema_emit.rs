@@ -12,7 +12,7 @@
 //!
 //! Usage:
 //! ```bash
-//! cargo run -p fallow-cli --features schema-emit --bin fallow-schema-emit \
+//! cargo run -p plow-cli --features schema-emit --bin plow-schema-emit \
 //!     > docs/output-schema.json
 //! ```
 //!
@@ -33,7 +33,7 @@ use std::process::ExitCode;
 use schemars::generate::SchemaSettings;
 use serde_json::{Map, Value};
 
-use fallow_cli::health_types::{
+use plow_cli::health_types::{
     ComplexityViolation, ContributorEntry, ContributorIdentifierFormat, CoverageGapSummary,
     CoverageGaps, CoverageModel, CoverageTier, ExceededThreshold, FileHealthScore, FindingSeverity,
     HealthActionsMeta, HealthScore, HealthScorePenalties, HealthSummary, HealthTrend, HotspotEntry,
@@ -42,55 +42,55 @@ use fallow_cli::health_types::{
     TargetThresholds, TrendCount, UntestedExport, UntestedExportFinding, UntestedFile,
     UntestedFileFinding, VitalSigns, VitalSignsCounts,
 };
-use fallow_cli::output_dupes::{
+use plow_cli::output_dupes::{
     AttributedCloneGroupFinding, CloneFamilyAction, CloneFamilyActionType, CloneFamilyFinding,
     CloneGroupAction, CloneGroupActionType, CloneGroupFinding, DupesReportPayload,
 };
-use fallow_cli::output_envelope::{
+use plow_cli::output_envelope::{
     AuditCommand, AuditOutput, BoundariesListLogicalGroup, BoundariesListRule, BoundariesListZone,
     BoundariesListing, CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CodeClimateIssue,
     CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation, CodeClimateOutput,
     CodeClimateSeverity, CombinedOutput, CoverageAnalyzeOutput, CoverageAnalyzeSchemaVersion,
     CoverageSetupFileToEdit, CoverageSetupFramework, CoverageSetupMember, CoverageSetupOutput,
     CoverageSetupPackageManager, CoverageSetupRuntimeTarget, CoverageSetupSchemaVersion,
-    CoverageSetupSnippet, DupesOutput, ExplainOutput, FallowOutput, GitHubReviewComment,
+    CoverageSetupSnippet, DupesOutput, ExplainOutput, PlowOutput, GitHubReviewComment,
     GitHubReviewSide, GitLabReviewComment, GitLabReviewPosition, GitLabReviewPositionType,
     GroupByMode, HealthOutput, ListBoundariesOutput, ReviewCheckConclusion, ReviewComment,
     ReviewEnvelopeEvent, ReviewEnvelopeMeta, ReviewEnvelopeOutput, ReviewEnvelopeSchema,
     ReviewEnvelopeSummary, ReviewProvider, ReviewReconcileOutput, ReviewReconcileSchema,
 };
-use fallow_cli::report::dupes_grouping::{
+use plow_cli::report::dupes_grouping::{
     AttributedCloneGroup, AttributedInstance, DuplicationGroup,
 };
-use fallow_config::{AuthoredRule, LogicalGroup, LogicalGroupStatus};
-use fallow_core::duplicates::{
+use plow_config::{AuthoredRule, LogicalGroup, LogicalGroupStatus};
+use plow_core::duplicates::{
     CloneFamily, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats, MirroredDirectory,
     RefactoringKind, RefactoringSuggestion,
 };
-use fallow_types::envelope::{
+use plow_types::envelope::{
     AuditIntroduced, BaselineCategoryDelta, BaselineDeltas, BaselineMatch, CheckSummary, ElapsedMs,
     EntryPoints, Meta, MetaMetric, MetaRule, RegressionResult, RegressionStatus,
     RegressionToleranceKind, SchemaVersion, ToolVersion,
 };
-use fallow_types::extract::MemberKind;
-use fallow_types::output::{
+use plow_types::extract::MemberKind;
+use plow_types::output::{
     AddToConfigAction, AddToConfigKind, AddToConfigValue, FixAction, FixActionType,
     IgnoreExportsRule, IssueAction, SuppressFileAction, SuppressFileKind, SuppressLineAction,
     SuppressLineKind, SuppressLineScope,
 };
-use fallow_types::output_dead_code::{
+use plow_types::output_dead_code::{
     BoundaryViolationFinding, CircularDependencyFinding, PrivateTypeLeakFinding,
     TestOnlyDependencyFinding, TypeOnlyDependencyFinding, UnlistedDependencyFinding,
     UnresolvedImportFinding, UnusedClassMemberFinding, UnusedDependencyFinding,
     UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
     UnusedOptionalDependencyFinding, UnusedTypeFinding,
 };
-use fallow_types::output_health::{
+use plow_types::output_health::{
     HealthFindingAction, HealthFindingActionType, HotspotAction, HotspotActionHeuristic,
     HotspotActionType, RefactoringTargetAction, RefactoringTargetActionType, UntestedExportAction,
     UntestedExportActionType, UntestedFileAction, UntestedFileActionType,
 };
-use fallow_types::results::{
+use plow_types::results::{
     AnalysisResults, BoundaryViolation, CircularDependency, DependencyLocation,
     DependencyOverrideMisconfigReason, DependencyOverrideSource, DuplicateExport,
     DuplicateLocation, EmptyCatalogGroup, EntryPointSummary, ExportUsage, FeatureFlag,
@@ -101,7 +101,7 @@ use fallow_types::results::{
 };
 
 /// Workspace-relative path to the committed schema. Read at runtime against
-/// the workspace root so the published `fallow-cli` crate does not need to
+/// the workspace root so the published `plow-cli` crate does not need to
 /// bundle `docs/output-schema.json` (which lives outside the cli crate's
 /// own directory). Only used by the production code path; tests use the
 /// embedded copy below.
@@ -159,7 +159,7 @@ fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
-            eprintln!("fallow-schema-emit: {err}");
+            eprintln!("plow-schema-emit: {err}");
             ExitCode::from(2)
         }
     }
@@ -339,7 +339,7 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
         // Drives the schema's document-root `oneOf` (see
         // `rewrite_document_root_one_of` in `merge_with_committed`); the
         // committed schema's root therefore becomes a derived artifact.
-        "FallowOutput",
+        "PlowOutput",
         // crates/cli/src/output_envelope.rs - list --boundaries envelope
         // and building blocks (issue #373).
         "BoundariesListLogicalGroup",
@@ -354,7 +354,7 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
         "LogicalGroup",
         "LogicalGroupStatus",
         // crates/cli/src/report/dupes_grouping.rs - per-group duplication
-        // attribution payload (`fallow dupes --group-by`).
+        // attribution payload (`plow dupes --group-by`).
         "AttributedCloneGroup",
         "AttributedInstance",
         "DuplicationGroup",
@@ -376,7 +376,7 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
         // root envelope introduced in #410 (PR D of the #384 ladder).
         // Replaces the hand-built `serde_json::json!` macro in
         // `crates/cli/src/coverage/analyze.rs::print_runtime_json` and
-        // joins `FallowOutput` as a sibling object variant.
+        // joins `PlowOutput` as a sibling object variant.
         "CoverageAnalyzeOutput",
         "CoverageAnalyzeSchemaVersion",
     ]
@@ -618,7 +618,7 @@ fn derived_definitions() -> Map<String, Value> {
     // Typed document root. Must be registered AFTER every variant struct so
     // schemars resolves each variant against the already-registered
     // definition rather than inlining.
-    let _ = generator.subschema_for::<FallowOutput>();
+    let _ = generator.subschema_for::<PlowOutput>();
 
     register_list_boundaries_definitions(&mut generator);
 
@@ -646,7 +646,7 @@ fn derived_definitions() -> Map<String, Value> {
 /// Register per-command envelope structs from `crates/cli/src/output_envelope.rs`.
 /// Extracted from [`derived_definitions`] to keep the orchestrator under the
 /// SIG unit-size threshold (the per-envelope list grew past the 150-line cap
-/// when `FallowOutput` was added in #384 item 6).
+/// when `PlowOutput` was added in #384 item 6).
 fn register_per_command_envelope_definitions(generator: &mut schemars::SchemaGenerator) {
     let _ = generator.subschema_for::<AuditOutput>();
     let _ = generator.subschema_for::<AuditCommand>();
@@ -666,8 +666,8 @@ fn register_per_command_envelope_definitions(generator: &mut schemars::SchemaGen
     let _ = generator.subschema_for::<CheckGroupedEntry>();
     let _ = generator.subschema_for::<DupesOutput>();
     let _ = generator.subschema_for::<HealthOutput>();
-    let _ = generator.subschema_for::<fallow_cli::health_types::HealthGroup>();
-    let _ = generator.subschema_for::<fallow_cli::health_types::HealthReport>();
+    let _ = generator.subschema_for::<plow_cli::health_types::HealthGroup>();
+    let _ = generator.subschema_for::<plow_cli::health_types::HealthReport>();
     let _ = generator.subschema_for::<GroupByMode>();
     let _ = generator.subschema_for::<ExplainOutput>();
     let _ = generator.subschema_for::<CodeClimateOutput>();
@@ -693,10 +693,10 @@ fn register_per_command_envelope_definitions(generator: &mut schemars::SchemaGen
     let _ = generator.subschema_for::<ReviewReconcileSchema>();
 }
 
-/// Register the `fallow list --boundaries --format json` envelope and its
+/// Register the `plow list --boundaries --format json` envelope and its
 /// building blocks. Extracted from [`derived_definitions`] to keep the
 /// orchestrator under the SIG unit-size threshold; the pre-expansion
-/// logical-group types live in `fallow_config` (issue #373) and ride along
+/// logical-group types live in `plow_config` (issue #373) and ride along
 /// via `JsonSchema` so the committed schema's `$ref`s resolve.
 fn register_list_boundaries_definitions(generator: &mut schemars::SchemaGenerator) {
     let _ = generator.subschema_for::<ListBoundariesOutput>();
@@ -779,19 +779,19 @@ fn merge_with_committed(derived: &Map<String, Value>) -> Result<Value, String> {
 /// Hand-maintained root-level envelope definitions that are NOT yet typed
 /// via Rust + schemars but DO appear as top-level `--format json` outputs.
 /// Each entry is referenced from the document-root `oneOf` so the typed
-/// surface (`FallowOutput`) plus the bare-array CodeClimate spec plus these
-/// hand-maintained envelopes together document every shape fallow can emit.
+/// surface (`PlowOutput`) plus the bare-array CodeClimate spec plus these
+/// hand-maintained envelopes together document every shape plow can emit.
 ///
 /// Entries here MUST also appear as a `$ref` from the document-root `oneOf`
 /// (the drift test `hand_maintained_root_envelopes_appear_in_root_one_of`
 /// asserts this). Removing an entry means the migration has landed and the
-/// envelope is now a variant of `FallowOutput`; in that case the
+/// envelope is now a variant of `PlowOutput`; in that case the
 /// corresponding `definitions[<name>]` block must also be removed (or
 /// remain only as a transitive helper) so the test
 /// `every_registered_name_resolves_to_a_derived_schema` still passes.
 const HAND_MAINTAINED_ROOT_ENVELOPES: &[&str] = &[];
 
-/// Drive the document-root `oneOf` from the typed `FallowOutput` enum plus
+/// Drive the document-root `oneOf` from the typed `PlowOutput` enum plus
 /// the two non-object branches (`CodeClimateOutput`, hand-maintained
 /// envelopes). Replaces the previously hand-maintained block.
 ///
@@ -804,12 +804,12 @@ fn rewrite_document_root_one_of(document: &mut Value) -> Result<(), String> {
         .ok_or_else(|| "schema document root is not a JSON object".to_string())?;
 
     let mut one_of: Vec<Value> = Vec::with_capacity(2 + HAND_MAINTAINED_ROOT_ENVELOPES.len());
-    one_of.push(serde_json::json!({ "$ref": "#/definitions/FallowOutput" }));
+    one_of.push(serde_json::json!({ "$ref": "#/definitions/PlowOutput" }));
     // CodeClimateOutput serializes as `Vec<CodeClimateIssue>` via
     // `#[serde(transparent)]`. `#[serde(tag = ...)]` cannot internally tag
     // a non-object variant and wrapping the array would break the Code
     // Climate / GitLab Code Quality spec, so it stays as a sibling root
-    // branch outside `FallowOutput`.
+    // branch outside `PlowOutput`.
     one_of.push(serde_json::json!({ "$ref": "#/definitions/CodeClimateOutput" }));
     for name in HAND_MAINTAINED_ROOT_ENVELOPES {
         one_of.push(serde_json::json!({ "$ref": format!("#/definitions/{name}") }));
@@ -819,20 +819,20 @@ fn rewrite_document_root_one_of(document: &mut Value) -> Result<(), String> {
     root.insert(
         "description".to_string(),
         Value::String(
-            "Schemas for the JSON output of fallow commands. To identify which \
+            "Schemas for the JSON output of plow commands. To identify which \
              envelope you have, check for the unique top-level field: \
              `summary.total_issues` (check), `health_score` (health), \
              `clone_groups` (dupes), `runtime_coverage` (coverage analyze), \
              `boundaries` (list --boundaries), `command: \"audit\"` (audit), \
              `body` plus `comments` (review-github / review-gitlab), \
-             `schema: \"fallow-review-reconcile/v1\"` (ci reconcile-review), \
+             `schema: \"plow-review-reconcile/v1\"` (ci reconcile-review), \
              `framework_detected` plus `members` (coverage setup), `id` plus \
              `how_to_fix` (explain), `check`+`dupes`+`health` keys together \
              (bare combined invocation). `HealthOutput` and `DupesOutput` \
              flatten their body (`HealthReport` / `DupesReportPayload`) into \
              top-level fields, so the discriminator field is from the body \
              shape itself, not a wrapper key. Every object-shaped envelope \
-             is a variant of `FallowOutput`; `CodeClimateOutput` is a bare \
+             is a variant of `PlowOutput`; `CodeClimateOutput` is a bare \
              JSON array (per the Code Climate / GitLab Code Quality spec) \
              and stays a sibling root branch."
                 .to_string(),
@@ -858,7 +858,7 @@ fn rewrite_document_root_one_of(document: &mut Value) -> Result<(), String> {
 /// of type `IssueAction`, `introduced` attached); health findings use the
 /// matching per-finding wrapper (`HealthFindingAction` / `HotspotAction` /
 /// `RefactoringTargetAction`) and skip `introduced` when the finding does not
-/// flow through `fallow audit`.
+/// flow through `plow audit`.
 fn augment_finding_definition(
     value: &mut Value,
     augmentation: FindingAugmentation,
@@ -1171,9 +1171,9 @@ mod drift_tests {
         }
     }
 
-    /// Every variant of [`FallowOutput`] must have its inner type registered
+    /// Every variant of [`PlowOutput`] must have its inner type registered
     /// in [`derived_definitions`]. Without registration, schemars inlines the
-    /// variant's schema in the root `FallowOutput` `oneOf` rather than
+    /// variant's schema in the root `PlowOutput` `oneOf` rather than
     /// emitting a `$ref`; the document-root union then drifts from the
     /// `definitions/` map and the drift gate may or may not catch it
     /// depending on whether the variant's inner type is transitively
@@ -1182,15 +1182,15 @@ mod drift_tests {
     /// The `VARIANTS` list is hand-maintained because Rust does not provide
     /// reflection over enum variants. The nested `_variant_count_is_locked`
     /// match produces a `non-exhaustive patterns` compile error if a
-    /// contributor adds a variant to [`FallowOutput`] without updating this
+    /// contributor adds a variant to [`PlowOutput`] without updating this
     /// test, so the list cannot silently drift.
     ///
     /// Regression for issue #417: mechanizes the `#[allow(dead_code)]`
     /// social contract on the enum into a `cargo test`-time assertion.
     #[test]
-    fn every_fallow_output_variant_is_registered_in_derived_definitions() {
+    fn every_plow_output_variant_is_registered_in_derived_definitions() {
         // (variant tag for the diagnostic, inner type name as schemars
-        // emits it). Keep in sync with `enum FallowOutput` in
+        // emits it). Keep in sync with `enum PlowOutput` in
         // `crates/cli/src/output_envelope.rs`. The exhaustive match below
         // enforces this at compile time.
         const VARIANTS: &[(&str, &str)] = &[
@@ -1209,31 +1209,31 @@ mod drift_tests {
         ];
 
         // Compile-time exhaustiveness check. Adding a new variant to
-        // `FallowOutput` without extending `VARIANTS` above fails this
+        // `PlowOutput` without extending `VARIANTS` above fails this
         // match with `non-exhaustive patterns`. The function is never
         // called; it exists solely to lock the variant count.
         #[expect(
             dead_code,
             reason = "compile-time exhaustiveness guard for the VARIANTS list above; never called at runtime"
         )]
-        fn variant_count_is_locked(value: &FallowOutput) -> &'static str {
+        fn variant_count_is_locked(value: &PlowOutput) -> &'static str {
             // The leading `variant_` (not `_variant_`) is intentional:
             // rustc auto-silences `dead_code` on identifiers starting
             // with `_`, which would make `#[expect(dead_code)]`
             // unfulfilled and trigger `unfulfilled_lint_expectations`.
             match value {
-                FallowOutput::Audit(_) => "Audit",
-                FallowOutput::Explain(_) => "Explain",
-                FallowOutput::ReviewEnvelope(_) => "ReviewEnvelope",
-                FallowOutput::ReviewReconcile(_) => "ReviewReconcile",
-                FallowOutput::CoverageSetup(_) => "CoverageSetup",
-                FallowOutput::CoverageAnalyze(_) => "CoverageAnalyze",
-                FallowOutput::ListBoundaries(_) => "ListBoundaries",
-                FallowOutput::Health(_) => "Health",
-                FallowOutput::Dupes(_) => "Dupes",
-                FallowOutput::CheckGrouped(_) => "CheckGrouped",
-                FallowOutput::Check(_) => "Check",
-                FallowOutput::Combined(_) => "Combined",
+                PlowOutput::Audit(_) => "Audit",
+                PlowOutput::Explain(_) => "Explain",
+                PlowOutput::ReviewEnvelope(_) => "ReviewEnvelope",
+                PlowOutput::ReviewReconcile(_) => "ReviewReconcile",
+                PlowOutput::CoverageSetup(_) => "CoverageSetup",
+                PlowOutput::CoverageAnalyze(_) => "CoverageAnalyze",
+                PlowOutput::ListBoundaries(_) => "ListBoundaries",
+                PlowOutput::Health(_) => "Health",
+                PlowOutput::Dupes(_) => "Dupes",
+                PlowOutput::CheckGrouped(_) => "CheckGrouped",
+                PlowOutput::Check(_) => "Check",
+                PlowOutput::Combined(_) => "Combined",
             }
         }
 
@@ -1242,13 +1242,13 @@ mod drift_tests {
         for (variant, inner) in VARIANTS {
             if !derived.contains_key(*inner) {
                 missing.push(format!(
-                    "variant `FallowOutput::{variant}({inner})` produces an inline schema in the root `oneOf` because `{inner}` is not registered in `derived_definitions()`. Add `let _ = generator.subschema_for::<{inner}>();` (or include it via `register_per_command_envelope_definitions` / `register_list_boundaries_definitions`)."
+                    "variant `PlowOutput::{variant}({inner})` produces an inline schema in the root `oneOf` because `{inner}` is not registered in `derived_definitions()`. Add `let _ = generator.subschema_for::<{inner}>();` (or include it via `register_per_command_envelope_definitions` / `register_list_boundaries_definitions`)."
                 ));
             }
         }
         assert!(
             missing.is_empty(),
-            "{} `FallowOutput` variant(s) missing registration:\n\n{}",
+            "{} `PlowOutput` variant(s) missing registration:\n\n{}",
             missing.len(),
             missing.join("\n\n"),
         );
@@ -1404,7 +1404,7 @@ mod drift_tests {
         }
         assert!(
             failures.is_empty(),
-            "schema drift detected ({} issue{}):\n\n  - {}\n\nRegenerate the in-scope `definitions` blocks with:\n    cargo run -p fallow-cli --features schema-emit --bin fallow-schema-emit > /tmp/emitted-schema.json\nthen reconcile the relevant entries in `docs/output-schema.json` against the derived shape, or update the Rust source if the schema change was the intended source of truth.",
+            "schema drift detected ({} issue{}):\n\n  - {}\n\nRegenerate the in-scope `definitions` blocks with:\n    cargo run -p plow-cli --features schema-emit --bin plow-schema-emit > /tmp/emitted-schema.json\nthen reconcile the relevant entries in `docs/output-schema.json` against the derived shape, or update the Rust source if the schema change was the intended source of truth.",
             failures.len(),
             if failures.len() == 1 { "" } else { "s" },
             failures.join("\n  - "),
@@ -1709,7 +1709,7 @@ mod drift_tests {
     /// migration that types `CoverageAnalyzeOutput` and removes its
     /// `definitions` entry could silently drop it from the documented
     /// union if the implementer forgot to add the variant to
-    /// `FallowOutput`. The drift test fires so the regression surfaces
+    /// `PlowOutput`. The drift test fires so the regression surfaces
     /// at `cargo test` time rather than at downstream-consumer time.
     #[test]
     fn hand_maintained_root_envelopes_appear_in_root_one_of() {
@@ -1737,19 +1737,19 @@ mod drift_tests {
                  the document-root `oneOf`. Either (a) re-add the entry to \
                  the rewritten `oneOf` in `rewrite_document_root_one_of`, \
                  or (b) remove it from `HAND_MAINTAINED_ROOT_ENVELOPES` \
-                 because the migration to a typed `FallowOutput` variant \
+                 because the migration to a typed `PlowOutput` variant \
                  has landed. Root `oneOf` refs today: {:?}",
                 refs.iter().collect::<Vec<_>>(),
             );
         }
     }
 
-    /// The document-root `oneOf` MUST always reference `FallowOutput` as
+    /// The document-root `oneOf` MUST always reference `PlowOutput` as
     /// its first entry plus the bare-array `CodeClimateOutput` branch.
     /// Catches accidental removal of either reference by a future
     /// `rewrite_document_root_one_of` edit.
     #[test]
-    fn root_one_of_carries_fallow_output_and_codeclimate() {
+    fn root_one_of_carries_plow_output_and_codeclimate() {
         let document: Value = serde_json::from_str(COMMITTED_SCHEMA)
             .expect("committed docs/output-schema.json must parse");
         let one_of = document
@@ -1767,8 +1767,8 @@ mod drift_tests {
         }
 
         assert!(
-            refs.contains("FallowOutput"),
-            "document-root `oneOf` must reference `#/definitions/FallowOutput`; \
+            refs.contains("PlowOutput"),
+            "document-root `oneOf` must reference `#/definitions/PlowOutput`; \
              found refs: {:?}",
             refs.iter().collect::<Vec<_>>(),
         );

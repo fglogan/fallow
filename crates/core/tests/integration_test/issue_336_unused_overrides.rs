@@ -17,10 +17,10 @@
 
 use std::{fs, path::PathBuf};
 
-use fallow_config::{
-    FallowConfig, IgnoreDependencyOverrideRule, OutputFormat, RulesConfig, Severity,
+use plow_config::{
+    PlowConfig, IgnoreDependencyOverrideRule, OutputFormat, RulesConfig, Severity,
 };
-use fallow_types::results::{DependencyOverrideMisconfigReason, DependencyOverrideSource};
+use plow_types::results::{DependencyOverrideMisconfigReason, DependencyOverrideSource};
 use rustc_hash::FxHashSet;
 
 use super::common::fixture_path;
@@ -28,8 +28,8 @@ use super::common::fixture_path;
 fn config_for_fixture(
     root: PathBuf,
     ignore: Vec<IgnoreDependencyOverrideRule>,
-) -> fallow_config::ResolvedConfig {
-    FallowConfig {
+) -> plow_config::ResolvedConfig {
+    PlowConfig {
         ignore_dependency_overrides: ignore,
         ..Default::default()
     }
@@ -40,7 +40,7 @@ fn config_for_fixture(
 fn detects_unused_overrides_across_both_sources() {
     let root = fixture_path("issue-336-unused-overrides");
     let config = config_for_fixture(root, vec![]);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let actual: FxHashSet<(&str, DependencyOverrideSource)> = results
         .unused_dependency_overrides
@@ -65,7 +65,7 @@ fn detects_unused_overrides_across_both_sources() {
 fn parent_chain_with_declared_parent_is_used() {
     let root = fixture_path("issue-336-unused-overrides");
     let config = config_for_fixture(root, vec![]);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let any_react_dom = results
         .unused_dependency_overrides
@@ -82,7 +82,7 @@ fn parent_chain_with_declared_parent_is_used() {
 fn target_with_version_selector_is_resolved() {
     let root = fixture_path("issue-336-unused-overrides");
     let config = config_for_fixture(root, vec![]);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let any_types_react = results
         .unused_dependency_overrides
@@ -132,7 +132,7 @@ snapshots:
     )
     .expect("write pnpm lockfile");
 
-    let config = FallowConfig::default().resolve(
+    let config = PlowConfig::default().resolve(
         root.to_path_buf(),
         OutputFormat::Human,
         4,
@@ -140,7 +140,7 @@ snapshots:
         true,
         None,
     );
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let actual: FxHashSet<&str> = results
         .unused_dependency_overrides
@@ -160,7 +160,7 @@ snapshots:
 fn detects_misconfigured_overrides() {
     let root = fixture_path("issue-336-unused-overrides");
     let config = config_for_fixture(root, vec![]);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let actual: FxHashSet<(String, DependencyOverrideMisconfigReason)> = results
         .misconfigured_dependency_overrides
@@ -192,7 +192,7 @@ fn ignore_rule_suppresses_unused_override() {
         source: None,
     }];
     let config = config_for_fixture(root, ignore);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let any_lodash = results
         .unused_dependency_overrides
@@ -215,7 +215,7 @@ fn ignore_rule_scoped_by_source_only_affects_matching_source() {
         source: Some("package.json".to_string()),
     }];
     let config = config_for_fixture(root, ignore);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let any_lodash = results
         .unused_dependency_overrides
@@ -236,12 +236,12 @@ fn severity_off_short_circuits() {
         misconfigured_dependency_overrides: Severity::Off,
         ..RulesConfig::default()
     };
-    let config = FallowConfig {
+    let config = PlowConfig {
         rules,
         ..Default::default()
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.unused_dependency_overrides.is_empty(),
@@ -273,7 +273,7 @@ fn unused_overrides_carry_transitive_hint_on_every_shape() {
     )
     .expect("write yaml");
 
-    let config = FallowConfig::default().resolve(
+    let config = PlowConfig::default().resolve(
         root.to_path_buf(),
         OutputFormat::Human,
         4,
@@ -281,7 +281,7 @@ fn unused_overrides_carry_transitive_hint_on_every_shape() {
         true,
         None,
     );
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert_eq!(results.unused_dependency_overrides.len(), 2);
     for finding in &results.unused_dependency_overrides {

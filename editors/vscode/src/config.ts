@@ -1,10 +1,10 @@
 import * as path from "node:path";
 // VS Code injects this module into the extension host at runtime.
-// fallow-ignore-next-line unlisted-dependency
+// plow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
 import type { DuplicationMode, IssueTypeConfig, TraceLevel } from "./types.js";
 
-const SECTION = "fallow";
+const SECTION = "plow";
 
 const getConfig = (): vscode.WorkspaceConfiguration => vscode.workspace.getConfiguration(SECTION);
 

@@ -18,14 +18,14 @@ use tower_lsp::{Client, LanguageServer, LspService, Server};
 
 use serde::{Deserialize, Serialize};
 
-use fallow_core::changed_files::{
+use plow_core::changed_files::{
     filter_duplication_by_changed_files, filter_results_by_changed_files, resolve_git_toplevel,
     try_get_changed_files_with_toplevel,
 };
-use fallow_core::duplicates::DuplicationReport;
-use fallow_core::results::AnalysisResults;
+use plow_core::duplicates::DuplicationReport;
+use plow_core::results::AnalysisResults;
 
-// ── Custom LSP notification: fallow/analysisComplete ──────────────────────
+// ── Custom LSP notification: plow/analysisComplete ──────────────────────
 
 /// Custom notification sent to the client after every analysis completes.
 /// Carries summary stats so the extension can update the status bar, context
@@ -34,7 +34,7 @@ enum AnalysisComplete {}
 
 impl notification::Notification for AnalysisComplete {
     type Params = AnalysisCompleteParams;
-    const METHOD: &'static str = "fallow/analysisComplete";
+    const METHOD: &'static str = "plow/analysisComplete";
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -69,7 +69,7 @@ struct AnalysisCompleteParams {
 }
 
 /// Diagnostic codes that the LSP client can disable via initializationOptions.
-/// The same table also backs the `fallow/issueTypes` custom request used by
+/// The same table also backs the `plow/issueTypes` custom request used by
 /// editor clients that need user-facing labels for all emitted diagnostic codes.
 #[derive(Debug, Clone, Copy)]
 struct DiagnosticIssueType {
@@ -225,7 +225,7 @@ fn config_load_error_detail(
 ) -> String {
     match explicit_config_path {
         Some(path) => format!(
-            "fallow.configPath '{}' failed to load for {}: {err} (no diagnostics will be produced)",
+            "plow.configPath '{}' failed to load for {}: {err} (no diagnostics will be produced)",
             path.display(),
             project_root.display()
         ),
@@ -244,7 +244,7 @@ fn analyze_project_root(
     merged_duplication: &mut DuplicationReport,
     config_messages: &mut Vec<(MessageType, String)>,
 ) {
-    let (config, message) = match fallow_core::config_for_project(project_root, config_path) {
+    let (config, message) = match plow_core::config_for_project(project_root, config_path) {
         Ok((config, Some(path))) => (
             config,
             (
@@ -273,14 +273,14 @@ fn analyze_project_root(
             if config_path.is_none() {
                 #[expect(
                     deprecated,
-                    reason = "ADR-008 deprecates fallow_core::analyze_project externally; the LSP still uses the workspace path dependency"
+                    reason = "ADR-008 deprecates plow_core::analyze_project externally; the LSP still uses the workspace path dependency"
                 )]
-                if let Ok(results) = fallow_core::analyze_project(project_root) {
+                if let Ok(results) = plow_core::analyze_project(project_root) {
                     merge_results(merged_results, results);
                 }
-                let duplication = fallow_core::duplicates::find_duplicates_in_project(
+                let duplication = plow_core::duplicates::find_duplicates_in_project(
                     project_root,
-                    &fallow_config::DuplicatesConfig::default(),
+                    &plow_config::DuplicatesConfig::default(),
                 );
                 merge_duplication(merged_duplication, duplication);
             }
@@ -291,15 +291,15 @@ fn analyze_project_root(
 
     #[expect(
         deprecated,
-        reason = "ADR-008 deprecates fallow_core::analyze_with_usages externally; the LSP still uses the workspace path dependency"
+        reason = "ADR-008 deprecates plow_core::analyze_with_usages externally; the LSP still uses the workspace path dependency"
     )]
-    if let Ok(results) = fallow_core::analyze_with_usages(&config) {
+    if let Ok(results) = plow_core::analyze_with_usages(&config) {
         merge_results(merged_results, results);
     }
 
-    let files = fallow_core::discover::discover_files_with_plugin_scopes(&config);
+    let files = plow_core::discover::discover_files_with_plugin_scopes(&config);
     let duplication =
-        fallow_core::duplicates::find_duplicates(project_root, &files, &config.duplicates);
+        plow_core::duplicates::find_duplicates(project_root, &files, &config.duplicates);
     merge_duplication(merged_duplication, duplication);
 }
 
@@ -339,7 +339,7 @@ fn initialization_config_path(opts: &serde_json::Value, root: Option<&Path>) -> 
     Some(path.canonicalize().unwrap_or(path))
 }
 
-struct FallowLspServer {
+struct PlowLspServer {
     client: Client,
     root: Arc<RwLock<Option<PathBuf>>>,
     results: Arc<RwLock<Option<AnalysisResults>>>,
@@ -410,7 +410,7 @@ fn build_server_capabilities() -> ServerCapabilities {
         }),
         hover_provider: Some(HoverProviderCapability::Simple(true)),
         diagnostic_provider: Some(DiagnosticServerCapabilities::Options(DiagnosticOptions {
-            identifier: Some("fallow".to_string()),
+            identifier: Some("plow".to_string()),
             inter_file_dependencies: true,
             workspace_diagnostics: false,
             work_done_progress_options: WorkDoneProgressOptions::default(),
@@ -420,7 +420,7 @@ fn build_server_capabilities() -> ServerCapabilities {
 }
 
 #[tower_lsp::async_trait]
-impl LanguageServer for FallowLspServer {
+impl LanguageServer for PlowLspServer {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
         let root = params
             .root_uri
@@ -488,7 +488,7 @@ impl LanguageServer for FallowLspServer {
 
     async fn initialized(&self, _: InitializedParams) {
         self.client
-            .log_message(MessageType::INFO, "fallow LSP server initialized")
+            .log_message(MessageType::INFO, "plow LSP server initialized")
             .await;
 
         // Run initial analysis
@@ -703,7 +703,7 @@ impl LanguageServer for FallowLspServer {
         let position = params.text_document_position_params.position;
 
         let duplication = self.duplication.read().await;
-        let empty_report = fallow_core::duplicates::DuplicationReport::default();
+        let empty_report = plow_core::duplicates::DuplicationReport::default();
         let duplication_ref = duplication.as_ref().unwrap_or(&empty_report);
 
         Ok(hover::build_hover(
@@ -715,7 +715,7 @@ impl LanguageServer for FallowLspServer {
     }
 }
 
-impl FallowLspServer {
+impl PlowLspServer {
     fn new(client: Client) -> Self {
         Self {
             client,
@@ -770,7 +770,7 @@ impl FallowLspServer {
                         .log_message(
                             MessageType::WARNING,
                             format!(
-                                "fallow workspace root ({}) is a subdirectory of git toplevel ({}). \
+                                "plow workspace root ({}) is a subdirectory of git toplevel ({}). \
                                  Diagnostics for files outside the workspace are not produced; the \
                                  changedSince filter joins paths against the toplevel.",
                                 root.display(),
@@ -819,7 +819,7 @@ impl FallowLspServer {
             .collect();
 
         self.client
-            .log_message(MessageType::INFO, "Running fallow analysis...")
+            .log_message(MessageType::INFO, "Running plow analysis...")
             .await;
 
         // Discover all project roots: the workspace root itself, plus any
@@ -1164,7 +1164,7 @@ impl FallowLspServer {
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()
-        .with_env_filter("fallow=info")
+        .with_env_filter("plow=info")
         .with_writer(std::io::stderr)
         .with_ansi(false)
         .init();
@@ -1172,8 +1172,8 @@ async fn main() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
-    let (service, socket) = LspService::build(FallowLspServer::new)
-        .custom_method("fallow/issueTypes", FallowLspServer::issue_types)
+    let (service, socket) = LspService::build(PlowLspServer::new)
+        .custom_method("plow/issueTypes", PlowLspServer::issue_types)
         .finish();
 
     Server::new(stdin, stdout, socket).serve(service).await;
@@ -1191,7 +1191,7 @@ async fn main() {
 fn find_project_roots(workspace_root: &std::path::Path) -> Vec<std::path::PathBuf> {
     let mut roots = vec![workspace_root.to_path_buf()];
 
-    let workspaces = fallow_config::discover_workspaces(workspace_root);
+    let workspaces = plow_config::discover_workspaces(workspace_root);
     for ws in &workspaces {
         roots.push(ws.root.clone());
     }
@@ -1224,7 +1224,7 @@ fn find_project_roots(workspace_root: &std::path::Path) -> Vec<std::path::PathBu
 /// non-object (string / number / array), the existing value is left alone
 /// and `changedSince` is not stamped on that one diagnostic; that case is
 /// not used by `build_diagnostics` today and is logged via the structured
-/// fact that `data` for any fallow diagnostic should be an object.
+/// fact that `data` for any plow diagnostic should be an object.
 fn attach_changed_since_data(
     diagnostics_by_file: &mut FxHashMap<Url, Vec<Diagnostic>>,
     changed_since: Option<&str>,
@@ -1242,7 +1242,7 @@ fn attach_changed_since_data(
                 Some(serde_json::Value::Object(obj)) => {
                     obj.insert("changedSince".to_string(), value.clone());
                 }
-                // Non-object existing payload: leave it intact. Fallow's
+                // Non-object existing payload: leave it intact. Plow's
                 // own diagnostics never set `data` to a non-object today;
                 // if a future caller does, they get to keep their value.
                 Some(_) => {}
@@ -1385,8 +1385,8 @@ fn dedup_results(target: &mut AnalysisResults) {
         // Include the kind discriminant so a self-loop on a single file
         // cannot collide with any future single-file multi-node shape.
         let kind = match c.cycle.kind {
-            fallow_core::results::ReExportCycleKind::SelfLoop => 1u8,
-            fallow_core::results::ReExportCycleKind::MultiNode => 0u8,
+            plow_core::results::ReExportCycleKind::SelfLoop => 1u8,
+            plow_core::results::ReExportCycleKind::MultiNode => 0u8,
         };
         (kind, files)
     });
@@ -1444,7 +1444,7 @@ fn dedup_results(target: &mut AnalysisResults) {
     // one entry per package_name with the union of import sites; keep
     // sites stable-sorted for deterministic output.
     if target.unlisted_dependencies.len() > 1 {
-        let mut merged: FxHashMap<String, fallow_core::results::UnlistedDependencyFinding> =
+        let mut merged: FxHashMap<String, plow_core::results::UnlistedDependencyFinding> =
             FxHashMap::default();
         for dep in target.unlisted_dependencies.drain(..) {
             merged
@@ -1556,8 +1556,8 @@ fn merge_duplication(target: &mut DuplicationReport, source: DuplicationReport) 
 mod tests {
     use super::*;
 
-    use fallow_core::duplicates::{CloneGroup, CloneInstance, DuplicationStats};
-    use fallow_core::results::{
+    use plow_core::duplicates::{CloneGroup, CloneInstance, DuplicationStats};
+    use plow_core::results::{
         BoundaryViolation, BoundaryViolationFinding, CircularDependency, CircularDependencyFinding,
         ExportUsage, TestOnlyDependency, TestOnlyDependencyFinding, TypeOnlyDependency,
         UnlistedDependency, UnlistedDependencyFinding, UnusedClassMemberFinding, UnusedDependency,
@@ -1581,10 +1581,10 @@ mod tests {
             .expect("diagnostic_provider must be advertised so strict LSP 3.17 clients (Helix, Zed) call textDocument/diagnostic");
         match provider {
             DiagnosticServerCapabilities::Options(opts) => {
-                assert_eq!(opts.identifier.as_deref(), Some("fallow"));
+                assert_eq!(opts.identifier.as_deref(), Some("plow"));
                 assert!(
                     opts.inter_file_dependencies,
-                    "fallow diagnostics span files; clients must re-pull related files on changes"
+                    "plow diagnostics span files; clients must re-pull related files on changes"
                 );
                 assert!(
                     !opts.workspace_diagnostics,
@@ -1608,7 +1608,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn shutdown_sets_cancellation_flag() {
-        let (service, _) = LspService::build(FallowLspServer::new).finish();
+        let (service, _) = LspService::build(PlowLspServer::new).finish();
         let backend = service.inner();
         assert!(
             !backend.cancellation.load(Ordering::SeqCst),
@@ -1623,7 +1623,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn run_analysis_short_circuits_after_shutdown() {
-        let (service, _) = LspService::build(FallowLspServer::new).finish();
+        let (service, _) = LspService::build(PlowLspServer::new).finish();
         let backend = service.inner();
         // Set a workspace root so the flag check, not the missing-root
         // check, is what would normally let analysis proceed. After
@@ -1667,7 +1667,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn text_document_diagnostic_request_is_served() {
-        let (mut service, _) = LspService::build(FallowLspServer::new).finish();
+        let (mut service, _) = LspService::build(PlowLspServer::new).finish();
 
         let initialize = Request::build("initialize")
             .params(json!({"capabilities": {}}))
@@ -1688,7 +1688,7 @@ mod tests {
                 "textDocument": {
                     "uri": "file:///workspace/src/example.ts"
                 },
-                "identifier": "fallow"
+                "identifier": "plow"
             }))
             .id(2)
             .finish();
@@ -1711,9 +1711,9 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn fallow_issue_types_request_is_served() {
-        let (mut service, _) = LspService::build(FallowLspServer::new)
-            .custom_method("fallow/issueTypes", FallowLspServer::issue_types)
+    async fn plow_issue_types_request_is_served() {
+        let (mut service, _) = LspService::build(PlowLspServer::new)
+            .custom_method("plow/issueTypes", PlowLspServer::issue_types)
             .finish();
 
         let initialize = Request::build("initialize")
@@ -1730,7 +1730,7 @@ mod tests {
             .expect("initialize request should return a response");
         assert!(response.is_ok());
 
-        let issue_types = Request::build("fallow/issueTypes").id(2).finish();
+        let issue_types = Request::build("plow/issueTypes").id(2).finish();
         let response = service
             .ready()
             .await
@@ -1742,7 +1742,7 @@ mod tests {
 
         assert!(
             response.is_ok(),
-            "fallow/issueTypes must not return method_not_found"
+            "plow/issueTypes must not return method_not_found"
         );
         let result = response
             .result()
@@ -1758,18 +1758,18 @@ mod tests {
                 .iter()
                 .any(|v| v["code"] == json!("test-only-dependency")
                     && v["label"] == json!("Test-Only Dependencies")),
-            "response should include every diagnostic code emitted by fallow-lsp"
+            "response should include every diagnostic code emitted by plow-lsp"
         );
     }
 
     #[test]
     fn initialization_config_path_resolves_workspace_relative_path() {
-        let opts = json!({"configPath": "config/fallow.json"});
+        let opts = json!({"configPath": "config/plow.json"});
         let root = Path::new("/workspace");
 
         assert_eq!(
             initialization_config_path(&opts, Some(root)),
-            Some(PathBuf::from("/workspace/config/fallow.json"))
+            Some(PathBuf::from("/workspace/config/plow.json"))
         );
     }
 
@@ -1783,9 +1783,9 @@ mod tests {
     #[test]
     fn initialization_config_path_passes_through_absolute_path() {
         #[cfg(windows)]
-        let absolute = "C:/configs/fallow.json";
+        let absolute = "C:/configs/plow.json";
         #[cfg(not(windows))]
-        let absolute = "/etc/fallow.json";
+        let absolute = "/etc/plow.json";
 
         let opts = json!({ "configPath": absolute });
         assert_eq!(
@@ -1796,11 +1796,11 @@ mod tests {
 
     #[test]
     fn initialization_config_path_keeps_relative_path_without_root() {
-        let opts = json!({"configPath": "config/fallow.json"});
+        let opts = json!({"configPath": "config/plow.json"});
 
         assert_eq!(
             initialization_config_path(&opts, None),
-            Some(PathBuf::from("config/fallow.json"))
+            Some(PathBuf::from("config/plow.json"))
         );
     }
 
@@ -1860,8 +1860,8 @@ mod tests {
                 path: "/a.ts".into(),
             }));
         source_a.unresolved_imports.push(
-            fallow_core::results::UnresolvedImportFinding::with_actions(
-                fallow_core::results::UnresolvedImport {
+            plow_core::results::UnresolvedImportFinding::with_actions(
+                plow_core::results::UnresolvedImport {
                     path: "/a.ts".into(),
                     specifier: "./missing".to_string(),
                     line: 1,
@@ -1916,7 +1916,7 @@ mod tests {
 
     fn merge_test_unused_dependency(
         package_name: &str,
-        location: fallow_core::results::DependencyLocation,
+        location: plow_core::results::DependencyLocation,
         line: u32,
     ) -> UnusedDependency {
         UnusedDependency {
@@ -1931,7 +1931,7 @@ mod tests {
     fn merge_test_unused_member(
         parent_name: &str,
         member_name: &str,
-        kind: fallow_core::extract::MemberKind,
+        kind: plow_core::extract::MemberKind,
         line: u32,
     ) -> UnusedMember {
         UnusedMember {
@@ -1958,37 +1958,37 @@ mod tests {
             unused_dependencies: vec![UnusedDependencyFinding::with_actions(
                 merge_test_unused_dependency(
                     "dep",
-                    fallow_core::results::DependencyLocation::Dependencies,
+                    plow_core::results::DependencyLocation::Dependencies,
                     3,
                 ),
             )],
             unused_dev_dependencies: vec![UnusedDevDependencyFinding::with_actions(
                 merge_test_unused_dependency(
                     "dev-dep",
-                    fallow_core::results::DependencyLocation::DevDependencies,
+                    plow_core::results::DependencyLocation::DevDependencies,
                     4,
                 ),
             )],
             unused_optional_dependencies: vec![UnusedOptionalDependencyFinding::with_actions(
                 merge_test_unused_dependency(
                     "opt-dep",
-                    fallow_core::results::DependencyLocation::OptionalDependencies,
+                    plow_core::results::DependencyLocation::OptionalDependencies,
                     5,
                 ),
             )],
             unused_enum_members: vec![UnusedEnumMemberFinding::with_actions(
-                merge_test_unused_member("E", "A", fallow_core::extract::MemberKind::EnumMember, 6),
+                merge_test_unused_member("E", "A", plow_core::extract::MemberKind::EnumMember, 6),
             )],
             unused_class_members: vec![UnusedClassMemberFinding::with_actions(
                 merge_test_unused_member(
                     "C",
                     "m",
-                    fallow_core::extract::MemberKind::ClassMethod,
+                    plow_core::extract::MemberKind::ClassMethod,
                     7,
                 ),
             )],
-            unresolved_imports: vec![fallow_core::results::UnresolvedImportFinding::with_actions(
-                fallow_core::results::UnresolvedImport {
+            unresolved_imports: vec![plow_core::results::UnresolvedImportFinding::with_actions(
+                plow_core::results::UnresolvedImport {
                     path: "/f.ts".into(),
                     specifier: "./gone".to_string(),
                     line: 8,
@@ -2002,14 +2002,14 @@ mod tests {
                     imported_from: vec![],
                 },
             )],
-            duplicate_exports: vec![fallow_core::results::DuplicateExportFinding::with_actions(
-                fallow_core::results::DuplicateExport {
+            duplicate_exports: vec![plow_core::results::DuplicateExportFinding::with_actions(
+                plow_core::results::DuplicateExport {
                     export_name: "dup".to_string(),
                     locations: vec![],
                 },
             )],
             type_only_dependencies: vec![
-                fallow_core::results::TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
+                plow_core::results::TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
                     package_name: "type-only".to_string(),
                     path: "/pkg.json".into(),
                     line: 9,
@@ -2229,12 +2229,12 @@ mod tests {
                 UnlistedDependency {
                     package_name: "lodash".to_string(),
                     imported_from: vec![
-                        fallow_core::results::ImportSite {
+                        plow_core::results::ImportSite {
                             path: "/repo/packages/a/x.ts".into(),
                             line: 1,
                             col: 0,
                         },
-                        fallow_core::results::ImportSite {
+                        plow_core::results::ImportSite {
                             path: "/repo/packages/b/y.ts".into(),
                             line: 2,
                             col: 0,
@@ -2247,7 +2247,7 @@ mod tests {
             .push(UnlistedDependencyFinding::with_actions(
                 UnlistedDependency {
                     package_name: "lodash".to_string(),
-                    imported_from: vec![fallow_core::results::ImportSite {
+                    imported_from: vec![plow_core::results::ImportSite {
                         path: "/repo/packages/a/x.ts".into(),
                         line: 1,
                         col: 0,
@@ -2292,7 +2292,7 @@ mod tests {
             },
             severity: Some(DiagnosticSeverity::HINT),
             code: Some(NumberOrString::String("unused-export".to_string())),
-            source: Some("fallow".to_string()),
+            source: Some("plow".to_string()),
             message: "Export 'helper' is unused".to_string(),
             ..Default::default()
         }
@@ -2304,13 +2304,13 @@ mod tests {
         let uri = Url::parse("file:///a.ts").unwrap();
         map.insert(uri.clone(), vec![make_diagnostic(), make_diagnostic()]);
 
-        attach_changed_since_data(&mut map, Some("fallow-baseline"));
+        attach_changed_since_data(&mut map, Some("plow-baseline"));
 
         let diags = &map[&uri];
         for d in diags {
             assert_eq!(
                 d.data,
-                Some(serde_json::json!({ "changedSince": "fallow-baseline" })),
+                Some(serde_json::json!({ "changedSince": "plow-baseline" })),
                 "every diagnostic must carry data.changedSince when filter is active"
             );
         }
@@ -2350,18 +2350,18 @@ mod tests {
         d.data = Some(serde_json::json!({ "resolveToken": "abc-123" }));
         map.insert(uri.clone(), vec![d]);
 
-        attach_changed_since_data(&mut map, Some("fallow-baseline"));
+        attach_changed_since_data(&mut map, Some("plow-baseline"));
 
         let merged = map[&uri][0].data.as_ref().unwrap();
         assert_eq!(merged["resolveToken"], "abc-123");
-        assert_eq!(merged["changedSince"], "fallow-baseline");
+        assert_eq!(merged["changedSince"], "plow-baseline");
     }
 
     #[test]
     fn attach_changed_since_data_leaves_non_object_data_intact() {
         // If a future caller stamped `data` to a non-object (string,
         // number, array), don't silently coerce or destroy it. This
-        // shouldn't happen for fallow's own diagnostics (we always use
+        // shouldn't happen for plow's own diagnostics (we always use
         // objects), but the stamp must be defensive.
         let mut map: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
         let uri = Url::parse("file:///a.ts").unwrap();
@@ -2369,7 +2369,7 @@ mod tests {
         d.data = Some(serde_json::Value::String("custom-token".to_string()));
         map.insert(uri.clone(), vec![d]);
 
-        attach_changed_since_data(&mut map, Some("fallow-baseline"));
+        attach_changed_since_data(&mut map, Some("plow-baseline"));
 
         assert_eq!(
             map[&uri][0].data,
@@ -2387,7 +2387,7 @@ mod tests {
                 .unused_dependencies
                 .push(UnusedDependencyFinding::with_actions(UnusedDependency {
                     package_name: "lodash".to_string(),
-                    location: fallow_core::results::DependencyLocation::Dependencies,
+                    location: plow_core::results::DependencyLocation::Dependencies,
                     path: "/repo/package.json".into(),
                     line: 5,
                     used_in_workspaces: Vec::new(),
@@ -2398,7 +2398,7 @@ mod tests {
             .unused_dependencies
             .push(UnusedDependencyFinding::with_actions(UnusedDependency {
                 package_name: "lodash".to_string(),
-                location: fallow_core::results::DependencyLocation::Dependencies,
+                location: plow_core::results::DependencyLocation::Dependencies,
                 path: "/repo/packages/web/package.json".into(),
                 line: 5,
                 used_in_workspaces: Vec::new(),
@@ -2608,7 +2608,7 @@ mod tests {
     // clearer does not erase prior valid diagnostics from the client.
     // -----------------------------------------------------------------------
 
-    async fn install_document(backend: &FallowLspServer, uri: &Url, version: i32, text: &str) {
+    async fn install_document(backend: &PlowLspServer, uri: &Url, version: i32, text: &str) {
         backend.documents.write().await.insert(
             uri.clone(),
             DocumentState {
@@ -2620,7 +2620,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn publish_skips_uri_when_live_version_advanced_past_snapshot() {
-        let (service, _) = LspService::build(FallowLspServer::new).finish();
+        let (service, _) = LspService::build(PlowLspServer::new).finish();
         let backend = service.inner();
 
         let uri = Url::parse("file:///stale.ts").unwrap();
@@ -2647,7 +2647,7 @@ mod tests {
         // Boundary case for the strict `>` comparison: equal versions are
         // NOT stale; the analysis ran against exactly the document the
         // client still holds.
-        let (service, _) = LspService::build(FallowLspServer::new).finish();
+        let (service, _) = LspService::build(PlowLspServer::new).finish();
         let backend = service.inner();
 
         let uri = Url::parse("file:///fresh.ts").unwrap();
@@ -2680,7 +2680,7 @@ mod tests {
         // reference findings on a `pnpm-workspace.yaml`) must publish
         // normally. With the URI absent from BOTH the snapshot AND the
         // live `documents` map, no version race exists.
-        let (service, _) = LspService::build(FallowLspServer::new).finish();
+        let (service, _) = LspService::build(PlowLspServer::new).finish();
         let backend = service.inner();
 
         let uri = Url::parse("file:///never-opened/package.json").unwrap();
@@ -2706,7 +2706,7 @@ mod tests {
         // analysis ran without seeing this buffer; we have no version to
         // attach to a publish so the client cannot drop a mismatched
         // payload server-to-client. Skip until the next analysis cycle.
-        let (service, _) = LspService::build(FallowLspServer::new).finish();
+        let (service, _) = LspService::build(PlowLspServer::new).finish();
         let backend = service.inner();
 
         let uri = Url::parse("file:///opened-mid-run.ts").unwrap();
@@ -2739,7 +2739,7 @@ mod tests {
         // but has since been removed from `documents` via did_close. We
         // cannot prove the client still owns the document, so treat as
         // stale and skip publish.
-        let (service, _) = LspService::build(FallowLspServer::new).finish();
+        let (service, _) = LspService::build(PlowLspServer::new).finish();
         let backend = service.inner();
 
         let uri = Url::parse("file:///closed.ts").unwrap();
@@ -2771,7 +2771,7 @@ mod tests {
         // until the server state is `Initialized`.
         use futures::StreamExt;
 
-        let (mut service, socket) = LspService::build(FallowLspServer::new).finish();
+        let (mut service, socket) = LspService::build(PlowLspServer::new).finish();
 
         let initialize = Request::build("initialize")
             .params(json!({"capabilities": {}}))
@@ -2830,7 +2830,7 @@ mod tests {
         // version has moved on; the stale-clearing branch must NOT emit
         // an empty publish for it (which would erase last-valid diagnostics
         // from the client) and must NOT evict the cached entry.
-        let (service, _) = LspService::build(FallowLspServer::new).finish();
+        let (service, _) = LspService::build(PlowLspServer::new).finish();
         let backend = service.inner();
 
         let uri = Url::parse("file:///clearing.ts").unwrap();
@@ -2875,7 +2875,7 @@ mod tests {
         // "disappeared" and erase its last-valid diagnostics on the
         // client. Detects a regression where a future refactor "fixes"
         // the skip by also dropping the new_uris insertion.
-        let (service, _) = LspService::build(FallowLspServer::new).finish();
+        let (service, _) = LspService::build(PlowLspServer::new).finish();
         let backend = service.inner();
 
         let uri = Url::parse("file:///tracked.ts").unwrap();

@@ -1,5 +1,5 @@
 use colored::Colorize;
-use fallow_core::trace::PipelineTimings;
+use plow_core::trace::PipelineTimings;
 
 /// Stages below this wall-clock time are too cheap to annotate as parallel;
 /// the multiplier would be noise.
@@ -114,7 +114,7 @@ pub(in crate::report) fn build_performance_human_lines(t: &PipelineTimings) -> V
             .to_string(),
     );
     if let Some(duplication_ms) = t.duplication_ms {
-        // In combined mode (`fallow` with no subcommand) duplication runs
+        // In combined mode (`plow` with no subcommand) duplication runs
         // CONCURRENTLY with the whole check pipeline via rayon::join, so it
         // overlaps the stages above rather than following them. It is shown as
         // an informational overlay and deliberately excluded from `(other)` /

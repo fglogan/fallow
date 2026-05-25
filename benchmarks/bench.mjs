@@ -23,7 +23,7 @@ const projectFilter = projectsArg
     )
   : null;
 
-console.log("Building fallow (release)...");
+console.log("Building plow (release)...");
 const buildResult = spawnSync("cargo", ["build", "--release"], {
   cwd: rootDir,
   stdio: "pipe",
@@ -33,7 +33,7 @@ if (buildResult.status !== 0) {
   console.error("Build failed:", buildResult.stderr?.toString());
   process.exit(1);
 }
-const fallowBin = join(rootDir, "target", "release", "fallow");
+const plowBin = join(rootDir, "target", "release", "plow");
 const knipBin = join(__dirname, "node_modules", ".bin", "knip");
 const knip6Bin = join(__dirname, "knip6", "node_modules", ".bin", "knip");
 if (!existsSync(knipBin)) {
@@ -45,7 +45,7 @@ if (!hasKnip6) {
   console.warn("knip v6 not found. Run: cd benchmarks/knip6 && npm install knip@6");
 }
 
-const fallowVersion = spawnSync(fallowBin, ["--version"], { stdio: "pipe" })
+const plowVersion = spawnSync(plowBin, ["--version"], { stdio: "pipe" })
   .stdout?.toString()
   .trim();
 const knipVersion = spawnSync(knipBin, ["--version"], { stdio: "pipe" }).stdout?.toString().trim();
@@ -54,10 +54,10 @@ const knip6Version = hasKnip6
   : null;
 const rustVersion = spawnSync("rustc", ["--version"], { stdio: "pipe" }).stdout?.toString().trim();
 
-console.log(`\n=== Fallow vs Knip Benchmark Suite ===\n`);
+console.log(`\n=== Plow vs Knip Benchmark Suite ===\n`);
 printEnvironment();
 console.log(
-  `Tools:\n  fallow   ${fallowVersion}\n  knip v5  ${knipVersion}${knip6Version ? `\n  knip v6  ${knip6Version}` : ""}\nConfig: ${RUNS} runs, ${WARMUP} warmup\n`,
+  `Tools:\n  plow   ${plowVersion}\n  knip v5  ${knipVersion}${knip6Version ? `\n  knip v6  ${knip6Version}` : ""}\nConfig: ${RUNS} runs, ${WARMUP} warmup\n`,
 );
 
 function printEnvironment() {
@@ -134,7 +134,7 @@ function timeRunWithMemory(cmd, cmdArgs, cwd) {
     if (match) peakRssBytes = parseInt(match[1]);
   }
 
-  // stdout for fallow comes from the time wrapper's child process — it's on stdout
+  // stdout for plow comes from the time wrapper's child process — it's on stdout
   const stdout = result.stdout?.toString() ?? "";
 
   return { elapsed, status: result.status, signal: result.signal, stdout, stderr, peakRssBytes };
@@ -215,8 +215,8 @@ function fmtMem(bytes) {
   return mb < 1024 ? `${mb.toFixed(1)} MB` : `${(mb / 1024).toFixed(2)} GB`;
 }
 
-function clearFallowCache(dir) {
-  const cacheDir = join(dir, ".fallow");
+function clearPlowCache(dir) {
+  const cacheDir = join(dir, ".plow");
   if (existsSync(cacheDir)) rmSync(cacheDir, { recursive: true });
 }
 
@@ -228,7 +228,7 @@ function benchmarkProject(name, dir) {
   const fArgsCold = ["check", "--quiet", "--format", "json", "--no-cache"];
   const kArgs = ["--reporter", "json"];
   for (let i = 0; i < WARMUP; i++) {
-    timeRun(fallowBin, fArgsCold, dir);
+    timeRun(plowBin, fArgsCold, dir);
     timeRun(knipBin, kArgs, dir);
     if (hasKnip6) timeRun(knip6Bin, kArgs, dir);
   }
@@ -246,9 +246,9 @@ function benchmarkProject(name, dir) {
     k6ErrorReason = null;
 
   for (let i = 0; i < RUNS; i++) {
-    const fr = timeRunWithMemory(fallowBin, fArgsCold, dir);
+    const fr = timeRunWithMemory(plowBin, fArgsCold, dir);
     const fSummary = summarizeBenchmarkRun(fr);
-    if (!fSummary.valid) throw new Error(`[${name}] fallow cold run failed: ${fSummary.error}`);
+    if (!fSummary.valid) throw new Error(`[${name}] plow cold run failed: ${fSummary.error}`);
     fTimesCold.push(fr.elapsed);
     if (i === 0) {
       fIssues = fSummary.issues;
@@ -283,26 +283,26 @@ function benchmarkProject(name, dir) {
   // --- Warm cache ---
   // Warmup runs below settle the OS file cache + Spotlight indexing of cache.bin
   // so the first measured warm run isn't penalized vs the cold loop's warmups.
-  clearFallowCache(dir);
+  clearPlowCache(dir);
   const fArgsWarm = ["check", "--quiet", "--format", "json"];
   // Populate cache
-  const populate = timeRun(fallowBin, fArgsWarm, dir);
+  const populate = timeRun(plowBin, fArgsWarm, dir);
   const populateSummary = summarizeBenchmarkRun(populate);
   if (!populateSummary.valid)
-    throw new Error(`[${name}] fallow cache warm-up failed: ${populateSummary.error}`);
+    throw new Error(`[${name}] plow cache warm-up failed: ${populateSummary.error}`);
   // Warmup runs (same shape as cold path) to settle OS / Spotlight noise
   for (let i = 0; i < WARMUP; i++) {
-    timeRun(fallowBin, fArgsWarm, dir);
+    timeRun(plowBin, fArgsWarm, dir);
   }
   // Benchmark warm runs
   const fTimesWarm = [];
   for (let i = 0; i < RUNS; i++) {
-    const fr = timeRun(fallowBin, fArgsWarm, dir);
+    const fr = timeRun(plowBin, fArgsWarm, dir);
     const fSummary = summarizeBenchmarkRun(fr);
-    if (!fSummary.valid) throw new Error(`[${name}] fallow warm run failed: ${fSummary.error}`);
+    if (!fSummary.valid) throw new Error(`[${name}] plow warm run failed: ${fSummary.error}`);
     fTimesWarm.push(fr.elapsed);
   }
-  clearFallowCache(dir);
+  clearPlowCache(dir);
 
   const fsCold = stats(fTimesCold),
     fsWarm = stats(fTimesWarm);
@@ -317,7 +317,7 @@ function benchmarkProject(name, dir) {
   const fmtSpeedup = (v) => (v != null ? `${v.toFixed(1)}x` : "--");
   const rows = [
     {
-      Tool: "fallow (cold)",
+      Tool: "plow (cold)",
       Min: fmt(fsCold.min),
       Mean: fmt(fsCold.mean),
       Median: fmt(fsCold.median),
@@ -328,7 +328,7 @@ function benchmarkProject(name, dir) {
       Issues: fIssues,
     },
     {
-      Tool: "fallow (warm)",
+      Tool: "plow (warm)",
       Min: fmt(fsWarm.min),
       Mean: fmt(fsWarm.mean),
       Median: fmt(fsWarm.median),
@@ -393,8 +393,8 @@ function benchmarkProject(name, dir) {
   }
   console.table(rows);
   console.log(`  Cache speedup: ${cacheSpeedup.toFixed(2)}x (warm vs cold)`);
-  console.log(`  fallow cold: [${fTimesCold.map((t) => t.toFixed(0)).join(", ")}]`);
-  console.log(`  fallow warm: [${fTimesWarm.map((t) => t.toFixed(0)).join(", ")}]`);
+  console.log(`  plow cold: [${fTimesCold.map((t) => t.toFixed(0)).join(", ")}]`);
+  console.log(`  plow warm: [${fTimesWarm.map((t) => t.toFixed(0)).join(", ")}]`);
   console.log(
     `  knip v5:     ${kTimes.length > 0 ? `[${kTimes.map((t) => t.toFixed(0)).join(", ")}]` : `[error — ${kErrorReason ?? kIssues}]`}`,
   );
@@ -407,8 +407,8 @@ function benchmarkProject(name, dir) {
   return {
     name,
     files,
-    fallowCold: fsCold,
-    fallowWarm: fsWarm,
+    plowCold: fsCold,
+    plowWarm: fsWarm,
     knip: ks,
     knip6: k6s,
     speedupColdV5,
@@ -465,8 +465,8 @@ if (results.length > 0) {
     results.map((r) => ({
       Project: r.name,
       Files: r.files,
-      "Cold (median)": fmt(r.fallowCold.median),
-      "Warm (median)": fmt(r.fallowWarm.median),
+      "Cold (median)": fmt(r.plowCold.median),
+      "Warm (median)": fmt(r.plowWarm.median),
       "Knip v5 (median)": r.knip ? fmt(r.knip.median) : "error",
       ...(hasKnip6 ? { "Knip v6 (median)": r.knip6 ? fmt(r.knip6.median) : "error" } : {}),
       "vs v5 (cold)": r.speedupColdV5 != null ? `${r.speedupColdV5.toFixed(1)}x` : "--",
@@ -474,7 +474,7 @@ if (results.length > 0) {
         ? { "vs v6 (cold)": r.speedupColdV6 != null ? `${r.speedupColdV6.toFixed(1)}x` : "--" }
         : {}),
       "Cache effect": `${r.cacheSpeedup.toFixed(2)}x`,
-      "Fallow RSS": fmtMem(r.fPeakRss),
+      "Plow RSS": fmtMem(r.fPeakRss),
       "Knip v5 RSS": r.kError ? "--" : fmtMem(r.kPeakRss),
       ...(hasKnip6 ? { "Knip v6 RSS": r.k6Error ? "--" : fmtMem(r.k6PeakRss) } : {}),
     })),

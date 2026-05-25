@@ -1,4 +1,4 @@
-//! `fallow config` subcommand: show the resolved config and which file was loaded.
+//! `plow config` subcommand: show the resolved config and which file was loaded.
 //!
 //! Mirrors `eslint --print-config`, `dprint output-resolved-config`, and similar
 //! ecosystem patterns. Closes the "is my config even loaded?" silent-failure gap.
@@ -6,14 +6,14 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use fallow_config::{FallowConfig, OutputFormat};
+use plow_config::{PlowConfig, OutputFormat};
 
 use crate::error::emit_error;
 
 /// Exit code when no config file was found (only defaults are in effect).
 const EXIT_NO_CONFIG: u8 = 3;
 
-/// Run the `fallow config` subcommand.
+/// Run the `plow config` subcommand.
 ///
 /// - `path_only = false` (default): print the loaded config path on the first
 ///   line, followed by the JSON-serialized config (with `extends` resolved).
@@ -35,19 +35,19 @@ pub fn run_config(
     output: OutputFormat,
 ) -> ExitCode {
     let result = if let Some(path) = explicit_config {
-        FallowConfig::load(path)
+        PlowConfig::load(path)
             .map(|c| Some((c, path.to_path_buf())))
             .map_err(|e| format!("failed to load config '{}': {e}", path.display()))
     } else {
-        FallowConfig::find_and_load(root)
+        PlowConfig::find_and_load(root)
     };
 
     match result {
         Ok(Some((config, path))) => {
             // Mirror the contract the analysis path enforces: an invalid
             // boundary configuration (unknown zone reference, redundant
-            // root-prefix) exits 2 at config load. Without this, `fallow config`
-            // happily prints a "loaded fine" view of a config that `fallow
+            // root-prefix) exits 2 at config load. Without this, `plow config`
+            // happily prints a "loaded fine" view of a config that `plow
             // check` immediately rejects, producing a false signal during
             // debug sessions. Surfaced by review of #468.
             if let Err(errors) = config.validate_resolved_boundaries(root) {
@@ -104,7 +104,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir(dir.path().join(".git")).unwrap();
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{"entry": ["src/index.ts"]}"#,
         )
         .unwrap();
@@ -116,7 +116,7 @@ mod tests {
     fn run_config_path_only_with_file_returns_success() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir(dir.path().join(".git")).unwrap();
-        std::fs::write(dir.path().join(".fallowrc.json"), "{}").unwrap();
+        std::fs::write(dir.path().join(".plowrc.json"), "{}").unwrap();
         let exit = run_config(dir.path(), None, true, OutputFormat::Human);
         assert_eq!(format!("{exit:?}"), format!("{:?}", ExitCode::SUCCESS));
     }
@@ -138,7 +138,7 @@ mod tests {
         // would be `discovered.json`, but we pass `explicit.json`).
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir(dir.path().join(".git")).unwrap();
-        let discovered = dir.path().join(".fallowrc.json");
+        let discovered = dir.path().join(".plowrc.json");
         std::fs::write(&discovered, r#"{"entry": ["src/discovered.ts"]}"#).unwrap();
         let explicit = dir.path().join("explicit.json");
         std::fs::write(&explicit, r#"{"entry": ["src/explicit.ts"]}"#).unwrap();
@@ -158,15 +158,15 @@ mod tests {
 
     #[test]
     fn run_config_rejects_unknown_boundary_zone_reference() {
-        // The CLI's `fallow config` subcommand must enforce the same
+        // The CLI's `plow config` subcommand must enforce the same
         // hard-error contract as the analysis paths: a typo'd zone in
         // `boundaries.rules[]` exits 2 instead of printing a "loaded fine"
-        // view of a config that `fallow check` then rejects. Surfaced by
+        // view of a config that `plow check` then rejects. Surfaced by
         // review of #468.
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir(dir.path().join(".git")).unwrap();
         std::fs::write(
-            dir.path().join(".fallowrc.json"),
+            dir.path().join(".plowrc.json"),
             r#"{
                 "boundaries": {
                     "zones": [{ "name": "ui", "patterns": ["src/ui/**"] }],

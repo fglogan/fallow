@@ -136,7 +136,7 @@ fn text_width(s: &str) -> u32 {
 /// Simple hash for generating unique SVG element IDs.
 ///
 /// Prevents ID collisions when multiple badges are inlined on the same page
-/// (e.g., a GitHub profile README with several fallow badges).
+/// (e.g., a GitHub profile README with several plow badges).
 fn svg_id_suffix(label: &str, message: &str) -> String {
     let mut h: u32 = 0;
     for b in label.bytes().chain(message.bytes()) {
@@ -217,14 +217,14 @@ fn render_badge(label: &str, message: &str, color: &str) -> String {
 )]
 pub fn print_health_badge(report: &HealthReport) -> ExitCode {
     let Some(ref score) = report.health_score else {
-        eprintln!("Error: badge format requires --score (run `fallow health --format badge`)");
+        eprintln!("Error: badge format requires --score (run `plow health --format badge`)");
         return ExitCode::from(2);
     };
 
     let rounded = score.score as u32;
     let message = format!("{} ({rounded})", score.grade);
     let color = grade_color(score.grade);
-    let svg = render_badge("fallow", &message, color);
+    let svg = render_badge("plow", &message, color);
 
     println!("{svg}");
     ExitCode::SUCCESS
@@ -266,15 +266,15 @@ mod tests {
 
     #[test]
     fn render_badge_has_accessibility() {
-        let svg = render_badge("fallow", "A (87)", "#4c1");
-        assert!(svg.contains(r#"aria-label="fallow: A (87)""#));
-        assert!(svg.contains("<title>fallow: A (87)</title>"));
+        let svg = render_badge("plow", "A (87)", "#4c1");
+        assert!(svg.contains(r#"aria-label="plow: A (87)""#));
+        assert!(svg.contains("<title>plow: A (87)</title>"));
     }
 
     #[test]
     fn render_badge_unique_ids() {
-        let a = render_badge("fallow", "A (90)", "#4c1");
-        let b = render_badge("fallow", "B (76)", "#97ca00");
+        let a = render_badge("plow", "A (90)", "#4c1");
+        let b = render_badge("plow", "B (76)", "#97ca00");
         // Extract gradient ID from each badge.
         let extract_id = |svg: &str| -> String {
             let start = svg.find("id=\"s-").unwrap() + 4;
@@ -287,7 +287,7 @@ mod tests {
     #[test]
     fn render_badge_width_increases_with_longer_text() {
         let short = render_badge("a", "b", "#4c1");
-        let long = render_badge("fallow health", "100 A", "#4c1");
+        let long = render_badge("plow health", "100 A", "#4c1");
 
         // Extract width from the opening svg tag.
         let extract_width = |svg: &str| -> u32 {

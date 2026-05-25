@@ -11,7 +11,7 @@ fn rel(path: &std::path::Path, root: &std::path::Path) -> String {
 fn storybook_static_dirs_and_manager_runtime_imports_are_framework_provided() {
     let root = fixture_path("issue-546-storybook-runtime-resources");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unresolved: Vec<_> = results
         .unresolved_imports

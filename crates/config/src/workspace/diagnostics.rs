@@ -3,8 +3,8 @@
 //! Surfaces malformed `package.json`, unreachable glob matches, missing
 //! tsconfig references, and undeclared workspaces as typed
 //! [`WorkspaceDiagnostic`] values. Each diagnostic also emits a deduplicated
-//! `tracing::warn!` so users running fallow with default tracing filters see
-//! the cause of "fallow doesn't see my package."
+//! `tracing::warn!` so users running plow with default tracing filters see
+//! the cause of "plow doesn't see my package."
 //!
 //! Repeated `GlobMatchedNoPackageJson` diagnostics are aggregated by glob
 //! pattern at emission time so a wide glob matching hundreds of package-less
@@ -208,7 +208,7 @@ impl std::fmt::Display for WorkspaceLoadError {
             Self::MalformedRootPackageJson { path, error } => write!(
                 f,
                 "root package.json at '{}' is not valid JSON ({error}). \
-                 Fix the syntax before re-running fallow.",
+                 Fix the syntax before re-running plow.",
                 path.display()
             ),
         }
@@ -354,7 +354,7 @@ pub(super) fn emit_diagnostics(root: &Path, diagnostics: &[WorkspaceDiagnostic])
         // On a poisoned mutex, `should_emit` returns true and we emit anyway:
         // over-warning beats swallowing a typo.
         if should_emit(plan.dedupe_key) {
-            tracing::warn!("fallow: {}", plan.message);
+            tracing::warn!("plow: {}", plan.message);
         }
     }
 }
@@ -454,8 +454,8 @@ pub fn capture_workspace_warnings<F: FnOnce() -> R, R>(body: F) -> (R, Vec<Works
 /// canonical root. Populated by callers that run
 /// [`super::discover_workspaces_with_diagnostics`] and (after config load
 /// completes) by the analysis pipeline's `find_undeclared_workspaces_*`
-/// pass. Consumers (`fallow list --workspaces`, the JSON envelope on
-/// `fallow check / dupes / health`) read via [`workspace_diagnostics_for`].
+/// pass. Consumers (`plow list --workspaces`, the JSON envelope on
+/// `plow check / dupes / health`) read via [`workspace_diagnostics_for`].
 ///
 /// Canonicalisation matches the dedupe-key canonicalisation in
 /// [`plan_warnings`]: two callers on the same physical root coalesce, and
@@ -539,7 +539,7 @@ pub fn workspace_diagnostics_for(root: &Path) -> Vec<WorkspaceDiagnostic> {
 
 /// Directories that are conventionally NOT workspace packages even when a
 /// glob like `packages/*` matches them. Mirrors pnpm/npm/yarn behavior of
-/// silently filtering these out, and extends fallow's existing
+/// silently filtering these out, and extends plow's existing
 /// `should_skip_workspace_scan_dir` list with build artifacts and tooling
 /// caches.
 #[must_use]

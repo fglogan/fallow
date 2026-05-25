@@ -1,7 +1,7 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use common::{fixture_path, parse_json, redact_all, run_fallow, run_fallow_in_root};
+use common::{fixture_path, parse_json, redact_all, run_plow, run_plow_in_root};
 use tempfile::tempdir;
 
 fn init_git_index(root: &std::path::Path) {
@@ -23,14 +23,14 @@ fn init_git_index(root: &std::path::Path) {
 // JSON output structure
 // ---------------------------------------------------------------------------
 
-/// `fallow dupes --performance` was previously a no-op: the global flag was
+/// `plow dupes --performance` was previously a no-op: the global flag was
 /// parsed but never wired through to `DupesOptions`, so users got nothing.
 /// This pins the behaviour: human format renders a stderr "Duplication
 /// Performance" panel; structured formats (JSON / SARIF / CodeClimate) stay
 /// silent so the machine envelope is uncorrupted.
 #[test]
 fn dupes_performance_panel_renders_for_human_format() {
-    let output = run_fallow("dupes", "duplicate-code", &["--performance"]);
+    let output = run_plow("dupes", "duplicate-code", &["--performance"]);
     assert!(
         output.stderr.contains("Duplication Performance"),
         "human dupes --performance should print panel header. stderr: {}",
@@ -45,7 +45,7 @@ fn dupes_performance_panel_renders_for_human_format() {
 
 #[test]
 fn dupes_performance_panel_suppressed_for_json_format() {
-    let output = run_fallow(
+    let output = run_plow(
         "dupes",
         "duplicate-code",
         &["--performance", "--format", "json", "--quiet"],
@@ -59,7 +59,7 @@ fn dupes_performance_panel_suppressed_for_json_format() {
 
 #[test]
 fn dupes_json_output_has_clone_groups() {
-    let output = run_fallow("dupes", "duplicate-code", &["--format", "json", "--quiet"]);
+    let output = run_plow("dupes", "duplicate-code", &["--format", "json", "--quiet"]);
     let json = parse_json(&output);
     assert!(
         json.get("clone_groups").is_some(),
@@ -74,7 +74,7 @@ fn dupes_json_output_has_clone_groups() {
 
 #[test]
 fn dupes_json_has_stats() {
-    let output = run_fallow("dupes", "duplicate-code", &["--format", "json", "--quiet"]);
+    let output = run_plow("dupes", "duplicate-code", &["--format", "json", "--quiet"]);
     let json = parse_json(&output);
     assert!(
         json.get("stats").is_some(),
@@ -88,7 +88,7 @@ fn dupes_json_has_stats() {
 
 #[test]
 fn dupes_strict_mode_accepted() {
-    let output = run_fallow(
+    let output = run_plow(
         "dupes",
         "duplicate-code",
         &["--mode", "strict", "--format", "json", "--quiet"],
@@ -102,7 +102,7 @@ fn dupes_strict_mode_accepted() {
 
 #[test]
 fn dupes_mild_mode_accepted() {
-    let output = run_fallow(
+    let output = run_plow(
         "dupes",
         "duplicate-code",
         &["--mode", "mild", "--format", "json", "--quiet"],
@@ -119,7 +119,7 @@ fn dupes_mild_mode_accepted() {
 
 #[test]
 fn dupes_min_tokens_filter() {
-    let output = run_fallow(
+    let output = run_plow(
         "dupes",
         "duplicate-code",
         &["--min-tokens", "1000", "--format", "json", "--quiet"],
@@ -134,7 +134,7 @@ fn dupes_min_tokens_filter() {
 
 #[test]
 fn dupes_top_flag() {
-    let output = run_fallow(
+    let output = run_plow(
         "dupes",
         "duplicate-code",
         &["--top", "1", "--format", "json", "--quiet"],
@@ -191,7 +191,7 @@ fn dupes_filters_atomic_function_call_clones() {
     .unwrap();
     init_git_index(dir.path());
 
-    let output = run_fallow_in_root(
+    let output = run_plow_in_root(
         "dupes",
         dir.path(),
         &["--format", "json", "--quiet", "--no-cache"],
@@ -246,7 +246,7 @@ fn dupes_still_reports_repeated_control_flow() {
     .unwrap();
     init_git_index(dir.path());
 
-    let output = run_fallow_in_root(
+    let output = run_plow_in_root(
         "dupes",
         dir.path(),
         &["--format", "json", "--quiet", "--no-cache"],
@@ -300,7 +300,7 @@ fn dupes_still_reports_repeated_callback_bodies_inside_calls() {
     .unwrap();
     init_git_index(dir.path());
 
-    let output = run_fallow_in_root(
+    let output = run_plow_in_root(
         "dupes",
         dir.path(),
         &["--format", "json", "--quiet", "--no-cache"],
@@ -326,7 +326,7 @@ fn dupes_group_by_package_validates_non_monorepo() {
     std::fs::create_dir_all(dir.path().join("src")).unwrap();
     std::fs::write(dir.path().join("src/index.ts"), "export const value = 1;\n").unwrap();
 
-    let output = run_fallow_in_root(
+    let output = run_plow_in_root(
         "dupes",
         dir.path(),
         &["--group-by", "package", "--format", "json", "--quiet"],
@@ -358,8 +358,8 @@ fn dupes_save_baseline_creates_parent_directory() {
     std::fs::write(dir.path().join("src/one.ts"), clone).unwrap();
     std::fs::write(dir.path().join("src/two.ts"), clone).unwrap();
 
-    let baseline_path = dir.path().join("fallow-baselines/dupes.json");
-    let output = run_fallow_in_root(
+    let baseline_path = dir.path().join("plow-baselines/dupes.json");
+    let output = run_plow_in_root(
         "dupes",
         dir.path(),
         &[
@@ -387,7 +387,7 @@ fn dupes_save_baseline_creates_parent_directory() {
 
 #[test]
 fn dupes_json_paths_are_relative() {
-    let output = run_fallow("dupes", "duplicate-code", &["--format", "json", "--quiet"]);
+    let output = run_plow("dupes", "duplicate-code", &["--format", "json", "--quiet"]);
     let json = parse_json(&output);
     let groups = json["clone_groups"].as_array().unwrap();
     assert!(!groups.is_empty(), "fixture should have clone groups");
@@ -425,7 +425,7 @@ fn dupes_json_paths_are_relative() {
 
 #[test]
 fn dupes_human_output_snapshot() {
-    let output = run_fallow("dupes", "duplicate-code", &["--quiet"]);
+    let output = run_plow("dupes", "duplicate-code", &["--quiet"]);
     let root = fixture_path("duplicate-code");
     let redacted = redact_all(&output.stdout, &root);
     insta::assert_snapshot!("dupes_human_output", redacted);
@@ -435,13 +435,13 @@ fn dupes_human_output_snapshot() {
 // Plugin-scoped hidden directory traversal
 // ---------------------------------------------------------------------------
 
-/// Standalone `fallow dupes` must include React Router's `.client` / `.server`
+/// Standalone `plow dupes` must include React Router's `.client` / `.server`
 /// folders in its file walk. The threshold is dropped to the minimum so the
 /// small fixture files survive dupes' token / line filters and surface in
 /// `stats.total_files`.
 #[test]
 fn dupes_includes_plugin_scoped_hidden_dirs_for_react_router() {
-    let output = run_fallow(
+    let output = run_plow(
         "dupes",
         "react-router-conventions",
         &[

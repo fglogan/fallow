@@ -2,7 +2,7 @@ use std::path::Path;
 
 use tower_lsp::lsp_types::{CodeLens, Command, Position, Range, Url};
 
-use fallow_core::results::AnalysisResults;
+use plow_core::results::AnalysisResults;
 
 /// Build Code Lens items for a file showing reference counts above each export declaration.
 pub fn build_code_lenses(
@@ -48,7 +48,7 @@ pub fn build_code_lenses(
             // Use editor.action.showReferences when we have reference locations,
             // fall back to display-only noop otherwise
             let (command_name, arguments) = if ref_locations.is_empty() {
-                ("fallow.noop".to_string(), None)
+                ("plow.noop".to_string(), None)
             } else {
                 (
                     "editor.action.showReferences".to_string(),
@@ -84,7 +84,7 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    use fallow_core::results::{ExportUsage, ReferenceLocation};
+    use plow_core::results::{ExportUsage, ReferenceLocation};
 
     fn test_root() -> PathBuf {
         if cfg!(windows) {
@@ -234,7 +234,7 @@ mod tests {
         assert_eq!(lenses.len(), 1);
 
         let cmd = lenses[0].command.as_ref().unwrap();
-        assert_eq!(cmd.command, "fallow.noop");
+        assert_eq!(cmd.command, "plow.noop");
         assert!(cmd.arguments.is_none());
     }
 

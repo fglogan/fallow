@@ -10,13 +10,13 @@
 //!   have a dispatch handle from day one (panel catch #3, Diego).
 
 use super::common::{create_config, fixture_path};
-use fallow_core::results::ReExportCycleKind;
+use plow_core::results::ReExportCycleKind;
 
 #[test]
 fn two_node_cycle_fires_as_multi_node_finding() {
     let root = fixture_path("re-export-cycle-2-node");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let cycles = &results.re_export_cycles;
     assert!(
@@ -51,7 +51,7 @@ fn two_node_cycle_fires_as_multi_node_finding() {
 fn three_node_cycle_fires_with_three_files() {
     let root = fixture_path("re-export-cycle-3-node");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let three_node = results
         .re_export_cycles
@@ -72,7 +72,7 @@ fn three_node_cycle_fires_with_three_files() {
 fn self_loop_fires_with_self_loop_kind() {
     let root = fixture_path("re-export-cycle-self-loop");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let self_loop = results
         .re_export_cycles
@@ -102,7 +102,7 @@ fn type_only_re_export_cycle_still_fires_as_finding() {
     // no-op either way, so the finding fires.
     let root = fixture_path("re-export-cycle-type-only");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let type_only_cycle = results
         .re_export_cycles

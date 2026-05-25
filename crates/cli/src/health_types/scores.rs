@@ -246,7 +246,7 @@ pub enum CoverageSource {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ComplexityViolation {
     /// Absolute file path.
-    #[serde(serialize_with = "fallow_types::serde_path::serialize")]
+    #[serde(serialize_with = "plow_types::serde_path::serialize")]
     pub path: std::path::PathBuf,
     /// Function name, `"<anonymous>"` for unnamed functions/arrows, or
     /// `"<template>"` for synthetic Angular template findings.
@@ -298,14 +298,14 @@ pub struct ComplexityViolation {
     /// Owning component file that contributed reachability when
     /// `coverage_source == "estimated_component_inherited"`. Always paired
     /// with that variant of `coverage_source` and absent otherwise. The
-    /// value is the `.ts` file fallow walked to via the inverse `templateUrl`
+    /// value is the `.ts` file plow walked to via the inverse `templateUrl`
     /// edge (e.g. `permissions.component.ts`); the JSON serializer strips it
     /// to project-relative form just like other path fields. Lets human and
     /// AI consumers explain "the template scored partial because the
     /// component it belongs to is tested" without re-deriving the link.
     #[serde(
         default,
-        serialize_with = "fallow_types::serde_path::serialize_option",
+        serialize_with = "plow_types::serde_path::serialize_option",
         skip_serializing_if = "Option::is_none"
     )]
     pub inherited_from: Option<std::path::PathBuf>,
@@ -358,7 +358,7 @@ pub struct ComponentRollup {
     /// absolute internally; the JSON output strips it to project-relative
     /// form via the global `strip_root_prefix` post-pass (as with every
     /// other `PathBuf` field in this crate).
-    #[serde(serialize_with = "fallow_types::serde_path::serialize")]
+    #[serde(serialize_with = "plow_types::serde_path::serialize")]
     pub template_path: std::path::PathBuf,
     /// Cyclomatic complexity contributed by the template alone (control
     /// flow on `*ngIf` / `*ngFor` / `@if` / `@for` / `@switch` etc.).
@@ -520,7 +520,7 @@ pub fn compute_finding_severity(
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct LargeFunctionEntry {
     /// Absolute file path.
-    #[serde(serialize_with = "fallow_types::serde_path::serialize")]
+    #[serde(serialize_with = "plow_types::serde_path::serialize")]
     pub path: std::path::PathBuf,
     /// Function name, or `"<anonymous>"` for unnamed functions/arrows.
     pub name: String,
@@ -632,7 +632,7 @@ impl Default for HealthSummary {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct FileHealthScore {
     /// File path (absolute; stripped to relative in output).
-    #[serde(serialize_with = "fallow_types::serde_path::serialize")]
+    #[serde(serialize_with = "plow_types::serde_path::serialize")]
     pub path: std::path::PathBuf,
     /// Number of files that import this file.
     pub fan_in: usize,
@@ -703,7 +703,7 @@ pub enum CoverageModel {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HotspotEntry {
     /// File path (absolute; stripped to relative in output).
-    #[serde(serialize_with = "fallow_types::serde_path::serialize")]
+    #[serde(serialize_with = "plow_types::serde_path::serialize")]
     pub path: std::path::PathBuf,
     /// Hotspot score (0–100). Higher means more risk.
     pub score: f64,
@@ -721,7 +721,7 @@ pub struct HotspotEntry {
     pub fan_in: usize,
     /// Churn trend: accelerating (recent > 1.5× older), stable, or cooling
     /// (recent < 0.67× older).
-    pub trend: fallow_core::churn::ChurnTrend,
+    pub trend: plow_core::churn::ChurnTrend,
     /// Ownership signals (bus factor, contributors, declared owner, drift).
     /// Populated only when `--ownership` is requested.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -788,7 +788,7 @@ pub enum OwnershipState {
     Active,
     /// A CODEOWNERS file exists but no rule matches this hotspot path.
     Unowned,
-    /// CODEOWNERS declares an owner, but fallow cannot match that owner to
+    /// CODEOWNERS declares an owner, but plow cannot match that owner to
     /// an active contributor using offline git identity data.
     DeclaredInactive,
     /// The original author has stepped away and no declared owner suppresses

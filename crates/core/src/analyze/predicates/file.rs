@@ -10,7 +10,7 @@ pub(in crate::analyze) fn is_declaration_file(path: &std::path::Path) -> bool {
 /// nothing imports an HTML file, so "unused" is meaningless for them. They serve as
 /// entry points in Vite/Parcel-style apps and their referenced assets are tracked
 /// via `<script src>` and `<link href>` edges.
-// Keep in sync with fallow_extract::html::is_html_file (crate boundary prevents sharing)
+// Keep in sync with plow_extract::html::is_html_file (crate boundary prevents sharing)
 pub(in crate::analyze) fn is_html_file(path: &std::path::Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
@@ -85,7 +85,7 @@ pub(in crate::analyze) fn is_config_file(path: &std::path::Path) -> bool {
         "typedoc.",
         // Analysis & misc
         "knip.config.",
-        "fallow.config.",
+        "plow.config.",
         "i18next-parser.config.",
         "codegen.config.",
         "graphql.config.",

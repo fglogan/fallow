@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use colored::Colorize;
-use fallow_config::{RulesConfig, Severity};
-use fallow_core::results::{
+use plow_config::{RulesConfig, Severity};
+use plow_core::results::{
     AnalysisResults, DuplicateExport, DuplicateExportFinding, TestOnlyDependency,
     TestOnlyDependencyFinding, TypeOnlyDependency, TypeOnlyDependencyFinding,
     UnusedClassMemberFinding, UnusedDependency, UnusedDependencyFinding,
@@ -324,43 +324,43 @@ fn inject_explain_blocks(lines: Vec<String>) -> Vec<String> {
 
 fn check_explain_for_header(line: &str) -> Option<&'static crate::explain::RuleDef> {
     let mappings = [
-        ("Unused files", "fallow/unused-file"),
-        ("Unused exports", "fallow/unused-export"),
-        ("Unused type exports", "fallow/unused-type"),
-        ("Private type leaks", "fallow/private-type-leak"),
-        ("Unused dependencies", "fallow/unused-dependency"),
-        ("Unused devDependencies", "fallow/unused-dev-dependency"),
+        ("Unused files", "plow/unused-file"),
+        ("Unused exports", "plow/unused-export"),
+        ("Unused type exports", "plow/unused-type"),
+        ("Private type leaks", "plow/private-type-leak"),
+        ("Unused dependencies", "plow/unused-dependency"),
+        ("Unused devDependencies", "plow/unused-dev-dependency"),
         (
             "Unused optionalDependencies",
-            "fallow/unused-optional-dependency",
+            "plow/unused-optional-dependency",
         ),
-        ("Type-only dependencies", "fallow/type-only-dependency"),
+        ("Type-only dependencies", "plow/type-only-dependency"),
         (
             "Test-only production dependencies",
-            "fallow/test-only-dependency",
+            "plow/test-only-dependency",
         ),
-        ("Unused enum members", "fallow/unused-enum-member"),
-        ("Unused class members", "fallow/unused-class-member"),
-        ("Unresolved imports", "fallow/unresolved-import"),
-        ("Unlisted dependencies", "fallow/unlisted-dependency"),
-        ("Duplicate exports", "fallow/duplicate-export"),
-        ("Circular dependencies", "fallow/circular-dependency"),
-        ("Re-Export Cycles", "fallow/re-export-cycle"),
-        ("Boundary violations", "fallow/boundary-violation"),
-        ("Stale suppressions", "fallow/stale-suppression"),
-        ("Unused catalog entries", "fallow/unused-catalog-entry"),
-        ("Empty catalog groups", "fallow/empty-catalog-group"),
+        ("Unused enum members", "plow/unused-enum-member"),
+        ("Unused class members", "plow/unused-class-member"),
+        ("Unresolved imports", "plow/unresolved-import"),
+        ("Unlisted dependencies", "plow/unlisted-dependency"),
+        ("Duplicate exports", "plow/duplicate-export"),
+        ("Circular dependencies", "plow/circular-dependency"),
+        ("Re-Export Cycles", "plow/re-export-cycle"),
+        ("Boundary violations", "plow/boundary-violation"),
+        ("Stale suppressions", "plow/stale-suppression"),
+        ("Unused catalog entries", "plow/unused-catalog-entry"),
+        ("Empty catalog groups", "plow/empty-catalog-group"),
         (
             "Unresolved catalog references",
-            "fallow/unresolved-catalog-reference",
+            "plow/unresolved-catalog-reference",
         ),
         (
             "Unused dependency overrides",
-            "fallow/unused-dependency-override",
+            "plow/unused-dependency-override",
         ),
         (
             "Misconfigured dependency overrides",
-            "fallow/misconfigured-dependency-override",
+            "plow/misconfigured-dependency-override",
         ),
     ];
     let (_, rule_id) = mappings
@@ -419,7 +419,7 @@ fn format_unused_export(e: &UnusedExport) -> String {
 }
 
 fn format_private_type_leak(
-    entry: &fallow_types::output_dead_code::PrivateTypeLeakFinding,
+    entry: &plow_types::output_dead_code::PrivateTypeLeakFinding,
 ) -> String {
     let e = &entry.leak;
     format!(
@@ -852,8 +852,8 @@ fn build_dependencies_section(
 /// empty or the rule is `Off` (which already removed entries upstream).
 fn push_unused_catalog_entries_section(
     lines: &mut Vec<String>,
-    entries: &[fallow_core::results::UnusedCatalogEntryFinding],
-    severity: fallow_config::Severity,
+    entries: &[plow_core::results::UnusedCatalogEntryFinding],
+    severity: plow_config::Severity,
     max_items: usize,
     total_issues: usize,
     root: &Path,
@@ -904,8 +904,8 @@ fn push_unused_catalog_entries_section(
 
 fn push_empty_catalog_groups_section(
     lines: &mut Vec<String>,
-    groups: &[fallow_core::results::EmptyCatalogGroupFinding],
-    severity: fallow_config::Severity,
+    groups: &[plow_core::results::EmptyCatalogGroupFinding],
+    severity: plow_config::Severity,
     max_items: usize,
     total_issues: usize,
     root: &Path,
@@ -949,8 +949,8 @@ fn push_empty_catalog_groups_section(
 /// write bare `catalog:` think of it as "the catalog", not as a named one.
 fn push_unresolved_catalog_references_section(
     lines: &mut Vec<String>,
-    findings: &[fallow_core::results::UnresolvedCatalogReferenceFinding],
-    severity: fallow_config::Severity,
+    findings: &[plow_core::results::UnresolvedCatalogReferenceFinding],
+    severity: plow_config::Severity,
     max_items: usize,
     total_issues: usize,
     root: &Path,
@@ -1025,8 +1025,8 @@ fn push_unresolved_catalog_references_section(
 /// conservative-static algorithm flags.
 fn push_unused_dependency_overrides_section(
     lines: &mut Vec<String>,
-    findings: &[fallow_core::results::UnusedDependencyOverrideFinding],
-    severity: fallow_config::Severity,
+    findings: &[plow_core::results::UnusedDependencyOverrideFinding],
+    severity: plow_config::Severity,
     max_items: usize,
     total_issues: usize,
     root: &Path,
@@ -1079,8 +1079,8 @@ fn push_unused_dependency_overrides_section(
 /// rule defaults to error.
 fn push_misconfigured_dependency_overrides_section(
     lines: &mut Vec<String>,
-    findings: &[fallow_core::results::MisconfiguredDependencyOverrideFinding],
-    severity: fallow_config::Severity,
+    findings: &[plow_core::results::MisconfiguredDependencyOverrideFinding],
+    severity: plow_config::Severity,
     max_items: usize,
     total_issues: usize,
     root: &Path,
@@ -1191,7 +1191,7 @@ fn build_maintenance_section(
 /// by top-level directory and shows file counts per directory.
 fn build_dir_rollup_section(
     lines: &mut Vec<String>,
-    unused_files: &[fallow_types::output_dead_code::UnusedFileFinding],
+    unused_files: &[plow_types::output_dead_code::UnusedFileFinding],
     root: &Path,
     rules: &RulesConfig,
     total_issues: usize,
@@ -1371,7 +1371,7 @@ fn build_human_grouped_section<'a, T>(
 /// Build duplicate exports grouped by file pair instead of flat list.
 fn build_duplicate_exports_section(
     lines: &mut Vec<String>,
-    items: &[fallow_core::results::DuplicateExportFinding],
+    items: &[plow_core::results::DuplicateExportFinding],
     level: Level,
     root: &Path,
     total_issues: usize,
@@ -1470,7 +1470,7 @@ fn build_duplicate_exports_section(
 /// Build circular dependencies grouped by hub file with path elision.
 fn build_circular_deps_section(
     lines: &mut Vec<String>,
-    items: &[fallow_types::output_dead_code::CircularDependencyFinding],
+    items: &[plow_types::output_dead_code::CircularDependencyFinding],
     level: Level,
     root: &Path,
     total_issues: usize,
@@ -1482,7 +1482,7 @@ fn build_circular_deps_section(
     lines.push(build_section_header(title, items.len(), level));
 
     // Group cycles by their first file (hub)
-    let mut hub_groups: Vec<(String, Vec<&fallow_core::results::CircularDependency>)> = Vec::new();
+    let mut hub_groups: Vec<(String, Vec<&plow_core::results::CircularDependency>)> = Vec::new();
     let mut hub_map: rustc_hash::FxHashMap<String, usize> = rustc_hash::FxHashMap::default();
 
     for entry in items {
@@ -1582,7 +1582,7 @@ fn build_circular_deps_section(
 /// from any surface).
 fn build_re_export_cycles_section(
     lines: &mut Vec<String>,
-    items: &[fallow_types::output_dead_code::ReExportCycleFinding],
+    items: &[plow_types::output_dead_code::ReExportCycleFinding],
     level: Level,
     root: &Path,
     total_issues: usize,
@@ -1603,8 +1603,8 @@ fn build_re_export_cycles_section(
             .unwrap_or_default();
         lines.push(format!("  {}", format_path(&first_path)));
         let header_line = match cycle.kind {
-            fallow_core::results::ReExportCycleKind::SelfLoop => "Self-loop (1 file):".to_string(),
-            fallow_core::results::ReExportCycleKind::MultiNode => {
+            plow_core::results::ReExportCycleKind::SelfLoop => "Self-loop (1 file):".to_string(),
+            plow_core::results::ReExportCycleKind::MultiNode => {
                 format!("Cycle ({} files):", cycle.files.len())
             }
         };
@@ -1614,10 +1614,10 @@ fn build_re_export_cycles_section(
             lines.push(format!("      - {}", format_path(&rel)));
         }
         let fix_hint = match cycle.kind {
-            fallow_core::results::ReExportCycleKind::SelfLoop => {
+            plow_core::results::ReExportCycleKind::SelfLoop => {
                 "To fix: remove the `export * from './'` (or equivalent) inside this file."
             }
-            fallow_core::results::ReExportCycleKind::MultiNode => {
+            plow_core::results::ReExportCycleKind::MultiNode => {
                 "To fix: remove one `export * from` statement on any member file."
             }
         };
@@ -1641,7 +1641,7 @@ fn build_re_export_cycles_section(
 /// Build boundary violations section grouped by importing file.
 fn build_boundary_violations_section(
     lines: &mut Vec<String>,
-    items: &[fallow_types::output_dead_code::BoundaryViolationFinding],
+    items: &[plow_types::output_dead_code::BoundaryViolationFinding],
     level: Level,
     root: &Path,
     total_issues: usize,
@@ -1680,7 +1680,7 @@ fn build_boundary_violations_section(
 
 fn build_stale_suppressions_section(
     lines: &mut Vec<String>,
-    items: &[fallow_core::results::StaleSuppression],
+    items: &[plow_core::results::StaleSuppression],
     level: Level,
     root: &Path,
     total_issues: usize,
@@ -1855,7 +1855,7 @@ pub(in crate::report) fn print_grouped_human(
         // Build lines and dedup doc URL footers across groups
         let lines = build_human_lines_with_explain(&group.results, root, rules, None, explain);
         for line in &lines {
-            if line.contains("docs.fallow.tools") && !seen_footers.insert(line.clone()) {
+            if line.contains("docs.genesis-plow.dev") && !seen_footers.insert(line.clone()) {
                 continue;
             }
             println!("{line}");
@@ -1931,15 +1931,15 @@ fn emit_config_quality_signal(results: &AnalysisResults, root: &Path) {
             let advice = if is_source_dir {
                 format!(
                     "Note: {pct:.0}% of unused files are under {dominant_dir}/ \
-                     \u{2014} run `fallow list --entry-points` to verify entry-point detection \
-                     \u{2014} https://docs.fallow.tools/explanations/dead-code#unused-files"
+                     \u{2014} run `plow list --entry-points` to verify entry-point detection \
+                     \u{2014} https://docs.genesis-plow.dev/explanations/dead-code#unused-files"
                 )
             } else {
                 format!(
                     "Note: {pct:.0}% of unused files are under {dominant_dir}/ \
                      \u{2014} consider adding it to ignorePatterns or using --production \
                      (analyzes only production entry points) \
-                     \u{2014} https://docs.fallow.tools/explanations/dead-code#unused-files"
+                     \u{2014} https://docs.genesis-plow.dev/explanations/dead-code#unused-files"
                 )
             };
             eprintln!("  {}", advice.yellow());
@@ -2182,9 +2182,9 @@ pub(in crate::report) fn print_check_summary(
 mod tests {
     use super::super::{plain, strip_ansi};
     use super::*;
-    use fallow_config::{RulesConfig, Severity};
-    use fallow_core::extract::MemberKind;
-    use fallow_core::results::*;
+    use plow_config::{RulesConfig, Severity};
+    use plow_core::extract::MemberKind;
+    use plow_core::results::*;
     use std::path::PathBuf;
 
     /// Build sample results including optional deps (extends the shared helper).
@@ -3087,7 +3087,7 @@ mod tests {
         let mut results = AnalysisResults::default();
         // Add exactly 1 of each pre-pluralized category
         results.unused_enum_members.push(
-            fallow_core::results::UnusedEnumMemberFinding::with_actions(UnusedMember {
+            plow_core::results::UnusedEnumMemberFinding::with_actions(UnusedMember {
                 path: root.join("src/types.ts"),
                 parent_name: "Status".to_string(),
                 member_name: "Unused".to_string(),
@@ -3097,7 +3097,7 @@ mod tests {
             }),
         );
         results.unused_class_members.push(
-            fallow_core::results::UnusedClassMemberFinding::with_actions(UnusedMember {
+            plow_core::results::UnusedClassMemberFinding::with_actions(UnusedMember {
                 path: root.join("src/foo.ts"),
                 parent_name: "Foo".to_string(),
                 member_name: "bar".to_string(),
@@ -3141,7 +3141,7 @@ mod tests {
         let lines = build_human_lines(&results, &root, &rules, None);
         let text = plain(&lines);
         // Human output always includes section footers with doc links
-        assert!(text.contains("docs.fallow.tools/explanations/dead-code"));
+        assert!(text.contains("docs.genesis-plow.dev/explanations/dead-code"));
         assert!(text.contains("Files not reachable from any entry point"));
     }
 

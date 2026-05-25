@@ -2,7 +2,7 @@ import * as child_process from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 // VS Code injects this module into the extension host at runtime.
-// fallow-ignore-next-line unlisted-dependency
+// plow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
 import {
   getLspPath,
@@ -18,10 +18,10 @@ import { findBinaryInPath, findLocalBinary, getExecutableExtension } from "./bin
 import { getInstalledCliPath } from "./download.js";
 import { buildFixArgs, createFixPreviewItems, resolveFixLocation } from "./fix-utils.js";
 import type {
-  FallowCheckResult,
-  FallowCombinedResult,
-  FallowDupesResult,
-  FallowFixResult,
+  PlowCheckResult,
+  PlowCombinedResult,
+  PlowDupesResult,
+  PlowFixResult,
   FixAction,
 } from "./types.js";
 
@@ -29,18 +29,18 @@ const findCliBinary = (context: vscode.ExtensionContext): string | null => {
   const lspPath = getLspPath();
   if (lspPath) {
     const dir = path.dirname(lspPath);
-    const cliPath = path.join(dir, `fallow${getExecutableExtension()}`);
+    const cliPath = path.join(dir, `plow${getExecutableExtension()}`);
     if (fs.existsSync(cliPath)) {
       return cliPath;
     }
   }
 
-  const local = findLocalBinary("fallow");
+  const local = findLocalBinary("plow");
   if (local) {
     return local;
   }
 
-  const inPath = findBinaryInPath("fallow");
+  const inPath = findBinaryInPath("plow");
   if (inPath) {
     return inPath;
   }
@@ -53,7 +53,7 @@ const findCliBinary = (context: vscode.ExtensionContext): string | null => {
   return null;
 };
 
-const execFallow = (
+const execPlow = (
   context: vscode.ExtensionContext,
   args: ReadonlyArray<string>,
   cwd: string,
@@ -61,7 +61,7 @@ const execFallow = (
   new Promise((resolve, reject) => {
     const binary = findCliBinary(context);
     if (!binary) {
-      reject(new Error("fallow CLI binary not found in PATH."));
+      reject(new Error("plow CLI binary not found in PATH."));
       return;
     }
 
@@ -89,12 +89,12 @@ const execFallow = (
 
     child.on("close", (code, signal) => {
       if (signal) {
-        reject(new Error(`fallow exited via signal ${signal}`));
+        reject(new Error(`plow exited via signal ${signal}`));
         return;
       }
 
       if (code !== null && code !== 0 && code !== 1) {
-        reject(new Error(stderr.trim() || `fallow exited with code ${code}`));
+        reject(new Error(stderr.trim() || `plow exited with code ${code}`));
         return;
       }
 
@@ -103,9 +103,9 @@ const execFallow = (
   });
 
 /** Filter check results based on the user's issueTypes configuration. */
-const filterCheckResult = (result: FallowCheckResult): FallowCheckResult => {
+const filterCheckResult = (result: PlowCheckResult): PlowCheckResult => {
   const types = getIssueTypes();
-  const filtered: FallowCheckResult = {
+  const filtered: PlowCheckResult = {
     ...result,
     unused_files: types["unused-files"] ? result.unused_files : [],
     unused_exports: types["unused-exports"] ? result.unused_exports : [],
@@ -188,7 +188,7 @@ interface FixQuickPickItem extends vscode.QuickPickItem {
 
 const confirmApplyFixes = async (): Promise<boolean> => {
   const confirm = await vscode.window.showWarningMessage(
-    "Fallow: This will unexport unused exports (keeps the code) and remove unused dependencies from package.json. Continue?",
+    "Plow: This will unexport unused exports (keeps the code) and remove unused dependencies from package.json. Continue?",
     "Yes",
     "No",
   );
@@ -211,9 +211,9 @@ const openFixLocation = async (root: string, fix: FixAction | undefined): Promis
   });
 };
 
-const showDryRunPreview = async (root: string, result: FallowFixResult): Promise<void> => {
+const showDryRunPreview = async (root: string, result: PlowFixResult): Promise<void> => {
   if (result.fixes.length === 0) {
-    void vscode.window.showInformationMessage("Fallow: no fixes available.");
+    void vscode.window.showInformationMessage("Plow: no fixes available.");
     return;
   }
 
@@ -243,7 +243,7 @@ const showDryRunPreview = async (root: string, result: FallowFixResult): Promise
   }
 
   const picked = await vscode.window.showQuickPick(quickPickItems, {
-    title: `Fallow: ${result.fixes.length} fix${result.fixes.length === 1 ? "" : "es"} available`,
+    title: `Plow: ${result.fixes.length} fix${result.fixes.length === 1 ? "" : "es"} available`,
     placeHolder: "Review fixes — select 'Apply all fixes' to apply, or click a fix to navigate",
   });
 
@@ -252,7 +252,7 @@ const showDryRunPreview = async (root: string, result: FallowFixResult): Promise
   }
 
   if (picked.action === "apply-all") {
-    void vscode.commands.executeCommand("fallow.fix");
+    void vscode.commands.executeCommand("plow.fix");
     return;
   }
 
@@ -262,17 +262,17 @@ const showDryRunPreview = async (root: string, result: FallowFixResult): Promise
 export const runAnalysis = async (
   context: vscode.ExtensionContext,
 ): Promise<{
-  check: FallowCheckResult | null;
-  dupes: FallowDupesResult | null;
+  check: PlowCheckResult | null;
+  dupes: PlowDupesResult | null;
 }> => {
   const root = getWorkspaceRoot();
   if (!root) {
-    void vscode.window.showWarningMessage("Fallow: no workspace folder open.");
+    void vscode.window.showWarningMessage("Plow: no workspace folder open.");
     return { check: null, dupes: null };
   }
 
-  let check: FallowCheckResult | null = null;
-  let dupes: FallowDupesResult | null = null;
+  let check: PlowCheckResult | null = null;
+  let dupes: PlowDupesResult | null = null;
 
   try {
     const analysisArgs = ["--format", "json", "--quiet", "--skip", "health"];
@@ -293,21 +293,21 @@ export const runAnalysis = async (
     analysisArgs.push("--dupes-mode", getDuplicationMode());
     analysisArgs.push("--dupes-threshold", String(getDuplicationThreshold()));
 
-    const output = await execFallow(context, analysisArgs, root);
+    const output = await execPlow(context, analysisArgs, root);
 
     if (output.trim().length === 0) {
-      // execFallow already rejects on non-zero exit codes (other than 0/1);
+      // execPlow already rejects on non-zero exit codes (other than 0/1);
       // an empty stdout on a successful exit means there was nothing to
       // report. Leave check/dupes null and return without raising.
       return { check, dupes };
     }
 
-    const result = JSON.parse(output) as FallowCombinedResult;
+    const result = JSON.parse(output) as PlowCombinedResult;
     check = result.check ? filterCheckResult(result.check) : null;
     dupes = result.dupes ?? null;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    void vscode.window.showErrorMessage(`Fallow analysis failed: ${message}`);
+    void vscode.window.showErrorMessage(`Plow analysis failed: ${message}`);
     throw err;
   }
 
@@ -317,10 +317,10 @@ export const runAnalysis = async (
 export const runFix = async (
   context: vscode.ExtensionContext,
   dryRun: boolean,
-): Promise<FallowFixResult | null> => {
+): Promise<PlowFixResult | null> => {
   const root = getWorkspaceRoot();
   if (!root) {
-    void vscode.window.showWarningMessage("Fallow: no workspace folder open.");
+    void vscode.window.showWarningMessage("Plow: no workspace folder open.");
     return null;
   }
 
@@ -335,22 +335,22 @@ export const runFix = async (
       fixArgs.push("--config", configPath);
     }
 
-    const output = await execFallow(context, fixArgs, root);
-    const result = JSON.parse(output) as FallowFixResult;
+    const output = await execPlow(context, fixArgs, root);
+    const result = JSON.parse(output) as PlowFixResult;
 
     if (dryRun) {
       await showDryRunPreview(root, result);
     } else {
       const fixCount = result.fixes.length;
       void vscode.window.showInformationMessage(
-        `Fallow: applied ${fixCount} fix${fixCount === 1 ? "" : "es"}.`,
+        `Plow: applied ${fixCount} fix${fixCount === 1 ? "" : "es"}.`,
       );
     }
 
     return result;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    void vscode.window.showErrorMessage(`Fallow fix failed: ${message}`);
+    void vscode.window.showErrorMessage(`Plow fix failed: ${message}`);
     return null;
   }
 };

@@ -75,9 +75,9 @@ pub(super) fn migrate_knip(
         warnings.push(MigrationWarning {
             source: "knip",
             field: "workspaces".to_string(),
-            message: "per-workspace plugin overrides have limited support in fallow".to_string(),
+            message: "per-workspace plugin overrides have limited support in plow".to_string(),
             suggestion: Some(
-                "fallow auto-discovers workspace packages; use --workspace flag to scope output"
+                "plow auto-discovers workspace packages; use --workspace flag to scope output"
                     .to_string(),
             ),
         });
@@ -565,11 +565,11 @@ mod tests {
 
         let rules = config.get("rules").unwrap().as_object().unwrap();
         // All should be "off"
-        for (_, fallow_name) in KNIP_RULE_MAP {
+        for (_, plow_name) in KNIP_RULE_MAP {
             assert_eq!(
-                rules.get(*fallow_name).unwrap(),
+                rules.get(*plow_name).unwrap(),
                 "off",
-                "{fallow_name} should be off"
+                "{plow_name} should be off"
             );
         }
         assert!(warnings.is_empty());
@@ -642,7 +642,7 @@ mod tests {
                 .suggestion
                 .as_deref()
                 .unwrap_or("")
-                .contains("docs.fallow.tools/migration/from-knip")
+                .contains("docs.genesis-plow.dev/migration/from-knip")
         );
     }
 
@@ -691,7 +691,7 @@ mod tests {
 
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].field, "rules.binaries");
-        assert!(warnings[0].message.contains("no fallow equivalent"));
+        assert!(warnings[0].message.contains("no plow equivalent"));
         assert!(warnings[0].suggestion.is_none());
     }
 

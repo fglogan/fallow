@@ -6,8 +6,8 @@ fn super_method_calls_credit_parent_class_members() {
     // not be reported as unused. See issue #130.
     let root = fixture_path("super-method-calls");
     let mut config = create_config(root);
-    config.rules.unused_class_members = fallow_config::Severity::Error;
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    config.rules.unused_class_members = plow_config::Severity::Error;
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused: Vec<String> = results
         .unused_class_members

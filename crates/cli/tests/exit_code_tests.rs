@@ -2,7 +2,7 @@
 mod common;
 
 use common::{
-    fallow_bin, parse_json, run_fallow, run_fallow_combined, run_fallow_in_root, run_fallow_raw,
+    plow_bin, parse_json, run_plow, run_plow_combined, run_plow_in_root, run_plow_raw,
 };
 
 // ---------------------------------------------------------------------------
@@ -11,7 +11,7 @@ use common::{
 
 #[test]
 fn fail_on_issues_check_exits_1_with_issues() {
-    let output = run_fallow(
+    let output = run_plow(
         "check",
         "basic-project",
         &["--fail-on-issues", "--format", "json", "--quiet"],
@@ -24,7 +24,7 @@ fn fail_on_issues_check_exits_1_with_issues() {
 
 #[test]
 fn fail_on_issues_dupes_exits_1_with_clones() {
-    let output = run_fallow(
+    let output = run_plow(
         "dupes",
         "duplicate-code",
         &[
@@ -45,7 +45,7 @@ fn fail_on_issues_dupes_exits_1_with_clones() {
 
 #[test]
 fn combined_mode_runs_successfully() {
-    let output = run_fallow_combined("basic-project", &["--format", "json", "--quiet"]);
+    let output = run_plow_combined("basic-project", &["--format", "json", "--quiet"]);
     assert!(
         output.code == 0 || output.code == 1,
         "combined mode should not crash, got exit code {}",
@@ -58,7 +58,7 @@ fn combined_mode_runs_successfully() {
 
 #[test]
 fn combined_json_explain_includes_sectioned_meta() {
-    let output = run_fallow_combined(
+    let output = run_plow_combined(
         "basic-project",
         &["--format", "json", "--quiet", "--explain"],
     );
@@ -90,7 +90,7 @@ fn combined_json_explain_includes_sectioned_meta() {
 
 #[test]
 fn human_explain_adds_inline_descriptions_for_analysis_commands() {
-    let check = run_fallow("check", "basic-project", &["--quiet", "--explain"]);
+    let check = run_plow("check", "basic-project", &["--quiet", "--explain"]);
     assert!(
         check
             .stdout
@@ -99,14 +99,14 @@ fn human_explain_adds_inline_descriptions_for_analysis_commands() {
         check.stdout
     );
 
-    let dupes = run_fallow("dupes", "duplicate-code", &["--quiet", "--explain"]);
+    let dupes = run_plow("dupes", "duplicate-code", &["--quiet", "--explain"]);
     assert!(
         dupes.stdout.contains("Description: A block of code"),
         "dupes --explain should describe duplicate sections, stdout:\n{}",
         dupes.stdout
     );
 
-    let health = run_fallow("health", "complexity-project", &["--quiet", "--explain"]);
+    let health = run_plow("health", "complexity-project", &["--quiet", "--explain"]);
     assert!(
         health
             .stdout
@@ -118,7 +118,7 @@ fn human_explain_adds_inline_descriptions_for_analysis_commands() {
 
 #[test]
 fn combined_human_explain_renders_inline_descriptions() {
-    let combined = run_fallow_combined("basic-project", &["--quiet", "--explain"]);
+    let combined = run_plow_combined("basic-project", &["--quiet", "--explain"]);
     assert!(
         combined.code == 0 || combined.code == 1,
         "combined --explain should not crash, got exit code {}",
@@ -135,7 +135,7 @@ fn combined_human_explain_renders_inline_descriptions() {
 
 #[test]
 fn check_grouped_human_explain_renders_inline_descriptions() {
-    let output = run_fallow(
+    let output = run_plow(
         "check",
         "basic-project",
         &["--quiet", "--explain", "--group-by", "directory"],
@@ -152,7 +152,7 @@ fn check_grouped_human_explain_renders_inline_descriptions() {
 #[test]
 fn combined_mode_config_enabled_coverage_gaps_stays_out_of_health_section() {
     let dir = tempfile::tempdir().expect("create temp dir");
-    let config_path = dir.path().join("fallow.json");
+    let config_path = dir.path().join("plow.json");
     std::fs::write(
         &config_path,
         r#"{
@@ -164,7 +164,7 @@ fn combined_mode_config_enabled_coverage_gaps_stays_out_of_health_section() {
     )
     .expect("write config file");
 
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "--root",
         common::fixture_path("production-mode")
             .to_str()
@@ -190,7 +190,7 @@ fn combined_mode_config_enabled_coverage_gaps_stays_out_of_health_section() {
 #[test]
 fn combined_mode_hidden_coverage_gap_gate_does_not_fail() {
     let dir = tempfile::tempdir().expect("create temp dir");
-    let config_path = dir.path().join("fallow.json");
+    let config_path = dir.path().join("plow.json");
     std::fs::write(
         &config_path,
         r#"{
@@ -206,7 +206,7 @@ fn combined_mode_hidden_coverage_gap_gate_does_not_fail() {
     )
     .expect("write config file");
 
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "--root",
         common::fixture_path("coverage-gaps")
             .to_str()
@@ -231,7 +231,7 @@ fn combined_mode_hidden_coverage_gap_gate_does_not_fail() {
 
 #[test]
 fn combined_human_output_labels_metrics_line() {
-    let output = run_fallow_combined("basic-project", &[]);
+    let output = run_plow_combined("basic-project", &[]);
     assert!(
         output.code == 0 || output.code == 1,
         "combined human output should not crash, got exit code {}",
@@ -255,7 +255,7 @@ fn combined_human_output_labels_metrics_line() {
 
 #[test]
 fn combined_only_dead_code() {
-    let output = run_fallow_combined(
+    let output = run_plow_combined(
         "basic-project",
         &["--only", "dead-code", "--format", "json", "--quiet"],
     );
@@ -267,7 +267,7 @@ fn combined_only_dead_code() {
 
 #[test]
 fn combined_skip_dead_code() {
-    let output = run_fallow_combined(
+    let output = run_plow_combined(
         "basic-project",
         &["--skip", "dead-code", "--format", "json", "--quiet"],
     );
@@ -279,7 +279,7 @@ fn combined_skip_dead_code() {
 
 #[test]
 fn combined_only_and_skip_are_mutually_exclusive() {
-    let output = run_fallow_combined(
+    let output = run_plow_combined(
         "basic-project",
         &[
             "--only",
@@ -303,13 +303,13 @@ fn combined_only_and_skip_are_mutually_exclusive() {
 
 #[test]
 fn save_baseline_creates_file() {
-    let dir = std::env::temp_dir().join(format!("fallow-baseline-test-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("plow-baseline-test-{}", std::process::id()));
     // Pre-clean to avoid false positives from previous runs
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::create_dir_all(&dir);
-    let baseline_path = dir.join("fallow-baselines/dead-code.json");
+    let baseline_path = dir.join("plow-baselines/dead-code.json");
 
-    let output = run_fallow(
+    let output = run_plow(
         "check",
         "basic-project",
         &[
@@ -339,14 +339,14 @@ fn save_baseline_creates_file() {
 #[test]
 fn baseline_filters_known_issues() {
     let dir = std::env::temp_dir().join(format!(
-        "fallow-baseline-filter-test-{}",
+        "plow-baseline-filter-test-{}",
         std::process::id()
     ));
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::create_dir_all(&dir);
     let baseline_path = dir.join("baseline.json");
 
-    run_fallow(
+    run_plow(
         "check",
         "basic-project",
         &[
@@ -358,7 +358,7 @@ fn baseline_filters_known_issues() {
         ],
     );
 
-    let output = run_fallow(
+    let output = run_plow(
         "check",
         "basic-project",
         &[
@@ -431,7 +431,7 @@ fn save_baseline_distinguishes_same_unused_dep_across_workspaces() {
     }
 
     let baseline_path = dir.path().join("baseline.json");
-    let output = run_fallow_in_root(
+    let output = run_plow_in_root(
         "dead-code",
         dir.path(),
         &[
@@ -476,7 +476,7 @@ fn save_baseline_distinguishes_same_unused_dep_across_workspaces() {
 
 #[test]
 fn changed_since_accepts_head() {
-    let output = run_fallow(
+    let output = run_plow(
         "check",
         "basic-project",
         &["--changed-since", "HEAD", "--format", "json", "--quiet"],
@@ -500,7 +500,7 @@ fn changed_since_accepts_head() {
 
 #[test]
 fn nonexistent_root_exits_2() {
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "check",
         "--root",
         "/nonexistent/path/for/testing",
@@ -517,12 +517,12 @@ fn config_with_traversal_glob_exits_2() {
     let root = dir.path();
     std::fs::write(root.join("package.json"), r#"{"name":"test"}"#).expect("write package.json");
     std::fs::write(
-        root.join(".fallowrc.json"),
+        root.join(".plowrc.json"),
         r#"{ "entry": ["../escape/**"] }"#,
     )
     .expect("write config");
 
-    let output = run_fallow_in_root("check", root, &["--quiet"]);
+    let output = run_plow_in_root("check", root, &["--quiet"]);
     assert_eq!(
         output.code, 2,
         "traversal glob in config should exit 2, stderr: {}",
@@ -543,12 +543,12 @@ fn config_with_invalid_glob_exits_2() {
     let root = dir.path();
     std::fs::write(root.join("package.json"), r#"{"name":"test"}"#).expect("write package.json");
     std::fs::write(
-        root.join(".fallowrc.json"),
+        root.join(".plowrc.json"),
         r#"{ "ignorePatterns": ["[unclosed"] }"#,
     )
     .expect("write config");
 
-    let output = run_fallow_in_root("check", root, &["--quiet"]);
+    let output = run_plow_in_root("check", root, &["--quiet"]);
     assert_eq!(
         output.code, 2,
         "invalid glob syntax in config should exit 2, stderr: {}",
@@ -564,17 +564,17 @@ fn config_with_invalid_glob_exits_2() {
 #[test]
 fn external_plugin_file_traversal_glob_exits_2() {
     // Issue #463 second BLOCK: external plugin files loaded from
-    // `.fallow/plugins/` (NOT inline `framework[]` in the main config)
+    // `.plow/plugins/` (NOT inline `framework[]` in the main config)
     // also reach `glob::glob` on disk via their `fileExists.pattern`.
     // The validation must run on those too, not just on the inline path.
-    // Mirrors codex's reproducer: `.fallow/plugins/leak.json` with a
+    // Mirrors codex's reproducer: `.plow/plugins/leak.json` with a
     // traversal-bearing detection pattern.
     let dir = tempfile::tempdir().expect("create temp dir");
     let root = dir.path();
     std::fs::write(root.join("package.json"), r#"{"name":"test"}"#).expect("write package.json");
-    std::fs::create_dir_all(root.join(".fallow").join("plugins")).expect("mk .fallow/plugins/");
+    std::fs::create_dir_all(root.join(".plow").join("plugins")).expect("mk .plow/plugins/");
     std::fs::write(
-        root.join(".fallow").join("plugins").join("leak.json"),
+        root.join(".plow").join("plugins").join("leak.json"),
         r#"{
             "name": "leaky-plugin",
             "detection": { "type": "fileExists", "pattern": "../secret-marker" }
@@ -582,7 +582,7 @@ fn external_plugin_file_traversal_glob_exits_2() {
     )
     .expect("write plugin");
 
-    let output = run_fallow_in_root("check", root, &["--quiet"]);
+    let output = run_plow_in_root("check", root, &["--quiet"]);
     assert_eq!(
         output.code, 2,
         "external plugin with traversal glob should exit 2, stderr: {}",
@@ -597,15 +597,15 @@ fn external_plugin_file_traversal_glob_exits_2() {
 }
 
 #[test]
-fn fallow_plugin_root_file_traversal_glob_exits_2() {
-    // Issue #463: `fallow-plugin-*` files at the project root are also
+fn plow_plugin_root_file_traversal_glob_exits_2() {
+    // Issue #463: `plow-plugin-*` files at the project root are also
     // auto-discovered (third discovery source after `plugins:` and
-    // `.fallow/plugins/`). Same validation must apply.
+    // `.plow/plugins/`). Same validation must apply.
     let dir = tempfile::tempdir().expect("create temp dir");
     let root = dir.path();
     std::fs::write(root.join("package.json"), r#"{"name":"test"}"#).expect("write package.json");
     std::fs::write(
-        root.join("fallow-plugin-leak.json"),
+        root.join("plow-plugin-leak.json"),
         r#"{
             "name": "leaky-root-plugin",
             "entryPoints": ["../entry/**"]
@@ -613,10 +613,10 @@ fn fallow_plugin_root_file_traversal_glob_exits_2() {
     )
     .expect("write plugin");
 
-    let output = run_fallow_in_root("check", root, &["--quiet"]);
+    let output = run_plow_in_root("check", root, &["--quiet"]);
     assert_eq!(
         output.code, 2,
-        "fallow-plugin-* root file with traversal glob should exit 2, stderr: {}",
+        "plow-plugin-* root file with traversal glob should exit 2, stderr: {}",
         output.stderr
     );
     assert!(
@@ -628,7 +628,7 @@ fn fallow_plugin_root_file_traversal_glob_exits_2() {
 
 #[test]
 fn no_package_json_returns_empty_results() {
-    let output = run_fallow(
+    let output = run_plow(
         "check",
         "error-no-package-json",
         &["--format", "json", "--quiet"],
@@ -678,7 +678,7 @@ fn combined_json_outside_git_repo_emits_single_document() {
     )
     .expect("write index.ts");
 
-    let mut cmd = Command::new(fallow_bin());
+    let mut cmd = Command::new(plow_bin());
     cmd.arg("--root")
         .arg(root)
         .arg("--format")
@@ -690,7 +690,7 @@ fn combined_json_outside_git_repo_emits_single_document() {
         .env_remove("GIT_WORK_TREE")
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_SYSTEM", "/dev/null");
-    let output = cmd.output().expect("failed to run fallow binary");
+    let output = cmd.output().expect("failed to run plow binary");
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     // The bug in #294 was that stdout contained an inline `{"error": true,
@@ -731,7 +731,7 @@ fn config_with_unknown_boundary_zone_reference_exits_2() {
     let root = dir.path();
     std::fs::write(root.join("package.json"), r#"{"name":"test"}"#).expect("write package.json");
     std::fs::write(
-        root.join(".fallowrc.json"),
+        root.join(".plowrc.json"),
         r#"{
             "boundaries": {
                 "zones": [{ "name": "ui", "patterns": ["src/ui/**"] }],
@@ -751,7 +751,7 @@ fn config_with_unknown_boundary_zone_reference_exits_2() {
     )
     .expect("write config");
 
-    let output = run_fallow_in_root("check", root, &["--quiet"]);
+    let output = run_plow_in_root("check", root, &["--quiet"]);
     assert_eq!(
         output.code, 2,
         "unknown boundary zone reference should exit 2, stderr: {}",
@@ -779,12 +779,12 @@ fn config_with_redundant_boundary_root_prefix_exits_2() {
     // root double-prefixes the path at classify time and never matches. This
     // used to log a `tracing::error!` and continue with a phantom-empty
     // zone; now exits 2 at config load with the legacy
-    // FALLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX tag preserved for CI grep recipes.
+    // PLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX tag preserved for CI grep recipes.
     let dir = tempfile::tempdir().expect("create temp dir");
     let root = dir.path();
     std::fs::write(root.join("package.json"), r#"{"name":"test"}"#).expect("write package.json");
     std::fs::write(
-        root.join(".fallowrc.json"),
+        root.join(".plowrc.json"),
         r#"{
             "boundaries": {
                 "zones": [{
@@ -798,7 +798,7 @@ fn config_with_redundant_boundary_root_prefix_exits_2() {
     )
     .expect("write config");
 
-    let output = run_fallow_in_root("check", root, &["--quiet"]);
+    let output = run_plow_in_root("check", root, &["--quiet"]);
     assert_eq!(
         output.code, 2,
         "redundant root prefix should exit 2, stderr: {}",
@@ -806,16 +806,16 @@ fn config_with_redundant_boundary_root_prefix_exits_2() {
     );
     let stderr = &output.stderr;
     assert!(
-        stderr.contains("FALLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX"),
+        stderr.contains("PLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX"),
         "stderr should preserve the legacy tag for CI grep recipes: {stderr}"
     );
     assert!(stderr.contains("packages/app/src/**"), "stderr: {stderr}");
 }
 
 #[test]
-fn fallow_config_subcommand_rejects_unknown_boundary_zone() {
-    // `fallow config` lives on a different code path than `check` (calls
-    // `FallowConfig::load` / `find_and_load` directly, no `runtime_support`).
+fn plow_config_subcommand_rejects_unknown_boundary_zone() {
+    // `plow config` lives on a different code path than `check` (calls
+    // `PlowConfig::load` / `find_and_load` directly, no `runtime_support`).
     // Without explicit wiring it would print the parsed config and exit 0
     // even when `check` exits 2, giving users a false "loaded fine" signal.
     // Surfaced by review of #468.
@@ -823,7 +823,7 @@ fn fallow_config_subcommand_rejects_unknown_boundary_zone() {
     let root = dir.path();
     std::fs::write(root.join("package.json"), r#"{"name":"test"}"#).expect("write package.json");
     std::fs::write(
-        root.join(".fallowrc.json"),
+        root.join(".plowrc.json"),
         r#"{
             "boundaries": {
                 "zones": [{ "name": "ui", "patterns": ["src/ui/**"] }],
@@ -833,10 +833,10 @@ fn fallow_config_subcommand_rejects_unknown_boundary_zone() {
     )
     .expect("write config");
 
-    let output = run_fallow_raw(&["--root", root.to_str().expect("utf-8 root"), "config"]);
+    let output = run_plow_raw(&["--root", root.to_str().expect("utf-8 root"), "config"]);
     assert_eq!(
         output.code, 2,
-        "fallow config must reject invalid boundary config, stderr: {}",
+        "plow config must reject invalid boundary config, stderr: {}",
         output.stderr
     );
     assert!(
@@ -847,7 +847,7 @@ fn fallow_config_subcommand_rejects_unknown_boundary_zone() {
 }
 
 #[test]
-fn fallow_config_subcommand_json_format_emits_structured_error_envelope() {
+fn plow_config_subcommand_json_format_emits_structured_error_envelope() {
     // `--format json` config-load failures must land as the structured
     // `{"error": true, "message": ..., "exit_code": 2}` envelope on stdout,
     // not human text. Locks the JSON error contract for the config subcommand.
@@ -855,7 +855,7 @@ fn fallow_config_subcommand_json_format_emits_structured_error_envelope() {
     let root = dir.path();
     std::fs::write(root.join("package.json"), r#"{"name":"test"}"#).expect("write package.json");
     std::fs::write(
-        root.join(".fallowrc.json"),
+        root.join(".plowrc.json"),
         r#"{
             "boundaries": {
                 "zones": [{ "name": "ui", "patterns": ["src/ui/**"] }],
@@ -865,7 +865,7 @@ fn fallow_config_subcommand_json_format_emits_structured_error_envelope() {
     )
     .expect("write config");
 
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "--root",
         root.to_str().expect("utf-8 root"),
         "--format",
@@ -889,8 +889,8 @@ fn fallow_config_subcommand_json_format_emits_structured_error_envelope() {
 }
 
 #[test]
-fn fallow_list_boundaries_json_format_emits_structured_error_envelope() {
-    // `fallow list --boundaries --format json` previously hardcoded
+fn plow_list_boundaries_json_format_emits_structured_error_envelope() {
+    // `plow list --boundaries --format json` previously hardcoded
     // `OutputFormat::Human` when calling `load_config`, so config-load
     // failures (boundary validation, glob validation, plugin validation)
     // surfaced as human-text errors on stderr instead of the structured JSON
@@ -899,7 +899,7 @@ fn fallow_list_boundaries_json_format_emits_structured_error_envelope() {
     let root = dir.path();
     std::fs::write(root.join("package.json"), r#"{"name":"test"}"#).expect("write package.json");
     std::fs::write(
-        root.join(".fallowrc.json"),
+        root.join(".plowrc.json"),
         r#"{
             "boundaries": {
                 "zones": [{ "name": "ui", "patterns": ["src/ui/**"] }],
@@ -909,7 +909,7 @@ fn fallow_list_boundaries_json_format_emits_structured_error_envelope() {
     )
     .expect("write config");
 
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "--root",
         root.to_str().expect("utf-8 root"),
         "--format",
@@ -942,7 +942,7 @@ fn config_with_valid_boundaries_loads_cleanly() {
     let root = dir.path();
     std::fs::write(root.join("package.json"), r#"{"name":"test"}"#).expect("write package.json");
     std::fs::write(
-        root.join(".fallowrc.json"),
+        root.join(".plowrc.json"),
         r#"{
             "boundaries": {
                 "zones": [
@@ -957,7 +957,7 @@ fn config_with_valid_boundaries_loads_cleanly() {
     )
     .expect("write config");
 
-    let output = run_fallow_in_root("check", root, &["--quiet"]);
+    let output = run_plow_in_root("check", root, &["--quiet"]);
     assert_eq!(
         output.code, 0,
         "valid boundary config should load (exit 0 with no sources), stderr: {}",
@@ -971,7 +971,7 @@ fn config_with_valid_boundaries_loads_cleanly() {
 
 #[test]
 fn regression_baseline_schema_mismatch_json_format_emits_structured_error_envelope() {
-    // `fallow check --regression-baseline <path> --fail-on-regression --format json --quiet`
+    // `plow check --regression-baseline <path> --fail-on-regression --format json --quiet`
     // against a baseline whose schema_version does not match this build must:
     //   1. exit 2 (load failure, distinct from exit 1 "regression detected")
     //   2. emit the structured `{"error": true, "message": ..., "exit_code": 2}`
@@ -989,14 +989,14 @@ fn regression_baseline_schema_mismatch_json_format_emits_structured_error_envelo
         &baseline_path,
         r#"{
   "schema_version": 99,
-  "fallow_version": "9.9.9",
+  "plow_version": "9.9.9",
   "timestamp": "2030-01-01T00:00:00Z",
   "check": {"total_issues": 0, "unused_files": 0}
 }"#,
     )
     .expect("write baseline");
 
-    let output = run_fallow_in_root(
+    let output = run_plow_in_root(
         "check",
         root,
         &[
@@ -1027,9 +1027,9 @@ fn regression_baseline_schema_mismatch_json_format_emits_structured_error_envelo
         .expect("message should be a string");
     assert!(msg.contains("schema_version 99"), "msg: {msg}");
     assert!(msg.contains("expects 1"), "msg: {msg}");
-    assert!(msg.contains("fallow 9.9.9"), "msg: {msg}");
+    assert!(msg.contains("plow 9.9.9"), "msg: {msg}");
     assert!(
-        msg.contains("fallow check --save-regression-baseline"),
+        msg.contains("plow check --save-regression-baseline"),
         "msg should include regenerate command, msg: {msg}"
     );
 }

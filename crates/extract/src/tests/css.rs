@@ -1,7 +1,7 @@
 use std::path::Path;
 
-use fallow_types::discover::FileId;
-use fallow_types::extract::{ExportName, ImportedName, ModuleInfo};
+use plow_types::discover::FileId;
+use plow_types::extract::{ExportName, ImportedName, ModuleInfo};
 
 use crate::parse::parse_source_to_module;
 

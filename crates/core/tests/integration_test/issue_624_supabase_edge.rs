@@ -10,7 +10,7 @@ use std::fs;
 use std::path::Path;
 
 use super::common::create_config;
-use fallow_types::results::AnalysisResults;
+use plow_types::results::AnalysisResults;
 
 #[test]
 fn supabase_edge_functions_handle_deno_schemes_and_roots() {
@@ -19,7 +19,7 @@ fn supabase_edge_functions_handle_deno_schemes_and_roots() {
     write_supabase_project(root);
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     // AC1 + AC4: jsr:, npm:, and URL imports produce no unresolved-import noise.
     let unresolved: Vec<&str> = results

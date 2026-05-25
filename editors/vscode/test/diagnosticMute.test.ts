@@ -148,7 +148,7 @@ describe("diagnostic mute language status", () => {
       { scheme: "file", language: "json" },
     ]);
     expect(item.command).toMatchObject({
-      command: "fallow.manageDiagnosticMutes",
+      command: "plow.manageDiagnosticMutes",
     });
 
     filter.clearAllMutes();
@@ -191,7 +191,7 @@ describe("diagnostic mute language status", () => {
         (item) => [item.code, item.label]
       )
     ).toEqual([
-      [null, "$(eye-closed) All Fallow Findings"],
+      [null, "$(eye-closed) All Plow Findings"],
       ["future-rule", "Future Rule"],
       ["unused-export", "Unused Exports"],
     ]);

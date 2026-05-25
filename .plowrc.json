@@ -1,5 +1,5 @@
 {
-  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+  "$schema": "https://raw.githubusercontent.com/plow-rs/plow/main/schema.json",
   "ignorePatterns": [
     "tests/fixtures/**",
     "tests/conformance/fixtures/**",
@@ -7,12 +7,12 @@
   ],
   "health": {
     "ignore": [
-      "npm/fallow/scripts/**"
+      "npm/plow/scripts/**"
     ]
   },
   "duplicates": {
     "ignore": [
-      "npm/fallow/scripts/**"
+      "npm/plow/scripts/**"
     ]
   }
 }

@@ -15,8 +15,8 @@
 
 use std::path::PathBuf;
 
-use fallow_config::{
-    FallowConfig, IgnoreCatalogReferenceRule, OutputFormat, RulesConfig, Severity,
+use plow_config::{
+    PlowConfig, IgnoreCatalogReferenceRule, OutputFormat, RulesConfig, Severity,
 };
 use rustc_hash::FxHashSet;
 
@@ -25,8 +25,8 @@ use super::common::fixture_path;
 fn config_for_fixture(
     root: PathBuf,
     ignore: Vec<IgnoreCatalogReferenceRule>,
-) -> fallow_config::ResolvedConfig {
-    FallowConfig {
+) -> plow_config::ResolvedConfig {
+    PlowConfig {
         ignore_catalog_references: ignore,
         ignore_dependency_overrides: vec![],
         ..Default::default()
@@ -38,7 +38,7 @@ fn config_for_fixture(
 fn detects_unresolved_named_and_default_catalog_references() {
     let root = fixture_path("issue-334-unresolved-catalog-ref");
     let config = config_for_fixture(root, vec![]);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     // Strip the project root so the test asserts on the project-root-relative
     // form regardless of where the fixture lives on disk. The path is stored
@@ -101,7 +101,7 @@ fn detects_unresolved_named_and_default_catalog_references() {
 fn unresolved_findings_carry_line_numbers_and_available_alternatives() {
     let root = fixture_path("issue-334-unresolved-catalog-ref");
     let config = config_for_fixture(root, vec![]);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let old_react = results
         .unresolved_catalog_references
@@ -157,7 +157,7 @@ fn ignore_catalog_references_filters_by_package_and_catalog_and_consumer() {
         consumer: Some("packages/placeholder/package.json".to_string()),
     }];
     let config = config_for_fixture(root.clone(), ignore);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         !results
@@ -181,7 +181,7 @@ fn ignore_catalog_references_filters_by_package_and_catalog_and_consumer() {
         consumer: Some("packages/**/package.json".to_string()),
     }];
     let config = config_for_fixture(root, glob_ignore);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     assert!(
         !results
             .unresolved_catalog_references
@@ -198,12 +198,12 @@ fn detector_skipped_when_severity_is_off() {
         unresolved_catalog_references: Severity::Off,
         ..RulesConfig::default()
     };
-    let config = FallowConfig {
+    let config = PlowConfig {
         rules,
         ..Default::default()
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     assert!(
         results.unresolved_catalog_references.is_empty(),
         "severity off must short-circuit the detector",

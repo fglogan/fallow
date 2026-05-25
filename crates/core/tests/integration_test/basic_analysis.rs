@@ -4,7 +4,7 @@ use super::common::{create_config, fixture_path};
 fn basic_project_detects_unused_files() {
     let root = fixture_path("basic-project");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     // orphan.ts should be detected as unused
     let unused_file_names: Vec<String> = results
@@ -30,7 +30,7 @@ fn basic_project_detects_unused_files() {
 fn basic_project_detects_unused_exports() {
     let root = fixture_path("basic-project");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -57,7 +57,7 @@ fn basic_project_detects_unused_exports() {
 fn basic_project_detects_unused_types() {
     let root = fixture_path("basic-project");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_type_names: Vec<&str> = results
         .unused_types
@@ -84,7 +84,7 @@ fn basic_project_detects_unused_types() {
 fn basic_project_detects_unused_dependencies() {
     let root = fixture_path("basic-project");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_dep_names: Vec<&str> = results
         .unused_dependencies
@@ -102,7 +102,7 @@ fn basic_project_detects_unused_dependencies() {
 fn analysis_returns_correct_total_count() {
     let root = fixture_path("basic-project");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(results.has_issues(), "basic-project should have issues");
     assert!(results.total_issues() > 0, "total_issues should be > 0");
@@ -111,7 +111,7 @@ fn analysis_returns_correct_total_count() {
 #[test]
 fn analyze_project_convenience_function() {
     let root = fixture_path("basic-project");
-    let results = fallow_core::analyze_project(&root).expect("analysis should succeed");
+    let results = plow_core::analyze_project(&root).expect("analysis should succeed");
     assert!(results.has_issues());
 }
 
@@ -119,7 +119,7 @@ fn analyze_project_convenience_function() {
 fn cjs_project_detects_orphan() {
     let root = fixture_path("cjs-project");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_names: Vec<String> = results
         .unused_files
@@ -146,7 +146,7 @@ fn cjs_project_detects_orphan() {
 fn namespace_import_makes_all_exports_used() {
     let root = fixture_path("namespace-imports");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     // With import * as utils, only members accessed via utils.member are used.
     // In the fixture, only utils.foo is accessed; bar and baz are unused.
@@ -174,7 +174,7 @@ fn namespace_import_makes_all_exports_used() {
 fn namespace_import_used_through_object_alias_and_star_barrel() {
     let root = fixture_path("issue-269-namespace-object-alias");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -200,7 +200,7 @@ fn namespace_import_used_through_object_alias_across_workspace_packages() {
     // without crediting unrelated exports of the same file.
     let root = fixture_path("issue-303-namespace-object-alias-cross-package");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -228,7 +228,7 @@ fn namespace_import_used_through_object_alias_across_packages_via_star_barrel() 
     // `bar` export symbol and the credit lands nowhere.
     let root = fixture_path("issue-303-namespace-object-alias-star-barrel");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -265,7 +265,7 @@ fn namespace_import_used_through_object_alias_across_multi_hop_barrel_chain() {
     // through, then matches consumer imports against the full set.
     let root = fixture_path("issue-310-namespace-object-alias-multi-hop-barrel");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -305,7 +305,7 @@ fn namespace_re_export_via_named_import_credits_target_members() {
     //                                every target export must be credited.
     let root = fixture_path("issue-324-namespace-re-export");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -382,7 +382,7 @@ fn namespace_object_alias_chains_through_namespace_re_export_target() {
     // propagate to the underlying source, recursively for multi-hop chains.
     let root = fixture_path("issue-328-namespace-object-alias-through-ns-re-export");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -451,7 +451,7 @@ fn namespace_object_alias_chains_through_namespace_re_export_target() {
 fn namespace_export_members_not_reported_as_unused() {
     let root = fixture_path("namespace-exports");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     // The namespace export `BusinessHelper` is imported and its members
     // accessed via `BusinessHelper.inviteSupplier()` etc. Neither the
@@ -483,7 +483,7 @@ fn namespace_export_members_not_reported_as_unused() {
 fn duplicate_exports_detected() {
     let root = fixture_path("duplicate-exports");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let dup_names: Vec<&str> = results
         .duplicate_exports
@@ -503,7 +503,7 @@ fn duplicate_exports_detected() {
 fn default_export_flagged_when_not_imported() {
     let root = fixture_path("default-export");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     // unused-default.ts is never imported, so it should be an unused file
     let unused_file_names: Vec<String> = results
@@ -529,7 +529,7 @@ fn default_export_flagged_when_not_imported() {
 fn default_export_flagged_when_only_named_imported() {
     let root = fixture_path("default-export");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     // component.ts is imported for { usedNamed } only, so its default export
     // should be flagged as unused
@@ -572,7 +572,7 @@ fn default_export_flagged_when_only_named_imported() {
 fn side_effect_import_makes_file_reachable() {
     let root = fixture_path("side-effect-imports");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_names: Vec<String> = results
         .unused_files
@@ -627,7 +627,7 @@ fn circular_import_does_not_crash() {
 
     let config = create_config(temp_dir);
     // This should not crash or infinite loop
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     assert!(
         !results.circular_dependencies.is_empty(),
         "should detect circular dependency between a.ts and b.ts"
@@ -649,18 +649,18 @@ fn circular_import_next_line_suppression_hides_cycle() {
 
     std::fs::write(
         temp_dir.join("src/a.ts"),
-        "// fallow-ignore-next-line circular-dependency\nimport { b } from './b';\nexport const a = b + 1;\n",
+        "// plow-ignore-next-line circular-dependency\nimport { b } from './b';\nexport const a = b + 1;\n",
     )
     .unwrap();
 
     std::fs::write(
         temp_dir.join("src/b.ts"),
-        "// fallow-ignore-next-line circular-dependency\nimport { a } from './a';\nexport const b = a + 1;\n",
+        "// plow-ignore-next-line circular-dependency\nimport { a } from './a';\nexport const b = a + 1;\n",
     )
     .unwrap();
 
     let config = create_config(temp_dir);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     assert!(
         results.circular_dependencies.is_empty(),
         "line-level circular-dependency suppression should hide the cycle, got: {:?}",

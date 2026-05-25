@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use oxc_span::Span;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_types::discover::{DiscoveredFile, FileId};
-use fallow_types::extract::{
+use plow_types::discover::{DiscoveredFile, FileId};
+use plow_types::extract::{
     DynamicImportInfo, DynamicImportPattern, ImportInfo, ImportedName, ReExportInfo,
     RequireCallInfo,
 };
@@ -1858,7 +1858,7 @@ fn resolve_falls_back_to_dts_when_no_runtime_file() {
 #[cfg_attr(miri, ignore)]
 fn resolve_honors_development_condition_by_default() {
     // When a package.json `exports` map declares both a `development` and an
-    // `import` branch, fallow should honor `development` (common pattern in
+    // `import` branch, plow should honor `development` (common pattern in
     // monorepos where `development` points at source files and `import` at
     // compiled output). See issue #135.
     let dir = tempfile::tempdir().expect("create temp dir");

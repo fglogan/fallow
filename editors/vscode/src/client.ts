@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 // VS Code injects this module into the extension host at runtime.
-// fallow-ignore-next-line unlisted-dependency
+// plow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
 import {
   LanguageClient,
@@ -29,13 +29,13 @@ import { downloadBinary, getBinaryVersion, getInstalledBinaryPath } from "./down
 let client: LanguageClient | null = null;
 
 const warnIfVersionMismatch = (binaryPath: string, outputChannel?: vscode.OutputChannel): void => {
-  const extensionVersion = vscode.extensions.getExtension("fallow-rs.fallow-vscode")?.packageJSON
+  const extensionVersion = vscode.extensions.getExtension("plow-rs.plow-vscode")?.packageJSON
     ?.version as string | undefined;
   if (!extensionVersion) return;
 
   const binaryVersion = getBinaryVersion(binaryPath);
   if (binaryVersion && binaryVersion !== extensionVersion) {
-    const msg = `Fallow: binary in PATH is v${binaryVersion}, extension is v${extensionVersion}. Update the binary or remove it from PATH to use the bundled version.`;
+    const msg = `Plow: binary in PATH is v${binaryVersion}, extension is v${extensionVersion}. Update the binary or remove it from PATH to use the bundled version.`;
     outputChannel?.appendLine(msg);
     void vscode.window.showWarningMessage(msg);
   }
@@ -48,29 +48,29 @@ const resolveBinaryPath = async (
   const configPath = getLspPath();
   if (configPath) {
     if (fs.existsSync(configPath)) {
-      outputChannel?.appendLine(`Binary resolution: using fallow.lspPath setting: ${configPath}`);
+      outputChannel?.appendLine(`Binary resolution: using plow.lspPath setting: ${configPath}`);
       return configPath;
     }
     void vscode.window.showWarningMessage(
-      `Fallow: configured LSP path "${configPath}" does not exist.`,
+      `Plow: configured LSP path "${configPath}" does not exist.`,
     );
     return null;
   }
 
-  const local = findLocalBinary("fallow-lsp");
+  const local = findLocalBinary("plow-lsp");
   if (local) {
     outputChannel?.appendLine(`Binary resolution: using local node_modules/.bin: ${local}`);
     return local;
   }
-  outputChannel?.appendLine("Binary resolution: no local node_modules/.bin/fallow-lsp found");
+  outputChannel?.appendLine("Binary resolution: no local node_modules/.bin/plow-lsp found");
 
-  const inPath = findBinaryInPath("fallow-lsp");
+  const inPath = findBinaryInPath("plow-lsp");
   if (inPath) {
     outputChannel?.appendLine(`Binary resolution: using system PATH: ${inPath}`);
     warnIfVersionMismatch(inPath, outputChannel);
     return inPath;
   }
-  outputChannel?.appendLine("Binary resolution: fallow-lsp not found in PATH");
+  outputChannel?.appendLine("Binary resolution: plow-lsp not found in PATH");
 
   const installed = getInstalledBinaryPath(context, outputChannel);
   if (installed) {
@@ -85,7 +85,7 @@ const resolveBinaryPath = async (
   }
 
   const choice = await vscode.window.showErrorMessage(
-    "Fallow: fallow-lsp binary not found. Would you like to download it?",
+    "Plow: plow-lsp binary not found. Would you like to download it?",
     "Download",
     "Set Path",
     "Cancel",
@@ -96,7 +96,7 @@ const resolveBinaryPath = async (
   }
 
   if (choice === "Set Path") {
-    void vscode.commands.executeCommand("workbench.action.openSettings", "fallow.lspPath");
+    void vscode.commands.executeCommand("workbench.action.openSettings", "plow.lspPath");
   }
 
   return null;
@@ -107,22 +107,22 @@ export const loadDiagnosticCategories = async (
   outputChannel: vscode.OutputChannel,
 ): Promise<void> => {
   try {
-    const response = await lspClient.sendRequest<unknown>("fallow/issueTypes");
+    const response = await lspClient.sendRequest<unknown>("plow/issueTypes");
     const categories = parseDiagnosticCategories(response);
     if (!categories) {
       resetDiagnosticCategories();
       outputChannel.appendLine(
-        "fallow/issueTypes returned an invalid response; using bundled diagnostic categories.",
+        "plow/issueTypes returned an invalid response; using bundled diagnostic categories.",
       );
       return;
     }
     setDiagnosticCategories(categories);
-    outputChannel.appendLine(`Loaded ${categories.length} diagnostic categories from fallow-lsp.`);
+    outputChannel.appendLine(`Loaded ${categories.length} diagnostic categories from plow-lsp.`);
   } catch (err) {
     resetDiagnosticCategories();
     const message = err instanceof Error ? err.message : String(err);
     outputChannel.appendLine(
-      `fallow/issueTypes unavailable (${message}); using bundled diagnostic categories.`,
+      `plow/issueTypes unavailable (${message}); using bundled diagnostic categories.`,
     );
   }
 };
@@ -137,7 +137,7 @@ export const startClient = async (
     return null;
   }
 
-  outputChannel.appendLine(`Using fallow-lsp binary: ${binaryPath}`);
+  outputChannel.appendLine(`Using plow-lsp binary: ${binaryPath}`);
 
   const serverOptions: ServerOptions = {
     command: binaryPath,
@@ -175,7 +175,7 @@ export const startClient = async (
       : undefined,
   };
 
-  client = new LanguageClient("fallow", "Fallow Language Server", serverOptions, clientOptions);
+  client = new LanguageClient("plow", "Plow Language Server", serverOptions, clientOptions);
 
   if (traceLevel !== "off") {
     void client.setTrace(traceLevel === "verbose" ? Trace.Verbose : Trace.Messages);
@@ -183,13 +183,13 @@ export const startClient = async (
 
   try {
     await client.start();
-    outputChannel.appendLine("Fallow language server started.");
+    outputChannel.appendLine("Plow language server started.");
     await loadDiagnosticCategories(client, outputChannel);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     outputChannel.appendLine(`Failed to start language server: ${message}`);
     void vscode.window.showErrorMessage(
-      `Fallow: failed to start language server. Check the output channel for details.`,
+      `Plow: failed to start language server. Check the output channel for details.`,
     );
     client = null;
     return null;

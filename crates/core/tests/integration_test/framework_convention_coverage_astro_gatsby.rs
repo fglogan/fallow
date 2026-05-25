@@ -9,7 +9,7 @@ fn astro_template_script_src_and_inline_imports_are_followed() {
     // should keep their targets reachable from the Astro page entry.
     let root = fixture_path("astro-script-references");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files = collect_unused_files(&root, &results);
     for expected_used_file in ["src/scripts/foo.ts", "src/scripts/bar.ts"] {
@@ -36,7 +36,7 @@ fn astro_template_script_src_and_inline_imports_are_followed() {
 fn astro_current_convention_files_and_exports_are_covered() {
     let root = fixture_path("astro-conventions");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files = collect_unused_files(&root, &results);
     for expected_used_file in [
@@ -86,7 +86,7 @@ fn astro_current_convention_files_and_exports_are_covered() {
 fn gatsby_pages_and_functions_keep_convention_exports_but_flag_dead_helpers() {
     let root = fixture_path("gatsby-conventions");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_exports = collect_unused_exports(&root, &results);
     for (path, export) in [

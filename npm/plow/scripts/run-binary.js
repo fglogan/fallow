@@ -1,4 +1,4 @@
-// Shared launcher used by bin/fallow, bin/fallow-lsp, and bin/fallow-mcp.
+// Shared launcher used by bin/plow, bin/plow-lsp, and bin/plow-mcp.
 //
 // 1. Resolves the platform package for the current process (platform + arch + libc).
 // 2. Runs ensureVerified (Ed25519 + SHA-256 lazy first-run verify).
@@ -73,9 +73,9 @@ function resolvePlatformPaths() {
 function printVerifyError(verifyResult) {
   const where = verifyResult.binary ? ` ${verifyResult.binary}` : "";
   process.stderr.write(
-    `fallow: binary verification failed${where} (${verifyResult.code}): ${verifyResult.message}\n` +
-      `See https://github.com/fallow-rs/fallow/blob/main/SECURITY.md for the trust model. ` +
-      `Set FALLOW_SKIP_BINARY_VERIFY=1 only when you deliberately replace the published binary.\n`,
+    `plow: binary verification failed${where} (${verifyResult.code}): ${verifyResult.message}\n` +
+      `See https://github.com/plow-rs/plow/blob/main/SECURITY.md for the trust model. ` +
+      `Set PLOW_SKIP_BINARY_VERIFY=1 only when you deliberately replace the published binary.\n`,
   );
 }
 
@@ -85,8 +85,8 @@ function writeVerifiedLineIfVersionQuery(verifyResult) {
   }
 }
 
-// Swallow EPIPE on stdout. When fallow's output is piped into a reader that
-// closes early (e.g. `fallow --version | head`), the trailing `verified:`
+// Swallow EPIPE on stdout. When plow's output is piped into a reader that
+// closes early (e.g. `plow --version | head`), the trailing `verified:`
 // status line would otherwise surface as an unhandled EPIPE 'error' event and
 // dump a Node stack trace. EPIPE arrives as an async 'error' event on the
 // stdout stream, not as a throw, so a try/catch around the write cannot catch

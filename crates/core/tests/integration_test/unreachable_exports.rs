@@ -1,12 +1,12 @@
 use super::common::{create_config, fixture_path};
 
-fn analyze_fixture(name: &str) -> fallow_core::results::AnalysisResults {
+fn analyze_fixture(name: &str) -> plow_core::results::AnalysisResults {
     let root = fixture_path(name);
     let config = create_config(root);
-    fallow_core::analyze(&config).expect("analysis should succeed")
+    plow_core::analyze(&config).expect("analysis should succeed")
 }
 
-fn unused_export_names(results: &fallow_core::results::AnalysisResults) -> Vec<&str> {
+fn unused_export_names(results: &plow_core::results::AnalysisResults) -> Vec<&str> {
     results
         .unused_exports
         .iter()
@@ -14,7 +14,7 @@ fn unused_export_names(results: &fallow_core::results::AnalysisResults) -> Vec<&
         .collect()
 }
 
-fn unused_file_names(results: &fallow_core::results::AnalysisResults) -> Vec<String> {
+fn unused_file_names(results: &plow_core::results::AnalysisResults) -> Vec<String> {
     results
         .unused_files
         .iter()

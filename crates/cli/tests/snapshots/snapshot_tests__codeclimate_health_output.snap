@@ -5,13 +5,13 @@ expression: json_str
 [
   {
     "type": "issue",
-    "check_name": "fallow/high-complexity",
+    "check_name": "plow/high-complexity",
     "description": "'processData' has cyclomatic complexity 25 (threshold: 20) and cognitive complexity 30 (threshold: 15)",
     "categories": [
       "Complexity"
     ],
     "severity": "major",
-    "fingerprint": "d4ee093a5fdb5d49",
+    "fingerprint": "5e1e11ec6d9fd112",
     "location": {
       "path": "src/complex.ts",
       "lines": {

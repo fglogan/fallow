@@ -4,13 +4,13 @@ use std::sync::LazyLock;
 use regex::Regex;
 use rmcp::ServerHandler;
 
-use super::super::FallowMcp;
+use super::super::PlowMcp;
 
 #[test]
 fn server_info_is_correct() {
-    let server = FallowMcp::new();
+    let server = PlowMcp::new();
     let info = ServerHandler::get_info(&server);
-    assert_eq!(info.server_info.name, "fallow-mcp");
+    assert_eq!(info.server_info.name, "plow-mcp");
     assert_eq!(info.server_info.version, env!("CARGO_PKG_VERSION"));
     assert!(info.capabilities.tools.is_some());
     assert!(info.instructions.is_some());
@@ -18,7 +18,7 @@ fn server_info_is_correct() {
 
 #[test]
 fn all_tools_registered() {
-    let server = FallowMcp::new();
+    let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
     let names: Vec<String> = tools.iter().map(|t| t.name.to_string()).collect();
     assert!(names.contains(&"analyze".to_string()));
@@ -33,7 +33,7 @@ fn all_tools_registered() {
     assert!(names.contains(&"trace_clone".to_string()));
     assert!(names.contains(&"check_health".to_string()));
     assert!(names.contains(&"audit".to_string()));
-    assert!(names.contains(&"fallow_explain".to_string()));
+    assert!(names.contains(&"plow_explain".to_string()));
     assert!(names.contains(&"list_boundaries".to_string()));
     assert!(names.contains(&"feature_flags".to_string()));
     assert!(names.contains(&"check_runtime_coverage".to_string()));
@@ -46,7 +46,7 @@ fn all_tools_registered() {
 
 #[test]
 fn read_only_tools_have_annotations() {
-    let server = FallowMcp::new();
+    let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
     let read_only = [
         "analyze",
@@ -60,7 +60,7 @@ fn read_only_tools_have_annotations() {
         "trace_clone",
         "check_health",
         "audit",
-        "fallow_explain",
+        "plow_explain",
         "list_boundaries",
         "feature_flags",
         "check_runtime_coverage",
@@ -80,7 +80,7 @@ fn read_only_tools_have_annotations() {
 
 #[test]
 fn fix_apply_is_destructive() {
-    let server = FallowMcp::new();
+    let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
     let fix = tools.iter().find(|t| t.name == "fix_apply").unwrap();
     let ann = fix.annotations.as_ref().unwrap();
@@ -90,7 +90,7 @@ fn fix_apply_is_destructive() {
 
 #[test]
 fn all_tools_have_descriptions() {
-    let server = FallowMcp::new();
+    let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
     for tool in &tools {
         let name = tool.name.to_string();
@@ -104,7 +104,7 @@ fn all_tools_have_descriptions() {
 
 #[test]
 fn all_tools_have_annotations() {
-    let server = FallowMcp::new();
+    let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
     for tool in &tools {
         let name = tool.name.to_string();
@@ -117,7 +117,7 @@ fn all_tools_have_annotations() {
 
 #[test]
 fn open_world_hint_on_analysis_tools() {
-    let server = FallowMcp::new();
+    let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
     let open_world = [
         "analyze",
@@ -150,7 +150,7 @@ fn open_world_hint_on_analysis_tools() {
 
 #[test]
 fn fix_preview_is_not_destructive() {
-    let server = FallowMcp::new();
+    let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
     let preview = tools.iter().find(|t| t.name == "fix_preview").unwrap();
     let ann = preview.annotations.as_ref().unwrap();
@@ -161,7 +161,7 @@ fn fix_preview_is_not_destructive() {
 
 #[test]
 fn server_info_has_description() {
-    let server = FallowMcp::new();
+    let server = PlowMcp::new();
     let info = ServerHandler::get_info(&server);
     assert!(
         info.server_info
@@ -174,7 +174,7 @@ fn server_info_has_description() {
 
 #[test]
 fn server_instructions_mention_all_tools() {
-    let server = FallowMcp::new();
+    let server = PlowMcp::new();
     let info = ServerHandler::get_info(&server);
     let instructions = info.instructions.as_deref().unwrap();
     assert!(instructions.contains("analyze"));
@@ -189,7 +189,7 @@ fn server_instructions_mention_all_tools() {
     assert!(instructions.contains("trace_clone"));
     assert!(instructions.contains("check_health"));
     assert!(instructions.contains("audit"));
-    assert!(instructions.contains("fallow_explain"));
+    assert!(instructions.contains("plow_explain"));
     assert!(instructions.contains("list_boundaries"));
     assert!(instructions.contains("feature_flags"));
     assert!(instructions.contains("check_runtime_coverage"));
@@ -201,7 +201,7 @@ fn server_instructions_mention_all_tools() {
 
 #[test]
 fn all_tools_have_input_schema() {
-    let server = FallowMcp::new();
+    let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
     for tool in &tools {
         let name = tool.name.to_string();
@@ -217,7 +217,7 @@ fn all_tools_have_input_schema() {
 
 #[test]
 fn analyze_schema_contains_expected_properties() {
-    let server = FallowMcp::new();
+    let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
     let tool = tools.iter().find(|t| t.name == "analyze").unwrap();
     let schema = serde_json::to_string(&tool.input_schema).unwrap();
@@ -242,7 +242,7 @@ fn analyze_schema_contains_expected_properties() {
 
 #[test]
 fn check_changed_schema_contains_expected_properties() {
-    let server = FallowMcp::new();
+    let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
     let tool = tools.iter().find(|t| t.name == "check_changed").unwrap();
     let schema = serde_json::to_string(&tool.input_schema).unwrap();
@@ -266,7 +266,7 @@ fn check_changed_schema_contains_expected_properties() {
 
 #[test]
 fn check_changed_schema_requires_since() {
-    let server = FallowMcp::new();
+    let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
     let tool = tools.iter().find(|t| t.name == "check_changed").unwrap();
     let schema = serde_json::to_string(&tool.input_schema).unwrap();
@@ -287,7 +287,7 @@ fn check_changed_schema_requires_since() {
 
 #[test]
 fn find_dupes_schema_contains_expected_properties() {
-    let server = FallowMcp::new();
+    let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
     let tool = tools.iter().find(|t| t.name == "find_dupes").unwrap();
     let schema = serde_json::to_string(&tool.input_schema).unwrap();
@@ -319,7 +319,7 @@ fn find_dupes_schema_contains_expected_properties() {
 
 #[test]
 fn fix_preview_schema_contains_expected_properties() {
-    let server = FallowMcp::new();
+    let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
     let tool = tools.iter().find(|t| t.name == "fix_preview").unwrap();
     let schema = serde_json::to_string(&tool.input_schema).unwrap();
@@ -340,7 +340,7 @@ fn fix_preview_schema_contains_expected_properties() {
 
 #[test]
 fn fix_apply_schema_contains_expected_properties() {
-    let server = FallowMcp::new();
+    let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
     let tool = tools.iter().find(|t| t.name == "fix_apply").unwrap();
     let schema = serde_json::to_string(&tool.input_schema).unwrap();
@@ -361,7 +361,7 @@ fn fix_apply_schema_contains_expected_properties() {
 
 #[test]
 fn project_info_schema_contains_expected_properties() {
-    let server = FallowMcp::new();
+    let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
     let tool = tools.iter().find(|t| t.name == "project_info").unwrap();
     let schema = serde_json::to_string(&tool.input_schema).unwrap();
@@ -384,7 +384,7 @@ fn project_info_schema_contains_expected_properties() {
 
 #[test]
 fn trace_export_schema_contains_expected_properties() {
-    let server = FallowMcp::new();
+    let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
     let tool = tools.iter().find(|t| t.name == "trace_export").unwrap();
     let schema = serde_json::to_string(&tool.input_schema).unwrap();
@@ -421,7 +421,7 @@ fn trace_export_schema_contains_expected_properties() {
 
 #[test]
 fn trace_file_schema_contains_expected_properties() {
-    let server = FallowMcp::new();
+    let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
     let tool = tools.iter().find(|t| t.name == "trace_file").unwrap();
     let schema = serde_json::to_string(&tool.input_schema).unwrap();
@@ -451,7 +451,7 @@ fn trace_file_schema_contains_expected_properties() {
 
 #[test]
 fn trace_dependency_schema_contains_expected_properties() {
-    let server = FallowMcp::new();
+    let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
     let tool = tools.iter().find(|t| t.name == "trace_dependency").unwrap();
     let schema = serde_json::to_string(&tool.input_schema).unwrap();
@@ -481,7 +481,7 @@ fn trace_dependency_schema_contains_expected_properties() {
 
 #[test]
 fn trace_clone_schema_contains_expected_properties() {
-    let server = FallowMcp::new();
+    let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
     let tool = tools.iter().find(|t| t.name == "trace_clone").unwrap();
     let schema = serde_json::to_string(&tool.input_schema).unwrap();
@@ -537,7 +537,7 @@ fn assert_required_fields(schema: &serde_json::Value, expected: &[&str]) {
 
 #[test]
 fn check_health_schema_contains_expected_properties() {
-    let server = FallowMcp::new();
+    let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
     let tool = tools.iter().find(|t| t.name == "check_health").unwrap();
     let schema = serde_json::to_string(&tool.input_schema).unwrap();
@@ -577,7 +577,7 @@ fn check_health_schema_contains_expected_properties() {
 
 #[test]
 fn check_health_description_mentions_runtime_coverage() {
-    let server = FallowMcp::new();
+    let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
     let tool = tools.iter().find(|t| t.name == "check_health").unwrap();
     let desc = tool.description.as_deref().unwrap();
@@ -590,14 +590,14 @@ fn check_health_description_mentions_runtime_coverage() {
         "check_health description should mention min_invocations_hot tuning knob"
     );
     assert!(
-        desc.contains("fallow license"),
-        "check_health description should reference `fallow license activate` as the activation path"
+        desc.contains("plow license"),
+        "check_health description should reference `plow license activate` as the activation path"
     );
 }
 
 #[test]
 fn audit_schema_contains_expected_properties() {
-    let server = FallowMcp::new();
+    let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
     let tool = tools.iter().find(|t| t.name == "audit").unwrap();
     let schema = serde_json::to_string(&tool.input_schema).unwrap();
@@ -623,7 +623,7 @@ fn audit_schema_contains_expected_properties() {
 
 #[test]
 fn list_boundaries_schema_contains_expected_properties() {
-    let server = FallowMcp::new();
+    let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
     let tool = tools.iter().find(|t| t.name == "list_boundaries").unwrap();
     let schema = serde_json::to_string(&tool.input_schema).unwrap();
@@ -641,7 +641,7 @@ fn list_boundaries_schema_contains_expected_properties() {
 /// drop user-visible prose from `tools/list`.
 #[test]
 fn converted_field_descriptions_render_in_schema() {
-    let server = FallowMcp::new();
+    let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
 
     let cases: &[(&str, &[&str])] = &[
@@ -721,7 +721,7 @@ const RUNTIME_DEFAULT_EXPECTATIONS: &[ToolDefaultExpectation] = &[
 ];
 
 fn mcp_tool_descriptions() -> BTreeMap<String, String> {
-    let server = FallowMcp::new();
+    let server = PlowMcp::new();
     server
         .tool_router
         .list_all()
@@ -870,7 +870,7 @@ fn default_drift_gate_trips_on_changed_or_missing_tool_description_default() {
 
 #[test]
 fn check_runtime_coverage_schema_contains_expected_properties() {
-    let server = FallowMcp::new();
+    let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
     let tool = tools
         .iter()
@@ -901,7 +901,7 @@ fn check_runtime_coverage_schema_contains_expected_properties() {
 
 #[test]
 fn runtime_context_split_tool_schemas_require_coverage() {
-    let server = FallowMcp::new();
+    let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
     for name in [
         "get_hot_paths",
@@ -930,7 +930,7 @@ fn runtime_context_split_tool_schemas_require_coverage() {
 
 #[test]
 fn check_runtime_coverage_schema_requires_coverage() {
-    let server = FallowMcp::new();
+    let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
     let tool = tools
         .iter()
@@ -950,7 +950,7 @@ fn check_runtime_coverage_schema_requires_coverage() {
 
 #[test]
 fn feature_flags_schema_contains_expected_properties() {
-    let server = FallowMcp::new();
+    let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
     let tool = tools.iter().find(|t| t.name == "feature_flags").unwrap();
     let schema = serde_json::to_string(&tool.input_schema).unwrap();
@@ -975,7 +975,7 @@ fn feature_flags_schema_contains_expected_properties() {
 
 #[test]
 fn fix_apply_does_not_have_open_world_hint() {
-    let server = FallowMcp::new();
+    let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
     let fix = tools.iter().find(|t| t.name == "fix_apply").unwrap();
     let ann = fix.annotations.as_ref().unwrap();
@@ -991,7 +991,7 @@ fn fix_apply_does_not_have_open_world_hint() {
 
 #[test]
 fn analyze_description_mentions_unused_code() {
-    let server = FallowMcp::new();
+    let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
     let tool = tools.iter().find(|t| t.name == "analyze").unwrap();
     let desc = tool.description.as_deref().unwrap();
@@ -1003,7 +1003,7 @@ fn analyze_description_mentions_unused_code() {
 
 #[test]
 fn find_dupes_description_mentions_duplication() {
-    let server = FallowMcp::new();
+    let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
     let tool = tools.iter().find(|t| t.name == "find_dupes").unwrap();
     let desc = tool.description.as_deref().unwrap();
@@ -1015,7 +1015,7 @@ fn find_dupes_description_mentions_duplication() {
 
 #[test]
 fn check_health_description_mentions_complexity() {
-    let server = FallowMcp::new();
+    let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
     let tool = tools.iter().find(|t| t.name == "check_health").unwrap();
     let desc = tool.description.as_deref().unwrap();
@@ -1027,7 +1027,7 @@ fn check_health_description_mentions_complexity() {
 
 #[test]
 fn check_health_description_mentions_config_activated_coverage_gaps() {
-    let server = FallowMcp::new();
+    let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
     let tool = tools.iter().find(|t| t.name == "check_health").unwrap();
     let desc = tool.description.as_deref().unwrap();
@@ -1039,7 +1039,7 @@ fn check_health_description_mentions_config_activated_coverage_gaps() {
 
 #[test]
 fn fix_apply_description_warns_about_modification() {
-    let server = FallowMcp::new();
+    let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
     let tool = tools.iter().find(|t| t.name == "fix_apply").unwrap();
     let desc = tool.description.as_deref().unwrap();
@@ -1051,7 +1051,7 @@ fn fix_apply_description_warns_about_modification() {
 
 #[test]
 fn fix_preview_description_mentions_dry_run_or_preview() {
-    let server = FallowMcp::new();
+    let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
     let tool = tools.iter().find(|t| t.name == "fix_preview").unwrap();
     let desc = tool.description.as_deref().unwrap();
@@ -1065,7 +1065,7 @@ fn fix_preview_description_mentions_dry_run_or_preview() {
 
 #[test]
 fn all_tool_schemas_are_json_objects() {
-    let server = FallowMcp::new();
+    let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
     for tool in &tools {
         let name = tool.name.to_string();
@@ -1230,7 +1230,7 @@ pub struct A {
 
 #[test]
 fn server_is_cloneable() {
-    let server = FallowMcp::new();
+    let server = PlowMcp::new();
     // Use clone in a way that isn't redundant — verify both instances work
     let cloned = server.clone();
     let tools_original = server.tool_router.list_all();

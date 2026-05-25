@@ -1,10 +1,10 @@
-//! `fallow license` subcommand: activate, status, refresh, deactivate.
+//! `plow license` subcommand: activate, status, refresh, deactivate.
 //!
 //! All entry points are dispatched from [`run`]. Network-bound flows
-//! (`refresh`, `activate --trial`) fetch a JWT from `api.fallow.cloud` and
+//! (`refresh`, `activate --trial`) fetch a JWT from `api.plow.cloud` and
 //! then pass it through the same offline verifier used by the local activation
 //! path. Local flows (`activate <jwt>`, `status`, `deactivate`) are fully
-//! wired against [`fallow_license`].
+//! wired against [`plow_license`].
 //!
 //! # Public key
 //!
@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use ed25519_dalek::VerifyingKey;
-use fallow_license::{
+use plow_license::{
     DEFAULT_HARD_FAIL_DAYS, Feature, LicenseError, LicenseStatus, current_unix_seconds,
     default_license_path, normalize_jwt, skew_tolerance_seconds_from_env, verify_jwt_with_skew,
 };
@@ -25,7 +25,7 @@ use crate::api::{
     NETWORK_EXIT_CODE, api_url, http_status_message, sanitize_network_error, try_api_agent,
 };
 
-/// Ed25519 verification key for fallow license JWT validation.
+/// Ed25519 verification key for plow license JWT validation.
 #[cfg(not(feature = "test-sidecar-key"))]
 pub const PUBLIC_KEY_BYTES: [u8; 32] = [
     179, 203, 218, 13, 98, 63, 103, 172, 91, 108, 23, 122, 27, 101, 200, 182, 174, 117, 160, 41,
@@ -41,21 +41,21 @@ pub const PUBLIC_KEY_BYTES: [u8; 32] = [
     0x7d, 0x59, 0xc5, 0x62, 0x3d, 0xd4, 0x0a, 0x74, 0xaa, 0x4d, 0x5a, 0x32, 0xac, 0x64, 0x5d, 0x3b,
     0x3f, 0x95, 0xda, 0xea, 0xe4, 0xc2, 0x2b, 0xe2, 0x54, 0x76, 0xdd, 0x6a, 0x48, 0x6f, 0x73, 0x82,
 ];
-/// Subcommands for `fallow license`.
+/// Subcommands for `plow license`.
 #[derive(Debug)]
 pub enum LicenseSubcommand {
-    /// Install a license JWT into `~/.fallow/license.jwt`.
+    /// Install a license JWT into `~/.plow/license.jwt`.
     Activate(ActivateArgs),
     /// Print active license tier, seats, features, days remaining.
     Status,
-    /// Fetch a fresh JWT from `api.fallow.cloud`, verify it offline, and
+    /// Fetch a fresh JWT from `api.plow.cloud`, verify it offline, and
     /// persist it to the active license path.
     Refresh,
     /// Remove the local license file.
     Deactivate,
 }
 
-/// Arguments for `fallow license activate`.
+/// Arguments for `plow license activate`.
 #[derive(Clone, Default)]
 pub struct ActivateArgs {
     /// JWT passed directly as a positional argument.
@@ -64,7 +64,7 @@ pub struct ActivateArgs {
     pub from_file: Option<PathBuf>,
     /// Read JWT from stdin.
     pub from_stdin: bool,
-    /// Issue a 30-day email-gated trial via `api.fallow.cloud` and persist
+    /// Issue a 30-day email-gated trial via `api.plow.cloud` and persist
     /// the returned JWT in one step.
     pub trial: bool,
     /// Email used for the trial flow (required when `trial = true`).
@@ -101,7 +101,7 @@ struct JwtResponse {
     trial_ends_at: Option<String>,
 }
 
-/// Dispatch a `fallow license <sub>` invocation.
+/// Dispatch a `plow license <sub>` invocation.
 pub fn run(subcommand: &LicenseSubcommand) -> ExitCode {
     match subcommand {
         LicenseSubcommand::Activate(args) => run_activate(args),
@@ -118,14 +118,14 @@ fn run_activate(args: &ActivateArgs) -> ExitCode {
     let jwt = match read_jwt(args) {
         Ok(jwt) => jwt,
         Err(msg) => {
-            eprintln!("fallow license: {msg}");
+            eprintln!("plow license: {msg}");
             return ExitCode::from(2);
         }
     };
     let key = match verifying_key() {
         Ok(k) => k,
         Err(msg) => {
-            eprintln!("fallow license: {msg}");
+            eprintln!("plow license: {msg}");
             return ExitCode::from(2);
         }
     };
@@ -138,7 +138,7 @@ fn run_activate(args: &ActivateArgs) -> ExitCode {
     ) {
         Ok(status) => {
             if let Err(msg) = persist_jwt(&jwt) {
-                eprintln!("fallow license: {msg}");
+                eprintln!("plow license: {msg}");
                 return ExitCode::from(2);
             }
             print_status(&status);
@@ -146,13 +146,13 @@ fn run_activate(args: &ActivateArgs) -> ExitCode {
         }
         Err(LicenseError::Truncated { .. }) => {
             eprintln!(
-                "fallow license: {}",
+                "plow license: {}",
                 LicenseError::Truncated { actual: jwt.len() }
             );
             ExitCode::from(3)
         }
         Err(err) => {
-            eprintln!("fallow license: failed to verify JWT: {err}");
+            eprintln!("plow license: failed to verify JWT: {err}");
             ExitCode::from(3)
         }
     }
@@ -162,11 +162,11 @@ fn run_status() -> ExitCode {
     let key = match verifying_key() {
         Ok(k) => k,
         Err(msg) => {
-            eprintln!("fallow license: {msg}");
+            eprintln!("plow license: {msg}");
             return ExitCode::from(2);
         }
     };
-    match fallow_license::load_and_verify(&key, DEFAULT_HARD_FAIL_DAYS) {
+    match plow_license::load_and_verify(&key, DEFAULT_HARD_FAIL_DAYS) {
         Ok(status) => {
             print_status(&status);
             match status {
@@ -175,7 +175,7 @@ fn run_status() -> ExitCode {
             }
         }
         Err(err) => {
-            eprintln!("fallow license: {err}");
+            eprintln!("plow license: {err}");
             ExitCode::from(3)
         }
     }
@@ -188,7 +188,7 @@ fn run_refresh() -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(message) => {
-            eprintln!("fallow license refresh: {message}");
+            eprintln!("plow license refresh: {message}");
             ExitCode::from(NETWORK_EXIT_CODE)
         }
     }
@@ -196,7 +196,7 @@ fn run_refresh() -> ExitCode {
 
 fn run_trial(email: Option<&str>) -> ExitCode {
     let Some(email) = email else {
-        eprintln!("fallow license activate --trial requires --email <addr>");
+        eprintln!("plow license activate --trial requires --email <addr>");
         return ExitCode::from(2);
     };
     match activate_trial(email) {
@@ -205,7 +205,7 @@ fn run_trial(email: Option<&str>) -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(message) => {
-            eprintln!("fallow license activate --trial: {message}");
+            eprintln!("plow license activate --trial: {message}");
             ExitCode::from(NETWORK_EXIT_CODE)
         }
     }
@@ -214,16 +214,16 @@ fn run_trial(email: Option<&str>) -> ExitCode {
 fn run_deactivate() -> ExitCode {
     let path = default_license_path();
     if !path.exists() {
-        println!("fallow license: no license file at {}", path.display());
+        println!("plow license: no license file at {}", path.display());
         return ExitCode::SUCCESS;
     }
     match std::fs::remove_file(&path) {
         Ok(()) => {
-            println!("fallow license: removed {}", path.display());
+            println!("plow license: removed {}", path.display());
             ExitCode::SUCCESS
         }
         Err(err) => {
-            eprintln!("fallow license: failed to remove {}: {err}", path.display());
+            eprintln!("plow license: failed to remove {}: {err}", path.display());
             ExitCode::from(2)
         }
     }
@@ -252,7 +252,7 @@ fn read_jwt(args: &ActivateArgs) -> Result<String, String> {
 
 fn persist_jwt(jwt: &str) -> Result<(), String> {
     let path = write_jwt(jwt)?;
-    println!("fallow license: stored at {}", path.display());
+    println!("plow license: stored at {}", path.display());
     Ok(())
 }
 
@@ -293,7 +293,7 @@ fn restrict_license_permissions(_path: &Path) -> Result<(), String> {
 
 /// Construct the compiled-in Ed25519 verification key.
 ///
-/// Crate-internal so other CLI subcommands (e.g. `fallow coverage setup`)
+/// Crate-internal so other CLI subcommands (e.g. `plow coverage setup`)
 /// can also detect license state without re-implementing key construction.
 pub fn verifying_key() -> Result<VerifyingKey, String> {
     VerifyingKey::from_bytes(&PUBLIC_KEY_BYTES)
@@ -329,10 +329,10 @@ pub fn refresh_active_license() -> Result<LicenseStatus, String> {
 }
 
 fn load_current_jwt() -> Result<String, String> {
-    match fallow_license::load_raw_jwt() {
+    match plow_license::load_raw_jwt() {
         Ok(Some(jwt)) => Ok(jwt),
         Ok(None) => Err(
-            "no license found. Run: fallow license activate --trial --email you@company.com"
+            "no license found. Run: plow license activate --trial --email you@company.com"
                 .to_owned(),
         ),
         Err(err) => Err(format!("failed to read the current license: {err}")),
@@ -350,11 +350,11 @@ fn store_verified_jwt(
     let jwt = normalize_jwt(&payload.jwt);
     let status = verify_downloaded_jwt(&jwt)?;
     let path = write_jwt(&jwt)?;
-    println!("fallow license: stored at {}", path.display());
+    println!("plow license: stored at {}", path.display());
     if let Some(trial_ends_at) = payload.trial_ends_at.as_deref() {
         let trimmed = trial_ends_at.trim();
         if !trimmed.is_empty() {
-            println!("fallow license: trial ends at {trimmed}");
+            println!("plow license: trial ends at {trimmed}");
         }
     }
     Ok(status)
@@ -394,7 +394,7 @@ fn print_status(status: &LicenseStatus) {
                 && current_unix_seconds() >= refresh_after
             {
                 println!(
-                    "  refresh suggested now: fallow license refresh (prevents CI breakage before expiry)"
+                    "  refresh suggested now: plow license refresh (prevents CI breakage before expiry)"
                 );
             }
         }
@@ -404,7 +404,7 @@ fn print_status(status: &LicenseStatus) {
         } => {
             println!(
                 "license: EXPIRED ({days_since_expiry} days ago), analysis still runs in the warning window. \
-                 Refresh: fallow license refresh"
+                 Refresh: plow license refresh"
             );
             println!(
                 "  tier={} seats={} features={}",
@@ -419,7 +419,7 @@ fn print_status(status: &LicenseStatus) {
         } => {
             println!(
                 "license: EXPIRED ({days_since_expiry} days ago), output will show a watermark until refreshed. \
-                 Refresh: fallow license refresh"
+                 Refresh: plow license refresh"
             );
             println!(
                 "  tier={} seats={} features={}",
@@ -433,12 +433,12 @@ fn print_status(status: &LicenseStatus) {
         } => {
             println!(
                 "license: EXPIRED ({days_since_expiry} days ago, past grace window), paid features blocked. \
-                 Refresh: fallow license refresh, or fallow license activate --trial --email <addr>"
+                 Refresh: plow license refresh, or plow license activate --trial --email <addr>"
             );
         }
         LicenseStatus::Missing => {
             println!(
-                "license: NOT FOUND. Start a 30-day trial: fallow license activate --trial --email you@company.com"
+                "license: NOT FOUND. Start a 30-day trial: plow license activate --trial --email you@company.com"
             );
         }
     }

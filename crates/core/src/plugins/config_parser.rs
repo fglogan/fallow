@@ -13,7 +13,7 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_extract::visitor::extract_import_from_callable;
+use plow_extract::visitor::extract_import_from_callable;
 use oxc_allocator::Allocator;
 #[allow(clippy::wildcard_imports, reason = "many AST types used")]
 use oxc_ast::ast::*;

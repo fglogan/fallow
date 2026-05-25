@@ -48,7 +48,7 @@ const GENERAL_TOOLING_EXACT: &[&str] = &[
     "ts-node",
     "tsx",
     "knip",
-    "fallow",
+    "plow",
     "jest",
     "vitest",
     "tap",

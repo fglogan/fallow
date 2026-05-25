@@ -1,6 +1,6 @@
 //! Angular template cyclomatic and cognitive complexity.
 
-use fallow_types::extract::{FunctionComplexity, byte_offset_to_line_col, compute_line_offsets};
+use plow_types::extract::{FunctionComplexity, byte_offset_to_line_col, compute_line_offsets};
 
 /// Internal scanner error. Carries no data: any malformed-template path
 /// just falls through and the caller drops the synthetic finding.

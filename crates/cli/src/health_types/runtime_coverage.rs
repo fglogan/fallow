@@ -1,10 +1,10 @@
 use std::fmt;
 use std::path::PathBuf;
 
-use fallow_types::serde_path;
+use plow_types::serde_path;
 
 /// Runtime coverage JSON contract version. This is scoped to the
-/// `runtime_coverage` block and is independent of the top-level fallow
+/// `runtime_coverage` block and is independent of the top-level plow
 /// JSON `schema_version`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -227,7 +227,7 @@ impl fmt::Display for RuntimeCoverageDataSource {
 pub struct RuntimeCoverageSummary {
     /// Runtime evidence source used for this report. Local mode reads a
     /// supplied runtime coverage artifact; cloud mode pulls the latest
-    /// fallow.cloud runtime context after explicit opt-in.
+    /// plow.cloud runtime context after explicit opt-in.
     pub data_source: RuntimeCoverageDataSource,
     /// Timestamp of the newest runtime payload included in the report. Null for
     /// local single-capture artifacts that do not carry cloud receipt metadata.
@@ -308,14 +308,14 @@ pub struct RuntimeCoverageEvidence {
 /// Suggested follow-up action for a runtime coverage finding.
 pub struct RuntimeCoverageAction {
     /// Action identifier, normalized to `type` in JSON output. Known values
-    /// emitted by `fallow coverage analyze`: `delete-cold-code`
+    /// emitted by `plow coverage analyze`: `delete-cold-code`
     /// (verdict=safe_to_delete), `review-runtime` (verdict=review_required).
     /// The sidecar may emit additional protocol-specific identifiers;
     /// consumers should treat unknown values as forward-compat extensions.
     #[serde(rename = "type")]
     pub kind: String,
     pub description: String,
-    /// Whether fallow can apply this action automatically.
+    /// Whether plow can apply this action automatically.
     pub auto_fixable: bool,
 }
 
@@ -505,13 +505,13 @@ pub struct RuntimeCoverageImportanceEntry {
 #[derive(Debug, Clone, Default, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 /// Runtime coverage findings merged into the health report or emitted by
-/// `fallow coverage analyze`. Present in health output when --runtime-coverage
+/// `plow coverage analyze`. Present in health output when --runtime-coverage
 /// is used. Shape mirrors the runtime coverage JSON contract; cloud mode
 /// fetches runtime facts explicitly and merges them locally with AST/static
 /// analysis.
 pub struct RuntimeCoverageReport {
     /// Runtime coverage JSON contract version. This is scoped to the
-    /// `runtime_coverage` block and is independent of the top-level fallow
+    /// `runtime_coverage` block and is independent of the top-level plow
     /// JSON `schema_version`.
     pub schema_version: RuntimeCoverageSchemaVersion,
     /// Single most actionable runtime-coverage signal under the current

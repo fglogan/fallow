@@ -9,7 +9,7 @@ use super::ModuleGraph;
 impl ModuleGraph {
     fn collect_reachable(
         &self,
-        entry_points: &rustc_hash::FxHashSet<fallow_types::discover::FileId>,
+        entry_points: &rustc_hash::FxHashSet<plow_types::discover::FileId>,
         total_capacity: usize,
     ) -> FixedBitSet {
         let mut visited = FixedBitSet::with_capacity(total_capacity);
@@ -44,9 +44,9 @@ impl ModuleGraph {
     /// Skips redundant BFS passes when entry point sets are identical or empty.
     pub(super) fn mark_reachable(
         &mut self,
-        entry_points: &rustc_hash::FxHashSet<fallow_types::discover::FileId>,
-        runtime_entry_points: &rustc_hash::FxHashSet<fallow_types::discover::FileId>,
-        test_entry_points: &rustc_hash::FxHashSet<fallow_types::discover::FileId>,
+        entry_points: &rustc_hash::FxHashSet<plow_types::discover::FileId>,
+        runtime_entry_points: &rustc_hash::FxHashSet<plow_types::discover::FileId>,
+        test_entry_points: &rustc_hash::FxHashSet<plow_types::discover::FileId>,
         total_capacity: usize,
     ) {
         let visited = self.collect_reachable(entry_points, total_capacity);
@@ -86,8 +86,8 @@ mod tests {
 
     use crate::graph::ModuleGraph;
     use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
-    use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
-    use fallow_types::extract::{ExportName, ImportInfo, ImportedName, VisibilityTag};
+    use plow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
+    use plow_types::extract::{ExportName, ImportInfo, ImportedName, VisibilityTag};
 
     /// Build a graph with separate runtime and test entry point sets.
     ///
@@ -135,7 +135,7 @@ mod tests {
                 ResolvedModule {
                     file_id: FileId(i as u32),
                     path: PathBuf::from(format!("/project/file{i}.ts")),
-                    exports: vec![fallow_types::extract::ExportInfo {
+                    exports: vec![plow_types::extract::ExportInfo {
                         name: ExportName::Named("x".to_string()),
                         local_name: Some("x".to_string()),
                         is_type_only: false,

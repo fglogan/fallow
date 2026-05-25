@@ -31,7 +31,7 @@ const ENTRY_PATTERNS: &[&str] = &[
     // Params matchers
     "src/params/**/*.{ts,js}",
     // Remote functions (SvelteKit 2.27+): invoked through generated client/server
-    // bindings, so the file is never reached through fallow's import graph.
+    // bindings, so the file is never reached through plow's import graph.
     "src/**/*.remote.{ts,js}",
 ];
 

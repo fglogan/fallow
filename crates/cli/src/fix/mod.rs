@@ -3,7 +3,7 @@ use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use fallow_config::OutputFormat;
+use plow_config::OutputFormat;
 
 mod catalog;
 mod config;
@@ -19,14 +19,14 @@ pub use config::is_config_fixable;
 use plan::{CapturedHashes, CommitOutcome, FixPlan, SkippedFile};
 
 fn run_analyze(
-    config: &fallow_config::ResolvedConfig,
+    config: &plow_config::ResolvedConfig,
     output: OutputFormat,
-) -> Result<(fallow_core::results::AnalysisResults, CapturedHashes), ExitCode> {
+) -> Result<(plow_core::results::AnalysisResults, CapturedHashes), ExitCode> {
     #[expect(
         deprecated,
-        reason = "ADR-008 deprecates fallow_core::analyze_with_file_hashes externally; the CLI still uses the workspace path dependency"
+        reason = "ADR-008 deprecates plow_core::analyze_with_file_hashes externally; the CLI still uses the workspace path dependency"
     )]
-    let output_struct = fallow_core::analyze_with_file_hashes(config)
+    let output_struct = plow_core::analyze_with_file_hashes(config)
         .map_err(|e| crate::error::emit_error(&format!("Analysis error: {e}"), 2, output))?;
     Ok((output_struct.results, output_struct.file_hashes))
 }
@@ -41,7 +41,7 @@ pub struct FixOptions<'a> {
     pub dry_run: bool,
     pub yes: bool,
     pub production: bool,
-    /// Refuse to create a new fallow config file when none exists. The
+    /// Refuse to create a new plow config file when none exists. The
     /// duplicate-export config-add path is skipped with an explanatory
     /// entry; source-file fixes proceed normally. Honored by
     /// `fix::config::apply_config_fixes`.
@@ -106,7 +106,7 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
     let mut plan = FixPlan::new();
 
     // Group exports by file path so we can apply all fixes to a single in-memory copy.
-    let mut exports_by_file: FxHashMap<PathBuf, Vec<&fallow_core::results::UnusedExport>> =
+    let mut exports_by_file: FxHashMap<PathBuf, Vec<&plow_core::results::UnusedExport>> =
         FxHashMap::default();
     for finding in &results.unused_exports {
         exports_by_file
@@ -159,7 +159,7 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
 
     // Group unused enum members by file path for batch editing.
     if !results.unused_enum_members.is_empty() {
-        let mut enum_members_by_file: FxHashMap<PathBuf, Vec<&fallow_core::results::UnusedMember>> =
+        let mut enum_members_by_file: FxHashMap<PathBuf, Vec<&plow_core::results::UnusedMember>> =
             FxHashMap::default();
         for finding in &results.unused_enum_members {
             enum_members_by_file
@@ -495,7 +495,7 @@ fn emit_human_summary(
             "files"
         };
         eprintln!(
-            "Skipped {content_changed_count} {files_word} that changed since `fallow check` ran. Re-run `fallow fix` to refresh the analysis."
+            "Skipped {content_changed_count} {files_word} that changed since `plow check` ran. Re-run `plow fix` to refresh the analysis."
         );
     }
     if mixed_line_endings_count > 0 {
@@ -517,7 +517,7 @@ fn emit_human_summary(
             "files"
         };
         eprintln!(
-            "Kept unused exports in {low_confidence_count} {files_word} where consumers may be invisible to fallow (test, mock, and fixture directories, or files with unresolved imports). Still listed by `fallow check`; remove by hand if you have confirmed they are unused.",
+            "Kept unused exports in {low_confidence_count} {files_word} where consumers may be invisible to plow (test, mock, and fixture directories, or files with unresolved imports). Still listed by `plow check`; remove by hand if you have confirmed they are unused.",
         );
     }
 }

@@ -1,4 +1,4 @@
-// fallow-ignore-next-line
+// plow-ignore-next-line
 export function blanketSuppressed(n: number): string {
   if (n < 0) return "negative";
   else if (n === 0) return "zero";

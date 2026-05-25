@@ -1,7 +1,7 @@
 use xxhash_rust::xxh3::xxh3_64;
 
 use super::tokenize::{SourceToken, TokenKind};
-use fallow_config::{DetectionMode, NormalizationConfig, ResolvedNormalization};
+use plow_config::{DetectionMode, NormalizationConfig, ResolvedNormalization};
 
 /// A token with a precomputed hash for use in the detection engine.
 #[derive(Debug, Clone)]
@@ -404,7 +404,7 @@ mod tests {
 
     #[test]
     fn resolved_normalization_from_mode_defaults() {
-        use fallow_config::NormalizationConfig;
+        use plow_config::NormalizationConfig;
 
         // Strict mode defaults: preserve everything
         let norm =
@@ -432,7 +432,7 @@ mod tests {
 
     #[test]
     fn resolved_normalization_overrides_mode_defaults() {
-        use fallow_config::NormalizationConfig;
+        use plow_config::NormalizationConfig;
 
         // Strict mode with explicit override to blind identifiers
         let overrides = NormalizationConfig {

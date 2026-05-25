@@ -1,7 +1,7 @@
 use std::path::Path;
 
-use fallow_types::discover::FileId;
-use fallow_types::extract::ModuleInfo;
+use plow_types::discover::FileId;
+use plow_types::extract::ModuleInfo;
 
 use crate::parse::parse_source_to_module;
 
@@ -818,7 +818,7 @@ export let items: T[] = [];
 // Regression for the knip #1670 reproduction shape: a type-only import in a
 // `<script lang="ts">` block whose binding is only consumed as a type
 // annotation. Knip's "real svelte compiler" mode strips types before
-// analysis, so the import vanishes from its view; fallow extracts the raw
+// analysis, so the import vanishes from its view; plow extracts the raw
 // script body and parses it with oxc, so type-position bindings stay
 // classified as type-referenced and the upstream `export type` is not
 // flagged unused.
@@ -933,7 +933,7 @@ const items = ref<T>();
 // Regression for the knip #1714 reproduction shape: a `generic` attribute
 // whose constraint references a single user type with a primitive type
 // argument. Knip's parser-driven path drops the entire script body in that
-// case, fallow's regex-based attrs scan keeps the body intact and oxc
+// case, plow's regex-based attrs scan keeps the body intact and oxc
 // parses it normally.
 #[test]
 fn vue_script_with_generic_type_argument() {

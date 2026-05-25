@@ -803,7 +803,7 @@ mod tests {
 
     /// Regression test: apps/foo/eslint.config.mjs imports @scope/eslint-config,
     /// which itself imports eslint-plugin-react. Both packages list eslint-plugin-react
-    /// in devDependencies. Fallow must NOT flag eslint-plugin-react as unused-devdep.
+    /// in devDependencies. Plow must NOT flag eslint-plugin-react as unused-devdep.
     ///
     /// The shared config lives at packages/eslint-config in the monorepo root, but
     /// its node_modules symlink is hoisted to monorepo-root/node_modules. The workspace

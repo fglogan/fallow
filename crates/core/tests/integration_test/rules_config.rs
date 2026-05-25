@@ -1,5 +1,5 @@
 use super::common::{create_config, fixture_path};
-use fallow_config::{FallowConfig, OutputFormat, RulesConfig};
+use plow_config::{PlowConfig, OutputFormat, RulesConfig};
 
 // ── Rules "off" disables detection ─────────────────────────────
 
@@ -7,8 +7,8 @@ use fallow_config::{FallowConfig, OutputFormat, RulesConfig};
 fn rules_off_disables_unused_files() {
     let root = fixture_path("detect-config");
     let mut config = create_config(root);
-    config.rules.unused_files = fallow_config::Severity::Off;
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    config.rules.unused_files = plow_config::Severity::Off;
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.unused_files.is_empty(),
@@ -20,8 +20,8 @@ fn rules_off_disables_unused_files() {
 fn rules_off_disables_unused_exports() {
     let root = fixture_path("detect-config");
     let mut config = create_config(root);
-    config.rules.unused_exports = fallow_config::Severity::Off;
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    config.rules.unused_exports = plow_config::Severity::Off;
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.unused_exports.is_empty(),
@@ -33,8 +33,8 @@ fn rules_off_disables_unused_exports() {
 fn rules_off_disables_unused_types() {
     let root = fixture_path("detect-config");
     let mut config = create_config(root);
-    config.rules.unused_types = fallow_config::Severity::Off;
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    config.rules.unused_types = plow_config::Severity::Off;
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.unused_types.is_empty(),
@@ -46,8 +46,8 @@ fn rules_off_disables_unused_types() {
 fn rules_off_disables_unused_dependencies() {
     let root = fixture_path("detect-config");
     let mut config = create_config(root);
-    config.rules.unused_dependencies = fallow_config::Severity::Off;
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    config.rules.unused_dependencies = plow_config::Severity::Off;
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.unused_dependencies.is_empty(),
@@ -59,8 +59,8 @@ fn rules_off_disables_unused_dependencies() {
 fn rules_off_disables_duplicate_exports() {
     let root = fixture_path("duplicate-exports");
     let mut config = create_config(root);
-    config.rules.duplicate_exports = fallow_config::Severity::Off;
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    config.rules.duplicate_exports = plow_config::Severity::Off;
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.duplicate_exports.is_empty(),
@@ -73,7 +73,7 @@ fn rules_off_disables_duplicate_exports() {
 #[test]
 fn ignore_exports_wildcard() {
     let root = fixture_path("ignore-exports");
-    let config = FallowConfig {
+    let config = PlowConfig {
         ignore_catalog_references: vec![],
         ignore_dependency_overrides: vec![],
         schema: None,
@@ -84,36 +84,36 @@ fn ignore_exports_wildcard() {
         workspaces: None,
         ignore_dependencies: vec![],
         ignore_unresolved_imports: vec![],
-        ignore_exports: vec![fallow_config::IgnoreExportRule {
+        ignore_exports: vec![plow_config::IgnoreExportRule {
             file: "src/utils.ts".to_string(),
             exports: vec!["*".to_string()],
         }],
-        ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+        ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
-        duplicates: fallow_config::DuplicatesConfig::default(),
-        health: fallow_config::HealthConfig::default(),
+        duplicates: plow_config::DuplicatesConfig::default(),
+        health: plow_config::HealthConfig::default(),
         rules: RulesConfig::default(),
-        boundaries: fallow_config::BoundaryConfig::default(),
+        boundaries: plow_config::BoundaryConfig::default(),
         production: false.into(),
         plugins: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
-        audit: fallow_config::AuditConfig::default(),
+        audit: plow_config::AuditConfig::default(),
         codeowners: None,
         public_packages: vec![],
-        flags: fallow_config::FlagsConfig::default(),
-        fix: fallow_config::FixConfig::default(),
-        resolve: fallow_config::ResolveConfig::default(),
+        flags: plow_config::FlagsConfig::default(),
+        fix: plow_config::FixConfig::default(),
+        resolve: plow_config::ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
         auto_imports: false,
-        cache: fallow_config::CacheConfig::default(),
+        cache: plow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None);
 
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -134,7 +134,7 @@ fn ignore_exports_wildcard() {
 #[test]
 fn ignore_exports_specific() {
     let root = fixture_path("ignore-exports");
-    let config = FallowConfig {
+    let config = PlowConfig {
         ignore_catalog_references: vec![],
         ignore_dependency_overrides: vec![],
         schema: None,
@@ -145,36 +145,36 @@ fn ignore_exports_specific() {
         workspaces: None,
         ignore_dependencies: vec![],
         ignore_unresolved_imports: vec![],
-        ignore_exports: vec![fallow_config::IgnoreExportRule {
+        ignore_exports: vec![plow_config::IgnoreExportRule {
             file: "src/utils.ts".to_string(),
             exports: vec!["ignored".to_string()],
         }],
-        ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+        ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
-        duplicates: fallow_config::DuplicatesConfig::default(),
-        health: fallow_config::HealthConfig::default(),
+        duplicates: plow_config::DuplicatesConfig::default(),
+        health: plow_config::HealthConfig::default(),
         rules: RulesConfig::default(),
-        boundaries: fallow_config::BoundaryConfig::default(),
+        boundaries: plow_config::BoundaryConfig::default(),
         production: false.into(),
         plugins: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
-        audit: fallow_config::AuditConfig::default(),
+        audit: plow_config::AuditConfig::default(),
         codeowners: None,
         public_packages: vec![],
-        flags: fallow_config::FlagsConfig::default(),
-        fix: fallow_config::FixConfig::default(),
-        resolve: fallow_config::ResolveConfig::default(),
+        flags: plow_config::FlagsConfig::default(),
+        fix: plow_config::FixConfig::default(),
+        resolve: plow_config::ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
         auto_imports: false,
-        cache: fallow_config::CacheConfig::default(),
+        cache: plow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None);
 
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -197,7 +197,7 @@ fn exports_used_only_in_file_are_reported_by_default() {
     let root = fixture_path("ignore-exports-used-in-file");
     let config = create_config(root);
 
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results
@@ -221,7 +221,7 @@ fn ignore_exports_used_in_file_boolean_suppresses_local_references() {
     let mut config = create_config(root);
     config.ignore_exports_used_in_file = true.into();
 
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -256,13 +256,13 @@ fn ignore_exports_used_in_file_boolean_suppresses_local_references() {
 fn ignore_exports_used_in_file_kind_form_can_target_types_only() {
     let root = fixture_path("ignore-exports-used-in-file");
     let mut config = create_config(root);
-    config.ignore_exports_used_in_file = fallow_config::IgnoreExportsUsedInFileByKind {
+    config.ignore_exports_used_in_file = plow_config::IgnoreExportsUsedInFileByKind {
         type_: true,
         interface: false,
     }
     .into();
 
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results
@@ -290,7 +290,7 @@ fn ignore_exports_used_in_file_does_not_suppress_export_specifier_self_reference
     let mut config = create_config(root);
     config.ignore_exports_used_in_file = true.into();
 
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
@@ -319,7 +319,7 @@ fn ignore_exports_used_in_file_does_not_suppress_export_specifier_self_reference
 #[test]
 fn ignore_dependencies_config() {
     let root = fixture_path("basic-project");
-    let config = FallowConfig {
+    let config = PlowConfig {
         ignore_catalog_references: vec![],
         ignore_dependency_overrides: vec![],
         schema: None,
@@ -331,32 +331,32 @@ fn ignore_dependencies_config() {
         ignore_dependencies: vec!["unused-dep".to_string()],
         ignore_unresolved_imports: vec![],
         ignore_exports: vec![],
-        ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+        ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
-        duplicates: fallow_config::DuplicatesConfig::default(),
-        health: fallow_config::HealthConfig::default(),
+        duplicates: plow_config::DuplicatesConfig::default(),
+        health: plow_config::HealthConfig::default(),
         rules: RulesConfig::default(),
-        boundaries: fallow_config::BoundaryConfig::default(),
+        boundaries: plow_config::BoundaryConfig::default(),
         production: false.into(),
         plugins: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
-        audit: fallow_config::AuditConfig::default(),
+        audit: plow_config::AuditConfig::default(),
         codeowners: None,
         public_packages: vec![],
-        flags: fallow_config::FlagsConfig::default(),
-        fix: fallow_config::FixConfig::default(),
-        resolve: fallow_config::ResolveConfig::default(),
+        flags: plow_config::FlagsConfig::default(),
+        fix: plow_config::FixConfig::default(),
+        resolve: plow_config::ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
         auto_imports: false,
-        cache: fallow_config::CacheConfig::default(),
+        cache: plow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None);
 
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         !results
@@ -373,7 +373,7 @@ fn ignore_dependencies_config() {
 fn results_serializable_to_json() {
     let root = fixture_path("basic-project");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let json = serde_json::to_string(&results).unwrap();
     assert!(!json.is_empty());
     // Verify it round-trips

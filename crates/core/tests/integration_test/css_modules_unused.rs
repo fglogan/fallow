@@ -4,7 +4,7 @@ use super::common::{create_config, fixture_path};
 fn css_module_unused_classes_detected() {
     let root = fixture_path("css-modules-unused");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -37,7 +37,7 @@ fn css_module_unused_classes_detected() {
 fn orphan_css_module_detected_as_unused_file() {
     let root = fixture_path("css-modules-unused");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_names: Vec<String> = results
         .unused_files

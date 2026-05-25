@@ -1,4 +1,4 @@
-//! Parsing and extraction engine for fallow codebase intelligence.
+//! Parsing and extraction engine for plow codebase intelligence.
 //!
 //! This crate handles all file parsing: JS/TS via Oxc, Vue/Svelte SFC extraction,
 //! Astro frontmatter, MDX import/export extraction, CSS Module class name extraction,
@@ -31,10 +31,10 @@ use std::path::Path;
 use rayon::prelude::*;
 
 use cache::CacheStore;
-use fallow_types::discover::{DiscoveredFile, FileId};
+use plow_types::discover::{DiscoveredFile, FileId};
 
-// Re-export all extract types from fallow-types
-pub use fallow_types::extract::{
+// Re-export all extract types from plow-types
+pub use plow_types::extract::{
     ClassHeritageInfo, DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName, ImportInfo,
     ImportedName, LocalTypeDeclaration, MemberAccess, MemberInfo, MemberKind, ModuleInfo,
     ParseResult, PublicSignatureTypeReference, ReExportInfo, RequireCallInfo, VisibilityTag,
@@ -54,21 +54,21 @@ pub use sfc_template::angular::ANGULAR_TPL_SENTINEL;
 /// `MemberAccess { object: format!("{INSTANCE_EXPORT_SENTINEL}{export_name}"), member: target }`
 /// means the exported value named `export_name` is an instance of the local
 /// class/interface symbol named `target`.
-pub const INSTANCE_EXPORT_SENTINEL: &str = "__fallow_instance_export__:";
+pub const INSTANCE_EXPORT_SENTINEL: &str = "__plow_instance_export__:";
 
 /// Synthetic member-access object prefix for typed Playwright fixtures.
 ///
 /// `MemberAccess { object: format!("{PLAYWRIGHT_FIXTURE_DEF_SENTINEL}{test}:{fixture}"), member: type_name }`
 /// means the exported Playwright test object named `test` provides a fixture
 /// named `fixture` whose declared type is `type_name`.
-pub const PLAYWRIGHT_FIXTURE_DEF_SENTINEL: &str = "__fallow_playwright_fixture_def__:";
+pub const PLAYWRIGHT_FIXTURE_DEF_SENTINEL: &str = "__plow_playwright_fixture_def__:";
 
 /// Synthetic member-access object prefix for Playwright fixture member uses.
 ///
 /// `MemberAccess { object: format!("{PLAYWRIGHT_FIXTURE_USE_SENTINEL}{test}:{fixture}"), member }`
 /// means a callback passed to the Playwright test object named `test`
 /// destructures `fixture` and accesses `fixture.member`.
-pub const PLAYWRIGHT_FIXTURE_USE_SENTINEL: &str = "__fallow_playwright_fixture_use__:";
+pub const PLAYWRIGHT_FIXTURE_USE_SENTINEL: &str = "__plow_playwright_fixture_use__:";
 
 /// Synthetic member-access object prefix for static-factory call returns.
 ///
@@ -78,7 +78,7 @@ pub const PLAYWRIGHT_FIXTURE_USE_SENTINEL: &str = "__fallow_playwright_fixture_u
 /// consumer module's imports to a class export and credits `member` on the
 /// class when the matching method carries `is_instance_returning_static`.
 /// See issue #346.
-pub const FACTORY_CALL_SENTINEL: &str = "__fallow_factory_call__:";
+pub const FACTORY_CALL_SENTINEL: &str = "__plow_factory_call__:";
 
 /// Synthetic member-access object prefix for fluent-builder chain credit.
 ///
@@ -90,7 +90,7 @@ pub const FACTORY_CALL_SENTINEL: &str = "__fallow_factory_call__:";
 /// `is_instance_returning_static`, walks each `chain` segment requiring
 /// `is_self_returning` on the class, and credits `member` on the class
 /// when the chain remains on the class type. See issue #387.
-pub const FLUENT_CHAIN_SENTINEL: &str = "__fallow_fluent_chain__:";
+pub const FLUENT_CHAIN_SENTINEL: &str = "__plow_fluent_chain__:";
 
 /// Synthetic member-access object prefix for fluent chains rooted at a `new`
 /// expression.
@@ -106,16 +106,16 @@ pub const FLUENT_CHAIN_SENTINEL: &str = "__fallow_fluent_chain__:";
 /// be `is_self_returning` on the class, and credits `member` on the class.
 /// The first method directly off the constructor is credited separately via
 /// the `static_member_object_name` `NewExpression` arm. See issue #605.
-pub const FLUENT_CHAIN_NEW_SENTINEL: &str = "__fallow_fluent_chain_new__:";
+pub const FLUENT_CHAIN_NEW_SENTINEL: &str = "__plow_fluent_chain_new__:";
 
 use parse::parse_source_to_module;
 
 /// Leading UTF-8 byte order mark codepoint.
 ///
 /// Windows editors (Notepad, older VS settings, some IDE plugins) emit a UTF-8
-/// BOM at the start of source files. fallow's contract is "UTF-8 with or
+/// BOM at the start of source files. plow's contract is "UTF-8 with or
 /// without BOM; line offsets are computed against the post-BOM view; the BOM,
-/// if present on input, is preserved on output by `fallow fix`."
+/// if present on input, is preserved on output by `plow fix`."
 const BOM_CHAR: char = '\u{FEFF}';
 
 /// Strip the leading UTF-8 BOM if present.
@@ -123,7 +123,7 @@ const BOM_CHAR: char = '\u{FEFF}';
 /// Called at every file-read entry point in this crate so the rest of the
 /// pipeline (content hash, `compute_line_offsets`, oxc parser, downstream
 /// analyses) sees a consistent post-BOM view. Mirrors the
-/// `fallow_config` layer (`config_writer.rs::BOM`) so config-shaped sources
+/// `plow_config` layer (`config_writer.rs::BOM`) so config-shaped sources
 /// and source-code-shaped sources are processed symmetrically. See issue #475.
 #[must_use]
 pub(crate) fn strip_bom(source: &str) -> &str {

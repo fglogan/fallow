@@ -7,27 +7,27 @@
 use std::process::ExitCode;
 
 use colored::Colorize;
-use fallow_config::OutputFormat;
+use plow_config::OutputFormat;
 use serde_json::{Value, json};
 
 // ── Docs base URL ────────────────────────────────────────────────
 
-const DOCS_BASE: &str = "https://docs.fallow.tools";
+const DOCS_BASE: &str = "https://docs.genesis-plow.dev";
 
 /// Docs URL for the dead-code (check) command.
-pub const CHECK_DOCS: &str = "https://docs.fallow.tools/cli/dead-code";
+pub const CHECK_DOCS: &str = "https://docs.genesis-plow.dev/cli/dead-code";
 
 /// Docs URL for the health command.
-pub const HEALTH_DOCS: &str = "https://docs.fallow.tools/cli/health";
+pub const HEALTH_DOCS: &str = "https://docs.genesis-plow.dev/cli/health";
 
 /// Docs URL for the dupes command.
-pub const DUPES_DOCS: &str = "https://docs.fallow.tools/cli/dupes";
+pub const DUPES_DOCS: &str = "https://docs.genesis-plow.dev/cli/dupes";
 
 /// Docs URL for the runtime coverage setup command's agent-readable JSON.
-pub const COVERAGE_SETUP_DOCS: &str = "https://docs.fallow.tools/cli/coverage#agent-readable-json";
+pub const COVERAGE_SETUP_DOCS: &str = "https://docs.genesis-plow.dev/cli/coverage#agent-readable-json";
 
-/// Docs URL for `fallow coverage analyze --format json --explain`.
-pub const COVERAGE_ANALYZE_DOCS: &str = "https://docs.fallow.tools/cli/coverage#analyze";
+/// Docs URL for `plow coverage analyze --format json --explain`.
+pub const COVERAGE_ANALYZE_DOCS: &str = "https://docs.genesis-plow.dev/cli/coverage#analyze";
 
 // ── Shared field definitions ────────────────────────────────────
 
@@ -39,7 +39,7 @@ const ACTIONS_FIELD_DEFINITION: &str = "Per-finding fix and suppression suggesti
 /// per-finding (not per-action-type) evaluation rule and the currently active
 /// per-instance flips so agents know to branch on the field value of EACH
 /// finding's action, not on the action `type` alone.
-const ACTIONS_AUTO_FIXABLE_FIELD_DEFINITION: &str = "Evaluated PER FINDING, not per action type. The same `type` may carry `auto_fixable: true` on one finding and `auto_fixable: false` on another when per-instance guards in the `fallow fix` applier discriminate. Filter on this bool of each individual action, not on `type` alone. Current per-instance flips: (1) `remove-catalog-entry` is `true` only when the finding's `hardcoded_consumers` array is empty (else fallow fix skips the entry to avoid breaking `pnpm install`); (2) the primary dependency action flips between `remove-dependency` (`auto_fixable: true`) and `move-dependency` (`auto_fixable: false`) based on `used_in_workspaces`; (3) `add-to-config` for `ignoreExports` is `true` when fallow fix can safely apply the action, which means EITHER a fallow config file already exists OR no config exists and the working directory is NOT inside a monorepo subpackage (the applier then creates `.fallowrc.json` using `fallow init`'s framework-aware scaffolding and layers the new rules on top); `false` inside a monorepo subpackage with no workspace-root config because the applier refuses to fragment per-package configs; (4) `update-catalog-reference` is always `false` today (catalog-switching applier not yet wired). All `suppress-line` and `suppress-file` actions are uniformly `false`.";
+const ACTIONS_AUTO_FIXABLE_FIELD_DEFINITION: &str = "Evaluated PER FINDING, not per action type. The same `type` may carry `auto_fixable: true` on one finding and `auto_fixable: false` on another when per-instance guards in the `plow fix` applier discriminate. Filter on this bool of each individual action, not on `type` alone. Current per-instance flips: (1) `remove-catalog-entry` is `true` only when the finding's `hardcoded_consumers` array is empty (else plow fix skips the entry to avoid breaking `pnpm install`); (2) the primary dependency action flips between `remove-dependency` (`auto_fixable: true`) and `move-dependency` (`auto_fixable: false`) based on `used_in_workspaces`; (3) `add-to-config` for `ignoreExports` is `true` when plow fix can safely apply the action, which means EITHER a plow config file already exists OR no config exists and the working directory is NOT inside a monorepo subpackage (the applier then creates `.plowrc.json` using `plow init`'s framework-aware scaffolding and layers the new rules on top); `false` inside a monorepo subpackage with no workspace-root config because the applier refuses to fragment per-package configs; (4) `update-catalog-reference` is always `false` today (catalog-switching applier not yet wired). All `suppress-line` and `suppress-file` actions are uniformly `false`.";
 
 // ── Check rules ─────────────────────────────────────────────────
 
@@ -61,7 +61,7 @@ pub struct RuleDef {
 
 pub const CHECK_RULES: &[RuleDef] = &[
     RuleDef {
-        id: "fallow/unused-file",
+        id: "plow/unused-file",
         category: "Dead code",
         name: "Unused Files",
         short: "File is not reachable from any entry point",
@@ -69,7 +69,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#unused-files",
     },
     RuleDef {
-        id: "fallow/unused-export",
+        id: "plow/unused-export",
         category: "Dead code",
         name: "Unused Exports",
         short: "Export is never imported",
@@ -77,7 +77,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#unused-exports",
     },
     RuleDef {
-        id: "fallow/unused-type",
+        id: "plow/unused-type",
         category: "Dead code",
         name: "Unused Type Exports",
         short: "Type export is never imported",
@@ -85,7 +85,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#unused-types",
     },
     RuleDef {
-        id: "fallow/private-type-leak",
+        id: "plow/private-type-leak",
         category: "Dead code",
         name: "Private Type Leaks",
         short: "Exported signature references a private type",
@@ -93,7 +93,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#private-type-leaks",
     },
     RuleDef {
-        id: "fallow/unused-dependency",
+        id: "plow/unused-dependency",
         category: "Dependencies",
         name: "Unused Dependencies",
         short: "Dependency listed but never imported",
@@ -101,7 +101,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#unused-dependencies",
     },
     RuleDef {
-        id: "fallow/unused-dev-dependency",
+        id: "plow/unused-dev-dependency",
         category: "Dependencies",
         name: "Unused Dev Dependencies",
         short: "Dev dependency listed but never imported",
@@ -109,7 +109,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#unused-devdependencies",
     },
     RuleDef {
-        id: "fallow/unused-optional-dependency",
+        id: "plow/unused-optional-dependency",
         category: "Dependencies",
         name: "Unused Optional Dependencies",
         short: "Optional dependency listed but never imported",
@@ -117,7 +117,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#unused-optionaldependencies",
     },
     RuleDef {
-        id: "fallow/type-only-dependency",
+        id: "plow/type-only-dependency",
         category: "Dependencies",
         name: "Type-only Dependencies",
         short: "Production dependency only used via type-only imports",
@@ -125,7 +125,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#type-only-dependencies",
     },
     RuleDef {
-        id: "fallow/test-only-dependency",
+        id: "plow/test-only-dependency",
         category: "Dependencies",
         name: "Test-only Dependencies",
         short: "Production dependency only imported by test files",
@@ -133,7 +133,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#test-only-dependencies",
     },
     RuleDef {
-        id: "fallow/unused-enum-member",
+        id: "plow/unused-enum-member",
         category: "Dead code",
         name: "Unused Enum Members",
         short: "Enum member is never referenced",
@@ -141,7 +141,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#unused-enum-members",
     },
     RuleDef {
-        id: "fallow/unused-class-member",
+        id: "plow/unused-class-member",
         category: "Dead code",
         name: "Unused Class Members",
         short: "Class member is never referenced",
@@ -149,7 +149,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#unused-class-members",
     },
     RuleDef {
-        id: "fallow/unresolved-import",
+        id: "plow/unresolved-import",
         category: "Dead code",
         name: "Unresolved Imports",
         short: "Import could not be resolved",
@@ -157,7 +157,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#unresolved-imports",
     },
     RuleDef {
-        id: "fallow/unlisted-dependency",
+        id: "plow/unlisted-dependency",
         category: "Dependencies",
         name: "Unlisted Dependencies",
         short: "Dependency used but not in package.json",
@@ -165,7 +165,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#unlisted-dependencies",
     },
     RuleDef {
-        id: "fallow/duplicate-export",
+        id: "plow/duplicate-export",
         category: "Dead code",
         name: "Duplicate Exports",
         short: "Export name appears in multiple modules",
@@ -173,7 +173,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#duplicate-exports",
     },
     RuleDef {
-        id: "fallow/circular-dependency",
+        id: "plow/circular-dependency",
         category: "Architecture",
         name: "Circular Dependencies",
         short: "Circular dependency chain detected",
@@ -181,7 +181,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#circular-dependencies",
     },
     RuleDef {
-        id: "fallow/re-export-cycle",
+        id: "plow/re-export-cycle",
         category: "Architecture",
         name: "Re-Export Cycles",
         short: "Two or more barrel files re-export from each other in a loop",
@@ -189,7 +189,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#re-export-cycles",
     },
     RuleDef {
-        id: "fallow/boundary-violation",
+        id: "plow/boundary-violation",
         category: "Architecture",
         name: "Boundary Violations",
         short: "Import crosses a configured architecture boundary",
@@ -197,23 +197,23 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#boundary-violations",
     },
     RuleDef {
-        id: "fallow/stale-suppression",
+        id: "plow/stale-suppression",
         category: "Suppressions",
         name: "Stale Suppressions",
         short: "Suppression comment or tag no longer matches any issue",
-        full: "A fallow-ignore-next-line, fallow-ignore-file, or @expected-unused suppression that no longer matches any active issue. The underlying problem was fixed but the suppression was left behind. Remove it to keep the codebase clean.",
+        full: "A plow-ignore-next-line, plow-ignore-file, or @expected-unused suppression that no longer matches any active issue. The underlying problem was fixed but the suppression was left behind. Remove it to keep the codebase clean.",
         docs_path: "explanations/dead-code#stale-suppressions",
     },
     RuleDef {
-        id: "fallow/unused-catalog-entry",
+        id: "plow/unused-catalog-entry",
         category: "Dependencies",
         name: "Unused pnpm catalog entry",
         short: "Catalog entry in pnpm-workspace.yaml not referenced by any workspace package",
-        full: "An entry in the `catalog:` or `catalogs:` section of pnpm-workspace.yaml that no workspace package.json references via the `catalog:` protocol. Catalog entries are leftover dependency metadata once a package is removed from every consumer; delete the entry to keep the catalog truthful. See also: fallow/unresolved-catalog-reference (the inverse: consumer references a catalog that does not declare the package).",
+        full: "An entry in the `catalog:` or `catalogs:` section of pnpm-workspace.yaml that no workspace package.json references via the `catalog:` protocol. Catalog entries are leftover dependency metadata once a package is removed from every consumer; delete the entry to keep the catalog truthful. See also: plow/unresolved-catalog-reference (the inverse: consumer references a catalog that does not declare the package).",
         docs_path: "explanations/dead-code#unused-catalog-entries",
     },
     RuleDef {
-        id: "fallow/empty-catalog-group",
+        id: "plow/empty-catalog-group",
         category: "Dependencies",
         name: "Empty pnpm catalog group",
         short: "Named catalog group in pnpm-workspace.yaml has no entries",
@@ -221,27 +221,27 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#empty-catalog-groups",
     },
     RuleDef {
-        id: "fallow/unresolved-catalog-reference",
+        id: "plow/unresolved-catalog-reference",
         category: "Dependencies",
         name: "Unresolved pnpm catalog reference",
         short: "package.json references a catalog that does not declare the package",
-        full: "A workspace package.json declares a dependency with the `catalog:` or `catalog:<name>` protocol, but the catalog has no entry for that package. `pnpm install` will fail with ERR_PNPM_CATALOG_ENTRY_NOT_FOUND_FOR_CATALOG_PROTOCOL. To fix: add the package to the named catalog, switch the reference to a different catalog that does declare it, or remove the reference and pin a hardcoded version. Scope: the detector scans `dependencies`, `devDependencies`, `peerDependencies`, and `optionalDependencies` in every workspace `package.json`. See also: fallow/unused-catalog-entry (the inverse: catalog entries no consumer references).",
+        full: "A workspace package.json declares a dependency with the `catalog:` or `catalog:<name>` protocol, but the catalog has no entry for that package. `pnpm install` will fail with ERR_PNPM_CATALOG_ENTRY_NOT_FOUND_FOR_CATALOG_PROTOCOL. To fix: add the package to the named catalog, switch the reference to a different catalog that does declare it, or remove the reference and pin a hardcoded version. Scope: the detector scans `dependencies`, `devDependencies`, `peerDependencies`, and `optionalDependencies` in every workspace `package.json`. See also: plow/unused-catalog-entry (the inverse: catalog entries no consumer references).",
         docs_path: "explanations/dead-code#unresolved-catalog-references",
     },
     RuleDef {
-        id: "fallow/unused-dependency-override",
+        id: "plow/unused-dependency-override",
         category: "Dependencies",
         name: "Unused pnpm dependency override",
         short: "pnpm.overrides entry targets a package not declared or resolved",
-        full: "An entry in `pnpm-workspace.yaml`'s `overrides:` section, or the root `package.json`'s `pnpm.overrides` block, whose target package is not declared by any workspace package and is not present in `pnpm-lock.yaml`. Override entries linger after their target package leaves the resolved dependency tree. For projects without a readable lockfile, fallow falls back to workspace package.json manifests and keeps a `hint` so transitive CVE pins can be reviewed before removal. To fix: delete the entry, refresh `pnpm-lock.yaml` if it is stale, or add the entry to `ignoreDependencyOverrides` when the override is intentionally retained. See also: fallow/misconfigured-dependency-override.",
+        full: "An entry in `pnpm-workspace.yaml`'s `overrides:` section, or the root `package.json`'s `pnpm.overrides` block, whose target package is not declared by any workspace package and is not present in `pnpm-lock.yaml`. Override entries linger after their target package leaves the resolved dependency tree. For projects without a readable lockfile, plow falls back to workspace package.json manifests and keeps a `hint` so transitive CVE pins can be reviewed before removal. To fix: delete the entry, refresh `pnpm-lock.yaml` if it is stale, or add the entry to `ignoreDependencyOverrides` when the override is intentionally retained. See also: plow/misconfigured-dependency-override.",
         docs_path: "explanations/dead-code#unused-dependency-overrides",
     },
     RuleDef {
-        id: "fallow/misconfigured-dependency-override",
+        id: "plow/misconfigured-dependency-override",
         category: "Dependencies",
         name: "Misconfigured pnpm dependency override",
         short: "pnpm.overrides entry has an unparsable key or value",
-        full: "An entry in `pnpm-workspace.yaml`'s `overrides:` or `package.json`'s `pnpm.overrides` whose key or value does not parse as a valid pnpm override spec. Common shapes: empty key, empty value, malformed version selector on the target (`@types/react@<<18`), unbalanced parent matcher (`react>`), or unsupported `npm:alias@` syntax in the version (only the `-`, `$ref`, and `npm:alias` pnpm idioms are allowed). pnpm rejects the workspace at install time with a parser error. To fix: correct the key/value shape, or remove the entry. See also: fallow/unused-dependency-override.",
+        full: "An entry in `pnpm-workspace.yaml`'s `overrides:` or `package.json`'s `pnpm.overrides` whose key or value does not parse as a valid pnpm override spec. Common shapes: empty key, empty value, malformed version selector on the target (`@types/react@<<18`), unbalanced parent matcher (`react>`), or unsupported `npm:alias@` syntax in the version (only the `-`, `$ref`, and `npm:alias` pnpm idioms are allowed). pnpm rejects the workspace at install time with a parser error. To fix: correct the key/value shape, or remove the entry. See also: plow/unused-dependency-override.",
         docs_path: "explanations/dead-code#misconfigured-dependency-overrides",
     },
 ];
@@ -262,7 +262,7 @@ pub fn rule_docs_url(rule: &RuleDef) -> String {
     format!("{DOCS_BASE}/{}", rule.docs_path)
 }
 
-/// Extra educational content for the standalone `fallow explain <issue-type>`
+/// Extra educational content for the standalone `plow explain <issue-type>`
 /// command. Kept separate from [`RuleDef`] so SARIF and `_meta` payloads remain
 /// compact while terminal users and agents can ask for worked examples on
 /// demand.
@@ -273,7 +273,7 @@ pub struct RuleGuide {
 
 /// Look up an issue type from a user-facing token.
 ///
-/// Accepts canonical SARIF ids (`fallow/unused-export`), issue tokens
+/// Accepts canonical SARIF ids (`plow/unused-export`), issue tokens
 /// (`unused-export`), and common CLI filter spellings (`unused-exports`).
 #[must_use]
 pub fn rule_by_token(token: &str) -> Option<&'static RuleDef> {
@@ -285,7 +285,7 @@ pub fn rule_by_token(token: &str) -> Option<&'static RuleDef> {
         return Some(rule);
     }
     let normalized = trimmed
-        .strip_prefix("fallow/")
+        .strip_prefix("plow/")
         .unwrap_or(trimmed)
         .trim_start_matches("--")
         .replace('_', "-")
@@ -293,51 +293,51 @@ pub fn rule_by_token(token: &str) -> Option<&'static RuleDef> {
         .collect::<Vec<_>>()
         .join("-");
     let alias = match normalized.as_str() {
-        "unused-files" => Some("fallow/unused-file"),
-        "unused-exports" => Some("fallow/unused-export"),
-        "unused-types" => Some("fallow/unused-type"),
-        "private-type-leaks" => Some("fallow/private-type-leak"),
-        "unused-deps" | "unused-dependencies" => Some("fallow/unused-dependency"),
-        "unused-dev-deps" | "unused-dev-dependencies" => Some("fallow/unused-dev-dependency"),
+        "unused-files" => Some("plow/unused-file"),
+        "unused-exports" => Some("plow/unused-export"),
+        "unused-types" => Some("plow/unused-type"),
+        "private-type-leaks" => Some("plow/private-type-leak"),
+        "unused-deps" | "unused-dependencies" => Some("plow/unused-dependency"),
+        "unused-dev-deps" | "unused-dev-dependencies" => Some("plow/unused-dev-dependency"),
         "unused-optional-deps" | "unused-optional-dependencies" => {
-            Some("fallow/unused-optional-dependency")
+            Some("plow/unused-optional-dependency")
         }
-        "type-only-deps" | "type-only-dependencies" => Some("fallow/type-only-dependency"),
-        "test-only-deps" | "test-only-dependencies" => Some("fallow/test-only-dependency"),
-        "unused-enum-members" => Some("fallow/unused-enum-member"),
-        "unused-class-members" => Some("fallow/unused-class-member"),
-        "unresolved-imports" => Some("fallow/unresolved-import"),
-        "unlisted-deps" | "unlisted-dependencies" => Some("fallow/unlisted-dependency"),
-        "duplicate-exports" => Some("fallow/duplicate-export"),
-        "circular-deps" | "circular-dependencies" => Some("fallow/circular-dependency"),
-        "boundary-violations" => Some("fallow/boundary-violation"),
-        "stale-suppressions" => Some("fallow/stale-suppression"),
+        "type-only-deps" | "type-only-dependencies" => Some("plow/type-only-dependency"),
+        "test-only-deps" | "test-only-dependencies" => Some("plow/test-only-dependency"),
+        "unused-enum-members" => Some("plow/unused-enum-member"),
+        "unused-class-members" => Some("plow/unused-class-member"),
+        "unresolved-imports" => Some("plow/unresolved-import"),
+        "unlisted-deps" | "unlisted-dependencies" => Some("plow/unlisted-dependency"),
+        "duplicate-exports" => Some("plow/duplicate-export"),
+        "circular-deps" | "circular-dependencies" => Some("plow/circular-dependency"),
+        "boundary-violations" => Some("plow/boundary-violation"),
+        "stale-suppressions" => Some("plow/stale-suppression"),
         "unused-catalog-entries" | "unused-catalog-entry" | "catalog" => {
-            Some("fallow/unused-catalog-entry")
+            Some("plow/unused-catalog-entry")
         }
         "empty-catalog-groups" | "empty-catalog-group" | "empty-catalog" => {
-            Some("fallow/empty-catalog-group")
+            Some("plow/empty-catalog-group")
         }
         "unresolved-catalog-references" | "unresolved-catalog-reference" | "unresolved-catalog" => {
-            Some("fallow/unresolved-catalog-reference")
+            Some("plow/unresolved-catalog-reference")
         }
         "unused-dependency-overrides"
         | "unused-dependency-override"
         | "unused-override"
-        | "unused-overrides" => Some("fallow/unused-dependency-override"),
+        | "unused-overrides" => Some("plow/unused-dependency-override"),
         "misconfigured-dependency-overrides"
         | "misconfigured-dependency-override"
         | "misconfigured-override"
-        | "misconfigured-overrides" => Some("fallow/misconfigured-dependency-override"),
-        "complexity" | "high-complexity" => Some("fallow/high-complexity"),
+        | "misconfigured-overrides" => Some("plow/misconfigured-dependency-override"),
+        "complexity" | "high-complexity" => Some("plow/high-complexity"),
         "cyclomatic" | "high-cyclomatic" | "high-cyclomatic-complexity" => {
-            Some("fallow/high-cyclomatic-complexity")
+            Some("plow/high-cyclomatic-complexity")
         }
         "cognitive" | "high-cognitive" | "high-cognitive-complexity" => {
-            Some("fallow/high-cognitive-complexity")
+            Some("plow/high-cognitive-complexity")
         }
-        "crap" | "high-crap" | "high-crap-score" => Some("fallow/high-crap-score"),
-        "duplication" | "dupes" | "code-duplication" => Some("fallow/code-duplication"),
+        "crap" | "high-crap" | "high-crap-score" => Some("plow/high-crap-score"),
+        "duplication" | "dupes" | "code-duplication" => Some("plow/code-duplication"),
         _ => None,
     };
     if let Some(id) = alias
@@ -349,7 +349,7 @@ pub fn rule_by_token(token: &str) -> Option<&'static RuleDef> {
         .strip_suffix('s')
         .filter(|_| normalized != "unused-class")
         .unwrap_or(&normalized);
-    let id = format!("fallow/{singular}");
+    let id = format!("plow/{singular}");
     rule_by_id(&id).or_else(|| {
         CHECK_RULES
             .iter()
@@ -367,115 +367,115 @@ pub fn rule_by_token(token: &str) -> Option<&'static RuleDef> {
 #[must_use]
 pub fn rule_guide(rule: &RuleDef) -> RuleGuide {
     match rule.id {
-        "fallow/unused-file" => RuleGuide {
+        "plow/unused-file" => RuleGuide {
             example: "src/old-widget.ts is not imported by any entry point, route, script, or config file.",
             how_to_fix: "Delete the file if it is genuinely dead. If a framework loads it implicitly, add the right plugin/config pattern or mark it in alwaysUsed.",
         },
-        "fallow/unused-export" => RuleGuide {
+        "plow/unused-export" => RuleGuide {
             example: "export const formatPrice = ... exists in src/money.ts, but no module imports formatPrice.",
             how_to_fix: "Remove the export or make it file-local. If it is public API, import it from an entry point or add an intentional suppression with context.",
         },
-        "fallow/unused-type" => RuleGuide {
+        "plow/unused-type" => RuleGuide {
             example: "export interface LegacyProps is exported, but no module imports the type.",
             how_to_fix: "Remove the type export, inline it, or keep it behind an explicit API entry point when consumers rely on it.",
         },
-        "fallow/private-type-leak" => RuleGuide {
+        "plow/private-type-leak" => RuleGuide {
             example: "export function makeUser(): InternalUser exposes InternalUser even though InternalUser is not exported.",
             how_to_fix: "Export the referenced type, change the public signature to an exported type, or keep the helper private.",
         },
-        "fallow/unused-dependency"
-        | "fallow/unused-dev-dependency"
-        | "fallow/unused-optional-dependency" => RuleGuide {
+        "plow/unused-dependency"
+        | "plow/unused-dev-dependency"
+        | "plow/unused-optional-dependency" => RuleGuide {
             example: "package.json lists left-pad, but no source, script, config, or plugin-recognized file imports it.",
             how_to_fix: "Remove the dependency after checking runtime/plugin usage. If another workspace uses it, move the dependency to that workspace.",
         },
-        "fallow/type-only-dependency" => RuleGuide {
+        "plow/type-only-dependency" => RuleGuide {
             example: "zod is in dependencies but only appears in import type declarations.",
             how_to_fix: "Move the package to devDependencies unless runtime code imports it as a value.",
         },
-        "fallow/test-only-dependency" => RuleGuide {
+        "plow/test-only-dependency" => RuleGuide {
             example: "vitest is listed in dependencies, but only test files import it.",
             how_to_fix: "Move the package to devDependencies unless production code imports it at runtime.",
         },
-        "fallow/unused-enum-member" => RuleGuide {
+        "plow/unused-enum-member" => RuleGuide {
             example: "Status.Legacy remains in an exported enum, but no code reads that member.",
             how_to_fix: "Remove the member after checking serialized/API compatibility, or suppress it with a reason when external data still uses it.",
         },
-        "fallow/unused-class-member" => RuleGuide {
+        "plow/unused-class-member" => RuleGuide {
             example: "class Parser has a public parseLegacy method that is never called in the project.",
             how_to_fix: "Remove or privatize the member. For reflection/framework lifecycle hooks, configure or suppress the intentional entry point.",
         },
-        "fallow/unresolved-import" => RuleGuide {
+        "plow/unresolved-import" => RuleGuide {
             example: "src/app.ts imports ./routes/admin, but no matching file exists after extension and index resolution.",
             how_to_fix: "Fix the specifier, restore the missing file, install the package, or align tsconfig path aliases with the runtime resolver.",
         },
-        "fallow/unlisted-dependency" => RuleGuide {
+        "plow/unlisted-dependency" => RuleGuide {
             example: "src/api.ts imports undici, but the nearest package.json does not list undici.",
             how_to_fix: "Add the package to dependencies/devDependencies in the workspace that imports it instead of relying on hoisting or transitive deps.",
         },
-        "fallow/duplicate-export" => RuleGuide {
+        "plow/duplicate-export" => RuleGuide {
             example: "Button is exported from both src/ui/button.ts and src/components/button.ts.",
             how_to_fix: "Rename or consolidate the exports so consumers have one intentional import target.",
         },
-        "fallow/circular-dependency" => RuleGuide {
+        "plow/circular-dependency" => RuleGuide {
             example: "src/a.ts imports src/b.ts, and src/b.ts imports src/a.ts.",
             how_to_fix: "Extract shared code to a third module, invert the dependency, or split initialization-time side effects from type-only contracts.",
         },
-        "fallow/boundary-violation" => RuleGuide {
+        "plow/boundary-violation" => RuleGuide {
             example: "features/billing imports app/admin even though the configured boundary only allows imports from shared and entities.",
             how_to_fix: "Move the shared contract to an allowed zone, invert the dependency, or update the boundary config only if the architecture rule was wrong.",
         },
-        "fallow/stale-suppression" => RuleGuide {
-            example: "// fallow-ignore-next-line unused-export remains above an export that is now used.",
+        "plow/stale-suppression" => RuleGuide {
+            example: "// plow-ignore-next-line unused-export remains above an export that is now used.",
             how_to_fix: "Remove the suppression. If a different issue is still intentional, replace it with a current, specific suppression.",
         },
-        "fallow/unused-catalog-entry" => RuleGuide {
+        "plow/unused-catalog-entry" => RuleGuide {
             example: "pnpm-workspace.yaml declares `catalog: { is-even: ^1.0.0 }`, but no workspace package.json declares `\"is-even\": \"catalog:\"`.",
             how_to_fix: "Delete the entry from pnpm-workspace.yaml. If any consumer uses a hardcoded version (surfaced in `hardcoded_consumers`), switch that consumer to `catalog:` first to keep versions aligned.",
         },
-        "fallow/empty-catalog-group" => RuleGuide {
+        "plow/empty-catalog-group" => RuleGuide {
             example: "pnpm-workspace.yaml declares `catalogs: { react17: {} }` after the last react17 entry was removed.",
             how_to_fix: "Delete the empty named group header from pnpm-workspace.yaml. Comments between the deleted header and the next sibling can stay in place for manual review.",
         },
-        "fallow/unresolved-catalog-reference" => RuleGuide {
+        "plow/unresolved-catalog-reference" => RuleGuide {
             example: "packages/app/package.json declares `\"old-react\": \"catalog:react17\"`, but `catalogs.react17` in pnpm-workspace.yaml does not declare `old-react`. `pnpm install` will fail.",
-            how_to_fix: "If `available_in_catalogs` is non-empty, change the reference to one of those catalogs (e.g. `catalog:react18`). Otherwise add the package to the named catalog in pnpm-workspace.yaml, or remove the catalog reference and pin a hardcoded version. For staged migrations where the catalog edit lands separately, add the (package, catalog, consumer) triple to `ignoreCatalogReferences` in your fallow config.",
+            how_to_fix: "If `available_in_catalogs` is non-empty, change the reference to one of those catalogs (e.g. `catalog:react18`). Otherwise add the package to the named catalog in pnpm-workspace.yaml, or remove the catalog reference and pin a hardcoded version. For staged migrations where the catalog edit lands separately, add the (package, catalog, consumer) triple to `ignoreCatalogReferences` in your plow config.",
         },
-        "fallow/unused-dependency-override" => RuleGuide {
+        "plow/unused-dependency-override" => RuleGuide {
             example: "pnpm-workspace.yaml declares `overrides: { axios: ^1.6.0 }`, but no workspace package.json declares `axios` and `pnpm-lock.yaml` does not resolve it.",
-            how_to_fix: "Delete the entry from `pnpm-workspace.yaml` or `package.json#pnpm.overrides`. If the finding is caused by a stale or missing lockfile, refresh `pnpm-lock.yaml` and rerun fallow. If the override is intentionally retained, add it to `ignoreDependencyOverrides` in your fallow config.",
+            how_to_fix: "Delete the entry from `pnpm-workspace.yaml` or `package.json#pnpm.overrides`. If the finding is caused by a stale or missing lockfile, refresh `pnpm-lock.yaml` and rerun plow. If the override is intentionally retained, add it to `ignoreDependencyOverrides` in your plow config.",
         },
-        "fallow/misconfigured-dependency-override" => RuleGuide {
+        "plow/misconfigured-dependency-override" => RuleGuide {
             example: "pnpm-workspace.yaml declares `overrides: { \"@types/react@<<18\": \"18.0.0\" }`. The doubled `<<` is not a valid pnpm version selector and pnpm will reject the workspace at install time.",
             how_to_fix: "Fix the key/value to match pnpm's override grammar: bare names (`axios`), scoped names (`@types/react`), targets with version selectors (`@types/react@<18`), parent matchers (`react>react-dom`), and parent chains with selectors on either side. Allowed value idioms: bare version range, `-` (delete), `$ref`, and `npm:alias`. If the entry was experimental, remove it.",
         },
-        "fallow/high-cyclomatic-complexity"
-        | "fallow/high-cognitive-complexity"
-        | "fallow/high-complexity" => RuleGuide {
-            example: "A function contains several nested conditionals, loops, and early exits, exceeding the configured complexity threshold. fallow also flags synthetic `<template>` findings on Angular .html templates and inline `@Component({ template: ... })` literals, and `<component>` rollup findings that combine the worst class method with its template.",
+        "plow/high-cyclomatic-complexity"
+        | "plow/high-cognitive-complexity"
+        | "plow/high-complexity" => RuleGuide {
+            example: "A function contains several nested conditionals, loops, and early exits, exceeding the configured complexity threshold. plow also flags synthetic `<template>` findings on Angular .html templates and inline `@Component({ template: ... })` literals, and `<component>` rollup findings that combine the worst class method with its template.",
             how_to_fix: "For function findings, extract named helpers, split independent branches, flatten guard clauses, and add tests around the behavior before refactoring. For `<template>` findings, split the template into child components, hoist data into the component class as computed signals, or replace nested `@if`/`@for` with a flatter structure. For `<component>` rollup findings, attack the larger half first; the per-half breakdown lives in `component_rollup`.",
         },
-        "fallow/high-crap-score" => RuleGuide {
+        "plow/high-crap-score" => RuleGuide {
             example: "A complex function has little or no matching Istanbul coverage, so its CRAP score crosses the configured gate.",
             how_to_fix: "Add focused tests for the risky branches first, then simplify the function if the score remains high.",
         },
-        "fallow/refactoring-target" => RuleGuide {
+        "plow/refactoring-target" => RuleGuide {
             example: "A file combines high complexity density, churn, fan-in, and dead-code signals.",
             how_to_fix: "Start with the listed evidence: remove dead exports, extract complex functions, then reduce fan-out or cycles in small steps.",
         },
-        "fallow/untested-file" | "fallow/untested-export" => RuleGuide {
+        "plow/untested-file" | "plow/untested-export" => RuleGuide {
             example: "Production-reachable code has no dependency path from discovered test entry points.",
-            how_to_fix: "Add or wire a test that imports the runtime path, or update entry-point/test discovery if the existing test is invisible to fallow.",
+            how_to_fix: "Add or wire a test that imports the runtime path, or update entry-point/test discovery if the existing test is invisible to plow.",
         },
-        "fallow/runtime-safe-to-delete"
-        | "fallow/runtime-review-required"
-        | "fallow/runtime-low-traffic"
-        | "fallow/runtime-coverage-unavailable"
-        | "fallow/runtime-coverage" => RuleGuide {
+        "plow/runtime-safe-to-delete"
+        | "plow/runtime-review-required"
+        | "plow/runtime-low-traffic"
+        | "plow/runtime-coverage-unavailable"
+        | "plow/runtime-coverage" => RuleGuide {
             example: "Runtime coverage shows a function was never called, barely called, or could not be matched during the capture window.",
             how_to_fix: "Treat high-confidence cold static-dead code as delete candidates. For advisory or unavailable coverage, inspect seasonality, workers, source maps, and capture quality first.",
         },
-        "fallow/code-duplication" => RuleGuide {
+        "plow/code-duplication" => RuleGuide {
             example: "Two files contain the same normalized token sequence across a multi-line block.",
             how_to_fix: "Extract the shared logic when the duplicated behavior should evolve together. Leave it duplicated when the similarity is accidental and likely to diverge.",
         },
@@ -585,23 +585,23 @@ fn print_explain_markdown(rule: &RuleDef, guide: &RuleGuide) -> ExitCode {
 
 pub const HEALTH_RULES: &[RuleDef] = &[
     RuleDef {
-        id: "fallow/high-cyclomatic-complexity",
+        id: "plow/high-cyclomatic-complexity",
         category: "Health",
         name: "High Cyclomatic Complexity",
         short: "Function has high cyclomatic complexity",
-        full: "McCabe cyclomatic complexity exceeds the configured threshold. Cyclomatic complexity counts the number of independent paths through a function (1 + decision points: if/else, switch cases, loops, ternary, logical operators). High values indicate functions that are hard to test exhaustively. fallow also emits this rule on synthetic `<template>` findings (Angular .html templates and inline `@Component({ template: ... })` literals), counting template control-flow blocks (`@if`, `@else if`, `@for`, `@case`, `@defer (when ...)`, legacy `*ngIf`/`*ngFor`) plus ternary and logical operators inside bound attributes and `{{ }}` interpolations; and on synthetic `<component>` rollup findings whose `cyclomatic` is the worst class method's score plus the template's. Ranking and `--targets` use the rollup total; JSON exposes the per-half breakdown under `component_rollup`.",
+        full: "McCabe cyclomatic complexity exceeds the configured threshold. Cyclomatic complexity counts the number of independent paths through a function (1 + decision points: if/else, switch cases, loops, ternary, logical operators). High values indicate functions that are hard to test exhaustively. plow also emits this rule on synthetic `<template>` findings (Angular .html templates and inline `@Component({ template: ... })` literals), counting template control-flow blocks (`@if`, `@else if`, `@for`, `@case`, `@defer (when ...)`, legacy `*ngIf`/`*ngFor`) plus ternary and logical operators inside bound attributes and `{{ }}` interpolations; and on synthetic `<component>` rollup findings whose `cyclomatic` is the worst class method's score plus the template's. Ranking and `--targets` use the rollup total; JSON exposes the per-half breakdown under `component_rollup`.",
         docs_path: "explanations/health#cyclomatic-complexity",
     },
     RuleDef {
-        id: "fallow/high-cognitive-complexity",
+        id: "plow/high-cognitive-complexity",
         category: "Health",
         name: "High Cognitive Complexity",
         short: "Function has high cognitive complexity",
-        full: "SonarSource cognitive complexity exceeds the configured threshold. Unlike cyclomatic complexity, cognitive complexity penalizes nesting depth and non-linear control flow (breaks, continues, early returns). It measures how hard a function is to understand when reading sequentially. fallow also emits this rule on synthetic `<template>` findings (Angular .html templates and inline `@Component({ template: ... })` literals), where nesting penalties accumulate on stacked `@if`/`@for`/`@switch` blocks; and on synthetic `<component>` rollup findings whose `cognitive` is the worst class method's score plus the template's. Ranking and `--targets` use the rollup total; JSON exposes the per-half breakdown under `component_rollup`.",
+        full: "SonarSource cognitive complexity exceeds the configured threshold. Unlike cyclomatic complexity, cognitive complexity penalizes nesting depth and non-linear control flow (breaks, continues, early returns). It measures how hard a function is to understand when reading sequentially. plow also emits this rule on synthetic `<template>` findings (Angular .html templates and inline `@Component({ template: ... })` literals), where nesting penalties accumulate on stacked `@if`/`@for`/`@switch` blocks; and on synthetic `<component>` rollup findings whose `cognitive` is the worst class method's score plus the template's. Ranking and `--targets` use the rollup total; JSON exposes the per-half breakdown under `component_rollup`.",
         docs_path: "explanations/health#cognitive-complexity",
     },
     RuleDef {
-        id: "fallow/high-complexity",
+        id: "plow/high-complexity",
         category: "Health",
         name: "High Complexity (Both)",
         short: "Function exceeds both complexity thresholds",
@@ -609,15 +609,15 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         docs_path: "explanations/health#complexity-metrics",
     },
     RuleDef {
-        id: "fallow/high-crap-score",
+        id: "plow/high-crap-score",
         category: "Health",
         name: "High CRAP Score",
         short: "Function has a high CRAP score (complexity combined with low coverage)",
-        full: "The function's CRAP (Change Risk Anti-Patterns) score meets or exceeds the configured threshold. CRAP combines cyclomatic complexity with test coverage using the Savoia and Evans (2007) formula: `CC^2 * (1 - coverage/100)^3 + CC`. High CRAP indicates changes to this function carry high risk because it is complex AND poorly tested. Pair with `--coverage` for accurate per-function scoring; without it fallow estimates coverage from the module graph.",
+        full: "The function's CRAP (Change Risk Anti-Patterns) score meets or exceeds the configured threshold. CRAP combines cyclomatic complexity with test coverage using the Savoia and Evans (2007) formula: `CC^2 * (1 - coverage/100)^3 + CC`. High CRAP indicates changes to this function carry high risk because it is complex AND poorly tested. Pair with `--coverage` for accurate per-function scoring; without it plow estimates coverage from the module graph.",
         docs_path: "explanations/health#crap-score",
     },
     RuleDef {
-        id: "fallow/refactoring-target",
+        id: "plow/refactoring-target",
         category: "Health",
         name: "Refactoring Target",
         short: "File identified as a high-priority refactoring candidate",
@@ -625,7 +625,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         docs_path: "explanations/health#refactoring-targets",
     },
     RuleDef {
-        id: "fallow/untested-file",
+        id: "plow/untested-file",
         category: "Health",
         name: "Untested File",
         short: "Runtime-reachable file has no test dependency path",
@@ -633,7 +633,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         docs_path: "explanations/health#coverage-gaps",
     },
     RuleDef {
-        id: "fallow/untested-export",
+        id: "plow/untested-export",
         category: "Health",
         name: "Untested Export",
         short: "Runtime-reachable export has no test dependency path",
@@ -641,15 +641,15 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         docs_path: "explanations/health#coverage-gaps",
     },
     RuleDef {
-        id: "fallow/runtime-safe-to-delete",
+        id: "plow/runtime-safe-to-delete",
         category: "Health",
         name: "Production Safe To Delete",
         short: "Statically unused AND never invoked in production with V8 tracking",
-        full: "The function is both statically unreachable in the module graph and was never invoked during the observed runtime coverage window. This is the highest-confidence delete signal fallow emits.",
+        full: "The function is both statically unreachable in the module graph and was never invoked during the observed runtime coverage window. This is the highest-confidence delete signal plow emits.",
         docs_path: "explanations/health#runtime-coverage",
     },
     RuleDef {
-        id: "fallow/runtime-review-required",
+        id: "plow/runtime-review-required",
         category: "Health",
         name: "Production Review Required",
         short: "Statically used but never invoked in production",
@@ -657,7 +657,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         docs_path: "explanations/health#runtime-coverage",
     },
     RuleDef {
-        id: "fallow/runtime-low-traffic",
+        id: "plow/runtime-low-traffic",
         category: "Health",
         name: "Production Low Traffic",
         short: "Function was invoked below the low-traffic threshold",
@@ -665,7 +665,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         docs_path: "explanations/health#runtime-coverage",
     },
     RuleDef {
-        id: "fallow/runtime-coverage-unavailable",
+        id: "plow/runtime-coverage-unavailable",
         category: "Health",
         name: "Runtime Coverage Unavailable",
         short: "Runtime coverage could not be resolved for this function",
@@ -673,7 +673,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         docs_path: "explanations/health#runtime-coverage",
     },
     RuleDef {
-        id: "fallow/runtime-coverage",
+        id: "plow/runtime-coverage",
         category: "Health",
         name: "Runtime Coverage",
         short: "Runtime coverage finding",
@@ -683,7 +683,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
 ];
 
 pub const DUPES_RULES: &[RuleDef] = &[RuleDef {
-    id: "fallow/code-duplication",
+    id: "plow/code-duplication",
     category: "Duplication",
     name: "Code Duplication",
     short: "Duplicated code block",
@@ -693,14 +693,14 @@ pub const DUPES_RULES: &[RuleDef] = &[RuleDef {
 
 // ── JSON _meta builders ─────────────────────────────────────────
 
-/// Build the `_meta` object for `fallow dead-code --format json --explain`.
+/// Build the `_meta` object for `plow dead-code --format json --explain`.
 #[must_use]
 pub fn check_meta() -> Value {
     let rules: Value = CHECK_RULES
         .iter()
         .map(|r| {
             (
-                r.id.replace("fallow/", ""),
+                r.id.replace("plow/", ""),
                 json!({
                     "name": r.name,
                     "description": r.full,
@@ -721,7 +721,7 @@ pub fn check_meta() -> Value {
     })
 }
 
-/// Build the sectioned `_meta` object for bare `fallow --format json --explain`.
+/// Build the sectioned `_meta` object for bare `plow --format json --explain`.
 #[must_use]
 pub fn combined_meta(include_check: bool, include_dupes: bool, include_health: bool) -> Value {
     let mut sections = serde_json::Map::new();
@@ -737,7 +737,7 @@ pub fn combined_meta(include_check: bool, include_dupes: bool, include_health: b
     Value::Object(sections)
 }
 
-/// Build the `_meta` object for `fallow health --format json --explain`.
+/// Build the `_meta` object for `plow health --format json --explain`.
 #[must_use]
 #[expect(
     clippy::too_many_lines,
@@ -929,7 +929,7 @@ pub fn health_meta() -> Value {
     })
 }
 
-/// Build the `_meta` object for `fallow dupes --format json --explain`.
+/// Build the `_meta` object for `plow dupes --format json --explain`.
 #[must_use]
 pub fn dupes_meta() -> Value {
     json!({
@@ -977,7 +977,7 @@ pub fn dupes_meta() -> Value {
     })
 }
 
-/// Build the `_meta` object for `fallow coverage setup --json --explain`.
+/// Build the `_meta` object for `plow coverage setup --json --explain`.
 #[must_use]
 pub fn coverage_setup_meta() -> Value {
     json!({
@@ -1019,17 +1019,17 @@ pub fn coverage_setup_meta() -> Value {
     })
 }
 
-/// Build the `_meta` object for `fallow coverage analyze --format json --explain`.
+/// Build the `_meta` object for `plow coverage analyze --format json --explain`.
 #[must_use]
 pub fn coverage_analyze_meta() -> Value {
     json!({
         "docs_url": COVERAGE_ANALYZE_DOCS,
         "field_definitions": {
             "schema_version": "Standalone coverage analyze envelope version. \"1\" for the current shape.",
-            "version": "fallow CLI version that produced this output.",
+            "version": "plow CLI version that produced this output.",
             "elapsed_ms": "Wall-clock milliseconds spent producing the report.",
-            "runtime_coverage": "Same RuntimeCoverageReport block emitted by `fallow health --runtime-coverage`.",
-            "runtime_coverage.summary.data_source": "Which evidence source produced the report. local = on-disk artifact via --runtime-coverage <path>; cloud = explicit pull via --cloud / --runtime-coverage-cloud / FALLOW_RUNTIME_COVERAGE_SOURCE=cloud.",
+            "runtime_coverage": "Same RuntimeCoverageReport block emitted by `plow health --runtime-coverage`.",
+            "runtime_coverage.summary.data_source": "Which evidence source produced the report. local = on-disk artifact via --runtime-coverage <path>; cloud = explicit pull via --cloud / --runtime-coverage-cloud / PLOW_RUNTIME_COVERAGE_SOURCE=cloud.",
             "runtime_coverage.summary.last_received_at": "ISO-8601 timestamp of the newest runtime payload included in the report. Null for local artifacts that do not carry receipt metadata.",
             "runtime_coverage.summary.capture_quality": "Capture-window telemetry derived from the runtime evidence. lazy_parse_warning trips when more than 30% of tracked functions are V8-untracked, which usually indicates a short observation window.",
             "runtime_coverage.findings[].id": "Per-finding SUPPRESSION key (fallow:prod:<hash>). Hashes file + function + the current line, so it changes when the function moves. Use it to suppress one finding at its current location.",
@@ -1039,8 +1039,8 @@ pub fn coverage_analyze_meta() -> Value {
             "runtime_coverage.findings[].evidence.test_coverage": "covered = the local test suite hits the function; not_covered otherwise.",
             "runtime_coverage.findings[].evidence.v8_tracking": "tracked = V8 observed the function during the capture window; untracked otherwise.",
             "runtime_coverage.findings[].actions[].type": "Suggested follow-up identifier. delete-cold-code is emitted on safe_to_delete; review-runtime on review_required.",
-            "runtime_coverage.blast_radius[]": "First-class blast-radius entries with stable fallow:blast IDs, static caller count, traffic-weighted caller reach, optional cloud deploy touch count, and low/medium/high risk band.",
-            "runtime_coverage.importance[]": "First-class production-importance entries with stable fallow:importance IDs, invocations, cyclomatic complexity, owner count, 0-100 importance score, and templated reason.",
+            "runtime_coverage.blast_radius[]": "First-class blast-radius entries with stable plow:blast IDs, static caller count, traffic-weighted caller reach, optional cloud deploy touch count, and low/medium/high risk band.",
+            "runtime_coverage.importance[]": "First-class production-importance entries with stable plow:importance IDs, invocations, cyclomatic complexity, owner count, 0-100 importance score, and templated reason.",
             "runtime_coverage.warnings[].code": "Stable warning identifier. cloud_functions_unmatched flags entries dropped because no AST/static counterpart was found locally."
         },
         "enums": {
@@ -1067,25 +1067,25 @@ mod tests {
 
     #[test]
     fn rule_by_id_finds_check_rule() {
-        let rule = rule_by_id("fallow/unused-file").unwrap();
+        let rule = rule_by_id("plow/unused-file").unwrap();
         assert_eq!(rule.name, "Unused Files");
     }
 
     #[test]
     fn rule_by_id_finds_health_rule() {
-        let rule = rule_by_id("fallow/high-cyclomatic-complexity").unwrap();
+        let rule = rule_by_id("plow/high-cyclomatic-complexity").unwrap();
         assert_eq!(rule.name, "High Cyclomatic Complexity");
     }
 
     #[test]
     fn rule_by_id_finds_dupes_rule() {
-        let rule = rule_by_id("fallow/code-duplication").unwrap();
+        let rule = rule_by_id("plow/code-duplication").unwrap();
         assert_eq!(rule.name, "Code Duplication");
     }
 
     #[test]
     fn rule_by_id_returns_none_for_unknown() {
-        assert!(rule_by_id("fallow/nonexistent").is_none());
+        assert!(rule_by_id("plow/nonexistent").is_none());
         assert!(rule_by_id("").is_none());
     }
 
@@ -1093,20 +1093,20 @@ mod tests {
 
     #[test]
     fn rule_docs_url_format() {
-        let rule = rule_by_id("fallow/unused-export").unwrap();
+        let rule = rule_by_id("plow/unused-export").unwrap();
         let url = rule_docs_url(rule);
-        assert!(url.starts_with("https://docs.fallow.tools/"));
+        assert!(url.starts_with("https://docs.genesis-plow.dev/"));
         assert!(url.contains("unused-exports"));
     }
 
     // ── CHECK_RULES completeness ─────────────────────────────────────
 
     #[test]
-    fn check_rules_all_have_fallow_prefix() {
+    fn check_rules_all_have_plow_prefix() {
         for rule in CHECK_RULES {
             assert!(
-                rule.id.starts_with("fallow/"),
-                "rule {} should start with fallow/",
+                rule.id.starts_with("plow/"),
+                "rule {} should start with plow/",
                 rule.id
             );
         }
@@ -1139,7 +1139,7 @@ mod tests {
         assert!(meta.get("docs").is_some());
         assert!(meta.get("rules").is_some());
         let rules = meta["rules"].as_object().unwrap();
-        // Verify all 13 rule categories are present (stripped fallow/ prefix)
+        // Verify all 13 rule categories are present (stripped plow/ prefix)
         assert_eq!(rules.len(), CHECK_RULES.len());
         assert!(rules.contains_key("unused-file"));
         assert!(rules.contains_key("unused-export"));
@@ -1313,11 +1313,11 @@ mod tests {
     // ── HEALTH_RULES completeness ──────────────────────────────────
 
     #[test]
-    fn health_rules_all_have_fallow_prefix() {
+    fn health_rules_all_have_plow_prefix() {
         for rule in HEALTH_RULES {
             assert!(
-                rule.id.starts_with("fallow/"),
-                "health rule {} should start with fallow/",
+                rule.id.starts_with("plow/"),
+                "health rule {} should start with plow/",
                 rule.id
             );
         }
@@ -1358,11 +1358,11 @@ mod tests {
     // ── DUPES_RULES completeness ───────────────────────────────────
 
     #[test]
-    fn dupes_rules_all_have_fallow_prefix() {
+    fn dupes_rules_all_have_plow_prefix() {
         for rule in DUPES_RULES {
             assert!(
-                rule.id.starts_with("fallow/"),
-                "dupes rule {} should start with fallow/",
+                rule.id.starts_with("plow/"),
+                "dupes rule {} should start with plow/",
                 rule.id
             );
         }
@@ -1419,17 +1419,17 @@ mod tests {
 
     #[test]
     fn rule_docs_url_health_rule() {
-        let rule = rule_by_id("fallow/high-cyclomatic-complexity").unwrap();
+        let rule = rule_by_id("plow/high-cyclomatic-complexity").unwrap();
         let url = rule_docs_url(rule);
-        assert!(url.starts_with("https://docs.fallow.tools/"));
+        assert!(url.starts_with("https://docs.genesis-plow.dev/"));
         assert!(url.contains("health"));
     }
 
     #[test]
     fn rule_docs_url_dupes_rule() {
-        let rule = rule_by_id("fallow/code-duplication").unwrap();
+        let rule = rule_by_id("plow/code-duplication").unwrap();
         let url = rule_docs_url(rule);
-        assert!(url.starts_with("https://docs.fallow.tools/"));
+        assert!(url.starts_with("https://docs.genesis-plow.dev/"));
         assert!(url.contains("duplication"));
     }
 

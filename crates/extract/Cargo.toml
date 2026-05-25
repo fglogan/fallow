@@ -1,5 +1,5 @@
 [package]
-name = "fallow-extract"
+name = "plow-extract"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,14 +8,14 @@ homepage.workspace = true
 documentation.workspace = true
 keywords.workspace = true
 categories.workspace = true
-description = "AST extraction engine for fallow codebase intelligence (parser, complexity, SFC / Astro / MDX / CSS)"
+description = "AST extraction engine for plow codebase intelligence (parser, complexity, SFC / Astro / MDX / CSS)"
 readme = "../../README.md"
 
 [lib]
 doctest = false
 
 [dependencies]
-fallow-types = { workspace = true }
+plow-types = { workspace = true }
 fallow-cov-protocol = "0.8"
 
 # Parsing & analysis

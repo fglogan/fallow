@@ -4,7 +4,7 @@ use super::common::{create_config, fixture_path};
 fn workspace_package_dependencies_are_checked_like_external_dependencies() {
     let root = fixture_path("workspace-internal-deps");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_dep_names: Vec<&str> = results
         .unused_dependencies
@@ -30,7 +30,7 @@ fn workspace_package_dependencies_are_checked_like_external_dependencies() {
 fn missing_workspace_package_dependency_is_unlisted_for_importing_workspace() {
     let root = fixture_path("workspace-internal-deps");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unlisted_names: Vec<&str> = results
         .unlisted_dependencies
@@ -61,7 +61,7 @@ fn missing_workspace_package_dependency_is_unlisted_for_importing_workspace() {
 fn custom_plugin_enabled_by_workspace_dependency_affects_analysis() {
     let root = fixture_path("workspace-internal-deps");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_paths: Vec<String> = results
         .unused_files

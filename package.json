@@ -1,5 +1,5 @@
 {
-  "name": "fallow-repo-tools",
+  "name": "plow-repo-tools",
   "private": true,
   "type": "module",
   "scripts": {

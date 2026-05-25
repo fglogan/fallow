@@ -9,7 +9,7 @@
 
 use std::path::Path;
 
-use fallow_cli::codeowners::CodeOwners;
+use plow_cli::codeowners::CodeOwners;
 
 fn write(path: &Path, contents: &str) {
     if let Some(parent) = path.parent() {
@@ -20,7 +20,7 @@ fn write(path: &Path, contents: &str) {
 
 #[test]
 fn gitlab_codeowners_reproduction_from_issue_127() {
-    // Verbatim CODEOWNERS content from https://github.com/fallow-rs/fallow/issues/127
+    // Verbatim CODEOWNERS content from https://github.com/plow-rs/plow/issues/127
     let dir = tempfile::tempdir().expect("create temp dir");
     let codeowners = "\
 # Default section (no header, rules before first section)

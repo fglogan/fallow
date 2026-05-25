@@ -1,4 +1,4 @@
-// fallow-ignore-next-line complexity
+// plow-ignore-next-line complexity
 export function suppressed(n: number): string {
   if (n < 0) return "negative";
   else if (n === 0) return "zero";

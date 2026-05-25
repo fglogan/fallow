@@ -1,6 +1,6 @@
-//! Shared types for fallow codebase intelligence.
+//! Shared types for plow codebase intelligence.
 //!
-//! This crate contains type definitions used across multiple fallow crates
+//! This crate contains type definitions used across multiple plow crates
 //! (core, CLI, LSP). It has no analysis logic, only data structures.
 
 #![warn(missing_docs)]

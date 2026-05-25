@@ -1,12 +1,12 @@
-//! `fallow flags` subcommand: detect and report feature flag patterns.
+//! `plow flags` subcommand: detect and report feature flag patterns.
 
 use std::path::Path;
 use std::process::ExitCode;
 use std::time::Instant;
 
-use fallow_config::{OutputFormat, ResolvedConfig};
-use fallow_types::extract::{FlagUse, FlagUseKind, ModuleInfo};
-use fallow_types::results::{FeatureFlag, FlagConfidence, FlagKind};
+use plow_config::{OutputFormat, ResolvedConfig};
+use plow_types::extract::{FlagUse, FlagUseKind, ModuleInfo};
+use plow_types::results::{FeatureFlag, FlagConfidence, FlagKind};
 
 use crate::error::emit_error;
 
@@ -26,8 +26,8 @@ fn flag_use_to_feature_flag(
         (flag_use.guard_span_start, flag_use.guard_span_end)
         && !module.line_offsets.is_empty()
     {
-        let (sl, _) = fallow_types::extract::byte_offset_to_line_col(&module.line_offsets, start);
-        let (el, _) = fallow_types::extract::byte_offset_to_line_col(&module.line_offsets, end);
+        let (sl, _) = plow_types::extract::byte_offset_to_line_col(&module.line_offsets, start);
+        let (el, _) = plow_types::extract::byte_offset_to_line_col(&module.line_offsets, end);
         (Some(sl), Some(el))
     } else {
         (None, None)
@@ -49,7 +49,7 @@ fn flag_use_to_feature_flag(
     }
 }
 
-/// Options for the `fallow flags` subcommand.
+/// Options for the `plow flags` subcommand.
 pub struct FlagsOptions<'a> {
     pub root: &'a Path,
     pub config_path: &'a Option<std::path::PathBuf>,
@@ -65,7 +65,7 @@ pub struct FlagsOptions<'a> {
     pub top: Option<usize>,
 }
 
-/// Run the `fallow flags` subcommand.
+/// Run the `plow flags` subcommand.
 pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
     let start = Instant::now();
 
@@ -83,7 +83,7 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
     };
 
     // Discover files
-    let files = fallow_core::discover::discover_files_with_plugin_scopes(&config);
+    let files = plow_core::discover::discover_files_with_plugin_scopes(&config);
     if files.is_empty() {
         return emit_error("no files discovered", 2, opts.output);
     }
@@ -92,13 +92,13 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
     let cache_store = if config.no_cache {
         None
     } else {
-        fallow_core::cache::CacheStore::load(
+        plow_core::cache::CacheStore::load(
             &config.cache_dir,
             config.cache_config_hash,
-            fallow_core::resolve_cache_max_size_bytes(&config),
+            plow_core::resolve_cache_max_size_bytes(&config),
         )
     };
-    let parse_result = fallow_core::extract::parse_all_files(&files, cache_store.as_ref(), false);
+    let parse_result = plow_core::extract::parse_all_files(&files, cache_store.as_ref(), false);
 
     // Build file_id -> path lookup from discovered files
     let file_paths: rustc_hash::FxHashMap<_, _> = files.iter().map(|f| (f.id, &f.path)).collect();
@@ -128,16 +128,16 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
         };
 
         // Built-in flag results from parse/cache
-        let file_suppressed = fallow_core::suppress::is_file_suppressed(
+        let file_suppressed = plow_core::suppress::is_file_suppressed(
             &module.suppressions,
-            fallow_core::suppress::IssueKind::FeatureFlag,
+            plow_core::suppress::IssueKind::FeatureFlag,
         );
         for flag_use in &module.flag_uses {
             if file_suppressed
-                || fallow_core::suppress::is_suppressed(
+                || plow_core::suppress::is_suppressed(
                     &module.suppressions,
                     flag_use.line,
-                    fallow_core::suppress::IssueKind::FeatureFlag,
+                    plow_core::suppress::IssueKind::FeatureFlag,
                 )
             {
                 continue;
@@ -150,7 +150,7 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
         // Custom SDK patterns, env prefixes, and config object heuristics
         // require re-reading source because they weren't applied at parse time.
         if has_custom_config && let Ok(source) = std::fs::read_to_string(path) {
-            let custom_flags = fallow_core::extract::flags::extract_flags_from_source(
+            let custom_flags = plow_core::extract::flags::extract_flags_from_source(
                 &source,
                 path,
                 &extra_sdk,
@@ -163,10 +163,10 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
                     existing.line == flag_use.line && existing.flag_name == flag_use.flag_name
                 });
                 if !already_found
-                    && !fallow_core::suppress::is_suppressed(
+                    && !plow_core::suppress::is_suppressed(
                         &module.suppressions,
                         flag_use.line,
-                        fallow_core::suppress::IssueKind::FeatureFlag,
+                        plow_core::suppress::IssueKind::FeatureFlag,
                     )
                 {
                     flags.push(flag_use_to_feature_flag(flag_use, module, path));
@@ -179,12 +179,12 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
     // Uses pre-parsed modules to avoid re-parsing.
     #[expect(
         deprecated,
-        reason = "ADR-008 deprecates fallow_core::analyze_with_parse_result and the feature_flags helpers externally; flags still uses the workspace path dependency"
+        reason = "ADR-008 deprecates plow_core::analyze_with_parse_result and the feature_flags helpers externally; flags still uses the workspace path dependency"
     )]
     if let Ok(analysis_output) =
-        fallow_core::analyze_with_parse_result(&config, &parse_result.modules)
+        plow_core::analyze_with_parse_result(&config, &parse_result.modules)
     {
-        fallow_core::analyze::feature_flags::correlate_with_dead_code(
+        plow_core::analyze::feature_flags::correlate_with_dead_code(
             &mut flags,
             &analysis_output.results,
         );
@@ -309,7 +309,7 @@ fn print_file_path(display: &str) {
     }
 }
 
-/// Human-readable output for `fallow flags`.
+/// Human-readable output for `plow flags`.
 fn print_flags_human(
     flags: &[FeatureFlag],
     config: &ResolvedConfig,
@@ -412,7 +412,7 @@ fn print_flags_human(
     }
 }
 
-/// Compact output (one line per finding) for `fallow flags`.
+/// Compact output (one line per finding) for `plow flags`.
 ///
 /// Follows the established `tag:path:line:detail` convention from `compact.rs`.
 fn print_flags_compact(flags: &[FeatureFlag], config: &ResolvedConfig) {
@@ -465,12 +465,12 @@ fn kind_label(flag: &FeatureFlag) -> &'static str {
     }
 }
 
-/// SARIF output for `fallow flags`.
+/// SARIF output for `plow flags`.
 fn print_flags_sarif(flags: &[FeatureFlag], config: &ResolvedConfig) {
     let rules = vec![serde_json::json!({
-        "id": "fallow/feature-flag",
+        "id": "plow/feature-flag",
         "shortDescription": { "text": "Feature flag pattern detected" },
-        "helpUri": "https://docs.fallow.tools/explanations/feature-flags",
+        "helpUri": "https://docs.genesis-plow.dev/explanations/feature-flags",
         "defaultConfiguration": { "level": "note" },
     })];
 
@@ -489,7 +489,7 @@ fn print_flags_sarif(flags: &[FeatureFlag], config: &ResolvedConfig) {
                 );
             }
             serde_json::json!({
-                "ruleId": "fallow/feature-flag",
+                "ruleId": "plow/feature-flag",
                 "level": "note",
                 "message": { "text": msg },
                 "locations": [{
@@ -508,9 +508,9 @@ fn print_flags_sarif(flags: &[FeatureFlag], config: &ResolvedConfig) {
         "runs": [{
             "tool": {
                 "driver": {
-                    "name": "fallow",
+                    "name": "plow",
                     "version": env!("CARGO_PKG_VERSION"),
-                    "informationUri": "https://github.com/fallow-rs/fallow",
+                    "informationUri": "https://github.com/plow-rs/plow",
                     "rules": rules,
                 }
             },
@@ -528,7 +528,7 @@ fn escape_backticks(s: &str) -> String {
     s.replace('`', "\\`")
 }
 
-/// Markdown output for `fallow flags` (PR comments).
+/// Markdown output for `plow flags` (PR comments).
 fn print_flags_markdown(flags: &[FeatureFlag], config: &ResolvedConfig) {
     if flags.is_empty() {
         println!("## Feature flags: no flags detected");
@@ -579,7 +579,7 @@ fn print_flags_markdown(flags: &[FeatureFlag], config: &ResolvedConfig) {
     }
 }
 
-/// CodeClimate output for `fallow flags` (GitLab Code Quality).
+/// CodeClimate output for `plow flags` (GitLab Code Quality).
 fn print_flags_codeclimate(flags: &[FeatureFlag], config: &ResolvedConfig) {
     let issues: Vec<serde_json::Value> = flags
         .iter()
@@ -603,7 +603,7 @@ fn print_flags_codeclimate(flags: &[FeatureFlag], config: &ResolvedConfig) {
                 fnv_fingerprint(&["feature-flag", &path, &f.line.to_string(), &f.flag_name]);
             serde_json::json!({
                 "type": "issue",
-                "check_name": "fallow/feature-flag",
+                "check_name": "plow/feature-flag",
                 "description": description,
                 "categories": ["Clarity"],
                 "severity": "info",
@@ -622,7 +622,7 @@ fn print_flags_codeclimate(flags: &[FeatureFlag], config: &ResolvedConfig) {
     );
 }
 
-/// JSON output for `fallow flags`.
+/// JSON output for `plow flags`.
 fn print_flags_json(
     flags: &[FeatureFlag],
     config: &ResolvedConfig,
@@ -668,7 +668,7 @@ fn print_flags_json(
                         "type": "suppress-line",
                         "auto_fixable": false,
                         "description": "Suppress with an inline comment",
-                        "comment": "// fallow-ignore-next-line feature-flag",
+                        "comment": "// plow-ignore-next-line feature-flag",
                     },
                 ],
             });
@@ -715,7 +715,7 @@ fn print_flags_json(
                     "medium": "Pattern match with some ambiguity",
                     "low": "Heuristic match (config objects), may produce false positives",
                 },
-                "docs": "https://docs.fallow.tools/explanations/feature-flags",
+                "docs": "https://docs.genesis-plow.dev/explanations/feature-flags",
             }
         });
     }

@@ -1,7 +1,7 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use common::{fixture_path, parse_json, run_fallow, run_fallow_in_root};
+use common::{fixture_path, parse_json, run_plow, run_plow_in_root};
 
 // ---------------------------------------------------------------------------
 // fix --dry-run
@@ -9,7 +9,7 @@ use common::{fixture_path, parse_json, run_fallow, run_fallow_in_root};
 
 #[test]
 fn fix_dry_run_exits_0() {
-    let output = run_fallow(
+    let output = run_plow(
         "fix",
         "basic-project",
         &["--dry-run", "--format", "json", "--quiet"],
@@ -23,7 +23,7 @@ fn fix_dry_run_exits_0() {
 
 #[test]
 fn fix_dry_run_json_has_dry_run_flag() {
-    let output = run_fallow(
+    let output = run_plow(
         "fix",
         "basic-project",
         &["--dry-run", "--format", "json", "--quiet"],
@@ -38,7 +38,7 @@ fn fix_dry_run_json_has_dry_run_flag() {
 
 #[test]
 fn fix_dry_run_finds_fixable_items() {
-    let output = run_fallow(
+    let output = run_plow(
         "fix",
         "basic-project",
         &["--dry-run", "--format", "json", "--quiet"],
@@ -58,7 +58,7 @@ fn fix_dry_run_finds_fixable_items() {
 
 #[test]
 fn fix_dry_run_does_not_have_applied_key() {
-    let output = run_fallow(
+    let output = run_plow(
         "fix",
         "basic-project",
         &["--dry-run", "--format", "json", "--quiet"],
@@ -90,7 +90,7 @@ fn fix_removes_unused_exported_enum_declaration() {
     )
     .unwrap();
 
-    let output = run_fallow_in_root("fix", root, &["--yes", "--quiet"]);
+    let output = run_plow_in_root("fix", root, &["--yes", "--quiet"]);
 
     assert_eq!(
         output.code, 0,
@@ -102,7 +102,7 @@ fn fix_removes_unused_exported_enum_declaration() {
         "\n"
     );
 
-    let output = run_fallow_in_root("fix", root, &["--dry-run", "--format", "json", "--quiet"]);
+    let output = run_plow_in_root("fix", root, &["--dry-run", "--format", "json", "--quiet"]);
     let json = parse_json(&output);
     assert!(json["fixes"].as_array().unwrap().is_empty());
 }
@@ -131,7 +131,7 @@ fn fix_folds_imported_enum_with_all_members_unused() {
     )
     .unwrap();
 
-    let output = run_fallow_in_root("fix", root, &["--dry-run", "--format", "json", "--quiet"]);
+    let output = run_plow_in_root("fix", root, &["--dry-run", "--format", "json", "--quiet"]);
     let json = parse_json(&output);
     let fixes = json["fixes"].as_array().unwrap();
     assert_eq!(
@@ -142,7 +142,7 @@ fn fix_folds_imported_enum_with_all_members_unused() {
     assert_eq!(fixes[0]["type"], "remove_export");
     assert_eq!(fixes[0]["name"], "MyEnum");
 
-    let output = run_fallow_in_root("fix", root, &["--yes", "--quiet"]);
+    let output = run_plow_in_root("fix", root, &["--yes", "--quiet"]);
     assert_eq!(
         output.code, 0,
         "fix should exit 0, stdout: {}, stderr: {}",
@@ -157,7 +157,7 @@ fn fix_folds_imported_enum_with_all_members_unused() {
 
     // Second pass: the empty-shell zombie that 2.54.3 would have left behind
     // must not be present, and the fold must not produce any new fix.
-    let output = run_fallow_in_root("fix", root, &["--dry-run", "--format", "json", "--quiet"]);
+    let output = run_plow_in_root("fix", root, &["--dry-run", "--format", "json", "--quiet"]);
     let json = parse_json(&output);
     assert!(
         json["fixes"].as_array().unwrap().is_empty(),
@@ -176,7 +176,7 @@ fn fix_adds_ignore_exports_config_rules_for_duplicate_exports() {
         r#"{"name":"dup-config","main":"src/index.ts"}"#,
     )
     .unwrap();
-    std::fs::write(root.join(".fallowrc.json"), "{}\n").unwrap();
+    std::fs::write(root.join(".plowrc.json"), "{}\n").unwrap();
     std::fs::write(
         root.join("src/index.ts"),
         "export { Button } from './one';\nexport { Button as Button2 } from './two';\nconsole.log(Button2);\n",
@@ -185,7 +185,7 @@ fn fix_adds_ignore_exports_config_rules_for_duplicate_exports() {
     std::fs::write(root.join("src/one/index.ts"), "export const Button = 1;\n").unwrap();
     std::fs::write(root.join("src/two/index.ts"), "export const Button = 2;\n").unwrap();
 
-    let output = run_fallow_in_root("fix", root, &["--yes", "--format", "json", "--quiet"]);
+    let output = run_plow_in_root("fix", root, &["--yes", "--format", "json", "--quiet"]);
     assert_eq!(
         output.code, 0,
         "fix should exit 0, stdout: {}, stderr: {}",
@@ -203,13 +203,13 @@ fn fix_adds_ignore_exports_config_rules_for_duplicate_exports() {
     assert_eq!(config_fix["entries"].as_array().unwrap().len(), 2);
 
     let config: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(root.join(".fallowrc.json")).unwrap())
+        serde_json::from_str(&std::fs::read_to_string(root.join(".plowrc.json")).unwrap())
             .unwrap();
     let ignore_exports = config["ignoreExports"].as_array().unwrap();
     assert_eq!(ignore_exports[0]["file"], "src/one/index.ts");
     assert_eq!(ignore_exports[1]["file"], "src/two/index.ts");
 
-    let output = run_fallow_in_root(
+    let output = run_plow_in_root(
         "dead-code",
         root,
         &["--duplicate-exports", "--format", "json", "--quiet"],
@@ -223,8 +223,8 @@ fn fix_adds_ignore_exports_config_rules_for_duplicate_exports() {
     assert_eq!(json["summary"]["duplicate_exports"].as_u64(), Some(0));
 }
 
-/// A Windows-authored `.fallowrc.json` with a UTF-8 BOM must round-trip
-/// through `fallow fix --yes` without breaking the parse on the next run.
+/// A Windows-authored `.plowrc.json` with a UTF-8 BOM must round-trip
+/// through `plow fix --yes` without breaking the parse on the next run.
 /// The CST parser (jsonc-parser) rejects a leading BOM, so the writer must
 /// strip and restore it.
 #[test]
@@ -239,7 +239,7 @@ fn fix_round_trips_utf8_bom_on_json_config() {
     )
     .unwrap();
     let bom_input = "\u{FEFF}{\n  \"entry\": [\"src/index.ts\"]\n}\n";
-    std::fs::write(root.join(".fallowrc.json"), bom_input).unwrap();
+    std::fs::write(root.join(".plowrc.json"), bom_input).unwrap();
     std::fs::write(
         root.join("src/index.ts"),
         "export { Button } from './one';\nexport { Button as Button2 } from './two';\nconsole.log(Button2);\n",
@@ -248,14 +248,14 @@ fn fix_round_trips_utf8_bom_on_json_config() {
     std::fs::write(root.join("src/one/index.ts"), "export const Button = 1;\n").unwrap();
     std::fs::write(root.join("src/two/index.ts"), "export const Button = 2;\n").unwrap();
 
-    let output = run_fallow_in_root("fix", root, &["--yes", "--format", "json", "--quiet"]);
+    let output = run_plow_in_root("fix", root, &["--yes", "--format", "json", "--quiet"]);
     assert_eq!(
         output.code, 0,
         "fix should succeed on BOM-prefixed config: {}",
         output.stderr
     );
 
-    let written = std::fs::read_to_string(root.join(".fallowrc.json")).unwrap();
+    let written = std::fs::read_to_string(root.join(".plowrc.json")).unwrap();
     assert!(
         written.starts_with('\u{FEFF}'),
         "BOM stripped from output (got bytes {:?})",
@@ -263,7 +263,7 @@ fn fix_round_trips_utf8_bom_on_json_config() {
     );
 
     // Round-trip: a follow-up analysis must still load this config cleanly.
-    let post = run_fallow_in_root(
+    let post = run_plow_in_root(
         "dead-code",
         root,
         &["--duplicate-exports", "--format", "json", "--quiet"],
@@ -277,7 +277,7 @@ fn fix_round_trips_utf8_bom_on_json_config() {
     assert_eq!(json["summary"]["duplicate_exports"].as_u64(), Some(0));
 }
 
-/// `fallow fix` on a symlinked config file must write through to the target
+/// `plow fix` on a symlinked config file must write through to the target
 /// rather than replacing the symlink with a regular file. Common in Docker
 /// images where configs are mounted from a sibling directory.
 #[cfg(unix)]
@@ -294,9 +294,9 @@ fn fix_writes_through_symlinked_config() {
         r#"{"name":"symlink-config","main":"src/index.ts"}"#,
     )
     .unwrap();
-    let real_path = real_dir.join(".fallowrc.json");
+    let real_path = real_dir.join(".plowrc.json");
     std::fs::write(&real_path, "{}\n").unwrap();
-    std::os::unix::fs::symlink(&real_path, root.join(".fallowrc.json")).unwrap();
+    std::os::unix::fs::symlink(&real_path, root.join(".plowrc.json")).unwrap();
     std::fs::write(
         root.join("src/index.ts"),
         "export { Button } from './one';\nexport { Button as Button2 } from './two';\nconsole.log(Button2);\n",
@@ -305,7 +305,7 @@ fn fix_writes_through_symlinked_config() {
     std::fs::write(root.join("src/one/index.ts"), "export const Button = 1;\n").unwrap();
     std::fs::write(root.join("src/two/index.ts"), "export const Button = 2;\n").unwrap();
 
-    let output = run_fallow_in_root("fix", root, &["--yes", "--format", "json", "--quiet"]);
+    let output = run_plow_in_root("fix", root, &["--yes", "--format", "json", "--quiet"]);
     assert_eq!(
         output.code, 0,
         "fix on symlinked config should succeed: {}",
@@ -314,7 +314,7 @@ fn fix_writes_through_symlinked_config() {
 
     // The symlink must still BE a symlink after the write (atomic_write
     // canonicalized to the target).
-    let meta = std::fs::symlink_metadata(root.join(".fallowrc.json")).unwrap();
+    let meta = std::fs::symlink_metadata(root.join(".plowrc.json")).unwrap();
     assert!(
         meta.file_type().is_symlink(),
         "symlink was replaced with regular file by atomic_write"
@@ -336,7 +336,7 @@ fn fix_writes_through_symlinked_config() {
 fn fix_without_yes_in_non_tty_exits_2() {
     // Running fix without --dry-run and without --yes in a non-TTY (test runner)
     // should exit 2 with an error
-    let output = run_fallow("fix", "basic-project", &["--format", "json", "--quiet"]);
+    let output = run_plow("fix", "basic-project", &["--format", "json", "--quiet"]);
     assert_eq!(output.code, 2, "fix without --yes in non-TTY should exit 2");
 }
 
@@ -346,7 +346,7 @@ fn fix_catalog_delete_preceding_comments_config_is_consumed() {
     let root = dir.path();
     std::fs::create_dir_all(root.join("packages/app")).unwrap();
     std::fs::write(
-        root.join(".fallowrc.json"),
+        root.join(".plowrc.json"),
         r#"{
   "fix": {
     "catalog": {
@@ -375,7 +375,7 @@ fn fix_catalog_delete_preceding_comments_config_is_consumed() {
     )
     .unwrap();
 
-    let output = run_fallow_in_root("fix", root, &["--yes", "--format", "json", "--quiet"]);
+    let output = run_plow_in_root("fix", root, &["--yes", "--format", "json", "--quiet"]);
     assert_eq!(
         output.code, 0,
         "fix should exit 0, stdout: {}, stderr: {}",
@@ -402,15 +402,15 @@ fn fix_catalog_delete_preceding_comments_config_is_consumed() {
 }
 
 #[test]
-fn fix_catalog_fallow_keep_marker_preserves_block() {
-    // Regression: `# fallow-keep` marker preserves a comment block even
+fn fix_catalog_plow_keep_marker_preserves_block() {
+    // Regression: `# plow-keep` marker preserves a comment block even
     // under `policy: always`. Mirrors the inline-suppression convention
-    // (`fallow-ignore-*`) so users discover it without docs.
+    // (`plow-ignore-*`) so users discover it without docs.
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
     std::fs::create_dir_all(root.join("packages/app")).unwrap();
     std::fs::write(
-        root.join(".fallowrc.json"),
+        root.join(".plowrc.json"),
         r#"{
   "fix": {
     "catalog": {
@@ -423,7 +423,7 @@ fn fix_catalog_fallow_keep_marker_preserves_block() {
     .unwrap();
     std::fs::write(
         root.join("pnpm-workspace.yaml"),
-        "packages:\n  - 'packages/*'\n\ncatalog:\n  is-odd: ^1.0.0\n  # fallow-keep audit trail\n  is-even: ^1.0.0\n",
+        "packages:\n  - 'packages/*'\n\ncatalog:\n  is-odd: ^1.0.0\n  # plow-keep audit trail\n  is-even: ^1.0.0\n",
     )
     .unwrap();
     std::fs::write(
@@ -439,7 +439,7 @@ fn fix_catalog_fallow_keep_marker_preserves_block() {
     )
     .unwrap();
 
-    let output = run_fallow_in_root("fix", root, &["--yes", "--format", "json", "--quiet"]);
+    let output = run_plow_in_root("fix", root, &["--yes", "--format", "json", "--quiet"]);
     assert_eq!(
         output.code, 0,
         "fix should exit 0, stderr: {}",
@@ -449,8 +449,8 @@ fn fix_catalog_fallow_keep_marker_preserves_block() {
     let after = std::fs::read_to_string(root.join("pnpm-workspace.yaml")).unwrap();
     assert_eq!(
         after,
-        "packages:\n  - 'packages/*'\n\ncatalog:\n  is-odd: ^1.0.0\n  # fallow-keep audit trail\n",
-        "fallow-keep marker must preserve the comment even when the entry is removed under `always`"
+        "packages:\n  - 'packages/*'\n\ncatalog:\n  is-odd: ^1.0.0\n  # plow-keep audit trail\n",
+        "plow-keep marker must preserve the comment even when the entry is removed under `always`"
     );
 }
 
@@ -458,7 +458,7 @@ fn fix_catalog_fallow_keep_marker_preserves_block() {
 // fix --yes on the canonical pnpm-catalog fixture (issue #335)
 // ---------------------------------------------------------------------------
 
-/// End-to-end regression for the issue #335 fix: running `fallow fix --yes`
+/// End-to-end regression for the issue #335 fix: running `plow fix --yes`
 /// against the canonical `issue-329-pnpm-catalog` fixture must produce a
 /// `pnpm-workspace.yaml` whose emptied named catalog (`react17`, whose
 /// only entries `react` and `react-dom` are unused) parses as an EMPTY
@@ -470,7 +470,7 @@ fn fix_catalog_fallow_keep_marker_preserves_block() {
 /// unit tests asserted on synthetic strings, which is the right shape for
 /// helper coverage but does not exercise the end-to-end flow through the
 /// binary against a real fixture. A parallel reviewer caught the bug by
-/// running `fallow fix` against this exact fixture and inspecting the
+/// running `plow fix` against this exact fixture and inspecting the
 /// resulting YAML; this test bakes that workflow into the suite.
 #[test]
 fn fix_catalog_issue_335_empties_parent_to_empty_map_not_null() {
@@ -479,7 +479,7 @@ fn fix_catalog_issue_335_empties_parent_to_empty_map_not_null() {
     let fixture = fixture_path("issue-329-pnpm-catalog");
     copy_dir_recursive(&fixture, &root).expect("copy fixture");
 
-    let output = run_fallow_in_root("fix", &root, &["--yes", "--format", "json", "--quiet"]);
+    let output = run_plow_in_root("fix", &root, &["--yes", "--format", "json", "--quiet"]);
     assert_eq!(
         output.code, 0,
         "fix --yes should exit 0, stderr: {}",
@@ -551,7 +551,7 @@ fn fix_json_envelope_carries_skipped_content_changed_count() {
     // every fixer ran cleanly; the count is 0 here but the field's
     // presence is the contract that consumers (CI scripts, MCP tools)
     // depend on.
-    let output = run_fallow(
+    let output = run_plow(
         "fix",
         "basic-project",
         &["--dry-run", "--format", "json", "--quiet"],
@@ -594,7 +594,7 @@ fn fix_round_trip_clears_targeted_findings() {
     )
     .unwrap();
 
-    let fix = run_fallow_in_root("fix", root, &["--yes", "--format", "json", "--quiet"]);
+    let fix = run_plow_in_root("fix", root, &["--yes", "--format", "json", "--quiet"]);
     assert_eq!(
         fix.code, 0,
         "fix should exit 0 on a clean run; stderr: {}",
@@ -606,7 +606,7 @@ fn fix_round_trip_clears_targeted_findings() {
 
     // Re-analyze; the same exports must NOT reappear, and no new
     // findings should have been introduced by the rewrite.
-    let check = run_fallow_in_root("check", root, &["--format", "json", "--quiet"]);
+    let check = run_plow_in_root("check", root, &["--format", "json", "--quiet"]);
     let check_json = parse_json(&check);
     let unused_exports = check_json["unused_exports"].as_array().map_or(0, Vec::len);
     assert_eq!(
@@ -651,7 +651,7 @@ fn fix_batch_aborts_when_a_target_directory_is_read_only() {
     perms.set_mode(0o555);
     std::fs::set_permissions(&sealed_dir, perms).unwrap();
 
-    let fix = run_fallow_in_root("fix", root, &["--yes", "--format", "json", "--quiet"]);
+    let fix = run_plow_in_root("fix", root, &["--yes", "--format", "json", "--quiet"]);
 
     // Restore permissions before any assertion can panic and skip cleanup.
     let mut restore = std::fs::metadata(&sealed_dir).unwrap().permissions();
@@ -719,7 +719,7 @@ fn fix_dry_run_withholds_off_graph_export_but_plans_high_confidence_one() {
     let root = dir.path();
     write_off_graph_project(root);
 
-    let output = run_fallow_in_root("fix", root, &["--dry-run", "--format", "json", "--quiet"]);
+    let output = run_plow_in_root("fix", root, &["--dry-run", "--format", "json", "--quiet"]);
     assert_eq!(
         output.code, 0,
         "off-graph skips are intentional, dry-run exits 0; stderr: {}",
@@ -769,7 +769,7 @@ fn fix_apply_keeps_off_graph_export_and_removes_high_confidence_one() {
     let root = dir.path();
     write_off_graph_project(root);
 
-    let fix = run_fallow_in_root("fix", root, &["--yes", "--format", "json", "--quiet"]);
+    let fix = run_plow_in_root("fix", root, &["--yes", "--format", "json", "--quiet"]);
     assert_eq!(
         fix.code, 0,
         "an apply whose only skip is intentional must exit 0; stderr: {}",
@@ -797,7 +797,7 @@ fn fix_apply_keeps_off_graph_export_and_removes_high_confidence_one() {
 fn fix_envelope_always_carries_skipped_low_confidence_exports() {
     // Presence-of-field contract: consumers (CI jq, MCP, VS Code) gate on
     // the key existing even when the count is 0.
-    let output = run_fallow(
+    let output = run_plow(
         "fix",
         "basic-project",
         &["--dry-run", "--format", "json", "--quiet"],

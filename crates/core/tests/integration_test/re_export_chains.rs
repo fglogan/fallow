@@ -4,7 +4,7 @@ use super::common::{create_config, fixture_path};
 fn three_level_star_chain_used_exports_propagate() {
     let root = fixture_path("re-export-chains");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -27,7 +27,7 @@ fn three_level_star_chain_used_exports_propagate() {
 fn three_level_star_chain_unused_exports_detected() {
     let root = fixture_path("re-export-chains");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -50,7 +50,7 @@ fn three_level_star_chain_unused_exports_detected() {
 fn three_level_star_chain_no_unused_files() {
     let root = fixture_path("re-export-chains");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     // All files are part of the chain, none should be unused
     assert!(

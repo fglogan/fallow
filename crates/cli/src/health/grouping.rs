@@ -40,9 +40,9 @@ struct GroupBucket {
 pub(super) fn build_health_grouping(
     resolver: &OwnershipResolver,
     project_root: &Path,
-    files: &[fallow_types::discover::DiscoveredFile],
-    modules: &[fallow_core::extract::ModuleInfo],
-    file_paths: &FxHashMap<fallow_core::discover::FileId, &PathBuf>,
+    files: &[plow_types::discover::DiscoveredFile],
+    modules: &[plow_core::extract::ModuleInfo],
+    file_paths: &FxHashMap<plow_core::discover::FileId, &PathBuf>,
     candidate_paths: &FxHashSet<PathBuf>,
     score_output: Option<&FileScoreOutput>,
     file_scores: &[FileHealthScore],
@@ -51,7 +51,7 @@ pub(super) fn build_health_grouping(
     large_functions: &[LargeFunctionEntry],
     targets: &[RefactoringTarget],
     score_requested: bool,
-    duplicates_config: Option<&fallow_config::DuplicatesConfig>,
+    duplicates_config: Option<&plow_config::DuplicatesConfig>,
     needs_file_scores: bool,
     needs_hotspots: bool,
     show_vital_signs: bool,
@@ -135,9 +135,9 @@ fn is_unowned_label(key: &str) -> bool {
 fn build_group(
     bucket: GroupBucket,
     project_root: &Path,
-    files: &[fallow_types::discover::DiscoveredFile],
-    modules: &[fallow_core::extract::ModuleInfo],
-    file_paths: &FxHashMap<fallow_core::discover::FileId, &PathBuf>,
+    files: &[plow_types::discover::DiscoveredFile],
+    modules: &[plow_core::extract::ModuleInfo],
+    file_paths: &FxHashMap<plow_core::discover::FileId, &PathBuf>,
     score_output: Option<&FileScoreOutput>,
     file_scores: &[FileHealthScore],
     findings: &[ComplexityViolation],
@@ -145,7 +145,7 @@ fn build_group(
     large_functions: &[LargeFunctionEntry],
     targets: &[RefactoringTarget],
     score_requested: bool,
-    duplicates_config: Option<&fallow_config::DuplicatesConfig>,
+    duplicates_config: Option<&plow_config::DuplicatesConfig>,
     needs_file_scores: bool,
     needs_hotspots: bool,
     show_vital_signs: bool,
@@ -190,13 +190,13 @@ fn build_group(
         &subset,
     );
     if let Some(config) = duplicates_config {
-        let group_files: Vec<fallow_types::discover::DiscoveredFile> = files
+        let group_files: Vec<plow_types::discover::DiscoveredFile> = files
             .iter()
             .filter(|file| paths.contains(&file.path))
             .cloned()
             .collect();
         let dupes_report =
-            fallow_core::duplicates::find_duplicates(project_root, &group_files, config);
+            plow_core::duplicates::find_duplicates(project_root, &group_files, config);
         apply_duplication_metrics(&mut vital_signs, &mut counts, &dupes_report);
     }
     let health_score =

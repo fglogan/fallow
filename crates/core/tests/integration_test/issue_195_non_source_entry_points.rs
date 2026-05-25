@@ -9,7 +9,7 @@
 
 use super::common::{create_config, fixture_path};
 
-fn unused_file_names(results: &fallow_types::results::AnalysisResults) -> Vec<String> {
+fn unused_file_names(results: &plow_types::results::AnalysisResults) -> Vec<String> {
     results
         .unused_files
         .iter()
@@ -26,7 +26,7 @@ fn unused_file_names(results: &fallow_types::results::AnalysisResults) -> Vec<St
         .collect()
 }
 
-fn unused_file_paths(results: &fallow_types::results::AnalysisResults) -> Vec<String> {
+fn unused_file_paths(results: &plow_types::results::AnalysisResults) -> Vec<String> {
     results
         .unused_files
         .iter()
@@ -40,7 +40,7 @@ fn unused_file_paths(results: &fallow_types::results::AnalysisResults) -> Vec<St
 fn vite_additional_data_seeds_scss_entries() {
     let root = fixture_path("issue-195-vite-additional-data");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let names = unused_file_names(&results);
     assert!(
@@ -87,7 +87,7 @@ export default defineConfig({
     .expect("write vite config");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         !results
@@ -132,7 +132,7 @@ export default defineConfig({
     .expect("write vite config");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         !results
@@ -149,7 +149,7 @@ export default defineConfig({
 fn sfc_style_block_scss_import_seeds_partial() {
     let root = fixture_path("issue-195-sfc-style-imports");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let names = unused_file_names(&results);
     assert!(
@@ -163,7 +163,7 @@ fn sfc_style_block_scss_import_seeds_partial() {
 fn sfc_style_src_attribute_seeds_external_file() {
     let root = fixture_path("issue-195-sfc-style-imports");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let names = unused_file_names(&results);
     assert!(
@@ -217,7 +217,7 @@ export const name = "App";
     .expect("write bootstrap partial");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         !results
@@ -242,7 +242,7 @@ export const name = "App";
 fn package_json_script_entry_files_seed_root_level_paths() {
     let root = fixture_path("issue-195-script-entry-files");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let names = unused_file_names(&results);
     assert!(
@@ -256,7 +256,7 @@ fn package_json_script_entry_files_seed_root_level_paths() {
 fn workspace_package_script_entry_files_use_workspace_prefix() {
     let root = fixture_path("issue-195-script-entry-files-workspace");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let paths = unused_file_paths(&results);
     let deploy_unused = paths
@@ -284,7 +284,7 @@ fn workspace_package_script_entry_files_use_workspace_prefix() {
 fn ci_yaml_file_args_seed_entry_points() {
     let root = fixture_path("issue-195-ci-file-args");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let names = unused_file_names(&results);
     assert!(
@@ -303,7 +303,7 @@ fn ci_yaml_file_args_seed_entry_points() {
 fn cypress_spec_pattern_outside_default_dir_seeds_entry() {
     let root = fixture_path("issue-195-cypress-spec-pattern");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let names = unused_file_names(&results);
     assert!(
@@ -322,7 +322,7 @@ fn cypress_spec_pattern_outside_default_dir_seeds_entry() {
 fn cypress_support_file_string_seeds_entry() {
     let root = fixture_path("issue-195-cypress-spec-pattern");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let paths = unused_file_paths(&results);
     let support_unused = paths.iter().any(|p| p.ends_with("tests/support/index.ts"));
@@ -388,7 +388,7 @@ describe("Foo", () => {
     .expect("write cypress spec");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let paths = unused_file_paths(&results);
 
     assert!(

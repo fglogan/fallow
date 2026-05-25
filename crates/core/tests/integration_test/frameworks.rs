@@ -6,7 +6,7 @@ use super::common::{create_config, fixture_path};
 fn nextjs_page_default_export_not_flagged() {
     let root = fixture_path("nextjs-project");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_names: Vec<String> = results
         .unused_files
@@ -38,7 +38,7 @@ fn nextjs_page_default_export_not_flagged() {
 fn nextjs_unused_util_export_flagged() {
     let root = fixture_path("nextjs-project");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     // unusedUtil is exported but never imported — however, since utils.ts is an
     // unreachable file, it may be reported as unused file instead of unused export.
@@ -62,7 +62,7 @@ fn nextjs_unused_util_export_flagged() {
 fn nextjs_convention_exports_are_not_flagged() {
     let root = fixture_path("nextjs-project");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -96,7 +96,7 @@ fn nextjs_convention_exports_are_not_flagged() {
 fn nextjs_special_file_exports_are_not_flagged() {
     let root = fixture_path("nextjs-project");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_exports: Vec<(String, String)> = results
         .unused_exports
@@ -154,7 +154,7 @@ fn nextjs_special_file_exports_are_not_flagged() {
 fn nextjs_config_referenced_dependencies_are_not_flagged_unused() {
     let root = fixture_path("nextjs-config-deps");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_dep_names: Vec<&str> = results
         .unused_dependencies
@@ -176,7 +176,7 @@ fn nextjs_config_referenced_dependencies_are_not_flagged_unused() {
 fn issue_613_opennext_cloudflare_config_is_framework_used() {
     let root = fixture_path("issue-613-opennext-cloudflare");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files: Vec<String> = results
         .unused_files
@@ -216,7 +216,7 @@ fn issue_613_opennext_cloudflare_config_is_framework_used() {
 fn issue_613_opennext_cloudflare_script_activates_config_handling() {
     let root = fixture_path("issue-613-opennext-cloudflare-script");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files: Vec<String> = results
         .unused_files
@@ -256,7 +256,7 @@ fn issue_613_opennext_cloudflare_script_activates_config_handling() {
 fn issue_613_opennext_cloudflare_workspace_script_activates_config_handling() {
     let root = fixture_path("issue-613-opennext-cloudflare-workspace-script");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files: Vec<String> = results
         .unused_files
@@ -296,7 +296,7 @@ fn issue_613_opennext_cloudflare_workspace_script_activates_config_handling() {
 fn issue_613_plain_nextjs_does_not_claim_opennext_config() {
     let root = fixture_path("issue-613-plain-nextjs-opennext-config");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files: Vec<String> = results
         .unused_files
@@ -323,7 +323,7 @@ fn issue_613_plain_nextjs_does_not_claim_opennext_config() {
 fn issue_623_nextjs_react_compiler_dependency_is_not_flagged_unused() {
     let root = fixture_path("issue-623-next-react-compiler");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_dep_names: Vec<&str> = results
         .unused_dependencies
@@ -345,7 +345,7 @@ fn issue_623_nextjs_react_compiler_dependency_is_not_flagged_unused() {
 fn issue_623_nextjs_disabled_react_compiler_dependency_is_flagged_unused() {
     let root = fixture_path("issue-623-next-react-compiler-disabled");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_dep_names: Vec<&str> = results
         .unused_dependencies
@@ -363,7 +363,7 @@ fn issue_623_nextjs_disabled_react_compiler_dependency_is_flagged_unused() {
 fn issue_623_vite_react_compiler_dependency_is_not_flagged_unused() {
     let root = fixture_path("issue-623-vite-react-compiler");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_dep_names: Vec<&str> = results
         .unused_dependencies
@@ -385,7 +385,7 @@ fn issue_623_vite_react_compiler_dependency_is_not_flagged_unused() {
 fn issue_623_vite_no_react_compiler_config_dependency_is_flagged_unused() {
     let root = fixture_path("issue-623-vite-react-compiler-control");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_dep_names: Vec<&str> = results
         .unused_dependencies
@@ -441,7 +441,7 @@ fn turborepo_generator_config_is_used_without_globbing_generator_directory() {
     .unwrap();
 
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files: Vec<String> = results
         .unused_files
@@ -482,7 +482,7 @@ fn turborepo_generator_config_is_used_without_globbing_generator_directory() {
 fn tap_test_files_are_not_flagged_unused() {
     let root = fixture_path("tap-project");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files: Vec<String> = results
         .unused_files
@@ -507,7 +507,7 @@ fn tap_test_files_are_not_flagged_unused() {
 fn tsd_test_files_are_not_flagged_unused() {
     let root = fixture_path("tsd-project");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files: Vec<String> = results
         .unused_files
@@ -536,7 +536,7 @@ fn tsd_test_files_are_not_flagged_unused() {
 fn path_alias_not_flagged_as_unlisted() {
     let root = fixture_path("path-aliases");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unlisted_names: Vec<&str> = results
         .unlisted_dependencies
@@ -555,7 +555,7 @@ fn path_alias_not_flagged_as_unlisted() {
 fn path_aliases_mixed_exports_no_false_positive_unused_files() {
     let root = fixture_path("path-aliases-mixed-exports");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_names: Vec<String> = results
         .unused_files
@@ -617,7 +617,7 @@ fn path_aliases_mixed_exports_no_false_positive_unused_files() {
 fn css_apply_marks_tailwind_as_used() {
     let root = fixture_path("css-apply-project");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     // tailwindcss should NOT be in unused dependencies (it's used via @apply in styles.css)
     let unused_dep_names: Vec<&str> = results
@@ -647,7 +647,7 @@ fn css_apply_marks_tailwind_as_used() {
 fn css_package_subpath_imports_resolve_from_node_modules() {
     let root = fixture_path("css-package-subpath-import");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unresolved_specs: Vec<&str> = results
         .unresolved_imports
@@ -713,7 +713,7 @@ fn css_package_subpath_imports_resolve_from_node_modules() {
 fn tailwind_plugin_directive_marks_plugin_targets_used() {
     let root = fixture_path("tailwind-plugin-directive");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_dep_names: Vec<&str> = results
         .unused_dependencies
@@ -776,7 +776,7 @@ fn iconify_static_icon_strings_credit_icon_set_packages() {
     // import, so they must be credited from the static icon string.
     let root = fixture_path("issue-608-iconify-credits");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_dep_names: Vec<&str> = results
         .unused_dependencies
@@ -801,7 +801,7 @@ fn iconify_static_icon_strings_credit_icon_set_packages() {
 fn pandacss_config_is_not_flagged_unused() {
     let root = fixture_path("pandacss-config");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_names: Vec<String> = results
         .unused_files
@@ -834,7 +834,7 @@ fn pandacss_config_is_not_flagged_unused() {
 fn vite_aliases_from_config_resolve_internal_modules() {
     let root = fixture_path("vite-alias-project");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unresolved_specs: Vec<&str> = results
         .unresolved_imports
@@ -878,7 +878,7 @@ fn vite_aliases_from_config_resolve_internal_modules() {
 fn webpack_aliases_from_config_resolve_internal_modules() {
     let root = fixture_path("webpack-alias-project");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unlisted_names: Vec<&str> = results
         .unlisted_dependencies
@@ -934,7 +934,7 @@ fn webpack_aliases_from_config_resolve_internal_modules() {
 fn webpack_descriptor_without_context_resolves_relative_entry() {
     let root = fixture_path("webpack-no-context-project");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_names: Vec<String> = results
         .unused_files
@@ -974,7 +974,7 @@ fn webpack_descriptor_without_context_resolves_relative_entry() {
 fn sveltekit_aliases_from_config_resolve_internal_modules() {
     let root = fixture_path("sveltekit-alias-project");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unresolved_specs: Vec<&str> = results
         .unresolved_imports
@@ -1018,7 +1018,7 @@ fn sveltekit_aliases_from_config_resolve_internal_modules() {
 fn nuxt_custom_dirs_and_aliases_reduce_false_positives() {
     let root = fixture_path("nuxt-custom-dirs");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unresolved_specs: Vec<&str> = results
         .unresolved_imports
@@ -1070,7 +1070,7 @@ fn nuxt_custom_dirs_and_aliases_reduce_false_positives() {
 fn nuxt_src_dir_config_reduces_false_positives() {
     let root = fixture_path("nuxt-src-dir");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unresolved_specs: Vec<&str> = results
         .unresolved_imports
@@ -1123,7 +1123,7 @@ fn nuxt_src_dir_config_reduces_false_positives() {
 fn nuxt_default_scan_keeps_nested_plugin_index_but_not_nested_helpers() {
     let root = fixture_path("nuxt-default-scan");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_names: Vec<String> = results
         .unused_files
@@ -1161,7 +1161,7 @@ fn nuxt_default_scan_keeps_nested_plugin_index_but_not_nested_helpers() {
 fn nuxt_runtime_conventions_report_dead_named_exports_without_unused_file_noise() {
     let root = fixture_path("nuxt-runtime-conventions");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_names: Vec<String> = results
         .unused_files
@@ -1216,7 +1216,7 @@ fn nuxt_runtime_conventions_report_dead_named_exports_without_unused_file_noise(
 fn nuxt_configured_runtime_paths_reduce_false_positives_and_keep_dead_exports_visible() {
     let root = fixture_path("nuxt-config-runtime-paths");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_names: Vec<String> = results
         .unused_files
@@ -1278,7 +1278,7 @@ fn nuxt_css_tilde_alias_keeps_app_assets_alive() {
     // app/assets/main.css as unused (default Nuxt 4 srcDir = app/).
     let root = fixture_path("nuxt-css-alias");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files: Vec<String> = results
         .unused_files
@@ -1298,7 +1298,7 @@ fn nuxt_css_tilde_alias_keeps_app_assets_alive() {
 fn nuxt_convention_exports_preserve_defaults_but_report_dead_helpers() {
     let root = fixture_path("nuxt-convention-exports");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_exports: Vec<(String, String)> = results
         .unused_exports
@@ -1393,7 +1393,7 @@ fn wrangler_config_main_entries_keep_worker_files_alive() {
     std::fs::write(root.join("src/orphan.ts"), "export const orphan = true;\n").expect("orphan");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused_files: Vec<String> = results
         .unused_files
         .iter()
@@ -1464,7 +1464,7 @@ fn wrangler_config_precedence_only_keeps_selected_main_alive() {
     .expect("legacy worker");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused_files: Vec<String> = results
         .unused_files
         .iter()
@@ -1516,7 +1516,7 @@ fn content_collections_config_and_tooling_deps_are_used() {
     std::fs::write(root.join("orphan.ts"), "export const orphan = true;\n").expect("orphan");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused_files: Vec<String> = results
         .unused_files
         .iter()
@@ -1576,7 +1576,7 @@ fn content_collections_mjs_config_is_used() {
     .expect("content collections mjs config");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused_files: Vec<String> = results
         .unused_files
         .iter()
@@ -1618,7 +1618,7 @@ fn content_collections_framework_integration_only_activates_plugin() {
     .expect("content collections config");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused_files: Vec<String> = results
         .unused_files
         .iter()
@@ -1703,7 +1703,7 @@ fn fumadocs_source_config_content_roots_and_virtual_imports_are_used() {
     std::fs::write(docs.join("orphan.ts"), "export const orphan = true;\n").expect("orphan");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused_files: Vec<String> = results
         .unused_files
         .iter()
@@ -1802,7 +1802,7 @@ fn wrangler_plain_json_config_main_keeps_worker_alive() {
     .expect("worker");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused_files: Vec<String> = results
         .unused_files
         .iter()

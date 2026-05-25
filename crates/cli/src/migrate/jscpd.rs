@@ -2,65 +2,65 @@ use super::{MigrationWarning, string_or_array};
 
 /// jscpd fields that cannot be mapped and generate warnings.
 const JSCPD_UNMAPPABLE_FIELDS: &[(&str, &str, Option<&str>)] = &[
-    ("maxLines", "No maximum line count limit in fallow", None),
-    ("maxSize", "No maximum file size limit in fallow", None),
+    ("maxLines", "No maximum line count limit in plow", None),
+    ("maxSize", "No maximum file size limit in plow", None),
     (
         "ignorePattern",
         "Content-based ignore patterns are not supported",
-        Some("use inline suppression: // fallow-ignore-next-line code-duplication"),
+        Some("use inline suppression: // plow-ignore-next-line code-duplication"),
     ),
     (
         "reporters",
-        "Reporters are not configurable in fallow",
+        "Reporters are not configurable in plow",
         Some("use --format flag instead (human/json/sarif/compact)"),
     ),
     (
         "output",
-        "fallow writes to stdout",
-        Some("redirect output with shell: fallow dupes > report.json"),
+        "plow writes to stdout",
+        Some("redirect output with shell: plow dupes > report.json"),
     ),
     (
         "blame",
-        "Git blame integration is not supported in fallow",
+        "Git blame integration is not supported in plow",
         None,
     ),
-    ("absolute", "fallow always shows relative paths", None),
+    ("absolute", "plow always shows relative paths", None),
     (
         "noSymlinks",
-        "Symlink handling is not configurable in fallow",
+        "Symlink handling is not configurable in plow",
         None,
     ),
     (
         "ignoreCase",
-        "Case-insensitive matching is not supported in fallow",
+        "Case-insensitive matching is not supported in plow",
         None,
     ),
-    ("format", "fallow auto-detects JS/TS files", None),
+    ("format", "plow auto-detects JS/TS files", None),
     (
         "formatsExts",
-        "Custom file extensions are not configurable in fallow",
+        "Custom file extensions are not configurable in plow",
         None,
     ),
-    ("store", "Store backend is not configurable in fallow", None),
+    ("store", "Store backend is not configurable in plow", None),
     (
         "tokensToSkip",
-        "Token skipping is not configurable in fallow",
+        "Token skipping is not configurable in plow",
         None,
     ),
     (
         "exitCode",
-        "Exit codes are not configurable in fallow",
+        "Exit codes are not configurable in plow",
         Some("use the rules system to control which issues cause CI failure"),
     ),
     (
         "pattern",
-        "Pattern filtering is not supported in fallow",
+        "Pattern filtering is not supported in plow",
         None,
     ),
     (
         "path",
         "Source path configuration is not supported",
-        Some("run fallow from the project root directory"),
+        Some("run plow from the project root directory"),
     ),
 ];
 
@@ -106,15 +106,15 @@ pub(super) fn migrate_jscpd(
 
     // mode -> duplicates.mode
     if let Some(mode_str) = obj.get("mode").and_then(|v| v.as_str()) {
-        let fallow_mode = match mode_str {
+        let plow_mode = match mode_str {
             "strict" => Some("strict"),
             "mild" => Some("mild"),
             "weak" => {
                 warnings.push(MigrationWarning {
                     source: "jscpd",
                     field: "mode".to_string(),
-                    message: "jscpd's \"weak\" mode may differ semantically from fallow's \"weak\" \
-                              mode. jscpd uses lexer-based tokens while fallow uses AST-based tokens."
+                    message: "jscpd's \"weak\" mode may differ semantically from plow's \"weak\" \
+                              mode. jscpd uses lexer-based tokens while plow uses AST-based tokens."
                         .to_string(),
                     suggestion: Some(
                         "test with both \"weak\" and \"mild\" to find the best match".to_string(),
@@ -132,7 +132,7 @@ pub(super) fn migrate_jscpd(
                 None
             }
         };
-        if let Some(mode) = fallow_mode {
+        if let Some(mode) = plow_mode {
             dupes.insert(
                 "mode".to_string(),
                 serde_json::Value::String(mode.to_string()),
@@ -455,11 +455,11 @@ mod tests {
         let by_field = |f: &str| warnings.iter().find(|w| w.field == f).unwrap();
         assert_eq!(
             by_field("maxLines").message,
-            "No maximum line count limit in fallow"
+            "No maximum line count limit in plow"
         );
         assert_eq!(
             by_field("reporters").message,
-            "Reporters are not configurable in fallow"
+            "Reporters are not configurable in plow"
         );
     }
 
@@ -482,7 +482,7 @@ mod tests {
         let w = by_field("ignorePattern");
         assert_eq!(
             w.suggestion.as_deref().unwrap(),
-            "use inline suppression: // fallow-ignore-next-line code-duplication"
+            "use inline suppression: // plow-ignore-next-line code-duplication"
         );
 
         let w = by_field("reporters");
@@ -494,7 +494,7 @@ mod tests {
         let w = by_field("output");
         assert_eq!(
             w.suggestion.as_deref().unwrap(),
-            "redirect output with shell: fallow dupes > report.json"
+            "redirect output with shell: plow dupes > report.json"
         );
 
         let w = by_field("exitCode");
@@ -506,7 +506,7 @@ mod tests {
         let w = by_field("path");
         assert_eq!(
             w.suggestion.as_deref().unwrap(),
-            "run fallow from the project root directory"
+            "run plow from the project root directory"
         );
     }
 
@@ -533,19 +533,19 @@ mod tests {
         assert!(by_field("maxLines").suggestion.is_none());
         assert_eq!(
             by_field("maxLines").message,
-            "No maximum line count limit in fallow"
+            "No maximum line count limit in plow"
         );
 
         assert!(by_field("maxSize").suggestion.is_none());
         assert_eq!(
             by_field("maxSize").message,
-            "No maximum file size limit in fallow"
+            "No maximum file size limit in plow"
         );
 
         assert!(by_field("blame").suggestion.is_none());
         assert_eq!(
             by_field("blame").message,
-            "Git blame integration is not supported in fallow"
+            "Git blame integration is not supported in plow"
         );
 
         assert!(by_field("absolute").suggestion.is_none());

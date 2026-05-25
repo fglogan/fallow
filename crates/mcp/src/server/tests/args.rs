@@ -121,7 +121,7 @@ fn shared_helpers_drop_empty_string_paths() {
 fn analyze_args_with_all_options() {
     let params = AnalyzeParams {
         root: Some("/my/project".to_string()),
-        config: Some("fallow.toml".to_string()),
+        config: Some("plow.toml".to_string()),
         production: Some(true),
         workspace: Some("@my/pkg".to_string()),
         issue_types: Some(vec![
@@ -153,7 +153,7 @@ fn analyze_args_with_all_options() {
             "--root",
             "/my/project",
             "--config",
-            "fallow.toml",
+            "plow.toml",
             "--no-cache",
             "--threads",
             "4",
@@ -352,7 +352,7 @@ fn find_dupes_args_minimal() {
 fn find_dupes_args_with_all_options() {
     let params = FindDupesParams {
         root: Some("/repo".to_string()),
-        config: Some("fallow.toml".to_string()),
+        config: Some("plow.toml".to_string()),
         workspace: Some("@my/lib".to_string()),
         mode: Some("semantic".to_string()),
         min_tokens: Some(100),
@@ -383,7 +383,7 @@ fn find_dupes_args_with_all_options() {
             "--root",
             "/repo",
             "--config",
-            "fallow.toml",
+            "plow.toml",
             "--no-cache",
             "--threads",
             "8",
@@ -662,7 +662,7 @@ fn project_info_args_minimal() {
 fn project_info_args_with_all_options() {
     let params = ProjectInfoParams {
         root: Some("/workspace".to_string()),
-        config: Some("fallow.toml".to_string()),
+        config: Some("plow.toml".to_string()),
         entry_points: Some(true),
         files: Some(true),
         plugins: Some(true),
@@ -681,7 +681,7 @@ fn project_info_args_with_all_options() {
             "--root",
             "/workspace",
             "--config",
-            "fallow.toml",
+            "plow.toml",
             "--no-cache",
             "--threads",
             "2",
@@ -726,7 +726,7 @@ fn trace_file_args_with_scope() {
     let args = build_trace_file_args(&TraceFileParams {
         file: "src/utils.ts".to_string(),
         root: Some("/repo".to_string()),
-        config: Some("fallow.toml".to_string()),
+        config: Some("plow.toml".to_string()),
         production: Some(true),
         workspace: Some("packages/web".to_string()),
         no_cache: Some(true),
@@ -743,7 +743,7 @@ fn trace_file_args_with_scope() {
             "--root",
             "/repo",
             "--config",
-            "fallow.toml",
+            "plow.toml",
             "--no-cache",
             "--threads",
             "3",
@@ -787,7 +787,7 @@ fn trace_clone_args_with_all_options() {
         file: "src/original.ts".to_string(),
         line: 12,
         root: Some("/repo".to_string()),
-        config: Some("fallow.toml".to_string()),
+        config: Some("plow.toml".to_string()),
         workspace: Some("packages/ui".to_string()),
         mode: Some("semantic".to_string()),
         min_tokens: Some(80),
@@ -811,7 +811,7 @@ fn trace_clone_args_with_all_options() {
             "--root",
             "/repo",
             "--config",
-            "fallow.toml",
+            "plow.toml",
             "--no-cache",
             "--threads",
             "6",
@@ -1003,7 +1003,7 @@ fn trace_clone_args_min_occurrences_rejects_one() {
 #[test]
 fn validation_errors_use_structured_json_body() {
     // Every arg-builder validation failure must emit the same JSON shape that
-    // `run_fallow` uses for CLI error exits, so MCP clients can decode one shape
+    // `run_plow` uses for CLI error exits, so MCP clients can decode one shape
     // for both error sources. `exit_code` is 0 on validation paths (no subprocess).
     let errors = [
         build_trace_clone_args(&TraceCloneParams {
@@ -1085,7 +1085,7 @@ fn health_args_minimal() {
 fn health_args_with_all_options() {
     let params = HealthParams {
         root: Some("/src".to_string()),
-        config: Some("fallow.toml".to_string()),
+        config: Some("plow.toml".to_string()),
         max_cyclomatic: Some(25),
         max_cognitive: Some(15),
         max_crap: Some(42.0),
@@ -1134,7 +1134,7 @@ fn health_args_with_all_options() {
             "--root",
             "/src",
             "--config",
-            "fallow.toml",
+            "plow.toml",
             "--no-cache",
             "--threads",
             "4",
@@ -1460,7 +1460,7 @@ fn check_runtime_coverage_all_tuning_flags_emit() {
     let params = CheckRuntimeCoverageParams {
         coverage: "./coverage/coverage-final.json".to_string(),
         root: Some("/my/project".to_string()),
-        config: Some(".fallowrc.json".to_string()),
+        config: Some(".plowrc.json".to_string()),
         production: Some(true),
         workspace: Some("apps/web".to_string()),
         min_invocations_hot: Some(500),
@@ -1476,7 +1476,7 @@ fn check_runtime_coverage_all_tuning_flags_emit() {
     assert!(args.contains(&"--root".to_string()));
     assert!(args.contains(&"/my/project".to_string()));
     assert!(args.contains(&"--config".to_string()));
-    assert!(args.contains(&".fallowrc.json".to_string()));
+    assert!(args.contains(&".plowrc.json".to_string()));
     assert!(args.contains(&"--production".to_string()));
     assert!(args.contains(&"--workspace".to_string()));
     assert!(args.contains(&"apps/web".to_string()));
@@ -1749,7 +1749,7 @@ fn audit_args_with_base() {
 fn audit_args_with_all_options() {
     let args = build_audit_args(&AuditParams {
         root: Some("/project".to_string()),
-        config: Some(".fallowrc.json".to_string()),
+        config: Some(".plowrc.json".to_string()),
         base: Some("develop".to_string()),
         production: Some(true),
         production_dead_code: None,
@@ -1768,14 +1768,14 @@ fn audit_args_with_all_options() {
         coverage: Some("coverage/coverage-final.json".to_string()),
         coverage_root: Some("/ci/build".to_string()),
         include_entry_exports: None,
-        runtime_coverage: Some(".fallow/runtime.json".to_string()),
+        runtime_coverage: Some(".plow/runtime.json".to_string()),
         min_invocations_hot: Some(250),
     })
     .expect("all options are valid");
     assert!(args.contains(&"--root".to_string()));
     assert!(args.contains(&"/project".to_string()));
     assert!(args.contains(&"--config".to_string()));
-    assert!(args.contains(&".fallowrc.json".to_string()));
+    assert!(args.contains(&".plowrc.json".to_string()));
     assert!(args.contains(&"--base".to_string()));
     assert!(args.contains(&"develop".to_string()));
     assert!(args.contains(&"--production".to_string()));
@@ -1797,7 +1797,7 @@ fn audit_args_with_all_options() {
     );
     assert!(
         args.windows(2)
-            .any(|w| w == ["--runtime-coverage", ".fallow/runtime.json"])
+            .any(|w| w == ["--runtime-coverage", ".plow/runtime.json"])
     );
     assert!(
         args.windows(2)
@@ -1924,25 +1924,25 @@ fn audit_args_invalid_gate_rejected() {
 #[test]
 fn audit_args_per_analysis_baselines() {
     let args = build_audit_args(&AuditParams {
-        dead_code_baseline: Some(".fallow-dead-code.json".to_string()),
-        health_baseline: Some(".fallow-health.json".to_string()),
-        dupes_baseline: Some(".fallow-dupes.json".to_string()),
+        dead_code_baseline: Some(".plow-dead-code.json".to_string()),
+        health_baseline: Some(".plow-health.json".to_string()),
+        dupes_baseline: Some(".plow-dupes.json".to_string()),
         ..Default::default()
     })
     .expect("baseline paths are valid");
     assert!(
         args.windows(2)
-            .any(|w| w == ["--dead-code-baseline", ".fallow-dead-code.json"]),
+            .any(|w| w == ["--dead-code-baseline", ".plow-dead-code.json"]),
         "expected --dead-code-baseline, got {args:?}"
     );
     assert!(
         args.windows(2)
-            .any(|w| w == ["--health-baseline", ".fallow-health.json"]),
+            .any(|w| w == ["--health-baseline", ".plow-health.json"]),
         "expected --health-baseline, got {args:?}"
     );
     assert!(
         args.windows(2)
-            .any(|w| w == ["--dupes-baseline", ".fallow-dupes.json"]),
+            .any(|w| w == ["--dupes-baseline", ".plow-dupes.json"]),
         "expected --dupes-baseline, got {args:?}"
     );
 }
@@ -1970,7 +1970,7 @@ fn list_boundaries_args_minimal() {
 fn list_boundaries_args_all_options() {
     let params = ListBoundariesParams {
         root: Some("/workspace".to_string()),
-        config: Some("fallow.toml".to_string()),
+        config: Some("plow.toml".to_string()),
         no_cache: Some(true),
         threads: Some(4),
     };
@@ -1986,7 +1986,7 @@ fn list_boundaries_args_all_options() {
             "--root",
             "/workspace",
             "--config",
-            "fallow.toml",
+            "plow.toml",
             "--no-cache",
             "--threads",
             "4",
@@ -2114,7 +2114,7 @@ fn feature_flags_args_minimal_produces_base_args() {
 fn feature_flags_args_with_all_options() {
     let args = build_feature_flags_args(&FeatureFlagsParams {
         root: Some("/project".to_string()),
-        config: Some(".fallowrc.json".to_string()),
+        config: Some(".plowrc.json".to_string()),
         production: Some(true),
         workspace: Some("@app/core".to_string()),
         flag_type: None,
@@ -2125,7 +2125,7 @@ fn feature_flags_args_with_all_options() {
     assert!(args.contains(&"--root".to_string()));
     assert!(args.contains(&"/project".to_string()));
     assert!(args.contains(&"--config".to_string()));
-    assert!(args.contains(&".fallowrc.json".to_string()));
+    assert!(args.contains(&".plowrc.json".to_string()));
     assert!(args.contains(&"--production".to_string()));
     assert!(args.contains(&"--workspace".to_string()));
     assert!(args.contains(&"@app/core".to_string()));

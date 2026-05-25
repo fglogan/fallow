@@ -3,9 +3,9 @@ use std::path::Path;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use fallow_core::duplicates::DuplicationReport;
-use fallow_core::results::AnalysisResults;
-use fallow_types::envelope::{CheckSummary, ElapsedMs, EntryPoints, SchemaVersion, ToolVersion};
+use plow_core::duplicates::DuplicationReport;
+use plow_core::results::AnalysisResults;
+use plow_types::envelope::{CheckSummary, ElapsedMs, EntryPoints, SchemaVersion, ToolVersion};
 
 use super::{emit_json, normalize_uri};
 use crate::explain;
@@ -121,7 +121,7 @@ pub(super) fn print_grouped_json(
     // `config_fixable` was layered into each group's `AnalysisResults`
     // above, so the typed `actions` array on every finding already carries
     // the correct `auto_fixable` bool. Only the suppression harmonizer
-    // still walks the per-group JSON tree to dedupe `// fallow-ignore-next-line`
+    // still walks the per-group JSON tree to dedupe `// plow-ignore-next-line`
     // anchors across same-path+line findings.
     if let Some(arr) = output.get_mut("groups").and_then(|v| v.as_array_mut()) {
         for entry in arr {
@@ -158,7 +158,7 @@ pub(crate) const SCHEMA_VERSION: u32 = 6;
 /// Returns an error if the results cannot be serialized to JSON.
 #[allow(
     dead_code,
-    reason = "used by the fallow-cli library target for embedders, but dead in the binary target"
+    reason = "used by the plow-cli library target for embedders, but dead in the binary target"
 )]
 pub fn build_json(
     results: &AnalysisResults,
@@ -354,7 +354,7 @@ fn rewrite_suppress_line_actions(
             if let Some(anchor) = suppression_anchor(map)
                 && let Some(kinds) = anchors.get(&anchor)
             {
-                let comment = format!("// fallow-ignore-next-line {}", kinds.join(", "));
+                let comment = format!("// plow-ignore-next-line {}", kinds.join(", "));
                 if let Some(actions) = map
                     .get_mut("actions")
                     .and_then(serde_json::Value::as_array_mut)
@@ -399,7 +399,7 @@ fn suppress_line_comment(action: &serde_json::Value) -> Option<&str> {
 
 fn parse_suppress_line_comment(comment: &str) -> Vec<String> {
     comment
-        .strip_prefix("// fallow-ignore-next-line ")
+        .strip_prefix("// plow-ignore-next-line ")
         .map(|rest| {
             rest.split(|c: char| c == ',' || c.is_whitespace())
                 .filter(|token| !token.is_empty())
@@ -803,8 +803,8 @@ mod tests {
         RuntimeCoverageWatermark,
     };
     use crate::report::test_helpers::sample_results;
-    use fallow_core::extract::MemberKind;
-    use fallow_core::results::*;
+    use plow_core::extract::MemberKind;
+    use plow_core::results::*;
     use std::path::PathBuf;
     use std::time::Duration;
 
@@ -1465,7 +1465,7 @@ mod tests {
     fn duplicate_export_add_to_config_is_auto_fixable_when_config_exists() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        std::fs::write(root.join(".fallowrc.json"), "{}\n").unwrap();
+        std::fs::write(root.join(".plowrc.json"), "{}\n").unwrap();
         let mut results = AnalysisResults::default();
         results
             .duplicate_exports
@@ -1496,7 +1496,7 @@ mod tests {
     #[test]
     fn duplicate_export_add_to_config_is_auto_fixable_when_create_fallback_allowed() {
         // No config file exists, and the dir is NOT inside a monorepo
-        // subpackage, so `fallow fix` can safely create one. The action
+        // subpackage, so `plow fix` can safely create one. The action
         // must surface as auto_fixable: true (per the per-instance flip
         // documented on AddToConfigAction).
         let dir = tempfile::tempdir().unwrap();
@@ -1531,9 +1531,9 @@ mod tests {
     #[test]
     fn duplicate_export_add_to_config_is_not_auto_fixable_in_monorepo_subpackage() {
         // A workspace marker above the invocation directory means
-        // `fallow fix` would refuse to create a per-subpackage config.
+        // `plow fix` would refuse to create a per-subpackage config.
         // The action must surface as auto_fixable: false so agents and
-        // IDEs don't blindly pipe into `fallow fix --yes`.
+        // IDEs don't blindly pipe into `plow fix --yes`.
         let dir = tempfile::tempdir().unwrap();
         let workspace = dir.path();
         std::fs::write(
@@ -2052,7 +2052,7 @@ mod tests {
         assert_eq!(actions[1]["type"], "suppress-line");
         assert_eq!(
             actions[1]["comment"],
-            "// fallow-ignore-next-line unused-export"
+            "// plow-ignore-next-line unused-export"
         );
     }
 
@@ -2088,11 +2088,11 @@ mod tests {
         let type_actions = output["unused_types"][0]["actions"].as_array().unwrap();
         assert_eq!(
             export_actions[1]["comment"],
-            "// fallow-ignore-next-line unused-export, unused-type"
+            "// plow-ignore-next-line unused-export, unused-type"
         );
         assert_eq!(
             type_actions[1]["comment"],
-            "// fallow-ignore-next-line unused-export, unused-type"
+            "// plow-ignore-next-line unused-export, unused-type"
         );
     }
 
@@ -2108,7 +2108,7 @@ mod tests {
                         {
                             "type": "suppress-line",
                             "auto_fixable": false,
-                            "comment": "// fallow-ignore-next-line unused-export"
+                            "comment": "// plow-ignore-next-line unused-export"
                         }
                     ]
                 }]
@@ -2122,7 +2122,7 @@ mod tests {
                         {
                             "type": "suppress-line",
                             "auto_fixable": false,
-                            "comment": "// fallow-ignore-next-line complexity"
+                            "comment": "// plow-ignore-next-line complexity"
                         }
                     ]
                 }]
@@ -2133,11 +2133,11 @@ mod tests {
 
         assert_eq!(
             output["dead_code"]["unused_exports"][0]["actions"][1]["comment"],
-            "// fallow-ignore-next-line unused-export, complexity"
+            "// plow-ignore-next-line unused-export, complexity"
         );
         assert_eq!(
             output["complexity"]["findings"][0]["actions"][1]["comment"],
-            "// fallow-ignore-next-line unused-export, complexity"
+            "// plow-ignore-next-line unused-export, complexity"
         );
     }
 
@@ -2157,7 +2157,7 @@ mod tests {
         assert_eq!(actions[0]["auto_fixable"], false);
         assert!(actions[0]["note"].is_string());
         assert_eq!(actions[1]["type"], "suppress-file");
-        assert_eq!(actions[1]["comment"], "// fallow-ignore-file unused-file");
+        assert_eq!(actions[1]["comment"], "// plow-ignore-file unused-file");
     }
 
     #[test]
@@ -2422,7 +2422,7 @@ mod tests {
         assert_eq!(actions[1]["type"], "suppress-line");
         assert_eq!(
             actions[1]["comment"],
-            "// fallow-ignore-next-line complexity"
+            "// plow-ignore-next-line complexity"
         );
     }
 
@@ -2478,7 +2478,7 @@ mod tests {
         assert_eq!(suppress["type"], "suppress-file");
         assert_eq!(
             suppress["comment"],
-            "<!-- fallow-ignore-file complexity -->"
+            "<!-- plow-ignore-file complexity -->"
         );
         assert_eq!(suppress["placement"], "top-of-template");
     }

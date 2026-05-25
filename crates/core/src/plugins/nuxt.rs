@@ -10,7 +10,7 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_config::{AutoImportKind, AutoImportRule};
+use plow_config::{AutoImportKind, AutoImportRule};
 
 use super::config_parser;
 use super::{Plugin, PluginResult};

@@ -1,4 +1,4 @@
-//! Function inventory walker for `fallow coverage upload-inventory`.
+//! Function inventory walker for `plow coverage upload-inventory`.
 //!
 //! Emits one [`InventoryEntry`] per function (declaration, expression, arrow,
 //! method) whose name matches what `oxc-coverage-instrument` produces at
@@ -233,7 +233,7 @@ pub fn walk_source(path: &Path, source: &str) -> Vec<InventoryEntry> {
     let allocator = Allocator::default();
     let parser_return = Parser::new(&allocator, source, source_type).parse();
 
-    let line_offsets = fallow_types::extract::compute_line_offsets(source);
+    let line_offsets = plow_types::extract::compute_line_offsets(source);
     let mut visitor = InventoryVisitor::new(source, &line_offsets);
     visitor.visit_program(&parser_return.program);
 

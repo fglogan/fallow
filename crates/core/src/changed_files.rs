@@ -1,4 +1,4 @@
-//! Git-aware "changed files" filtering shared between fallow-cli and fallow-lsp.
+//! Git-aware "changed files" filtering shared between plow-cli and plow-lsp.
 //!
 //! Provides:
 //! - [`validate_git_ref`] for input validation at trust boundaries.
@@ -170,7 +170,7 @@ pub fn resolve_git_toplevel(cwd: &Path) -> Result<PathBuf, ChangedFilesError> {
     // onto a verbatim-prefixed toplevel, and downstream `strip_prefix`
     // comparisons against an `opts.root` that does NOT carry the verbatim
     // prefix silently mismatched. The focus-filter then dropped EVERY
-    // finding on Windows, breaking `fallow audit` and `--changed-since`.
+    // finding on Windows, breaking `plow audit` and `--changed-since`.
     // On POSIX `dunce::canonicalize` is identical to `std::fs::canonicalize`.
     Ok(dunce::canonicalize(&path).unwrap_or(path))
 }
@@ -341,7 +341,7 @@ pub fn get_changed_files(root: &Path, git_ref: &str) -> Option<FxHashSet<PathBuf
 /// import graph and can't be attributed to individual changed source files.
 #[expect(
     clippy::implicit_hasher,
-    reason = "fallow standardizes on FxHashSet across the workspace"
+    reason = "plow standardizes on FxHashSet across the workspace"
 )]
 pub fn filter_results_by_changed_files(
     results: &mut AnalysisResults,
@@ -511,7 +511,7 @@ fn recompute_duplication_stats(report: &DuplicationReport) -> DuplicationStats {
 /// correctly-scoped numbers.
 #[expect(
     clippy::implicit_hasher,
-    reason = "fallow standardizes on FxHashSet across the workspace"
+    reason = "plow standardizes on FxHashSet across the workspace"
 )]
 pub fn filter_duplication_by_changed_files(
     report: &mut DuplicationReport,
@@ -537,7 +537,7 @@ mod tests {
     use crate::results::{
         BoundaryViolation, CircularDependency, EmptyCatalogGroup, UnusedExport, UnusedFile,
     };
-    use fallow_types::output_dead_code::{
+    use plow_types::output_dead_code::{
         BoundaryViolationFinding, CircularDependencyFinding, EmptyCatalogGroupFinding,
         UnusedExportFinding, UnusedFileFinding,
     };
@@ -567,7 +567,7 @@ mod tests {
 
     #[test]
     fn augment_git_failed_appends_shallow_clone_hint_for_unknown_revision() {
-        let stderr = "fatal: ambiguous argument 'fallow-baseline...HEAD': unknown revision or path not in the working tree.";
+        let stderr = "fatal: ambiguous argument 'plow-baseline...HEAD': unknown revision or path not in the working tree.";
         let described = ChangedFilesError::GitFailed(stderr.to_owned()).describe();
         assert!(described.contains(stderr), "original stderr preserved");
         assert!(
@@ -597,8 +597,8 @@ mod tests {
     #[test]
     fn validate_git_ref_accepts_baseline_tag() {
         assert_eq!(
-            validate_git_ref("fallow-baseline").unwrap(),
-            "fallow-baseline"
+            validate_git_ref("plow-baseline").unwrap(),
+            "plow-baseline"
         );
     }
 
@@ -613,7 +613,7 @@ mod tests {
 
     #[test]
     fn validate_git_ref_rejects_option_like_ref() {
-        assert!(validate_git_ref("--output=/tmp/fallow-proof").is_err());
+        assert!(validate_git_ref("--output=/tmp/plow-proof").is_err());
     }
 
     #[test]
@@ -692,7 +692,7 @@ mod tests {
     fn filter_results_preserves_dependency_level_issues() {
         let mut results = AnalysisResults::default();
         results.unused_dependencies.push(
-            fallow_types::output_dead_code::UnusedDependencyFinding::with_actions(
+            plow_types::output_dead_code::UnusedDependencyFinding::with_actions(
                 crate::results::UnusedDependency {
                     package_name: "lodash".into(),
                     location: crate::results::DependencyLocation::Dependencies,
@@ -961,7 +961,7 @@ mod tests {
         std::fs::write(repo.join("seed.txt"), "seed\n").unwrap();
         run_git(repo, &["add", "seed.txt"]);
         run_git(repo, &["commit", "--quiet", "-m", "initial"]);
-        run_git(repo, &["tag", "fallow-baseline"]);
+        run_git(repo, &["tag", "plow-baseline"]);
         dunce::canonicalize(repo).unwrap()
     }
 
@@ -987,7 +987,7 @@ mod tests {
         std::fs::create_dir_all(repo.join("src")).unwrap();
         std::fs::write(repo.join("src/new.ts"), "export const x = 1;\n").unwrap();
 
-        let changed = try_get_changed_files(&repo, "fallow-baseline").unwrap();
+        let changed = try_get_changed_files(&repo, "plow-baseline").unwrap();
 
         let expected = repo.join("src/new.ts");
         assert!(
@@ -1011,7 +1011,7 @@ mod tests {
         std::fs::create_dir_all(frontend.join("src")).unwrap();
         std::fs::write(frontend.join("src/new.ts"), "export const x = 1;\n").unwrap();
 
-        let changed = try_get_changed_files(&frontend, "fallow-baseline").unwrap();
+        let changed = try_get_changed_files(&frontend, "plow-baseline").unwrap();
 
         let expected = repo.join("frontend/src/new.ts");
         assert!(
@@ -1053,7 +1053,7 @@ mod tests {
         let frontend = repo.join("frontend");
         std::fs::create_dir_all(&frontend).unwrap();
 
-        let changed = try_get_changed_files(&frontend, "fallow-baseline").unwrap();
+        let changed = try_get_changed_files(&frontend, "plow-baseline").unwrap();
 
         let expected = repo.join("backend/server.py");
         assert!(
@@ -1074,11 +1074,11 @@ mod tests {
         std::fs::write(frontend.join("src/old.ts"), "export const x = 1;\n").unwrap();
         run_git(&repo, &["add", "."]);
         run_git(&repo, &["commit", "--quiet", "-m", "add old"]);
-        run_git(&repo, &["tag", "fallow-baseline-v2"]);
+        run_git(&repo, &["tag", "plow-baseline-v2"]);
         // Modify the tracked file (no commit, so diff-HEAD picks it up)
         std::fs::write(frontend.join("src/old.ts"), "export const x = 2;\n").unwrap();
 
-        let changed = try_get_changed_files(&frontend, "fallow-baseline-v2").unwrap();
+        let changed = try_get_changed_files(&frontend, "plow-baseline-v2").unwrap();
 
         let expected = repo.join("frontend/src/old.ts");
         assert!(
