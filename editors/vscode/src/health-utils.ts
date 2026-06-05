@@ -219,8 +219,7 @@ export const formatComplexityOffense = (finding: {
   readonly cognitive: number;
   readonly crap?: number | null;
 }): string => {
-  const crapSegment =
-    typeof finding.crap === "number" ? ` · CRAP ${finding.crap.toFixed(0)}` : "";
+  const crapSegment = typeof finding.crap === "number" ? ` · CRAP ${finding.crap.toFixed(0)}` : "";
   return `${finding.name} · ${finding.cyclomatic} cyc · ${finding.cognitive} cog${crapSegment}`;
 };
 

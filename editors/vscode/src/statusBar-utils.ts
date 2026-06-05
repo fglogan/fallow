@@ -66,7 +66,6 @@ export const buildParamsFromCli = (
   cloneGroups: dupes?.stats.clone_groups ?? 0,
 });
 
-
 interface BreakdownLine {
   readonly count: keyof AnalysisCompleteParams;
   readonly icon: string;

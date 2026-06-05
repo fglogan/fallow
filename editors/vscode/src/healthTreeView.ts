@@ -147,8 +147,7 @@ const visibleComplexityFindings = (report: HealthReport): HealthReport["findings
 const buildComplexityLeaves = (report: HealthReport): HealthLeafItem[] =>
   visibleComplexityFindings(report).map((finding) => {
     const { relative } = resolveFilePath(finding.path);
-    const crapNote =
-      typeof finding.crap === "number" ? `, CRAP ${finding.crap.toFixed(0)}` : "";
+    const crapNote = typeof finding.crap === "number" ? `, CRAP ${finding.crap.toFixed(0)}` : "";
     const tooltip = `${finding.name} (${finding.severity})\ncyclomatic ${finding.cyclomatic}, cognitive ${finding.cognitive}${crapNote}\n${relative}:${finding.line}`;
     const detail = new HealthLeafItem(formatComplexityOffense(finding), undefined, {
       tooltip,

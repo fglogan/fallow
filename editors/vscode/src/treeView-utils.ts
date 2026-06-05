@@ -72,7 +72,7 @@ export const sortCloneGroupsBySize = <
 >(
   groups: ReadonlyArray<T>,
 ): T[] =>
-  [...groups].sort((a, b) => {
+  groups.toSorted((a, b) => {
     const impact = b.line_count * b.instances.length - a.line_count * a.instances.length;
     return impact !== 0 ? impact : b.line_count - a.line_count;
   });

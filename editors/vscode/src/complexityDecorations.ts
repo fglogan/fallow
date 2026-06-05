@@ -353,6 +353,11 @@ export class ComplexityDecorationController {
     editor.setDecorations(this.contributionType, []);
   }
 
+  // Invoked by VS Code when the controller (pushed to context.subscriptions in
+  // extension.ts) is disposed on deactivate. fallow cannot see that runtime
+  // Disposable-contract call because the object is registered directly rather
+  // than via an explicit `.dispose()` wrapper.
+  // fallow-ignore-next-line unused-class-member
   dispose(): void {
     this.functionType.dispose();
     this.contributionType.dispose();
