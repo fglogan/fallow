@@ -1374,39 +1374,8 @@ pub(super) fn find_unused_members_with_public_api_entry_points(
         }
     }
 
-    let mut interface_to_implementers: FxHashMap<ExportKey, Vec<ExportKey>> = FxHashMap::default();
-    for resolved in resolved_modules {
-        let Some(class_heritage) = class_heritage_by_file.get(&resolved.file_id) else {
-            continue;
-        };
-        if class_heritage.is_empty() {
-            continue;
-        }
-
-        let local_to_export_keys = build_local_to_export_keys(resolved);
-        for heritage in *class_heritage {
-            if heritage.implements.is_empty() {
-                continue;
-            }
-
-            let implementer_key = ExportKey::new(resolved.file_id, heritage.export_name.clone());
-            for interface_name in &heritage.implements {
-                let Some(interface_keys) = local_to_export_keys.get(interface_name.as_str()) else {
-                    continue;
-                };
-                for interface_key in interface_keys {
-                    for resolved_interface_key in export_key_with_origins(graph, interface_key) {
-                        let implementers = interface_to_implementers
-                            .entry(resolved_interface_key)
-                            .or_default();
-                        if !implementers.contains(&implementer_key) {
-                            implementers.push(implementer_key.clone());
-                        }
-                    }
-                }
-            }
-        }
-    }
+    let interface_to_implementers =
+        build_interface_to_implementers(graph, resolved_modules, &class_heritage_by_file);
 
     let mut accessed_members: FxHashMap<ExportKey, FxHashSet<String>> = FxHashMap::default();
 
@@ -1805,6 +1774,47 @@ fn record_seen_ignore_decorators(graph: &ModuleGraph, ignore_decorators: &Ignore
             }
         }
     }
+}
+
+fn build_interface_to_implementers(
+    graph: &ModuleGraph,
+    resolved_modules: &[ResolvedModule],
+    class_heritage_by_file: &FxHashMap<FileId, &[fallow_types::extract::ClassHeritageInfo]>,
+) -> FxHashMap<ExportKey, Vec<ExportKey>> {
+    let mut interface_to_implementers: FxHashMap<ExportKey, Vec<ExportKey>> = FxHashMap::default();
+    for resolved in resolved_modules {
+        let Some(class_heritage) = class_heritage_by_file.get(&resolved.file_id) else {
+            continue;
+        };
+        if class_heritage.is_empty() {
+            continue;
+        }
+
+        let local_to_export_keys = build_local_to_export_keys(resolved);
+        for heritage in *class_heritage {
+            if heritage.implements.is_empty() {
+                continue;
+            }
+
+            let implementer_key = ExportKey::new(resolved.file_id, heritage.export_name.clone());
+            for interface_name in &heritage.implements {
+                let Some(interface_keys) = local_to_export_keys.get(interface_name.as_str()) else {
+                    continue;
+                };
+                for interface_key in interface_keys {
+                    for resolved_interface_key in export_key_with_origins(graph, interface_key) {
+                        let implementers = interface_to_implementers
+                            .entry(resolved_interface_key)
+                            .or_default();
+                        if !implementers.contains(&implementer_key) {
+                            implementers.push(implementer_key.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    interface_to_implementers
 }
 
 #[cfg(test)]
