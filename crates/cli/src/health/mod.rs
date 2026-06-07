@@ -1,5 +1,6 @@
 mod assembly;
 pub mod coverage;
+mod coverage_gaps;
 mod coverage_intelligence;
 mod grouping;
 mod hotspots;
