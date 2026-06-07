@@ -636,17 +636,18 @@ fn execute_health_inner(
         SubsetFilter::Paths(&candidate_paths)
     };
     let total_files_scoped = candidate_paths.len();
-    let (mut vital_signs, mut counts) = compute_vital_signs_and_counts(
-        score_output.as_ref(),
-        &modules,
-        &file_paths,
+    let vital_signs_input = VitalSignsAndCountsInput {
+        score_output: score_output.as_ref(),
+        modules: &modules,
+        file_paths: &file_paths,
         needs_file_scores,
         file_scores_slice,
-        opts.hotspots || opts.targets,
-        &hotspots,
-        total_files_scoped,
-        &project_subset,
-    );
+        needs_hotspots: opts.hotspots || opts.targets,
+        hotspots: &hotspots,
+        total_files: total_files_scoped,
+        subset: &project_subset,
+    };
+    let (mut vital_signs, mut counts) = compute_vital_signs_and_counts(&vital_signs_input);
 
     let t = Instant::now();
     if opts.score {
@@ -1453,36 +1454,37 @@ impl SubsetFilter<'_> {
 /// `dead_exports`, `unused_deps`, `circular_deps`, `total_exports`) are
 /// recomputed from the snapshot for the same subset, and `total_files` should
 /// already reflect the subset-scoped count.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "vital signs aggregate inputs from many pipeline stages"
-)]
-fn compute_vital_signs_and_counts(
-    score_output: Option<&scoring::FileScoreOutput>,
-    modules: &[fallow_core::extract::ModuleInfo],
-    file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
+struct VitalSignsAndCountsInput<'a> {
+    score_output: Option<&'a scoring::FileScoreOutput>,
+    modules: &'a [fallow_core::extract::ModuleInfo],
+    file_paths:
+        &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
     needs_file_scores: bool,
-    file_scores_slice: &[FileHealthScore],
+    file_scores_slice: &'a [FileHealthScore],
     needs_hotspots: bool,
-    hotspots: &[HotspotEntry],
+    hotspots: &'a [HotspotEntry],
     total_files: usize,
-    subset: &SubsetFilter<'_>,
-) -> (
+    subset: &'a SubsetFilter<'a>,
+}
+
+fn compute_vital_signs_and_counts(input: &VitalSignsAndCountsInput<'_>) -> (
     crate::health_types::VitalSigns,
     crate::health_types::VitalSignsCounts,
 ) {
-    let analysis_counts =
-        score_output.map(|o| o.analysis_snapshot.counts_for(subset, &o.analysis_counts));
+    let analysis_counts = input
+        .score_output
+        .map(|o| o.analysis_snapshot.counts_for(input.subset, &o.analysis_counts));
     let module_filter_set: Option<rustc_hash::FxHashSet<fallow_core::discover::FileId>> =
-        if subset.is_full() {
+        if input.subset.is_full() {
             None
         } else {
             Some(
-                modules
+                input
+                    .modules
                     .iter()
                     .filter_map(|m| {
-                        let path = file_paths.get(&m.file_id)?;
-                        if subset.matches(path) {
+                        let path = input.file_paths.get(&m.file_id)?;
+                        if input.subset.matches(path) {
                             Some(m.file_id)
                         } else {
                             None
@@ -1492,15 +1494,19 @@ fn compute_vital_signs_and_counts(
             )
         };
     let vs_input = vital_signs::VitalSignsInput {
-        modules,
+        modules: input.modules,
         module_filter: module_filter_set.as_ref(),
-        file_scores: if needs_file_scores {
-            Some(file_scores_slice)
+        file_scores: if input.needs_file_scores {
+            Some(input.file_scores_slice)
         } else {
             None
         },
-        hotspots: if needs_hotspots { Some(hotspots) } else { None },
-        total_files,
+        hotspots: if input.needs_hotspots {
+            Some(input.hotspots)
+        } else {
+            None
+        },
+        total_files: input.total_files,
         analysis_counts,
     };
     let signs = vital_signs::compute_vital_signs(&vs_input);

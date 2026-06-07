@@ -11,7 +11,10 @@ use std::path::{Path, PathBuf};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::scoring::FileScoreOutput;
-use super::{SubsetFilter, apply_duplication_metrics, compute_vital_signs_and_counts};
+use super::{
+    SubsetFilter, VitalSignsAndCountsInput, apply_duplication_metrics,
+    compute_vital_signs_and_counts,
+};
 use crate::health_types::{
     ComplexityViolation, FileHealthScore, HealthGroup, HealthGrouping, HotspotEntry,
     LargeFunctionEntry, RefactoringTarget, summarize_coverage_source_consistency,
@@ -141,17 +144,18 @@ fn build_group(
         .cloned()
         .collect();
     let total_files = paths.len();
-    let (mut vital_signs, mut counts) = compute_vital_signs_and_counts(
-        input.score_output,
-        input.modules,
-        input.file_paths,
-        input.needs_file_scores,
-        &group_file_scores,
-        input.needs_hotspots,
-        &group_hotspots,
+    let vital_signs_input = VitalSignsAndCountsInput {
+        score_output: input.score_output,
+        modules: input.modules,
+        file_paths: input.file_paths,
+        needs_file_scores: input.needs_file_scores,
+        file_scores_slice: &group_file_scores,
+        needs_hotspots: input.needs_hotspots,
+        hotspots: &group_hotspots,
         total_files,
-        &subset,
-    );
+        subset: &subset,
+    };
+    let (mut vital_signs, mut counts) = compute_vital_signs_and_counts(&vital_signs_input);
     if let Some(config) = input.duplicates_config {
         let group_files: Vec<fallow_types::discover::DiscoveredFile> = input
             .files
