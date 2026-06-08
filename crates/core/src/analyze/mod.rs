@@ -807,17 +807,40 @@ pub fn find_dead_code_full(
             &results.unused_exports,
             &mut results.security_findings,
         );
-        let boundary_anchor_paths: rustc_hash::FxHashSet<std::path::PathBuf> = results
-            .boundary_violations
-            .iter()
-            .flat_map(|b| [b.violation.from_path.clone(), b.violation.to_path.clone()])
-            .collect();
+        // Map each boundary-violation file (importer or imported side) to the
+        // (from_zone, to_zone) it crosses, so security ranking can flag
+        // `crosses_boundary` AND fill the candidate's architecture-zone slot
+        // (issue #900). `boundary_violations` is not yet path-sorted here (the
+        // output sort runs later), so for a file participating in more than one
+        // zone crossing pick the lexicographically smallest pair, which is
+        // independent of insertion order and therefore stable across runs.
+        let mut boundary_crossings: rustc_hash::FxHashMap<std::path::PathBuf, (String, String)> =
+            rustc_hash::FxHashMap::default();
+        for violation in &results.boundary_violations {
+            let zones = (
+                violation.violation.from_zone.clone(),
+                violation.violation.to_zone.clone(),
+            );
+            for path in [
+                violation.violation.from_path.clone(),
+                violation.violation.to_path.clone(),
+            ] {
+                boundary_crossings
+                    .entry(path)
+                    .and_modify(|existing| {
+                        if zones < *existing {
+                            *existing = zones.clone();
+                        }
+                    })
+                    .or_insert_with(|| zones.clone());
+            }
+        }
         security::rank_security_findings(
             graph,
             modules,
             &line_offsets_by_file,
             &declared_deps,
-            &boundary_anchor_paths,
+            &boundary_crossings,
             &mut results.security_findings,
         );
     }
