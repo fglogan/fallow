@@ -18,7 +18,7 @@ mod helpers;
 use helpers::{
     check_has_config_file, discover_config_files, is_external_plugin_active,
     prepare_config_pattern, process_config_result, process_external_plugins,
-    process_static_patterns,
+    process_package_json_metadata, process_static_patterns,
 };
 
 fn must_parse_workspace_config_when_root_active(plugin_name: &str) -> bool {
@@ -120,6 +120,8 @@ pub struct AggregatedPluginResult {
     pub used_class_members: Vec<UsedClassMemberRule>,
     /// Dependencies referenced in config files (should not be flagged unused).
     pub referenced_dependencies: Vec<String>,
+    /// Dependencies referenced by package.json metadata, scoped to that package.json path.
+    pub package_referenced_dependencies: Vec<(PathBuf, String)>,
     /// Additional always-used files discovered from config parsing: (pattern, plugin_name).
     pub discovered_always_used: Vec<(String, String)>,
     /// Setup files discovered from config parsing: (path, plugin_name).
@@ -245,6 +247,7 @@ impl AggregatedPluginResult {
             used_exports,
             used_class_members,
             referenced_dependencies,
+            package_referenced_dependencies,
             discovered_always_used,
             setup_files,
             tooling_dependencies,
@@ -271,6 +274,8 @@ impl AggregatedPluginResult {
         self.used_exports.extend(used_exports);
         self.used_class_members.extend(used_class_members);
         self.referenced_dependencies.extend(referenced_dependencies);
+        self.package_referenced_dependencies
+            .extend(package_referenced_dependencies);
         self.discovered_always_used.extend(discovered_always_used);
         self.setup_files.extend(setup_files);
         self.tooling_dependencies.extend(tooling_dependencies);
@@ -380,6 +385,7 @@ impl PluginRegistry {
             .filter(|p| {
                 p.is_enabled_with_files(&all_deps, root, discovered_files)
                     || p.is_enabled_with_scripts(&script_packages, root)
+                    || p.is_enabled_with_package_json(pkg, root)
             })
             .map(AsRef::as_ref)
             .collect();
@@ -400,6 +406,7 @@ impl PluginRegistry {
         for plugin in &active {
             process_static_patterns(*plugin, root, &mut result);
         }
+        process_package_json_metadata(&active, pkg, root, &mut result, &mut regex_errors);
 
         process_external_plugins(
             &self.external_plugins,
@@ -606,6 +613,7 @@ impl PluginRegistry {
             .filter(|p| {
                 p.is_enabled_with_files(&all_deps, root, &workspace_files)
                     || p.is_enabled_with_scripts(&script_packages, root)
+                    || p.is_enabled_with_package_json(pkg, root)
             })
             .map(AsRef::as_ref)
             .collect();
@@ -636,6 +644,7 @@ impl PluginRegistry {
         for plugin in &active {
             process_static_patterns(*plugin, root, &mut result);
         }
+        process_package_json_metadata(&active, pkg, root, &mut result, &mut regex_errors);
 
         let active_names: FxHashSet<&str> = active.iter().map(|p| p.name()).collect();
         let workspace_matchers: Vec<_> = precompiled_config_matchers

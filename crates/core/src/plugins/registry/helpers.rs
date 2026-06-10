@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use rustc_hash::FxHashSet;
 
-use fallow_config::{ExternalPluginDef, PluginDetection, UsedClassMemberRule};
+use fallow_config::{ExternalPluginDef, PackageJson, PluginDetection, UsedClassMemberRule};
 
 use crate::discover::SOURCE_EXTENSIONS;
 
@@ -119,6 +119,39 @@ pub fn process_static_patterns(
         result
             .fixture_patterns
             .push(((*pat).to_string(), pname.clone()));
+    }
+}
+
+/// Resolve package.json metadata hooks for active plugins.
+pub fn process_package_json_metadata(
+    active: &[&dyn Plugin],
+    pkg: &PackageJson,
+    root: &Path,
+    result: &mut AggregatedPluginResult,
+    regex_errors: &mut Vec<PluginRegexValidationError>,
+) {
+    for plugin in active {
+        let package_referenced = plugin.package_json_referenced_dependencies(pkg, root);
+        if !package_referenced.is_empty() {
+            let pkg_path = root.join("package.json");
+            result.package_referenced_dependencies.extend(
+                package_referenced
+                    .into_iter()
+                    .map(|dep| (pkg_path.clone(), dep)),
+            );
+        }
+        let plugin_result = plugin.resolve_package_json(pkg, root);
+        if plugin_result.is_empty() {
+            continue;
+        }
+        tracing::debug!(
+            plugin = plugin.name(),
+            deps = plugin_result.referenced_dependencies.len(),
+            "resolved package.json metadata"
+        );
+        if let Err(mut errors) = process_config_result(plugin.name(), plugin_result, result, None) {
+            regex_errors.append(&mut errors);
+        }
     }
 }
 

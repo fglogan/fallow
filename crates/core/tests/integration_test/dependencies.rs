@@ -228,6 +228,192 @@ fn unused_optional_dependency_detected() {
 }
 
 #[test]
+fn napi_rs_optional_prebuild_dependencies_are_not_reported() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let root = tmp.path();
+    fs::create_dir_all(root.join("src")).expect("create src dir");
+    fs::write(
+        root.join("package.json"),
+        r#"{
+  "name": "@srcmap/codec",
+  "main": "src/index.ts",
+  "optionalDependencies": {
+    "@srcmap/codec-darwin-arm64": "1.0.0",
+    "@srcmap/codec-linux-x64-gnu": "1.0.0",
+    "unused-optional-pkg": "1.0.0"
+  },
+  "napi": {
+    "binaryName": "srcmap-codec",
+    "targets": [
+      "aarch64-apple-darwin",
+      "x86_64-unknown-linux-gnu"
+    ]
+  }
+}"#,
+    )
+    .expect("write package.json");
+    fs::write(root.join("src/index.ts"), "export const value = 1;\n").expect("write source");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unused_optional_dep_names: Vec<&str> = results
+        .unused_optional_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+
+    assert!(
+        !unused_optional_dep_names.contains(&"@srcmap/codec-darwin-arm64"),
+        "generated napi-rs optional package should be credited, found: {unused_optional_dep_names:?}"
+    );
+    assert!(
+        !unused_optional_dep_names.contains(&"@srcmap/codec-linux-x64-gnu"),
+        "generated napi-rs optional package should be credited, found: {unused_optional_dep_names:?}"
+    );
+    assert!(
+        unused_optional_dep_names.contains(&"unused-optional-pkg"),
+        "unrelated optional package should still be reported, found: {unused_optional_dep_names:?}"
+    );
+}
+
+#[test]
+fn napi_rs_optional_prebuild_dependencies_are_not_reported_in_workspaces() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let root = tmp.path();
+    let package_root = root.join("packages/native");
+    fs::create_dir_all(package_root.join("src")).expect("create workspace package");
+    fs::write(
+        root.join("package.json"),
+        r#"{
+  "private": true,
+  "workspaces": ["packages/*"]
+}"#,
+    )
+    .expect("write root package.json");
+    fs::write(
+        package_root.join("package.json"),
+        r#"{
+  "name": "@oxc-coverage-instrument/binding",
+  "main": "src/index.ts",
+  "optionalDependencies": {
+    "@oxc-coverage-instrument/binding-win32-arm64-msvc": "1.0.0",
+    "@oxc-coverage-instrument/binding-wasm32-wasi": "1.0.0",
+    "@oxc-coverage-instrument/binding-wasm32-wasi-singlethreaded": "1.0.0",
+    "unused-optional-pkg": "1.0.0"
+  },
+  "napi": {
+    "packageName": "@oxc-coverage-instrument/binding",
+    "binaryName": "coverage-instrument",
+    "targets": [
+      "aarch64-pc-windows-msvc",
+      "wasm32-wasip1",
+      "wasm32-wasip1-threads"
+    ]
+  }
+}"#,
+    )
+    .expect("write workspace package.json");
+    fs::write(
+        package_root.join("src/index.ts"),
+        "export const value = 1;\n",
+    )
+    .expect("write source");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unused_optional_dep_names: Vec<&str> = results
+        .unused_optional_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+
+    for generated in [
+        "@oxc-coverage-instrument/binding-win32-arm64-msvc",
+        "@oxc-coverage-instrument/binding-wasm32-wasi",
+        "@oxc-coverage-instrument/binding-wasm32-wasi-singlethreaded",
+    ] {
+        assert!(
+            !unused_optional_dep_names.contains(&generated),
+            "generated napi-rs optional package should be credited in a workspace, found: {unused_optional_dep_names:?}"
+        );
+    }
+    assert!(
+        unused_optional_dep_names.contains(&"unused-optional-pkg"),
+        "unrelated workspace optional package should still be reported, found: {unused_optional_dep_names:?}"
+    );
+}
+
+#[test]
+fn napi_rs_optional_prebuild_credits_are_workspace_scoped() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let root = tmp.path();
+    let native_root = root.join("packages/native");
+    let other_root = root.join("packages/other");
+    fs::create_dir_all(native_root.join("src")).expect("create native workspace package");
+    fs::create_dir_all(other_root.join("src")).expect("create other workspace package");
+    fs::write(
+        root.join("package.json"),
+        r#"{
+  "private": true,
+  "workspaces": ["packages/*"]
+}"#,
+    )
+    .expect("write root package.json");
+    fs::write(
+        native_root.join("package.json"),
+        r#"{
+  "name": "native",
+  "main": "src/index.ts",
+  "optionalDependencies": {
+    "native-linux-x64-gnu": "1.0.0"
+  },
+  "napi": {
+    "targets": ["x86_64-unknown-linux-gnu"]
+  }
+}"#,
+    )
+    .expect("write native package.json");
+    fs::write(
+        native_root.join("src/index.ts"),
+        "export const value = 1;\n",
+    )
+    .expect("write native source");
+    fs::write(
+        other_root.join("package.json"),
+        r#"{
+  "name": "other",
+  "main": "src/index.ts",
+  "optionalDependencies": {
+    "native-linux-x64-gnu": "1.0.0"
+  }
+}"#,
+    )
+    .expect("write other package.json");
+    fs::write(other_root.join("src/index.ts"), "export const value = 1;\n")
+        .expect("write other source");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results.unused_optional_dependencies.iter().any(|dep| {
+            dep.dep.package_name == "native-linux-x64-gnu"
+                && dep.dep.path.ends_with("packages/other/package.json")
+        }),
+        "same-named optional dependency in a non-napi workspace should still be reported, found: {:?}",
+        results.unused_optional_dependencies
+    );
+    assert!(
+        !results.unused_optional_dependencies.iter().any(|dep| {
+            dep.dep.package_name == "native-linux-x64-gnu"
+                && dep.dep.path.ends_with("packages/native/package.json")
+        }),
+        "napi-generated optional dependency should be credited only in its declaring workspace, found: {:?}",
+        results.unused_optional_dependencies
+    );
+}
+
+#[test]
 fn unused_workspace_dependency_reports_other_workspace_usage() {
     let root = fixture_path("cross-workspace-dependency-context");
     let config = create_config(root.clone());
