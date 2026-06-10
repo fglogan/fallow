@@ -3151,32 +3151,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
                 workspaces,
             },
         ),
-        Command::Dupes {
-            mode,
-            min_tokens,
-            min_lines,
-            min_occurrences,
-            threshold,
-            skip_local,
-            cross_language,
-            ignore_imports,
-            top,
-            trace,
-        } => dispatch_dupes(
-            dispatch,
-            &DupesDispatchArgs {
-                mode,
-                min_tokens,
-                min_lines,
-                min_occurrences,
-                threshold,
-                skip_local,
-                cross_language,
-                ignore_imports,
-                top,
-                trace,
-            },
-        ),
+        dupes @ Command::Dupes { .. } => dispatch_dupes_command(dupes, dispatch),
         Command::Health {
             max_cyclomatic,
             max_cognitive,
@@ -3305,6 +3280,40 @@ fn dispatch_security_command(command: Command, dispatch: &DispatchContext<'_>) -
         min_invocations_hot,
         explain: cli.explain,
     })
+}
+
+fn dispatch_dupes_command(command: Command, dispatch: &DispatchContext<'_>) -> ExitCode {
+    let Command::Dupes {
+        mode,
+        min_tokens,
+        min_lines,
+        min_occurrences,
+        threshold,
+        skip_local,
+        cross_language,
+        ignore_imports,
+        top,
+        trace,
+    } = command
+    else {
+        unreachable!("dupes dispatcher only handles dupes commands");
+    };
+
+    dispatch_dupes(
+        dispatch,
+        &DupesDispatchArgs {
+            mode,
+            min_tokens,
+            min_lines,
+            min_occurrences,
+            threshold,
+            skip_local,
+            cross_language,
+            ignore_imports,
+            top,
+            trace,
+        },
+    )
 }
 
 fn dispatch_coverage_command(dispatch: &DispatchContext<'_>, subcommand: CoverageCli) -> ExitCode {
