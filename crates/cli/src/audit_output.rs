@@ -176,18 +176,29 @@ fn short_base_ref(base_ref: &str) -> &str {
 /// via `FALLOW_AUDIT_BASE`), append the provenance so the comparison target is
 /// checkable, e.g. `vs a1b2c3d4e5f6 (merge-base with origin/main)`.
 fn format_scope_line(result: &AuditResult) -> String {
-    let sha_suffix = result
-        .head_sha
-        .as_ref()
-        .map_or(String::new(), |sha| format!(" ({sha}..HEAD)"));
-    let base_display = match &result.base_description {
-        Some(description) => format!("{} ({description})", short_base_ref(&result.base_ref)),
-        None => result.base_ref.clone(),
+    format_scope_line_parts(
+        result.changed_files_count,
+        &result.base_ref,
+        result.base_description.as_deref(),
+        result.head_sha.as_deref(),
+    )
+}
+
+fn format_scope_line_parts(
+    changed_files_count: usize,
+    base_ref: &str,
+    base_description: Option<&str>,
+    head_sha: Option<&str>,
+) -> String {
+    let sha_suffix = head_sha.map_or(String::new(), |sha| format!(" ({sha}..HEAD)"));
+    let base_display = match base_description {
+        Some(description) => format!("{} ({description})", short_base_ref(base_ref)),
+        None => base_ref.to_string(),
     };
     format!(
         "Audit scope: {} changed file{} vs {}{}",
-        result.changed_files_count,
-        plural(result.changed_files_count),
+        changed_files_count,
+        plural(changed_files_count),
         base_display,
         sha_suffix
     )
@@ -521,7 +532,9 @@ fn build_audit_codeclimate(result: &AuditResult) -> serde_json::Value {
 
 #[cfg(test)]
 mod tests {
-    use super::short_base_ref;
+    use crate::audit::AuditSummary;
+
+    use super::{build_status_parts, format_scope_line_parts, short_base_ref};
 
     #[test]
     fn short_base_ref_abbreviates_full_sha() {
@@ -543,5 +556,51 @@ mod tests {
             short_base_ref("611d151e8250146426ff3178e94207f8a8d3ccZZ"),
             "611d151e8250146426ff3178e94207f8a8d3ccZZ"
         );
+    }
+
+    #[test]
+    fn format_scope_line_parts_uses_plural_ref_provenance_and_head_sha() {
+        assert_eq!(
+            format_scope_line_parts(
+                1,
+                "611d151e8250146426ff3178e94207f8a8d3cc7b",
+                Some("merge-base with origin/main"),
+                Some("HEADSHA")
+            ),
+            "Audit scope: 1 changed file vs 611d151e8250 (merge-base with origin/main) (HEADSHA..HEAD)"
+        );
+        assert_eq!(
+            format_scope_line_parts(3, "origin/main", None, None),
+            "Audit scope: 3 changed files vs origin/main"
+        );
+    }
+
+    #[test]
+    fn build_status_parts_describes_only_non_empty_categories() {
+        let summary = AuditSummary {
+            dead_code_issues: 1,
+            dead_code_has_errors: true,
+            complexity_findings: 2,
+            max_cyclomatic: Some(12),
+            duplication_clone_groups: 3,
+        };
+
+        assert_eq!(
+            build_status_parts(&summary),
+            vec![
+                "dead code: 1 issue".to_string(),
+                "complexity: 2 findings".to_string(),
+                "duplication: 3 clone groups".to_string(),
+            ]
+        );
+
+        let empty = AuditSummary {
+            dead_code_issues: 0,
+            dead_code_has_errors: false,
+            complexity_findings: 0,
+            max_cyclomatic: None,
+            duplication_clone_groups: 0,
+        };
+        assert!(build_status_parts(&empty).is_empty());
     }
 }
