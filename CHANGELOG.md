@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Route-internal unused exports in Next.js app-router files are reported where other tools suppress them.** A stray helper export or a typo'd `metadata` (for example `meatdata`) inside `app/page.tsx` / `layout.tsx` surfaces as an unused export, because fallow credits a precise per-route-file export allowlist rather than treating the whole route file as an opaque entry point. Valid framework exports (`metadata`, `default`, segment config) stay credited.
 
+- **`fallow impact --all` shows what fallow has done for you across every repo.** A read-only roll-up that aggregates the per-project histories in your user config dir into one ranked table plus grand totals (findings resolved, commits contained), so you can see your impact across all your projects in one view. Sort with `--sort {recent,resolved,contained,name}` (default `recent`) and cap printed rows with `--limit N` (grand totals always reflect every project). `--format json` emits a new `impact-cross-repo` envelope whose `projects[]` each embed the same per-project report as `fallow impact`, carry a stable `project_key` for cross-run correlation, and a repo `label`; the single-project `fallow impact` output is unchanged. JSON and markdown never include any filesystem path. Repos are labeled by their folder basename, captured at record time (a new optional store field; old histories show a short key until their next recorded run). Recording stays off in CI, so this reflects local-developer work, never a CI metric.
+
 ## [2.96.0] - 2026-06-13
 
 ### Changed
