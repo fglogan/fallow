@@ -21,8 +21,11 @@ fn all_tools_registered() {
     let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
     let names: Vec<String> = tools.iter().map(|t| t.name.to_string()).collect();
+    assert!(names.contains(&"code_execute".to_string()));
     assert!(names.contains(&"analyze".to_string()));
     assert!(names.contains(&"check_changed".to_string()));
+    assert!(names.contains(&"security_candidates".to_string()));
+    assert!(names.contains(&"inspect_target".to_string()));
     assert!(names.contains(&"find_dupes".to_string()));
     assert!(names.contains(&"fix_preview".to_string()));
     assert!(names.contains(&"fix_apply".to_string()));
@@ -41,7 +44,9 @@ fn all_tools_registered() {
     assert!(names.contains(&"get_blast_radius".to_string()));
     assert!(names.contains(&"get_importance".to_string()));
     assert!(names.contains(&"get_cleanup_candidates".to_string()));
-    assert_eq!(tools.len(), 20);
+    assert!(names.contains(&"impact".to_string()));
+    assert!(names.contains(&"impact_all".to_string()));
+    assert_eq!(tools.len(), 25);
 }
 
 #[test]
@@ -49,8 +54,11 @@ fn read_only_tools_have_annotations() {
     let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
     let read_only = [
+        "code_execute",
         "analyze",
         "check_changed",
+        "security_candidates",
+        "inspect_target",
         "find_dupes",
         "fix_preview",
         "project_info",
@@ -68,6 +76,8 @@ fn read_only_tools_have_annotations() {
         "get_blast_radius",
         "get_importance",
         "get_cleanup_candidates",
+        "impact",
+        "impact_all",
     ];
     for tool in &tools {
         let name = tool.name.to_string();
@@ -120,8 +130,11 @@ fn open_world_hint_on_analysis_tools() {
     let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
     let open_world = [
+        "code_execute",
         "analyze",
         "check_changed",
+        "security_candidates",
+        "inspect_target",
         "find_dupes",
         "fix_preview",
         "project_info",
@@ -134,6 +147,7 @@ fn open_world_hint_on_analysis_tools() {
         "list_boundaries",
         "feature_flags",
         "check_runtime_coverage",
+        "impact_all",
     ];
     for tool in &tools {
         let name = tool.name.to_string();
@@ -149,12 +163,37 @@ fn open_world_hint_on_analysis_tools() {
 }
 
 #[test]
+fn impact_is_read_only_closed_world() {
+    let server = PlowMcp::new();
+    let tools = server.tool_router.list_all();
+    let impact = tools.iter().find(|t| t.name == "impact").unwrap();
+    let ann = impact.annotations.as_ref().unwrap();
+    assert_eq!(ann.read_only_hint, Some(true));
+    assert_eq!(ann.open_world_hint, Some(false));
+    assert_eq!(ann.idempotent_hint, Some(true));
+}
+
+#[test]
+fn impact_all_is_read_only_open_world_idempotent() {
+    // The load-bearing distinction from single-repo `impact`: the cross-repo
+    // roll-up's result set varies with the machine's tracked repos, so it is
+    // OPEN-world while staying read-only and idempotent. A regression that
+    // dropped any of these hints would otherwise pass CI.
+    let server = PlowMcp::new();
+    let tools = server.tool_router.list_all();
+    let impact_all = tools.iter().find(|t| t.name == "impact_all").unwrap();
+    let ann = impact_all.annotations.as_ref().unwrap();
+    assert_eq!(ann.read_only_hint, Some(true));
+    assert_eq!(ann.open_world_hint, Some(true));
+    assert_eq!(ann.idempotent_hint, Some(true));
+}
+
+#[test]
 fn fix_preview_is_not_destructive() {
     let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
     let preview = tools.iter().find(|t| t.name == "fix_preview").unwrap();
     let ann = preview.annotations.as_ref().unwrap();
-    // fix_preview should be read-only (dry-run only)
     assert_eq!(ann.read_only_hint, Some(true));
     assert_ne!(ann.destructive_hint, Some(true));
 }
@@ -177,8 +216,11 @@ fn server_instructions_mention_all_tools() {
     let server = PlowMcp::new();
     let info = ServerHandler::get_info(&server);
     let instructions = info.instructions.as_deref().unwrap();
+    assert!(instructions.contains("code_execute"));
     assert!(instructions.contains("analyze"));
     assert!(instructions.contains("check_changed"));
+    assert!(instructions.contains("security_candidates"));
+    assert!(instructions.contains("inspect_target"));
     assert!(instructions.contains("find_dupes"));
     assert!(instructions.contains("fix_preview"));
     assert!(instructions.contains("fix_apply"));
@@ -205,7 +247,6 @@ fn all_tools_have_input_schema() {
     let tools = server.tool_router.list_all();
     for tool in &tools {
         let name = tool.name.to_string();
-        // input_schema should be present (JSON Schema object)
         assert!(
             !tool.input_schema.is_empty(),
             "tool '{name}' should have a non-empty input_schema"
@@ -213,7 +254,21 @@ fn all_tools_have_input_schema() {
     }
 }
 
-// ── Schema property validation ────────────────────────────────────
+#[test]
+fn code_execute_schema_contains_expected_properties() {
+    let server = PlowMcp::new();
+    let tools = server.tool_router.list_all();
+    let tool = tools.iter().find(|t| t.name == "code_execute").unwrap();
+    let schema = serde_json::to_string(&tool.input_schema).unwrap();
+    for prop in ["code", "root", "timeout_ms", "max_output_bytes"] {
+        assert!(
+            schema.contains(prop),
+            "code_execute schema should contain property '{prop}'"
+        );
+    }
+    let schema: serde_json::Value = serde_json::to_value(&tool.input_schema).unwrap();
+    assert_required_fields(&schema, &["code"]);
+}
 
 #[test]
 fn analyze_schema_contains_expected_properties() {
@@ -270,17 +325,145 @@ fn check_changed_schema_requires_since() {
     let tools = server.tool_router.list_all();
     let tool = tools.iter().find(|t| t.name == "check_changed").unwrap();
     let schema = serde_json::to_string(&tool.input_schema).unwrap();
-    // "since" should appear in the "required" array
     assert!(
         schema.contains("\"required\""),
         "check_changed schema should have a required array"
     );
-    // The required field should reference "since"
     let schema_value: serde_json::Value = serde_json::from_str(&schema).unwrap();
     if let Some(required) = schema_value.get("required").and_then(|r| r.as_array()) {
         assert!(
             required.iter().any(|v| v.as_str() == Some("since")),
             "check_changed schema should require 'since'"
+        );
+    }
+}
+
+#[test]
+fn security_candidates_schema_contains_expected_properties() {
+    let server = PlowMcp::new();
+    let tools = server.tool_router.list_all();
+    let tool = tools
+        .iter()
+        .find(|t| t.name == "security_candidates")
+        .unwrap();
+    let schema = serde_json::to_string(&tool.input_schema).unwrap();
+    for prop in [
+        "root",
+        "config",
+        "workspace",
+        "changed_since",
+        "paths",
+        "changed_workspaces",
+        "surface",
+        "gate",
+        "no_cache",
+        "threads",
+    ] {
+        assert!(
+            schema.contains(prop),
+            "security_candidates schema should contain property '{prop}'"
+        );
+    }
+    for inert in [
+        "ci",
+        "fail_on_issues",
+        "sarif_file",
+        "summary",
+        "baseline",
+        "save_baseline",
+    ] {
+        assert!(
+            !schema.contains(inert),
+            "security_candidates must not expose inert or mutating property '{inert}'"
+        );
+    }
+}
+
+#[test]
+fn security_candidates_description_frames_candidates_and_scope() {
+    let server = PlowMcp::new();
+    let tools = server.tool_router.list_all();
+    let tool = tools
+        .iter()
+        .find(|t| t.name == "security_candidates")
+        .unwrap();
+    let desc = tool.description.as_deref().unwrap();
+    assert!(
+        desc.starts_with("Returns unverified security candidates, not confirmed vulnerabilities."),
+        "security_candidates description must lead with candidate framing, got {desc}"
+    );
+    for expected in [
+        "plow security --format json",
+        "kind: \"security\"",
+        "security_findings",
+        "category",
+        "CWE",
+        "severity",
+        "evidence",
+        "structural trace",
+        "taint_confidence",
+        "Verify trace, reachability context, severity, and evidence",
+        "paths",
+        "changed_since",
+        "changed_workspaces",
+        "gate",
+        "newly-reachable",
+        "attack_surface",
+        "PLOW_DIFF_FILE",
+        "PLOW_TIMEOUT_SECS",
+    ] {
+        assert!(
+            desc.contains(expected),
+            "security_candidates description should mention {expected}"
+        );
+    }
+}
+
+#[test]
+fn inspect_target_schema_contains_expected_properties() {
+    let server = PlowMcp::new();
+    let tools = server.tool_router.list_all();
+    let tool = tools.iter().find(|t| t.name == "inspect_target").unwrap();
+    let schema = serde_json::to_string(&tool.input_schema).unwrap();
+    for prop in [
+        "target",
+        "type",
+        "file",
+        "export_name",
+        "root",
+        "config",
+        "production",
+        "workspace",
+        "no_cache",
+        "threads",
+    ] {
+        assert!(
+            schema.contains(prop),
+            "inspect_target schema should contain property '{prop}'"
+        );
+    }
+    let schema: serde_json::Value = serde_json::to_value(&tool.input_schema).unwrap();
+    assert_required_fields(&schema, &["target"]);
+}
+
+#[test]
+fn inspect_target_description_frames_scope_and_timeout() {
+    let server = PlowMcp::new();
+    let tools = server.tool_router.list_all();
+    let tool = tools.iter().find(|t| t.name == "inspect_target").unwrap();
+    let desc = tool.description.as_deref().unwrap();
+    for expected in [
+        "one typed evidence bundle",
+        "target={type:\"file\"",
+        "target={type:\"symbol\"",
+        "trace_file",
+        "trace_export",
+        "file-scoped",
+        "PLOW_TIMEOUT_SECS",
+    ] {
+        assert!(
+            desc.contains(expected),
+            "inspect_target description should mention {expected}"
         );
     }
 }
@@ -488,6 +671,7 @@ fn trace_clone_schema_contains_expected_properties() {
     for prop in [
         "file",
         "line",
+        "fingerprint",
         "root",
         "config",
         "workspace",
@@ -507,18 +691,14 @@ fn trace_clone_schema_contains_expected_properties() {
         );
     }
     let schema: serde_json::Value = serde_json::to_value(&tool.input_schema).unwrap();
-    assert_required_fields(&schema, &["file", "line"]);
-    assert_eq!(
-        schema
-            .pointer("/properties/file/minLength")
-            .and_then(|v| v.as_u64()),
-        Some(1)
-    );
-    assert_eq!(
-        schema
-            .pointer("/properties/line/minimum")
-            .and_then(|v| v.as_u64()),
-        Some(1)
+    let required: Vec<&str> = schema
+        .get("required")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+        .unwrap_or_default();
+    assert!(
+        !required.contains(&"file") && !required.contains(&"line"),
+        "file/line must be optional now, got required: {required:?}"
     );
 }
 
@@ -556,6 +736,7 @@ fn check_health_schema_contains_expected_properties() {
         "targets",
         "since",
         "min_commits",
+        "churn_file",
         "workspace",
         "production",
         "save_snapshot",
@@ -617,6 +798,25 @@ fn audit_schema_contains_expected_properties() {
         assert!(
             schema.contains(prop),
             "audit schema should contain property '{prop}'"
+        );
+    }
+}
+
+#[test]
+fn impact_schema_contains_root_and_omits_inert_flags() {
+    let server = PlowMcp::new();
+    let tools = server.tool_router.list_all();
+    let tool = tools.iter().find(|t| t.name == "impact").unwrap();
+    let schema = serde_json::to_value(&tool.input_schema).unwrap();
+    let props = schema
+        .get("properties")
+        .and_then(|p| p.as_object())
+        .expect("impact schema has a properties object");
+    assert!(props.contains_key("root"), "impact exposes 'root'");
+    for inert in ["config", "no_cache", "threads"] {
+        assert!(
+            !props.contains_key(inert),
+            "impact must NOT expose inert property '{inert}'"
         );
     }
 }
@@ -971,23 +1171,18 @@ fn feature_flags_schema_contains_expected_properties() {
     }
 }
 
-// ── fix_apply is not open_world ───────────────────────────────────
-
 #[test]
 fn fix_apply_does_not_have_open_world_hint() {
     let server = PlowMcp::new();
     let tools = server.tool_router.list_all();
     let fix = tools.iter().find(|t| t.name == "fix_apply").unwrap();
     let ann = fix.annotations.as_ref().unwrap();
-    // fix_apply is destructive, should not have open_world_hint=true
     assert_ne!(
         ann.open_world_hint,
         Some(true),
         "fix_apply should not have open_world_hint=true"
     );
 }
-
-// ── Tool descriptions mention key behaviors ───────────────────────
 
 #[test]
 fn analyze_description_mentions_unused_code() {
@@ -1061,8 +1256,6 @@ fn fix_preview_description_mentions_dry_run_or_preview() {
     );
 }
 
-// ── All schemas are valid JSON objects ─────────────────────────────
-
 #[test]
 fn all_tool_schemas_are_json_objects() {
     let server = PlowMcp::new();
@@ -1075,7 +1268,6 @@ fn all_tool_schemas_are_json_objects() {
             schema_value.is_object(),
             "tool '{name}' schema should be a JSON object"
         );
-        // Should have "type": "object" at the top level
         assert_eq!(
             schema_value.get("type").and_then(|t| t.as_str()),
             Some("object"),
@@ -1083,8 +1275,6 @@ fn all_tool_schemas_are_json_objects() {
         );
     }
 }
-
-// ── params.rs field-description style gate ────────────────────────
 
 /// Returns the 1-based line numbers of any field that carries BOTH a `///`
 /// doc comment AND a `#[schemars(description = ...)]` attribute (single or
@@ -1099,8 +1289,6 @@ fn fields_with_both_doc_and_schemars_description(src: &str) -> Vec<usize> {
         if !trimmed.starts_with("#[schemars(") {
             continue;
         }
-        // Walk forward to assemble the full attribute (single or multi-line)
-        // and confirm it carries a `description = ...` arg.
         let mut full = String::new();
         let mut depth: i32 = 0;
         let mut j = i;
@@ -1123,9 +1311,6 @@ fn fields_with_both_doc_and_schemars_description(src: &str) -> Vec<usize> {
             continue;
         }
 
-        // Walk backwards from i looking for a `///` line, stopping at the
-        // first block boundary (blank line, prior field decl, struct opener
-        // or closer). Sibling attributes are transparent.
         let mut has_doc = false;
         let mut k = i;
         while k > 0 {
@@ -1226,12 +1411,9 @@ pub struct A {
     );
 }
 
-// ── Server can be cloned (required for rmcp runtime) ───────────────
-
 #[test]
 fn server_is_cloneable() {
     let server = PlowMcp::new();
-    // Use clone in a way that isn't redundant — verify both instances work
     let cloned = server.clone();
     let tools_original = server.tool_router.list_all();
     let tools_cloned = cloned.tool_router.list_all();

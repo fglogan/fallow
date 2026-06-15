@@ -1,3 +1,9 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "tests and benches use unwrap and expect to keep fixture setup concise"
+)]
+
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -84,6 +90,15 @@ fn sample_results(root: &Path) -> AnalysisResults {
             line: 42,
             col: 4,
         }));
+    r.unused_store_members
+        .push(UnusedStoreMemberFinding::with_actions(UnusedMember {
+            path: root.join("src/stores/counter.ts"),
+            parent_name: "useCounterStore".to_string(),
+            member_name: "legacyAction".to_string(),
+            kind: MemberKind::StoreMember,
+            line: 24,
+            col: 2,
+        }));
     r.unresolved_imports
         .push(UnresolvedImportFinding::with_actions(UnresolvedImport {
             path: root.join("src/app.ts"),
@@ -152,6 +167,7 @@ fn sample_results(root: &Path) -> AnalysisResults {
                 length: 2,
                 line: 3,
                 col: 0,
+                edges: Vec::new(),
                 is_cross_package: false,
             },
         ));
@@ -163,8 +179,8 @@ fn sample_results(root: &Path) -> AnalysisResults {
             ],
             kind: ReExportCycleKind::MultiNode,
         }));
-    r.unused_catalog_entries.push(
-        plow_core::results::UnusedCatalogEntryFinding::with_actions(
+    r.unused_catalog_entries
+        .push(plow_core::results::UnusedCatalogEntryFinding::with_actions(
             plow_core::results::UnusedCatalogEntry {
                 entry_name: "is-even".to_string(),
                 catalog_name: "default".to_string(),
@@ -172,10 +188,9 @@ fn sample_results(root: &Path) -> AnalysisResults {
                 line: 6,
                 hardcoded_consumers: vec![],
             },
-        ),
-    );
-    r.unused_catalog_entries.push(
-        plow_core::results::UnusedCatalogEntryFinding::with_actions(
+        ));
+    r.unused_catalog_entries
+        .push(plow_core::results::UnusedCatalogEntryFinding::with_actions(
             plow_core::results::UnusedCatalogEntry {
                 entry_name: "old-thing".to_string(),
                 catalog_name: "legacy".to_string(),
@@ -183,17 +198,15 @@ fn sample_results(root: &Path) -> AnalysisResults {
                 line: 12,
                 hardcoded_consumers: vec![PathBuf::from("apps/web/package.json")],
             },
-        ),
-    );
-    r.empty_catalog_groups.push(
-        plow_core::results::EmptyCatalogGroupFinding::with_actions(
+        ));
+    r.empty_catalog_groups
+        .push(plow_core::results::EmptyCatalogGroupFinding::with_actions(
             plow_core::results::EmptyCatalogGroup {
                 catalog_name: "react17".to_string(),
                 path: PathBuf::from("pnpm-workspace.yaml"),
                 line: 10,
             },
-        ),
-    );
+        ));
     r.unresolved_catalog_references.push(
         plow_core::results::UnresolvedCatalogReferenceFinding::with_actions(
             plow_core::results::UnresolvedCatalogReference {
@@ -236,11 +249,41 @@ fn sample_results(root: &Path) -> AnalysisResults {
             },
         ),
     );
+    r.invalid_client_exports.push(
+        plow_core::results::InvalidClientExportFinding::with_actions(
+            plow_core::results::InvalidClientExport {
+                path: root.join("app/page.tsx"),
+                export_name: "metadata".to_string(),
+                directive: "use client".to_string(),
+                line: 3,
+                col: 0,
+            },
+        ),
+    );
+    r.mixed_client_server_barrels.push(
+        plow_core::results::MixedClientServerBarrelFinding::with_actions(
+            plow_core::results::MixedClientServerBarrel {
+                path: root.join("app/components/index.ts"),
+                client_origin: "./Button".to_string(),
+                server_origin: "./fetchUser".to_string(),
+                line: 2,
+                col: 0,
+            },
+        ),
+    );
+    r.unprovided_injects
+        .push(plow_core::results::UnprovidedInjectFinding::with_actions(
+            plow_core::results::UnprovidedInject {
+                path: root.join("src/useTheme.ts"),
+                key_name: "THEME_KEY".to_string(),
+                framework: "vue".to_string(),
+                line: 5,
+                col: 2,
+            },
+        ));
 
     r
 }
-
-// ── JSON format ──────────────────────────────────────────────────
 
 #[test]
 fn json_output_snapshot() {
@@ -250,7 +293,6 @@ fn json_output_snapshot() {
     let value = build_json(&results, &root, elapsed).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
 
-    // Redact dynamic values (version changes with releases, elapsed_ms may vary)
     insta::assert_snapshot!(
         "json_output",
         json_str.replace(
@@ -258,6 +300,42 @@ fn json_output_snapshot() {
             "\"version\": \"[VERSION]\"",
         )
     );
+}
+
+#[test]
+fn next_steps_are_read_only_and_placeholder_free() {
+    // The dead-code JSON path emits `next_steps` when findings exist. Every
+    // emitted command must be runnable as-is (no `<...>` placeholder) and never
+    // mutating (`fix`/`init`/`hooks`/`migrate`), per the NextStep contract.
+    let root = PathBuf::from("/project");
+    let results = sample_results(&root);
+    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
+    let steps = value
+        .get("next_steps")
+        .and_then(serde_json::Value::as_array)
+        .expect("dead-code output carries next_steps when findings exist");
+    assert!(!steps.is_empty(), "expected at least one next-step");
+    assert_eq!(
+        steps[0]["id"], "trace-unused-export",
+        "the verification path leads the priority order"
+    );
+    for step in steps {
+        let command = step["command"].as_str().expect("command is a string");
+        assert!(
+            !command.contains('<') && !command.contains('>'),
+            "command must be placeholder-free: {command}"
+        );
+        for verb in ["fix", "init", "hooks", "migrate", "setup-hooks"] {
+            assert!(
+                !command.split_whitespace().any(|token| token == verb),
+                "command must be read-only: {command}"
+            );
+        }
+        assert!(
+            step["reason"].as_str().is_some_and(|r| !r.is_empty()),
+            "each next-step carries a non-empty reason"
+        );
+    }
 }
 
 #[test]
@@ -276,8 +354,6 @@ fn json_empty_results_snapshot() {
         )
     );
 }
-
-// ── SARIF format ─────────────────────────────────────────────────
 
 #[test]
 fn sarif_output_snapshot() {
@@ -301,8 +377,6 @@ fn sarif_empty_results_snapshot() {
     insta::assert_snapshot!("sarif_empty", redact_sarif_version(&json_str));
 }
 
-// ── Compact format ───────────────────────────────────────────────
-
 #[test]
 fn compact_output_snapshot() {
     let root = PathBuf::from("/project");
@@ -322,8 +396,6 @@ fn compact_empty_results_snapshot() {
 
     insta::assert_snapshot!("compact_empty", output);
 }
-
-// ── Per-issue-type compact snapshots ────────────────────────────
 
 #[test]
 fn compact_unused_files_only_snapshot() {
@@ -561,8 +633,6 @@ fn compact_duplicate_exports_only_snapshot() {
     insta::assert_snapshot!("compact_duplicate_exports_only", lines.join("\n"));
 }
 
-// ── Re-export variant snapshots ─────────────────────────────────
-
 #[test]
 fn compact_re_export_variant_snapshot() {
     let root = PathBuf::from("/project");
@@ -641,8 +711,6 @@ fn sarif_re_export_variant_snapshot() {
     insta::assert_snapshot!("sarif_re_export_variant", redact_sarif_version(&json_str));
 }
 
-// ── SARIF with mixed severity levels ────────────────────────────
-
 #[test]
 fn sarif_mixed_severity_snapshot() {
     let root = PathBuf::from("/project");
@@ -657,6 +725,12 @@ fn sarif_mixed_severity_snapshot() {
         unused_optional_dependencies: plow_config::Severity::Warn,
         unused_enum_members: plow_config::Severity::Warn,
         unused_class_members: plow_config::Severity::Warn,
+        unused_store_members: plow_config::Severity::Warn,
+        unprovided_injects: plow_config::Severity::Warn,
+        unrendered_components: plow_config::Severity::Warn,
+        unused_component_props: plow_config::Severity::Warn,
+        unused_component_emits: plow_config::Severity::Warn,
+        unused_server_actions: plow_config::Severity::Warn,
         unresolved_imports: plow_config::Severity::Error,
         unlisted_dependencies: plow_config::Severity::Error,
         duplicate_exports: plow_config::Severity::Warn,
@@ -673,13 +747,19 @@ fn sarif_mixed_severity_snapshot() {
         unresolved_catalog_references: plow_config::Severity::Error,
         unused_dependency_overrides: plow_config::Severity::Warn,
         misconfigured_dependency_overrides: plow_config::Severity::Error,
+        security_client_server_leak: plow_config::Severity::Off,
+        security_sink: plow_config::Severity::Off,
+        policy_violation: plow_config::Severity::Warn,
+        invalid_client_export: plow_config::Severity::Warn,
+        mixed_client_server_barrel: plow_config::Severity::Warn,
+        misplaced_directive: plow_config::Severity::Warn,
+        route_collision: plow_config::Severity::Warn,
+        dynamic_segment_name_conflict: plow_config::Severity::Warn,
     };
     let sarif = build_sarif(&results, &root, &rules);
     let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");
     insta::assert_snapshot!("sarif_mixed_severity", redact_sarif_version(&json_str));
 }
-
-// ── Type-only dependency snapshots ──────────────────────────────
 
 #[test]
 fn json_type_only_deps_snapshot() {
@@ -714,8 +794,6 @@ fn json_type_only_deps_snapshot() {
         )
     );
 }
-
-// ── Per-issue-type JSON snapshots ───────────────────────────────
 
 fn redact_version(json_str: &str) -> String {
     json_str.replace(
@@ -901,14 +979,8 @@ fn json_duplicate_exports_only_snapshot() {
 
 #[test]
 fn json_stale_suppression_unknown_kind_snapshot() {
-    // Issue #449: lock the wire shape for the unknown-kind case. The
-    // `kind_known: false` field MUST appear on the wire so JSON / MCP / CI
-    // consumers can distinguish "typo / obsolete name" from "stale-but-known
-    // kind". The recognized-kind case keeps the prior shape because
-    // `skip_serializing_if = "is_true"` omits the field.
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    // Unknown kind: kind_known: false MUST be present.
     results.stale_suppressions.push(StaleSuppression {
         path: root.join("src/utils.ts"),
         line: 1,
@@ -919,7 +991,6 @@ fn json_stale_suppression_unknown_kind_snapshot() {
             kind_known: false,
         },
     });
-    // Recognized but stale: kind_known true is omitted on the wire.
     results.stale_suppressions.push(StaleSuppression {
         path: root.join("src/utils.ts"),
         line: 10,
@@ -938,11 +1009,7 @@ fn json_stale_suppression_unknown_kind_snapshot() {
     );
 }
 
-// ── Per-issue-type SARIF snapshots ──────────────────────────────
-
 fn redact_sarif_version(json_str: &str) -> String {
-    // Only redact the plow tool version inside `"driver": { "name": "plow", "version": "..." }`,
-    // not the SARIF spec `"version": "2.1.0"` at the top level (which may collide).
     json_str.replace(
         &format!(
             "\"name\": \"plow\",\n          \"version\": \"{}\"",
@@ -1139,8 +1206,6 @@ fn sarif_duplicate_exports_only_snapshot() {
     );
 }
 
-// ── Multiple items grouping ─────────────────────────────────────
-
 #[test]
 fn json_multiple_exports_same_file_snapshot() {
     let root = PathBuf::from("/project");
@@ -1248,8 +1313,6 @@ fn compact_multiple_exports_same_file_snapshot() {
     insta::assert_snapshot!("compact_multiple_exports_same_file", lines.join("\n"));
 }
 
-// ── Workspace package.json path variant ─────────────────────────
-
 #[test]
 fn json_workspace_dep_snapshot() {
     let root = PathBuf::from("/project");
@@ -1296,8 +1359,6 @@ fn sarif_workspace_dep_snapshot() {
     insta::assert_snapshot!("sarif_workspace_deps", redact_sarif_version(&json_str));
 }
 
-// ── CodeClimate format ──────────────────────────────────────────
-
 #[test]
 fn codeclimate_output_snapshot() {
     let root = PathBuf::from("/project");
@@ -1317,8 +1378,6 @@ fn codeclimate_empty_results_snapshot() {
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
     insta::assert_snapshot!("codeclimate_empty", json_str);
 }
-
-// ── Per-issue-type CodeClimate snapshots ────────────────────────
 
 #[test]
 fn codeclimate_unused_files_only_snapshot() {
@@ -1539,6 +1598,12 @@ fn codeclimate_mixed_severity_snapshot() {
         unused_optional_dependencies: plow_config::Severity::Warn,
         unused_enum_members: plow_config::Severity::Warn,
         unused_class_members: plow_config::Severity::Warn,
+        unused_store_members: plow_config::Severity::Warn,
+        unprovided_injects: plow_config::Severity::Warn,
+        unrendered_components: plow_config::Severity::Warn,
+        unused_component_props: plow_config::Severity::Warn,
+        unused_component_emits: plow_config::Severity::Warn,
+        unused_server_actions: plow_config::Severity::Warn,
         unresolved_imports: plow_config::Severity::Error,
         unlisted_dependencies: plow_config::Severity::Error,
         duplicate_exports: plow_config::Severity::Warn,
@@ -1555,6 +1620,14 @@ fn codeclimate_mixed_severity_snapshot() {
         unresolved_catalog_references: plow_config::Severity::Error,
         unused_dependency_overrides: plow_config::Severity::Warn,
         misconfigured_dependency_overrides: plow_config::Severity::Error,
+        security_client_server_leak: plow_config::Severity::Off,
+        security_sink: plow_config::Severity::Off,
+        policy_violation: plow_config::Severity::Warn,
+        invalid_client_export: plow_config::Severity::Warn,
+        mixed_client_server_barrel: plow_config::Severity::Warn,
+        misplaced_directive: plow_config::Severity::Warn,
+        route_collision: plow_config::Severity::Warn,
+        dynamic_segment_name_conflict: plow_config::Severity::Warn,
     };
     let cc = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
@@ -1632,6 +1705,7 @@ fn codeclimate_circular_deps_only_snapshot() {
                 length: 2,
                 line: 3,
                 col: 0,
+                edges: Vec::new(),
                 is_cross_package: false,
             },
         ));
@@ -1703,8 +1777,6 @@ fn codeclimate_workspace_dep_snapshot() {
     insta::assert_snapshot!("codeclimate_workspace_deps", json_str);
 }
 
-// ── PR/MR CI renderer snapshots ─────────────────────────────────
-
 #[test]
 fn pr_comment_github_snapshot() {
     let root = PathBuf::from("/project");
@@ -1755,8 +1827,6 @@ fn review_gitlab_envelope_snapshot() {
     insta::assert_snapshot!("review_gitlab_envelope", json_str);
 }
 
-// ── Cross-format parity: circular deps ──────────────────────────
-
 #[test]
 fn json_circular_deps_only_snapshot() {
     let root = PathBuf::from("/project");
@@ -1769,6 +1839,7 @@ fn json_circular_deps_only_snapshot() {
                 length: 2,
                 line: 3,
                 col: 0,
+                edges: Vec::new(),
                 is_cross_package: false,
             },
         ));
@@ -1789,6 +1860,7 @@ fn sarif_circular_deps_only_snapshot() {
                 length: 2,
                 line: 3,
                 col: 0,
+                edges: Vec::new(),
                 is_cross_package: false,
             },
         ));
@@ -1809,14 +1881,13 @@ fn compact_circular_deps_only_snapshot() {
                 length: 2,
                 line: 3,
                 col: 0,
+                edges: Vec::new(),
                 is_cross_package: false,
             },
         ));
     let lines = build_compact_lines(&results, &root);
     insta::assert_snapshot!("compact_circular_deps_only", lines.join("\n"));
 }
-
-// ── Cross-format parity: re-export cycles ───────────────────────
 
 fn re_export_cycles_results(root: &Path) -> AnalysisResults {
     let mut results = AnalysisResults::default();
@@ -1885,8 +1956,6 @@ fn codeclimate_re_export_cycles_only_snapshot() {
     insta::assert_snapshot!("codeclimate_re_export_cycles_only", json_str);
 }
 
-// ── Cross-format parity: type-only deps ─────────────────────────
-
 #[test]
 fn sarif_type_only_deps_snapshot() {
     let root = PathBuf::from("/project");
@@ -1921,8 +1990,6 @@ fn compact_type_only_deps_snapshot() {
     let lines = build_compact_lines(&results, &root);
     insta::assert_snapshot!("compact_type_only_deps", lines.join("\n"));
 }
-
-// ── Cross-format parity: unused dev/optional deps ───────────────
 
 #[test]
 fn json_unused_dev_deps_only_snapshot() {
@@ -2006,8 +2073,6 @@ fn sarif_unused_optional_deps_only_snapshot() {
     );
 }
 
-// ── Cross-format parity: multiple exports, workspace, mixed ─────
-
 #[test]
 fn compact_workspace_dep_snapshot() {
     let root = PathBuf::from("/project");
@@ -2030,15 +2095,10 @@ fn json_mixed_severity_snapshot() {
     let root = PathBuf::from("/project");
     let results = sample_results(&root);
     let elapsed = Duration::from_millis(42);
-    // JSON includes severity metadata via _meta when explain is true,
-    // but the raw format doesn't encode severity — this test verifies
-    // the output is stable regardless of rules config.
     let value = build_json(&results, &root, elapsed).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_mixed_severity", redact_version(&json_str));
 }
-
-// ── Markdown format ─────────────────────────────────────────────
 
 #[test]
 fn markdown_output_snapshot() {
@@ -2245,6 +2305,7 @@ fn markdown_circular_deps_only_snapshot() {
                 length: 2,
                 line: 3,
                 col: 0,
+                edges: Vec::new(),
                 is_cross_package: false,
             },
         ));
@@ -2305,8 +2366,6 @@ fn markdown_workspace_dep_snapshot() {
     insta::assert_snapshot!("markdown_workspace_deps", output);
 }
 
-// ── Health report snapshots ─────────────────────────────────────
-
 /// Build a minimal health report with one finding for snapshot tests.
 fn sample_health_report(root: &Path) -> HealthReport {
     let action_ctx = plow_cli::health_types::HealthActionContext {
@@ -2314,6 +2373,7 @@ fn sample_health_report(root: &Path) -> HealthReport {
         max_cyclomatic_threshold: 20,
         max_cognitive_threshold: 15,
         max_crap_threshold: 30.0,
+        crap_refactor_band: 5,
     };
     HealthReport {
         findings: vec![plow_cli::health_types::HealthFinding::with_actions(
@@ -2334,6 +2394,9 @@ fn sample_health_report(root: &Path) -> HealthReport {
                 coverage_source: None,
                 inherited_from: None,
                 component_rollup: None,
+                contributions: Vec::new(),
+                effective_thresholds: None,
+                threshold_source: None,
             },
             &action_ctx,
         )],
@@ -2347,6 +2410,7 @@ fn sample_health_report(root: &Path) -> HealthReport {
             files_scored: None,
             average_maintainability: None,
             coverage_model: None,
+            coverage_source_consistency: None,
             istanbul_matched: None,
             istanbul_total: None,
             severity_critical_count: 0,
@@ -2357,6 +2421,7 @@ fn sample_health_report(root: &Path) -> HealthReport {
         health_score: None,
         file_scores: vec![],
         coverage_gaps: None,
+        threshold_overrides: vec![],
         hotspots: vec![],
         hotspot_summary: None,
         large_functions: vec![],
@@ -2364,6 +2429,7 @@ fn sample_health_report(root: &Path) -> HealthReport {
         target_thresholds: None,
         health_trend: None,
         runtime_coverage: None,
+        coverage_intelligence: None,
         actions_meta: None,
     }
 }
@@ -2389,8 +2455,8 @@ fn health_report_with_runtime_coverage(root: &Path) -> HealthReport {
         },
         findings: vec![
             RuntimeCoverageFinding {
-                id: "fallow:prod:deadbeef".to_string(),
-                stable_id: Some("fallow:fn:00000001".to_string()),
+                id: "plow:prod:deadbeef".to_string(),
+                stable_id: Some("plow:fn:00000001".to_string()),
                 path: root.join("src/cold.ts"),
                 function: "coldPath".to_string(),
                 line: 14,
@@ -2413,9 +2479,7 @@ fn health_report_with_runtime_coverage(root: &Path) -> HealthReport {
                 source_hash: None,
             },
             RuntimeCoverageFinding {
-                id: "fallow:prod:feedface".to_string(),
-                // Left absent to exercise the "stable identity where available"
-                // path: an older sidecar / un-migrated cloud supplies no identity.
+                id: "plow:prod:feedface".to_string(),
                 stable_id: None,
                 path: root.join("src/unknown.ts"),
                 function: "lateBound".to_string(),
@@ -2440,8 +2504,8 @@ fn health_report_with_runtime_coverage(root: &Path) -> HealthReport {
             },
         ],
         hot_paths: vec![RuntimeCoverageHotPath {
-            id: "fallow:hot:cafebabe".to_string(),
-            stable_id: Some("fallow:fn:00000002".to_string()),
+            id: "plow:hot:cafebabe".to_string(),
+            stable_id: Some("plow:fn:00000002".to_string()),
             path: root.join("src/hot.ts"),
             function: "hotPath".to_string(),
             line: 3,
@@ -2461,6 +2525,138 @@ fn health_report_with_runtime_coverage(root: &Path) -> HealthReport {
     report
 }
 
+/// Health report carrying a populated `coverage_intelligence` block alongside
+/// runtime coverage, so the public format renderers exercise the live combined
+/// surface (not just the per-format helper unit tests). Mirrors the shape the
+/// `build_coverage_intelligence` builder emits for a risky changed hot path plus
+/// a high-confidence delete candidate, with one ambiguous match skipped.
+fn health_report_with_coverage_intelligence(root: &Path) -> HealthReport {
+    let mut report = health_report_with_runtime_coverage(root);
+    report.coverage_intelligence = Some(CoverageIntelligenceReport {
+        schema_version: CoverageIntelligenceSchemaVersion::default(),
+        verdict: CoverageIntelligenceVerdict::RiskyChangeDetected,
+        summary: CoverageIntelligenceSummary {
+            findings: 2,
+            risky_changes: 1,
+            high_confidence_deletes: 1,
+            review_required: 0,
+            refactor_carefully: 0,
+            skipped_ambiguous_matches: 1,
+        },
+        findings: vec![
+            CoverageIntelligenceFinding {
+                id: "plow:coverage-intel:0badc0de".to_string(),
+                path: root.join("src/hot.ts"),
+                identity: Some("handler".to_string()),
+                line: 10,
+                verdict: CoverageIntelligenceVerdict::RiskyChangeDetected,
+                signals: vec![
+                    CoverageIntelligenceSignal::Changed,
+                    CoverageIntelligenceSignal::HotPath,
+                    CoverageIntelligenceSignal::LowTestCoverage,
+                    CoverageIntelligenceSignal::HighCrap,
+                ],
+                recommendation: CoverageIntelligenceRecommendation::AddTestOrSplitBeforeMerge,
+                confidence: CoverageIntelligenceConfidence::High,
+                related_ids: vec!["plow:hot:cafebabe".to_string()],
+                evidence: CoverageIntelligenceEvidence {
+                    coverage_pct: Some(20.0),
+                    crap: Some(45.0),
+                    runtime_verdict: Some("hot_path_touched".to_string()),
+                    invocations: Some(250),
+                    static_status: Some("used".to_string()),
+                    test_coverage: Some("partially_covered".to_string()),
+                    changed: true,
+                    ownership_state: None,
+                    match_confidence: CoverageIntelligenceMatchConfidence::PathFunctionLine,
+                },
+                actions: vec![CoverageIntelligenceAction {
+                    kind: "add-tests".to_string(),
+                    description:
+                        "Add tests or split before merge: this changed hot path is undertested."
+                            .to_string(),
+                    auto_fixable: false,
+                }],
+            },
+            CoverageIntelligenceFinding {
+                id: "plow:coverage-intel:1deadfa1".to_string(),
+                path: root.join("src/dead.ts"),
+                identity: Some("deadPath".to_string()),
+                line: 4,
+                verdict: CoverageIntelligenceVerdict::HighConfidenceDelete,
+                signals: vec![
+                    CoverageIntelligenceSignal::StaticUnused,
+                    CoverageIntelligenceSignal::RuntimeCold,
+                    CoverageIntelligenceSignal::NoTestPath,
+                ],
+                recommendation: CoverageIntelligenceRecommendation::DeleteAfterConfirmingOwner,
+                confidence: CoverageIntelligenceConfidence::High,
+                related_ids: vec!["plow:prod:deadbeef".to_string()],
+                evidence: CoverageIntelligenceEvidence {
+                    coverage_pct: Some(0.0),
+                    crap: None,
+                    runtime_verdict: Some("safe_to_delete".to_string()),
+                    invocations: Some(0),
+                    static_status: Some("unused".to_string()),
+                    test_coverage: Some("not_covered".to_string()),
+                    changed: false,
+                    ownership_state: None,
+                    match_confidence: CoverageIntelligenceMatchConfidence::PathLine,
+                },
+                actions: vec![CoverageIntelligenceAction {
+                    kind: "delete-after-confirm".to_string(),
+                    description:
+                        "Delete after confirming with the owner: unused, cold, and untested."
+                            .to_string(),
+                    auto_fixable: false,
+                }],
+            },
+        ],
+    });
+    report
+}
+
+#[test]
+fn json_health_with_coverage_intelligence_snapshot() {
+    let root = PathBuf::from("/project");
+    let report = health_report_with_coverage_intelligence(&root);
+    let value = build_health_json(&report, &root, Duration::ZERO, false)
+        .expect("health JSON build should succeed");
+    let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
+    insta::assert_snapshot!(
+        "json_health_with_coverage_intelligence",
+        redact_version(&json_str)
+    );
+}
+
+#[test]
+fn markdown_health_with_coverage_intelligence_snapshot() {
+    let root = PathBuf::from("/project");
+    let report = health_report_with_coverage_intelligence(&root);
+    let output = build_health_markdown(&report, &root);
+    insta::assert_snapshot!("markdown_health_with_coverage_intelligence", output);
+}
+
+#[test]
+fn sarif_health_with_coverage_intelligence_snapshot() {
+    let root = PathBuf::from("/project");
+    let report = health_report_with_coverage_intelligence(&root);
+    let json_str = serde_json::to_string_pretty(&build_health_sarif(&report, &root)).unwrap();
+    insta::assert_snapshot!(
+        "sarif_health_with_coverage_intelligence",
+        redact_sarif_version(&json_str)
+    );
+}
+
+#[test]
+fn codeclimate_health_with_coverage_intelligence_snapshot() {
+    let root = PathBuf::from("/project");
+    let report = health_report_with_coverage_intelligence(&root);
+    let cc = codeclimate_issues_to_value(&build_health_codeclimate(&report, &root));
+    let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
+    insta::assert_snapshot!("codeclimate_health_with_coverage_intelligence", json_str);
+}
+
 /// Build an empty health report (no findings).
 const fn empty_health_report() -> HealthReport {
     HealthReport {
@@ -2475,6 +2671,7 @@ const fn empty_health_report() -> HealthReport {
             files_scored: None,
             average_maintainability: None,
             coverage_model: None,
+            coverage_source_consistency: None,
             istanbul_matched: None,
             istanbul_total: None,
             severity_critical_count: 0,
@@ -2485,6 +2682,7 @@ const fn empty_health_report() -> HealthReport {
         health_score: None,
         file_scores: vec![],
         coverage_gaps: None,
+        threshold_overrides: vec![],
         hotspots: vec![],
         hotspot_summary: None,
         large_functions: vec![],
@@ -2492,6 +2690,7 @@ const fn empty_health_report() -> HealthReport {
         target_thresholds: None,
         health_trend: None,
         runtime_coverage: None,
+        coverage_intelligence: None,
         actions_meta: None,
     }
 }
@@ -2681,8 +2880,6 @@ fn json_health_with_coverage_gaps_snapshot() {
     insta::assert_snapshot!("json_health_with_coverage_gaps", redact_version(&json_str));
 }
 
-// ── Health score snapshots ──────────────────────────────────────
-
 /// Build a health report with score populated.
 fn health_report_with_score(root: &Path) -> HealthReport {
     let mut report = sample_health_report(root);
@@ -2753,8 +2950,6 @@ fn codeclimate_health_with_score_snapshot() {
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
     insta::assert_snapshot!("codeclimate_health_with_score", json_str);
 }
-
-// ── Health trend snapshots ─────────────────────────────────────
 
 /// Build a health report with trend data populated.
 fn health_report_with_trend(root: &Path) -> HealthReport {
@@ -2833,8 +3028,6 @@ fn markdown_health_with_trend_snapshot() {
     let output = build_health_markdown(&report, &root);
     insta::assert_snapshot!("markdown_health_with_trend", output);
 }
-
-// ── Duplication report snapshots ────────────────────────────────
 
 /// Build a sample duplication report for snapshot tests.
 fn sample_duplication_report(root: &Path) -> DuplicationReport {
@@ -2916,13 +3109,10 @@ fn codeclimate_duplication_empty_snapshot() {
     insta::assert_snapshot!("codeclimate_duplication_empty", json_str);
 }
 
-// ── Grouped duplication snapshots ───────────────────────────────────
-
 /// Build a multi-group duplication report exercising the largest-owner rule.
 fn sample_grouped_duplication_report(root: &Path) -> DuplicationReport {
     DuplicationReport {
         clone_groups: vec![
-            // Group 1: 2 src instances + 1 lib instance -> primary owner = src
             CloneGroup {
                 instances: vec![
                     CloneInstance {
@@ -2953,7 +3143,6 @@ fn sample_grouped_duplication_report(root: &Path) -> DuplicationReport {
                 token_count: 25,
                 line_count: 11,
             },
-            // Group 2: 2 lib instances -> primary owner = lib
             CloneGroup {
                 instances: vec![
                     CloneInstance {
@@ -3005,7 +3194,6 @@ fn grouped_duplication_json_directory_snapshot() {
         build_grouped_duplication_json(&report, &grouping, &root, Duration::from_millis(0), false)
             .expect("should serialize");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
-    // Redact dynamic values (version changes with releases; elapsed_ms is forced to 0 above).
     insta::assert_snapshot!(
         "grouped_duplication_json_directory",
         json_str.replace(
@@ -3020,9 +3208,6 @@ fn grouped_duplication_codeclimate_directory_snapshot() {
     let root = PathBuf::from("/project");
     let report = sample_grouped_duplication_report(&root);
     let resolver = plow_cli::report::OwnershipResolver::Directory;
-    // Build the codeclimate output, then post-process per-issue with the
-    // group key (replicates the runtime path inside print_grouped_duplication_codeclimate
-    // for snapshot stability without going through stdout).
     let mut value = codeclimate_issues_to_value(&build_duplication_codeclimate(&report, &root));
     let mut path_to_owner = rustc_hash::FxHashMap::<String, String>::default();
     for group in &report.clone_groups {

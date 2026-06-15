@@ -86,7 +86,7 @@ pub enum PluginDetection {
 ///
 /// ```json
 /// {
-///   "$schema": "https://raw.githubusercontent.com/plow-rs/plow/main/plugin-schema.json",
+///   "$schema": "https://raw.githubusercontent.com/fglogan/genesis-plow/main/plugin-schema.json",
 ///   "name": "my-framework",
 ///   "enablers": ["my-framework", "@my-framework/core"],
 ///   "entryPoints": ["src/routes/**/*.{ts,tsx}"],
@@ -337,10 +337,8 @@ pub fn discover_external_plugins(
     let mut plugins = Vec::new();
     let mut seen_names = rustc_hash::FxHashSet::default();
 
-    // All paths are checked against the canonical root to prevent symlink escapes
     let canonical_root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
 
-    // 1. Explicit paths from config
     for path_str in config_plugin_paths {
         let path = root.join(path_str);
         if !is_within_root(&path, &canonical_root) {
@@ -354,13 +352,11 @@ pub fn discover_external_plugins(
         }
     }
 
-    // 2. .plow/plugins/ directory
     let plugins_dir = root.join(".plow").join("plugins");
     if plugins_dir.is_dir() && is_within_root(&plugins_dir, &canonical_root) {
         load_plugins_from_dir(&plugins_dir, &canonical_root, &mut plugins, &mut seen_names);
     }
 
-    // 3. Project root plow-plugin-* files (.toml, .json, .jsonc)
     if let Ok(entries) = std::fs::read_dir(root) {
         let mut plugin_files: Vec<PathBuf> = entries
             .filter_map(Result::ok)
@@ -382,7 +378,11 @@ pub fn discover_external_plugins(
 }
 
 /// Check if a path resolves within the canonical root (follows symlinks).
-fn is_within_root(path: &Path, canonical_root: &Path) -> bool {
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "this module is glob re-exported from lib.rs, so `pub` would leak this helper into the public API; pub(crate) is the minimal widening for the rule-pack loader"
+)]
+pub(crate) fn is_within_root(path: &Path, canonical_root: &Path) -> bool {
     let canonical = dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     canonical.starts_with(canonical_root)
 }
@@ -412,7 +412,6 @@ fn load_plugin_file(
     plugins: &mut Vec<ExternalPluginDef>,
     seen: &mut rustc_hash::FxHashSet<String>,
 ) {
-    // Verify symlinks don't escape the project root
     if !is_within_root(path, canonical_root) {
         tracing::warn!(
             "plugin file '{}' resolves outside project root (symlink?), skipping",
@@ -652,7 +651,6 @@ exports = ["default"]
     #[test]
     fn deserialize_jsonc_plugin() {
         let jsonc_str = r#"{
-            // This is a JSONC plugin
             "name": "my-jsonc-plugin",
             "enablers": ["my-pkg"],
             /* Block comment */
@@ -710,10 +708,8 @@ entryPoints = ["src/**/*.ts"]
 
     #[test]
     fn discover_json_plugins_from_plow_plugins_dir() {
-        let dir = std::env::temp_dir().join(format!(
-            "plow-test-ext-json-plugins-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("plow-test-ext-json-plugins-{}", std::process::id()));
         let plugins_dir = dir.join(".plow").join("plugins");
         let _ = std::fs::create_dir_all(&plugins_dir);
 
@@ -726,7 +722,6 @@ entryPoints = ["src/**/*.ts"]
         std::fs::write(
             plugins_dir.join("my-plugin.jsonc"),
             r#"{
-                // JSONC plugin
                 "name": "jsonc-plugin",
                 "enablers": ["jsonc-pkg"]
             }"#,
@@ -735,7 +730,6 @@ entryPoints = ["src/**/*.ts"]
 
         let plugins = discover_external_plugins(&dir, &[]);
         assert_eq!(plugins.len(), 2);
-        // Sorted: json before jsonc
         assert_eq!(plugins[0].name, "json-plugin");
         assert_eq!(plugins[1].name, "jsonc-plugin");
 
@@ -757,7 +751,6 @@ enablers = ["custom-pkg"]
         )
         .unwrap();
 
-        // Non-matching file should be ignored
         std::fs::write(dir.join("some-other-file.toml"), r#"name = "ignored""#).unwrap();
 
         let plugins = discover_external_plugins(&dir, &[]);
@@ -784,14 +777,12 @@ enablers = ["custom-pkg"]
         std::fs::write(
             dir.join("plow-plugin-custom2.jsonc"),
             r#"{
-                // JSONC root plugin
                 "name": "jsonc-root",
                 "enablers": ["jsonc-pkg"]
             }"#,
         )
         .unwrap();
 
-        // Non-matching extension should be ignored
         std::fs::write(
             dir.join("plow-plugin-bad.yaml"),
             "name: ignored\nenablers:\n  - pkg\n",
@@ -829,7 +820,6 @@ enablers = ["toml-pkg"]
         std::fs::write(
             plugins_dir.join("c-plugin.jsonc"),
             r#"{
-                // JSONC plugin
                 "name": "jsonc-plugin",
                 "enablers": ["jsonc-pkg"]
             }"#,
@@ -852,7 +842,6 @@ enablers = ["toml-pkg"]
         let plugins_dir = dir.join(".plow").join("plugins");
         let _ = std::fs::create_dir_all(&plugins_dir);
 
-        // Same name in .plow/plugins/ and root
         std::fs::write(
             plugins_dir.join("my-plugin.toml"),
             r#"
@@ -873,7 +862,6 @@ enablers = ["pkg-b"]
 
         let plugins = discover_external_plugins(&dir, &[]);
         assert_eq!(plugins.len(), 1);
-        // First one wins (.plow/plugins/ before root)
         assert_eq!(plugins[0].enablers, vec!["pkg-a"]);
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -926,10 +914,8 @@ enablers = ["single-pkg"]
 
     #[test]
     fn config_plugin_path_to_single_json_file() {
-        let dir = std::env::temp_dir().join(format!(
-            "plow-test-single-json-file-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("plow-test-single-json-file-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
 
         std::fs::write(
@@ -952,10 +938,8 @@ enablers = ["single-pkg"]
         let plugins_dir = dir.join(".plow").join("plugins");
         let _ = std::fs::create_dir_all(&plugins_dir);
 
-        // Invalid: missing required `name` field
         std::fs::write(plugins_dir.join("bad.toml"), r#"enablers = ["pkg"]"#).unwrap();
 
-        // Valid
         std::fs::write(
             plugins_dir.join("good.toml"),
             r#"
@@ -981,10 +965,8 @@ enablers = ["good-pkg"]
         let plugins_dir = dir.join(".plow").join("plugins");
         let _ = std::fs::create_dir_all(&plugins_dir);
 
-        // Invalid JSON: missing name
         std::fs::write(plugins_dir.join("bad.json"), r#"{"enablers": ["pkg"]}"#).unwrap();
 
-        // Valid JSON
         std::fs::write(
             plugins_dir.join("good.json"),
             r#"{"name": "good-json", "enablers": ["good-pkg"]}"#,
@@ -1010,8 +992,7 @@ enablers = ["@myorg/"]
 
     #[test]
     fn skips_empty_name() {
-        let dir =
-            std::env::temp_dir().join(format!("plow-test-empty-name-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("plow-test-empty-name-{}", std::process::id()));
         let plugins_dir = dir.join(".plow").join("plugins");
         let _ = std::fs::create_dir_all(&plugins_dir);
 
@@ -1036,7 +1017,6 @@ enablers = ["pkg"]
             std::env::temp_dir().join(format!("plow-test-path-escape-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
 
-        // Attempt to load a plugin from outside the project root
         let plugins = discover_external_plugins(&dir, &["../../../etc".to_string()]);
         assert!(plugins.is_empty(), "paths outside root should be rejected");
 
@@ -1070,8 +1050,6 @@ enablers = ["pkg"]
         assert!(!is_plugin_file(Path::new("plugin.txt")));
         assert!(!is_plugin_file(Path::new("plugin")));
     }
-
-    // ── PluginDetection tests ────────────────────────────────────
 
     #[test]
     fn detection_deserialize_dependency() {
@@ -1128,8 +1106,6 @@ enablers = ["pkg"]
         assert_eq!(plugin.enablers, vec!["my-pkg"]);
     }
 
-    // ── Nested detection combinators ────────────────────────────────
-
     #[test]
     fn detection_nested_all_with_any() {
         let json = r#"{
@@ -1181,8 +1157,6 @@ enablers = ["pkg"]
         ));
     }
 
-    // ── TOML with detection field ───────────────────────────────────
-
     #[test]
     fn detection_toml_dependency() {
         let toml_str = r#"
@@ -1216,8 +1190,6 @@ pattern = "next.config.js"
         ));
     }
 
-    // ── Plugin with all fields set ──────────────────────────────────
-
     #[test]
     fn plugin_all_fields_json() {
         let json = r#"{
@@ -1244,16 +1216,12 @@ pattern = "next.config.js"
         assert_eq!(plugin.used_exports[0].exports, vec!["default", "setup"]);
     }
 
-    // ── Plugin name validation edge case ────────────────────────────
-
     #[test]
     fn plugin_with_special_chars_in_name() {
         let json = r#"{"name": "@scope/my-plugin-v2.0", "enablers": ["pkg"]}"#;
         let plugin: ExternalPluginDef = serde_json::from_str(json).unwrap();
         assert_eq!(plugin.name, "@scope/my-plugin-v2.0");
     }
-
-    // ── parse_plugin with various formats ───────────────────────────
 
     #[test]
     fn parse_plugin_toml_format() {
@@ -1279,7 +1247,6 @@ entryPoints = ["src/**/*.ts"]
     #[test]
     fn parse_plugin_jsonc_format() {
         let content = r#"{
-            // A comment
             "name": "jsonc-test",
             "enablers": ["pkg"]
         }"#;
@@ -1304,7 +1271,6 @@ entryPoints = ["src/**/*.ts"]
 
     #[test]
     fn parse_plugin_invalid_jsonc_returns_none() {
-        // Missing required `name` field
         let content = r#"{"enablers": ["pkg"]}"#;
         let result = parse_plugin(content, &PluginFormat::Jsonc, Path::new("bad.jsonc"));
         assert!(result.is_none());

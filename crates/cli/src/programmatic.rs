@@ -22,6 +22,7 @@ pub const COMMON_ANALYSIS_OPTION_FLAGS: &[&str] = &[
     "workspace",
     "changed-workspaces",
     "explain",
+    "legacy-envelope",
 ];
 
 /// Structured error surface for the programmatic API.
@@ -93,6 +94,8 @@ pub struct AnalysisOptions {
     pub workspace: Option<Vec<String>>,
     pub changed_workspaces: Option<String>,
     pub explain: bool,
+    /// Return the one-cycle legacy root envelope without top-level `kind`.
+    pub legacy_envelope: bool,
 }
 
 /// Issue-type filters for the dead-code analysis.
@@ -105,12 +108,19 @@ pub struct DeadCodeFilters {
     pub private_type_leaks: bool,
     pub unused_enum_members: bool,
     pub unused_class_members: bool,
+    pub unused_store_members: bool,
+    pub unprovided_injects: bool,
+    pub unrendered_components: bool,
+    pub unused_component_props: bool,
+    pub unused_component_emits: bool,
+    pub unused_server_actions: bool,
     pub unresolved_imports: bool,
     pub unlisted_deps: bool,
     pub duplicate_exports: bool,
     pub circular_deps: bool,
     pub re_export_cycles: bool,
     pub boundary_violations: bool,
+    pub policy_violations: bool,
     pub stale_suppressions: bool,
     pub unused_catalog_entries: bool,
     pub empty_catalog_groups: bool,
@@ -166,7 +176,10 @@ pub struct DuplicationOptions {
     pub threshold: f64,
     pub skip_local: bool,
     pub cross_language: bool,
-    pub ignore_imports: bool,
+    /// Exclude import declarations from clone detection. `None` defers to the
+    /// project config (which defaults to `true` since #1224); `Some(false)`
+    /// forces import blocks to be counted again.
+    pub ignore_imports: Option<bool>,
     pub top: Option<usize>,
 }
 
@@ -181,7 +194,7 @@ impl Default for DuplicationOptions {
             threshold: 0.0,
             skip_local: false,
             cross_language: false,
-            ignore_imports: false,
+            ignore_imports: None,
             top: None,
         }
     }
@@ -284,6 +297,7 @@ struct ResolvedAnalysisOptions {
     workspace: Option<Vec<String>>,
     changed_workspaces: Option<String>,
     explain: bool,
+    legacy_envelope: bool,
 }
 
 impl AnalysisOptions {
@@ -372,6 +386,7 @@ impl AnalysisOptions {
             workspace: self.workspace.clone(),
             changed_workspaces: self.changed_workspaces.clone(),
             explain: self.explain,
+            legacy_envelope: self.legacy_envelope,
         })
     }
 }
@@ -454,7 +469,24 @@ fn load_explicit_diff_file(path: &Path, root: &Path) -> ProgrammaticResult<Loade
 
 fn insert_meta(output: &mut serde_json::Value, meta: serde_json::Value) {
     if let serde_json::Value::Object(map) = output {
+        let telemetry = map
+            .get("_meta")
+            .and_then(|existing| existing.get("telemetry"))
+            .cloned();
+        let mut meta = meta;
+        if let (Some(telemetry), Some(meta_map)) = (telemetry, meta.as_object_mut()) {
+            meta_map.insert("telemetry".to_string(), telemetry);
+        }
         map.insert("_meta".to_string(), meta);
+    }
+}
+
+fn apply_programmatic_envelope_options(
+    output: &mut serde_json::Value,
+    resolved: &ResolvedAnalysisOptions,
+) {
+    if resolved.legacy_envelope {
+        crate::output_envelope::remove_root_kind(output);
     }
 }
 
@@ -475,6 +507,8 @@ fn build_dead_code_json(
     if explain {
         insert_meta(&mut output, crate::explain::check_meta());
     }
+    // `build_dead_code_json` is only called after options have been resolved;
+    // callers apply the root-envelope compatibility setting at the boundary.
     Ok(output)
 }
 
@@ -487,18 +521,39 @@ fn to_issue_filters(filters: &DeadCodeFilters) -> IssueFilters {
         private_type_leaks: filters.private_type_leaks,
         unused_enum_members: filters.unused_enum_members,
         unused_class_members: filters.unused_class_members,
+        unused_store_members: filters.unused_store_members,
+        unprovided_injects: filters.unprovided_injects,
+        unrendered_components: filters.unrendered_components,
+        unused_component_props: filters.unused_component_props,
+        unused_component_emits: filters.unused_component_emits,
+        unused_server_actions: filters.unused_server_actions,
         unresolved_imports: filters.unresolved_imports,
         unlisted_deps: filters.unlisted_deps,
         duplicate_exports: filters.duplicate_exports,
         circular_deps: filters.circular_deps,
         re_export_cycles: filters.re_export_cycles,
         boundary_violations: filters.boundary_violations,
+        policy_violations: filters.policy_violations,
         stale_suppressions: filters.stale_suppressions,
         unused_catalog_entries: filters.unused_catalog_entries,
         empty_catalog_groups: filters.empty_catalog_groups,
         unresolved_catalog_references: filters.unresolved_catalog_references,
         unused_dependency_overrides: filters.unused_dependency_overrides,
         misconfigured_dependency_overrides: filters.misconfigured_dependency_overrides,
+        // No programmatic filter for invalid-client-exports yet; the rule runs
+        // and reports by default. Field exists for clear-parity only.
+        invalid_client_exports: false,
+        // No programmatic filter for mixed-client-server-barrels yet; the rule
+        // runs and reports by default. Field exists for clear-parity only.
+        mixed_client_server_barrels: false,
+        // No programmatic filter for misplaced-directives yet; the rule runs and
+        // reports by default. Field exists for clear-parity only.
+        misplaced_directives: false,
+        // No programmatic filter for route-collisions / dynamic-segment-name
+        // -conflicts yet; the rules run and report by default. Fields exist for
+        // clear-parity only.
+        route_collisions: false,
+        dynamic_segment_name_conflicts: false,
     }
 }
 
@@ -573,12 +628,21 @@ fn filter_for_circular_dependencies(results: &AnalysisResults) -> AnalysisResult
     filtered.unused_optional_dependencies.clear();
     filtered.unused_enum_members.clear();
     filtered.unused_class_members.clear();
+    filtered.unused_store_members.clear();
+    filtered.unprovided_injects.clear();
+    filtered.unrendered_components.clear();
+    filtered.unused_component_props.clear();
+    filtered.unused_component_emits.clear();
+    filtered.unused_server_actions.clear();
     filtered.unresolved_imports.clear();
     filtered.unlisted_dependencies.clear();
     filtered.duplicate_exports.clear();
     filtered.type_only_dependencies.clear();
     filtered.test_only_dependencies.clear();
     filtered.boundary_violations.clear();
+    filtered.boundary_coverage_violations.clear();
+    filtered.boundary_call_violations.clear();
+    filtered.policy_violations.clear();
     filtered.stale_suppressions.clear();
     filtered
 }
@@ -594,6 +658,12 @@ fn filter_for_boundary_violations(results: &AnalysisResults) -> AnalysisResults 
     filtered.unused_optional_dependencies.clear();
     filtered.unused_enum_members.clear();
     filtered.unused_class_members.clear();
+    filtered.unused_store_members.clear();
+    filtered.unprovided_injects.clear();
+    filtered.unrendered_components.clear();
+    filtered.unused_component_props.clear();
+    filtered.unused_component_emits.clear();
+    filtered.unused_server_actions.clear();
     filtered.unresolved_imports.clear();
     filtered.unlisted_dependencies.clear();
     filtered.duplicate_exports.clear();
@@ -618,13 +688,15 @@ pub fn detect_dead_code(options: &DeadCodeOptions) -> ProgrammaticResult<serde_j
         let check_options = build_check_options(&resolved, options, &filters, &trace_opts);
         let result = crate::check::execute_check(&check_options)
             .map_err(|_| generic_analysis_error("dead-code"))?;
-        build_dead_code_json(
+        let mut output = build_dead_code_json(
             &result.results,
             &result.config.root,
             result.elapsed,
             resolved.explain,
             result.config_fixable,
-        )
+        )?;
+        apply_programmatic_envelope_options(&mut output, &resolved);
+        Ok(output)
     })
 }
 
@@ -646,18 +718,21 @@ pub fn detect_circular_dependencies(
         let result = crate::check::execute_check(&check_options)
             .map_err(|_| generic_analysis_error("dead-code"))?;
         let filtered = filter_for_circular_dependencies(&result.results);
-        build_dead_code_json(
+        let mut output = build_dead_code_json(
             &filtered,
             &result.config.root,
             result.elapsed,
             resolved.explain,
             result.config_fixable,
-        )
+        )?;
+        apply_programmatic_envelope_options(&mut output, &resolved);
+        Ok(output)
     })
 }
 
 /// Run the boundary-violation analysis and return the standard dead-code JSON envelope
-/// filtered down to the `boundary_violations` category.
+/// filtered down to the boundary family: `boundary_violations`,
+/// `boundary_coverage_violations`, and `boundary_call_violations`.
 pub fn detect_boundary_violations(
     options: &DeadCodeOptions,
 ) -> ProgrammaticResult<serde_json::Value> {
@@ -674,13 +749,15 @@ pub fn detect_boundary_violations(
         let result = crate::check::execute_check(&check_options)
             .map_err(|_| generic_analysis_error("dead-code"))?;
         let filtered = filter_for_boundary_violations(&result.results);
-        build_dead_code_json(
+        let mut output = build_dead_code_json(
             &filtered,
             &result.config.root,
             result.elapsed,
             resolved.explain,
             result.config_fixable,
-        )
+        )?;
+        apply_programmatic_envelope_options(&mut output, &resolved);
+        Ok(output)
     })
 }
 
@@ -695,9 +772,6 @@ pub fn detect_duplication(options: &DuplicationOptions) -> ProgrammaticResult<se
             no_cache: resolved.no_cache,
             threads: resolved.threads,
             quiet: true,
-            // The programmatic API requires callers to provide concrete values
-            // (the public `DuplicationOptions` has no Optional scalars), so we
-            // forward each as an explicit override.
             mode: Some(options.mode.to_cli()),
             min_tokens: Some(options.min_tokens),
             min_lines: Some(options.min_lines),
@@ -722,13 +796,11 @@ pub fn detect_duplication(options: &DuplicationOptions) -> ProgrammaticResult<se
             explain_skipped: false,
             summary: false,
             group_by: None,
-            // The programmatic API returns structured JSON; performance panels go
-            // to stderr in human mode and are not part of the public contract.
             performance: false,
         };
         let result = crate::dupes::execute_dupes(&dupes_options)
             .map_err(|_| generic_analysis_error("dupes"))?;
-        build_duplication_json(
+        let mut output = build_duplication_json(
             &result.report,
             &result.config.root,
             result.elapsed,
@@ -738,7 +810,9 @@ pub fn detect_duplication(options: &DuplicationOptions) -> ProgrammaticResult<se
             ProgrammaticError::new(format!("failed to serialize duplication report: {err}"), 2)
                 .with_code("PLOW_SERIALIZE_DUPLICATION_REPORT")
                 .with_context("dupes")
-        })
+        })?;
+        apply_programmatic_envelope_options(&mut output, &resolved);
+        Ok(output)
     })
 }
 
@@ -803,6 +877,7 @@ fn build_complexity_options<'a>(
         baseline: None,
         save_baseline: None,
         complexity: eff_complexity,
+        complexity_breakdown: false,
         file_scores: eff_file_scores,
         coverage_gaps: eff_coverage_gaps,
         config_activates_coverage_gaps: !any_section,
@@ -827,7 +902,11 @@ fn build_complexity_options<'a>(
         coverage_root: options.coverage_root.as_deref(),
         performance: false,
         min_severity: None,
+        report_only: false,
         runtime_coverage: None,
+        // The programmatic facade has no churn-file knob; embedders that want
+        // imported hotspots call the CLI. Git churn is used when available.
+        churn_file: None,
     }
 }
 
@@ -856,7 +935,7 @@ pub fn compute_complexity(options: &ComplexityOptions) -> ProgrammaticResult<ser
         let health_options = build_complexity_options(&resolved, options);
         let result = crate::health::execute_health(&health_options)
             .map_err(|_| generic_analysis_error("health"))?;
-        build_health_json(
+        let mut output = build_health_json(
             &result.report,
             &result.config.root,
             result.elapsed,
@@ -866,7 +945,9 @@ pub fn compute_complexity(options: &ComplexityOptions) -> ProgrammaticResult<ser
             ProgrammaticError::new(format!("failed to serialize health report: {err}"), 2)
                 .with_code("PLOW_SERIALIZE_HEALTH_REPORT")
                 .with_context("health")
-        })
+        })?;
+        apply_programmatic_envelope_options(&mut output, &resolved);
+        Ok(output)
     })
 }
 
@@ -893,6 +974,7 @@ mod tests {
         let json = build_dead_code_json(&filtered, &root, std::time::Duration::ZERO, false, false)
             .expect("should serialize");
 
+        assert_eq!(json["kind"], "dead-code");
         assert_eq!(json["circular_dependencies"].as_array().unwrap().len(), 1);
         assert_eq!(json["boundary_violations"].as_array().unwrap().len(), 0);
         assert_eq!(json["unused_files"].as_array().unwrap().len(), 0);
@@ -907,6 +989,7 @@ mod tests {
         let json = build_dead_code_json(&filtered, &root, std::time::Duration::ZERO, false, false)
             .expect("should serialize");
 
+        assert_eq!(json["kind"], "dead-code");
         assert_eq!(json["boundary_violations"].as_array().unwrap().len(), 1);
         assert_eq!(json["circular_dependencies"].as_array().unwrap().len(), 0);
         assert_eq!(json["unused_exports"].as_array().unwrap().len(), 0);
@@ -945,6 +1028,32 @@ mod tests {
             !paths.iter().any(|path| path.ends_with("utils.test.ts")),
             "omitted production option should defer to production.deadCode=true config: {paths:?}"
         );
+    }
+
+    #[test]
+    fn dead_code_legacy_envelope_removes_root_kind() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"programmatic-legacy","main":"src/index.ts"}"#,
+        )
+        .unwrap();
+        std::fs::write(root.join("src/index.ts"), "export const ok = 1;\n").unwrap();
+
+        let options = DeadCodeOptions {
+            analysis: AnalysisOptions {
+                root: Some(root.to_path_buf()),
+                legacy_envelope: true,
+                ..AnalysisOptions::default()
+            },
+            ..DeadCodeOptions::default()
+        };
+        let json = detect_dead_code(&options).expect("analysis should succeed");
+
+        assert!(json.get("kind").is_none());
+        assert_eq!(json["schema_version"], crate::report::SCHEMA_VERSION);
     }
 
     #[test]
@@ -1147,6 +1256,309 @@ mod tests {
 
         assert_eq!(error.code.as_deref(), Some("PLOW_INVALID_DIFF_FILE"));
         assert_eq!(error.context.as_deref(), Some("analysis.diffFile"));
+    }
+
+    /// Minimal valid project used by the end-to-end programmatic entry points.
+    fn tiny_project() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"prog-e2e","main":"src/index.ts"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("src/index.ts"),
+            "export const ok = 1;\nconsole.log(ok);\n",
+        )
+        .unwrap();
+        dir
+    }
+
+    fn analysis_at(root: &Path) -> AnalysisOptions {
+        AnalysisOptions {
+            root: Some(root.to_path_buf()),
+            ..AnalysisOptions::default()
+        }
+    }
+
+    #[test]
+    fn resolve_rejects_zero_threads() {
+        let err = AnalysisOptions {
+            threads: Some(0),
+            ..AnalysisOptions::default()
+        }
+        .resolve()
+        .err()
+        .expect("zero threads must be rejected");
+        assert_eq!(err.exit_code, 2);
+        assert_eq!(err.code.as_deref(), Some("PLOW_INVALID_THREADS"));
+        assert_eq!(err.context.as_deref(), Some("analysis.threads"));
+    }
+
+    #[test]
+    fn resolve_rejects_mutually_exclusive_workspace_flags() {
+        let err = AnalysisOptions {
+            workspace: Some(vec!["packages/*".to_owned()]),
+            changed_workspaces: Some("HEAD~1".to_owned()),
+            ..AnalysisOptions::default()
+        }
+        .resolve()
+        .err()
+        .expect("workspace + changed_workspaces must be rejected");
+        assert_eq!(err.code.as_deref(), Some("PLOW_MUTUALLY_EXCLUSIVE_OPTIONS"));
+        assert_eq!(err.context.as_deref(), Some("analysis.workspace"));
+    }
+
+    #[test]
+    fn resolve_rejects_nonexistent_root() {
+        let err = AnalysisOptions {
+            root: Some(PathBuf::from("/definitely/not/a/real/path/xyzzy")),
+            ..AnalysisOptions::default()
+        }
+        .resolve()
+        .err()
+        .expect("nonexistent root must be rejected");
+        assert_eq!(err.code.as_deref(), Some("PLOW_INVALID_ROOT"));
+        assert_eq!(err.context.as_deref(), Some("analysis.root"));
+    }
+
+    #[test]
+    fn resolve_rejects_root_that_is_a_file() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let file = dir.path().join("not-a-dir.txt");
+        std::fs::write(&file, "x").unwrap();
+        let err = AnalysisOptions {
+            root: Some(file),
+            ..AnalysisOptions::default()
+        }
+        .resolve()
+        .err()
+        .expect("a file root must be rejected");
+        assert_eq!(err.code.as_deref(), Some("PLOW_INVALID_ROOT"));
+    }
+
+    #[test]
+    fn resolve_rejects_nonexistent_config_path() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let err = AnalysisOptions {
+            root: Some(dir.path().to_path_buf()),
+            config_path: Some(dir.path().join("missing.plowrc.json")),
+            ..AnalysisOptions::default()
+        }
+        .resolve()
+        .err()
+        .expect("nonexistent config must be rejected");
+        assert_eq!(err.code.as_deref(), Some("PLOW_INVALID_CONFIG_PATH"));
+        assert_eq!(err.context.as_deref(), Some("analysis.configPath"));
+    }
+
+    #[test]
+    fn resolve_rejects_missing_diff_file() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let err = AnalysisOptions {
+            root: Some(dir.path().to_path_buf()),
+            diff_file: Some(PathBuf::from("nope.diff")),
+            ..AnalysisOptions::default()
+        }
+        .resolve()
+        .err()
+        .expect("missing diff file must be rejected");
+        assert_eq!(err.code.as_deref(), Some("PLOW_INVALID_DIFF_FILE"));
+        assert_eq!(err.context.as_deref(), Some("analysis.diffFile"));
+    }
+
+    #[test]
+    fn resolve_rejects_diff_path_that_is_a_directory() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::create_dir_all(dir.path().join("a-dir")).unwrap();
+        let err = AnalysisOptions {
+            root: Some(dir.path().to_path_buf()),
+            diff_file: Some(PathBuf::from("a-dir")),
+            ..AnalysisOptions::default()
+        }
+        .resolve()
+        .err()
+        .expect("a directory diff path must be rejected");
+        assert_eq!(err.code.as_deref(), Some("PLOW_INVALID_DIFF_FILE"));
+    }
+
+    #[test]
+    fn detect_circular_dependencies_returns_dead_code_envelope() {
+        let project = tiny_project();
+        let json = detect_circular_dependencies(&DeadCodeOptions {
+            analysis: analysis_at(project.path()),
+            ..DeadCodeOptions::default()
+        })
+        .expect("circular-dependency analysis should succeed");
+        assert_eq!(json["kind"], "dead-code");
+        assert!(json["circular_dependencies"].is_array());
+    }
+
+    #[test]
+    fn detect_boundary_violations_returns_dead_code_envelope() {
+        let project = tiny_project();
+        let json = detect_boundary_violations(&DeadCodeOptions {
+            analysis: analysis_at(project.path()),
+            ..DeadCodeOptions::default()
+        })
+        .expect("boundary-violation analysis should succeed");
+        assert_eq!(json["kind"], "dead-code");
+        assert!(json["boundary_violations"].is_array());
+    }
+
+    #[test]
+    fn detect_boundary_violations_includes_boundary_coverage() {
+        let project = tiny_project();
+        let root = project.path();
+        std::fs::write(
+            root.join(".plowrc.json"),
+            r#"{
+              "boundaries": {
+                "zones": [
+                  { "name": "domain", "patterns": ["src/domain/**"] }
+                ],
+                "coverage": { "requireAllFiles": true }
+              }
+            }"#,
+        )
+        .unwrap();
+
+        let json = detect_boundary_violations(&DeadCodeOptions {
+            analysis: analysis_at(root),
+            ..DeadCodeOptions::default()
+        })
+        .expect("boundary-violation analysis should succeed");
+
+        let coverage = json["boundary_coverage_violations"]
+            .as_array()
+            .expect("coverage findings should be an array");
+        assert_eq!(coverage.len(), 1);
+        assert_eq!(coverage[0]["path"], "src/index.ts");
+        assert_eq!(json["summary"]["boundary_coverage_violations"], 1);
+    }
+
+    #[test]
+    fn detect_boundary_violations_includes_boundary_calls() {
+        let project = tiny_project();
+        let root = project.path();
+        std::fs::write(
+            root.join("src/index.ts"),
+            "console.log('hello');\nexport const x = 1;\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join(".plowrc.json"),
+            r#"{
+              "boundaries": {
+                "zones": [
+                  { "name": "domain", "patterns": ["src/**"] }
+                ],
+                "calls": {
+                  "forbidden": [
+                    { "from": "domain", "callee": "console.*" }
+                  ]
+                }
+              }
+            }"#,
+        )
+        .unwrap();
+
+        let json = detect_boundary_violations(&DeadCodeOptions {
+            analysis: analysis_at(root),
+            ..DeadCodeOptions::default()
+        })
+        .expect("boundary-violation analysis should succeed");
+
+        let calls = json["boundary_call_violations"]
+            .as_array()
+            .expect("boundary call findings should be an array");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0]["path"], "src/index.ts");
+        assert_eq!(calls[0]["zone"], "domain");
+        assert_eq!(calls[0]["callee"], "console.log");
+        assert_eq!(calls[0]["pattern"], "console.*");
+        assert_eq!(json["summary"]["boundary_call_violations"], 1);
+    }
+
+    #[test]
+    fn detect_duplication_returns_dupes_envelope() {
+        let project = tiny_project();
+        let json = detect_duplication(&DuplicationOptions {
+            analysis: analysis_at(project.path()),
+            ..DuplicationOptions::default()
+        })
+        .expect("duplication analysis should succeed");
+        assert_eq!(json["kind"], "dupes");
+        // DupesOutput.report is `#[serde(flatten)]`, so its fields are top-level.
+        assert!(json["clone_groups"].is_array());
+        assert!(json["stats"].is_object());
+    }
+
+    #[test]
+    fn compute_health_returns_health_envelope() {
+        let project = tiny_project();
+        let options = ComplexityOptions {
+            analysis: analysis_at(project.path()),
+            ..ComplexityOptions::default()
+        };
+        // compute_health is a thin alias for compute_complexity.
+        let json = compute_health(&options).expect("health analysis should succeed");
+        assert_eq!(json["kind"], "health");
+        // HealthOutput.report is `#[serde(flatten)]`, so its fields are top-level.
+        assert!(json["summary"].is_object());
+        assert!(json["findings"].is_array());
+    }
+
+    #[test]
+    fn compute_complexity_rejects_missing_coverage_path() {
+        let project = tiny_project();
+        let err = compute_complexity(&ComplexityOptions {
+            analysis: analysis_at(project.path()),
+            coverage: Some(project.path().join("missing-coverage.json")),
+            ..ComplexityOptions::default()
+        })
+        .expect_err("a missing coverage path must be rejected");
+        assert_eq!(err.code.as_deref(), Some("PLOW_INVALID_COVERAGE_PATH"));
+        assert_eq!(err.context.as_deref(), Some("health.coverage"));
+    }
+
+    #[test]
+    fn compute_complexity_rejects_relative_coverage_root() {
+        let project = tiny_project();
+        let err = compute_complexity(&ComplexityOptions {
+            analysis: analysis_at(project.path()),
+            coverage_root: Some(PathBuf::from("relative/prefix")),
+            ..ComplexityOptions::default()
+        })
+        .expect_err("a relative coverage_root must be rejected");
+        assert_eq!(err.code.as_deref(), Some("PLOW_INVALID_COVERAGE_ROOT"));
+        assert_eq!(err.context.as_deref(), Some("health.coverage_root"));
+    }
+
+    #[test]
+    fn programmatic_error_builders_compose_and_display() {
+        let err = ProgrammaticError::new("boom", 7)
+            .with_code("PLOW_X")
+            .with_help("try again")
+            .with_context("ctx.path");
+        assert_eq!(err.message, "boom");
+        assert_eq!(err.exit_code, 7);
+        assert_eq!(err.code.as_deref(), Some("PLOW_X"));
+        assert_eq!(err.help.as_deref(), Some("try again"));
+        assert_eq!(err.context.as_deref(), Some("ctx.path"));
+        // Display surfaces only the message.
+        assert_eq!(format!("{err}"), "boom");
+    }
+
+    #[test]
+    fn generic_analysis_error_uppercases_command_into_code() {
+        let err = generic_analysis_error("dead-code");
+        assert_eq!(err.code.as_deref(), Some("PLOW_DEAD_CODE_FAILED"));
+        assert_eq!(err.exit_code, 2);
+        assert_eq!(err.context.as_deref(), Some("plow dead-code"));
+        assert!(err.help.is_some(), "diagnostics hint should be attached");
     }
 
     fn unused_file_paths(json: &serde_json::Value) -> Vec<String> {

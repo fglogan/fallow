@@ -2,6 +2,9 @@ pub(super) mod check;
 mod cross_ref;
 pub(super) mod dupes;
 pub(super) mod health;
+mod health_hotspots;
+mod health_runtime;
+mod health_targets;
 mod perf;
 mod traces;
 
@@ -42,7 +45,11 @@ pub(super) fn thousands(n: usize) -> String {
 }
 
 pub(super) fn print_explain_tip_if_tty(has_findings: bool, quiet: bool) {
-    if has_findings && !quiet && std::io::stdout().is_terminal() {
+    if has_findings
+        && !quiet
+        && std::io::stdout().is_terminal()
+        && !crate::report::sink::is_redirected()
+    {
         println!(
             "{}",
             "Tip: run `plow explain <issue label>`; spaces and hyphens both work, e.g. `plow explain unused files`."
@@ -101,6 +108,10 @@ fn section_footer_text(title: &str) -> Option<(&'static str, &'static str)> {
             "Class methods or properties never referenced outside their class",
             "https://docs.genesis-plow.dev/explanations/dead-code#unused-class-members",
         )),
+        "Unused store members" => Some((
+            "Store state or actions never accessed by any consumer",
+            "https://docs.genesis-plow.dev/explanations/dead-code#unused-store-members",
+        )),
         "Unresolved imports" => Some((
             "Import paths that could not be resolved \u{2014} check for missing packages or broken paths. Framework-specific imports may need a plugin: https://docs.genesis-plow.dev/plugins",
             "https://docs.genesis-plow.dev/explanations/dead-code#unresolved-imports",
@@ -141,6 +152,38 @@ fn section_footer_text(title: &str) -> Option<(&'static str, &'static str)> {
             "pnpm `overrides:` entries with an unparsable key or empty value (pnpm install will error)",
             "https://docs.genesis-plow.dev/explanations/dead-code#misconfigured-dependency-overrides",
         )),
+        "Invalid client exports" => Some((
+            "Server-only or route-config exports in a \"use client\" file (Next.js rejects this at build time)",
+            "https://docs.genesis-plow.dev/explanations/dead-code#invalid-client-exports",
+        )),
+        "Mixed client/server barrels" => Some((
+            "Barrel re-exports both a \"use client\" module and a server-only module (one import drags the other's directive across the boundary)",
+            "https://docs.genesis-plow.dev/explanations/dead-code#mixed-client-server-barrels",
+        )),
+        "Misplaced directives" => Some((
+            "A \"use client\" / \"use server\" directive sits below an import, so the RSC bundler ignores it (move it above every import)",
+            "https://docs.genesis-plow.dev/explanations/dead-code#misplaced-directives",
+        )),
+        "Unprovided injects" => Some((
+            "A Vue inject / Svelte getContext whose key is provided nowhere in the project, so at runtime it returns undefined",
+            "https://docs.genesis-plow.dev/explanations/dead-code#unprovided-injects",
+        )),
+        "Unrendered components" => Some((
+            "A Vue / Svelte component reachable through a barrel but rendered nowhere in the project (render it somewhere or remove it)",
+            "https://docs.genesis-plow.dev/explanations/dead-code#unrendered-components",
+        )),
+        "Unused component props" => Some((
+            "A Vue <script setup> defineProps prop referenced nowhere inside its own component (remove it or use it)",
+            "https://docs.genesis-plow.dev/explanations/dead-code#unused-component-props",
+        )),
+        "Unused component emits" => Some((
+            "A Vue <script setup> defineEmits event emitted nowhere inside its own component (remove it or emit it)",
+            "https://docs.genesis-plow.dev/explanations/dead-code#unused-component-emits",
+        )),
+        "Unused server actions" => Some((
+            "A Next.js Server Action exported from a \"use server\" file that no code in the project references (wire it to a consumer or remove it)",
+            "https://docs.genesis-plow.dev/explanations/dead-code#unused-server-actions",
+        )),
         t if t.starts_with("Type-only") => Some((
             "Dependencies only used for type imports \u{2014} consider moving to devDependencies",
             "https://docs.genesis-plow.dev/explanations/dead-code#type-only-dependencies",
@@ -161,6 +204,7 @@ fn section_suppress_rule(title: &str) -> Option<&'static str> {
         }
         "Unused enum members" => Some("unused-enum-members"),
         "Unused class members" => Some("unused-class-members"),
+        "Unused store members" => Some("unused-store-members"),
         "Unresolved imports" => Some("unresolved-imports"),
         "Unlisted dependencies" => Some("unlisted-dependencies"),
         "Duplicate exports" => Some("duplicate-exports"),
@@ -170,6 +214,14 @@ fn section_suppress_rule(title: &str) -> Option<&'static str> {
         "Unresolved catalog references" => Some("unresolved-catalog-reference"),
         "Unused dependency overrides" => Some("unused-dependency-override"),
         "Misconfigured dependency overrides" => Some("misconfigured-dependency-override"),
+        "Invalid client exports" => Some("invalid-client-export"),
+        "Mixed client/server barrels" => Some("mixed-client-server-barrel"),
+        "Misplaced directives" => Some("misplaced-directive"),
+        "Unprovided injects" => Some("unprovided-injects"),
+        "Unrendered components" => Some("unrendered-components"),
+        "Unused component props" => Some("unused-component-props"),
+        "Unused component emits" => Some("unused-component-emits"),
+        "Unused server actions" => Some("unused-server-actions"),
         _ => None,
     }
 }
@@ -242,16 +294,10 @@ fn push_section_footer_impl(lines: &mut Vec<String>, title: &str, item_count: us
     if let Some((desc, url)) = section_footer_text(title) {
         lines.push(format!("  {}", format!("{desc} \u{2014} {url}").dimmed()));
     }
-    // Only show suppress/fix hints for sections with 3+ items to reduce noise
     if item_count >= 3 {
-        // Auto-fix hint for fixable categories
         if is_auto_fixable(title) {
-            lines.push(format!(
-                "  {}",
-                "To auto-fix: plow fix --dry-run".dimmed()
-            ));
+            lines.push(format!("  {}", "To auto-fix: plow fix --dry-run".dimmed()));
         }
-        // Suppress hint: config-level for rollup, inline for individual items
         if let Some(rule) = section_suppress_rule(title) {
             let comment = if rollup {
                 "To suppress a directory: add to ignorePatterns in .plowrc.json".to_string()
@@ -270,16 +316,35 @@ fn push_section_footer_impl(lines: &mut Vec<String>, title: &str, item_count: us
 }
 
 /// Build items grouped by file path, sorted by count descending, with truncation.
-pub(super) fn build_grouped_by_file<'a, T>(
-    lines: &mut Vec<String>,
-    items: &'a [T],
-    root: &Path,
-    get_path: impl Fn(&'a T) -> &'a Path,
-    format_detail: &impl Fn(&T) -> String,
-    max_files: usize,
-    max_items_per_file: usize,
-) {
-    // Group items by file path, preserving indices
+pub(super) struct GroupedByFileInput<'out, 'items, T, P, F>
+where
+    P: Fn(&'items T) -> &'items Path,
+    F: Fn(&T) -> String,
+{
+    pub(super) lines: &'out mut Vec<String>,
+    pub(super) items: &'items [T],
+    pub(super) root: &'out Path,
+    pub(super) get_path: P,
+    pub(super) format_detail: &'out F,
+    pub(super) max_files: usize,
+    pub(super) max_items_per_file: usize,
+}
+
+pub(super) fn build_grouped_by_file<'out, 'items, T, P, F>(
+    input: GroupedByFileInput<'out, 'items, T, P, F>,
+) where
+    P: Fn(&'items T) -> &'items Path,
+    F: Fn(&T) -> String,
+{
+    let GroupedByFileInput {
+        lines,
+        items,
+        root,
+        get_path,
+        format_detail,
+        max_files,
+        max_items_per_file,
+    } = input;
     let mut file_groups: Vec<(String, Vec<usize>)> = Vec::new();
     let mut file_map: rustc_hash::FxHashMap<String, usize> = rustc_hash::FxHashMap::default();
 
@@ -293,7 +358,6 @@ pub(super) fn build_grouped_by_file<'a, T>(
         }
     }
 
-    // Sort files by item count descending, alphabetical tiebreaker
     file_groups.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then_with(|| a.0.cmp(&b.0)));
 
     let total_files = file_groups.len();
@@ -349,7 +413,6 @@ pub(super) fn strip_ansi(s: &str) -> String {
     let mut chars = s.chars();
     while let Some(c) = chars.next() {
         if c == '\x1b' {
-            // Skip until 'm' (end of SGR sequence)
             for inner in chars.by_ref() {
                 if inner == 'm' {
                     break;
@@ -375,8 +438,6 @@ pub(super) fn plain(lines: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ── Utility function tests ──
 
     #[test]
     fn thousands_zero() {
@@ -416,8 +477,6 @@ mod tests {
         assert_eq!(result, "index.ts");
     }
 
-    // ── strip_ansi utility ──
-
     #[test]
     fn strip_ansi_removes_color_codes() {
         let colored_str = "hello".red().bold().to_string();
@@ -433,8 +492,6 @@ mod tests {
     fn strip_ansi_handles_empty_string() {
         assert_eq!(strip_ansi(""), "");
     }
-
-    // ── Section header tests ──
 
     #[test]
     fn section_header_uses_bullet_indicator() {

@@ -56,7 +56,6 @@ fn has_higher_precedence_sibling(config_path: &Path) -> bool {
         .any(|candidate| parent.join(candidate).exists())
 }
 
-// Matches Wrangler's current findWranglerConfig order.
 const WRANGLER_CONFIG_PRECEDENCE: &[&str] = &["wrangler.json", "wrangler.jsonc", "wrangler.toml"];
 
 fn extract_main_entries(config_path: &Path, source: &str, root: &Path) -> Vec<String> {
@@ -71,18 +70,24 @@ fn extract_main_entries(config_path: &Path, source: &str, root: &Path) -> Vec<St
 }
 
 fn extract_js_main_entries(config_path: &Path, source: &str, root: &Path) -> Vec<String> {
-    let top_level = config_parser::extract_config_path_string(source, config_path, &["main"]);
+    let mut entries = Vec::new();
+    if let Some(raw) = config_parser::extract_config_path(source, config_path, &["main"])
+        && let Some(path) = config_parser::normalize_config_path(&raw, config_path, root)
+    {
+        entries.push(path);
+    }
     let env_entries = config_parser::extract_config_object_nested_strings(
         source,
         config_path,
         &["env"],
         &["main"],
     );
-    top_level
-        .into_iter()
-        .chain(env_entries)
-        .filter_map(|raw| config_parser::normalize_config_path(&raw, config_path, root))
-        .collect()
+    entries.extend(
+        env_entries
+            .into_iter()
+            .filter_map(|raw| config_parser::normalize_config_path(raw, config_path, root)),
+    );
+    entries
 }
 
 fn extract_toml_main_entries(config_path: &Path, source: &str, root: &Path) -> Vec<String> {
@@ -131,7 +136,6 @@ mod tests {
         let result = plugin.resolve_config(
             Path::new("/repo/apps/site/wrangler.jsonc"),
             r#"{
-                // top-level worker
                 "main": "src/worker.tsx",
                 "env": {
                     "staging": { "main": "worker/entry.ts" }

@@ -1,3 +1,8 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "tests and benches use unwrap and expect to keep fixture setup concise"
+)]
 #![expect(
     deprecated,
     reason = "ADR-008: integration tests exercise the workspace path-dep plow_core::analyze* surface; the deprecation warning targets external crates.io consumers"
@@ -54,8 +59,18 @@ mod graphql_imports;
 mod hono_html_tagged_template;
 #[path = "integration_test/html_entry.rs"]
 mod html_entry;
+#[path = "integration_test/issue_1032_tsconfig_sibling_src_paths.rs"]
+mod issue_1032_tsconfig_sibling_src_paths;
 #[path = "integration_test/issue_546_storybook_runtime_resources.rs"]
 mod issue_546_storybook_runtime_resources;
+#[path = "integration_test/issue_914_pnpm_bare_binary.rs"]
+mod issue_914_pnpm_bare_binary;
+#[path = "integration_test/issue_948_vscode_provider_members.rs"]
+mod issue_948_vscode_provider_members;
+#[path = "integration_test/issue_952_package_path_resolution.rs"]
+mod issue_952_package_path_resolution;
+#[path = "integration_test/issue_954_pino_transport_target.rs"]
+mod issue_954_pino_transport_target;
 #[path = "integration_test/jsx_assets_and_jsdoc.rs"]
 mod jsx_assets_and_jsdoc;
 #[path = "integration_test/member_detection.rs"]
@@ -64,8 +79,12 @@ mod member_detection;
 mod nx_project_json;
 #[path = "integration_test/redwoodsdk.rs"]
 mod redwoodsdk;
+#[path = "integration_test/rspress_theme.rs"]
+mod rspress_theme;
 #[path = "integration_test/rules_config.rs"]
 mod rules_config;
+#[path = "integration_test/safe_analysis.rs"]
+mod safe_analysis;
 #[path = "integration_test/sfc_parsing.rs"]
 mod sfc_parsing;
 #[path = "integration_test/unreachable_exports.rs"]
@@ -75,16 +94,56 @@ mod workspaces;
 
 #[path = "integration_test/boundary_violations.rs"]
 mod boundary_violations;
+#[path = "integration_test/capability_e_route_exports.rs"]
+mod capability_e_route_exports;
 #[path = "integration_test/config_file_loading.rs"]
 mod config_file_loading;
 #[path = "integration_test/css_modules_unused.rs"]
 mod css_modules_unused;
+#[path = "integration_test/invalid_client_exports.rs"]
+mod invalid_client_exports;
+#[path = "integration_test/misplaced_directive.rs"]
+mod misplaced_directive;
+#[path = "integration_test/mixed_client_server_barrel.rs"]
+mod mixed_client_server_barrel;
+#[path = "integration_test/nextjs_route_tree.rs"]
+mod nextjs_route_tree;
+#[path = "integration_test/policy_violations.rs"]
+mod policy_violations;
 #[path = "integration_test/private_type_leaks.rs"]
 mod private_type_leaks;
 #[path = "integration_test/production_mode.rs"]
 mod production_mode;
 #[path = "integration_test/re_export_chains.rs"]
 mod re_export_chains;
+#[path = "integration_test/security_catalogue_categories.rs"]
+mod security_catalogue_categories;
+#[path = "integration_test/security_client_server_leak.rs"]
+mod security_client_server_leak;
+#[path = "integration_test/security_dangerous_html.rs"]
+mod security_dangerous_html;
+#[path = "integration_test/security_dead_code_cross_link.rs"]
+mod security_dead_code_cross_link;
+#[path = "integration_test/security_declarative_validation.rs"]
+mod security_declarative_validation;
+#[path = "integration_test/security_framework_entry_sources.rs"]
+mod security_framework_entry_sources;
+#[path = "integration_test/security_framework_sinks.rs"]
+mod security_framework_sinks;
+#[path = "integration_test/security_hardcoded_secret.rs"]
+mod security_hardcoded_secret;
+#[path = "integration_test/security_multihop_taint.rs"]
+mod security_multihop_taint;
+#[path = "integration_test/security_request_receivers.rs"]
+mod security_request_receivers;
+#[path = "integration_test/security_secret_to_network.rs"]
+mod security_secret_to_network;
+#[path = "integration_test/security_taint_confidence.rs"]
+mod security_taint_confidence;
+#[path = "integration_test/security_template_xss_sinks.rs"]
+mod security_template_xss_sinks;
+#[path = "integration_test/sfc_template_assets.rs"]
+mod sfc_template_assets;
 #[path = "integration_test/stale_suppressions.rs"]
 mod stale_suppressions;
 #[path = "integration_test/suppression_comments.rs"]
@@ -93,8 +152,20 @@ mod suppression_comments;
 mod test_only_deps;
 #[path = "integration_test/type_only_deps.rs"]
 mod type_only_deps;
+#[path = "integration_test/unprovided_injects.rs"]
+mod unprovided_injects;
+#[path = "integration_test/unrendered_components.rs"]
+mod unrendered_components;
+#[path = "integration_test/unused_component_emits.rs"]
+mod unused_component_emits;
+#[path = "integration_test/unused_component_props.rs"]
+mod unused_component_props;
 #[path = "integration_test/unused_enum_members.rs"]
 mod unused_enum_members;
+#[path = "integration_test/unused_server_actions.rs"]
+mod unused_server_actions;
+#[path = "integration_test/unused_store_members.rs"]
+mod unused_store_members;
 #[path = "integration_test/web_components.rs"]
 mod web_components;
 #[path = "integration_test/workspace_cross_imports.rs"]
@@ -114,6 +185,21 @@ mod issue_605_new_class_member;
 mod issue_616_browser_extension_manifest;
 #[path = "integration_test/issue_617_obsidian_plugin.rs"]
 mod issue_617_obsidian_plugin;
+#[path = "integration_test/issue_752_svelte_typed_props.rs"]
+mod issue_752_svelte_typed_props;
+#[path = "integration_test/issue_753_oxlint_cli_tooling.rs"]
+mod issue_753_oxlint_cli_tooling;
+#[path = "integration_test/issue_758_danger_no_dep.rs"]
+mod issue_758_danger_no_dep;
+#[path = "integration_test/issue_772_workspace_plugin_merge.rs"]
+mod issue_772_workspace_plugin_merge;
+#[path = "integration_test/issue_845_instanceof_narrowing.rs"]
+mod issue_845_instanceof_narrowing;
+#[path = "integration_test/issue_910_structural_class_member_usage.rs"]
+mod issue_910_structural_class_member_usage;
+
+#[path = "integration_test/issue_844_usememo_instance.rs"]
+mod issue_844_usememo_instance;
 #[path = "integration_test/lit_custom_element.rs"]
 mod lit_custom_element;
 #[path = "integration_test/scoped_used_class_members.rs"]
@@ -147,6 +233,8 @@ mod issue_358_custom_eslint_config;
 mod issue_359_empty_catalog_group;
 #[path = "integration_test/issue_396_397_399_typeof_import_and_new_url.rs"]
 mod issue_396_397_399_typeof_import_and_new_url;
+#[path = "integration_test/issue_462_tooling_catalogue.rs"]
+mod issue_462_tooling_catalogue;
 #[path = "integration_test/issue_463_glob_validation.rs"]
 mod issue_463_glob_validation;
 #[path = "integration_test/issue_515_re_export_cycles.rs"]
@@ -175,6 +263,22 @@ mod issue_629_opencode_plugin;
 mod issue_635_scaffold_template_assets;
 #[path = "integration_test/issue_638_node_script_entrypoints.rs"]
 mod issue_638_node_script_entrypoints;
+#[path = "integration_test/issue_754_eslint_meta_preset.rs"]
+mod issue_754_eslint_meta_preset;
+#[path = "integration_test/issue_811_vite_alias_identifier_spread.rs"]
+mod issue_811_vite_alias_identifier_spread;
+#[path = "integration_test/issue_818_prettier_pkg_json_string.rs"]
+mod issue_818_prettier_pkg_json_string;
+#[path = "integration_test/issue_820_vercel_ts_config.rs"]
+mod issue_820_vercel_ts_config;
+#[path = "integration_test/issue_823_pnpm_package_sources.rs"]
+mod issue_823_pnpm_package_sources;
+#[path = "integration_test/issue_868_ionic_lifecycle.rs"]
+mod issue_868_ionic_lifecycle;
+#[path = "integration_test/issue_873_firebase_messaging_sw.rs"]
+mod issue_873_firebase_messaging_sw;
+#[path = "integration_test/issue_956_playwright_pnpm_exec.rs"]
+mod issue_956_playwright_pnpm_exec;
 #[path = "integration_test/lexical_nodes.rs"]
 mod lexical_nodes;
 #[path = "integration_test/script_multiplexers.rs"]
@@ -188,8 +292,17 @@ mod ember_classic;
 #[path = "integration_test/issue_620_error_subclass_name.rs"]
 mod issue_620_error_subclass_name;
 
+#[path = "integration_test/issue_843_nestjs_lifecycle.rs"]
+mod issue_843_nestjs_lifecycle;
+
+#[path = "integration_test/issue_609_velite.rs"]
+mod issue_609_velite;
 #[path = "integration_test/issue_704_auto_import_components.rs"]
 mod issue_704_auto_import_components;
+#[path = "integration_test/issue_739_script_auto_imports.rs"]
+mod issue_739_script_auto_imports;
+#[path = "integration_test/issue_740_pinia_store_auto_imports.rs"]
+mod issue_740_pinia_store_auto_imports;
 #[path = "integration_test/issue_744_tsdown_config.rs"]
 mod issue_744_tsdown_config;
 #[path = "integration_test/pkg_utils_plugin.rs"]

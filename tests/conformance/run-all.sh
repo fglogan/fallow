@@ -3,11 +3,11 @@ set -euo pipefail
 
 # Conformance test runner for multiple real-world projects.
 #
-# Clones projects, runs fallow + knip on each, and produces an aggregated
+# Clones projects, runs plow + knip on each, and produces an aggregated
 # conformance report.
 #
 # Usage:
-#   ./run-all.sh [--fallow-bin PATH] [--clone-dir DIR] [--timeout SECS]
+#   ./run-all.sh [--plow-bin PATH] [--clone-dir DIR] [--timeout SECS]
 #
 # Output:
 #   Aggregated JSON report to stdout
@@ -16,16 +16,16 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
-FALLOW_BIN=""
-CLONE_DIR="/tmp/fallow-conformance"
+PLOW_BIN=""
+CLONE_DIR="/tmp/plow-conformance"
 TIMEOUT=300
-export FALLOW_QUIET="${FALLOW_QUIET:-1}"
+export PLOW_QUIET="${PLOW_QUIET:-1}"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --fallow-bin)   FALLOW_BIN="$2";  shift 2 ;;
-        --fallow-bin=*) FALLOW_BIN="${1#*=}"; shift ;;
+        --plow-bin)   PLOW_BIN="$2";  shift 2 ;;
+        --plow-bin=*) PLOW_BIN="${1#*=}"; shift ;;
         --clone-dir)    CLONE_DIR="$2";   shift 2 ;;
         --clone-dir=*)  CLONE_DIR="${1#*=}"; shift ;;
         --timeout)      TIMEOUT="$2";     shift 2 ;;
@@ -50,36 +50,36 @@ PROJECTS=(
 )
 
 # ---------------------------------------------------------------------------
-# Find fallow binary
+# Find plow binary
 # ---------------------------------------------------------------------------
 
-if [[ -z "${FALLOW_BIN}" ]]; then
-    if command -v fallow &>/dev/null; then
-        FALLOW_BIN="fallow"
+if [[ -z "${PLOW_BIN}" ]]; then
+    if command -v plow &>/dev/null; then
+        PLOW_BIN="plow"
     else
         for candidate in \
-            "${REPO_ROOT}/target/release/fallow" \
-            "${REPO_ROOT}/target/debug/fallow"; do
+            "${REPO_ROOT}/target/release/plow" \
+            "${REPO_ROOT}/target/debug/plow"; do
             if [[ -x "${candidate}" ]]; then
-                FALLOW_BIN="${candidate}"
+                PLOW_BIN="${candidate}"
                 break
             fi
         done
     fi
 fi
 
-if [[ -z "${FALLOW_BIN}" ]]; then
-    echo "Error: fallow binary not found. Build with 'cargo build' or pass --fallow-bin PATH" >&2
+if [[ -z "${PLOW_BIN}" ]]; then
+    echo "Error: plow binary not found. Build with 'cargo build' or pass --plow-bin PATH" >&2
     exit 1
 fi
 
 # Resolve to absolute path
-if [[ "${FALLOW_BIN}" != /* ]] && [[ "${FALLOW_BIN}" == */* ]]; then
-    FALLOW_BIN="$(cd "$(dirname "${FALLOW_BIN}")" && pwd)/$(basename "${FALLOW_BIN}")"
+if [[ "${PLOW_BIN}" != /* ]] && [[ "${PLOW_BIN}" == */* ]]; then
+    PLOW_BIN="$(cd "$(dirname "${PLOW_BIN}")" && pwd)/$(basename "${PLOW_BIN}")"
 fi
 
-if ! "${FALLOW_BIN}" --version &>/dev/null; then
-    echo "Error: fallow binary at '${FALLOW_BIN}' does not work" >&2
+if ! "${PLOW_BIN}" --version &>/dev/null; then
+    echo "Error: plow binary at '${PLOW_BIN}' does not work" >&2
     exit 1
 fi
 
@@ -136,29 +136,29 @@ install_deps() {
 
 run_single_project() {
     local name="$1" dir="$2" out_dir="$3"
-    local fallow_out="${out_dir}/${name}-fallow.json"
+    local plow_out="${out_dir}/${name}-plow.json"
     local knip_out="${out_dir}/${name}-knip.json"
     local report_out="${out_dir}/${name}-report.json"
 
-    # Run fallow
-    echo "    Running fallow..." >&2
-    local fallow_exit=0
-    timeout_cmd "${TIMEOUT}" "${FALLOW_BIN}" check --format json --root "${dir}" \
-        > "${fallow_out}" 2>/dev/null || fallow_exit=$?
+    # Run plow
+    echo "    Running plow..." >&2
+    local plow_exit=0
+    timeout_cmd "${TIMEOUT}" "${PLOW_BIN}" check --format json --root "${dir}" \
+        > "${plow_out}" 2>/dev/null || plow_exit=$?
 
-    if [[ ${fallow_exit} -eq 124 ]]; then
-        echo "    fallow TIMEOUT" >&2
+    if [[ ${plow_exit} -eq 124 ]]; then
+        echo "    plow TIMEOUT" >&2
         return 1
     fi
-    if [[ ${fallow_exit} -ge 2 ]]; then
-        echo "    fallow ERROR (exit ${fallow_exit})" >&2
+    if [[ ${plow_exit} -ge 2 ]]; then
+        echo "    plow ERROR (exit ${plow_exit})" >&2
         return 1
     fi
-    echo "    fallow done (exit ${fallow_exit})" >&2
+    echo "    plow done (exit ${plow_exit})" >&2
 
-    # Validate fallow output
-    if ! python3 -c "import json; json.load(open('${fallow_out}'))" 2>/dev/null; then
-        echo "    fallow output is not valid JSON" >&2
+    # Validate plow output
+    if ! python3 -c "import json; json.load(open('${plow_out}'))" 2>/dev/null; then
+        echo "    plow output is not valid JSON" >&2
         return 1
     fi
 
@@ -185,7 +185,7 @@ run_single_project() {
     fi
 
     # Compare
-    if ! python3 "${SCRIPT_DIR}/compare.py" "${fallow_out}" "${knip_out}" "${dir}" > "${report_out}"; then
+    if ! python3 "${SCRIPT_DIR}/compare.py" "${plow_out}" "${knip_out}" "${dir}" > "${report_out}"; then
         echo "    compare.py failed" >&2
         return 1
     fi
@@ -197,7 +197,7 @@ run_single_project() {
 # ---------------------------------------------------------------------------
 
 echo "=== Conformance Test Suite ===" >&2
-echo "Fallow:     ${FALLOW_BIN}" >&2
+echo "Plow:     ${PLOW_BIN}" >&2
 echo "Projects:   ${#PROJECTS[@]}" >&2
 echo "Timeout:    ${TIMEOUT}s per tool" >&2
 echo "" >&2
@@ -242,7 +242,7 @@ import json, sys
 with open('${TMPDIR_CONFORM}/${name}-report.json') as f:
     r = json.load(f)
 s = r['summary']
-print(f\"    Agreement: {s['agreement_pct']}% ({s['agreed']}/{s['agreed']+s['fallow_only']+s['knip_only']})\", file=sys.stderr)
+print(f\"    Agreement: {s['agreement_pct']}% ({s['agreed']}/{s['agreed']+s['plow_only']+s['knip_only']})\", file=sys.stderr)
 " 2>/dev/null || true
     else
         echo "    SKIP: tool error" >&2

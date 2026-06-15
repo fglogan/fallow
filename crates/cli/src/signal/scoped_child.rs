@@ -28,7 +28,7 @@
 //! Documented here so future maintainers don't re-derive the trade-off.
 
 use std::io;
-use std::process::{Child, ChildStdin, Command, ExitStatus, Output, Stdio};
+use std::process::{Child, ChildStdin, ChildStdout, Command, ExitStatus, Output, Stdio};
 
 use super::registry;
 
@@ -79,10 +79,23 @@ impl ScopedChild {
         self.inner.as_mut().and_then(|c| c.stdin.take())
     }
 
+    /// Take the child's stdout handle, if it was piped. Same semantics as
+    /// `Child::stdout.take()`. Returns `None` if stdout was not piped or the
+    /// child has been consumed. Used by long-lived readers (e.g. the audit
+    /// base-file `cat-file --batch` reader) that drive both pipes while leaving
+    /// the wrapper owning the child for registry tracking and the terminal wait.
+    pub fn take_stdout(&mut self) -> Option<ChildStdout> {
+        self.inner.as_mut().and_then(|c| c.stdout.take())
+    }
+
     /// Consume self and wait for the child to exit, collecting stdout
     /// and stderr. The signal handler may have already killed the
     /// child via the PID side channel; in that case wait returns
     /// normally with a non-zero status.
+    #[expect(
+        clippy::expect_used,
+        reason = "ScopedChild owns inner until one terminal wait method consumes it"
+    )]
     pub fn wait_with_output(mut self) -> io::Result<Output> {
         let child = self.inner.take().expect("inner already taken");
         let id = self.id.take();
@@ -95,6 +108,10 @@ impl ScopedChild {
 
     /// Wait for the child to exit, returning the status. Same signal-
     /// kill-by-PID semantics as `wait_with_output`.
+    #[expect(
+        clippy::expect_used,
+        reason = "ScopedChild owns inner until one terminal wait method consumes it"
+    )]
     pub fn wait(mut self) -> io::Result<ExitStatus> {
         let mut child = self.inner.take().expect("inner already taken");
         let id = self.id.take();
@@ -111,9 +128,6 @@ impl Drop for ScopedChild {
         if let Some(id) = self.id.take() {
             registry::deregister(id);
         }
-        // Non-blocking reap so the PID is released if the child has
-        // already exited. Callers wanting a real wait should call
-        // `wait` / `wait_with_output` explicitly; Drop never blocks.
         if let Some(mut child) = self.inner.take() {
             let _ = child.try_wait();
         }
@@ -141,22 +155,12 @@ pub fn output(command: &mut Command) -> io::Result<Output> {
     ScopedChild::spawn(command)?.wait_with_output()
 }
 
-// Every test in this module exec's `/bin/sh` / `true` / `echo`, so the
-// entire suite is cfg(unix)-only. Gating at the module level keeps the
-// Windows `unused_imports` lint quiet on `use super::*;` (since the
-// module would otherwise be reduced to just the import line on Windows).
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
-    // The only callers (`scoped_child_drop_deregisters` and
-    // `scoped_child_wait_deregisters_and_succeeds`) are cfg(unix), so on
-    // Windows this helper has no consumer. Gate with cfg(unix) rather than
-    // a per-arm `#[expect(dead_code)]` to keep the intent obvious.
     #[cfg(unix)]
     fn assert_deregistered(id: u64) {
-        // The registry is private; deregister is idempotent so calling
-        // it again is the cheapest way to assert "no longer present".
         registry::deregister(id);
     }
 

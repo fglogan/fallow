@@ -32,6 +32,60 @@ export default {};
 }
 
 #[test]
+fn vue_script_import_spans_are_original_source_offsets() {
+    let source = r#"<template><div /></template>
+
+<script lang="ts">
+import { helper } from './utils';
+export const value = helper();
+</script>
+"#;
+    let info = parse_sfc(source, "App.vue");
+    let import = info
+        .imports
+        .iter()
+        .find(|i| i.source == "./utils")
+        .expect("script import extracted");
+    let export = info
+        .exports
+        .iter()
+        .find(|e| matches!(&e.name, crate::ExportName::Named(name) if name == "value"))
+        .expect("script export extracted");
+    let (import_line, _) =
+        plow_types::extract::byte_offset_to_line_col(&info.line_offsets, import.span.start);
+    let (export_line, _) =
+        plow_types::extract::byte_offset_to_line_col(&info.line_offsets, export.span.start);
+    assert_eq!(import_line, 4);
+    assert_eq!(export_line, 5);
+    assert_eq!(
+        &source[import.source_span.start as usize..import.source_span.end as usize],
+        "'./utils'"
+    );
+}
+
+#[test]
+fn vue_script_security_sink_spans_are_original_source_offsets() {
+    let source = r#"<template><div /></template>
+
+<script setup lang="ts">
+const load = async (url: string) => {
+  await fetch(url);
+};
+</script>
+"#;
+    let info = parse_sfc(source, "App.vue");
+    assert_eq!(info.security_sinks.len(), 1);
+    let sink = &info.security_sinks[0];
+    let (line, _) =
+        plow_types::extract::byte_offset_to_line_col(&info.line_offsets, sink.span_start);
+    assert_eq!(line, 5);
+    assert!(
+        source[sink.span_start as usize..].starts_with("fetch(url)"),
+        "sink span should point at fetch call in original SFC source",
+    );
+}
+
+#[test]
 fn extracts_vue_script_setup_imports() {
     let info = parse_sfc(
         r#"
@@ -509,6 +563,53 @@ const counter = new Counter();
 }
 
 #[test]
+fn svelte_derived_rune_member_call_marks_bound_class_member_usage() {
+    let info = parse_sfc(
+        r#"
+<script lang="ts">
+import { Counter } from './counter';
+const counter = $derived(new Counter());
+</script>
+<button onclick={() => counter.bump()}>Increment</button>
+"#,
+        "App.svelte",
+    );
+
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Counter" && access.member == "bump"),
+        "$derived(new Counter()) should still resolve template member usage, got: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn svelte_effect_and_inspect_runes_credit_import_usage() {
+    let info = parse_sfc(
+        r#"
+<script lang="ts">
+import { track, debug } from './utils';
+$effect(() => track());
+$inspect(debug());
+</script>
+"#,
+        "App.svelte",
+    );
+
+    assert!(
+        !info.unused_import_bindings.contains(&"track".to_string()),
+        "$effect callback should credit track, got: {:?}",
+        info.unused_import_bindings
+    );
+    assert!(
+        !info.unused_import_bindings.contains(&"debug".to_string()),
+        "$inspect argument should credit debug, got: {:?}",
+        info.unused_import_bindings
+    );
+}
+
+#[test]
 fn vue_no_script_returns_empty() {
     let info = parse_sfc(
         "<template><div></div></template><style>div {}</style>",
@@ -582,11 +683,6 @@ const items = ref<T[]>([]);
     assert_eq!(info.imports[0].source, "vue");
 }
 
-// Imports referenced ONLY inside `generic="T extends Test<boolean>"` (not
-// inside the script body itself) must still be classified as
-// type-referenced, otherwise the upstream `export type Test` is falsely
-// reported as `unused_types`. The augmented-source probe in
-// `merge_script_into_module` is what makes this work.
 #[test]
 fn vue_generic_attr_marks_type_only_import_as_type_referenced() {
     let info = parse_sfc(
@@ -611,8 +707,6 @@ defineProps<{ item: T }>();
     );
 }
 
-// Multi-parameter generic constraints must credit every distinct identifier
-// in the constraint, not just the first one.
 #[test]
 fn vue_generic_attr_marks_each_constraint_identifier() {
     let info = parse_sfc(
@@ -634,8 +728,6 @@ defineProps<{ key: K; value: V }>();
     }
 }
 
-// Svelte's `generics="..."` attribute is the equivalent knob and must walk
-// the same augmented-source path.
 #[test]
 fn svelte_generics_attr_marks_type_only_import_as_type_referenced() {
     let info = parse_sfc(
@@ -660,7 +752,6 @@ export let items: T[] = [];
     );
 }
 
-// Single-quoted attribute values must be recognised the same as double.
 #[test]
 fn vue_generic_attr_handles_single_quotes() {
     let info = parse_sfc(
@@ -675,8 +766,6 @@ fn vue_generic_attr_handles_single_quotes() {
     );
 }
 
-// Empty / whitespace-only generic attributes must not produce a parse error
-// or otherwise mark unrelated imports as type-referenced.
 #[test]
 fn vue_generic_attr_empty_value_is_inert() {
     let info = parse_sfc(
@@ -688,7 +777,6 @@ const x = ref(0);
 "#,
         "EmptyGeneric.vue",
     );
-    // ref is value-referenced (used as `ref(0)`) and must not be type-referenced
     assert!(
         !info
             .type_referenced_import_bindings
@@ -734,9 +822,6 @@ fn vue_script_src_attribute() {
 
 #[test]
 fn vue_script_src_bare_filename_normalized() {
-    // Vue/Svelte <script src="..."> resolves relative to the SFC file, so a
-    // bare `logic.ts` must be normalized to `./logic.ts` and not reported as
-    // an unlisted npm package. Same bug shape as Angular templateUrl (#99).
     let info = parse_sfc(
         r#"<script src="logic.ts" lang="ts"></script><template><div/></template>"#,
         "App.vue",
@@ -746,13 +831,85 @@ fn vue_script_src_bare_filename_normalized() {
 }
 
 #[test]
-fn svelte_script_src_bare_filename_normalized() {
+fn svelte_script_src_bare_filename_creates_no_import() {
     let info = parse_sfc(
         r#"<script src="store.js"></script><div>hi</div>"#,
         "App.svelte",
     );
-    assert_eq!(info.imports.len(), 1);
-    assert_eq!(info.imports[0].source, "./store.js");
+    assert!(
+        info.imports.is_empty(),
+        "Svelte markup script src should not create imports: {:?}",
+        info.imports
+    );
+}
+
+#[test]
+fn svelte_script_src_root_relative_creates_no_import() {
+    let info = parse_sfc(
+        r#"<script src="/some-lib.min.js"></script><div>hi</div>"#,
+        "App.svelte",
+    );
+    assert!(
+        info.imports.is_empty(),
+        "Svelte root-relative script src should not create imports: {:?}",
+        info.imports
+    );
+}
+
+#[test]
+fn svelte_script_src_relative_creates_no_import() {
+    let info = parse_sfc(
+        r#"<script src="./store.js"></script><div>hi</div>"#,
+        "App.svelte",
+    );
+    assert!(
+        info.imports.is_empty(),
+        "Svelte relative script src should not create imports: {:?}",
+        info.imports
+    );
+}
+
+#[test]
+fn svelte_script_src_type_module_creates_no_import() {
+    let info = parse_sfc(
+        r#"<script type="module" src="./module.js"></script><div>hi</div>"#,
+        "App.svelte",
+    );
+    assert!(
+        info.imports.is_empty(),
+        "Svelte type=module script src should not create imports: {:?}",
+        info.imports
+    );
+}
+
+#[test]
+fn svelte_head_script_src_creates_no_import() {
+    let info = parse_sfc(
+        r#"<svelte:head><script src="/some-lib.min.js" async></script></svelte:head>"#,
+        "App.svelte",
+    );
+    assert!(
+        info.imports.is_empty(),
+        "Svelte head script src should not create imports: {:?}",
+        info.imports
+    );
+}
+
+#[test]
+fn svelte_script_src_cdn_urls_create_no_import() {
+    for src in [
+        "https://cdn.example.com/lib.js",
+        "http://cdn.example.com/lib.js",
+        "//cdn.example.com/lib.js",
+    ] {
+        let source = format!(r#"<script src="{src}"></script><div>hi</div>"#);
+        let info = parse_sfc(&source, "App.svelte");
+        assert!(
+            info.imports.is_empty(),
+            "Svelte CDN script src should not create imports for {src}: {:?}",
+            info.imports
+        );
+    }
 }
 
 #[test]
@@ -815,13 +972,6 @@ export let items: T[] = [];
     assert_eq!(info.imports[0].source, "svelte");
 }
 
-// Regression for the knip #1670 reproduction shape: a type-only import in a
-// `<script lang="ts">` block whose binding is only consumed as a type
-// annotation. Knip's "real svelte compiler" mode strips types before
-// analysis, so the import vanishes from its view; plow extracts the raw
-// script body and parses it with oxc, so type-position bindings stay
-// classified as type-referenced and the upstream `export type` is not
-// flagged unused.
 #[test]
 fn svelte_script_keeps_type_only_imports_used_as_annotations() {
     let info = parse_sfc(
@@ -930,11 +1080,6 @@ const items = ref<T>();
     assert_eq!(info.imports[0].source, "vue");
 }
 
-// Regression for the knip #1714 reproduction shape: a `generic` attribute
-// whose constraint references a single user type with a primitive type
-// argument. Knip's parser-driven path drops the entire script body in that
-// case, plow's regex-based attrs scan keeps the body intact and oxc
-// parses it normally.
 #[test]
 fn vue_script_with_generic_type_argument() {
     let info = parse_sfc(
@@ -1033,8 +1178,6 @@ import { good } from 'vue';
     assert_eq!(info.imports[0].source, "vue");
 }
 
-// --- TypeScript typed template bindings (regression: infinite recursion) ---
-
 #[test]
 fn vue_v_for_typed_destructure_full_pipeline() {
     let info = parse_sfc(
@@ -1048,7 +1191,6 @@ import type { Item } from './types';
         "TypedVFor.vue",
     );
 
-    // items is used in the template (iterable), so it should NOT be in unused_import_bindings
     assert!(
         !info.unused_import_bindings.contains(&"items".to_string()),
         "items should be marked as used in v-for iterable, got unused: {:?}",
@@ -1069,13 +1211,11 @@ import List from './List.vue';
         "TypedSlot.vue",
     );
 
-    // data is shadowed by the slot binding, so it should be in unused_import_bindings
     assert!(
         info.unused_import_bindings.contains(&"data".to_string()),
         "data should be shadowed by v-slot binding, got unused: {:?}",
         info.unused_import_bindings
     );
-    // List component is used
     assert!(
         !info.unused_import_bindings.contains(&"List".to_string()),
         "List component should be used"
@@ -1160,7 +1300,6 @@ type Props = { href?: string; content?: string };
         "TypedSnippet.svelte",
     );
 
-    // cn is imported but never used in the template
     assert!(
         info.unused_import_bindings.contains(&"cn".to_string()),
         "cn should be unused, got unused: {:?}",
@@ -1213,12 +1352,8 @@ fn sfc_vue_with_leading_bom_produces_same_script_line_numbers_as_without_bom() {
     );
 }
 
-// --- convention auto-import candidate capture (issue #704) ---
-
 #[test]
 fn captures_unresolved_pascal_tags_with_zero_imports() {
-    // A Nuxt page may reference only convention auto-imported components, with
-    // no `import` statement at all.
     let info = parse_sfc(
         r#"
 <script setup lang="ts"></script>
@@ -1236,7 +1371,6 @@ fn captures_unresolved_pascal_tags_with_zero_imports() {
         info.auto_import_candidates
             .contains(&"BaseButton".to_string())
     );
-    // Native lowercase HTML elements are never captured.
     assert!(!info.auto_import_candidates.contains(&"div".to_string()));
     assert!(!info.auto_import_candidates.contains(&"span".to_string()));
 }
@@ -1250,7 +1384,6 @@ fn captures_kebab_tag_as_pascal_candidate() {
 "#,
         "pages/about.vue",
     );
-    // Only the canonical Pascal form is captured, not the raw kebab or camel form.
     assert!(
         info.auto_import_candidates
             .contains(&"BaseButton".to_string())
@@ -1278,7 +1411,42 @@ import Card001 from './Card001.vue';
 "#,
         "pages/index.vue",
     );
-    // An explicitly imported tag is credited as a used import, not captured as
-    // an auto-import candidate.
     assert!(!info.auto_import_candidates.contains(&"Card001".to_string()));
+}
+
+#[test]
+fn captures_script_setup_auto_import_candidates() {
+    let info = parse_sfc(
+        r#"
+<script setup lang="ts">
+useCounter();
+const label = formatPrice(10);
+const localOnly = () => label;
+localOnly();
+type Local = UseTypeOnly;
+</script>
+<template><Card001 /></template>
+"#,
+        "pages/index.vue",
+    );
+
+    assert!(
+        info.auto_import_candidates
+            .contains(&"useCounter".to_string())
+    );
+    assert!(
+        info.auto_import_candidates
+            .contains(&"formatPrice".to_string())
+    );
+    assert!(info.auto_import_candidates.contains(&"Card001".to_string()));
+    assert!(
+        !info
+            .auto_import_candidates
+            .contains(&"UseTypeOnly".to_string())
+    );
+    assert!(
+        !info
+            .auto_import_candidates
+            .contains(&"localOnly".to_string())
+    );
 }

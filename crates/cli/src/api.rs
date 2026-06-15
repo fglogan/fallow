@@ -281,14 +281,9 @@ pub fn actionable_error_hint(operation: &str, code: &str) -> Option<&'static str
         ("refresh", "invalid_token") => Some(
             "your stored license token is missing required claims. Reactivate with: plow license activate --trial --email <addr>",
         ),
-        // Trial + refresh are license-JWT flows: a stale / invalid JWT is
-        // fixed by reactivating via the trial endpoint.
         ("refresh" | "trial", "unauthorized") => Some(
             "authentication failed. Reactivate with: plow license activate --trial --email <addr>",
         ),
-        // upload-inventory uses a separate API key (`plow_live_k1_*`), not
-        // the license JWT. Reactivating the trial does NOT rotate the API
-        // key. Point users at key generation instead.
         ("upload-inventory", "unauthorized") => Some(
             "authentication failed. Generate an API key at https://plow.cloud/settings#api-keys and set PLOW_API_KEY on the runner. Note: this key is separate from the license JWT; `plow license activate --trial` will not fix this error.",
         ),
@@ -297,6 +292,12 @@ pub fn actionable_error_hint(operation: &str, code: &str) -> Option<&'static str
         ),
         ("upload-inventory", "payload_too_large") => Some(
             "inventory exceeds the 200,000-function server limit. Scope the walk with --exclude-paths, or open an issue if this is a legitimately large repo.",
+        ),
+        ("upload-static-findings", "unauthorized") => Some(
+            "authentication failed. Generate a live API key at https://plow.cloud/settings#api-keys and set PLOW_API_KEY on the runner. Note: a publishable ingest key (plow_pub_k1_) is not accepted here, and `plow license activate --trial` will not fix this error.",
+        ),
+        ("upload-static-findings", "payload_too_large") => Some(
+            "static findings exceed the 200,000-finding server limit. Scope the analysis with your plow ignore rules, or open an issue if this is a legitimately large repo.",
         ),
         _ => None,
     }
@@ -364,8 +365,6 @@ fn redact_bearer_tokens(detail: &str) -> String {
             token_end += 1;
         }
         if token_end == token_start {
-            // `Bearer` followed by no token character: preserve as-is and
-            // advance past the literal so we do not infinite-loop.
             out.push_str(BEARER);
             cursor = token_end;
             continue;
@@ -508,12 +507,6 @@ mod tests {
             body: r#"{"error":true,"code":"unauthorized"}"#.to_owned(),
         };
         let message = http_status_message(&mut response, "upload-inventory");
-        // API keys are a distinct secret from the license JWT. Sending trial
-        // users to `license activate --trial` when they get a 401 on upload
-        // is a dead-end support loop. The hint MUST both direct them to the
-        // API-keys page AND explain that the trial flow won't fix it, so we
-        // require the disqualifier to appear adjacent to "will not fix".
-        // Regression test for BLOCK 3 from the public-readiness panel.
         assert!(
             message.contains("https://plow.cloud/settings#api-keys"),
             "expected api-keys URL, got: {message}"
@@ -623,9 +616,8 @@ mod tests {
     #[expect(unsafe_code, reason = "env var mutation requires unsafe")]
     fn ca_bundle_read_errors_are_reported_as_client_setup_errors() {
         let prior = std::env::var(CA_BUNDLE_ENV).ok();
-        // SAFETY: env mutation is unsafe because it is not thread-safe. This
-        // test serializes its own writes and restores the prior value before
-        // returning; no other test in this module touches PLOW_CA_BUNDLE.
+        // SAFETY: This test owns the CA_BUNDLE_ENV mutation and restores the
+        // previous value before returning.
         unsafe {
             std::env::set_var(CA_BUNDLE_ENV, "/definitely/missing/plow-ca.pem");
         }
@@ -633,7 +625,8 @@ mod tests {
         let message = err.to_string();
         assert!(message.contains(CA_BUNDLE_ENV));
         assert!(message.contains("failed to read PEM bundle"));
-        // SAFETY: see the `set_var` safety note above.
+        // SAFETY: Restore the process environment to the value captured before
+        // the test mutation.
         unsafe {
             if let Some(value) = prior {
                 std::env::set_var(CA_BUNDLE_ENV, value);
@@ -698,9 +691,6 @@ mod tests {
 
     #[test]
     fn sanitize_network_error_preserves_literal_bearer_when_no_token_follows() {
-        // `Bearer ` followed by a non-token byte (e.g. `@`) leaves the prefix
-        // untouched so we do not corrupt non-secret prose that mentions the
-        // literal `Bearer `.
         let input = "Bearer @other";
         let output = sanitize_network_error(input);
         assert_eq!(output, input);
@@ -713,16 +703,131 @@ mod tests {
         assert_eq!(output, input);
     }
 
-    // Env-var assertions run in one test to avoid interleaving with parallel
-    // tests that also touch `PLOW_API_URL`. Restores the prior value.
+    #[test]
+    fn token_leak_authenticated_ureq_paths_stay_sanitized() {
+        const CLOUD_CLIENT: &str = include_str!("coverage/cloud_client.rs");
+        const UPLOAD_INVENTORY: &str = include_str!("coverage/upload_inventory.rs");
+        const UPLOAD_SOURCE_MAPS: &str = include_str!("coverage/upload_source_maps.rs");
+        const LICENSE: &str = include_str!("license/mod.rs");
+        const CI: &str = include_str!("ci.rs");
+
+        assert_eq!(
+            count_occurrences(CLOUD_CLIENT, ".header(\"Authorization\""),
+            1,
+            "update this guard when cloud runtime-context auth paths change"
+        );
+        assert_contains(
+            CLOUD_CLIENT,
+            "sanitize_network_error(&format!(\"{err}\"))",
+            "cloud runtime-context transport errors must be sanitized",
+        );
+
+        assert_eq!(
+            count_occurrences(UPLOAD_INVENTORY, ".header(\"Authorization\""),
+            1,
+            "update this guard when inventory upload auth paths change"
+        );
+        assert_contains(
+            UPLOAD_INVENTORY,
+            "UploadError::Network(sanitize_network_error(&format!(\"network error: {err}\")))",
+            "inventory upload transport errors must be sanitized",
+        );
+
+        assert_eq!(
+            count_occurrences(UPLOAD_SOURCE_MAPS, ".header(\"Authorization\""),
+            1,
+            "update this guard when source-map upload auth paths change"
+        );
+        assert_contains(
+            UPLOAD_SOURCE_MAPS,
+            "message: sanitize_network_error(&format!(\"network error: {err}\"))",
+            "source-map upload transport errors must be sanitized",
+        );
+
+        assert_eq!(
+            count_occurrences(LICENSE, ".header(\"Authorization\""),
+            1,
+            "update this guard when license refresh auth paths change"
+        );
+        assert_contains(
+            LICENSE,
+            "sanitize_network_error(&format!(\"failed to refresh the current license: {err}\"))",
+            "license refresh transport errors must be sanitized",
+        );
+
+        assert_eq!(
+            count_occurrences(CI, ".header(\"Authorization\""),
+            2,
+            "update this guard when GitHub reconciliation auth paths change"
+        );
+        assert_eq!(
+            count_occurrences(CI, ".header(\"PRIVATE-TOKEN\""),
+            3,
+            "update this guard when GitLab reconciliation auth paths change"
+        );
+        assert_contains(
+            CI,
+            "return Err(sanitize_network_error(&format!(",
+            "CI reconciliation retry wrapper must sanitize transport errors",
+        );
+    }
+
+    #[test]
+    fn token_leak_credential_debug_impls_stay_redacted() {
+        const ANALYZE: &str = include_str!("coverage/analyze.rs");
+        const CLOUD_CLIENT: &str = include_str!("coverage/cloud_client.rs");
+        const UPLOAD_INVENTORY: &str = include_str!("coverage/upload_inventory.rs");
+        const LICENSE: &str = include_str!("license/mod.rs");
+
+        assert_manual_debug_mask(
+            ANALYZE,
+            "AnalyzeArgs",
+            r#".field("api_key", &self.api_key.as_ref().map(|_| "***"))"#,
+        );
+        assert_manual_debug_mask(CLOUD_CLIENT, "CloudRequest", r#".field("api_key", &"***")"#);
+        assert_manual_debug_mask(
+            UPLOAD_INVENTORY,
+            "UploadInventoryArgs",
+            r#".field("api_key", &self.api_key.as_ref().map(|_| "***"))"#,
+        );
+        assert_manual_debug_mask(
+            LICENSE,
+            "ActivateArgs",
+            r#".field("raw_jwt", &self.raw_jwt.as_ref().map(|_| "***"))"#,
+        );
+    }
+
+    fn count_occurrences(haystack: &str, needle: &str) -> usize {
+        haystack.match_indices(needle).count()
+    }
+
+    fn assert_contains(source: &str, needle: &str, message: &str) {
+        assert!(
+            source.contains(needle),
+            "{message}; expected source to contain `{needle}`"
+        );
+    }
+
+    fn assert_manual_debug_mask(source: &str, type_name: &str, mask_snippet: &str) {
+        assert!(
+            source.contains(&format!("impl fmt::Debug for {type_name}"))
+                || source.contains(&format!("impl std::fmt::Debug for {type_name}")),
+            "{type_name} must keep a manual Debug impl"
+        );
+        assert_contains(
+            source,
+            mask_snippet,
+            &format!("{type_name} Debug impl must mask credential fields"),
+        );
+    }
+
     #[test]
     #[expect(unsafe_code, reason = "env var mutation requires unsafe")]
     fn api_url_respects_env_override_and_default() {
         let prior = std::env::var("PLOW_API_URL").ok();
 
-        // SAFETY: env mutation is unsafe because it is not thread-safe. This
-        // test serializes its own writes and restores the prior value before
-        // returning; no other test in this module touches PLOW_API_URL.
+        // SAFETY: This test owns the PLOW_API_URL mutation while validating
+        // default URL behavior.
         unsafe {
             std::env::remove_var("PLOW_API_URL");
         }
@@ -731,7 +836,7 @@ mod tests {
             "https://api.plow.cloud/v1/coverage/repo/inventory",
         );
 
-        // SAFETY: see the `remove_var` safety note above.
+        // SAFETY: Set a scoped override for this test case only.
         unsafe {
             std::env::set_var("PLOW_API_URL", "http://127.0.0.1:3000/");
         }
@@ -740,7 +845,8 @@ mod tests {
             "http://127.0.0.1:3000/v1/coverage/a/inventory",
         );
 
-        // SAFETY: see the `remove_var` safety note above.
+        // SAFETY: Restore the process environment to the value captured before
+        // the test mutation.
         unsafe {
             if let Some(value) = prior {
                 std::env::set_var("PLOW_API_URL", value);

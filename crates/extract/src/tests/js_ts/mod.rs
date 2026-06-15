@@ -1,3 +1,4 @@
+mod callee_uses;
 mod cjs;
 mod classes;
 mod complexity;
@@ -9,4 +10,5 @@ mod jsdoc;
 mod jsx_assets;
 mod jsx_retry;
 mod member_access;
+mod security_sources;
 mod unused_bindings;

@@ -1,4 +1,5 @@
 import { countCheckIssues } from "./analysis-utils.js";
+import { escapeMarkdownText, normalizeInlineText } from "./markdown-utils.js";
 import type { PlowCheckResult, PlowDupesResult } from "./types.js";
 
 export interface AnalysisCompleteParams {
@@ -64,8 +65,6 @@ export const buildParamsFromCli = (
   duplicationPercentage: dupes?.stats.duplication_percentage ?? 0,
   cloneGroups: dupes?.stats.clone_groups ?? 0,
 });
-
-type SeverityKey = "statusBarItem.errorBackground" | "statusBarItem.warningBackground";
 
 interface BreakdownLine {
   readonly count: keyof AnalysisCompleteParams;
@@ -182,20 +181,6 @@ export const buildStatusBarPartsFromLsp = (params: AnalysisCompleteParams): stri
   `${getDuplicationPercentage(params.duplicationPercentage).toFixed(1)}% duplication`,
 ];
 
-export const getStatusBarSeverityKey = (params: AnalysisCompleteParams): SeverityKey | null => {
-  if (params.unresolvedImports > 0) {
-    return "statusBarItem.errorBackground";
-  }
-
-  if (params.totalIssues > 0) {
-    return "statusBarItem.warningBackground";
-  }
-
-  return null;
-};
-
-const normalizeInlineText = (value: string): string => value.replace(/\s+/g, " ").trim();
-
 export const formatChangedSinceRefForStatusBar = (ref: string): string => {
   const normalized = normalizeInlineText(ref);
   return normalized.length > 48 ? `${normalized.slice(0, 45).trimEnd()}...` : normalized;
@@ -222,9 +207,6 @@ export const renderStatusBarText = (base: string, changedSince: string | null): 
   }
   return `${base} (since ${formatChangedSinceRefForStatusBar(changedSince)})`;
 };
-
-const escapeMarkdownText = (value: string): string =>
-  normalizeInlineText(value).replace(/([\\`*_{}[\]()#+.!|>-])/g, "\\$1");
 
 export const buildStatusBarTooltipMarkdown = (
   params: AnalysisCompleteParams,

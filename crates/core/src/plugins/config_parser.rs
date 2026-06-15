@@ -1,24 +1,16 @@
 //! AST-based config file parser utilities.
 //!
-//! Provides helpers to extract configuration values from JS/TS config files
-//! without evaluating them. Uses Oxc's parser for fast, safe AST walking.
-//!
-//! Common patterns handled:
-//! - `export default { key: "value" }` (default export object)
-//! - `export default defineConfig({ key: "value" })` (factory function)
-//! - `module.exports = { key: "value" }` (CJS)
-//! - Import specifiers (`import x from 'pkg'`)
-//! - Array literals (`["a", "b"]`)
-//! - Object properties (`{ key: "value" }`)
+//! Helpers for statically extracting config values from JS/TS files.
 
 use std::path::{Path, PathBuf};
 
-use plow_extract::visitor::extract_import_from_callable;
 use oxc_allocator::Allocator;
 #[allow(clippy::wildcard_imports, reason = "many AST types used")]
 use oxc_ast::ast::*;
 use oxc_parser::Parser;
 use oxc_span::SourceType;
+use plow_extract::visitor::extract_import_from_callable;
+use rustc_hash::FxHashSet;
 
 /// Extract all import source specifiers from JS/TS source code.
 #[must_use]
@@ -35,13 +27,7 @@ pub fn extract_imports(source: &str, path: &Path) -> Vec<String> {
     .unwrap_or_default()
 }
 
-/// Extract all import sources AND top-level `require('...')` expression statements.
-///
-/// Handles configs that load plugins via side-effect requires:
-/// ```js
-/// require("@nomiclabs/hardhat-waffle");
-/// import "@nomicfoundation/hardhat-toolbox";
-/// ```
+/// Extract import sources and top-level `require('...')` statements.
 #[must_use]
 pub fn extract_imports_and_requires(source: &str, path: &Path) -> Vec<String> {
     extract_from_source(source, path, |program| {
@@ -86,12 +72,17 @@ pub fn extract_config_string(source: &str, path: &Path, prop_path: &[&str]) -> O
     })
 }
 
-/// Extract string values from top-level properties of the default export/module.exports object.
-/// Returns all string literal values found for the given property key, recursively.
-///
-/// **Warning**: This recurses into nested objects/arrays. For config arrays that contain
-/// tuples like `["pkg-name", { options }]`, use [`extract_config_shallow_strings`] instead
-/// to avoid extracting option values as package names.
+/// Extract a shell command string from a property at a nested path.
+#[must_use]
+pub fn extract_config_command(source: &str, path: &Path, prop_path: &[&str]) -> Option<String> {
+    extract_from_source(source, path, |program| {
+        let obj = find_config_object(program)?;
+        get_nested_command_from_object(obj, prop_path)
+    })
+}
+
+/// Extract string values from top-level properties of the default export or
+/// `module.exports` object.
 #[must_use]
 pub fn extract_config_property_strings(source: &str, path: &Path, key: &str) -> Vec<String> {
     extract_from_source(source, path, |program| {
@@ -106,11 +97,6 @@ pub fn extract_config_property_strings(source: &str, path: &Path, key: &str) -> 
 }
 
 /// Extract only top-level string values from a property's array.
-///
-/// Unlike [`extract_config_property_strings`], this does NOT recurse into nested
-/// objects or sub-arrays. Useful for config arrays with tuple elements like:
-/// `reporters: ["default", ["jest-junit", { outputDirectory: "reports" }]]`
-/// — only `"default"` and `"jest-junit"` are returned, not `"reports"`.
 #[must_use]
 pub fn extract_config_shallow_strings(source: &str, path: &Path, key: &str) -> Vec<String> {
     extract_from_source(source, path, |program| {
@@ -122,9 +108,6 @@ pub fn extract_config_shallow_strings(source: &str, path: &Path, key: &str) -> V
 }
 
 /// Extract top-level string values from a config array, including object entries.
-///
-/// Handles string entries, tuple entries, and alias objects such as:
-/// `jsPlugins: ["pkg", ["pkg-with-options", {}], { specifier: "pkg-alias" }]`.
 #[must_use]
 pub fn extract_config_shallow_strings_or_object_property(
     source: &str,
@@ -144,10 +127,6 @@ pub fn extract_config_shallow_strings_or_object_property(
 }
 
 /// Extract shallow strings from an array property inside a nested object path.
-///
-/// Navigates `outer_path` to find a nested object, then extracts shallow strings
-/// from the `key` property. Useful for configs like Vitest where reporters are at
-/// `test.reporters`: `{ test: { reporters: ["default", ["vitest-sonar-reporter", {...}]] } }`.
 #[must_use]
 pub fn extract_config_nested_shallow_strings(
     source: &str,
@@ -168,7 +147,7 @@ pub fn extract_config_nested_shallow_strings(
     .unwrap_or_default()
 }
 
-/// Public wrapper for `find_config_object` for plugins that need manual AST walking.
+/// Public wrapper for `find_config_object`.
 pub fn find_config_object_pub<'a>(program: &'a Program) -> Option<&'a ObjectExpression<'a>> {
     find_config_object(program)
 }
@@ -216,15 +195,31 @@ pub(crate) fn array_expression<'a>(expr: &'a Expression<'a>) -> Option<&'a Array
     }
 }
 
-/// Convert a path-like expression to zero or more statically recoverable path strings.
-pub(crate) fn expression_to_path_values(expr: &Expression<'_>) -> Vec<String> {
+/// Convert a config path string to a `PathBuf` with platform-independent
+/// separator handling.
+pub(crate) fn path_from_config_string(raw: &str) -> PathBuf {
+    PathBuf::from(raw.replace('\\', "/"))
+}
+
+/// Convert a config path to the forward-slash string form used in plugin output.
+pub(crate) fn path_to_config_string(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
+/// Convert a path-like expression to a statically recoverable path.
+pub(crate) fn expression_to_path(expr: &Expression<'_>) -> Option<PathBuf> {
+    expression_to_path_string(expr).map(|path| path_from_config_string(&path))
+}
+
+/// Convert a path-like expression to zero or more statically recoverable paths.
+pub(crate) fn expression_to_path_values(expr: &Expression<'_>) -> Vec<PathBuf> {
     match expr {
         Expression::ArrayExpression(arr) => arr
             .elements
             .iter()
-            .filter_map(|element| element.as_expression().and_then(expression_to_path_string))
+            .filter_map(|element| element.as_expression().and_then(expression_to_path))
             .collect(),
-        _ => expression_to_path_string(expr).into_iter().collect(),
+        _ => expression_to_path(expr).into_iter().collect(),
     }
 }
 
@@ -257,9 +252,6 @@ fn is_truthy_bool_or_object(expr: &Expression<'_>) -> bool {
 }
 
 /// Extract keys of an object property at a nested path.
-///
-/// Useful for `PostCSS` config: `{ plugins: { autoprefixer: {}, tailwindcss: {} } }`
-/// → returns `["autoprefixer", "tailwindcss"]`.
 #[must_use]
 pub fn extract_config_object_keys(source: &str, path: &Path, prop_path: &[&str]) -> Vec<String> {
     extract_from_source(source, path, |program| {
@@ -269,14 +261,8 @@ pub fn extract_config_object_keys(source: &str, path: &Path, prop_path: &[&str])
     .unwrap_or_default()
 }
 
-/// Extract a value that may be a single string, a string array, or an object with string/array values.
-///
-/// Useful for Webpack `entry`, Rollup `input`, etc. that accept multiple formats:
-/// - `entry: "./src/index.js"` → `["./src/index.js"]`
-/// - `entry: ["./src/a.js", "./src/b.js"]` → `["./src/a.js", "./src/b.js"]`
-/// - `entry: { main: "./src/main.js" }` → `["./src/main.js"]`
-/// - `entry: { main: ["./src/polyfill.js", "./src/main.js"] }` → `["./src/polyfill.js", "./src/main.js"]`
-/// - `entry: { main: { import: "./src/main.js" } }` → `["./src/main.js"]`
+/// Extract a value that may be a single string, string array, or object with
+/// string/array values.
 #[must_use]
 pub fn extract_config_string_or_array(
     source: &str,
@@ -290,22 +276,17 @@ pub fn extract_config_string_or_array(
     .unwrap_or_default()
 }
 
-/// Extract a statically recoverable path-like string from a property path.
+/// Extract a statically recoverable path-like value from a property path.
 #[must_use]
-pub fn extract_config_path_string(source: &str, path: &Path, prop_path: &[&str]) -> Option<String> {
+pub fn extract_config_path(source: &str, path: &Path, prop_path: &[&str]) -> Option<PathBuf> {
     extract_from_source(source, path, |program| {
         let obj = find_config_object(program)?;
         let expr = get_nested_expression(obj, prop_path)?;
-        expression_to_path_string(expr)
+        expression_to_path(expr)
     })
 }
 
 /// Extract string values from a property path, also searching inside array elements.
-///
-/// Navigates `array_path` to find an array expression, then for each object in the
-/// array, navigates `inner_path` to extract string values. Useful for configs like
-/// Vitest projects where values are nested in array elements:
-/// - `test.projects[*].test.setupFiles`
 #[must_use]
 pub fn extract_config_array_nested_string_or_array(
     source: &str,
@@ -337,11 +318,6 @@ pub fn extract_config_array_nested_string_or_array(
 }
 
 /// Extract string values from a property path, searching inside all values of an object.
-///
-/// Navigates `object_path` to find an object expression, then for each property value
-/// (regardless of key name), navigates `inner_path` to extract string values. Useful for
-/// configs with dynamic keys like `angular.json`:
-/// - `projects.*.architect.build.options.styles`
 #[must_use]
 pub fn extract_config_object_nested_string_or_array(
     source: &str,
@@ -354,10 +330,7 @@ pub fn extract_config_object_nested_string_or_array(
     })
 }
 
-/// Extract string values from a property path, searching inside all values of an object.
-///
-/// Like [`extract_config_object_nested_string_or_array`] but returns a single optional string
-/// per object value (useful for fields like `architect.build.options.main`).
+/// Extract a single string value from each object under a property path.
 #[must_use]
 pub fn extract_config_object_nested_strings(
     source: &str,
@@ -371,9 +344,6 @@ pub fn extract_config_object_nested_strings(
 }
 
 /// Shared helper for object-nested extraction.
-///
-/// Navigates `object_path` to find an object expression, then for each property value
-/// that is itself an object, calls `extract_fn` to produce string values.
 fn extract_config_object_nested(
     source: &str,
     path: &Path,
@@ -405,10 +375,6 @@ fn extract_config_object_nested(
 }
 
 /// Extract `require('...')` call argument strings from a property's value.
-///
-/// Handles direct require calls and arrays containing require calls or tuples:
-/// - `plugins: [require('autoprefixer')]`
-/// - `plugins: [require('postcss-import'), [require('postcss-preset-env'), { ... }]]`
 #[must_use]
 pub fn extract_config_require_strings(source: &str, path: &Path, key: &str) -> Vec<String> {
     extract_from_source(source, path, |program| {
@@ -420,33 +386,32 @@ pub fn extract_config_require_strings(source: &str, path: &Path, key: &str) -> V
 }
 
 /// Extract alias mappings from an object or array-based alias config.
-///
-/// Supports common bundler config shapes like:
-/// - `resolve.alias = { "@": "./src" }`
-/// - `resolve.alias = [{ find: "@", replacement: "./src" }]`
-/// - `resolve.alias = [{ find: "@", replacement: fileURLToPath(new URL("./src", import.meta.url)) }]`
 #[must_use]
 pub fn extract_config_aliases(
     source: &str,
     path: &Path,
     prop_path: &[&str],
 ) -> Vec<(String, String)> {
-    extract_from_source(source, path, |program| {
-        let obj = find_config_object(program)?;
-        let expr = get_nested_expression(obj, prop_path)?;
-        let aliases = expression_to_alias_pairs(expr);
-        (!aliases.is_empty()).then_some(aliases)
-    })
-    .unwrap_or_default()
+    extract_config_aliases_kinded(source, path, prop_path)
+        .into_iter()
+        .map(|(find, replacement, _is_bare)| (find, replacement))
+        .collect()
+}
+
+/// Extract alias mappings where the replacement is a filesystem path value.
+#[must_use]
+pub fn extract_config_path_aliases(
+    source: &str,
+    path: &Path,
+    prop_path: &[&str],
+) -> Vec<(String, PathBuf)> {
+    extract_config_aliases_kinded(source, path, prop_path)
+        .into_iter()
+        .map(|(find, replacement, _is_bare)| (find, path_from_config_string(&replacement)))
+        .collect()
 }
 
 /// Extract alias mappings nested inside an array of config objects.
-///
-/// Navigates `array_path` to an array expression, then for each object element
-/// navigates `alias_path` and runs the same object/array alias extraction as
-/// [`extract_config_aliases`]. Useful for Vitest projects/workspaces where the
-/// aliases live one level down:
-/// - `test.projects[*].test.alias`
 #[must_use]
 pub fn extract_config_array_nested_aliases(
     source: &str,
@@ -473,14 +438,7 @@ pub fn extract_config_array_nested_aliases(
     .unwrap_or_default()
 }
 
-/// Like [`extract_config_aliases`] but each tuple carries a third element:
-/// `replacement_is_bare_string_literal`, true ONLY when the replacement was
-/// written as a plain bare string literal (not starting with `./`/`../`/`/`)
-/// rather than a path expression (`path.resolve(...)`, `path.join(...)`,
-/// `fileURLToPath(...)`, `new URL(...)`). This is the filesystem-free
-/// discriminator between a package-to-package alias (`'lodash-es' -> 'lodash'`,
-/// bare literal) and a directory/file alias (`'@' -> path.resolve(__dirname,
-/// 'src')`, path expression). See `test_alias::process_test_alias`.
+/// Like [`extract_config_aliases`] but each tuple carries a bare-string flag.
 #[must_use]
 pub fn extract_config_aliases_kinded(
     source: &str,
@@ -490,14 +448,14 @@ pub fn extract_config_aliases_kinded(
     extract_from_source(source, path, |program| {
         let obj = find_config_object(program)?;
         let expr = get_nested_expression(obj, prop_path)?;
-        let aliases = expression_to_alias_pairs_kinded(expr);
+        let mut visited = FxHashSet::default();
+        let aliases = resolve_alias_pairs_kinded(program, path, expr, &mut visited, 0);
         (!aliases.is_empty()).then_some(aliases)
     })
     .unwrap_or_default()
 }
 
-/// Kinded variant of [`extract_config_array_nested_aliases`] (see
-/// [`extract_config_aliases_kinded`] for the third tuple element).
+/// Kinded variant of [`extract_config_array_nested_aliases`].
 #[must_use]
 pub fn extract_config_array_nested_aliases_kinded(
     source: &str,
@@ -524,12 +482,7 @@ pub fn extract_config_array_nested_aliases_kinded(
     .unwrap_or_default()
 }
 
-/// Extract kinded aliases from a default-exported ARRAY config, the
-/// `defineWorkspace([...])` / `vitest.workspace.{ts,js}` shape. `find_config_object`
-/// only finds an object default export, so the workspace array file is invisible
-/// to the object-based extractors; this walks each object element of the array and
-/// reads `alias_path` from it. One level only (nested `test.projects` inside an
-/// element is out of scope).
+/// Extract kinded aliases from a default-exported ARRAY config.
 #[must_use]
 pub fn extract_default_export_array_aliases_kinded(
     source: &str,
@@ -551,11 +504,7 @@ pub fn extract_default_export_array_aliases_kinded(
     .unwrap_or_default()
 }
 
-/// True when a parsed config has neither an object default export
-/// (`find_config_object`) nor an array default export
-/// (`find_default_export_array`). Used to emit a diagnostic when a config shape
-/// such as `mergeConfig(base, defineConfig({...}))` or an imported-and-spread
-/// base config cannot be statically reached.
+/// True when a parsed config has neither an object nor array default export.
 #[must_use]
 pub fn config_default_export_unreachable(source: &str, path: &Path) -> bool {
     extract_from_source(source, path, |program| {
@@ -685,6 +634,42 @@ pub fn extract_config_array_object_string_pairs(
             };
             let Some(primary) = find_property(item, primary_key)
                 .and_then(|prop| expression_to_path_string(&prop.value))
+            else {
+                continue;
+            };
+            let secondary = find_property(item, secondary_key)
+                .and_then(|prop| expression_to_path_string(&prop.value));
+            results.push((primary, secondary));
+        }
+
+        (!results.is_empty()).then_some(results)
+    })
+    .unwrap_or_default()
+}
+
+/// Extract paired shell command and string values from each object element of an array.
+#[must_use]
+pub fn extract_config_array_object_command_pairs(
+    source: &str,
+    path: &Path,
+    array_path: &[&str],
+    primary_key: &str,
+    secondary_key: &str,
+) -> Vec<(String, Option<String>)> {
+    extract_from_source(source, path, |program| {
+        let obj = find_config_object(program)?;
+        let array_expr = get_nested_expression(obj, array_path)?;
+        let Expression::ArrayExpression(arr) = array_expr else {
+            return None;
+        };
+
+        let mut results = Vec::new();
+        for element in &arr.elements {
+            let Some(Expression::ObjectExpression(item)) = element.as_expression() else {
+                continue;
+            };
+            let Some(primary) = find_property(item, primary_key)
+                .and_then(|prop| expression_to_command(&prop.value))
             else {
                 continue;
             };
@@ -891,34 +876,45 @@ pub fn extract_vite_react_babel_dependencies(source: &str, path: &Path) -> Vec<S
     .unwrap_or_default()
 }
 
-/// Normalize a config-relative path string to a project-root-relative path.
+/// Normalize a config-relative path to a project-root-relative path.
 ///
 /// Handles values extracted from config files such as `"./src"`, `"src/lib"`,
 /// `"/src"`, or absolute filesystem paths under `root`.
 #[must_use]
-pub fn normalize_config_path(raw: &str, config_path: &Path, root: &Path) -> Option<String> {
-    if raw.is_empty() {
+pub fn normalize_config_path_buf(
+    raw: impl AsRef<Path>,
+    config_path: &Path,
+    root: &Path,
+) -> Option<PathBuf> {
+    let raw = raw.as_ref();
+    if raw.as_os_str().is_empty() {
         return None;
     }
 
-    let candidate = if let Some(stripped) = raw.strip_prefix('/') {
+    let raw_string = path_to_config_string(raw);
+    let raw_path = Path::new(&raw_string);
+    let candidate = if let Some(stripped) = raw_string.strip_prefix('/') {
         lexical_normalize(&root.join(stripped))
+    } else if raw_path.is_absolute() {
+        lexical_normalize(raw_path)
     } else {
-        let path = Path::new(raw);
-        if path.is_absolute() {
-            lexical_normalize(path)
-        } else {
-            let base = config_path.parent().unwrap_or(root);
-            lexical_normalize(&base.join(path))
-        }
+        let base = config_path.parent().unwrap_or(root);
+        lexical_normalize(&base.join(raw_path))
     };
 
     let relative = candidate.strip_prefix(root).ok()?;
-    let normalized = relative.to_string_lossy().replace('\\', "/");
-    (!normalized.is_empty()).then_some(normalized)
+    (!relative.as_os_str().is_empty()).then(|| relative.to_path_buf())
 }
 
-// ── Internal helpers ──────────────────────────────────────────────
+/// Normalize a config-relative path to a project-root-relative forward-slash string.
+#[must_use]
+pub fn normalize_config_path(
+    raw: impl AsRef<Path>,
+    config_path: &Path,
+    root: &Path,
+) -> Option<String> {
+    normalize_config_path_buf(raw, config_path, root).map(|path| path_to_config_string(&path))
+}
 
 /// Parse source and run an extraction function on the AST.
 ///
@@ -934,8 +930,6 @@ pub(crate) fn extract_from_source<T>(
     let source_type = SourceType::from_path(path).unwrap_or_default();
     let alloc = Allocator::default();
 
-    // For JSON files, wrap in parens and parse as JS so the AST matches
-    // what find_config_object expects (ExpressionStatement → ObjectExpression).
     let is_json = path
         .extension()
         .is_some_and(|ext| ext == "json" || ext == "jsonc");
@@ -1058,9 +1052,7 @@ fn push_unique_string(items: &mut Vec<String>, value: String) {
 fn find_config_object<'a>(program: &'a Program) -> Option<&'a ObjectExpression<'a>> {
     for stmt in &program.body {
         match stmt {
-            // export default { ... } or export default defineConfig({ ... })
             Statement::ExportDefaultDeclaration(decl) => {
-                // ExportDefaultDeclarationKind inherits Expression variants directly
                 let expr: Option<&Expression> = match &decl.declaration {
                     ExportDefaultDeclarationKind::ObjectExpression(obj) => {
                         return Some(obj);
@@ -1071,18 +1063,14 @@ fn find_config_object<'a>(program: &'a Program) -> Option<&'a ObjectExpression<'
                     _ => decl.declaration.as_expression(),
                 };
                 if let Some(expr) = expr {
-                    // Try direct extraction (handles defineConfig(), parens, TS annotations)
                     if let Some(obj) = extract_object_from_expression(expr) {
                         return Some(obj);
                     }
-                    // Fallback: resolve identifier reference to variable declaration
-                    // Handles: const config: Type = { ... }; export default config;
                     if let Some(name) = unwrap_to_identifier_name(expr) {
                         return find_variable_init_object(program, name);
                     }
                 }
             }
-            // module.exports = { ... }
             Statement::ExpressionStatement(expr_stmt) => {
                 if let Expression::AssignmentExpression(assign) = &expr_stmt.expression
                     && is_module_exports_target(&assign.left)
@@ -1094,8 +1082,6 @@ fn find_config_object<'a>(program: &'a Program) -> Option<&'a ObjectExpression<'
         }
     }
 
-    // JSON files: the program body might be a single expression statement
-    // Also handles JSON wrapped in parens: `({ ... })` (used for tsconfig.json parsing)
     if program.body.len() == 1
         && let Statement::ExpressionStatement(expr_stmt) = &program.body[0]
     {
@@ -1118,15 +1104,11 @@ fn extract_object_from_expression<'a>(
     expr: &'a Expression<'a>,
 ) -> Option<&'a ObjectExpression<'a>> {
     match expr {
-        // Direct object: `{ ... }`
         Expression::ObjectExpression(obj) => Some(obj),
-        // Factory call: `defineConfig({ ... })`
         Expression::CallExpression(call) => {
-            // Look for the first object argument
             for arg in &call.arguments {
                 match arg {
                     Argument::ObjectExpression(obj) => return Some(obj),
-                    // Arrow function body: `defineConfig(() => ({ ... }))`
                     Argument::ArrowFunctionExpression(arrow) => {
                         if arrow.expression
                             && !arrow.body.statements.is_empty()
@@ -1141,11 +1123,9 @@ fn extract_object_from_expression<'a>(
             }
             None
         }
-        // Parenthesized: `({ ... })`
         Expression::ParenthesizedExpression(paren) => {
             extract_object_from_expression(&paren.expression)
         }
-        // TS type annotations: `{ ... } satisfies Config` or `{ ... } as Config`
         Expression::TSSatisfiesExpression(ts_sat) => {
             extract_object_from_expression(&ts_sat.expression)
         }
@@ -1284,7 +1264,6 @@ fn get_nested_string_array_from_object(
     if path.len() == 1 {
         return Some(get_object_string_array_property(obj, path[0]));
     }
-    // Navigate into nested object
     let prop = find_property(obj, path[0])?;
     if let Expression::ObjectExpression(nested) = &prop.value {
         get_nested_string_array_from_object(nested, &path[1..])
@@ -1309,16 +1288,79 @@ fn get_nested_string_from_object(obj: &ObjectExpression, path: &[&str]) -> Optio
     }
 }
 
+/// Navigate a nested property path and get a shell command value.
+fn get_nested_command_from_object(obj: &ObjectExpression, path: &[&str]) -> Option<String> {
+    if path.is_empty() {
+        return None;
+    }
+    if path.len() == 1 {
+        return find_property(obj, path[0]).and_then(|prop| expression_to_command(&prop.value));
+    }
+    let prop = find_property(obj, path[0])?;
+    if let Expression::ObjectExpression(nested) = &prop.value {
+        get_nested_command_from_object(nested, &path[1..])
+    } else {
+        None
+    }
+}
+
 /// Convert an expression to a string if it's a string literal.
 pub(crate) fn expression_to_string(expr: &Expression) -> Option<String> {
     match expr {
         Expression::StringLiteral(s) => Some(s.value.to_string()),
         Expression::TemplateLiteral(t) if t.expressions.is_empty() => {
-            // Template literal with no expressions: `\`value\``
             t.quasis.first().map(|q| q.value.raw.to_string())
         }
         _ => None,
     }
+}
+
+/// Convert an expression to a shell command when static command tokens are recoverable.
+fn expression_to_command(expr: &Expression) -> Option<String> {
+    match expr {
+        Expression::StringLiteral(s) => Some(s.value.to_string()),
+        Expression::TemplateLiteral(template) => template_literal_to_command(template),
+        Expression::ParenthesizedExpression(paren) => expression_to_command(&paren.expression),
+        Expression::TSAsExpression(ts_as) => expression_to_command(&ts_as.expression),
+        Expression::TSSatisfiesExpression(ts_sat) => expression_to_command(&ts_sat.expression),
+        _ => None,
+    }
+}
+
+fn template_literal_to_command(template: &TemplateLiteral<'_>) -> Option<String> {
+    let first = template.quasis.first()?.value.raw.as_str();
+    if first.trim_start().is_empty() {
+        return None;
+    }
+
+    let mut command = String::new();
+    for (idx, quasi) in template.quasis.iter().enumerate() {
+        command.push_str(quasi.value.raw.as_str());
+        if idx < template.expressions.len() {
+            let next = template
+                .quasis
+                .get(idx + 1)
+                .map_or("", |next| next.value.raw.as_str());
+            if dynamic_template_boundary_splits_static_token(quasi.value.raw.as_str(), next) {
+                return None;
+            }
+            command.push(' ');
+        }
+    }
+
+    Some(command)
+}
+
+fn dynamic_template_boundary_splits_static_token(before: &str, after: &str) -> bool {
+    before
+        .chars()
+        .next_back()
+        .is_some_and(is_command_token_char)
+        && after.chars().next().is_some_and(is_command_token_char)
+}
+
+fn is_command_token_char(ch: char) -> bool {
+    !ch.is_whitespace() && !matches!(ch, '&' | '|' | ';' | '"' | '\'')
 }
 
 /// Convert an expression to a path-like string if it's statically recoverable.
@@ -1438,7 +1480,10 @@ fn expression_to_alias_pairs(expr: &Expression) -> Vec<(String, String)> {
                     return None;
                 };
                 let find = property_key_to_string(&prop.key)?;
-                let replacement = expression_to_path_values(&prop.value).into_iter().next()?;
+                let replacement = expression_to_path_values(&prop.value)
+                    .into_iter()
+                    .next()
+                    .map(|path| path_to_config_string(&path))?;
                 Some((find, replacement))
             })
             .collect(),
@@ -1512,10 +1557,295 @@ fn alias_replacement_kinded(expr: &Expression) -> Option<(String, bool)> {
                 !value.starts_with("./") && !value.starts_with("../") && !value.starts_with('/');
             Some((value, is_bare))
         }
-        // Path-builder calls / `new URL(...)` / other expressions are filesystem
-        // paths, never bare-package aliases.
+        // tsconfig `compilerOptions.paths` maps each key to an ARRAY of targets
+        // (`{ "@/*": ["./src/*"] }`); take the first entry, matching the prior
+        // non-kinded `expression_to_path_values().next()` behavior.
+        Expression::ArrayExpression(arr) => arr
+            .elements
+            .iter()
+            .find_map(ArrayExpressionElement::as_expression)
+            .and_then(alias_replacement_kinded),
         _ => expression_to_path_string(expr).map(|value| (value, false)),
     }
+}
+
+/// Maximum identifier-indirection hops the alias resolver follows before giving
+/// up. Each local-variable or imported-binding resolution counts one hop. The
+/// per-file `visited` set is the real cycle guard; this bound additionally
+/// terminates pathological local self-references (`const a = a`). Real configs
+/// rarely exceed one or two hops (`alias: importedAliases`).
+const MAX_ALIAS_RESOLVE_DEPTH: usize = 8;
+
+/// Sibling-file extensions probed when an alias identifier is imported from a
+/// relative specifier. Mirrors the JS/TS config extensions Vite/Vitest configs
+/// and their shared alias modules use. `.js` first matches the common
+/// JS-project case; the direct-as-written read happens before any probing. JSON
+/// is intentionally excluded: it parses as a bare expression with no `export`,
+/// so `find_exported_init` could never recover an alias literal from it.
+const ALIAS_SIBLING_EXTS: [&str; 6] = ["js", "mjs", "cjs", "ts", "mts", "cts"];
+
+/// Resolve an alias expression into `(find, replacement, is_bare)` tuples,
+/// following identifiers and expanding spreads.
+///
+/// Beyond the inline object (`{ '@': './src' }`) and array
+/// (`[{ find, replacement }]`) forms, this handles the indirection shapes from
+/// issue #811:
+/// - an identifier bound to a local `const NAME = [...] | {...}`,
+/// - an identifier imported from a relative sibling file
+///   (`import { sharedAliases } from "./vite.shared.js"`), read one hop and
+///   parsed for `export const NAME` / `export default` / `export { NAME }`,
+/// - array spread elements (`[...a, ...b]`) and object spread properties
+///   (`{ ...a, '@': './src' }`), each resolved recursively.
+///
+/// `config_path` is the file `expr` lives in (used to resolve relative sibling
+/// imports). `visited` holds already-read sibling paths to break import cycles;
+/// `depth` bounds identifier indirection via [`MAX_ALIAS_RESOLVE_DEPTH`].
+fn resolve_alias_pairs_kinded(
+    program: &Program,
+    config_path: &Path,
+    expr: &Expression,
+    visited: &mut FxHashSet<PathBuf>,
+    depth: usize,
+) -> Vec<(String, String, bool)> {
+    match expr {
+        Expression::ParenthesizedExpression(paren) => {
+            resolve_alias_pairs_kinded(program, config_path, &paren.expression, visited, depth)
+        }
+        Expression::TSAsExpression(ts_as) => {
+            resolve_alias_pairs_kinded(program, config_path, &ts_as.expression, visited, depth)
+        }
+        Expression::TSSatisfiesExpression(ts_sat) => {
+            resolve_alias_pairs_kinded(program, config_path, &ts_sat.expression, visited, depth)
+        }
+        Expression::ObjectExpression(obj) => {
+            let mut pairs = Vec::new();
+            for prop in &obj.properties {
+                match prop {
+                    ObjectPropertyKind::ObjectProperty(prop) => {
+                        if let Some(find) = property_key_to_string(&prop.key)
+                            && let Some((replacement, is_bare)) =
+                                alias_replacement_kinded(&prop.value)
+                        {
+                            pairs.push((find, replacement, is_bare));
+                        }
+                    }
+                    // `{ ...sharedAliases, '@': './src' }`
+                    ObjectPropertyKind::SpreadProperty(spread) => {
+                        pairs.extend(resolve_alias_pairs_kinded(
+                            program,
+                            config_path,
+                            &spread.argument,
+                            visited,
+                            depth,
+                        ));
+                    }
+                }
+            }
+            pairs
+        }
+        Expression::ArrayExpression(arr) => {
+            let mut pairs = Vec::new();
+            for element in &arr.elements {
+                match element {
+                    // `[...sharedAliases, { find, replacement }]`
+                    ArrayExpressionElement::SpreadElement(spread) => {
+                        pairs.extend(resolve_alias_pairs_kinded(
+                            program,
+                            config_path,
+                            &spread.argument,
+                            visited,
+                            depth,
+                        ));
+                    }
+                    _ => {
+                        if let Some(Expression::ObjectExpression(obj)) = element.as_expression()
+                            && let Some(find) = find_property(obj, "find")
+                                .and_then(|prop| expression_to_string(&prop.value))
+                            && let Some((replacement, is_bare)) = find_property(obj, "replacement")
+                                .and_then(|prop| alias_replacement_kinded(&prop.value))
+                        {
+                            pairs.push((find, replacement, is_bare));
+                        }
+                    }
+                }
+            }
+            pairs
+        }
+        Expression::Identifier(id) => {
+            resolve_identifier_alias_pairs(program, config_path, id.name.as_str(), visited, depth)
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// Resolve an identifier used as an alias value to its literal pairs, first by
+/// local `const`/`let`/`var` binding, then by a one-hop relative import.
+fn resolve_identifier_alias_pairs(
+    program: &Program,
+    config_path: &Path,
+    name: &str,
+    visited: &mut FxHashSet<PathBuf>,
+    depth: usize,
+) -> Vec<(String, String, bool)> {
+    if depth >= MAX_ALIAS_RESOLVE_DEPTH {
+        return Vec::new();
+    }
+    // Local `const NAME = [...] | {...}` (or `const NAME = otherIdentifier`).
+    if let Some(init) = find_variable_init_expression(program, name) {
+        return resolve_alias_pairs_kinded(program, config_path, init, visited, depth + 1);
+    }
+    // `import { NAME } from "./sibling"` / `import NAME from "./sibling"`.
+    let Some((specifier, imported_name)) = find_relative_import_binding(program, name) else {
+        return Vec::new();
+    };
+    resolve_imported_alias_pairs(
+        config_path,
+        &specifier,
+        imported_name.as_deref(),
+        visited,
+        depth + 1,
+    )
+}
+
+/// Read a relative sibling file and resolve the alias literal it exports under
+/// `imported_name` (`None` = default export).
+fn resolve_imported_alias_pairs(
+    config_path: &Path,
+    specifier: &str,
+    imported_name: Option<&str>,
+    visited: &mut FxHashSet<PathBuf>,
+    depth: usize,
+) -> Vec<(String, String, bool)> {
+    let Some((sibling_path, sibling_source)) = resolve_sibling_module(config_path, specifier)
+    else {
+        return Vec::new();
+    };
+    if !visited.insert(sibling_path.clone()) {
+        return Vec::new();
+    }
+    extract_from_source(&sibling_source, &sibling_path, |program| {
+        let init = find_exported_init(program, imported_name)?;
+        let pairs = resolve_alias_pairs_kinded(program, &sibling_path, init, visited, depth);
+        (!pairs.is_empty()).then_some(pairs)
+    })
+    .unwrap_or_default()
+}
+
+/// Find a top-level variable declaration by name and return its init expression
+/// (array, object, or another identifier). Covers bare `const NAME = ...` and
+/// `export const NAME = ...`. Generalizes [`find_variable_init_object`] to any
+/// init shape so the alias resolver can recurse on array/identifier inits.
+fn find_variable_init_expression<'a>(
+    program: &'a Program<'a>,
+    name: &str,
+) -> Option<&'a Expression<'a>> {
+    for stmt in &program.body {
+        let decl = match stmt {
+            Statement::VariableDeclaration(decl) => decl,
+            Statement::ExportNamedDeclaration(export) => match &export.declaration {
+                Some(Declaration::VariableDeclaration(decl)) => decl,
+                _ => continue,
+            },
+            _ => continue,
+        };
+        for declarator in &decl.declarations {
+            if let BindingPattern::BindingIdentifier(id) = &declarator.id
+                && id.name == name
+                && let Some(init) = &declarator.init
+            {
+                return Some(init);
+            }
+        }
+    }
+    None
+}
+
+/// Find the init expression a sibling module exports under `name`
+/// (`None` = default export). For named exports this covers both
+/// `export const NAME = ...` and a local `const NAME = ...` later re-exported
+/// via `export { NAME }` (both surface through [`find_variable_init_expression`]).
+fn find_exported_init<'a>(
+    program: &'a Program<'a>,
+    name: Option<&str>,
+) -> Option<&'a Expression<'a>> {
+    match name {
+        Some(name) => find_variable_init_expression(program, name),
+        None => program.body.iter().find_map(|stmt| {
+            if let Statement::ExportDefaultDeclaration(decl) = stmt {
+                decl.declaration.as_expression()
+            } else {
+                None
+            }
+        }),
+    }
+}
+
+/// Find the import that binds local `name` to a RELATIVE module, returning the
+/// specifier and the imported name (`None` for a default import). Bare-package
+/// imports are intentionally skipped: reading a literal alias table out of
+/// `node_modules` is not a real-world config shape.
+fn find_relative_import_binding(program: &Program, name: &str) -> Option<(String, Option<String>)> {
+    for stmt in &program.body {
+        let Statement::ImportDeclaration(decl) = stmt else {
+            continue;
+        };
+        let specifier = decl.source.value.as_str();
+        if !is_relative_specifier(specifier) {
+            continue;
+        }
+        let Some(specifiers) = &decl.specifiers else {
+            continue;
+        };
+        for spec in specifiers {
+            match spec {
+                ImportDeclarationSpecifier::ImportSpecifier(spec) if spec.local.name == name => {
+                    return Some((
+                        specifier.to_string(),
+                        Some(spec.imported.name().to_string()),
+                    ));
+                }
+                ImportDeclarationSpecifier::ImportDefaultSpecifier(spec)
+                    if spec.local.name == name =>
+                {
+                    return Some((specifier.to_string(), None));
+                }
+                _ => {}
+            }
+        }
+    }
+    None
+}
+
+/// True for a relative/absolute module specifier (`./x`, `../x`, `/x`), the
+/// shapes that point at a sibling file rather than an npm package.
+fn is_relative_specifier(specifier: &str) -> bool {
+    specifier.starts_with("./") || specifier.starts_with("../") || specifier.starts_with('/')
+}
+
+/// Resolve a relative specifier against `config_path`'s directory to a readable
+/// sibling file, returning the resolved path and its source. Tries the path as
+/// written first (covers `./vite.shared.js`), then appends each known config
+/// extension (covers extensionless `./vite.shared` and dotted basenames where
+/// `Path::extension` would misread `.shared`), then an `index.*` directory file.
+fn resolve_sibling_module(config_path: &Path, specifier: &str) -> Option<(PathBuf, String)> {
+    let parent = config_path.parent().unwrap_or(config_path);
+    let direct = parent.join(specifier);
+    if let Ok(source) = std::fs::read_to_string(&direct) {
+        return Some((direct, source));
+    }
+    for ext in ALIAS_SIBLING_EXTS {
+        let candidate = parent.join(format!("{specifier}.{ext}"));
+        if let Ok(source) = std::fs::read_to_string(&candidate) {
+            return Some((candidate, source));
+        }
+    }
+    for ext in ALIAS_SIBLING_EXTS {
+        let candidate = direct.join(format!("index.{ext}"));
+        if let Ok(source) = std::fs::read_to_string(&candidate) {
+            return Some((candidate, source));
+        }
+    }
+    None
 }
 
 /// Find a default-exported array config, the `defineWorkspace([...])` /
@@ -1539,7 +1869,6 @@ fn array_from_expression<'a>(expr: &'a Expression<'a>) -> Option<&'a ArrayExpres
         Expression::ParenthesizedExpression(paren) => array_from_expression(&paren.expression),
         Expression::TSAsExpression(ts_as) => array_from_expression(&ts_as.expression),
         Expression::TSSatisfiesExpression(ts_sat) => array_from_expression(&ts_sat.expression),
-        // defineWorkspace([...]) / defineConfig([...]): the array is the first arg.
         Expression::CallExpression(call) => call
             .arguments
             .first()
@@ -1549,7 +1878,7 @@ fn array_from_expression<'a>(expr: &'a Expression<'a>) -> Option<&'a ArrayExpres
     }
 }
 
-fn lexical_normalize(path: &Path) -> PathBuf {
+pub(crate) fn lexical_normalize(path: &Path) -> PathBuf {
     let mut normalized = PathBuf::new();
 
     for component in path.components() {
@@ -1597,7 +1926,6 @@ fn collect_shallow_string_values(expr: &Expression) -> Vec<String> {
                         Expression::StringLiteral(s) => {
                             values.push(s.value.to_string());
                         }
-                        // Handle tuples: ["pkg-name", { options }] → extract first string
                         Expression::ArrayExpression(sub_arr) => {
                             if let Some(first) = sub_arr.elements.first()
                                 && let Some(first_expr) = first.as_expression()
@@ -1611,7 +1939,6 @@ fn collect_shallow_string_values(expr: &Expression) -> Vec<String> {
                 }
             }
         }
-        // Handle objects: { "key": "value" } or { "key": ["pkg", { opts }] } → extract values
         Expression::ObjectExpression(obj) => {
             for prop in &obj.properties {
                 if let ObjectPropertyKind::ObjectProperty(p) = prop {
@@ -1619,7 +1946,6 @@ fn collect_shallow_string_values(expr: &Expression) -> Vec<String> {
                         Expression::StringLiteral(s) => {
                             values.push(s.value.to_string());
                         }
-                        // Handle tuples: { "key": ["pkg-name", { options }] }
                         Expression::ArrayExpression(sub_arr) => {
                             if let Some(first) = sub_arr.elements.first()
                                 && let Some(first_expr) = first.as_expression()
@@ -1804,11 +2130,6 @@ fn expression_to_string_or_array(expr: &Expression) -> Vec<String> {
                 Expression::ObjectExpression(obj) => find_property(obj, "input")
                     .map(|p| expression_to_string_or_array(&p.value))
                     .unwrap_or_default(),
-                // `expression_to_path_string` is a superset of `expression_to_string`
-                // (it falls through to it for string/template literals) that also
-                // evaluates statically recoverable path-helper calls such as
-                // `resolve(__dirname, "src/app.ts")`, `path.resolve(...)`, `join(...)`,
-                // `fileURLToPath(...)`, and `new URL(...)`. See issue #604.
                 _ => expression_to_path_string(e).into_iter().collect(),
             })
             .collect(),
@@ -1833,7 +2154,6 @@ fn expression_to_string_or_array(expr: &Expression) -> Vec<String> {
                 }
             })
             .collect(),
-        // A single top-level path-helper call, e.g. `lib.entry: resolve(__dirname, "src/x.ts")`.
         _ => expression_to_path_string(expr).into_iter().collect(),
     }
 }
@@ -1856,7 +2176,6 @@ fn collect_require_sources(expr: &Expression) -> Vec<String> {
                                 sources.push(s);
                             }
                         }
-                        // Tuple: [require('pkg'), options]
                         Expression::ArrayExpression(sub_arr) => {
                             if let Some(first) = sub_arr.elements.first()
                                 && let Some(Expression::CallExpression(call)) =
@@ -1946,7 +2265,6 @@ mod tests {
 
     #[test]
     fn extract_lazy_imports_block_body_with_return() {
-        // Less common but legal: explicit return body. Still supported.
         let source = r"
             export default defineConfig({
                 commands: [
@@ -1960,8 +2278,6 @@ mod tests {
 
     #[test]
     fn extract_lazy_imports_skips_unknown_element_shapes() {
-        // Mixed array with strings, numbers, objects without `file` — these
-        // are not lazy imports and must be silently ignored.
         let source = r"
             export default defineConfig({
                 commands: [
@@ -2077,8 +2393,6 @@ mod tests {
         assert_eq!(result, None);
     }
 
-    // ── extract_config_object_keys tests ────────────────────────────
-
     #[test]
     fn object_keys_postcss_plugins() {
         let source = r"
@@ -2123,8 +2437,6 @@ mod tests {
         let keys = extract_config_object_keys(source, &js_path(), &["plugins"]);
         assert!(keys.is_empty());
     }
-
-    // ── extract_config_string_or_array tests ────────────────────────
 
     #[test]
     fn string_or_array_single_string() {
@@ -2214,8 +2526,6 @@ mod tests {
 
     #[test]
     fn string_or_array_object_path_helper_values() {
-        // Issue #604: object values written as path-helper calls are evaluated,
-        // with the leading __dirname / path.resolve / join anchor dropped.
         let source = r#"
             import { resolve, join } from "node:path";
             import path from "node:path";
@@ -2287,8 +2597,6 @@ mod tests {
 
     #[test]
     fn string_or_array_non_literal_path_helper_args_dropped() {
-        // A path-helper call with a non-literal, non-anchor argument is not
-        // statically recoverable and must be dropped, not guessed.
         let source = r#"
             import { resolve } from "node:path";
             export default { build: { lib: { entry: resolve(baseDir, "src/index.ts") } } };
@@ -2299,8 +2607,6 @@ mod tests {
             "non-literal path-helper args must be dropped: {result:?}"
         );
     }
-
-    // ── extract_config_require_strings tests ────────────────────────
 
     #[test]
     fn require_strings_array() {
@@ -2484,8 +2790,6 @@ mod tests {
 
     #[test]
     fn extract_array_object_string_pairs_empty_for_object_form() {
-        // Object (non-array) value at the path yields no pairs; the object form
-        // is handled separately by `extract_config_string`.
         let source = r#"
             export default {
                 webServer: { command: "srvx --port 3000" }
@@ -2696,7 +3000,27 @@ mod tests {
         );
     }
 
-    // ── JSON wrapped in parens (for tsconfig.json parsing) ──────────
+    #[test]
+    fn normalize_config_path_mixed_separators_and_parent_dirs() {
+        let config_path = PathBuf::from("/project/config/vite.config.ts");
+        let root = PathBuf::from("/project");
+
+        assert_eq!(
+            normalize_config_path(".\\src\\..\\app\\lib", &config_path, &root),
+            Some("config/app/lib".to_string())
+        );
+    }
+
+    #[test]
+    fn normalize_config_path_leading_slash_stays_project_relative() {
+        let config_path = PathBuf::from("/project/vite.config.ts");
+        let root = PathBuf::from("/project");
+
+        assert_eq!(
+            normalize_config_path("/src\\lib", &config_path, &root),
+            Some("src/lib".to_string())
+        );
+    }
 
     #[test]
     fn json_wrapped_in_parens_string() {
@@ -2723,8 +3047,6 @@ mod tests {
         assert_eq!(keys, vec!["autoprefixer", "tailwindcss"]);
     }
 
-    // ── JSON file extension detection ────────────────────────────
-
     fn json_path() -> PathBuf {
         PathBuf::from("config.json")
     }
@@ -2746,8 +3068,6 @@ mod tests {
         let val = extract_config_string(source, &path, &["key"]);
         assert_eq!(val, Some("value".to_string()));
     }
-
-    // ── defineConfig with arrow function ─────────────────────────
 
     #[test]
     fn extract_define_config_arrow_function() {
@@ -2809,8 +3129,6 @@ mod tests {
         assert_eq!(themes, vec!["classic"]);
     }
 
-    // ── module.exports with nested properties ────────────────────
-
     #[test]
     fn module_exports_nested_string() {
         let source = r#"
@@ -2825,8 +3143,6 @@ mod tests {
         let val = extract_config_string(source, &js_path(), &["resolve", "alias", "@"]);
         assert_eq!(val, Some("./src".to_string()));
     }
-
-    // ── extract_config_property_strings (recursive) ──────────────
 
     #[test]
     fn property_strings_nested_objects() {
@@ -2850,8 +3166,6 @@ mod tests {
         assert!(values.is_empty());
     }
 
-    // ── extract_config_shallow_strings ────────────────────────────
-
     #[test]
     fn shallow_strings_tuple_array() {
         let source = r#"
@@ -2861,7 +3175,6 @@ mod tests {
         "#;
         let values = extract_config_shallow_strings(source, &js_path(), "reporters");
         assert_eq!(values, vec!["default", "jest-junit"]);
-        // "reports" should NOT be extracted (it's inside an options object)
         assert!(!values.contains(&"reports".to_string()));
     }
 
@@ -2905,8 +3218,6 @@ mod tests {
             ]
         );
     }
-
-    // ── extract_config_nested_shallow_strings tests ──────────────
 
     #[test]
     fn nested_shallow_strings_vitest_reporters() {
@@ -2952,8 +3263,6 @@ mod tests {
         assert!(values.is_empty());
     }
 
-    // ── extract_config_string_or_array edge cases ────────────────
-
     #[test]
     fn string_or_array_missing_path() {
         let source = r"export default {};";
@@ -2963,13 +3272,10 @@ mod tests {
 
     #[test]
     fn string_or_array_non_string_values() {
-        // When values are not strings (e.g., numbers), they should be skipped
         let source = r"export default { entry: [42, true] };";
         let result = extract_config_string_or_array(source, &js_path(), &["entry"]);
         assert!(result.is_empty());
     }
-
-    // ── extract_config_array_nested_string_or_array ──────────────
 
     #[test]
     fn array_nested_extraction() {
@@ -3013,8 +3319,6 @@ mod tests {
         assert!(results.is_empty());
     }
 
-    // ── extract_config_object_nested_string_or_array ─────────────
-
     #[test]
     fn object_nested_extraction() {
         let source = r#"{
@@ -3041,11 +3345,6 @@ mod tests {
 
     #[test]
     fn array_with_object_input_form_extracted() {
-        // Angular CLI schema allows both string and object forms in `styles`:
-        //   "styles": ["src/styles.scss", { "input": "src/theme.scss", "inject": false }]
-        // The object form declares bundle-name / inject options for vendor
-        // stylesheets. Previously the array branch silently dropped object
-        // elements. See #126.
         let source = r#"{
             "projects": {
                 "app": {
@@ -3077,8 +3376,6 @@ mod tests {
             results.contains(&"src/theme.scss".to_string()),
             "object form with `input` must be extracted: {results:?}"
         );
-        // Object without `input` has nothing to extract; must NOT leak
-        // unrelated property values (e.g., `bundleName`).
         assert!(
             !results.contains(&"lazy-only".to_string()),
             "bundleName must not be misinterpreted as a path: {results:?}"
@@ -3088,8 +3385,6 @@ mod tests {
             "bundleName from full object must not leak: {results:?}"
         );
     }
-
-    // ── extract_config_object_nested_strings ─────────────────────
 
     #[test]
     fn object_nested_strings_extraction() {
@@ -3109,8 +3404,6 @@ mod tests {
         assert!(results.contains(&"@nx/vite:test".to_string()));
     }
 
-    // ── extract_config_require_strings edge cases ────────────────
-
     #[test]
     fn require_strings_direct_call() {
         let source = r"module.exports = { adapter: require('@sveltejs/adapter-node') };";
@@ -3124,8 +3417,6 @@ mod tests {
         let deps = extract_config_require_strings(source, &js_path(), "plugins");
         assert!(deps.is_empty());
     }
-
-    // ── extract_imports edge cases ───────────────────────────────
 
     #[test]
     fn extract_imports_no_imports() {
@@ -3157,8 +3448,6 @@ mod tests {
         assert_eq!(imports, vec!["module-a", "module-b", "module-c"]);
     }
 
-    // ── Template literal support ─────────────────────────────────
-
     #[test]
     fn template_literal_in_string_or_array() {
         let source = r"export default { entry: `./src/index.ts` };";
@@ -3173,7 +3462,73 @@ mod tests {
         assert_eq!(val, Some("./tests".to_string()));
     }
 
-    // ── Empty/missing path navigation ────────────────────────────
+    #[test]
+    fn template_literal_command_recovers_static_command_tokens() {
+        let source = r"
+            const PORT = 3000;
+            export default {
+                webServer: {
+                    command: `pnpm exec srvx --port ${PORT} --hostname 127.0.0.1`
+                }
+            };
+        ";
+        let val = extract_config_command(source, &ts_path(), &["webServer", "command"]);
+        assert_eq!(
+            val,
+            Some("pnpm exec srvx --port   --hostname 127.0.0.1".to_string())
+        );
+    }
+
+    #[test]
+    fn template_literal_command_skips_dynamic_prefix() {
+        let source = r"
+            export default {
+                webServer: { command: `${serverCommand} && pnpm exec srvx` }
+            };
+        ";
+        let val = extract_config_command(source, &ts_path(), &["webServer", "command"]);
+        assert!(val.is_none());
+    }
+
+    #[test]
+    fn template_literal_command_skips_split_static_token() {
+        let source = r"
+            export default {
+                webServer: { command: `pnpm exec sr${part}vx --port 3000` }
+            };
+        ";
+        let val = extract_config_command(source, &ts_path(), &["webServer", "command"]);
+        assert!(val.is_none());
+    }
+
+    #[test]
+    fn array_object_command_pairs_recover_template_command() {
+        let source = r"
+            const PORT = 3000;
+            export default {
+                webServer: [
+                    {
+                        command: `pnpm exec srvx --port ${PORT}`,
+                        cwd: 'apps/web'
+                    }
+                ]
+            };
+        ";
+        let pairs = extract_config_array_object_command_pairs(
+            source,
+            &ts_path(),
+            &["webServer"],
+            "command",
+            "cwd",
+        );
+        assert_eq!(
+            pairs,
+            vec![(
+                "pnpm exec srvx --port  ".to_string(),
+                Some("apps/web".to_string())
+            )]
+        );
+    }
 
     #[test]
     fn nested_string_array_empty_path() {
@@ -3196,11 +3551,8 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // ── No config object found ───────────────────────────────────
-
     #[test]
     fn no_config_object_returns_empty() {
-        // Source with no default export or module.exports
         let source = r"const x = 42;";
         let result = extract_config_string(source, &js_path(), &["key"]);
         assert!(result.is_none());
@@ -3212,8 +3564,6 @@ mod tests {
         assert!(keys.is_empty());
     }
 
-    // ── String literal with string key property ──────────────────
-
     #[test]
     fn property_with_string_key() {
         let source = r#"export default { "string-key": "value" };"#;
@@ -3223,13 +3573,10 @@ mod tests {
 
     #[test]
     fn nested_navigation_through_non_object() {
-        // Trying to navigate through a string value should return None
         let source = r#"export default { level1: "not-an-object" };"#;
         let val = extract_config_string(source, &js_path(), &["level1", "level2"]);
         assert!(val.is_none());
     }
-
-    // ── Variable reference resolution ───────────────────────────
 
     #[test]
     fn variable_reference_untyped() {
@@ -3278,8 +3625,6 @@ mod tests {
         assert_eq!(include, vec!["**/*.test.ts"]);
     }
 
-    // ── TS type annotation wrappers ─────────────────────────────
-
     #[test]
     fn ts_satisfies_direct_export() {
         let source = r#"
@@ -3300,5 +3645,313 @@ mod tests {
         "#;
         let val = extract_config_string(source, &ts_path(), &["testDir"]);
         assert_eq!(val, Some("./tests".to_string()));
+    }
+
+    // --- issue #811: resolve.alias as imported identifier / spread ---
+
+    fn aliases(source: &str) -> Vec<(String, String)> {
+        extract_config_aliases(source, &js_path(), &["resolve", "alias"])
+    }
+
+    #[test]
+    fn aliases_inline_object_still_extracted() {
+        // Regression: the resolver must not change inline-object behavior.
+        let source = r#"
+            export default defineConfig({
+                resolve: { alias: { "@": "./src", utils: "../../utils" } }
+            });
+        "#;
+        let mut got = aliases(source);
+        got.sort();
+        assert_eq!(
+            got,
+            vec![
+                ("@".to_string(), "./src".to_string()),
+                ("utils".to_string(), "../../utils".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn aliases_inline_array_still_extracted() {
+        let source = r#"
+            export default defineConfig({
+                resolve: { alias: [{ find: "@", replacement: "./src" }] }
+            });
+        "#;
+        assert_eq!(
+            aliases(source),
+            vec![("@".to_string(), "./src".to_string())]
+        );
+    }
+
+    #[test]
+    fn aliases_local_const_array_identifier() {
+        let source = r#"
+            const sharedAliases = [{ find: "@", replacement: "./src" }];
+            export default defineConfig({ resolve: { alias: sharedAliases } });
+        "#;
+        assert_eq!(
+            aliases(source),
+            vec![("@".to_string(), "./src".to_string())]
+        );
+    }
+
+    #[test]
+    fn aliases_local_const_object_identifier() {
+        let source = r#"
+            const sharedAliases = { "@": "./src" };
+            export default defineConfig({ resolve: { alias: sharedAliases } });
+        "#;
+        assert_eq!(
+            aliases(source),
+            vec![("@".to_string(), "./src".to_string())]
+        );
+    }
+
+    #[test]
+    fn aliases_array_spread_of_identifiers_and_inline() {
+        let source = r##"
+            const a = [{ find: "@", replacement: "./src" }];
+            const b = [{ find: "~", replacement: "./lib" }];
+            export default defineConfig({
+                resolve: { alias: [...a, ...b, { find: "#", replacement: "./test" }] }
+            });
+        "##;
+        let mut got = aliases(source);
+        got.sort();
+        assert_eq!(
+            got,
+            vec![
+                ("#".to_string(), "./test".to_string()),
+                ("@".to_string(), "./src".to_string()),
+                ("~".to_string(), "./lib".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn aliases_object_spread_of_identifier_and_inline() {
+        let source = r#"
+            const base = { "@": "./src" };
+            export default defineConfig({
+                resolve: { alias: { ...base, "~": "./lib" } }
+            });
+        "#;
+        let mut got = aliases(source);
+        got.sort();
+        assert_eq!(
+            got,
+            vec![
+                ("@".to_string(), "./src".to_string()),
+                ("~".to_string(), "./lib".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn aliases_local_const_chained_identifier() {
+        // `const a = b` indirection resolves through the chain.
+        let source = r#"
+            const real = [{ find: "@", replacement: "./src" }];
+            const alias2 = real;
+            export default defineConfig({ resolve: { alias: alias2 } });
+        "#;
+        assert_eq!(
+            aliases(source),
+            vec![("@".to_string(), "./src".to_string())]
+        );
+    }
+
+    #[test]
+    fn aliases_imported_named_identifier_from_sibling() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("vite.shared.js"),
+            r#"export const sharedAliases = [
+                { find: "@", replacement: new URL("./src", import.meta.url).pathname },
+            ];"#,
+        )
+        .unwrap();
+        let config = dir.path().join("vite.config.js");
+        let source = r#"
+            import { defineConfig } from "vite";
+            import { sharedAliases } from "./vite.shared.js";
+            export default defineConfig({ resolve: { alias: sharedAliases } });
+        "#;
+        let got = extract_config_aliases(source, &config, &["resolve", "alias"]);
+        assert_eq!(got, vec![("@".to_string(), "./src".to_string())]);
+    }
+
+    #[test]
+    fn aliases_imported_extensionless_specifier_probed() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("aliases.mjs"),
+            r#"export const sharedAliases = { "@": "./src" };"#,
+        )
+        .unwrap();
+        let config = dir.path().join("vite.config.ts");
+        let source = r#"
+            import { sharedAliases } from "./aliases";
+            export default defineConfig({ resolve: { alias: sharedAliases } });
+        "#;
+        let got = extract_config_aliases(source, &config, &["resolve", "alias"]);
+        assert_eq!(got, vec![("@".to_string(), "./src".to_string())]);
+    }
+
+    #[test]
+    fn aliases_imported_default_export_from_sibling() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("aliases.js"),
+            r#"export default [{ find: "@", replacement: "./src" }];"#,
+        )
+        .unwrap();
+        let config = dir.path().join("vite.config.js");
+        let source = r#"
+            import sharedAliases from "./aliases.js";
+            export default defineConfig({ resolve: { alias: sharedAliases } });
+        "#;
+        let got = extract_config_aliases(source, &config, &["resolve", "alias"]);
+        assert_eq!(got, vec![("@".to_string(), "./src".to_string())]);
+    }
+
+    #[test]
+    fn aliases_imported_spread_from_two_siblings() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("a.js"),
+            r#"export const a = [{ find: "@", replacement: "./src" }];"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("b.js"),
+            r#"export const b = [{ find: "~", replacement: "./lib" }];"#,
+        )
+        .unwrap();
+        let config = dir.path().join("vite.config.js");
+        let source = r#"
+            import { a } from "./a.js";
+            import { b } from "./b.js";
+            export default defineConfig({ resolve: { alias: [...a, ...b] } });
+        "#;
+        let mut got = extract_config_aliases(source, &config, &["resolve", "alias"]);
+        got.sort();
+        assert_eq!(
+            got,
+            vec![
+                ("@".to_string(), "./src".to_string()),
+                ("~".to_string(), "./lib".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn aliases_import_cycle_terminates() {
+        // a.js imports from b.js and vice versa; resolution must not hang and
+        // should still recover the literal pairs present.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("a.js"),
+            r#"import { b } from "./b.js";
+               export const a = [{ find: "@", replacement: "./src" }, ...b];"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("b.js"),
+            r#"import { a } from "./a.js";
+               export const b = [...a];"#,
+        )
+        .unwrap();
+        let config = dir.path().join("vite.config.js");
+        let source = r#"
+            import { a } from "./a.js";
+            export default defineConfig({ resolve: { alias: a } });
+        "#;
+        let got = extract_config_aliases(source, &config, &["resolve", "alias"]);
+        assert_eq!(got, vec![("@".to_string(), "./src".to_string())]);
+    }
+
+    #[test]
+    fn aliases_non_relative_import_not_followed() {
+        // A bare-package import is intentionally out of scope: no node_modules
+        // read for an alias literal.
+        let source = r#"
+            import { sharedAliases } from "some-pkg";
+            export default defineConfig({ resolve: { alias: sharedAliases } });
+        "#;
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("vite.config.js");
+        assert!(extract_config_aliases(source, &config, &["resolve", "alias"]).is_empty());
+    }
+
+    #[test]
+    fn aliases_object_array_value_takes_first_entry() {
+        // tsconfig `compilerOptions.paths` maps each key to an ARRAY of targets;
+        // the resolver must take the first, matching the long-standing non-kinded
+        // behavior the TypeScript plugin depends on. Regression guard for the
+        // array-value case that the kinded unification briefly dropped.
+        let source = r#"
+            export default {
+                compilerOptions: { paths: { "@/*": ["./src/*"], "~/*": ["./lib/*", "./vendor/*"] } }
+            };
+        "#;
+        let mut got = extract_config_aliases(source, &js_path(), &["compilerOptions", "paths"]);
+        got.sort();
+        assert_eq!(
+            got,
+            vec![
+                ("@/*".to_string(), "./src/*".to_string()),
+                ("~/*".to_string(), "./lib/*".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn aliases_kinded_preserves_is_bare_through_resolution() {
+        // The bare-string vs path discriminator must survive identifier + spread
+        // resolution (the test.alias package-to-package gate depends on it).
+        let source = r#"
+            const a = [{ find: "lodash-es", replacement: "lodash" }];
+            export default defineConfig({
+                resolve: { alias: [...a, { find: "@", replacement: "./src" }] }
+            });
+        "#;
+        let mut got = extract_config_aliases_kinded(source, &js_path(), &["resolve", "alias"]);
+        got.sort();
+        assert_eq!(
+            got,
+            vec![
+                ("@".to_string(), "./src".to_string(), false),
+                ("lodash-es".to_string(), "lodash".to_string(), true),
+            ]
+        );
+    }
+
+    #[test]
+    fn aliases_kinded_preserves_is_bare_through_imported_spread() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("aliases.js"),
+            r#"export const packageAliases = [{ find: "lodash-es", replacement: "lodash" }];"#,
+        )
+        .unwrap();
+        let config = dir.path().join("vite.config.js");
+        let source = r#"
+            import { packageAliases } from "./aliases.js";
+            export default defineConfig({
+                resolve: { alias: [...packageAliases, { find: "@", replacement: "./src" }] }
+            });
+        "#;
+        let mut got = extract_config_aliases_kinded(source, &config, &["resolve", "alias"]);
+        got.sort();
+        assert_eq!(
+            got,
+            vec![
+                ("@".to_string(), "./src".to_string(), false),
+                ("lodash-es".to_string(), "lodash".to_string(), true),
+            ]
+        );
     }
 }

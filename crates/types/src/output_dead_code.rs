@@ -36,11 +36,14 @@ use crate::output::{
     SuppressLineKind, SuppressLineScope,
 };
 use crate::results::{
-    BoundaryViolation, CircularDependency, DependencyOverrideSource, DuplicateExport,
-    EmptyCatalogGroup, MisconfiguredDependencyOverride, PrivateTypeLeak, ReExportCycle,
-    ReExportCycleKind, TestOnlyDependency, TypeOnlyDependency, UnlistedDependency,
-    UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry, UnusedDependency,
-    UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedMember,
+    BoundaryCallViolation, BoundaryCoverageViolation, BoundaryViolation, CircularDependency,
+    DependencyOverrideSource, DuplicateExport, DynamicSegmentNameConflict, EmptyCatalogGroup,
+    InvalidClientExport, MisconfiguredDependencyOverride, MisplacedDirective,
+    MixedClientServerBarrel, PolicyViolation, PrivateTypeLeak, ReExportCycle, ReExportCycleKind,
+    RouteCollision, TestOnlyDependency, TypeOnlyDependency, UnlistedDependency, UnprovidedInject,
+    UnrenderedComponent, UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry,
+    UnusedComponentEmit, UnusedComponentProp, UnusedDependency, UnusedDependencyOverride,
+    UnusedExport, UnusedFile, UnusedMember, UnusedServerAction,
 };
 
 /// Shared note for the `duplicate-exports` fix action. Mirrors the const used
@@ -51,17 +54,16 @@ pub const NAMESPACE_BARREL_HINT: &str = "If every location is the sole `index.*`
 /// JSON Schema fragment URL for the `add-to-config` `ignoreExports` action's
 /// `value` payload. Pinned to the main branch so users browsing the action
 /// value can navigate directly to the rule shape.
-const IGNORE_EXPORTS_VALUE_SCHEMA: &str =
-    "https://raw.githubusercontent.com/plow-rs/plow/main/schema.json#/properties/ignoreExports";
+const IGNORE_EXPORTS_VALUE_SCHEMA: &str = "https://raw.githubusercontent.com/fglogan/genesis-plow/main/schema.json#/properties/ignoreExports";
 
 /// JSON Schema fragment URL for the `ignoreCatalogReferences` rule items
 /// referenced by `add-to-config` actions on `unresolved-catalog-references`.
-const IGNORE_CATALOG_REFERENCES_VALUE_SCHEMA: &str = "https://raw.githubusercontent.com/plow-rs/plow/main/schema.json#/properties/ignoreCatalogReferences/items";
+const IGNORE_CATALOG_REFERENCES_VALUE_SCHEMA: &str = "https://raw.githubusercontent.com/fglogan/genesis-plow/main/schema.json#/properties/ignoreCatalogReferences/items";
 
 /// JSON Schema fragment URL for the `ignoreDependencyOverrides` rule items
 /// referenced by `add-to-config` actions on both the unused- and
 /// misconfigured-override findings.
-const IGNORE_DEPENDENCY_OVERRIDES_VALUE_SCHEMA: &str = "https://raw.githubusercontent.com/plow-rs/plow/main/schema.json#/properties/ignoreDependencyOverrides/items";
+const IGNORE_DEPENDENCY_OVERRIDES_VALUE_SCHEMA: &str = "https://raw.githubusercontent.com/fglogan/genesis-plow/main/schema.json#/properties/ignoreDependencyOverrides/items";
 
 /// Wire-shape envelope for an [`UnusedFile`] finding. The bare finding
 /// flattens in via `#[serde(flatten)]`, with a typed `actions` array
@@ -209,7 +211,7 @@ impl UnresolvedImportFinding {
                 config_key: "ignoreUnresolvedImports".to_string(),
                 value: AddToConfigValue::Scalar(import.specifier.clone()),
                 value_schema: Some(
-                    "https://raw.githubusercontent.com/plow-rs/plow/main/schema.json#/properties/ignoreUnresolvedImports/items"
+                    "https://raw.githubusercontent.com/fglogan/genesis-plow/main/schema.json#/properties/ignoreUnresolvedImports/items"
                         .to_string(),
                 ),
             }),
@@ -413,6 +415,196 @@ impl BoundaryViolationFinding {
     }
 }
 
+/// Wire-shape envelope for a [`BoundaryCoverageViolation`] finding. Carries
+/// actions for assigning the file to a zone or explicitly allowing it to stay
+/// unmatched.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct BoundaryCoverageViolationFinding {
+    /// The underlying coverage entry.
+    #[serde(flatten)]
+    pub violation: BoundaryCoverageViolation,
+    /// Suggested next steps.
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl BoundaryCoverageViolationFinding {
+    /// Build the wrapper from a raw [`BoundaryCoverageViolation`].
+    #[must_use]
+    pub fn with_actions(violation: BoundaryCoverageViolation) -> Self {
+        let path = violation.path.to_string_lossy().replace('\\', "/");
+        let actions = vec![
+            IssueAction::Fix(FixAction {
+                kind: FixActionType::RefactorBoundary,
+                auto_fixable: false,
+                description: "Add this file to a boundary zone pattern or move it under an existing zone"
+                    .to_string(),
+                note: Some(
+                    "Boundary coverage is enabled, so every analyzed source file must match a zone unless allow-listed"
+                        .to_string(),
+                ),
+                available_in_catalogs: None,
+                suggested_target: None,
+            }),
+            IssueAction::AddToConfig(AddToConfigAction {
+                kind: AddToConfigKind::AddToConfig,
+                auto_fixable: false,
+                description: format!(
+                    "Add \"{path}\" to boundaries.coverage.allowUnmatched in plow config"
+                ),
+                config_key: "boundaries.coverage.allowUnmatched".to_string(),
+                value: AddToConfigValue::Scalar(path),
+                value_schema: Some(
+                    "https://raw.githubusercontent.com/fglogan/genesis-plow/main/schema.json#/properties/boundaries/properties/coverage/properties/allowUnmatched/items"
+                        .to_string(),
+                ),
+            }),
+            IssueAction::SuppressFile(SuppressFileAction {
+                kind: SuppressFileKind::SuppressFile,
+                auto_fixable: false,
+                description: "Suppress with a file-level comment at the top of the file"
+                    .to_string(),
+                comment: "// plow-ignore-file boundary-violation".to_string(),
+            }),
+        ];
+        Self {
+            violation,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for a [`BoundaryCallViolation`] finding. Carries
+/// actions for refactoring the forbidden call out of the zone or suppressing
+/// it with the shared `boundary-violation` token.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct BoundaryCallViolationFinding {
+    /// The underlying forbidden-call entry.
+    #[serde(flatten)]
+    pub violation: BoundaryCallViolation,
+    /// Suggested next steps.
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl BoundaryCallViolationFinding {
+    /// Build the wrapper from a raw [`BoundaryCallViolation`].
+    #[must_use]
+    pub fn with_actions(violation: BoundaryCallViolation) -> Self {
+        let actions = vec![
+            IssueAction::Fix(FixAction {
+                kind: FixActionType::RefactorBoundary,
+                auto_fixable: false,
+                description: format!(
+                    "Move the `{}` call out of zone '{}' or behind an allowed abstraction",
+                    violation.callee, violation.zone,
+                ),
+                note: Some(format!(
+                    "`boundaries.calls.forbidden` bans callees matching `{}` from zone '{}'. The check is syntactic: it applies only to files classified into a zone and does not follow aliased or re-bound callees",
+                    violation.pattern, violation.zone,
+                )),
+                available_in_catalogs: None,
+                suggested_target: None,
+            }),
+            IssueAction::SuppressLine(SuppressLineAction {
+                kind: SuppressLineKind::SuppressLine,
+                auto_fixable: false,
+                description: "Suppress with an inline comment above the line".to_string(),
+                comment: "// plow-ignore-next-line boundary-violation".to_string(),
+                scope: None,
+            }),
+            IssueAction::SuppressFile(SuppressFileAction {
+                kind: SuppressFileKind::SuppressFile,
+                auto_fixable: false,
+                description: "Suppress with a file-level comment at the top of the file"
+                    .to_string(),
+                comment: "// plow-ignore-file boundary-violation".to_string(),
+            }),
+        ];
+        Self {
+            violation,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for a [`PolicyViolation`] finding. Carries actions for
+/// replacing the banned call or import, or suppressing it with a scoped
+/// `policy-violation:<pack>/<rule-id>` token.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PolicyViolationFinding {
+    /// The underlying rule-pack policy entry.
+    #[serde(flatten)]
+    pub violation: PolicyViolation,
+    /// Suggested next steps.
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl PolicyViolationFinding {
+    /// Build the wrapper from a raw [`PolicyViolation`].
+    #[must_use]
+    pub fn with_actions(violation: PolicyViolation) -> Self {
+        let what = match violation.kind {
+            crate::results::PolicyRuleKind::BannedCall => "call",
+            crate::results::PolicyRuleKind::BannedImport => "import",
+        };
+        let description = match &violation.message {
+            Some(message) => format!("Replace the `{}` {what}: {message}", violation.matched),
+            None => format!("Replace the `{}` {what}", violation.matched),
+        };
+        let suppress_token = format!("policy-violation:{}/{}", violation.pack, violation.rule_id);
+        let actions = vec![
+            IssueAction::Fix(FixAction {
+                kind: FixActionType::ResolvePolicyViolation,
+                auto_fixable: false,
+                description,
+                note: Some(format!(
+                    "Rule `{}/{}` from the configured rule packs bans this {what}. The check is syntactic: it does not follow aliased or re-bound callees, and import matching uses the raw specifier",
+                    violation.pack, violation.rule_id,
+                )),
+                available_in_catalogs: None,
+                suggested_target: None,
+            }),
+            IssueAction::SuppressLine(SuppressLineAction {
+                kind: SuppressLineKind::SuppressLine,
+                auto_fixable: false,
+                description: "Suppress this rule-pack rule with an inline comment above the line"
+                    .to_string(),
+                comment: format!("// plow-ignore-next-line {suppress_token}"),
+                scope: None,
+            }),
+            IssueAction::SuppressFile(SuppressFileAction {
+                kind: SuppressFileKind::SuppressFile,
+                auto_fixable: false,
+                description:
+                    "Suppress this rule-pack rule with a file-level comment at the top of the file"
+                        .to_string(),
+                comment: format!("// plow-ignore-file {suppress_token}"),
+            }),
+        ];
+        Self {
+            violation,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
 /// Wire-shape envelope for an [`UnusedExport`] finding consumed under the
 /// `unused_exports` key. Same Rust struct as [`UnusedTypeFinding`], with a
 /// different fix description so consumers can tell value-export from
@@ -530,6 +722,491 @@ impl UnusedTypeFinding {
     }
 }
 
+/// Wire-shape envelope for an [`InvalidClientExport`] finding. There is no safe
+/// auto-fix: the export itself may be a legitimate client-component value
+/// export that happens to collide with a Next.js server-only name, so removing
+/// it could break the component. Actions are a manual `move-to-server-module`
+/// fix (the real remediation) plus a line-level suppress.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct InvalidClientExportFinding {
+    /// The underlying dead-code entry.
+    #[serde(flatten)]
+    pub export: InvalidClientExport,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl InvalidClientExportFinding {
+    /// Build the wrapper from a raw [`InvalidClientExport`]. Emits a manual
+    /// fix action (move the server-only export to a non-client module) plus a
+    /// line-level suppress: there is no safe auto-fix because removing the
+    /// export could break a legitimate client component.
+    #[must_use]
+    pub fn with_actions(export: InvalidClientExport) -> Self {
+        let actions = vec![
+            IssueAction::Fix(FixAction {
+                kind: FixActionType::MoveToServerModule,
+                auto_fixable: false,
+                description: "Move the server-only export to a non-client module and import it from there"
+                    .to_string(),
+                note: Some(
+                    "A \"use client\" file cannot export a Next.js server-only or route-config name; Next.js rejects it at build time"
+                        .to_string(),
+                ),
+                available_in_catalogs: None,
+                suggested_target: None,
+            }),
+            IssueAction::SuppressLine(SuppressLineAction {
+                kind: SuppressLineKind::SuppressLine,
+                auto_fixable: false,
+                description: "Suppress with an inline comment above the line".to_string(),
+                comment: "// plow-ignore-next-line invalid-client-export".to_string(),
+                scope: None,
+            }),
+        ];
+        Self {
+            export,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for a [`MixedClientServerBarrel`] finding. There is no
+/// safe auto-fix: splitting a barrel into separate client and server modules is
+/// a human decision (the barrel may intentionally aggregate both surfaces).
+/// Actions are a manual `split-mixed-barrel` fix (the real remediation) plus a
+/// line-level suppress.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MixedClientServerBarrelFinding {
+    /// The underlying dead-code entry.
+    #[serde(flatten)]
+    pub barrel: MixedClientServerBarrel,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl MixedClientServerBarrelFinding {
+    /// Build the wrapper from a raw [`MixedClientServerBarrel`]. Emits a manual
+    /// fix action (split the barrel into separate client and server halves)
+    /// plus a line-level suppress: there is no safe auto-fix because splitting
+    /// the barrel is a human decision.
+    #[must_use]
+    pub fn with_actions(barrel: MixedClientServerBarrel) -> Self {
+        let actions = vec![
+            IssueAction::Fix(FixAction {
+                kind: FixActionType::SplitMixedBarrel,
+                auto_fixable: false,
+                description: "Split the barrel so client and server-only modules are re-exported from separate files"
+                    .to_string(),
+                note: Some(
+                    "Importing one name from this barrel drags the other's directive across the client/server boundary"
+                        .to_string(),
+                ),
+                available_in_catalogs: None,
+                suggested_target: None,
+            }),
+            IssueAction::SuppressLine(SuppressLineAction {
+                kind: SuppressLineKind::SuppressLine,
+                auto_fixable: false,
+                description: "Suppress with an inline comment above the line".to_string(),
+                comment: "// plow-ignore-next-line mixed-client-server-barrel".to_string(),
+                scope: None,
+            }),
+        ];
+        Self {
+            barrel,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for a [`MisplacedDirective`] finding. There is no safe
+/// auto-fix: moving a directive to the leading prologue is a small but
+/// judgement-bearing edit (the author may have intended the file to be a
+/// server module after all). Actions are a manual `hoist-directive` fix (the
+/// real remediation) plus a line-level suppress.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MisplacedDirectiveFinding {
+    /// The underlying dead-code entry.
+    #[serde(flatten)]
+    pub directive_site: MisplacedDirective,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl MisplacedDirectiveFinding {
+    /// Build the wrapper from a raw [`MisplacedDirective`]. Emits a manual fix
+    /// action (hoist the directive to the leading prologue) plus a line-level
+    /// suppress: there is no safe auto-fix because moving a directive can
+    /// change module semantics and is a human decision.
+    #[must_use]
+    pub fn with_actions(directive_site: MisplacedDirective) -> Self {
+        let actions = vec![
+            IssueAction::Fix(FixAction {
+                kind: FixActionType::HoistDirective,
+                auto_fixable: false,
+                description: "Move the directive to the very top of the file, above all imports and statements"
+                    .to_string(),
+                note: Some(
+                    "An RSC bundler honors the directive only in the leading prologue; here it precedes other statements and is silently ignored"
+                        .to_string(),
+                ),
+                available_in_catalogs: None,
+                suggested_target: None,
+            }),
+            IssueAction::SuppressLine(SuppressLineAction {
+                kind: SuppressLineKind::SuppressLine,
+                auto_fixable: false,
+                description: "Suppress with an inline comment above the line".to_string(),
+                comment: "// plow-ignore-next-line misplaced-directive".to_string(),
+                scope: None,
+            }),
+        ];
+        Self {
+            directive_site,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for an [`UnprovidedInject`] finding. There is no safe
+/// auto-fix: the fix is binary but judgement-bearing (add a `provide` for the
+/// key, or delete the dead inject). The only action is a line-level suppress.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnprovidedInjectFinding {
+    /// The underlying finding.
+    #[serde(flatten)]
+    pub inject: UnprovidedInject,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl UnprovidedInjectFinding {
+    /// Build the wrapper from a raw [`UnprovidedInject`]. Emits only a
+    /// line-level suppress action: there is no safe auto-fix because the fix
+    /// (provide the key or remove the inject) is a human decision.
+    #[must_use]
+    pub fn with_actions(inject: UnprovidedInject) -> Self {
+        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
+            kind: SuppressLineKind::SuppressLine,
+            auto_fixable: false,
+            description: "Suppress with an inline comment above the line".to_string(),
+            comment: "// plow-ignore-next-line unprovided-inject".to_string(),
+            scope: None,
+        })];
+        Self {
+            inject,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for an [`UnusedServerAction`] finding. There is no safe
+/// auto-fix: the fix is binary but judgement-bearing (wire the action up to a
+/// consumer, or delete it). The only action is a line-level suppress.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedServerActionFinding {
+    /// The underlying finding.
+    #[serde(flatten)]
+    pub action: UnusedServerAction,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl UnusedServerActionFinding {
+    /// Build the wrapper from a raw [`UnusedServerAction`]. Emits only a
+    /// line-level suppress action: there is no safe auto-fix because the fix
+    /// (wire the action to a consumer or remove it) is a human decision.
+    #[must_use]
+    pub fn with_actions(action: UnusedServerAction) -> Self {
+        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
+            kind: SuppressLineKind::SuppressLine,
+            auto_fixable: false,
+            description: "Suppress with an inline comment above the line".to_string(),
+            comment: "// plow-ignore-next-line unused-server-action".to_string(),
+            scope: None,
+        })];
+        Self {
+            action,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for an [`UnrenderedComponent`] finding. There is no safe
+/// auto-fix: the fix is binary but judgement-bearing (render the component
+/// somewhere, or delete the dead component). The only action is a line-level
+/// suppress.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnrenderedComponentFinding {
+    /// The underlying finding.
+    #[serde(flatten)]
+    pub component: UnrenderedComponent,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl UnrenderedComponentFinding {
+    /// Build the wrapper from a raw [`UnrenderedComponent`]. Emits only a
+    /// line-level suppress action: there is no safe auto-fix because the fix
+    /// (render the component or remove it) is a human decision.
+    #[must_use]
+    pub fn with_actions(component: UnrenderedComponent) -> Self {
+        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
+            kind: SuppressLineKind::SuppressLine,
+            auto_fixable: false,
+            description: "Suppress with an inline comment above the line".to_string(),
+            comment: "// plow-ignore-next-line unrendered-component".to_string(),
+            scope: None,
+        })];
+        Self {
+            component,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for an [`UnusedComponentProp`] finding. There is no safe
+/// auto-fix: removing a declared prop is judgement-bearing (the prop may be part
+/// of a deliberately-stable public component API). The only action is a
+/// line-level suppress at the prop declaration.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedComponentPropFinding {
+    /// The underlying finding.
+    #[serde(flatten)]
+    pub prop: UnusedComponentProp,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl UnusedComponentPropFinding {
+    /// Build the wrapper from a raw [`UnusedComponentProp`]. Emits only a
+    /// line-level suppress action: there is no safe auto-fix because removing a
+    /// prop is a human decision (it may be part of a stable component API).
+    #[must_use]
+    pub fn with_actions(prop: UnusedComponentProp) -> Self {
+        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
+            kind: SuppressLineKind::SuppressLine,
+            auto_fixable: false,
+            description: "Suppress with an inline comment above the line".to_string(),
+            comment: "// plow-ignore-next-line unused-component-prop".to_string(),
+            scope: None,
+        })];
+        Self {
+            prop,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for an [`UnusedComponentEmit`] finding. There is no safe
+/// auto-fix: removing a declared emit is judgement-bearing (the event may be
+/// part of a deliberately-stable public component API). The only action is a
+/// line-level suppress at the emit declaration.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedComponentEmitFinding {
+    /// The underlying finding.
+    #[serde(flatten)]
+    pub emit: UnusedComponentEmit,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl UnusedComponentEmitFinding {
+    /// Build the wrapper from a raw [`UnusedComponentEmit`]. Emits only a
+    /// line-level suppress action: there is no safe auto-fix because removing an
+    /// emit is a human decision (it may be part of a stable component API).
+    #[must_use]
+    pub fn with_actions(emit: UnusedComponentEmit) -> Self {
+        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
+            kind: SuppressLineKind::SuppressLine,
+            auto_fixable: false,
+            description: "Suppress with an inline comment above the line".to_string(),
+            comment: "// plow-ignore-next-line unused-component-emit".to_string(),
+            scope: None,
+        })];
+        Self {
+            emit,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for a [`RouteCollision`] finding. A route collision is a
+/// guaranteed `next build` failure, so the PRIMARY action is manual guidance
+/// (move or merge one of the colliding files), NOT a suppress: suppressing a
+/// build error never makes the build pass. A file-level suppress is offered as
+/// an escape hatch only.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct RouteCollisionFinding {
+    /// The underlying route-collision entry.
+    #[serde(flatten)]
+    pub collision: RouteCollision,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl RouteCollisionFinding {
+    /// Build the wrapper from a raw [`RouteCollision`]. The primary action is
+    /// manual guidance because suppressing a guaranteed build error is never
+    /// the right fix; a file-level suppress is the escape hatch only.
+    #[must_use]
+    pub fn with_actions(collision: RouteCollision) -> Self {
+        let actions = vec![
+            IssueAction::Fix(FixAction {
+                kind: FixActionType::ResolveRouteCollision,
+                auto_fixable: false,
+                description: "Two or more files resolve to the same URL. Move or merge one so \
+                              each URL has a single owner. Route groups `(name)` and parallel \
+                              slots `@name` are the only legal same-URL shapes."
+                    .to_string(),
+                note: Some(
+                    "Next.js fails the build with \"You cannot have two parallel pages that \
+                     resolve to the same path\". See the sibling `conflicting_paths` array for \
+                     the other files that own this URL."
+                        .to_string(),
+                ),
+                available_in_catalogs: None,
+                suggested_target: None,
+            }),
+            IssueAction::SuppressFile(SuppressFileAction {
+                kind: SuppressFileKind::SuppressFile,
+                auto_fixable: false,
+                description: "Escape hatch only: a file-level suppress silences the finding but \
+                              does NOT make `next build` pass. Prefer moving or merging a file."
+                    .to_string(),
+                comment: "// plow-ignore-file route-collision".to_string(),
+            }),
+        ];
+        Self {
+            collision,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for a [`DynamicSegmentNameConflict`] finding. The
+/// conflict is a Next.js dev / runtime error (`next build` does NOT catch it),
+/// so the primary action is manual guidance (rename the dynamic segments to a
+/// single consistent slug name), with a file-level suppress as escape hatch.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct DynamicSegmentNameConflictFinding {
+    /// The underlying dynamic-segment-name-conflict entry.
+    #[serde(flatten)]
+    pub conflict: DynamicSegmentNameConflict,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl DynamicSegmentNameConflictFinding {
+    /// Build the wrapper from a raw [`DynamicSegmentNameConflict`]. Manual
+    /// guidance primary action; file-level suppress escape hatch only.
+    #[must_use]
+    pub fn with_actions(conflict: DynamicSegmentNameConflict) -> Self {
+        let actions = vec![
+            IssueAction::Fix(FixAction {
+                kind: FixActionType::ResolveDynamicSegmentNameConflict,
+                auto_fixable: false,
+                description: "Sibling dynamic segments at the same position use different param \
+                              names. Rename them to one consistent slug name (e.g. pick `[id]` \
+                              or `[slug]` for both)."
+                    .to_string(),
+                note: Some(
+                    "Next.js throws \"You cannot use different slug names for the same dynamic \
+                     path\" at dev / runtime when the position is hit; `next build` does not \
+                     catch it. See the sibling `conflicting_segments` array."
+                        .to_string(),
+                ),
+                available_in_catalogs: None,
+                suggested_target: None,
+            }),
+            IssueAction::SuppressFile(SuppressFileAction {
+                kind: SuppressFileKind::SuppressFile,
+                auto_fixable: false,
+                description: "Escape hatch only: a file-level suppress silences the finding but \
+                              does NOT stop Next.js from throwing at dev / runtime. Prefer \
+                              renaming the segments."
+                    .to_string(),
+                comment: "// plow-ignore-file dynamic-segment-name-conflict".to_string(),
+            }),
+        ];
+        Self {
+            conflict,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
 /// Wire-shape envelope for an [`UnusedMember`] finding consumed under the
 /// `unused_enum_members` key.
 #[derive(Debug, Clone, Serialize)]
@@ -629,6 +1306,50 @@ impl UnusedClassMemberFinding {
     }
 }
 
+/// Wire-shape envelope for an [`UnusedMember`] finding consumed under the
+/// `unused_store_members` key (a Pinia `state` / `getters` / `actions` key, or
+/// a setup-store returned key, declared but never accessed by any consumer
+/// project-wide). Same Rust struct as [`UnusedClassMemberFinding`]. Emits only
+/// a line-level suppress action: there is no safe auto-fix because a store
+/// member can be accessed reflectively (a Pinia plugin, `store.$onAction`, or
+/// dynamic dispatch) in ways syntactic analysis cannot see, so removal is a
+/// behavioral change the user must own.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedStoreMemberFinding {
+    /// The underlying dead-code entry.
+    #[serde(flatten)]
+    pub member: UnusedMember,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl UnusedStoreMemberFinding {
+    /// Build the wrapper from a raw [`UnusedMember`]. Emits only a line-level
+    /// suppress action (no auto-fix: store members can be accessed
+    /// reflectively, so removal is never provably safe).
+    #[must_use]
+    pub fn with_actions(member: UnusedMember) -> Self {
+        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
+            kind: SuppressLineKind::SuppressLine,
+            auto_fixable: false,
+            description: "Suppress with an inline comment above the line".to_string(),
+            comment: "// plow-ignore-next-line unused-store-member".to_string(),
+            scope: None,
+        })];
+        Self {
+            member,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
 /// Build the `IssueAction` vec for the three `unused_dependencies`,
 /// `unused_dev_dependencies`, `unused_optional_dependencies` views over the
 /// same bare [`UnusedDependency`] struct. Each wrapper differs only in the
@@ -694,7 +1415,7 @@ fn build_ignore_dependencies_suppress_action(
         config_key: "ignoreDependencies".to_string(),
         value: AddToConfigValue::Scalar(package_name.to_string()),
         value_schema: Some(
-            "https://raw.githubusercontent.com/plow-rs/plow/main/schema.json#/properties/ignoreDependencies/items"
+            "https://raw.githubusercontent.com/fglogan/genesis-plow/main/schema.json#/properties/ignoreDependencies/items"
                 .to_string(),
         ),
     })
@@ -1455,6 +2176,14 @@ mod position_0_invariants {
                 FixActionType::RemoveCatalogReference => "remove-catalog-reference",
                 FixActionType::RemoveDependencyOverride => "remove-dependency-override",
                 FixActionType::FixDependencyOverride => "fix-dependency-override",
+                FixActionType::ResolvePolicyViolation => "resolve-policy-violation",
+                FixActionType::MoveToServerModule => "move-to-server-module",
+                FixActionType::SplitMixedBarrel => "split-mixed-barrel",
+                FixActionType::HoistDirective => "hoist-directive",
+                FixActionType::ResolveRouteCollision => "resolve-route-collision",
+                FixActionType::ResolveDynamicSegmentNameConflict => {
+                    "resolve-dynamic-segment-name-conflict"
+                }
             },
             IssueAction::SuppressLine(_) => "suppress-line",
             IssueAction::SuppressFile(_) => "suppress-file",
@@ -1487,7 +2216,7 @@ mod position_0_invariants {
         assert_eq!(
             action.value_schema.as_deref(),
             Some(
-                "https://raw.githubusercontent.com/plow-rs/plow/main/schema.json#/properties/ignoreUnresolvedImports/items"
+                "https://raw.githubusercontent.com/fglogan/genesis-plow/main/schema.json#/properties/ignoreUnresolvedImports/items"
             )
         );
     }

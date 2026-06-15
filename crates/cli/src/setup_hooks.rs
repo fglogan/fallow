@@ -18,6 +18,8 @@ use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use serde::Serialize;
+
 /// Agent target for generated hook artifacts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
 pub enum HookAgentArg {
@@ -66,15 +68,30 @@ pub const AGENTS_BLOCK_START: &str = "<!-- plow:setup-hooks:start -->";
 /// Managed-block end marker for the AGENTS.md Codex fallback.
 pub const AGENTS_BLOCK_END: &str = "<!-- plow:setup-hooks:end -->";
 
-/// Body of the managed block that `plow setup-hooks` maintains in
-/// `AGENTS.md`. The `start` and `end` markers bracket this body so re-runs
-/// replace it in place rather than appending duplicates.
+/// Prose body of the managed block that `plow setup-hooks` maintains in
+/// `AGENTS.md`. The `start` and `end` markers bracket the full body (this
+/// prose plus the task-to-command matrix appended by `agents_block_body`) so
+/// re-runs replace it in place rather than appending duplicates.
 pub const AGENTS_BLOCK_BODY: &str = "## Plow local gate
 
-Before any `git commit` or `git push`, run `plow audit --format json --quiet --explain`. If the verdict is `fail`, fix the reported findings before retrying. Treat JSON runtime errors like `{ \"error\": true, ... }` as non-blocking.
+Before any `git commit` or `git push`, run `plow audit --format json --quiet --explain --gate-marker agent`. If the verdict is `fail`, fix the reported findings before retrying. Treat JSON runtime errors like `{ \"error\": true, ... }` as non-blocking.
 
 Audit defaults to `gate=new-only`: only findings introduced by the current changeset affect the verdict. Inherited findings on touched files are reported under `attribution` and annotated with `introduced: false`, but do not block the commit. Set `[audit] gate = \"all\"` in `plow.toml` to gate every finding in changed files.
+
+For non-skill agents, treat the task map below as the local onboarding source: run the listed plow command before destructive edits, before commits, and before pull request handoff.
 ";
+
+/// Full managed-block body: the gate prose plus the agent task-to-command
+/// matrix, rendered from the single `crate::task_matrix::TASK_MATRIX` slice so
+/// it stays in sync with the `init --agents` template, the schema manifest,
+/// and the generated SKILL.md section. The matrix refreshes on every reinstall
+/// because `upsert_managed_block` replaces the whole block wholesale.
+fn agents_block_body() -> String {
+    format!(
+        "{AGENTS_BLOCK_BODY}\n## Plow task map\n\n{}",
+        crate::task_matrix::render_task_matrix_markdown()
+    )
+}
 
 /// Marker embedded in generated hook scripts so uninstall (and upgrades)
 /// can recognize a previously-generated file and remove it without `--force`.
@@ -131,7 +148,23 @@ pub fn run_setup_hooks_with_label(opts: &SetupHooksOptions<'_>, command_label: &
     ExitCode::SUCCESS
 }
 
-// ── Plan (resolve target paths from options + filesystem) ──────────
+/// Render read-only status for all supported hook surfaces.
+pub fn run_hooks_status(root: &Path, output: plow_config::OutputFormat) -> ExitCode {
+    let report = build_hooks_status(root);
+    match output {
+        plow_config::OutputFormat::Json => {
+            let value = serde_json::json!({ "hooks": report });
+            crate::report::emit_json(&value, "hooks status")
+        }
+        plow_config::OutputFormat::Human => {
+            println!("Git hook: {}", describe_status(&report.git));
+            println!("Claude hook: {}", describe_status(&report.claude));
+            println!("Codex block: {}", describe_status(&report.codex));
+            ExitCode::SUCCESS
+        }
+        _ => crate::error::emit_error("hooks status supports human and json output", 2, output),
+    }
+}
 
 #[derive(Debug, Default)]
 struct Plan {
@@ -148,6 +181,140 @@ struct ClaudeTargets {
 #[derive(Debug)]
 struct CodexTargets {
     agents_path: PathBuf,
+}
+
+#[derive(Debug, Serialize)]
+struct HooksStatusReport {
+    git: HookSurfaceStatus,
+    claude: HookSurfaceStatus,
+    codex: HookSurfaceStatus,
+}
+
+#[derive(Debug, Serialize)]
+struct HookSurfaceStatus {
+    installed: bool,
+    managed_block_present: bool,
+    user_edited: bool,
+    path: String,
+    script_version: Option<String>,
+    min_version_floor: Option<String>,
+}
+
+fn build_hooks_status(root: &Path) -> HooksStatusReport {
+    HooksStatusReport {
+        git: git_hook_status(root),
+        claude: claude_hook_status(root),
+        codex: codex_hook_status(root),
+    }
+}
+
+fn git_hook_status(root: &Path) -> HookSurfaceStatus {
+    let candidates = [
+        root.join(".husky").join("pre-commit"),
+        root.join(".git").join("hooks").join("pre-commit"),
+    ];
+    let path = candidates
+        .iter()
+        .find(|path| path.exists())
+        .cloned()
+        .unwrap_or_else(|| root.join(".git").join("hooks").join("pre-commit"));
+    let raw = read_optional_text(&path).ok().flatten();
+    let managed = raw
+        .as_deref()
+        .is_some_and(|text| text.contains(crate::init::GIT_HOOK_MARKER));
+    HookSurfaceStatus {
+        installed: managed,
+        managed_block_present: managed,
+        user_edited: raw.is_some() && !managed,
+        path: display_rel(root, &path),
+        script_version: None,
+        min_version_floor: None,
+    }
+}
+
+fn claude_hook_status(root: &Path) -> HookSurfaceStatus {
+    let settings_path = root.join(".claude").join("settings.json");
+    let script_path = root.join(".claude").join("hooks").join("plow-gate.sh");
+    let settings_has_handler = read_optional_text(&settings_path)
+        .ok()
+        .flatten()
+        .as_deref()
+        .is_some_and(settings_has_plow_handler);
+    let script = read_optional_text(&script_path).ok().flatten();
+    let script_managed = script
+        .as_deref()
+        .is_some_and(|text| text.contains(HOOK_SCRIPT_MARKER));
+    HookSurfaceStatus {
+        installed: settings_has_handler && script_managed,
+        managed_block_present: settings_has_handler,
+        user_edited: script.is_some() && !script_managed,
+        path: display_rel(root, &script_path),
+        script_version: script.as_deref().and_then(extract_installer_version),
+        min_version_floor: script.as_deref().and_then(extract_min_version_floor),
+    }
+}
+
+fn codex_hook_status(root: &Path) -> HookSurfaceStatus {
+    let path = root.join("AGENTS.md");
+    let raw = read_optional_text(&path).ok().flatten();
+    let has_start = raw
+        .as_deref()
+        .is_some_and(|text| text.contains(AGENTS_BLOCK_START));
+    let has_end = raw
+        .as_deref()
+        .is_some_and(|text| text.contains(AGENTS_BLOCK_END));
+    let managed = has_start && has_end;
+    HookSurfaceStatus {
+        installed: managed,
+        managed_block_present: managed,
+        user_edited: raw.is_some() && has_start != has_end,
+        path: display_rel(root, &path),
+        script_version: None,
+        min_version_floor: None,
+    }
+}
+
+fn settings_has_plow_handler(raw: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return false;
+    };
+    value
+        .get("hooks")
+        .and_then(|hooks| hooks.get("PreToolUse"))
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|group| group.get("hooks"))
+        .filter_map(serde_json::Value::as_array)
+        .flatten()
+        .any(is_plow_handler)
+}
+
+fn extract_installer_version(script: &str) -> Option<String> {
+    script.lines().find_map(|line| {
+        line.trim()
+            .strip_prefix("# Installer version: ")
+            .map(ToOwned::to_owned)
+    })
+}
+
+fn extract_min_version_floor(script: &str) -> Option<String> {
+    script.lines().find_map(|line| {
+        line.trim()
+            .strip_prefix("MIN_VERSION=\"${PLOW_GATE_MIN_VERSION-")
+            .and_then(|value| value.strip_suffix("}\""))
+            .map(ToOwned::to_owned)
+    })
+}
+
+fn describe_status(status: &HookSurfaceStatus) -> String {
+    if status.installed {
+        return format!("installed ({})", status.path);
+    }
+    if status.user_edited {
+        return format!("user-edited ({})", status.path);
+    }
+    "not installed".to_string()
 }
 
 impl Plan {
@@ -203,8 +370,6 @@ fn auto_detect(root: &Path, mode: Mode) -> (bool, bool) {
         _ => (has_claude, has_codex),
     }
 }
-
-// ── Target resolvers ────────────────────────────────────────────────
 
 impl ClaudeTargets {
     fn resolve(opts: &SetupHooksOptions<'_>) -> Result<Self, String> {
@@ -289,8 +454,6 @@ impl CodexTargets {
     }
 }
 
-// ── Report types (printed as the run's summary) ─────────────────────
-
 #[derive(Debug, Default)]
 struct Report {
     claude: Option<ClaudeReport>,
@@ -343,8 +506,6 @@ enum AgentsOutcome {
     Removed,
     NotPresent,
 }
-
-// ── Claude settings merge / uninstall ───────────────────────────────
 
 /// Merge the default Claude settings into an existing `settings.json` (or
 /// write the file fresh if none exists). Preserves unrelated top-level keys
@@ -519,6 +680,10 @@ fn uninstall_claude_settings(path: &Path, dry_run: bool) -> Result<SettingsOutco
 /// Returns the merged value and the tuple `(added, removed, preserved)`
 /// where `preserved` counts handlers in the `Bash` matcher group that are
 /// NOT owned by plow (the existing typecheck/lint / user's own handlers).
+#[expect(
+    clippy::expect_used,
+    reason = "rebuilt settings value is explicitly constructed as an object"
+)]
 fn merge_settings_value(
     current: &serde_json::Value,
     desired: &serde_json::Value,
@@ -528,8 +693,6 @@ fn merge_settings_value(
         .ok_or_else(|| "settings.json must be a JSON object".to_string())?
         .clone();
 
-    // Rebuild the top-level object with `$schema` at position 0 so JSON
-    // reviewers see the schema pointer where conventions expect it.
     let mut rebuilt = serde_json::Map::with_capacity(current_obj.len() + 1);
     if let Some(schema) = current_obj
         .get("$schema")
@@ -667,7 +830,6 @@ fn strip_plow_handlers(
         preserved += group_hooks.len();
     }
 
-    // Collapse empty scaffolding.
     pretool_arr.retain(|group| {
         let Some(group_obj) = group.as_object() else {
             return true;
@@ -750,8 +912,6 @@ fn trim_outer_quotes(command: &str) -> &str {
         .unwrap_or(command)
 }
 
-// ── Hook script write / remove ──────────────────────────────────────
-
 /// Write an executable shell script. On Unix sets mode `0o755`.
 ///
 /// If the existing file carries the generator marker, it is overwritten so
@@ -832,11 +992,7 @@ fn set_executable_bit(path: &Path) {
 }
 
 #[cfg(not(unix))]
-fn set_executable_bit(_path: &Path) {
-    // Windows: no executable bit; `bash` runs the script via its own shebang.
-}
-
-// ── AGENTS.md managed block ─────────────────────────────────────────
+fn set_executable_bit(_path: &Path) {}
 
 /// Append or replace the managed Codex block in `AGENTS.md`. Idempotent.
 ///
@@ -845,9 +1001,16 @@ fn set_executable_bit(_path: &Path) {
 /// Development`, or `## Local development` heading (if present); failing
 /// that it is appended at the end with a horizontal-rule separator so the
 /// block reads as deliberate rather than orphaned prose.
+#[expect(
+    clippy::unwrap_used,
+    reason = "managed block bounds are checked before slicing replacement offsets"
+)]
 fn upsert_managed_block(path: &Path, dry_run: bool) -> std::io::Result<AgentsOutcome> {
     let existing = read_optional_text(path)?.unwrap_or_default();
-    let new_block = format!("{AGENTS_BLOCK_START}\n{AGENTS_BLOCK_BODY}{AGENTS_BLOCK_END}\n");
+    let new_block = format!(
+        "{AGENTS_BLOCK_START}\n{}{AGENTS_BLOCK_END}\n",
+        agents_block_body()
+    );
 
     let (next, outcome) =
         if existing.contains(AGENTS_BLOCK_START) && existing.contains(AGENTS_BLOCK_END) {
@@ -914,7 +1077,6 @@ fn remove_managed_block(path: &Path, dry_run: bool) -> std::io::Result<AgentsOut
         .find('\n')
         .map_or(existing.len(), |offset| end + offset + 1);
 
-    // Also strip a leading `\n---\n\n` fallback separator if we added one.
     let mut prefix_end = start;
     let prefix = &existing[..start];
     if prefix.ends_with("\n---\n\n") {
@@ -926,7 +1088,6 @@ fn remove_managed_block(path: &Path, dry_run: bool) -> std::io::Result<AgentsOut
     let mut buf = String::with_capacity(existing.len());
     buf.push_str(&existing[..prefix_end]);
     let tail = &existing[end_line_end..];
-    // Collapse back-to-back blank lines at the splice point.
     let tail = tail.strip_prefix('\n').unwrap_or(tail);
     buf.push_str(tail);
 
@@ -956,8 +1117,6 @@ fn find_tooling_insertion_point(text: &str) -> Option<usize> {
     }
     None
 }
-
-// ── Gitignore helper (install-only) ─────────────────────────────────
 
 fn ensure_gitignore_entry(root: &Path, entry: &str) -> std::io::Result<()> {
     let gitignore_path = root.join(".gitignore");
@@ -994,8 +1153,6 @@ fn read_optional_text(path: &Path) -> std::io::Result<Option<String>> {
 fn home_dir() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
 }
-
-// ── Summary printing ────────────────────────────────────────────────
 
 fn print_summary(report: &Report, opts: &SetupHooksOptions<'_>, mode: Mode, command_label: &str) {
     let verb = match mode {
@@ -1143,8 +1300,6 @@ mod tests {
 
     #[test]
     fn auto_uninstall_does_not_fabricate_missing_surfaces() {
-        // With nothing present, uninstall must NOT default to Claude and
-        // pretend to remove scaffolding that never existed.
         let tmp = tempdir().unwrap();
         let (claude, codex) = auto_detect(tmp.path(), Mode::Uninstall);
         assert!(!claude);
@@ -1344,25 +1499,68 @@ mod tests {
     fn rendered_script_preserves_correctness_floor() {
         let rendered = rendered_gate_script();
         assert!(
-            rendered.contains("PLOW_GATE_MIN_VERSION-2.46.0"),
+            rendered.contains("PLOW_GATE_MIN_VERSION-2.85.0"),
             "enforced floor must stay maintainer-bumped, not installer-pinned; \
              rendered script was:\n{rendered}"
         );
     }
 
+    #[test]
+    fn rendered_script_marks_agent_gate_runs() {
+        let rendered = rendered_gate_script();
+        assert!(
+            rendered.contains("audit --format json --quiet --explain --gate-marker agent"),
+            "agent hook must pass --gate-marker agent so Impact containment can record blocked-then-cleared runs; rendered script was:\n{rendered}"
+        );
+    }
+
+    #[test]
+    fn hooks_status_reports_managed_surfaces() {
+        let tmp = tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git/hooks")).unwrap();
+        std::fs::write(
+            tmp.path().join(".git/hooks/pre-commit"),
+            format!(
+                "#!/bin/sh\n{}\nplow audit --quiet --gate-marker pre-commit\n",
+                crate::init::GIT_HOOK_MARKER
+            ),
+        )
+        .unwrap();
+        let mut o = opts(tmp.path());
+        o.agent = Some(HookAgentArg::Claude);
+        assert_eq!(run_setup_hooks(&o), ExitCode::SUCCESS);
+        o.agent = Some(HookAgentArg::Codex);
+        assert_eq!(run_setup_hooks(&o), ExitCode::SUCCESS);
+
+        let status = build_hooks_status(tmp.path());
+        assert!(status.git.installed);
+        assert!(status.claude.installed);
+        assert!(status.codex.installed);
+        let json = serde_json::to_value(&status).unwrap();
+        assert!(json["git"]["script_version"].is_null());
+        assert!(json["codex"]["min_version_floor"].is_null());
+        assert_eq!(
+            status.claude.script_version.as_deref(),
+            Some(env!("CARGO_PKG_VERSION"))
+        );
+        assert_eq!(status.claude.min_version_floor.as_deref(), Some("2.85.0"));
+    }
+
+    #[test]
+    fn hooks_status_marks_user_edited_agent_script() {
+        let tmp = tempdir().unwrap();
+        let script_path = tmp.path().join(".claude/hooks/plow-gate.sh");
+        std::fs::create_dir_all(script_path.parent().unwrap()).unwrap();
+        std::fs::write(&script_path, "#!/bin/sh\necho user\n").unwrap();
+
+        let status = build_hooks_status(tmp.path());
+        assert!(!status.claude.installed);
+        assert!(status.claude.user_edited);
+    }
+
     #[cfg(unix)]
     #[test]
     fn gate_script_sort_v_orders_plain_semver_correctly() {
-        // The gate's floor check is `sort -V | head -n1`. Lock down only the
-        // orderings the gate actually depends on in practice: plain-vs-plain
-        // semver, which is stable across GNU and BSD sort. Prerelease ordering
-        // (`2.48.0-alpha.1` vs `2.48.0`) diverges between platforms: GNU places
-        // the prerelease BELOW the release (semver-correct), BSD places it
-        // ABOVE. Plow's shipped floor is always a plain version and
-        // `CARGO_PKG_VERSION` stamped at install is plain on published
-        // releases, so this divergence does not affect the common flow. The
-        // gate script's header notes the quirk for anyone setting
-        // `PLOW_GATE_MIN_VERSION` to a prerelease explicitly.
         let output = std::process::Command::new("bash")
             .arg("-c")
             .arg("printf '%s\\n' 2.46.0 2.30.0 2.48.0 2.46.0 2.46.1 | sort -V")
@@ -1385,19 +1583,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn gate_blocks_stale_plow_on_path() {
-        // End-to-end regression: the fix is a floor check that blocks a
-        // plow on PATH older than the uncommitted-changes inclusion fix
-        // (aabb8e1b, v2.46.0). The sibling `rendered_script_*` tests cover
-        // substitution mechanics but would all still pass if the floor
-        // block were ripped out. This test exercises the actual bug: write
-        // the rendered script, prepend a fake plow reporting v2.30.0 to
-        // PATH, pipe a `git commit` hook input, assert the gate exits 2
-        // with an upgrade hint instead of passing through.
         use std::io::Write;
         use std::os::unix::fs::PermissionsExt;
 
-        // The gate depends on jq for hook-input parsing. Skip cleanly on
-        // runners that lack it so CI stays green on stripped environments.
         if std::process::Command::new("jq")
             .arg("--version")
             .output()
@@ -1411,8 +1599,6 @@ mod tests {
         let fake_bin = tmp.path().join("bin");
         std::fs::create_dir_all(&fake_bin).unwrap();
         let plow_path = fake_bin.join("plow");
-        // Fake reports v2.30.0 (below the 2.46.0 floor). No audit stub is
-        // needed because the floor check exits before audit is reached.
         std::fs::write(
             &plow_path,
             "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'plow 2.30.0'; exit 0; fi\nexit 0\n",
@@ -1428,8 +1614,6 @@ mod tests {
         perms.set_mode(0o755);
         std::fs::set_permissions(&script_path, perms).unwrap();
 
-        // Prepend fake dir to PATH so `command -v plow` finds the stale
-        // version first while jq / sort / head / grep still resolve normally.
         let existing_path = std::env::var("PATH").unwrap_or_default();
         let new_path = format!("{}:{existing_path}", fake_bin.display());
         let hook_input = br#"{"tool_input":{"command":"git commit -m test"}}"#;
@@ -1455,7 +1639,7 @@ mod tests {
         );
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(
-            stderr.contains("below required 2.46.0"),
+            stderr.contains("below required 2.85.0"),
             "stderr must mention the required floor; got:\n{stderr}"
         );
         assert!(
@@ -1497,6 +1681,35 @@ mod tests {
         assert!(contents.contains("Plow local gate"));
         assert!(!contents.contains("stale body"));
         assert!(contents.contains("below"));
+    }
+
+    #[test]
+    fn agents_block_includes_task_matrix_and_is_idempotent() {
+        let tmp = tempdir().unwrap();
+        let agents_path = tmp.path().join("AGENTS.md");
+        std::fs::write(&agents_path, "# Project agents\n").unwrap();
+
+        let mut o = opts(tmp.path());
+        o.agent = Some(HookAgentArg::Codex);
+        assert_eq!(run_setup_hooks(&o), ExitCode::SUCCESS);
+        let after_first = std::fs::read_to_string(&agents_path).unwrap();
+
+        // The managed block carries the task-to-command matrix.
+        assert!(after_first.contains("## Plow task map"));
+        assert!(after_first.contains("When the agent is about to"));
+        for row in crate::task_matrix::TASK_MATRIX {
+            assert!(
+                after_first.contains(row.command),
+                "managed block missing task-matrix command {}",
+                row.command
+            );
+        }
+
+        // A second reinstall is byte-identical (replace-in-place idempotency).
+        assert_eq!(run_setup_hooks(&o), ExitCode::SUCCESS);
+        let after_second = std::fs::read_to_string(&agents_path).unwrap();
+        assert_eq!(after_second, after_first);
+        assert_eq!(after_second.matches(AGENTS_BLOCK_START).count(), 1);
     }
 
     #[test]
@@ -1585,10 +1798,7 @@ mod tests {
         let bash_group = &parsed["hooks"]["PreToolUse"][0]["hooks"];
         let entries = bash_group.as_array().unwrap();
         let plow_count = entries.iter().filter(|e| is_plow_handler(e)).count();
-        assert_eq!(
-            plow_count, 1,
-            "stale plow handlers should collapse to one"
-        );
+        assert_eq!(plow_count, 1, "stale plow handlers should collapse to one");
         let lint_count = entries
             .iter()
             .filter(|e| e.get("command").and_then(|c| c.as_str()) == Some("bun run lint"))
@@ -1632,10 +1842,7 @@ mod tests {
             .flat_map(|group| group["hooks"].as_array().into_iter().flatten())
             .filter(|handler| is_plow_handler(handler))
             .count();
-        assert_eq!(
-            plow_count, 1,
-            "expected a single canonical plow handler"
-        );
+        assert_eq!(plow_count, 1, "expected a single canonical plow handler");
     }
 
     #[test]
@@ -1824,20 +2031,16 @@ mod tests {
         assert_eq!(err.kind(), ErrorKind::InvalidData);
     }
 
-    // ── Uninstall tests ──────────────────────────────────────────────
-
     #[test]
     fn uninstall_round_trips_a_fresh_install() {
         let tmp = tempdir().unwrap();
 
-        // Install.
         let mut install = opts(tmp.path());
         install.agent = Some(HookAgentArg::Claude);
         assert_eq!(run_setup_hooks(&install), ExitCode::SUCCESS);
         assert!(tmp.path().join(".claude/settings.json").is_file());
         assert!(tmp.path().join(".claude/hooks/plow-gate.sh").is_file());
 
-        // Uninstall.
         let mut uninstall = opts(tmp.path());
         uninstall.agent = Some(HookAgentArg::Claude);
         uninstall.uninstall = true;
@@ -1845,8 +2048,6 @@ mod tests {
         assert!(!tmp.path().join(".claude/hooks/plow-gate.sh").exists());
         let raw = std::fs::read_to_string(tmp.path().join(".claude/settings.json")).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap();
-        // `hooks` should have been collapsed because the Bash group only
-        // contained our handler.
         assert!(
             parsed.get("hooks").is_none(),
             "expected empty hooks block to collapse"
@@ -1891,12 +2092,8 @@ mod tests {
     #[test]
     fn uninstall_is_idempotent_when_nothing_to_remove() {
         let tmp = tempdir().unwrap();
-        // Simulate a repo with neither .claude nor AGENTS.md.
         let mut o = opts(tmp.path());
         o.uninstall = true;
-        // Auto-detect on uninstall returns (false, false); dispatch then
-        // reports "no surfaces found" with exit code 2. Assert that
-        // behavior so misconfigurations surface instead of silently succeeding.
         assert_eq!(run_setup_hooks(&o), ExitCode::from(2));
     }
 
@@ -1932,7 +2129,6 @@ mod tests {
         o.agent = Some(HookAgentArg::Claude);
         o.uninstall = true;
         assert_eq!(run_setup_hooks(&o), ExitCode::SUCCESS);
-        // Script must survive because it lacks the generator marker.
         assert!(script_path.is_file());
         let kept = std::fs::read_to_string(&script_path).unwrap();
         assert_eq!(kept, "#!/bin/sh\necho user-owned\n");
@@ -1976,19 +2172,16 @@ mod tests {
     #[test]
     fn uninstall_dry_run_does_not_touch_files() {
         let tmp = tempdir().unwrap();
-        // Install for real first.
         let mut install = opts(tmp.path());
         install.agent = Some(HookAgentArg::Claude);
         assert_eq!(run_setup_hooks(&install), ExitCode::SUCCESS);
 
-        // Dry-run uninstall.
         let mut dry = opts(tmp.path());
         dry.agent = Some(HookAgentArg::Claude);
         dry.uninstall = true;
         dry.dry_run = true;
         assert_eq!(run_setup_hooks(&dry), ExitCode::SUCCESS);
 
-        // Files still there.
         assert!(tmp.path().join(".claude/settings.json").is_file());
         assert!(tmp.path().join(".claude/hooks/plow-gate.sh").is_file());
     }

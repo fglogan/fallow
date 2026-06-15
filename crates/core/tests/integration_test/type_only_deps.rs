@@ -1,5 +1,5 @@
 use super::common::fixture_path;
-use plow_config::{PlowConfig, OutputFormat, RulesConfig};
+use plow_config::{OutputFormat, PlowConfig, RulesConfig};
 
 fn create_production_config(root: std::path::PathBuf) -> plow_config::ResolvedConfig {
     PlowConfig {
@@ -23,6 +23,7 @@ fn create_production_config(root: std::path::PathBuf) -> plow_config::ResolvedCo
         boundaries: plow_config::BoundaryConfig::default(),
         production: true.into(),
         plugins: vec![],
+        rule_packs: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
@@ -30,6 +31,7 @@ fn create_production_config(root: std::path::PathBuf) -> plow_config::ResolvedCo
         codeowners: None,
         public_packages: vec![],
         flags: plow_config::FlagsConfig::default(),
+        security: plow_config::SecurityConfig::default(),
         fix: plow_config::FixConfig::default(),
         resolve: plow_config::ResolveConfig::default(),
         sealed: false,
@@ -52,13 +54,11 @@ fn type_only_import_detected_in_production_mode() {
         .map(|d| d.dep.package_name.as_str())
         .collect();
 
-    // zod is only imported via `import type`, so it should be type-only
     assert!(
         type_only_names.contains(&"zod"),
         "zod should be detected as type-only dependency, found: {type_only_names:?}"
     );
 
-    // express has a runtime import, should NOT be type-only
     assert!(
         !type_only_names.contains(&"express"),
         "express should NOT be type-only (has runtime import), found: {type_only_names:?}"
@@ -71,7 +71,6 @@ fn type_only_deps_not_reported_outside_production_mode() {
     let config = super::common::create_config(root);
     let results = plow_core::analyze(&config).expect("analysis should succeed");
 
-    // type_only_dependencies is only populated in production mode
     assert!(
         results.type_only_dependencies.is_empty(),
         "type_only_dependencies should be empty outside production mode, found: {:?}",

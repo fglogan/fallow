@@ -42,28 +42,17 @@ pub(super) fn try_path_alias_fallback(
             continue;
         };
 
-        // Build the substituted path relative to root. An empty remainder is an
-        // exact-key match (the whole specifier equals the alias), so the
-        // replacement must be used verbatim with no trailing slash; appending
-        // `/` would make the resolver treat a file target as a directory and
-        // fail (e.g. `vscode` -> `mock/vscode.js`).
         let substituted = match (replacement.is_empty(), remainder.is_empty()) {
             (true, _) => format!("./{remainder}"),
             (false, true) => format!("./{replacement}"),
             (false, false) => format!("./{replacement}/{remainder}"),
         };
 
-        // Resolve relative to the project root directly. These plugin-provided
-        // aliases have already been normalized to root-relative paths, so
-        // tsconfig discovery is not needed here and can actually hurt for
-        // solution-style roots (`tsconfig.json` with only `references`).
         if let Ok(resolved) = ctx.resolver.resolve(ctx.root, &substituted) {
             let resolved_path = resolved.path();
-            // Try raw path lookup first
             if let Some(&file_id) = ctx.raw_path_to_id.get(resolved_path) {
                 return Some(ResolveResult::InternalModule(file_id));
             }
-            // Fall back to canonical path lookup
             if let Ok(canonical) = dunce::canonicalize(resolved_path) {
                 if let Some(&file_id) = ctx.path_to_id.get(canonical.as_path()) {
                     return Some(ResolveResult::InternalModule(file_id));
@@ -99,7 +88,6 @@ pub(super) fn try_scss_partial_fallback(
     from_file: &Path,
     specifier: &str,
 ) -> Option<ResolveResult> {
-    // SCSS built-in modules (`sass:math`) should not be retried
     if specifier.contains(':') {
         return None;
     }
@@ -107,12 +95,10 @@ pub(super) fn try_scss_partial_fallback(
     let spec_path = Path::new(specifier);
     let filename = spec_path.file_name()?.to_str()?;
 
-    // Already has underscore prefix
     if filename.starts_with('_') {
         return None;
     }
 
-    // 1. Try partial convention: prepend _ to the filename
     let partial_filename = format!("_{filename}");
     let partial_specifier = if let Some(parent) = spec_path.parent()
         && !parent.as_os_str().is_empty()
@@ -126,7 +112,6 @@ pub(super) fn try_scss_partial_fallback(
         return Some(result);
     }
 
-    // 2. Try directory index convention: specifier/_index and specifier/index
     let index_partial = format!("{specifier}/_index");
     if let Some(result) = try_resolve_scss(ctx, from_file, &index_partial) {
         return Some(result);
@@ -153,9 +138,6 @@ pub(super) fn try_css_extension_fallback(
     if specifier.contains(':') {
         return None;
     }
-    // If the specifier already has a CSS extension, the standard resolver path
-    // would have found it by name; a fallback re-entry with the same suffix is
-    // a no-op.
     let spec_path = Path::new(specifier);
     let already_css_ext = spec_path
         .extension()
@@ -231,13 +213,9 @@ pub(super) fn try_scss_include_path_fallback(
     if !is_scss_importer && !from_style {
         return None;
     }
-    // SCSS built-in modules (`sass:math`) should not be retried
     if specifier.contains(':') {
         return None;
     }
-    // Only bare (normalized) specifiers benefit from include-path search.
-    // Parent-relative specifiers like `../shared/vars` explicitly escape the
-    // importing file's directory and should not be silently redirected.
     let bare = specifier.strip_prefix("./")?;
     if bare.starts_with("..") || bare.starts_with('/') {
         return None;
@@ -261,8 +239,6 @@ fn find_scss_in_dir(include_dir: &Path, bare: &str, ctx: &ResolveContext<'_>) ->
         Some(ext) if ext.eq_ignore_ascii_case("scss") || ext.eq_ignore_ascii_case("sass")
     );
 
-    // Split bare spec so we can build the `_`-prefixed partial for the final
-    // component while preserving any leading directory segments.
     let parent = bare_path.parent();
     let stem_with_ext = bare_path.file_name()?.to_str()?;
     let stem_without_ext = bare_path.file_stem().and_then(|s| s.to_str())?;
@@ -284,7 +260,6 @@ fn find_scss_in_dir(include_dir: &Path, bare: &str, ctx: &ResolveContext<'_>) ->
         } else {
             format!(".{ext}")
         };
-        // 1. Direct file: include_dir/<bare><ext>
         let direct = if ext.is_empty() {
             build(bare_path)
         } else {
@@ -293,7 +268,6 @@ fn find_scss_in_dir(include_dir: &Path, bare: &str, ctx: &ResolveContext<'_>) ->
         if let Some(fid) = lookup_scss_path(&direct, ctx) {
             return Some(fid);
         }
-        // 2. Partial: include_dir/<parent>/_<stem><ext>
         let partial_name = if ext.is_empty() {
             format!("_{stem_with_ext}")
         } else {
@@ -304,10 +278,8 @@ fn find_scss_in_dir(include_dir: &Path, bare: &str, ctx: &ResolveContext<'_>) ->
             return Some(fid);
         }
         if ext.is_empty() {
-            // Already has extension; directory index candidates below don't apply.
             continue;
         }
-        // 3. Directory index: include_dir/<bare>/_index.<ext>
         let idx_partial = build(bare_path).join(format!("_index{suffix}"));
         if let Some(fid) = lookup_scss_path(&idx_partial, ctx) {
             return Some(fid);
@@ -366,7 +338,6 @@ pub(super) fn try_scss_node_modules_fallback(
     specifier: &str,
     from_style: bool,
 ) -> Option<ResolveResult> {
-    // SCSS built-in modules (`sass:math`) should not be retried
     if specifier.contains(':') {
         return None;
     }
@@ -376,27 +347,14 @@ pub(super) fn try_scss_node_modules_fallback(
     if !is_scss_importer && !from_style {
         return None;
     }
-    // Only bare (normalized) specifiers should search node_modules. Explicit
-    // parent-relative paths (`../shared/vars`) are intentional and must not be
-    // redirected.
     let bare = specifier.strip_prefix("./")?;
     if bare.starts_with("..") || bare.starts_with('/') {
         return None;
     }
-    // The first segment of a bare specifier is the package name (or the start
-    // of a scoped package name). Require it before probing node_modules to
-    // avoid spurious syscalls on malformed specifiers.
     if bare.is_empty() {
         return None;
     }
 
-    // Walk up from the importing file's parent directory to the filesystem
-    // root, matching Node.js / Sass `node_modules` resolution. Covers all
-    // common layouts: flat single project, non-hoisted monorepo, and hoisted
-    // monorepo where `node_modules` lives above the plow project root
-    // (e.g., plow run on `/monorepo/packages/my-lib` needs to reach
-    // `/monorepo/node_modules`). The walk is bounded by `Path::parent()`
-    // returning `None` at the filesystem root.
     let mut dir = from_file.parent()?;
     loop {
         let nm_dir = dir.join("node_modules");
@@ -430,24 +388,18 @@ fn find_scss_in_node_modules(nm_dir: &Path, bare: &str) -> Option<PathBuf> {
         parent.map_or_else(|| nm_dir.join(name), |p| nm_dir.join(p).join(name))
     };
 
-    // 1. Append extension. Covers both SCSS partials (with ext .scss/.sass
-    // added via the separate partial probe below) and CSS files where Sass
-    // appends `.css` to an extensionless specifier like `animate.css/animate.min`.
     for ext in &["scss", "sass", "css"] {
         let candidate = join_with_parent(&format!("{file_name}.{ext}"));
         if candidate.is_file() {
             return Some(candidate);
         }
     }
-    // 2. SCSS partial: prepend underscore to the file name component only.
-    // Skip `.css` here — CSS has no partial convention.
     for ext in &["scss", "sass"] {
         let candidate = join_with_parent(&format!("_{file_name}.{ext}"));
         if candidate.is_file() {
             return Some(candidate);
         }
     }
-    // 3. Directory index: `<bare>/_index.<ext>` or `<bare>/index.<ext>`.
     for ext in &["scss", "sass"] {
         let idx_partial = nm_dir.join(bare).join(format!("_index.{ext}"));
         if idx_partial.is_file() {
@@ -458,8 +410,6 @@ fn find_scss_in_node_modules(nm_dir: &Path, bare: &str) -> Option<PathBuf> {
             return Some(idx_plain);
         }
     }
-    // 4. Exact file — covers specifiers that already carry an extension
-    // (e.g., `bootstrap/dist/css/bootstrap.min.css`).
     let exact = nm_dir.join(bare);
     if exact.is_file() {
         return Some(exact);
@@ -493,26 +443,18 @@ pub(super) fn try_source_fallback(
         false
     };
 
-    // Find the LAST output directory component (closest to the file).
-    // Using rposition avoids false matches on parent directories that happen to
-    // be named "build", "dist", etc.
     let last_output_pos = components.iter().rposition(&is_output_dir)?;
 
-    // Walk backwards to find the start of consecutive output directory components.
-    // e.g., for `dist/esm/utils.mjs`, rposition finds `esm`, then we walk back to `dist`.
     let mut first_output_pos = last_output_pos;
     while first_output_pos > 0 && is_output_dir(&components[first_output_pos - 1]) {
         first_output_pos -= 1;
     }
 
-    // Build the path prefix (everything before the first consecutive output dir)
     let prefix: PathBuf = components[..first_output_pos].iter().collect();
 
-    // Build the relative path after the last consecutive output dir
     let suffix: PathBuf = components[last_output_pos + 1..].iter().collect();
     suffix.file_stem()?; // Ensure the suffix has a filename
 
-    // Try replacing the output dirs with "src" and each source extension
     for ext in SOURCE_EXTS {
         let source_candidate = prefix.join("src").join(suffix.with_extension(ext));
         if let Some(&file_id) = path_to_id.get(source_candidate.as_path()) {
@@ -558,6 +500,56 @@ pub(super) fn try_package_imports_fallback(
             }
         },
     )
+}
+
+/// Resolve a relative import that lands on a known package root whose built
+/// entry points are absent but whose package metadata points at source files.
+pub(super) fn try_relative_package_root_source_fallback(
+    ctx: &ResolveContext<'_>,
+    from_file: &Path,
+    specifier: &str,
+) -> Option<ResolveResult> {
+    if !specifier.starts_with("./") && !specifier.starts_with("../") {
+        return None;
+    }
+
+    let from_dir = from_file.parent()?;
+    let candidate = from_dir.join(specifier);
+    let normalized_candidate = normalize_path_lexically(&candidate);
+    #[cfg(not(miri))]
+    let canonical_candidate = dunce::canonicalize(&candidate).ok();
+    #[cfg(miri)]
+    let canonical_candidate: Option<PathBuf> = None;
+
+    ctx.package_manifests.iter().find_map(|manifest| {
+        let matches_manifest = candidate == manifest.root
+            || normalized_candidate == manifest.root
+            || canonical_candidate
+                .as_deref()
+                .is_some_and(|canonical| canonical == manifest.canonical_root);
+        matches_manifest
+            .then(|| try_source_subpath(ctx, manifest, Path::new("")))
+            .flatten()
+            .map(ResolveResult::InternalModule)
+    })
+}
+
+fn normalize_path_lexically(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                if !normalized.pop() {
+                    normalized.push(component.as_os_str());
+                }
+            }
+            std::path::Component::Prefix(_)
+            | std::path::Component::RootDir
+            | std::path::Component::Normal(_) => normalized.push(component.as_os_str()),
+        }
+    }
+    normalized
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -776,8 +768,8 @@ fn try_source_subpath(
 ) -> Option<FileId> {
     if subpath.as_os_str().is_empty()
         && let Some(source) = manifest.package_json.source.as_deref()
-        && let Some(source) = source.strip_prefix("./")
-        && let Some(file_id) = lookup_internal_file_id(ctx, &manifest.root.join(source))
+        && let Some(source_path) = safe_relative_package_source_path(source)
+        && let Some(file_id) = lookup_internal_file_id(ctx, &manifest.root.join(source_path))
     {
         return Some(file_id);
     }
@@ -812,6 +804,25 @@ fn try_source_subpath(
     }
 
     None
+}
+
+fn safe_relative_package_source_path(source: &str) -> Option<&Path> {
+    let source = source.strip_prefix("./").unwrap_or(source);
+    let path = Path::new(source);
+    if path.as_os_str().is_empty()
+        || path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
+    {
+        None
+    } else {
+        Some(path)
+    }
 }
 
 fn lookup_internal_file_id(ctx: &ResolveContext<'_>, candidate: &Path) -> Option<FileId> {
@@ -849,7 +860,6 @@ pub fn extract_package_name_from_node_modules_path(path: &Path) -> Option<String
         })
         .collect();
 
-    // Find the last "node_modules" component (handles nested node_modules)
     let nm_idx = components.iter().rposition(|&c| c == "node_modules")?;
 
     let after = &components[nm_idx + 1..];
@@ -858,7 +868,6 @@ pub fn extract_package_name_from_node_modules_path(path: &Path) -> Option<String
     }
 
     if after[0].starts_with('@') {
-        // Scoped package: @scope/pkg
         if after.len() >= 2 {
             Some(format!("{}/{}", after[0], after[1]))
         } else {
@@ -882,7 +891,6 @@ pub(super) fn try_pnpm_workspace_fallback(
     path_to_id: &FxHashMap<&Path, FileId>,
     workspace_roots: &FxHashMap<&str, &Path>,
 ) -> Option<FileId> {
-    // Only relevant for paths containing .pnpm
     let components: Vec<&str> = path
         .components()
         .filter_map(|c| match c {
@@ -891,14 +899,10 @@ pub(super) fn try_pnpm_workspace_fallback(
         })
         .collect();
 
-    // Find .pnpm component
     let pnpm_idx = components.iter().position(|&c| c == ".pnpm")?;
 
-    // After .pnpm, find the inner node_modules (the actual package location)
-    // Structure: .pnpm/<name>@<version>/node_modules/<package>/...
     let after_pnpm = &components[pnpm_idx + 1..];
 
-    // Find "node_modules" inside the .pnpm directory
     let inner_nm_idx = after_pnpm.iter().position(|&c| c == "node_modules")?;
     let after_inner_nm = &after_pnpm[inner_nm_idx + 1..];
 
@@ -906,7 +910,6 @@ pub(super) fn try_pnpm_workspace_fallback(
         return None;
     }
 
-    // Extract package name (handle scoped packages)
     let (pkg_name, pkg_name_components) = if after_inner_nm[0].starts_with('@') {
         if after_inner_nm.len() >= 2 {
             (format!("{}/{}", after_inner_nm[0], after_inner_nm[1]), 2)
@@ -917,10 +920,8 @@ pub(super) fn try_pnpm_workspace_fallback(
         (after_inner_nm[0].to_string(), 1)
     };
 
-    // Check if this package is a workspace package
     let ws_root = workspace_roots.get(pkg_name.as_str())?;
 
-    // Get the relative path within the package (after the package name components)
     let relative_parts = &after_inner_nm[pkg_name_components..];
     if relative_parts.is_empty() {
         return None;
@@ -928,13 +929,11 @@ pub(super) fn try_pnpm_workspace_fallback(
 
     let relative_path: PathBuf = relative_parts.iter().collect();
 
-    // Try direct file lookup in workspace root
     let direct = ws_root.join(&relative_path);
     if let Some(&file_id) = path_to_id.get(direct.as_path()) {
         return Some(file_id);
     }
 
-    // Try source fallback (dist/ → src/ etc.) within the workspace
     try_source_fallback(&direct, path_to_id)
 }
 
@@ -964,14 +963,11 @@ pub(super) fn try_workspace_package_fallback(
     ctx: &ResolveContext<'_>,
     specifier: &str,
 ) -> Option<ResolveResult> {
-    // Must look like a bare package specifier to avoid matching `./button`, etc.
     if !super::path_info::is_bare_specifier(specifier) {
         return None;
     }
     let pkg_name = super::path_info::extract_package_name(specifier);
 
-    // Remainder after the package name. Empty for `@org/pkg`, `"button"` for
-    // `@org/pkg/button`, `"internal/base"` for `@org/pkg/internal/base`.
     let subpath = specifier
         .strip_prefix(pkg_name.as_str())
         .and_then(|s| s.strip_prefix('/'))
@@ -1016,8 +1012,6 @@ pub(super) fn try_workspace_package_fallback(
             (*ctx.workspace_roots.get(pkg_name.as_str())?, pkg_name)
         };
 
-    // Synthetic importer inside the workspace root so tsconfig discovery walks
-    // up from the correct directory and relative specifiers anchor there.
     let root_file = ws_root.join("__plow_ws_self_resolve__");
     let rel_spec = if subpath.is_empty() {
         "./".to_string()
@@ -1063,7 +1057,6 @@ pub(super) fn try_workspace_package_fallback(
 pub(super) fn make_glob_from_pattern(
     pattern: &plow_types::extract::DynamicImportPattern,
 ) -> String {
-    // If the prefix already contains glob characters (from import.meta.glob), use as-is
     if pattern.prefix.contains('*') || pattern.prefix.contains('{') {
         return pattern.prefix.clone();
     }
@@ -1123,14 +1116,12 @@ mod tests {
 
     #[test]
     fn alias_match_remainder_exact_key() {
-        // Exact-key alias (the whole specifier equals the key): empty remainder.
         assert_eq!(alias_match_remainder("vscode", "vscode"), Some(""));
         assert_eq!(alias_match_remainder("@scope/sdk", "@scope/sdk"), Some(""));
     }
 
     #[test]
     fn alias_match_remainder_slash_continuation() {
-        // Slash-delimited continuation matches for both bare and trailing-slash prefixes.
         assert_eq!(
             alias_match_remainder("@scope/sdk/sub", "@scope/sdk"),
             Some("/sub")
@@ -1145,8 +1136,6 @@ mod tests {
 
     #[test]
     fn alias_match_remainder_rejects_prefix_collision() {
-        // The collision class: an exact-key alias must NOT capture a longer
-        // package that merely shares the prefix without a path boundary.
         assert_eq!(
             alias_match_remainder("@scope/sdk-extra", "@scope/sdk"),
             None
@@ -1183,7 +1172,6 @@ mod tests {
 
     #[test]
     fn test_extract_package_name_from_node_modules_path_nested() {
-        // Nested node_modules: should use the last (innermost) one
         let path = PathBuf::from("/project/node_modules/pkg-a/node_modules/pkg-b/dist/index.js");
         assert_eq!(
             extract_package_name_from_node_modules_path(&path),
@@ -1214,7 +1202,6 @@ mod tests {
 
     #[test]
     fn test_extract_package_name_from_node_modules_path_scoped_only_scope() {
-        // Edge case: path ends at scope without package name
         let path = PathBuf::from("/project/node_modules/@scope");
         assert_eq!(
             extract_package_name_from_node_modules_path(&path),
@@ -1224,11 +1211,6 @@ mod tests {
 
     #[test]
     fn test_resolve_specifier_node_modules_returns_npm_package() {
-        // When oxc_resolver resolves to a node_modules path that is NOT in path_to_id,
-        // it should return NpmPackage instead of ExternalFile.
-        // We can't easily test resolve_specifier directly without a real resolver,
-        // but the extract_package_name_from_node_modules_path function covers the
-        // core logic that was missing.
         let path =
             PathBuf::from("/project/node_modules/styled-components/dist/styled-components.esm.js");
         assert_eq!(
@@ -1289,7 +1271,6 @@ mod tests {
         let mut path_to_id = FxHashMap::default();
         path_to_id.insert(src_path.as_path(), FileId(0));
 
-        // A path that's not in an output directory should not trigger fallback
         let normal_path = PathBuf::from("/project/packages/ui/scripts/utils.js");
         assert_eq!(
             try_source_fallback(&normal_path, &path_to_id),
@@ -1602,8 +1583,58 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
+    fn relative_package_root_source_fallback_uses_package_source_entry() {
+        let root = PathBuf::from("/project");
+        let source_path = root.join("custom/entry.js");
+        with_package_map_ctx(
+            root,
+            Some("pkg"),
+            plow_config::PackageJson {
+                source: Some("custom/entry.js".to_string()),
+                ..Default::default()
+            },
+            &[(source_path, FileId(11))],
+            |ctx, _, root| {
+                let result = try_relative_package_root_source_fallback(
+                    ctx,
+                    &root.join("test/shared/exports.test.js"),
+                    "../../",
+                );
+                assert!(matches!(
+                    result,
+                    Some(ResolveResult::InternalModule(FileId(11)))
+                ));
+            },
+        );
+    }
+
+    #[test]
+    fn package_source_path_accepts_relative_source_entries() {
+        assert_eq!(
+            safe_relative_package_source_path("src/index.js"),
+            Some(Path::new("src/index.js"))
+        );
+        assert_eq!(
+            safe_relative_package_source_path("./custom/entry.ts"),
+            Some(Path::new("custom/entry.ts"))
+        );
+    }
+
+    #[test]
+    fn package_source_path_rejects_unsafe_entries() {
+        assert_eq!(safe_relative_package_source_path(""), None);
+        assert_eq!(safe_relative_package_source_path("./"), None);
+        assert_eq!(safe_relative_package_source_path("../src/index.js"), None);
+        assert_eq!(safe_relative_package_source_path("src/../index.js"), None);
+        assert_eq!(safe_relative_package_source_path("/src/index.js"), None);
+
+        #[cfg(windows)]
+        assert_eq!(safe_relative_package_source_path("C:\\src\\index.js"), None);
+    }
+
+    #[test]
     fn test_pnpm_store_path_extract_package_name() {
-        // pnpm virtual store paths should correctly extract package name
         let path =
             PathBuf::from("/project/node_modules/.pnpm/react@18.2.0/node_modules/react/index.js");
         assert_eq!(
@@ -1655,7 +1686,6 @@ mod tests {
         let ws_root = PathBuf::from("/project/packages/ui");
         workspace_roots.insert("@myorg/ui", ws_root.as_path());
 
-        // pnpm virtual store path with dist/ output
         let pnpm_path = PathBuf::from(
             "/project/node_modules/.pnpm/@myorg+ui@1.0.0/node_modules/@myorg/ui/dist/utils.js",
         );
@@ -1676,7 +1706,6 @@ mod tests {
         let ws_root = PathBuf::from("/project/packages/core");
         workspace_roots.insert("@myorg/core", ws_root.as_path());
 
-        // pnpm path pointing directly to src/
         let pnpm_path = PathBuf::from(
             "/project/node_modules/.pnpm/@myorg+core@workspace/node_modules/@myorg/core/src/index.ts",
         );
@@ -1695,7 +1724,6 @@ mod tests {
         let ws_root = PathBuf::from("/project/packages/ui");
         workspace_roots.insert("@myorg/ui", ws_root.as_path());
 
-        // External package (not a workspace) — should return None
         let pnpm_path =
             PathBuf::from("/project/node_modules/.pnpm/react@18.2.0/node_modules/react/index.js");
         assert_eq!(
@@ -1715,7 +1743,6 @@ mod tests {
         let ws_root = PathBuf::from("/project/packages/utils");
         workspace_roots.insert("my-utils", ws_root.as_path());
 
-        // Unscoped workspace package in pnpm store
         let pnpm_path = PathBuf::from(
             "/project/node_modules/.pnpm/my-utils@1.0.0/node_modules/my-utils/dist/index.js",
         );
@@ -1736,7 +1763,6 @@ mod tests {
         let ws_root = PathBuf::from("/project/packages/ui");
         workspace_roots.insert("@myorg/ui", ws_root.as_path());
 
-        // Nested path within the package
         let pnpm_path = PathBuf::from(
             "/project/node_modules/.pnpm/@myorg+ui@1.0.0/node_modules/@myorg/ui/dist/components/Button.js",
         );
@@ -1752,7 +1778,6 @@ mod tests {
         let path_to_id: FxHashMap<&Path, FileId> = FxHashMap::default();
         let workspace_roots: FxHashMap<&str, &Path> = FxHashMap::default();
 
-        // Regular path without .pnpm — should return None immediately
         let regular_path = PathBuf::from("/project/node_modules/react/index.js");
         assert_eq!(
             try_pnpm_workspace_fallback(&regular_path, &path_to_id, &workspace_roots),
@@ -1770,7 +1795,6 @@ mod tests {
         let ws_root = PathBuf::from("/project/packages/ui");
         workspace_roots.insert("@myorg/ui", ws_root.as_path());
 
-        // pnpm path with peer dependency suffix
         let pnpm_path = PathBuf::from(
             "/project/node_modules/.pnpm/@myorg+ui@1.0.0_react@18.2.0/node_modules/@myorg/ui/dist/index.js",
         );
@@ -1780,8 +1804,6 @@ mod tests {
             ".pnpm path with peer dep suffix should still resolve"
         );
     }
-
-    // ── make_glob_from_pattern ───────────────────────────────────────
 
     #[test]
     fn make_glob_prefix_only_no_suffix() {
@@ -1805,7 +1827,6 @@ mod tests {
 
     #[test]
     fn make_glob_passthrough_star() {
-        // Prefix already contains glob characters — use as-is
         let pattern = plow_types::extract::DynamicImportPattern {
             prefix: "./pages/**/*.tsx".to_string(),
             suffix: None,
@@ -1844,11 +1865,8 @@ mod tests {
         assert_eq!(make_glob_from_pattern(&pattern), "*.ts");
     }
 
-    // ── make_glob_from_pattern: template literal patterns ──────────
-
     #[test]
     fn make_glob_template_literal_prefix_only() {
-        // `./pages/${page}` extracts prefix="./pages/", suffix=None
         let pattern = plow_types::extract::DynamicImportPattern {
             prefix: "./pages/".to_string(),
             suffix: None,
@@ -1859,7 +1877,6 @@ mod tests {
 
     #[test]
     fn make_glob_template_literal_with_extension_suffix() {
-        // `./locales/${lang}.json` extracts prefix="./locales/", suffix=".json"
         let pattern = plow_types::extract::DynamicImportPattern {
             prefix: "./locales/".to_string(),
             suffix: Some(".json".to_string()),
@@ -1870,8 +1887,6 @@ mod tests {
 
     #[test]
     fn make_glob_template_literal_deep_prefix() {
-        // `./modules/${area}/components/${name}.tsx`
-        // Extractor captures prefix="./modules/", suffix=None (only first dynamic part)
         let pattern = plow_types::extract::DynamicImportPattern {
             prefix: "./modules/".to_string(),
             suffix: None,
@@ -1882,7 +1897,6 @@ mod tests {
 
     #[test]
     fn make_glob_string_concat_prefix() {
-        // `'./pages/' + name` extracts prefix="./pages/", suffix=None
         let pattern = plow_types::extract::DynamicImportPattern {
             prefix: "./pages/".to_string(),
             suffix: None,
@@ -1893,7 +1907,6 @@ mod tests {
 
     #[test]
     fn make_glob_string_concat_with_extension() {
-        // `'./views/' + name + '.vue'` extracts prefix="./views/", suffix=".vue"
         let pattern = plow_types::extract::DynamicImportPattern {
             prefix: "./views/".to_string(),
             suffix: Some(".vue".to_string()),
@@ -1902,11 +1915,8 @@ mod tests {
         assert_eq!(make_glob_from_pattern(&pattern), "./views/*.vue");
     }
 
-    // ── make_glob_from_pattern: import.meta.glob ──────────────────
-
     #[test]
     fn make_glob_import_meta_glob_recursive() {
-        // import.meta.glob('./components/**/*.vue')
         let pattern = plow_types::extract::DynamicImportPattern {
             prefix: "./components/**/*.vue".to_string(),
             suffix: None,
@@ -1921,7 +1931,6 @@ mod tests {
 
     #[test]
     fn make_glob_import_meta_glob_brace_expansion() {
-        // import.meta.glob('./plugins/{auth,analytics}.ts')
         let pattern = plow_types::extract::DynamicImportPattern {
             prefix: "./plugins/{auth,analytics}.ts".to_string(),
             suffix: None,
@@ -1936,7 +1945,6 @@ mod tests {
 
     #[test]
     fn make_glob_import_meta_glob_star_with_brace() {
-        // import.meta.glob('./routes/**/*.{ts,tsx}')
         let pattern = plow_types::extract::DynamicImportPattern {
             prefix: "./routes/**/*.{ts,tsx}".to_string(),
             suffix: None,
@@ -1951,7 +1959,6 @@ mod tests {
 
     #[test]
     fn make_glob_import_meta_glob_ignores_suffix_when_star_present() {
-        // Edge case: prefix contains *, suffix is provided (unlikely but defensive)
         let pattern = plow_types::extract::DynamicImportPattern {
             prefix: "./*.ts".to_string(),
             suffix: Some(".extra".to_string()),
@@ -1963,8 +1970,6 @@ mod tests {
             "when prefix has glob chars, suffix is ignored (prefix used as-is)"
         );
     }
-
-    // ── make_glob_from_pattern: edge cases ────────────────────────
 
     #[test]
     fn make_glob_single_dot_prefix() {
@@ -1978,7 +1983,6 @@ mod tests {
 
     #[test]
     fn make_glob_prefix_without_trailing_slash() {
-        // `'./config' + ext` -> prefix="./config", suffix might be extension
         let pattern = plow_types::extract::DynamicImportPattern {
             prefix: "./config".to_string(),
             suffix: None,
@@ -1997,12 +2001,8 @@ mod tests {
         assert_eq!(make_glob_from_pattern(&pattern), "../shared/*.ts");
     }
 
-    // ── extract_package_name: additional edge cases ───────────────
-
     #[test]
     fn test_extract_package_name_with_pnpm_plus_encoded_scope() {
-        // pnpm encodes @scope/pkg as @scope+pkg in store path
-        // but the inner node_modules still uses the real scope
         let path = PathBuf::from(
             "/project/node_modules/.pnpm/@mui+material@5.15.0/node_modules/@mui/material/index.js",
         );
@@ -2014,15 +2014,12 @@ mod tests {
 
     #[test]
     fn test_extract_package_name_windows_style_path() {
-        // Windows-style paths should still work since we filter for Normal components
         let path = PathBuf::from("/project/node_modules/typescript/lib/tsc.js");
         assert_eq!(
             extract_package_name_from_node_modules_path(&path),
             Some("typescript".to_string())
         );
     }
-
-    // ── try_source_fallback: additional output dir patterns ───────
 
     #[test]
     fn test_try_source_fallback_out_dir() {
@@ -2082,7 +2079,6 @@ mod tests {
 
     #[test]
     fn test_try_source_fallback_no_file_stem() {
-        // Path with no filename at all should return None gracefully
         let path_to_id: FxHashMap<&Path, FileId> = FxHashMap::default();
         let dist_path = PathBuf::from("/project/packages/ui/dist/");
         assert_eq!(
@@ -2094,7 +2090,6 @@ mod tests {
 
     #[test]
     fn test_try_source_fallback_esm_subdir() {
-        // esm is an output directory, so dist/esm -> src
         let src_path = PathBuf::from("/project/lib/src/index.ts");
         let mut path_to_id = FxHashMap::default();
         path_to_id.insert(src_path.as_path(), FileId(10));
@@ -2121,11 +2116,8 @@ mod tests {
         );
     }
 
-    // ── try_pnpm_workspace_fallback: edge cases ──────────────────
-
     #[test]
     fn test_try_pnpm_workspace_fallback_empty_after_pnpm() {
-        // Path that has .pnpm but nothing after the inner node_modules
         let path_to_id: FxHashMap<&Path, FileId> = FxHashMap::default();
         let workspace_roots: FxHashMap<&str, &Path> = FxHashMap::default();
 
@@ -2139,7 +2131,6 @@ mod tests {
 
     #[test]
     fn test_try_pnpm_workspace_fallback_scoped_package_only_scope() {
-        // Path has .pnpm/inner-node_modules/@scope but no package name after scope
         let path_to_id: FxHashMap<&Path, FileId> = FxHashMap::default();
         let workspace_roots: FxHashMap<&str, &Path> = FxHashMap::default();
 
@@ -2154,7 +2145,6 @@ mod tests {
 
     #[test]
     fn test_try_pnpm_workspace_fallback_no_inner_node_modules() {
-        // Path has .pnpm but no inner node_modules
         let path_to_id: FxHashMap<&Path, FileId> = FxHashMap::default();
         let workspace_roots: FxHashMap<&str, &Path> = FxHashMap::default();
 
@@ -2168,7 +2158,6 @@ mod tests {
 
     #[test]
     fn test_try_pnpm_workspace_fallback_package_without_relative_path() {
-        // Path ends right at the package name, no file path after it
         let path_to_id: FxHashMap<&Path, FileId> = FxHashMap::default();
         let mut workspace_roots = FxHashMap::default();
         let ws_root = PathBuf::from("/project/packages/ui");
@@ -2193,7 +2182,6 @@ mod tests {
         let ws_root = PathBuf::from("/project/packages/ui");
         workspace_roots.insert("@myorg/ui", ws_root.as_path());
 
-        // Nested output dirs within pnpm workspace path
         let pnpm_path = PathBuf::from(
             "/project/node_modules/.pnpm/@myorg+ui@1.0.0/node_modules/@myorg/ui/dist/esm/Button.mjs",
         );

@@ -1,10 +1,12 @@
+use crate::report::sink::{out, outln};
 use std::fmt::Write;
 use std::path::Path;
 
 use plow_core::duplicates::DuplicationReport;
 use plow_core::results::{
-    AnalysisResults, UnusedClassMemberFinding, UnusedEnumMemberFinding, UnusedExport,
-    UnusedExportFinding, UnusedMember, UnusedTypeFinding,
+    AnalysisResults, UnresolvedCatalogReferenceFinding, UnusedCatalogEntryFinding,
+    UnusedClassMemberFinding, UnusedDependencyOverrideFinding, UnusedEnumMemberFinding,
+    UnusedExport, UnusedExportFinding, UnusedMember, UnusedStoreMemberFinding, UnusedTypeFinding,
 };
 
 use super::grouping::ResultGroup;
@@ -16,14 +18,10 @@ fn escape_backticks(s: &str) -> String {
 }
 
 pub(super) fn print_markdown(results: &AnalysisResults, root: &Path) {
-    println!("{}", build_markdown(results, root));
+    outln!("{}", build_markdown(results, root));
 }
 
 /// Build markdown output for analysis results.
-#[expect(
-    clippy::too_many_lines,
-    reason = "one section per issue type; splitting would fragment the output builder"
-)]
 pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
     let rel = |p: &Path| {
         escape_backticks(&normalize_uri(
@@ -41,12 +39,10 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
 
     let _ = write!(out, "## Plow: {total} issue{} found\n\n", plural(total));
 
-    // ── Unused files ──
     markdown_section(&mut out, &results.unused_files, "Unused files", |file| {
         vec![format!("- `{}`", rel(&file.file.path))]
     });
 
-    // ── Unused exports ──
     markdown_grouped_section(
         &mut out,
         &results.unused_exports,
@@ -56,7 +52,6 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
         |e: &UnusedExportFinding| format_export(&e.export),
     );
 
-    // ── Unused types ──
     markdown_grouped_section(
         &mut out,
         &results.unused_types,
@@ -75,72 +70,9 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
         format_private_type_leak,
     );
 
-    // ── Unused dependencies ──
-    markdown_section(
-        &mut out,
-        &results.unused_dependencies,
-        "Unused dependencies",
-        |dep| {
-            format_dependency(
-                &dep.dep.package_name,
-                &dep.dep.path,
-                &dep.dep.used_in_workspaces,
-                root,
-            )
-        },
-    );
+    push_markdown_dependency_sections(&mut out, results, root);
+    push_markdown_member_sections(&mut out, results, root);
 
-    // ── Unused devDependencies ──
-    markdown_section(
-        &mut out,
-        &results.unused_dev_dependencies,
-        "Unused devDependencies",
-        |dep| {
-            format_dependency(
-                &dep.dep.package_name,
-                &dep.dep.path,
-                &dep.dep.used_in_workspaces,
-                root,
-            )
-        },
-    );
-
-    // ── Unused optionalDependencies ──
-    markdown_section(
-        &mut out,
-        &results.unused_optional_dependencies,
-        "Unused optionalDependencies",
-        |dep| {
-            format_dependency(
-                &dep.dep.package_name,
-                &dep.dep.path,
-                &dep.dep.used_in_workspaces,
-                root,
-            )
-        },
-    );
-
-    // ── Unused enum members ──
-    markdown_grouped_section(
-        &mut out,
-        &results.unused_enum_members,
-        "Unused enum members",
-        root,
-        |m| m.member.path.as_path(),
-        |m: &UnusedEnumMemberFinding| format_member(&m.member),
-    );
-
-    // ── Unused class members ──
-    markdown_grouped_section(
-        &mut out,
-        &results.unused_class_members,
-        "Unused class members",
-        root,
-        |m| m.member.path.as_path(),
-        |m: &UnusedClassMemberFinding| format_member(&m.member),
-    );
-
-    // ── Unresolved imports ──
     markdown_grouped_section(
         &mut out,
         &results.unresolved_imports,
@@ -156,7 +88,6 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
         },
     );
 
-    // ── Unlisted dependencies ──
     markdown_section(
         &mut out,
         &results.unlisted_dependencies,
@@ -164,7 +95,6 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
         |dep| vec![format!("- `{}`", escape_backticks(&dep.dep.package_name))],
     );
 
-    // ── Duplicate exports ──
     markdown_section(
         &mut out,
         &results.duplicate_exports,
@@ -184,93 +114,198 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
         },
     );
 
-    // ── Type-only dependencies ──
+    push_markdown_dependency_detail_sections(&mut out, results, root);
+    push_markdown_graph_sections(&mut out, results, &rel);
+    push_markdown_catalog_sections(&mut out, results, &rel);
+
+    out
+}
+
+fn push_markdown_dependency_sections(out: &mut String, results: &AnalysisResults, root: &Path) {
     markdown_section(
-        &mut out,
+        out,
+        &results.unused_dependencies,
+        "Unused dependencies",
+        |dep| {
+            format_dependency(
+                &dep.dep.package_name,
+                &dep.dep.path,
+                &dep.dep.used_in_workspaces,
+                root,
+            )
+        },
+    );
+    markdown_section(
+        out,
+        &results.unused_dev_dependencies,
+        "Unused devDependencies",
+        |dep| {
+            format_dependency(
+                &dep.dep.package_name,
+                &dep.dep.path,
+                &dep.dep.used_in_workspaces,
+                root,
+            )
+        },
+    );
+    markdown_section(
+        out,
+        &results.unused_optional_dependencies,
+        "Unused optionalDependencies",
+        |dep| {
+            format_dependency(
+                &dep.dep.package_name,
+                &dep.dep.path,
+                &dep.dep.used_in_workspaces,
+                root,
+            )
+        },
+    );
+}
+
+fn push_markdown_member_sections(out: &mut String, results: &AnalysisResults, root: &Path) {
+    markdown_grouped_section(
+        out,
+        &results.unused_enum_members,
+        "Unused enum members",
+        root,
+        |m| m.member.path.as_path(),
+        |m: &UnusedEnumMemberFinding| format_member(&m.member),
+    );
+    markdown_grouped_section(
+        out,
+        &results.unused_class_members,
+        "Unused class members",
+        root,
+        |m| m.member.path.as_path(),
+        |m: &UnusedClassMemberFinding| format_member(&m.member),
+    );
+    markdown_grouped_section(
+        out,
+        &results.unused_store_members,
+        "Unused store members",
+        root,
+        |m| m.member.path.as_path(),
+        |m: &UnusedStoreMemberFinding| format_member(&m.member),
+    );
+}
+
+fn push_markdown_dependency_detail_sections(
+    out: &mut String,
+    results: &AnalysisResults,
+    root: &Path,
+) {
+    markdown_section(
+        out,
         &results.type_only_dependencies,
         "Type-only dependencies (consider moving to devDependencies)",
         |dep| format_dependency(&dep.dep.package_name, &dep.dep.path, &[], root),
     );
-
-    // ── Test-only dependencies ──
     markdown_section(
-        &mut out,
+        out,
         &results.test_only_dependencies,
         "Test-only production dependencies (consider moving to devDependencies)",
         |dep| format_dependency(&dep.dep.package_name, &dep.dep.path, &[], root),
     );
+}
 
-    // ── Circular dependencies ──
+fn push_markdown_graph_sections(
+    out: &mut String,
+    results: &AnalysisResults,
+    rel: &dyn Fn(&Path) -> String,
+) {
     markdown_section(
-        &mut out,
+        out,
         &results.circular_dependencies,
         "Circular dependencies",
-        |cycle| {
-            let chain: Vec<String> = cycle.cycle.files.iter().map(|p| rel(p)).collect();
-            let mut display_chain = chain.clone();
-            if let Some(first) = chain.first() {
-                display_chain.push(first.clone());
-            }
-            let cross_pkg_tag = if cycle.cycle.is_cross_package {
-                " *(cross-package)*"
-            } else {
-                ""
-            };
-            vec![format!(
-                "- {}{}",
-                display_chain
-                    .iter()
-                    .map(|s| format!("`{s}`"))
-                    .collect::<Vec<_>>()
-                    .join(" \u{2192} "),
-                cross_pkg_tag
-            )]
-        },
+        |cycle| format_markdown_circular_dependency(cycle, rel),
     );
-
-    // ── Re-export cycles ──
     markdown_section(
-        &mut out,
+        out,
         &results.re_export_cycles,
         "Re-export cycles",
-        |cycle| {
-            let chain: Vec<String> = cycle.cycle.files.iter().map(|p| rel(p)).collect();
-            let kind_tag = match cycle.cycle.kind {
-                plow_core::results::ReExportCycleKind::SelfLoop => " *(self-loop)*",
-                plow_core::results::ReExportCycleKind::MultiNode => "",
-            };
-            vec![format!(
-                "- {}{}",
-                chain
-                    .iter()
-                    .map(|s| format!("`{s}`"))
-                    .collect::<Vec<_>>()
-                    .join(" <-> "),
-                kind_tag
-            )]
-        },
+        |cycle| format_markdown_re_export_cycle(cycle, rel),
     );
-
-    // ── Boundary violations ──
     markdown_section(
-        &mut out,
+        out,
         &results.boundary_violations,
         "Boundary violations",
-        |v| {
-            vec![format!(
-                "- `{}`:{}  \u{2192} `{}` ({} \u{2192} {})",
-                rel(&v.violation.from_path),
-                v.violation.line,
-                rel(&v.violation.to_path),
-                v.violation.from_zone,
-                v.violation.to_zone,
-            )]
-        },
+        |v| format_markdown_boundary_violation(v, rel),
     );
-
-    // ── Stale suppressions ──
     markdown_section(
-        &mut out,
+        out,
+        &results.boundary_coverage_violations,
+        "Boundary coverage",
+        |v| format_markdown_boundary_coverage(v, rel),
+    );
+    markdown_section(
+        out,
+        &results.boundary_call_violations,
+        "Boundary calls",
+        |v| format_markdown_boundary_call(v, rel),
+    );
+    markdown_section(out, &results.policy_violations, "Policy violations", |v| {
+        format_markdown_policy_violation(v, rel)
+    });
+    markdown_section(
+        out,
+        &results.invalid_client_exports,
+        "Invalid client exports",
+        |e| format_markdown_invalid_client_export(e, rel),
+    );
+    markdown_section(
+        out,
+        &results.mixed_client_server_barrels,
+        "Mixed client/server barrels",
+        |b| format_markdown_mixed_client_server_barrel(b, rel),
+    );
+    markdown_section(
+        out,
+        &results.misplaced_directives,
+        "Misplaced directives",
+        |d| format_markdown_misplaced_directive(d, rel),
+    );
+    markdown_section(out, &results.route_collisions, "Route collisions", |c| {
+        format_markdown_route_collision(c, rel)
+    });
+    markdown_section(
+        out,
+        &results.dynamic_segment_name_conflicts,
+        "Dynamic segment conflicts",
+        |c| format_markdown_dynamic_segment_name_conflict(c, rel),
+    );
+    markdown_section(
+        out,
+        &results.unprovided_injects,
+        "Unprovided injects",
+        |i| format_markdown_unprovided_inject(i, rel),
+    );
+    markdown_section(
+        out,
+        &results.unrendered_components,
+        "Unrendered components",
+        |c| format_markdown_unrendered_component(c, rel),
+    );
+    markdown_section(
+        out,
+        &results.unused_component_props,
+        "Unused component props",
+        |p| format_markdown_unused_component_prop(p, rel),
+    );
+    markdown_section(
+        out,
+        &results.unused_component_emits,
+        "Unused component emits",
+        |e| format_markdown_unused_component_emit(e, rel),
+    );
+    markdown_section(
+        out,
+        &results.unused_server_actions,
+        "Unused server actions",
+        |a| format_markdown_unused_server_action(a, rel),
+    );
+    markdown_section(
+        out,
         &results.stale_suppressions,
         "Stale suppressions",
         |s| {
@@ -283,34 +318,248 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
             )]
         },
     );
+}
+
+fn format_markdown_circular_dependency(
+    cycle: &plow_core::results::CircularDependencyFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    let chain: Vec<String> = cycle.cycle.files.iter().map(|p| rel(p)).collect();
+    let mut display_chain = chain.clone();
+    if let Some(first) = chain.first() {
+        display_chain.push(first.clone());
+    }
+    let cross_pkg_tag = if cycle.cycle.is_cross_package {
+        " *(cross-package)*"
+    } else {
+        ""
+    };
+    vec![format!(
+        "- {}{}",
+        display_chain
+            .iter()
+            .map(|s| format!("`{s}`"))
+            .collect::<Vec<_>>()
+            .join(" \u{2192} "),
+        cross_pkg_tag
+    )]
+}
+
+fn format_markdown_re_export_cycle(
+    cycle: &plow_core::results::ReExportCycleFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    let chain: Vec<String> = cycle.cycle.files.iter().map(|p| rel(p)).collect();
+    let kind_tag = match cycle.cycle.kind {
+        plow_core::results::ReExportCycleKind::SelfLoop => " *(self-loop)*",
+        plow_core::results::ReExportCycleKind::MultiNode => "",
+    };
+    vec![format!(
+        "- {}{}",
+        chain
+            .iter()
+            .map(|s| format!("`{s}`"))
+            .collect::<Vec<_>>()
+            .join(" <-> "),
+        kind_tag
+    )]
+}
+
+fn format_markdown_boundary_violation(
+    v: &plow_core::results::BoundaryViolationFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    vec![format!(
+        "- `{}`:{}  \u{2192} `{}` ({} \u{2192} {})",
+        rel(&v.violation.from_path),
+        v.violation.line,
+        rel(&v.violation.to_path),
+        v.violation.from_zone,
+        v.violation.to_zone,
+    )]
+}
+
+fn format_markdown_boundary_coverage(
+    v: &plow_core::results::BoundaryCoverageViolationFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    vec![format!(
+        "- `{}`:{} no matching boundary zone",
+        rel(&v.violation.path),
+        v.violation.line,
+    )]
+}
+
+fn format_markdown_boundary_call(
+    v: &plow_core::results::BoundaryCallViolationFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    vec![format!(
+        "- `{}`:{} `{}` forbidden in zone `{}` (pattern `{}`)",
+        rel(&v.violation.path),
+        v.violation.line,
+        v.violation.callee,
+        v.violation.zone,
+        v.violation.pattern,
+    )]
+}
+
+fn format_markdown_policy_violation(
+    v: &plow_core::results::PolicyViolationFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    vec![format!(
+        "- `{}`:{} `{}` banned by `{}/{}`{}",
+        rel(&v.violation.path),
+        v.violation.line,
+        v.violation.matched,
+        v.violation.pack,
+        v.violation.rule_id,
+        v.violation
+            .message
+            .as_deref()
+            .map(|m| format!(" ({m})"))
+            .unwrap_or_default(),
+    )]
+}
+
+fn format_markdown_invalid_client_export(
+    e: &plow_core::results::InvalidClientExportFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    vec![format!(
+        "- `{}`:{} `{}` (from `\"{}\"`)",
+        rel(&e.export.path),
+        e.export.line,
+        e.export.export_name,
+        e.export.directive,
+    )]
+}
+
+fn format_markdown_mixed_client_server_barrel(
+    b: &plow_core::results::MixedClientServerBarrelFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    vec![format!(
+        "- `{}`:{} re-exports client `{}` and server-only `{}`",
+        rel(&b.barrel.path),
+        b.barrel.line,
+        b.barrel.client_origin,
+        b.barrel.server_origin,
+    )]
+}
+
+fn format_markdown_misplaced_directive(
+    d: &plow_core::results::MisplacedDirectiveFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    vec![format!(
+        "- `{}`:{} `\"{}\"` is not in the leading position and is ignored",
+        rel(&d.directive_site.path),
+        d.directive_site.line,
+        d.directive_site.directive,
+    )]
+}
+
+fn format_markdown_unprovided_inject(
+    i: &plow_core::results::UnprovidedInjectFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    vec![format!(
+        "- `{}`:{} `{}` has no matching provide(`{}`) in this project; at runtime it returns undefined",
+        rel(&i.inject.path),
+        i.inject.line,
+        escape_backticks(&i.inject.key_name),
+        escape_backticks(&i.inject.key_name),
+    )]
+}
+
+fn format_markdown_unrendered_component(
+    c: &plow_core::results::UnrenderedComponentFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    vec![format!(
+        "- `{}`:{} `{}` is reachable but rendered nowhere in this project (render it somewhere or remove it)",
+        rel(&c.component.path),
+        c.component.line,
+        escape_backticks(&c.component.component_name),
+    )]
+}
+
+fn format_markdown_unused_component_prop(
+    p: &plow_core::results::UnusedComponentPropFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    vec![format!(
+        "- `{}`:{} `{}` is declared but referenced nowhere in this component (remove it or use it)",
+        rel(&p.prop.path),
+        p.prop.line,
+        escape_backticks(&p.prop.prop_name),
+    )]
+}
+
+fn format_markdown_unused_component_emit(
+    e: &plow_core::results::UnusedComponentEmitFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    vec![format!(
+        "- `{}`:{} `{}` is declared but emitted nowhere in this component (remove it or emit it)",
+        rel(&e.emit.path),
+        e.emit.line,
+        escape_backticks(&e.emit.emit_name),
+    )]
+}
+
+fn format_markdown_unused_server_action(
+    a: &plow_core::results::UnusedServerActionFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    vec![format!(
+        "- `{}`:{} `{}` is exported from a \"use server\" file but no code in this project references it",
+        rel(&a.action.path),
+        a.action.line,
+        escape_backticks(&a.action.action_name),
+    )]
+}
+
+fn format_markdown_route_collision(
+    c: &plow_core::results::RouteCollisionFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    vec![format!(
+        "- `{}` resolves to `{}` (shared with {} other route file(s))",
+        rel(&c.collision.path),
+        c.collision.url,
+        c.collision.conflicting_paths.len(),
+    )]
+}
+
+fn format_markdown_dynamic_segment_name_conflict(
+    c: &plow_core::results::DynamicSegmentNameConflictFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    vec![format!(
+        "- `{}` crashes at runtime: different slug names ({}) at the same dynamic path `{}`; \
+         `next build` passes but the route fails on its first request (rename to one consistent slug)",
+        rel(&c.conflict.path),
+        c.conflict.conflicting_segments.join(" vs "),
+        c.conflict.position,
+    )]
+}
+
+fn push_markdown_catalog_sections(
+    out: &mut String,
+    results: &AnalysisResults,
+    rel: &dyn Fn(&Path) -> String,
+) {
     markdown_section(
-        &mut out,
+        out,
         &results.unused_catalog_entries,
         "Unused catalog entries",
-        |entry| {
-            let mut row = format!(
-                "- `{}` (`{}`) `{}`:{}",
-                escape_backticks(&entry.entry.entry_name),
-                escape_backticks(&entry.entry.catalog_name),
-                rel(&entry.entry.path),
-                entry.entry.line,
-            );
-            if !entry.entry.hardcoded_consumers.is_empty() {
-                use std::fmt::Write as _;
-                let consumers = entry
-                    .entry
-                    .hardcoded_consumers
-                    .iter()
-                    .map(|p| format!("`{}`", rel(p)))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                let _ = write!(row, " (hardcoded in {consumers})");
-            }
-            vec![row]
-        },
+        |entry| format_unused_catalog_entry(entry, rel),
     );
     markdown_section(
-        &mut out,
+        out,
         &results.empty_catalog_groups,
         "Empty catalog groups",
         |group| {
@@ -323,53 +572,19 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
         },
     );
     markdown_section(
-        &mut out,
+        out,
         &results.unresolved_catalog_references,
         "Unresolved catalog references",
-        |finding| {
-            let mut row = format!(
-                "- `{}` (`{}`) `{}`:{}",
-                escape_backticks(&finding.reference.entry_name),
-                escape_backticks(&finding.reference.catalog_name),
-                rel(&finding.reference.path),
-                finding.reference.line,
-            );
-            if !finding.reference.available_in_catalogs.is_empty() {
-                use std::fmt::Write as _;
-                let alts = finding
-                    .reference
-                    .available_in_catalogs
-                    .iter()
-                    .map(|c| format!("`{}`", escape_backticks(c)))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                let _ = write!(row, " (available in: {alts})");
-            }
-            vec![row]
-        },
+        |finding| format_unresolved_catalog_reference(finding, rel),
     );
     markdown_section(
-        &mut out,
+        out,
         &results.unused_dependency_overrides,
         "Unused dependency overrides",
-        |finding| {
-            use std::fmt::Write as _;
-            let mut row = format!(
-                "- `{}` -> `{}` (`{}`) `{}`:{}",
-                escape_backticks(&finding.entry.raw_key),
-                escape_backticks(&finding.entry.version_range),
-                finding.entry.source.as_label(),
-                rel(&finding.entry.path),
-                finding.entry.line,
-            );
-            if let Some(hint) = &finding.entry.hint {
-                let _ = write!(row, " (hint: {})", escape_backticks(hint));
-            }
-            vec![row]
-        },
+        |finding| format_unused_dependency_override(finding, rel),
     );
     markdown_section(
-        &mut out,
+        out,
         &results.misconfigured_dependency_overrides,
         "Misconfigured dependency overrides",
         |finding| {
@@ -384,8 +599,72 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
             )]
         },
     );
+}
 
-    out
+fn format_unused_catalog_entry(
+    entry: &UnusedCatalogEntryFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    let mut row = format!(
+        "- `{}` (`{}`) `{}`:{}",
+        escape_backticks(&entry.entry.entry_name),
+        escape_backticks(&entry.entry.catalog_name),
+        rel(&entry.entry.path),
+        entry.entry.line,
+    );
+    if !entry.entry.hardcoded_consumers.is_empty() {
+        let consumers = entry
+            .entry
+            .hardcoded_consumers
+            .iter()
+            .map(|p| format!("`{}`", rel(p)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let _ = write!(row, " (hardcoded in {consumers})");
+    }
+    vec![row]
+}
+
+fn format_unresolved_catalog_reference(
+    finding: &UnresolvedCatalogReferenceFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    let mut row = format!(
+        "- `{}` (`{}`) `{}`:{}",
+        escape_backticks(&finding.reference.entry_name),
+        escape_backticks(&finding.reference.catalog_name),
+        rel(&finding.reference.path),
+        finding.reference.line,
+    );
+    if !finding.reference.available_in_catalogs.is_empty() {
+        let alts = finding
+            .reference
+            .available_in_catalogs
+            .iter()
+            .map(|c| format!("`{}`", escape_backticks(c)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let _ = write!(row, " (available in: {alts})");
+    }
+    vec![row]
+}
+
+fn format_unused_dependency_override(
+    finding: &UnusedDependencyOverrideFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    let mut row = format!(
+        "- `{}` -> `{}` (`{}`) `{}`:{}",
+        escape_backticks(&finding.entry.raw_key),
+        escape_backticks(&finding.entry.version_range),
+        finding.entry.source.as_label(),
+        rel(&finding.entry.path),
+        finding.entry.line,
+    );
+    if let Some(hint) = &finding.entry.hint {
+        let _ = write!(row, " (hint: {})", escape_backticks(hint));
+    }
+    vec![row]
 }
 
 /// Print grouped markdown output: each group gets an `## owner (N issues)` heading.
@@ -393,29 +672,22 @@ pub(super) fn print_grouped_markdown(groups: &[ResultGroup], root: &Path) {
     let total: usize = groups.iter().map(|g| g.results.total_issues()).sum();
 
     if total == 0 {
-        println!("## Plow: no issues found");
+        outln!("## Plow: no issues found");
         return;
     }
 
-    println!(
-        "## Plow: {total} issue{} found (grouped)\n",
-        plural(total)
-    );
+    outln!("## Plow: {total} issue{} found (grouped)\n", plural(total));
 
     for group in groups {
         let count = group.results.total_issues();
         if count == 0 {
             continue;
         }
-        println!(
+        outln!(
             "## {} ({count} issue{})\n",
             escape_backticks(&group.key),
             plural(count)
         );
-        // Section-mode: surface the section's default owners under the heading
-        // so PR comment dashboards can see who approves without re-opening
-        // CODEOWNERS. `owners` is `None` outside of `--group-by section` and
-        // empty for the `(no section)` / `(unowned)` buckets.
         if let Some(ref owners) = group.owners
             && !owners.is_empty()
         {
@@ -424,17 +696,14 @@ pub(super) fn print_grouped_markdown(groups: &[ResultGroup], root: &Path) {
                 .map(|o| escape_backticks(o))
                 .collect::<Vec<_>>()
                 .join(" ");
-            println!("Owners: {joined}\n");
+            outln!("Owners: {joined}\n");
         }
-        // build_markdown already emits its own `## Plow: N issues found` header;
-        // we re-use the section-level rendering by extracting just the section body.
         let body = build_markdown(&group.results, root);
-        // Skip the first `## Plow: ...` line from build_markdown and print the rest.
         let sections = body
             .strip_prefix("## Plow: no issues found\n")
             .or_else(|| body.find("\n\n").map(|pos| &body[pos + 2..]))
             .unwrap_or(&body);
-        print!("{sections}");
+        out!("{sections}");
     }
 }
 
@@ -545,10 +814,8 @@ fn markdown_grouped_section<'a, T>(
     out.push('\n');
 }
 
-// ── Duplication markdown output ──────────────────────────────────
-
 pub(super) fn print_duplication_markdown(report: &DuplicationReport, root: &Path) {
-    println!("{}", build_duplication_markdown(report, root));
+    outln!("{}", build_duplication_markdown(report, root));
 }
 
 /// Build markdown output for duplication results.
@@ -593,7 +860,6 @@ pub fn build_duplication_markdown(report: &DuplicationReport, root: &Path) -> St
         out.push('\n');
     }
 
-    // Clone families
     if !report.clone_families.is_empty() {
         out.push_str("### Clone Families\n\n");
         for (i, family) in report.clone_families.iter().enumerate() {
@@ -623,7 +889,6 @@ pub fn build_duplication_markdown(report: &DuplicationReport, root: &Path) -> St
         }
     }
 
-    // Summary line
     let _ = writeln!(
         out,
         "**Summary:** {} duplicated lines ({:.1}%) across {} file{}",
@@ -636,10 +901,8 @@ pub fn build_duplication_markdown(report: &DuplicationReport, root: &Path) -> St
     out
 }
 
-// ── Health markdown output ──────────────────────────────────────────
-
 pub(super) fn print_health_markdown(report: &crate::health_types::HealthReport, root: &Path) {
-    println!("{}", build_health_markdown(report, root));
+    outln!("{}", build_health_markdown(report, root));
 }
 
 /// Build markdown output for health (complexity) results.
@@ -660,6 +923,8 @@ pub fn build_health_markdown(report: &crate::health_types::HealthReport, root: &
         && report.hotspots.is_empty()
         && report.targets.is_empty()
         && report.runtime_coverage.is_none()
+        && report.coverage_intelligence.is_none()
+        && report.threshold_overrides.is_empty()
     {
         if report.vital_signs.is_none() {
             let _ = write!(
@@ -676,7 +941,9 @@ pub fn build_health_markdown(report: &crate::health_types::HealthReport, root: &
     }
 
     write_findings_section(&mut out, report, root);
+    write_threshold_overrides_section(&mut out, report, root);
     write_runtime_coverage_section(&mut out, report, root);
+    write_coverage_intelligence_section(&mut out, report, root);
     write_coverage_gaps_section(&mut out, report, root);
     write_file_scores_section(&mut out, report, root);
     write_hotspots_section(&mut out, report, root);
@@ -684,6 +951,71 @@ pub fn build_health_markdown(report: &crate::health_types::HealthReport, root: &
     write_metric_legend(&mut out, report);
 
     out
+}
+
+fn write_coverage_intelligence_section(
+    out: &mut String,
+    report: &crate::health_types::HealthReport,
+    root: &Path,
+) {
+    let Some(ref intelligence) = report.coverage_intelligence else {
+        return;
+    };
+    if !out.is_empty() && !out.ends_with("\n\n") {
+        out.push('\n');
+    }
+    let _ = writeln!(
+        out,
+        "## Coverage Intelligence\n\n- Verdict: {}\n- Findings: {}\n- Ambiguous matches skipped: {}\n",
+        intelligence.verdict,
+        intelligence.summary.findings,
+        intelligence.summary.skipped_ambiguous_matches,
+    );
+    if intelligence.findings.is_empty() {
+        if intelligence.summary.skipped_ambiguous_matches > 0 {
+            let match_phrase = if intelligence.summary.skipped_ambiguous_matches == 1 {
+                "evidence match was"
+            } else {
+                "evidence matches were"
+            };
+            let _ = writeln!(
+                out,
+                "No actionable findings were emitted because {} ambiguous {match_phrase} skipped.\n",
+                intelligence.summary.skipped_ambiguous_matches,
+            );
+        }
+        return;
+    }
+    out.push_str("| ID | Path | Identity | Verdict | Recommendation | Confidence | Signals |\n");
+    out.push_str("|:---|:-----|:---------|:--------|:---------------|:-----------|:--------|\n");
+    for finding in &intelligence.findings {
+        let path = escape_backticks(&normalize_uri(
+            &relative_path(&finding.path, root).display().to_string(),
+        ));
+        let identity = finding
+            .identity
+            .as_deref()
+            .map_or_else(|| "-".to_owned(), escape_backticks);
+        let signals = finding
+            .signals
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+        let _ = writeln!(
+            out,
+            "| `{}` | `{}`:{} | `{}` | {} | {} | {} | {} |",
+            escape_backticks(&finding.id),
+            path,
+            finding.line,
+            identity,
+            finding.verdict,
+            finding.recommendation,
+            finding.confidence,
+            signals,
+        );
+    }
+    out.push('\n');
 }
 
 fn write_runtime_coverage_section(
@@ -694,9 +1026,6 @@ fn write_runtime_coverage_section(
     let Some(ref production) = report.runtime_coverage else {
         return;
     };
-    // Prepend a blank line so the heading is not concatenated to the previous
-    // section (GFM requires a blank line before headings to avoid the heading
-    // being parsed as a paragraph continuation).
     if !out.is_empty() && !out.ends_with("\n\n") {
         out.push('\n');
     }
@@ -869,7 +1198,11 @@ fn write_vital_signs_section(out: &mut String, report: &crate::health_types::Hea
         let _ = writeln!(out, "| Maintainability (avg) | {v:.1} |");
     }
     if let Some(v) = vs.hotspot_count {
-        let _ = writeln!(out, "| Hotspots | {v} |");
+        let label = report.hotspot_summary.as_ref().map_or_else(
+            || "Hotspots".to_string(),
+            |summary| format!("Hotspots (since {})", summary.since),
+        );
+        let _ = writeln!(out, "| {label} | {v} |");
     }
     if let Some(v) = vs.circular_dep_count {
         let _ = writeln!(out, "| Circular Deps | {v} |");
@@ -917,12 +1250,19 @@ fn write_findings_section(
 
     for finding in &report.findings {
         let file_str = rel(&finding.path);
-        let cyc_marker = if finding.cyclomatic > report.summary.max_cyclomatic_threshold {
+        let thresholds = finding.effective_thresholds.unwrap_or(
+            crate::health_types::HealthEffectiveThresholds {
+                max_cyclomatic: report.summary.max_cyclomatic_threshold,
+                max_cognitive: report.summary.max_cognitive_threshold,
+                max_crap: report.summary.max_crap_threshold,
+            },
+        );
+        let cyc_marker = if finding.cyclomatic > thresholds.max_cyclomatic {
             " **!**"
         } else {
             ""
         };
-        let cog_marker = if finding.cognitive > report.summary.max_cognitive_threshold {
+        let cog_marker = if finding.cognitive > thresholds.max_cognitive {
             " **!**"
         } else {
             ""
@@ -934,7 +1274,7 @@ fn write_findings_section(
         };
         let crap_cell = match finding.crap {
             Some(crap) => {
-                let marker = if crap >= report.summary.max_crap_threshold {
+                let marker = if crap >= thresholds.max_crap {
                     " **!**"
                 } else {
                     ""
@@ -965,6 +1305,59 @@ fn write_findings_section(
         cog = s.max_cognitive_threshold,
         crap = s.max_crap_threshold,
     );
+}
+
+fn write_threshold_overrides_section(
+    out: &mut String,
+    report: &crate::health_types::HealthReport,
+    root: &Path,
+) {
+    if report.threshold_overrides.is_empty() {
+        return;
+    }
+    if !out.is_empty() && !out.ends_with("\n\n") {
+        out.push('\n');
+    }
+    out.push_str("## Health Threshold Overrides\n\n");
+    out.push_str("| Override | Status | Target | Metrics |\n");
+    out.push_str("|---------:|:-------|:-------|:--------|\n");
+    for entry in &report.threshold_overrides {
+        let status = match entry.status {
+            crate::health_types::ThresholdOverrideStatus::Active => "active",
+            crate::health_types::ThresholdOverrideStatus::Stale => "stale",
+            crate::health_types::ThresholdOverrideStatus::NoMatch => "no_match",
+        };
+        let target = entry.path.as_ref().map_or_else(
+            || "<no matching file or function>".to_string(),
+            |path| {
+                let display = escape_backticks(&normalize_uri(
+                    &relative_path(path, root).display().to_string(),
+                ));
+                entry.function.as_ref().map_or_else(
+                    || display.clone(),
+                    |name| format!("{display}:{}", escape_backticks(name)),
+                )
+            },
+        );
+        let metrics = entry.metrics.map_or_else(
+            || "-".to_string(),
+            |metrics| {
+                let crap = metrics
+                    .crap
+                    .map_or(String::new(), |value| format!(", CRAP {value:.1}"));
+                format!(
+                    "cyclomatic {}, cognitive {}{}",
+                    metrics.cyclomatic, metrics.cognitive, crap
+                )
+            },
+        );
+        let _ = writeln!(
+            out,
+            "| {} | {} | `{}` | {} |",
+            entry.override_index, status, target, metrics
+        );
+    }
+    out.push('\n');
 }
 
 /// Write the file health scores table to the output.
@@ -1134,7 +1527,6 @@ fn write_hotspots_section(
         },
     );
     let _ = writeln!(out, "{header}");
-    // Add ownership columns when at least one entry has ownership data.
     let any_ownership = report.hotspots.iter().any(|e| e.ownership.is_some());
     if any_ownership {
         out.push_str(
@@ -1396,6 +1788,7 @@ mod tests {
                     length: 2,
                     line: 3,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             ));
@@ -1486,8 +1879,6 @@ mod tests {
         let md = build_markdown(&results, &root);
         assert!(md.contains("pkg\\`name"));
     }
-
-    // ── Duplication markdown ──
 
     #[test]
     fn duplication_markdown_empty() {
@@ -1587,8 +1978,6 @@ mod tests {
         assert!(md.contains("~15 lines saved"));
     }
 
-    // ── Health markdown ──
-
     #[test]
     fn health_markdown_empty_no_findings() {
         let root = PathBuf::from("/project");
@@ -1627,6 +2016,9 @@ mod tests {
                     coverage_source: None,
                     inherited_from: None,
                     component_rollup: None,
+                    contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
                 }
                 .into(),
             ],
@@ -1646,8 +2038,77 @@ mod tests {
         assert!(md.contains("25 **!**"));
         assert!(md.contains("30 **!**"));
         assert!(md.contains("| 80 |"));
-        // CRAP column renders `-` when the finding didn't trigger on CRAP.
         assert!(md.contains("| - |"));
+    }
+
+    #[test]
+    fn health_markdown_includes_coverage_intelligence_and_ambiguity_summary() {
+        use crate::health_types::{
+            CoverageIntelligenceAction, CoverageIntelligenceConfidence,
+            CoverageIntelligenceEvidence, CoverageIntelligenceFinding,
+            CoverageIntelligenceMatchConfidence, CoverageIntelligenceRecommendation,
+            CoverageIntelligenceReport, CoverageIntelligenceSchemaVersion,
+            CoverageIntelligenceSignal, CoverageIntelligenceSummary, CoverageIntelligenceVerdict,
+            HealthReport, HealthSummary,
+        };
+
+        let root = PathBuf::from("/project");
+        let mut report = HealthReport {
+            summary: HealthSummary {
+                files_analyzed: 10,
+                functions_analyzed: 50,
+                ..Default::default()
+            },
+            coverage_intelligence: Some(CoverageIntelligenceReport {
+                schema_version: CoverageIntelligenceSchemaVersion::V1,
+                verdict: CoverageIntelligenceVerdict::HighConfidenceDelete,
+                summary: CoverageIntelligenceSummary {
+                    findings: 1,
+                    high_confidence_deletes: 1,
+                    ..Default::default()
+                },
+                findings: vec![CoverageIntelligenceFinding {
+                    id: "plow:coverage-intel:abc123".to_owned(),
+                    path: root.join("src/dead.ts"),
+                    identity: Some("deadPath".to_owned()),
+                    line: 9,
+                    verdict: CoverageIntelligenceVerdict::HighConfidenceDelete,
+                    signals: vec![CoverageIntelligenceSignal::RuntimeCold],
+                    recommendation: CoverageIntelligenceRecommendation::DeleteAfterConfirmingOwner,
+                    confidence: CoverageIntelligenceConfidence::High,
+                    related_ids: vec!["plow:prod:deadbeef".to_owned()],
+                    evidence: CoverageIntelligenceEvidence {
+                        match_confidence: CoverageIntelligenceMatchConfidence::Direct,
+                        ..Default::default()
+                    },
+                    actions: vec![CoverageIntelligenceAction {
+                        kind: "delete-after-confirming-owner".to_owned(),
+                        description: "Confirm ownership".to_owned(),
+                        auto_fixable: false,
+                    }],
+                }],
+            }),
+            ..Default::default()
+        };
+
+        let md = build_health_markdown(&report, &root);
+        assert!(md.contains("## Coverage Intelligence"));
+        assert!(md.contains("plow:coverage-intel:abc123"));
+        assert!(md.contains("delete-after-confirming-owner"));
+        assert!(md.contains("runtime_cold"));
+
+        report.coverage_intelligence = Some(CoverageIntelligenceReport {
+            schema_version: CoverageIntelligenceSchemaVersion::V1,
+            verdict: CoverageIntelligenceVerdict::Clean,
+            summary: CoverageIntelligenceSummary {
+                skipped_ambiguous_matches: 2,
+                ..Default::default()
+            },
+            findings: vec![],
+        });
+        let md = build_health_markdown(&report, &root);
+        assert!(md.contains("2 ambiguous evidence matches were skipped"));
+        assert!(!md.contains("| ID | Path |"));
     }
 
     #[test]
@@ -1672,6 +2133,9 @@ mod tests {
                     coverage_source: None,
                     inherited_from: None,
                     component_rollup: None,
+                    contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
                 }
                 .into(),
             ],
@@ -1720,6 +2184,9 @@ mod tests {
                     coverage_source: None,
                     inherited_from: None,
                     component_rollup: None,
+                    contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
                 }
                 .into(),
             ],
@@ -1732,9 +2199,7 @@ mod tests {
             ..Default::default()
         };
         let md = build_health_markdown(&report, &root);
-        // Cyclomatic 15 is below threshold 20, no marker
         assert!(md.contains("| 15 |"));
-        // Cognitive 20 exceeds threshold 15, has marker
         assert!(md.contains("20 **!**"));
     }
 
@@ -1784,7 +2249,6 @@ mod tests {
         };
         let md = build_health_markdown(&report, &root);
 
-        // Should have refactoring targets section
         assert!(
             md.contains("Refactoring Targets"),
             "should contain targets heading"
@@ -1847,8 +2311,6 @@ mod tests {
         assert!(md.contains("`src/app.ts`:12 `loader`"));
     }
 
-    // ── Dependency in workspace package ──
-
     #[test]
     fn markdown_dep_in_workspace_shows_package_label() {
         let root = PathBuf::from("/project");
@@ -1863,7 +2325,6 @@ mod tests {
                 used_in_workspaces: Vec::new(),
             }));
         let md = build_markdown(&results, &root);
-        // Non-root package.json should show the label
         assert!(md.contains("(packages/core/package.json)"));
     }
 
@@ -1903,8 +2364,6 @@ mod tests {
         assert!(!md.contains("(package.json; imported in packages/consumer)"));
     }
 
-    // ── Multiple exports same file grouped ──
-
     #[test]
     fn markdown_exports_grouped_by_file() {
         let root = PathBuf::from("/project");
@@ -1943,15 +2402,11 @@ mod tests {
                 is_re_export: false,
             }));
         let md = build_markdown(&results, &root);
-        // File header should appear only once for utils.ts
         let utils_count = md.matches("- `src/utils.ts`").count();
         assert_eq!(utils_count, 1, "file header should appear once per file");
-        // Both exports should be under it as sub-items
         assert!(md.contains(":5 `alpha`"));
         assert!(md.contains(":10 `beta`"));
     }
-
-    // ── Multiple issues plural header ──
 
     #[test]
     fn markdown_multiple_issues_plural() {
@@ -1970,8 +2425,6 @@ mod tests {
         let md = build_markdown(&results, &root);
         assert!(md.starts_with("## Plow: 2 issues found\n"));
     }
-
-    // ── Duplication markdown with zero estimated savings ──
 
     #[test]
     fn duplication_markdown_zero_savings_no_suffix() {
@@ -2013,8 +2466,6 @@ mod tests {
         assert!(!md.contains("lines saved"));
     }
 
-    // ── Health markdown vital signs ──
-
     #[test]
     fn health_markdown_vital_signs_table() {
         let root = PathBuf::from("/project");
@@ -2042,6 +2493,13 @@ mod tests {
                 total_loc: 15_200,
                 ..Default::default()
             }),
+            hotspot_summary: Some(crate::health_types::HotspotSummary {
+                since: "6 months".to_string(),
+                min_commits: 3,
+                files_analyzed: 50,
+                files_excluded: 0,
+                shallow_clone: false,
+            }),
             ..Default::default()
         };
         let md = build_health_markdown(&report, &root);
@@ -2053,12 +2511,29 @@ mod tests {
         assert!(md.contains("| Dead Files | 5.0% |"));
         assert!(md.contains("| Dead Exports | 10.2% |"));
         assert!(md.contains("| Maintainability (avg) | 72.3 |"));
-        assert!(md.contains("| Hotspots | 3 |"));
+        assert!(md.contains("| Hotspots (since 6 months) | 3 |"));
         assert!(md.contains("| Circular Deps | 1 |"));
         assert!(md.contains("| Unused Deps | 2 |"));
     }
 
-    // ── Health markdown file scores ──
+    #[test]
+    fn health_markdown_hotspots_without_summary_omits_window() {
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            vital_signs: Some(crate::health_types::VitalSigns {
+                avg_cyclomatic: 2.0,
+                p90_cyclomatic: 5,
+                hotspot_count: Some(0),
+                total_loc: 1_000,
+                ..Default::default()
+            }),
+            hotspot_summary: None,
+            ..Default::default()
+        };
+        let md = build_health_markdown(&report, &root);
+        assert!(md.contains("| Hotspots | 0 |"));
+        assert!(!md.contains("Hotspots (since"));
+    }
 
     #[test]
     fn health_markdown_file_scores_table() {
@@ -2082,6 +2557,9 @@ mod tests {
                     coverage_source: None,
                     inherited_from: None,
                     component_rollup: None,
+                    contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
                 }
                 .into(),
             ],
@@ -2116,8 +2594,6 @@ mod tests {
         assert!(md.contains("**Average maintainability index:** 65.0/100"));
     }
 
-    // ── Health markdown hotspots ──
-
     #[test]
     fn health_markdown_hotspots_table() {
         let root = PathBuf::from("/project");
@@ -2140,6 +2616,9 @@ mod tests {
                     coverage_source: None,
                     inherited_from: None,
                     component_rollup: None,
+                    contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
                 }
                 .into(),
             ],
@@ -2180,8 +2659,6 @@ mod tests {
         assert!(md.contains("*5 files excluded (< 3 commits)*"));
     }
 
-    // ── Health markdown metric legend ──
-
     #[test]
     fn health_markdown_metric_legend_with_scores() {
         let root = PathBuf::from("/project");
@@ -2204,6 +2681,9 @@ mod tests {
                     coverage_source: None,
                     inherited_from: None,
                     component_rollup: None,
+                    contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
                 }
                 .into(),
             ],
@@ -2238,8 +2718,6 @@ mod tests {
         assert!(md.contains("Full metric reference"));
     }
 
-    // ── Health markdown truncated findings ──
-
     #[test]
     fn health_markdown_truncated_findings_shown_count() {
         let root = PathBuf::from("/project");
@@ -2262,6 +2740,9 @@ mod tests {
                     coverage_source: None,
                     inherited_from: None,
                     component_rollup: None,
+                    contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
                 }
                 .into(),
             ],
@@ -2277,8 +2758,6 @@ mod tests {
         assert!(md.contains("5 high complexity functions (1 shown)"));
     }
 
-    // ── escape_backticks ──
-
     #[test]
     fn escape_backticks_handles_multiple() {
         assert_eq!(escape_backticks("a`b`c"), "a\\`b\\`c");
@@ -2288,8 +2767,6 @@ mod tests {
     fn escape_backticks_no_backticks_unchanged() {
         assert_eq!(escape_backticks("hello"), "hello");
     }
-
-    // ── Unresolved import in markdown ──
 
     #[test]
     fn markdown_unresolved_import_grouped_by_file() {
@@ -2310,8 +2787,6 @@ mod tests {
         assert!(md.contains(":3 `./missing`"));
     }
 
-    // ── Markdown optional dep ──
-
     #[test]
     fn markdown_unused_optional_dep() {
         let root = PathBuf::from("/project");
@@ -2331,8 +2806,6 @@ mod tests {
         assert!(md.contains("### Unused optionalDependencies (1)"));
         assert!(md.contains("- `fsevents`"));
     }
-
-    // ── Health markdown no hotspot exclusion message when 0 excluded ──
 
     #[test]
     fn health_markdown_hotspots_no_excluded_message() {
@@ -2356,6 +2829,9 @@ mod tests {
                     coverage_source: None,
                     inherited_from: None,
                     component_rollup: None,
+                    contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
                 }
                 .into(),
             ],
@@ -2393,8 +2869,6 @@ mod tests {
         let md = build_health_markdown(&report, &root);
         assert!(!md.contains("files excluded"));
     }
-
-    // ── Duplication markdown plural ──
 
     #[test]
     fn duplication_markdown_single_group_no_plural() {

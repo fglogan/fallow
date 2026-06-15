@@ -1,9 +1,7 @@
-//! Issue #317: ignoreExports must also gate duplicate-exports for shadcn /
-//! Radix / bits-ui namespace-barrel patterns where many `index.ts` files
-//! intentionally export the same short names (Root, Content, Trigger).
+//! Issue #317: ignoreExports must also gate namespace-barrel duplicate exports.
 
 use plow_config::{
-    PlowConfig, IgnoreExportRule, IgnoreExportsUsedInFileConfig, OutputFormat, RulesConfig,
+    IgnoreExportRule, IgnoreExportsUsedInFileConfig, OutputFormat, PlowConfig, RulesConfig,
 };
 
 use crate::common::fixture_path;
@@ -33,6 +31,7 @@ fn make_config(
         boundaries: plow_config::BoundaryConfig::default(),
         production: false.into(),
         plugins: vec![],
+        rule_packs: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
@@ -40,6 +39,7 @@ fn make_config(
         codeowners: None,
         public_packages: vec![],
         flags: plow_config::FlagsConfig::default(),
+        security: plow_config::SecurityConfig::default(),
         fix: plow_config::FixConfig::default(),
         resolve: plow_config::ResolveConfig::default(),
         sealed: false,
@@ -52,10 +52,6 @@ fn make_config(
 
 #[test]
 fn duplicate_exports_flagged_without_ignore_exports() {
-    // Baseline: with no ignoreExports config, shadcn-style component barrels
-    // (components/ui/dialog/index.ts and components/ui/card/index.ts both
-    // exporting Root, Content, Trigger) trip duplicate-exports because page.ts
-    // is a common importer.
     let root = fixture_path("issue-317-namespace-barrel-ignore-exports");
     let config = make_config(root, vec![]);
     let results = plow_core::analyze(&config).expect("analysis should succeed");
@@ -81,9 +77,6 @@ fn duplicate_exports_flagged_without_ignore_exports() {
 
 #[test]
 fn ignore_exports_wildcard_clears_duplicate_exports() {
-    // Fix path: ignoreExports with a glob over the barrels and exports: ["*"]
-    // must remove every duplicate-export group whose contributing files all
-    // match the glob.
     let root = fixture_path("issue-317-namespace-barrel-ignore-exports");
     let config = make_config(
         root,
@@ -107,8 +100,6 @@ fn ignore_exports_wildcard_clears_duplicate_exports() {
 
 #[test]
 fn ignore_exports_named_clears_only_listed_names() {
-    // Partial path: listing specific names suppresses only those, leaving any
-    // other coincidental duplicates intact (Content, Trigger here).
     let root = fixture_path("issue-317-namespace-barrel-ignore-exports");
     let config = make_config(
         root,

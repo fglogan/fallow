@@ -5,15 +5,15 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use colored::Colorize;
-use plow_config::OutputFormat;
 use ignore::Match;
 use notify::{RecommendedWatcher, Watcher};
+use plow_config::OutputFormat;
 use rustc_hash::FxHashSet;
 
 use crate::report;
 use crate::runtime_support::load_config;
 
-/// ANSI escape: clear screen + scrollback + move cursor home (same sequence as tsc --watch).
+/// ANSI escape: clear screen + scrollback + move cursor home.
 const CLEAR_SCREEN: &str = "\x1B[2J\x1B[3J\x1B[H";
 const DEBOUNCE_WINDOW: Duration = Duration::from_millis(500);
 const ROOT_POLL_INTERVAL: Duration = Duration::from_secs(1);
@@ -29,10 +29,7 @@ pub struct WatchOptions<'a> {
     pub production: bool,
     pub clear_screen: bool,
     pub explain: bool,
-    /// Mirror of the global `--include-entry-exports` flag. When true, ORs into the
-    /// loaded config's `include_entry_exports` field so the CLI flag also takes
-    /// effect under watch mode (config-file-driven `includeEntryExports: true`
-    /// already worked through plain config loading).
+    /// Mirror of the global `--include-entry-exports` flag.
     pub include_entry_exports: bool,
 }
 
@@ -365,12 +362,6 @@ fn reload_config_or_keep_previous(
 pub fn run_watch(opts: &WatchOptions<'_>) -> ExitCode {
     use std::sync::mpsc;
 
-    // Ensure the global signal handler is registered (idempotent if main
-    // already called this) and flip the handler into graceful mode so a
-    // SIGINT / SIGTERM only sets the shutdown flag; the watch loop polls
-    // the flag and returns cleanly with exit code 0. The RAII guard
-    // restores forceful-exit behavior for any subsequent CLI command run
-    // in the same process.
     let _ = crate::signal::install_handlers();
     let _graceful = crate::signal::GracefulModeGuard::new();
 
@@ -392,7 +383,6 @@ pub fn run_watch(opts: &WatchOptions<'_>) -> ExitCode {
         Err(code) => return code,
     };
 
-    // Run initial analysis
     let initial_status = analyze_and_report(&config, opts);
     if initial_status != ExitCode::SUCCESS {
         return initial_status;
@@ -424,13 +414,15 @@ pub fn run_watch(opts: &WatchOptions<'_>) -> ExitCode {
             next_root_check = now + ROOT_POLL_INTERVAL;
             handle_root_lifecycle(
                 opts,
-                &mut config,
-                &filter,
-                &mut watcher,
-                &tx,
-                &mut debouncer,
-                &mut detached,
-                &mut last_reattach_error,
+                RootLifecycleState {
+                    config: &mut config,
+                    filter: &filter,
+                    watcher: &mut watcher,
+                    tx: &tx,
+                    debouncer: &mut debouncer,
+                    detached: &mut detached,
+                    last_reattach_error: &mut last_reattach_error,
+                },
             );
         }
 
@@ -444,9 +436,7 @@ pub fn run_watch(opts: &WatchOptions<'_>) -> ExitCode {
             Ok(Err(e)) => {
                 eprintln!("Watch error: {e:?}");
             }
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                // Loop back to check the shutdown flag and debounce timeout.
-            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 eprintln!("Channel error: notify sender disconnected");
                 return ExitCode::from(2);
@@ -463,7 +453,6 @@ pub fn run_watch(opts: &WatchOptions<'_>) -> ExitCode {
                 eprint!("{CLEAR_SCREEN}");
             }
 
-            // Show which files changed
             for path in &changed {
                 eprintln!("{} {path}", "Changed:".dimmed());
             }
@@ -513,20 +502,27 @@ fn replace_watch_filter(filter: &Arc<Mutex<WatchFilter>>, config: &plow_config::
     }
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "watch root lifecycle owns the explicit state slots mutated by the main loop"
-)]
-fn handle_root_lifecycle(
-    opts: &WatchOptions<'_>,
-    config: &mut plow_config::ResolvedConfig,
-    filter: &Arc<Mutex<WatchFilter>>,
-    watcher: &mut Option<RecommendedWatcher>,
-    tx: &std::sync::mpsc::Sender<WatchEvent>,
-    debouncer: &mut PathDebouncer,
-    detached: &mut bool,
-    last_reattach_error: &mut Option<Instant>,
-) {
+struct RootLifecycleState<'a> {
+    config: &'a mut plow_config::ResolvedConfig,
+    filter: &'a Arc<Mutex<WatchFilter>>,
+    watcher: &'a mut Option<RecommendedWatcher>,
+    tx: &'a std::sync::mpsc::Sender<WatchEvent>,
+    debouncer: &'a mut PathDebouncer,
+    detached: &'a mut bool,
+    last_reattach_error: &'a mut Option<Instant>,
+}
+
+fn handle_root_lifecycle(opts: &WatchOptions<'_>, state: RootLifecycleState<'_>) {
+    let RootLifecycleState {
+        config,
+        filter,
+        watcher,
+        tx,
+        debouncer,
+        detached,
+        last_reattach_error,
+    } = state;
+
     let root_exists = opts.root.metadata().is_ok();
     if !root_exists {
         if !*detached {
@@ -579,10 +575,8 @@ fn handle_root_lifecycle(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plow_config::PlowConfig;
     use notify::event::EventKind;
-
-    // ── is_relevant_source ───────────────────────────────────────────
+    use plow_config::PlowConfig;
 
     #[test]
     fn relevant_source_ts_extensions() {
@@ -624,8 +618,6 @@ mod tests {
         assert!(!is_relevant_source(Path::new("no_extension")));
     }
 
-    // ── is_relevant_config ───────────────────────────────────────────
-
     #[test]
     fn relevant_config_files() {
         assert!(is_relevant_config(Path::new("package.json")));
@@ -653,8 +645,6 @@ mod tests {
         assert!(!has_disallowed_hidden_dir(Path::new(".storybook/main.ts")));
         assert!(!has_disallowed_hidden_dir(Path::new("src/.generated.ts")));
     }
-
-    // ── watch filtering ──────────────────────────────────────────────
 
     fn make_event(paths: &[&Path]) -> notify::Event {
         let mut event = notify::Event::new(EventKind::Any);
@@ -875,13 +865,15 @@ mod tests {
         std::fs::remove_dir(&root).expect("remove root");
         handle_root_lifecycle(
             &opts,
-            &mut config,
-            &filter,
-            &mut watcher,
-            &tx,
-            &mut debouncer,
-            &mut detached,
-            &mut last_reattach_error,
+            RootLifecycleState {
+                config: &mut config,
+                filter: &filter,
+                watcher: &mut watcher,
+                tx: &tx,
+                debouncer: &mut debouncer,
+                detached: &mut detached,
+                last_reattach_error: &mut last_reattach_error,
+            },
         );
         assert!(detached);
         assert!(watcher.is_none());
@@ -889,13 +881,15 @@ mod tests {
         std::fs::create_dir(&root).expect("recreate root");
         handle_root_lifecycle(
             &opts,
-            &mut config,
-            &filter,
-            &mut watcher,
-            &tx,
-            &mut debouncer,
-            &mut detached,
-            &mut last_reattach_error,
+            RootLifecycleState {
+                config: &mut config,
+                filter: &filter,
+                watcher: &mut watcher,
+                tx: &tx,
+                debouncer: &mut debouncer,
+                detached: &mut detached,
+                last_reattach_error: &mut last_reattach_error,
+            },
         );
         assert!(!detached);
         assert!(watcher.is_some());
@@ -938,6 +932,7 @@ mod tests {
             boundaries: plow_config::BoundaryConfig::default(),
             production: false.into(),
             plugins: vec![],
+            rule_packs: vec![],
             dynamically_loaded: vec![],
             overrides: vec![],
             regression: None,
@@ -945,6 +940,7 @@ mod tests {
             codeowners: None,
             public_packages: vec![],
             flags: plow_config::FlagsConfig::default(),
+            security: plow_config::SecurityConfig::default(),
             fix: plow_config::FixConfig::default(),
             resolve: plow_config::ResolveConfig::default(),
             sealed: false,
@@ -996,8 +992,6 @@ mod tests {
 
     #[test]
     fn reload_config_applies_include_entry_exports_override() {
-        // Issue #249 follow-up: --include-entry-exports must take effect under
-        // watch mode after a config reload, not just on the initial load.
         let root = Path::new("/project");
         let mut config = make_config(root, OutputFormat::Human, 1, false);
         assert!(!config.include_entry_exports);

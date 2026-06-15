@@ -4,7 +4,10 @@ use plow_types::serde_path;
 use rustc_hash::FxHashSet;
 use serde::Serialize;
 
-use crate::duplicates::{CloneInstance, DuplicationReport};
+use crate::duplicates::{
+    CloneFingerprintSet, CloneGroup, CloneInstance, DuplicationReport, RefactoringSuggestion,
+    dominant_identifier, group_refactoring_suggestion,
+};
 use crate::graph::{ModuleGraph, ReferenceKind};
 
 /// Match a user-provided file path against a module's actual path.
@@ -12,12 +15,6 @@ use crate::graph::{ModuleGraph, ReferenceKind};
 /// Handles monorepo scenarios where module paths may be canonicalized
 /// (symlinks resolved) while user-provided paths are not.
 fn path_matches(module_path: &Path, root: &Path, user_path: &str) -> bool {
-    // Normalise to forward slashes on both sides so user-supplied
-    // forward-slashed input (`src/utils.ts`, the shape MCP and most
-    // cross-platform tooling produces) matches Windows-shaped module
-    // paths (`D:\a\...\src\utils.ts`). Without this, the four byte-level
-    // string comparisons below all silently miss on Windows even though
-    // the file is in the graph. POSIX is a no-op.
     let user_path_norm = user_path.replace('\\', "/");
     let rel = module_path.strip_prefix(root).unwrap_or(module_path);
     let rel_str = rel.to_string_lossy().replace('\\', "/");
@@ -179,13 +176,11 @@ pub fn trace_export(
     file_path: &str,
     export_name: &str,
 ) -> Option<ExportTrace> {
-    // Find the file in the graph
     let module = graph
         .modules
         .iter()
         .find(|m| path_matches(&m.path, root, file_path))?;
 
-    // Find the export
     let export = module.exports.iter().find(|e| {
         let name_str = e.name.to_string();
         name_str == export_name || (export_name == "default" && name_str == "default")
@@ -206,7 +201,6 @@ pub fn trace_export(
         })
         .collect();
 
-    // Find re-export chains involving this export
     let re_export_chains: Vec<ReExportChain> = graph
         .modules
         .iter()
@@ -307,7 +301,6 @@ pub fn trace_file(graph: &ModuleGraph, root: &Path, file_path: &str) -> Option<F
         })
         .collect();
 
-    // Edges FROM this file (what it imports)
     let imports_from: Vec<PathBuf> = graph
         .edges_for(module.file_id)
         .iter()
@@ -319,7 +312,6 @@ pub fn trace_file(graph: &ModuleGraph, root: &Path, file_path: &str) -> Option<F
         })
         .collect();
 
-    // Reverse deps: who imports this file
     let imported_by: Vec<PathBuf> = graph
         .reverse_deps
         .get(module.file_id.0 as usize)
@@ -450,9 +442,42 @@ pub struct CloneTrace {
 
 #[derive(Debug, Serialize)]
 pub struct TracedCloneGroup {
+    /// Stable content fingerprint, usually `dup:<8hex>` and widened on rare
+    /// report collisions; addressable via `plow dupes --trace dup:<fp>` and
+    /// shown in the `dupes` listing.
+    pub fingerprint: String,
     pub token_count: usize,
     pub line_count: usize,
     pub instances: Vec<CloneInstance>,
+    /// Group-level extract-function suggestion with estimated line savings.
+    pub suggestion: RefactoringSuggestion,
+    /// Best-effort name for the extracted function, derived from the dominant
+    /// non-generic identifier. `null` when no confident name exists; advisory
+    /// only (verify before applying).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suggested_name: Option<String>,
+}
+
+/// Build a [`TracedCloneGroup`] from a raw clone group, computing the
+/// fingerprint, group-level suggestion, and dominant-identifier name and
+/// relativizing every instance path against `root`.
+fn build_traced_group(
+    group: &CloneGroup,
+    root: &Path,
+    fingerprints: &CloneFingerprintSet,
+) -> TracedCloneGroup {
+    TracedCloneGroup {
+        fingerprint: fingerprints.fingerprint_for_group(group),
+        token_count: group.token_count,
+        line_count: group.line_count,
+        instances: group
+            .instances
+            .iter()
+            .map(|inst| relativize_instance(inst, root))
+            .collect(),
+        suggestion: group_refactoring_suggestion(group),
+        suggested_name: dominant_identifier(group),
+    }
 }
 
 #[must_use]
@@ -465,6 +490,7 @@ pub fn trace_clone(
     let resolved = root.join(file_path);
     let mut matched_instance = None;
     let mut clone_groups = Vec::new();
+    let fingerprints = CloneFingerprintSet::from_groups(&report.clone_groups);
 
     for group in &report.clone_groups {
         let matching = group.instances.iter().find(|inst| {
@@ -477,15 +503,7 @@ pub fn trace_clone(
             if matched_instance.is_none() {
                 matched_instance = Some(relativize_instance(matched, root));
             }
-            clone_groups.push(TracedCloneGroup {
-                token_count: group.token_count,
-                line_count: group.line_count,
-                instances: group
-                    .instances
-                    .iter()
-                    .map(|inst| relativize_instance(inst, root))
-                    .collect(),
-            });
+            clone_groups.push(build_traced_group(group, root, &fingerprints));
         }
     }
 
@@ -494,6 +512,50 @@ pub fn trace_clone(
         line,
         matched_instance,
         clone_groups,
+    }
+}
+
+/// Trace a clone group by its stable content fingerprint.
+///
+/// Fingerprints are usually `dup:<8hex>` and widen only when needed to avoid a
+/// collision inside the same report.
+///
+/// Returns a [`CloneTrace`] whose single `clone_groups` entry is the matched
+/// group and whose `file` / `line` / `matched_instance` come from that group's
+/// representative (first) instance. `matched_instance` is `None` (and
+/// `clone_groups` empty) when no group matches the fingerprint.
+#[must_use]
+pub fn trace_clone_by_fingerprint(
+    report: &DuplicationReport,
+    root: &Path,
+    fingerprint: &str,
+) -> CloneTrace {
+    let fingerprints = CloneFingerprintSet::from_groups(&report.clone_groups);
+    let matched = fingerprints.find_group(&report.clone_groups, fingerprint);
+
+    let Some(group) = matched else {
+        return CloneTrace {
+            file: PathBuf::new(),
+            line: 0,
+            matched_instance: None,
+            clone_groups: Vec::new(),
+        };
+    };
+
+    let representative = group
+        .instances
+        .first()
+        .map(|inst| relativize_instance(inst, root));
+    let (file, line) = representative.as_ref().map_or_else(
+        || (PathBuf::new(), 0),
+        |inst| (inst.file.clone(), inst.start_line),
+    );
+
+    CloneTrace {
+        file,
+        line,
+        matched_instance: representative,
+        clone_groups: vec![build_traced_group(group, root, &fingerprints)],
     }
 }
 
@@ -703,7 +765,6 @@ mod tests {
 
     #[test]
     fn trace_dependency_used() {
-        // Build a graph with npm package usage
         let files = vec![DiscoveredFile {
             id: FileId(0),
             path: PathBuf::from("/project/src/app.ts"),
@@ -845,6 +906,53 @@ mod tests {
         assert!(trace.matched_instance.is_some());
         assert_eq!(trace.clone_groups.len(), 1);
         assert_eq!(trace.clone_groups[0].instances.len(), 2);
+        assert!(trace.clone_groups[0].fingerprint.starts_with("dup:"));
+        assert_eq!(trace.clone_groups[0].suggestion.estimated_savings, 11);
+    }
+
+    #[test]
+    fn trace_clone_by_fingerprint_resolves_and_misses() {
+        use crate::duplicates::{
+            CloneGroup, CloneInstance, DuplicationReport, DuplicationStats, clone_fingerprint,
+        };
+        let report = DuplicationReport {
+            clone_groups: vec![CloneGroup {
+                instances: vec![
+                    CloneInstance {
+                        file: PathBuf::from("/project/src/a.ts"),
+                        start_line: 10,
+                        end_line: 20,
+                        start_col: 0,
+                        end_col: 0,
+                        fragment: "fn buildInvoice() {}".to_string(),
+                    },
+                    CloneInstance {
+                        file: PathBuf::from("/project/src/b.ts"),
+                        start_line: 5,
+                        end_line: 15,
+                        start_col: 0,
+                        end_col: 0,
+                        fragment: "fn buildInvoice() {}".to_string(),
+                    },
+                ],
+                token_count: 60,
+                line_count: 11,
+            }],
+            clone_families: vec![],
+            mirrored_directories: vec![],
+            stats: DuplicationStats::default(),
+        };
+        let fp = clone_fingerprint(&report.clone_groups[0].instances);
+
+        let hit = trace_clone_by_fingerprint(&report, Path::new("/project"), &fp);
+        assert!(hit.matched_instance.is_some());
+        assert_eq!(hit.clone_groups.len(), 1);
+        assert_eq!(hit.clone_groups[0].fingerprint, fp);
+        assert_eq!(hit.line, 10);
+
+        let miss = trace_clone_by_fingerprint(&report, Path::new("/project"), "dup:deadbeef");
+        assert!(miss.matched_instance.is_none());
+        assert!(miss.clone_groups.is_empty());
     }
 
     #[test]
@@ -1018,9 +1126,6 @@ mod tests {
         let root = Path::new(r"D:\a\plow\plow\tests\fixtures\basic-project");
         let module_path =
             PathBuf::from(r"D:\a\plow\plow\tests\fixtures\basic-project\src\utils.ts");
-        // user_path uses forward slashes (the shape MCP and other
-        // cross-platform tooling emit), but the stored path uses
-        // Windows backslashes. The helper should still match.
         assert!(path_matches(&module_path, root, "src/utils.ts"));
         assert!(path_matches(&module_path, root, r"src\utils.ts"));
     }
@@ -1030,8 +1135,6 @@ mod tests {
         let root = Path::new("/some/other/root");
         let module_path =
             PathBuf::from(r"D:\a\plow\plow\tests\fixtures\basic-project\src\utils.ts");
-        // root does not prefix module_path; the ends_with("/src/utils.ts")
-        // fallback should still match once both sides are forward-slashed.
         assert!(path_matches(&module_path, root, "src/utils.ts"));
     }
 

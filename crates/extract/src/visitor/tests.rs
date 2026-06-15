@@ -1,4 +1,3 @@
-// Visitor tests invoke Oxc parser which is ~1000x slower under Miri.
 #![cfg(all(test, not(miri)))]
 
 use std::path::Path;
@@ -6,16 +5,87 @@ use std::path::Path;
 use super::*;
 use crate::tests::parse_ts as parse;
 use crate::{ImportedName, MemberKind};
-use plow_types::discover::FileId;
 use helpers::regex_pattern_to_suffix;
-
-// ── into_module_info transfers all fields ────────────────────
+use plow_types::discover::FileId;
+use plow_types::extract::{
+    DiFramework, DiRole, SecurityControlKind, SecurityUrlShape, SinkArgKind, SinkLiteralValue,
+    SinkShape, SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason,
+};
 
 #[test]
 fn into_module_info_transfers_exports() {
     let info = parse("export const a = 1; export function b() {}");
     assert_eq!(info.exports.len(), 2);
     assert_eq!(info.file_id, FileId(0));
+}
+
+fn store_member_names(info: &crate::ModuleInfo, export: &str) -> Vec<String> {
+    info.exports
+        .iter()
+        .find(|e| e.name.to_string() == export)
+        .map(|e| {
+            let mut names: Vec<String> = e
+                .members
+                .iter()
+                .filter(|m| m.kind == MemberKind::StoreMember)
+                .map(|m| m.name.clone())
+                .collect();
+            names.sort();
+            names
+        })
+        .unwrap_or_default()
+}
+
+#[test]
+fn pinia_option_store_harvests_state_getters_actions_keys() {
+    let info = parse(
+        "import { defineStore } from 'pinia'\nexport const useS = defineStore('s', {\n  state: () => ({ count: 0, total: 1 }),\n  getters: { double: (s) => s.count },\n  actions: { inc() {} },\n})",
+    );
+    assert_eq!(
+        store_member_names(&info, "useS"),
+        vec![
+            "count".to_string(),
+            "double".to_string(),
+            "inc".to_string(),
+            "total".to_string()
+        ]
+    );
+}
+
+#[test]
+fn pinia_option_store_excludes_dollar_prefixed_api() {
+    let info = parse(
+        "import { defineStore } from 'pinia'\nexport const useS = defineStore('s', {\n  state: () => ({ count: 0 }),\n  actions: { inc() {}, $reset() {} },\n})",
+    );
+    let names = store_member_names(&info, "useS");
+    assert!(names.contains(&"count".to_string()));
+    assert!(names.contains(&"inc".to_string()));
+    assert!(
+        !names.contains(&"$reset".to_string()),
+        "Pinia $-API must be excluded from the declared set: {names:?}"
+    );
+}
+
+#[test]
+fn pinia_setup_store_harvests_returned_keys() {
+    let info = parse(
+        "import { defineStore } from 'pinia'\nexport const useS = defineStore('s', () => {\n  const count = 0\n  function inc() {}\n  return { count, inc }\n})",
+    );
+    assert_eq!(
+        store_member_names(&info, "useS"),
+        vec!["count".to_string(), "inc".to_string()]
+    );
+}
+
+#[test]
+fn pinia_setup_store_spread_return_abstains() {
+    let info = parse(
+        "import { defineStore } from 'pinia'\nexport const useS = defineStore('s', () => {\n  const base = { a: 1 }\n  return { ...base, b: 2 }\n})",
+    );
+    assert!(
+        store_member_names(&info, "useS").is_empty(),
+        "a spread return must abstain (no members harvested)"
+    );
 }
 
 #[test]
@@ -47,7 +117,6 @@ fn into_module_info_transfers_whole_object_uses() {
     let info = parse(
         "import { Status } from './types';\nObject.values(Status);\nconst y = { ...Status };",
     );
-    // Object.values + spread = 2 whole-object uses
     assert!(info.whole_object_uses.len() >= 2);
 }
 
@@ -67,14 +136,11 @@ fn into_module_info_transfers_cjs_flag() {
     assert!(info.has_cjs_exports);
 }
 
-// ── merge_into extends (not replaces) ────────────────────────
-
 #[test]
 fn merge_into_extends_imports() {
     let mut base = parse("import { a } from './a';");
     let _extra = parse("import { b } from './b';");
 
-    // Build a second extractor from parsing and merge
     let allocator = oxc_allocator::Allocator::default();
     let source_type = oxc_span::SourceType::from_path(Path::new("extra.ts")).unwrap_or_default();
     let parser_return =
@@ -105,7 +171,1030 @@ fn merge_into_ors_cjs_flag() {
     assert!(base.has_cjs_exports, "merge_into should OR the cjs flag");
 }
 
-// ── Class member extraction ──────────────────────────────────
+#[test]
+fn security_literal_sink_capture_records_literal_argument() {
+    let info = parse(r#"postMessage({ status: "ready" }, "*");"#);
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|sink| sink.callee_path == "postMessage" && sink.arg_index == 1)
+        .expect("postMessage target-origin sink captured");
+
+    assert_eq!(sink.sink_shape, SinkShape::Call);
+    assert_eq!(sink.arg_index, 1);
+    assert!(!sink.arg_is_non_literal);
+    assert_eq!(sink.arg_kind, SinkArgKind::Literal);
+    assert_eq!(
+        sink.arg_literal,
+        Some(SinkLiteralValue::String("*".to_string()))
+    );
+}
+
+#[test]
+fn security_unresolved_callee_records_computed_member_call() {
+    let info = parse("client[method](req.body.name);");
+
+    assert_eq!(info.security_sinks_skipped, 1);
+    let diagnostic = info
+        .security_unresolved_callee_sites
+        .first()
+        .expect("diagnostic recorded");
+    assert_eq!(
+        diagnostic.reason,
+        SkippedSecurityCalleeReason::ComputedMember
+    );
+    assert_eq!(
+        diagnostic.expression_kind,
+        SkippedSecurityCalleeExpressionKind::ComputedMemberExpression
+    );
+}
+
+#[test]
+fn security_unresolved_callee_records_dynamic_dispatch() {
+    let info = parse("factory()(req.body.name);");
+
+    assert_eq!(info.security_sinks_skipped, 1);
+    let diagnostic = info
+        .security_unresolved_callee_sites
+        .first()
+        .expect("diagnostic recorded");
+    assert_eq!(
+        diagnostic.reason,
+        SkippedSecurityCalleeReason::DynamicDispatch
+    );
+    assert_eq!(
+        diagnostic.expression_kind,
+        SkippedSecurityCalleeExpressionKind::Other
+    );
+}
+
+#[test]
+fn security_unresolved_callee_records_member_assignment_object() {
+    let info = parse("getElement().innerHTML = req.body.name;");
+
+    assert_eq!(info.security_sinks_skipped, 1);
+    let diagnostic = info
+        .security_unresolved_callee_sites
+        .first()
+        .expect("diagnostic recorded");
+    assert_eq!(
+        diagnostic.reason,
+        SkippedSecurityCalleeReason::UnsupportedAssignmentObject
+    );
+    assert_eq!(
+        diagnostic.expression_kind,
+        SkippedSecurityCalleeExpressionKind::Other
+    );
+}
+
+#[test]
+fn security_unresolved_callee_skips_redos_regex_application() {
+    let info = parse("pattern.test(req.body.name);");
+
+    assert_eq!(info.security_sinks_skipped, 0);
+    assert!(info.security_unresolved_callee_sites.is_empty());
+}
+
+#[test]
+fn network_sink_captures_literal_url_destination() {
+    // Issue #890: the arg-0 URL literal is captured on the arg-1 sink so the
+    // secret-to-network category can carry a destination-host signal.
+    let info = parse(
+        r#"const t = process.env.SECRET; fetch("https://api.stripe.com", { headers: { authorization: t } });"#,
+    );
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|s| s.callee_path == "fetch" && s.arg_index == 1)
+        .expect("fetch options sink captured");
+    assert_eq!(
+        sink.url_arg_literal.as_deref(),
+        Some("https://api.stripe.com")
+    );
+}
+
+#[test]
+fn network_sink_dynamic_url_has_no_literal_destination() {
+    let info = parse(r"const t = process.env.SECRET; fetch(buildUrl(), { headers: { x: t } });");
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|s| s.callee_path == "fetch" && s.arg_index == 1)
+        .expect("fetch options sink captured");
+    assert!(
+        sink.url_arg_literal.is_none(),
+        "a dynamic URL must not record a literal destination"
+    );
+}
+
+#[test]
+fn network_sink_classifies_static_base_template_url_shape() {
+    let info = parse(
+        r#"const API_URL = "https://api.example.com"; fetch(`${API_URL}/v1/${encodeURIComponent(token)}`);"#,
+    );
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|s| s.callee_path == "fetch" && s.arg_index == 0)
+        .expect("fetch URL sink captured");
+
+    assert_eq!(
+        sink.url_shape,
+        Some(SecurityUrlShape::FixedOriginDynamicPath)
+    );
+}
+
+#[test]
+fn network_sink_classifies_dynamic_base_template_url_shape() {
+    let info = parse(r"fetch(`${origin}/v1/${encodeURIComponent(token)}`);");
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|s| s.callee_path == "fetch" && s.arg_index == 0)
+        .expect("fetch URL sink captured");
+
+    assert_eq!(sink.url_shape, Some(SecurityUrlShape::DynamicOrigin));
+}
+
+#[test]
+fn public_env_is_not_a_secret_source() {
+    // Issue #890 GAP A: public-by-convention env vars are not secret sources via
+    // a binding (`process.env.NEXT_PUBLIC_X`, `import.meta.env.VITE_Y`) or a
+    // direct argument path (`console.log(process.env.NEXT_PUBLIC_Z)`).
+    let info = parse(
+        r"const a = process.env.NEXT_PUBLIC_X; const b = import.meta.env.VITE_Y; console.log(process.env.NEXT_PUBLIC_Z);",
+    );
+    assert!(
+        info.tainted_bindings
+            .iter()
+            .all(|binding| binding.source_path != "process.env"
+                && binding.source_path != "import.meta.env"),
+        "public env reads must not create secret-source bindings"
+    );
+    if let Some(sink) = info
+        .security_sinks
+        .iter()
+        .find(|s| s.callee_path == "console.log")
+    {
+        assert!(
+            !sink
+                .arg_source_paths
+                .iter()
+                .any(|path| path == "process.env"),
+            "a public env argument must not record process.env as a source path"
+        );
+    }
+}
+
+#[test]
+fn public_ci_metadata_env_is_not_a_secret_source() {
+    let info = parse(
+        r"
+            const tagRef = process.env.TAG_REF;
+            const buildSha = import.meta.env.GITHUB_SHA;
+            console.error(tagRef);
+            console.warn(buildSha);
+        ",
+    );
+
+    assert!(
+        info.tainted_bindings
+            .iter()
+            .all(|binding| binding.source_path != "process.env"
+                && binding.source_path != "import.meta.env"),
+        "public CI metadata env reads must not create secret-source bindings"
+    );
+    assert!(
+        info.security_sinks
+            .iter()
+            .all(|sink| sink.arg_source_paths.is_empty()),
+        "public CI metadata env sink args must not record env source paths"
+    );
+}
+
+#[test]
+fn import_meta_env_secret_binds_as_a_source() {
+    // Issue #890: a non-public `import.meta.env.X` (Vite) read is a secret source
+    // like `process.env`, via the new flatten_member_path MetaProperty arm.
+    let info = parse("const key = import.meta.env.SERVER_KEY; doThing(key);");
+    assert!(
+        info.tainted_bindings
+            .iter()
+            .any(|binding| binding.local == "key" && binding.source_path == "import.meta.env"),
+        "import.meta.env secret should bind as a source"
+    );
+}
+
+fn has_tainted_binding(source: &str, local: &str, source_path: &str) -> bool {
+    let info = parse(source);
+    info.tainted_bindings
+        .iter()
+        .any(|binding| binding.local == local && binding.source_path == source_path)
+}
+
+#[test]
+fn template_literal_source_substitution_binds_as_source() {
+    assert!(has_tainted_binding(
+        "const command = `run ${req.query.id}`;",
+        "command",
+        "req.query"
+    ));
+}
+
+#[test]
+fn concat_source_operand_binds_as_source() {
+    assert!(has_tainted_binding(
+        r#"const command = "run " + req.query.id;"#,
+        "command",
+        "req.query"
+    ));
+}
+
+#[test]
+fn object_literal_source_property_binds_as_source() {
+    assert!(has_tainted_binding(
+        "const payload = { id: req.query.id };",
+        "payload",
+        "req.query"
+    ));
+}
+
+#[test]
+fn non_concat_binary_expression_does_not_bind_as_source() {
+    assert!(!has_tainted_binding(
+        "const amount = req.query.count * 2;",
+        "amount",
+        "req.query"
+    ));
+}
+
+// ── #1146 bounded multi-hop taint binding chains ──
+
+#[test]
+fn two_hop_template_chain_binds_with_the_original_source_metadata() {
+    let info = parse("const a = req.query.id;\nconst b = `wrap-${a}`;");
+    let root = info
+        .tainted_bindings
+        .iter()
+        .find(|binding| binding.local == "a" && binding.source_path == "req.query")
+        .expect("direct source binding for `a`");
+    let chained = info
+        .tainted_bindings
+        .iter()
+        .find(|binding| binding.local == "b" && binding.source_path == "req.query")
+        .expect("chained binding for `b` carrying the original source path");
+    assert_ne!(root.source_span_start, 0, "the direct read has a real span");
+    assert_eq!(
+        chained.source_span_start, root.source_span_start,
+        "the chained binding anchors at the ORIGINAL source read, not the chain step"
+    );
+}
+
+#[test]
+fn bare_identifier_alias_chains() {
+    assert!(has_tainted_binding(
+        "const a = req.query.id; const b = a;",
+        "b",
+        "req.query"
+    ));
+}
+
+#[test]
+fn member_root_read_does_not_chain() {
+    // A property read off a tainted local frequently strips taint in practice
+    // (`a.length`, `a.startsWith("/")`), so member roots are excluded from the
+    // binding-side chain even though the sink-side collector admits them.
+    assert!(!has_tainted_binding(
+        "const a = req.query.id; const b = a.id;",
+        "b",
+        "req.query"
+    ));
+    assert!(!has_tainted_binding(
+        "const a = req.query.id; const len = a.length;",
+        "len",
+        "req.query"
+    ));
+}
+
+#[test]
+fn call_logical_and_conditional_expressions_do_not_chain() {
+    assert!(!has_tainted_binding(
+        "const a = req.query.id; const b = wrap(a);",
+        "b",
+        "req.query"
+    ));
+    assert!(!has_tainted_binding(
+        r#"const a = req.query.id; const b = a || "x";"#,
+        "b",
+        "req.query"
+    ));
+    assert!(!has_tainted_binding(
+        r#"const a = req.query.id; const b = cond ? a : "x";"#,
+        "b",
+        "req.query"
+    ));
+}
+
+#[test]
+fn chain_records_through_the_cap_and_drops_beyond_it() {
+    // a = hop 1, b = hop 2, c = hop 3 (the cap, still recorded), d = hop 4
+    // (dropped: degrades to module-level instead of a false arg-level claim).
+    let source =
+        "const a = req.query.id; const b = `1-${a}`; const c = `2-${b}`; const d = `3-${c}`;";
+    assert!(has_tainted_binding(source, "c", "req.query"));
+    assert!(!has_tainted_binding(source, "d", "req.query"));
+}
+
+#[test]
+fn hops_are_tracked_per_source_path_not_per_local_name() {
+    // `c` carries req.body at hop 2 (via x) and req.query at hop 3 (via b).
+    // One more step keeps req.body (hop 3, at the cap) but must drop
+    // req.query: a deep path may not ride a shallow sibling under the cap.
+    let source = "const a = req.query.id; const b = `1-${a}`; const x = req.body.y; const c = `${x}-${b}`; const e = `e-${c}`;";
+    assert!(has_tainted_binding(source, "e", "req.body"));
+    assert!(!has_tainted_binding(source, "e", "req.query"));
+}
+
+#[test]
+fn direct_capture_keeps_its_full_chain_budget_when_also_chained() {
+    // `b`'s initializer BOTH reads the source directly (hop 1) and references
+    // the tainted `a` (would be hop 2). The dedup min-merge must keep hop 1,
+    // so two more chain steps still fit under the cap.
+    let source = "const a = req.query.id; const b = `${a}-${req.query.z}`; const c = `c-${b}`; const d = `d-${c}`;";
+    assert!(has_tainted_binding(source, "d", "req.query"));
+}
+
+#[test]
+fn destructure_from_tainted_local_chains_with_the_original_source() {
+    let info = parse("const a = req.query;\nconst { id } = a;");
+    let root = info
+        .tainted_bindings
+        .iter()
+        .find(|binding| binding.local == "a" && binding.source_path == "req.query")
+        .expect("direct source binding for `a`");
+    let chained = info
+        .tainted_bindings
+        .iter()
+        .find(|binding| binding.local == "id" && binding.source_path == "req.query")
+        .expect("chained destructure binding for `id`");
+    assert_eq!(
+        chained.source_span_start, root.source_span_start,
+        "the destructured local anchors at the original source read"
+    );
+}
+
+#[test]
+fn destructure_from_a_call_result_does_not_chain() {
+    assert!(!has_tainted_binding(
+        "const a = req.query.id; const { id } = wrap(a);",
+        "id",
+        "req.query"
+    ));
+}
+
+fn redos_regex_sink(source: &str) -> plow_types::extract::SinkSite {
+    let info = parse(source);
+    info.security_sinks
+        .into_iter()
+        .find(|sink| sink.callee_path == "RegExp.redos")
+        .expect("ReDoS regex sink captured")
+}
+
+#[test]
+fn security_redos_regex_capture_records_literal_regex_application() {
+    let sink = redos_regex_sink("const value = req.query.name; /^(a+)+$/.test(value);");
+
+    assert_eq!(sink.sink_shape, SinkShape::MemberCall);
+    assert_eq!(sink.arg_kind, SinkArgKind::Other);
+    assert_eq!(sink.regex_pattern, Some("(a+)+".to_string()));
+    assert_eq!(sink.arg_idents, vec!["value".to_string()]);
+}
+
+#[test]
+fn security_redos_regex_capture_records_const_regexp_application() {
+    let sink = redos_regex_sink(r#"const re = new RegExp("^(a+)+$"); re.test(req.body.value);"#);
+
+    assert_eq!(sink.regex_pattern, Some("(a+)+".to_string()));
+    assert!(
+        sink.arg_source_paths
+            .iter()
+            .any(|path| path == "req.body.value")
+    );
+}
+
+#[test]
+fn security_control_capture_records_validation_and_auth_calls() {
+    let info = parse(
+        r#"
+        const parsed = schema.parse(req.body);
+        passport.authenticate("jwt");
+        authorize(user, "admin");
+        "#,
+    );
+
+    assert!(info.security_control_sites.iter().any(|control| {
+        control.kind == SecurityControlKind::Validation && control.callee_path == "schema.parse"
+    }));
+    assert!(info.security_control_sites.iter().any(|control| {
+        control.kind == SecurityControlKind::Authentication
+            && control.callee_path == "passport.authenticate"
+    }));
+    assert!(info.security_control_sites.iter().any(|control| {
+        control.kind == SecurityControlKind::Authorization && control.callee_path == "authorize"
+    }));
+}
+
+fn has_validation_control(source: &str, callee: &str) -> bool {
+    parse(source).security_control_sites.iter().any(|control| {
+        control.kind == SecurityControlKind::Validation && control.callee_path == callee
+    })
+}
+
+#[test]
+fn security_control_capture_records_elysia_route_validation() {
+    assert!(has_validation_control(
+        r#"
+        import { Elysia, t } from "elysia";
+        const app = new Elysia().post("/users", ({ body }) => save(body.name), {
+            body: t.Object({ name: t.String() }),
+        });
+        "#,
+        "elysia.route.validation",
+    ));
+}
+
+#[test]
+fn security_control_capture_records_fastify_route_schema() {
+    assert!(has_validation_control(
+        r#"
+        import fastify from "fastify";
+        const app = fastify();
+        app.post("/users", {
+            schema: { body: { type: "object" } },
+            handler: async (request) => save(request.body.name),
+        });
+        "#,
+        "fastify.route.schema",
+    ));
+}
+
+#[test]
+fn security_control_capture_records_trpc_input_validation() {
+    assert!(has_validation_control(
+        r#"
+        import { initTRPC } from "@trpc/server";
+        const t = initTRPC.create();
+        const publicProcedure = t.procedure;
+        export const route = publicProcedure.input(schema).mutation(({ input }) => save(input));
+        "#,
+        "trpc.procedure.input",
+    ));
+}
+
+#[test]
+fn security_control_capture_records_hono_validator_middleware() {
+    assert!(has_validation_control(
+        r#"
+        import { zValidator } from "@hono/zod-validator";
+        app.post("/users", zValidator("json", schema), (c) => save(c.req.valid("json")));
+        "#,
+        "hono.validator",
+    ));
+}
+
+#[test]
+fn security_control_capture_records_nest_validation_pipe() {
+    assert!(has_validation_control(
+        r#"
+        import { UsePipes, ValidationPipe } from "@nestjs/common";
+        @UsePipes(new ValidationPipe())
+        class UsersController {}
+        "#,
+        "nestjs.validation-pipe",
+    ));
+}
+
+#[test]
+fn security_control_capture_records_express_validator_middleware() {
+    assert!(has_validation_control(
+        r#"
+        import { body } from "express-validator";
+        app.post("/users", body("email").isEmail(), (req, res) => save(req.body.email));
+        "#,
+        "express-validator.middleware",
+    ));
+}
+
+#[test]
+fn security_control_capture_skips_generic_declarative_shapes_without_framework_evidence() {
+    let info = parse(
+        r#"
+        const route = app.post("/users", handler, { body: schema });
+        const field = builder.input(schema);
+        body("email").isEmail();
+        "#,
+    );
+
+    assert!(!info.security_control_sites.iter().any(|control| {
+        matches!(
+            control.callee_path.as_str(),
+            "elysia.route.validation"
+                | "fastify.route.schema"
+                | "trpc.procedure.input"
+                | "express-validator.middleware"
+        )
+    }));
+}
+
+#[test]
+fn security_redos_regex_capture_records_string_method_application() {
+    let sink = redos_regex_sink("req.params.slug.match(/^(a|aa)+$/);");
+
+    assert_eq!(sink.regex_pattern, Some("(a|aa)+".to_string()));
+    assert!(
+        sink.arg_source_paths
+            .iter()
+            .any(|path| path == "req.params.slug")
+    );
+}
+
+#[test]
+fn security_redos_regex_capture_skips_safe_literal_regex() {
+    let info = parse("const value = req.query.name; /^[a-z]+$/.test(value);");
+
+    assert!(
+        !info
+            .security_sinks
+            .iter()
+            .any(|sink| sink.callee_path == "RegExp.redos")
+    );
+}
+
+#[test]
+fn security_redos_regex_capture_skips_mutable_regex_binding() {
+    let info = parse("let re = /^(a+)+$/; re.test(req.query.name);");
+
+    assert!(
+        !info
+            .security_sinks
+            .iter()
+            .any(|sink| sink.callee_path == "RegExp.redos")
+    );
+}
+
+#[test]
+fn security_literal_sink_capture_unwraps_ts_assertions() {
+    let info = parse(r#"postMessage({ status: "ready" }, "*" as const);"#);
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|sink| sink.callee_path == "postMessage" && sink.arg_index == 1)
+        .expect("postMessage target-origin sink captured");
+
+    assert!(!sink.arg_is_non_literal);
+    assert_eq!(sink.arg_kind, SinkArgKind::Literal);
+    assert_eq!(
+        sink.arg_literal,
+        Some(SinkLiteralValue::String("*".to_string()))
+    );
+}
+
+#[test]
+fn security_cleartext_call_capture_records_literal_argument() {
+    let info = parse(r#"fetch("http://api.example.com/status");"#);
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|sink| sink.callee_path == "fetch" && sink.arg_index == 0)
+        .expect("cleartext fetch sink captured");
+
+    assert_eq!(sink.sink_shape, SinkShape::Call);
+    assert_eq!(sink.arg_index, 0);
+    assert!(!sink.arg_is_non_literal);
+    assert_eq!(sink.arg_kind, SinkArgKind::Literal);
+    assert_eq!(
+        sink.arg_literal,
+        Some(SinkLiteralValue::String(
+            "http://api.example.com/status".to_string()
+        ))
+    );
+}
+
+#[test]
+fn security_cleartext_websocket_capture_records_constructor_argument() {
+    let info = parse(r#"const socket = new WebSocket("ws://socket.example.com/events");"#);
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|sink| sink.callee_path == "WebSocket" && sink.arg_index == 0)
+        .expect("cleartext WebSocket sink captured");
+
+    assert_eq!(sink.sink_shape, SinkShape::NewExpression);
+    assert_eq!(sink.arg_index, 0);
+    assert!(!sink.arg_is_non_literal);
+    assert_eq!(sink.arg_kind, SinkArgKind::Literal);
+    assert_eq!(
+        sink.arg_literal,
+        Some(SinkLiteralValue::String(
+            "ws://socket.example.com/events".to_string()
+        ))
+    );
+}
+
+#[test]
+fn security_cleartext_literal_capture_rejects_encrypted_schemes() {
+    let info = parse(
+        r#"
+            fetch("https://api.example.com/status");
+            fetch("sftp://files.example.com/report.csv");
+            new WebSocket("wss://socket.example.com/events");
+        "#,
+    );
+
+    assert!(
+        info.security_sinks.is_empty(),
+        "encrypted URL literals must not be captured as cleartext security sinks"
+    );
+}
+
+#[test]
+fn security_tls_env_assignment_capture_records_literal_argument() {
+    let info = parse(r#"process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";"#);
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|sink| sink.callee_path == "process.env.NODE_TLS_REJECT_UNAUTHORIZED")
+        .expect("TLS env assignment sink captured");
+
+    assert_eq!(sink.sink_shape, SinkShape::MemberAssign);
+    assert_eq!(sink.arg_index, 0);
+    assert!(!sink.arg_is_non_literal);
+    assert_eq!(sink.arg_kind, SinkArgKind::Literal);
+    assert_eq!(
+        sink.arg_literal,
+        Some(SinkLiteralValue::String("0".to_string()))
+    );
+}
+
+#[test]
+fn security_new_expression_capture_records_constructor_argument() {
+    let info = parse(r#"const compiled = new Function("return 1");"#);
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|sink| sink.callee_path == "Function")
+        .expect("Function constructor sink captured");
+
+    assert_eq!(sink.sink_shape, SinkShape::NewExpression);
+    assert_eq!(sink.arg_index, 0);
+    assert!(!sink.arg_is_non_literal);
+    assert_eq!(sink.arg_kind, SinkArgKind::Literal);
+    assert_eq!(
+        sink.arg_literal,
+        Some(SinkLiteralValue::String("return 1".to_string()))
+    );
+}
+
+#[test]
+fn security_object_sink_capture_unwraps_ts_satisfies() {
+    let info = parse(
+        r#"
+            type CorsOptions = { origin: string; credentials: boolean };
+            cors({ origin: "*", credentials: true } satisfies CorsOptions);
+        "#,
+    );
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|sink| sink.callee_path == "cors" && sink.arg_index == 0)
+        .expect("cors option-object sink captured");
+
+    assert!(sink.arg_is_non_literal);
+    assert_eq!(sink.arg_kind, SinkArgKind::Object);
+    assert!(
+        sink.object_properties
+            .iter()
+            .any(|property| property.key == "origin"
+                && property.value == SinkLiteralValue::String("*".to_string()))
+    );
+    assert!(
+        sink.object_properties
+            .iter()
+            .any(|property| property.key == "credentials"
+                && property.value == SinkLiteralValue::Boolean(true))
+    );
+}
+
+#[test]
+fn security_object_sink_capture_records_nested_literal_properties() {
+    let info = parse(
+        r"
+            new BrowserWindow({
+                webPreferences: {
+                    nodeIntegration: true,
+                    webSecurity: false,
+                },
+            });
+        ",
+    );
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|sink| sink.callee_path == "BrowserWindow" && sink.arg_index == 0)
+        .expect("BrowserWindow option object sink captured");
+
+    assert!(sink.arg_is_non_literal);
+    assert_eq!(sink.arg_kind, SinkArgKind::Object);
+    assert!(
+        sink.object_properties
+            .iter()
+            .any(|property| property.key == "webPreferences.nodeIntegration"
+                && property.value == SinkLiteralValue::Boolean(true))
+    );
+    assert!(
+        sink.object_properties
+            .iter()
+            .any(|property| property.key == "webPreferences.webSecurity"
+                && property.value == SinkLiteralValue::Boolean(false))
+    );
+}
+
+#[test]
+fn security_chmod_capture_records_integer_literal_argument() {
+    let info = parse(r"fs.chmodSync(file, 0o777);");
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|sink| sink.callee_path == "fs.chmodSync" && sink.arg_index == 1)
+        .expect("chmod integer mode sink captured");
+
+    assert_eq!(sink.sink_shape, SinkShape::MemberCall);
+    assert_eq!(sink.arg_index, 1);
+    assert!(!sink.arg_is_non_literal);
+    assert_eq!(sink.arg_kind, SinkArgKind::Literal);
+    assert_eq!(sink.arg_literal, Some(SinkLiteralValue::Integer(511)));
+}
+
+#[test]
+fn security_sink_constant_string_coercion_is_classified_as_literal() {
+    let info = parse(
+        r"
+            const MISSING_LINE_NUMBER_SENTINEL = -1;
+            sql.raw(String(MISSING_LINE_NUMBER_SENTINEL));
+        ",
+    );
+
+    assert!(
+        !info
+            .security_sinks
+            .iter()
+            .any(|sink| sink.callee_path == "sql.raw"),
+        "a numeric constant coerced through String() must not be captured as a non-literal raw SQL sink"
+    );
+}
+
+#[test]
+fn security_sink_constant_template_is_classified_as_literal() {
+    let info = parse(
+        r#"
+            const SCHEME = "http";
+            const HOST = "api.example.com";
+            const URL = `${SCHEME}://${HOST}/status`;
+            fetch(URL);
+        "#,
+    );
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|sink| sink.callee_path == "fetch" && sink.arg_index == 0)
+        .expect("cleartext fetch sink captured");
+
+    assert!(!sink.arg_is_non_literal);
+    assert_eq!(sink.arg_kind, SinkArgKind::Literal);
+    assert_eq!(
+        sink.arg_literal,
+        Some(SinkLiteralValue::String(
+            "http://api.example.com/status".to_string()
+        ))
+    );
+}
+
+#[test]
+fn security_sink_shadowed_constant_stays_dynamic() {
+    let info = parse(
+        r"
+            const MISSING_LINE_NUMBER_SENTINEL = -1;
+            function run(MISSING_LINE_NUMBER_SENTINEL: number): void {
+                sql.raw(String(MISSING_LINE_NUMBER_SENTINEL));
+            }
+        ",
+    );
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|sink| sink.callee_path == "sql.raw")
+        .expect("shadowed constant sink stays captured");
+
+    assert!(sink.arg_is_non_literal);
+    assert_eq!(sink.arg_kind, SinkArgKind::Call);
+}
+
+#[test]
+fn security_temp_file_capture_records_literal_path_argument() {
+    let info = parse(r#"fs.writeFileSync("/tmp/plow-token", token);"#);
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|sink| sink.callee_path == "fs.writeFileSync" && sink.arg_index == 0)
+        .expect("temp path literal sink captured");
+
+    assert_eq!(sink.sink_shape, SinkShape::MemberCall);
+    assert_eq!(sink.arg_index, 0);
+    assert!(!sink.arg_is_non_literal);
+    assert_eq!(sink.arg_kind, SinkArgKind::Literal);
+    assert_eq!(
+        sink.arg_literal,
+        Some(SinkLiteralValue::String("/tmp/plow-token".to_string()))
+    );
+}
+
+#[test]
+fn security_call_capture_records_dynamic_regex_argument() {
+    let info = parse("const compiled = RegExp(pattern);");
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|sink| sink.callee_path == "RegExp")
+        .expect("RegExp call sink captured");
+
+    assert_eq!(sink.sink_shape, SinkShape::Call);
+    assert_eq!(sink.arg_index, 0);
+    assert!(sink.arg_is_non_literal);
+    assert_eq!(sink.arg_kind, SinkArgKind::Other);
+    assert_eq!(sink.arg_idents, vec!["pattern".to_string()]);
+}
+
+#[test]
+fn security_new_expression_capture_records_dynamic_regex_argument() {
+    let info = parse("const compiled = new RegExp(pattern);");
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|sink| sink.callee_path == "RegExp")
+        .expect("RegExp constructor sink captured");
+
+    assert_eq!(sink.sink_shape, SinkShape::NewExpression);
+    assert_eq!(sink.arg_index, 0);
+    assert!(sink.arg_is_non_literal);
+    assert_eq!(sink.arg_kind, SinkArgKind::Other);
+    assert_eq!(sink.arg_idents, vec!["pattern".to_string()]);
+}
+
+#[test]
+fn security_zero_arg_member_call_capture_records_token_context() {
+    let info = parse("const sessionToken = Math.random().toString(36);");
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|sink| sink.callee_path == "Math.random")
+        .expect("Math.random context sink captured");
+
+    assert_eq!(sink.sink_shape, SinkShape::MemberCall);
+    assert_eq!(sink.arg_index, 0);
+    assert!(!sink.arg_is_non_literal);
+    assert_eq!(sink.arg_kind, SinkArgKind::NoArg);
+    assert_eq!(sink.arg_idents, vec!["sessionToken".to_string()]);
+}
+
+#[test]
+fn security_hardcoded_secret_capture_records_variable_literal() {
+    let info = parse(r#"const apiKey = "mF9a7Qp2Lx8Nz4Rv6Ts0";"#);
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|sink| sink.callee_path == "apiKey")
+        .expect("secret literal sink captured");
+
+    assert_eq!(sink.sink_shape, SinkShape::SecretLiteral);
+    assert_eq!(sink.arg_index, 0);
+    assert!(!sink.arg_is_non_literal);
+    assert_eq!(sink.arg_kind, SinkArgKind::Literal);
+    assert_eq!(
+        sink.arg_literal,
+        Some(SinkLiteralValue::String("mF9a7Qp2Lx8Nz4Rv6Ts0".to_string()))
+    );
+    assert_eq!(sink.arg_idents, vec!["apiKey".to_string()]);
+}
+
+#[test]
+fn security_hardcoded_secret_capture_records_template_literal() {
+    let info = parse("const accessToken = `R8vK2mP9qL4xZ7nT1sB6`;");
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|sink| sink.callee_path == "accessToken")
+        .expect("template secret literal sink captured");
+
+    assert_eq!(sink.sink_shape, SinkShape::SecretLiteral);
+    assert_eq!(
+        sink.arg_literal,
+        Some(SinkLiteralValue::String("R8vK2mP9qL4xZ7nT1sB6".to_string()))
+    );
+}
+
+#[test]
+fn security_hardcoded_secret_capture_records_object_property_literal() {
+    let info = parse(r#"const config = { clientSecret: "n7Pq4Zx9Lm2Qa8Rt5Vb3" };"#);
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|sink| sink.callee_path == "clientSecret")
+        .expect("object property secret literal sink captured");
+
+    assert_eq!(sink.sink_shape, SinkShape::SecretLiteral);
+    assert_eq!(
+        sink.arg_literal,
+        Some(SinkLiteralValue::String("n7Pq4Zx9Lm2Qa8Rt5Vb3".to_string()))
+    );
+}
+
+#[test]
+fn security_hardcoded_secret_capture_skips_entropy_only_context() {
+    let info = parse(r#"const cacheHash = "mF9a7Qp2Lx8Nz4Rv6Ts0";"#);
+
+    assert!(
+        !info
+            .security_sinks
+            .iter()
+            .any(|sink| sink.callee_path == "cacheHash")
+    );
+}
+
+#[test]
+fn security_hardcoded_secret_capture_skips_auth_header_context() {
+    let info = parse(r#"const headers = { "WWW-Authenticate": "mF9a7Qp2Lx8Nz4Rv6Ts0" };"#);
+
+    assert!(
+        !info
+            .security_sinks
+            .iter()
+            .any(|sink| sink.callee_path == "WWW-Authenticate")
+    );
+}
+
+fn jwt_verify_options_sink(source: &str) -> plow_types::extract::SinkSite {
+    let info = parse(source);
+    info.security_sinks
+        .into_iter()
+        .find(|sink| sink.callee_path == "jwt.verify" && sink.arg_index == 2)
+        .expect("jwt.verify options sink captured")
+}
+
+#[test]
+fn security_jwt_verify_missing_options_capture_records_empty_complete_keys() {
+    let sink = jwt_verify_options_sink("jwt.verify(token, key);");
+
+    assert_eq!(sink.sink_shape, SinkShape::MemberCall);
+    assert_eq!(sink.arg_index, 2);
+    assert!(!sink.arg_is_non_literal);
+    assert_eq!(sink.arg_kind, SinkArgKind::Object);
+    assert!(sink.object_property_keys.is_empty());
+    assert!(sink.object_property_keys_complete);
+}
+
+#[test]
+fn security_jwt_verify_options_capture_records_array_key_presence() {
+    let sink = jwt_verify_options_sink(r#"jwt.verify(token, key, { algorithms: ["RS256"] });"#);
+
+    assert_eq!(sink.arg_kind, SinkArgKind::Object);
+    assert_eq!(sink.object_property_keys, vec!["algorithms".to_string()]);
+    assert!(sink.object_property_keys_complete);
+    assert!(sink.object_properties.is_empty());
+}
+
+#[test]
+fn security_jwt_verify_options_capture_records_missing_algorithm_key() {
+    let sink = jwt_verify_options_sink(r#"jwt.verify(token, key, { audience: "app" });"#);
+
+    assert_eq!(sink.object_property_keys, vec!["audience".to_string()]);
+    assert!(sink.object_property_keys_complete);
+}
+
+#[test]
+fn security_jwt_verify_options_with_spread_is_incomplete() {
+    let sink = jwt_verify_options_sink(r#"jwt.verify(token, key, { audience: "app", ...opts });"#);
+
+    assert_eq!(sink.object_property_keys, vec!["audience".to_string()]);
+    assert!(!sink.object_property_keys_complete);
+}
+
+#[test]
+fn security_jwt_verify_options_with_computed_key_is_incomplete() {
+    let sink = jwt_verify_options_sink(r#"jwt.verify(token, key, { [keyName]: ["RS256"] });"#);
+
+    assert!(sink.object_property_keys.is_empty());
+    assert!(!sink.object_property_keys_complete);
+}
 
 #[test]
 fn extracts_public_class_methods_and_properties() {
@@ -262,8 +1351,6 @@ fn local_class_export_specifier_keeps_members_and_heritage() {
     );
 }
 
-// ── Enum member extraction ───────────────────────────────────
-
 #[test]
 fn extracts_enum_members() {
     let info = parse(
@@ -287,8 +1374,6 @@ fn extracts_enum_members() {
     assert!(members.iter().any(|m| m.name == "Up"));
     assert!(members.iter().any(|m| m.name == "Right"));
 }
-
-// ── Whole-object use patterns ────────────────────────────────
 
 #[test]
 fn object_values_marks_whole_use() {
@@ -326,8 +1411,6 @@ fn dynamic_computed_access_marks_whole_use() {
     assert!(info.whole_object_uses.contains(&"E".to_string()));
 }
 
-// ── this.member tracking ─────────────────────────────────────
-
 #[test]
 fn this_member_access_tracked() {
     let info = parse(
@@ -364,8 +1447,6 @@ fn this_assignment_tracked() {
     );
 }
 
-// ── Instance member access tracking ─────────────────────────
-
 #[test]
 fn instance_member_access_mapped_to_class() {
     let info = parse(
@@ -375,13 +1456,186 @@ fn instance_member_access_mapped_to_class() {
             svc.greet();
             ",
     );
-    // svc.greet() should produce a MemberAccess for MyService.greet
     assert!(
         info.member_accesses
             .iter()
             .any(|a| a.object == "MyService" && a.member == "greet"),
         "svc.greet() should be mapped to MyService.greet, found: {:?}",
         info.member_accesses
+    );
+}
+
+#[test]
+fn structural_typed_call_direct_new_maps_parameter_members_to_class() {
+    let info = parse(
+        r"
+            interface DurationI {
+                toMs(): number;
+                toSec(): number;
+            }
+            function main(dur: DurationI) {
+                dur.toMs();
+                dur.toSec();
+            }
+            main(new DurationMS(1000));
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "DurationMS" && a.member == "toMs"),
+        "DurationMS.toMs should be credited, found: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "DurationMS" && a.member == "toSec"),
+        "DurationMS.toSec should be credited, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn structural_typed_call_identifier_maps_parameter_members_to_class() {
+    let info = parse(
+        r"
+            interface DurationI {
+                toMs(): number;
+            }
+            function main(dur: DurationI) {
+                dur.toMs();
+            }
+            const dur = new DurationMS(1000);
+            main(dur);
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "DurationMS" && a.member == "toMs"),
+        "DurationMS.toMs should be credited, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn structural_typed_call_wrong_argument_index_does_not_credit_class() {
+    let info = parse(
+        r"
+            interface DurationI {
+                toMs(): number;
+            }
+            function main(other: OtherI, dur: DurationI) {
+                dur.toMs();
+            }
+            const other = {};
+            main(new DurationMS(1000), other);
+            ",
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object == "DurationMS" && a.member == "toMs"),
+        "wrong argument index should not credit DurationMS.toMs, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn structural_typed_call_same_parameter_name_other_function_does_not_credit_class() {
+    let info = parse(
+        r"
+            interface DurationI {
+                toMs(): number;
+            }
+            function main(dur: DurationI) {
+                return dur;
+            }
+            function other(dur: DurationI) {
+                dur.toMs();
+            }
+            main(new DurationMS(1000));
+            ",
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object == "DurationMS" && a.member == "toMs"),
+        "other function should not credit main call, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn structural_typed_call_shadowed_parameter_does_not_credit_class() {
+    let info = parse(
+        r"
+            interface DurationI {
+                toMs(): number;
+            }
+            function main(dur: DurationI) {
+                {
+                    const dur = {
+                        toMs() {
+                            return 0;
+                        }
+                    };
+                    dur.toMs();
+                }
+            }
+            main(new DurationMS(1000));
+            ",
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object == "DurationMS" && a.member == "toMs"),
+        "shadowed parameter should not credit DurationMS.toMs, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn structural_typed_call_imported_callee_does_not_credit_class() {
+    let info = parse(
+        r"
+            import { main } from './main';
+            main(new DurationMS(1000));
+            ",
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object == "DurationMS"),
+        "imported callee should not credit DurationMS members, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn bare_constructor_binding_does_not_mark_class_members_used() {
+    let info = parse(
+        r"
+            const dur = new DurationMS(1000);
+            ",
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object == "DurationMS"),
+        "bare constructor binding should not emit DurationMS member access, found: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        !info.whole_object_uses.contains(&"DurationMS".to_string()),
+        "bare constructor binding should not emit whole-object use, found: {:?}",
+        info.whole_object_uses
     );
 }
 
@@ -454,6 +1708,138 @@ fn assigned_nested_object_member_access_mapped_to_class() {
 }
 
 #[test]
+fn destructure_binding_typed_by_interface_mapped_to_class() {
+    let info = parse(
+        r"
+            import type { ResultState } from './state';
+            interface Props { resultState: ResultState }
+            const { resultState }: Props = getProps();
+            resultState.pin();
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "ResultState" && a.member == "pin"),
+        "resultState.pin() through an interface-typed destructure should map to ResultState.pin, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn destructure_binding_typed_by_interface_declared_after_use() {
+    let info = parse(
+        r"
+            import type { ResultState } from './state';
+            const { resultState }: Props = getProps();
+            resultState.pin();
+            interface Props { resultState: ResultState }
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "ResultState" && a.member == "pin"),
+        "source-order-independent interface resolution should map resultState.pin() to ResultState.pin, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn destructure_binding_typed_by_inline_type_literal_mapped_to_class() {
+    let info = parse(
+        r"
+            import type { ResultState } from './state';
+            const { resultState }: { resultState: ResultState } = getProps();
+            resultState.pin();
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "ResultState" && a.member == "pin"),
+        "inline type-literal destructure should map resultState.pin() to ResultState.pin, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn destructure_binding_typed_by_type_alias_mapped_to_class() {
+    let info = parse(
+        r"
+            import type { ResultState } from './state';
+            type Props = { resultState: ResultState };
+            const { resultState }: Props = getProps();
+            resultState.pin();
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "ResultState" && a.member == "pin"),
+        "object type-alias destructure should map resultState.pin() to ResultState.pin, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn renamed_destructure_binding_typed_by_interface_mapped_to_class() {
+    let info = parse(
+        r"
+            import type { ResultState } from './state';
+            interface Props { resultState: ResultState }
+            const { resultState: rs }: Props = getProps();
+            rs.pin();
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "ResultState" && a.member == "pin"),
+        "renamed destructure `{{ resultState: rs }}` should map rs.pin() to ResultState.pin, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn destructured_formal_parameter_typed_by_interface_mapped_to_class() {
+    let info = parse(
+        r"
+            import type { ResultState } from './state';
+            interface Props { resultState: ResultState }
+            function render({ resultState }: Props) {
+                resultState.pin();
+            }
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "ResultState" && a.member == "pin"),
+        "destructured formal parameter typed by an interface should map resultState.pin() to ResultState.pin, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn untyped_destructure_binding_does_not_map_to_class() {
+    let info = parse(
+        r"
+            const { resultState } = getProps();
+            resultState.pin();
+            ",
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object == "ResultState"),
+        "an untyped destructure must not credit any class member, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
 fn instance_whole_object_use_mapped_to_class() {
     let info = parse(
         r"
@@ -477,7 +1863,6 @@ fn non_instance_binding_not_mapped() {
             obj.greet();
             ",
     );
-    // obj is not a `new` binding, so no class mapping should exist.
     assert!(
         !info
             .member_accesses
@@ -496,7 +1881,6 @@ fn instance_binding_with_no_access_produces_nothing() {
             const x = new Foo();
             ",
     );
-    // Binding exists but no x.method() calls — no synthetic accesses should be emitted.
     assert!(
         !info.member_accesses.iter().any(|a| a.object == "Foo"),
         "binding with no member access should not produce Foo entries, found: {:?}",
@@ -519,7 +1903,6 @@ fn builtin_constructor_not_tracked() {
             m.get('key');
             ",
     );
-    // Built-in constructors should not create instance bindings
     assert!(
         !info.member_accesses.iter().any(|a| a.object == "URL"),
         "new URL() should not create instance binding, found: {:?}",
@@ -576,8 +1959,6 @@ fn exported_instance_binding_is_recorded() {
         info.member_accesses
     );
 }
-
-// ── Factory initializer instance tracking ──────────────────
 
 #[test]
 fn array_destructured_factory_arrow_expression_body() {
@@ -673,13 +2054,71 @@ fn non_array_destructured_call_not_tracked() {
             result.bar();
             ",
     );
-    // Without array destructuring, the factory pattern should not create a binding
     assert!(
         !info
             .member_accesses
             .iter()
             .any(|a| a.object == "Foo" && a.member == "bar"),
         "non-array-destructured call should not create instance binding, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn usememo_non_destructured_factory_tracked() {
+    // useMemo returns the factory's product directly, so `svc` is a Svc
+    // instance and `svc.fetch()` credits Svc.fetch. See issue #844.
+    let info = parse(
+        r"
+            import { Svc } from './svc';
+            const svc = useMemo(() => new Svc(token), [token]);
+            svc.fetch();
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "Svc" && a.member == "fetch"),
+        "useMemo factory binding should credit Svc.fetch, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn usememo_react_namespaced_factory_tracked() {
+    let info = parse(
+        r"
+            import { Svc } from './svc';
+            const svc = React.useMemo(() => new Svc(), []);
+            svc.fetch();
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "Svc" && a.member == "fetch"),
+        "React.useMemo factory binding should credit Svc.fetch, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn usestate_non_destructured_factory_not_tracked() {
+    // useState returns a [value, setter] tuple, so a non-destructured binding is
+    // the tuple, not the instance. Only the array-destructured form is tracked.
+    let info = parse(
+        r"
+            import { Foo } from './foo';
+            const state = useState(() => new Foo());
+            state.bar();
+            ",
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object == "Foo" && a.member == "bar"),
+        "non-destructured useState (tuple) should not bind the instance, found: {:?}",
         info.member_accesses
     );
 }
@@ -693,7 +2132,6 @@ fn array_destructured_no_factory_not_tracked() {
             x.bar();
             ",
     );
-    // No factory argument — should not create instance binding
     assert!(
         !info
             .member_accesses
@@ -703,8 +2141,6 @@ fn array_destructured_no_factory_not_tracked() {
         info.member_accesses
     );
 }
-
-// ── Typed-binding nullable unions ─────
 
 #[test]
 fn type_annotation_nullable_union_undefined_binds_class() {
@@ -839,8 +2275,6 @@ fn type_annotation_array_generic_not_unwrapped() {
 
 #[test]
 fn type_annotation_qualified_promise_not_unwrapped() {
-    // `Foo.Promise<Aggregate>` is not the global Promise; binding should fall back
-    // to the bare reference name (`Foo.Promise`), not unwrap to `Aggregate`.
     let info = parse(
         r"
             import { Aggregate, Foo } from './foo';
@@ -858,8 +2292,6 @@ fn type_annotation_qualified_promise_not_unwrapped() {
     );
 }
 
-// ── this.field chained member access ────────────────────────
-
 #[test]
 fn this_field_new_assignment_enables_chained_access() {
     let info = parse(
@@ -875,7 +2307,6 @@ fn this_field_new_assignment_enables_chained_access() {
             }
             ",
     );
-    // this.service.doWork() should be mapped to MyService.doWork
     assert!(
         info.member_accesses
             .iter()
@@ -896,8 +2327,6 @@ fn this_field_chained_access_without_new_not_mapped() {
             }
             ",
     );
-    // No `this.config = new Config()` assignment, so no class mapping.
-    // The raw `this.config.getValue` access should exist but not be resolved to a class.
     assert!(
         info.member_accesses
             .iter()
@@ -905,7 +2334,6 @@ fn this_field_chained_access_without_new_not_mapped() {
         "raw this.config.getValue access should be recorded, found: {:?}",
         info.member_accesses
     );
-    // No class-level mapping should exist
     assert!(
         !info
             .member_accesses
@@ -1008,6 +2436,100 @@ fn non_playwright_extend_does_not_record_fixture_definitions() {
             .iter()
             .any(|a| a.object.starts_with(crate::PLAYWRIGHT_FIXTURE_DEF_SENTINEL)),
         "non-Playwright .extend<T>() should not emit Playwright fixture definitions, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn playwright_merge_tests_records_fixture_aliases() {
+    let info = parse(
+        r"
+            import { mergeTests } from '@playwright/test';
+            import { testPrimary } from './primary-fixture';
+            import { testSecondary } from './secondary-fixture';
+
+            export const mergedTest = mergeTests(testPrimary, testSecondary);
+        ",
+    );
+
+    assert!(
+        info.member_accesses.iter().any(|a| {
+            a.object == format!("{}mergedTest:", crate::PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL)
+                && a.member == "testPrimary"
+        }),
+        "Playwright mergeTests should record the first inherited fixture test, found: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        info.member_accesses.iter().any(|a| {
+            a.object == format!("{}mergedTest:", crate::PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL)
+                && a.member == "testSecondary"
+        }),
+        "Playwright mergeTests should record the second inherited fixture test, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn playwright_aliased_merge_tests_records_fixture_aliases() {
+    let info = parse(
+        r"
+            import { mergeTests as merge } from '@playwright/test';
+            import { testPrimary } from './primary-fixture';
+
+            export const mergedTest = merge(testPrimary);
+        ",
+    );
+
+    assert!(
+        info.member_accesses.iter().any(|a| {
+            a.object == format!("{}mergedTest:", crate::PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL)
+                && a.member == "testPrimary"
+        }),
+        "aliased Playwright mergeTests should record an inherited fixture test, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn playwright_wrapper_extend_records_fixture_alias() {
+    let info = parse(
+        r"
+            import { testPrimary } from './primary-fixture';
+
+            export const extendedTest = testPrimary.extend<{ extra: string }>({});
+        ",
+    );
+
+    assert!(
+        info.member_accesses.iter().any(|a| {
+            a.object == format!("{}extendedTest:", crate::PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL)
+                && a.member == "testPrimary"
+        }),
+        "chained Playwright wrapper .extend should record an inherited fixture test, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn non_playwright_merge_tests_does_not_record_fixture_aliases() {
+    let info = parse(
+        r"
+            import { testPrimary } from './primary-fixture';
+
+            function mergeTests<T>(test: T): T {
+                return test;
+            }
+
+            export const mergedTest = mergeTests(testPrimary);
+        ",
+    );
+
+    assert!(
+        !info.member_accesses.iter().any(|a| a
+            .object
+            .starts_with(crate::PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL)),
+        "local mergeTests should not emit Playwright fixture aliases, found: {:?}",
         info.member_accesses
     );
 }
@@ -1131,6 +2653,34 @@ fn playwright_nested_fixture_alias_type_records_dotted_path_definitions() {
                 && a.member == "UserPage"
         }),
         "nested alias fixture pages.userPage should map to UserPage, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn playwright_fixture_type_alias_records_nested_type_bindings() {
+    let info = parse(
+        r"
+            import { MessageChecks } from './message-checks';
+
+            type AppFixture = {
+                assert: {
+                    messageChecks: MessageChecks;
+                };
+            };
+        ",
+    );
+
+    assert!(
+        info.member_accesses.iter().any(|a| {
+            a.object
+                == format!(
+                    "{}AppFixture:assert.messageChecks",
+                    crate::PLAYWRIGHT_FIXTURE_TYPE_SENTINEL
+                )
+                && a.member == "MessageChecks"
+        }),
+        "Playwright fixture type alias should record nested type bindings, found: {:?}",
         info.member_accesses
     );
 }
@@ -1525,15 +3075,12 @@ fn this_field_builtin_constructor_not_tracked() {
             }
             ",
     );
-    // Built-in constructors should not create this.field bindings
     assert!(
         !info.member_accesses.iter().any(|a| a.object == "Map"),
         "new Map() should not create this.field instance binding, found: {:?}",
         info.member_accesses
     );
 }
-
-// ── CJS export patterns ──────────────────────────────────────
 
 #[test]
 fn module_exports_object_extracts_keys() {
@@ -1562,8 +3109,6 @@ fn exports_dot_property() {
     );
 }
 
-// ── Destructured require/import ──────────────────────────────
-
 #[test]
 fn destructured_require_captures_names() {
     let info = parse("const { readFile, writeFile } = require('fs');");
@@ -1583,6 +3128,25 @@ fn namespace_require_has_local_name() {
 }
 
 #[test]
+fn require_source_span_points_at_specifier_literal() {
+    // The specifier string-literal span anchors the unresolved-import squiggly
+    // under `'./x'`, not the `require` keyword. It must begin strictly past the
+    // call span start (after `require(`) and cover the quoted specifier.
+    let info = parse("const x = require('./gone');");
+    assert_eq!(info.require_calls.len(), 1);
+    let call = &info.require_calls[0];
+    assert!(
+        call.source_span.start > call.span.start,
+        "specifier span should start after the `require` keyword"
+    );
+    assert_eq!(
+        call.source_span.end - call.source_span.start,
+        "'./gone'".len() as u32,
+        "specifier span should cover the quoted literal"
+    );
+}
+
+#[test]
 fn destructured_await_import_captures_names() {
     let info = parse("const { foo, bar } = await import('./mod');");
     assert_eq!(info.dynamic_imports.len(), 1);
@@ -1599,8 +3163,6 @@ fn namespace_await_import_has_local_name() {
     assert_eq!(info.dynamic_imports[0].local_name, Some("mod".to_string()));
 }
 
-// ── new URL pattern ──────────────────────────────────────────
-
 #[test]
 fn new_url_with_import_meta_url_tracked() {
     let info = parse("const w = new URL('./worker.js', import.meta.url);");
@@ -1611,8 +3173,6 @@ fn new_url_with_import_meta_url_tracked() {
         "new URL('./worker.js', import.meta.url) should be tracked as dynamic import"
     );
 }
-
-// ── import.meta.glob ─────────────────────────────────────────
 
 #[test]
 fn import_meta_glob_string_pattern() {
@@ -1626,8 +3186,6 @@ fn import_meta_glob_array_patterns() {
     let info = parse("const mods = import.meta.glob(['./a/*.ts', './b/*.ts']);");
     assert_eq!(info.dynamic_import_patterns.len(), 2);
 }
-
-// ── require.context ──────────────────────────────────────────
 
 #[test]
 fn require_context_non_recursive() {
@@ -1682,8 +3240,6 @@ fn require_context_no_regex_has_no_suffix() {
     assert!(info.dynamic_import_patterns[0].suffix.is_none());
 }
 
-// ── regex_pattern_to_suffix unit tests ──────────────────────
-
 #[test]
 fn regex_suffix_simple_ext() {
     assert_eq!(regex_pattern_to_suffix(r"\.vue$"), Some(".vue".to_string()));
@@ -1720,13 +3276,10 @@ fn regex_suffix_alternation() {
 
 #[test]
 fn regex_suffix_complex_returns_none() {
-    // Patterns too complex to convert
     assert_eq!(regex_pattern_to_suffix(r"\..*$"), None);
     assert_eq!(regex_pattern_to_suffix(r"\.[^.]+$"), None);
     assert_eq!(regex_pattern_to_suffix(r"test"), None);
 }
-
-// ── Whole-object-use edge cases ─────────────────────────────
 
 #[test]
 fn for_in_loop_marks_enum_as_whole_use() {
@@ -1759,21 +3312,17 @@ fn object_get_own_property_names_marks_whole_use() {
 #[test]
 fn nested_member_access_only_tracks_object() {
     let info = parse("import { obj } from './data';\nconst val = obj.nested.prop;");
-    // obj should be tracked as a member access, not as whole-object-use
     assert!(
         info.member_accesses
             .iter()
             .any(|a| a.object == "obj" && a.member == "nested"),
         "obj.nested should be tracked as a member access"
     );
-    // obj should NOT be in whole_object_uses (it's a specific member access)
     assert!(
         !info.whole_object_uses.contains(&"obj".to_string()),
         "nested member access should not mark obj as whole-object-use"
     );
 }
-
-// ── Export extraction ────────────────────────────────────────
 
 #[test]
 fn export_default_class_declaration() {
@@ -1917,8 +3466,6 @@ fn export_generator_function() {
     assert_eq!(info.exports[0].name, ExportName::Named("gen".to_string()));
 }
 
-// ── Type exports ─────────────────────────────────────────────
-
 #[test]
 fn export_type_alias() {
     let info = parse("export type ID = string | number;");
@@ -1967,8 +3514,6 @@ fn export_declare_namespace() {
     assert_eq!(info.exports[0].name, ExportName::Named("MyNS".to_string()));
     assert!(info.exports[0].is_type_only);
 }
-
-// ── Re-export extraction ─────────────────────────────────────
 
 #[test]
 fn re_export_named() {
@@ -2043,8 +3588,6 @@ fn re_export_star_type_only() {
     assert!(info.re_exports[0].is_type_only);
     assert_eq!(info.re_exports[0].imported_name, "*");
 }
-
-// ── Import extraction ────────────────────────────────────────
 
 #[test]
 fn import_named_single() {
@@ -2163,11 +3706,8 @@ fn import_type_default() {
 fn import_source_span_populated() {
     let info = parse("import { foo } from './bar';");
     assert_eq!(info.imports.len(), 1);
-    // source_span should cover the string literal './bar'
     assert!(info.imports[0].source_span.start < info.imports[0].source_span.end);
 }
-
-// ── Dynamic import extraction ────────────────────────────────
 
 #[test]
 fn dynamic_import_string_literal() {
@@ -2306,7 +3846,6 @@ fn dynamic_import_non_relative_concat_ignored() {
 
 #[test]
 fn dynamic_import_no_duplicate_when_assigned() {
-    // When assigned to a variable, the import should appear exactly once
     let info = parse("async function f() { const m = await import('./svc'); }");
     assert_eq!(
         info.dynamic_imports.len(),
@@ -2314,8 +3853,6 @@ fn dynamic_import_no_duplicate_when_assigned() {
         "assigned dynamic import should not produce duplicate entries"
     );
 }
-
-// ── Require call extraction ──────────────────────────────────
 
 #[test]
 fn require_call_simple() {
@@ -2377,8 +3914,6 @@ fn require_destructured_with_rest_returns_empty() {
     assert!(info.require_calls[0].destructured_names.is_empty());
 }
 
-// ── Member access extraction ─────────────────────────────────
-
 #[test]
 fn member_access_static() {
     let info = parse("import { Status } from './types';\nStatus.Active;");
@@ -2418,6 +3953,41 @@ fn member_access_computed_dynamic_marks_whole() {
     assert!(
         info.whole_object_uses.contains(&"Status".to_string()),
         "dynamic computed access should mark as whole-object use"
+    );
+}
+
+#[test]
+fn import_meta_env_static_member_access_tracked() {
+    let info = parse("const secret = import.meta.env.SECRET_KEY;");
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| { a.object == "import.meta.env" && a.member == "SECRET_KEY" }),
+        "static import.meta.env.SECRET_KEY should be tracked"
+    );
+}
+
+#[test]
+fn import_meta_env_computed_member_access_not_tracked() {
+    let info = parse("const key = 'SECRET_KEY'; const secret = import.meta.env[key];");
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object == "import.meta.env"),
+        "computed import.meta.env access should stay out of the static source set"
+    );
+}
+
+#[test]
+fn new_target_env_static_member_access_not_tracked_as_import_meta() {
+    let info = parse("function Factory() { return new.target.env.SECRET_KEY; }");
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object == "import.meta.env"),
+        "new.target.env.SECRET_KEY must not be labeled as import.meta.env"
     );
 }
 
@@ -2468,8 +4038,6 @@ fn member_access_chained() {
     );
 }
 
-// ── Whole-object use patterns ────────────────────────────────
-
 #[test]
 fn whole_object_object_values() {
     let info = parse("Object.values(myObj);");
@@ -2517,8 +4085,6 @@ fn whole_object_spread_in_call_args() {
     let info = parse("fn(...myArr);");
     assert!(info.whole_object_uses.contains(&"myArr".to_string()));
 }
-
-// ── Type-level member access ────────────────────────────────
 
 #[test]
 fn type_qualified_name_tracks_member_access() {
@@ -2599,8 +4165,6 @@ fn record_with_non_identifier_key_no_whole_object_use() {
     );
 }
 
-// ── CommonJS exports ─────────────────────────────────────────
-
 #[test]
 fn cjs_module_exports_object_keys() {
     let info = parse("module.exports = { foo: 1, bar: 2, baz: 3 };");
@@ -2623,7 +4187,6 @@ fn cjs_exports_dot_property() {
 fn cjs_module_exports_non_object() {
     let info = parse("module.exports = someValue;");
     assert!(info.has_cjs_exports);
-    // Non-object RHS doesn't produce named exports
     assert!(info.exports.is_empty());
 }
 
@@ -2666,8 +4229,6 @@ fn cjs_module_exports_dot_property() {
             .any(|e| matches!(&e.name, ExportName::Named(n) if n == "baz"))
     );
 }
-
-// ── TypeScript enum extraction ───────────────────────────────
 
 #[test]
 fn ts_enum_members_extracted() {
@@ -2712,8 +4273,6 @@ fn ts_enum_string_member_name() {
     assert_eq!(info.exports[0].members.len(), 1);
     assert_eq!(info.exports[0].members[0].name, "some-key");
 }
-
-// ── Class member extraction ──────────────────────────────────
 
 #[test]
 fn class_public_methods_and_properties() {
@@ -2807,8 +4366,6 @@ fn class_member_decorator_tracked() {
     assert!(!plain.has_decorator);
 }
 
-// ── Instance member access mapping ───────────────────────────
-
 #[test]
 fn instance_method_call_mapped() {
     let info = parse(
@@ -2894,6 +4451,139 @@ fn typed_getter_records_instance_binding() {
 }
 
 #[test]
+fn angular_inject_property_records_instance_binding() {
+    let info = parse(
+        r"
+        import { Component, inject } from '@angular/core';
+        import { ExampleService } from './example.service';
+
+        @Component({ templateUrl: './example.component.html' })
+        export class ExampleComponent {
+            readonly exampleService = inject(ExampleService);
+        }
+        ",
+    );
+
+    assert!(
+        info.class_heritage.iter().any(|heritage| {
+            heritage.export_name == "ExampleComponent"
+                && heritage
+                    .instance_bindings
+                    .contains(&("exampleService".to_string(), "ExampleService".to_string()))
+        }),
+        "Angular inject() property should be recorded as an instance binding, found: {:?}",
+        info.class_heritage
+    );
+}
+
+#[test]
+fn angular_inject_alias_property_records_instance_binding() {
+    let info = parse(
+        r"
+        import { Component, inject as ngInject } from '@angular/core';
+        import { ExampleService } from './example.service';
+
+        @Component({ templateUrl: './example.component.html' })
+        export class ExampleComponent {
+            readonly exampleService = ngInject(ExampleService);
+        }
+        ",
+    );
+
+    assert!(
+        info.class_heritage.iter().any(|heritage| {
+            heritage.export_name == "ExampleComponent"
+                && heritage
+                    .instance_bindings
+                    .contains(&("exampleService".to_string(), "ExampleService".to_string()))
+        }),
+        "aliased Angular inject() property should be recorded as an instance binding, found: {:?}",
+        info.class_heritage
+    );
+}
+
+#[test]
+fn non_angular_inject_property_does_not_record_instance_binding() {
+    let info = parse(
+        r"
+        import { inject } from './container';
+        import { ExampleService } from './example.service';
+
+        export class ExampleComponent {
+            readonly exampleService = inject(ExampleService);
+        }
+        ",
+    );
+
+    let bindings = info
+        .class_heritage
+        .iter()
+        .find(|heritage| heritage.export_name == "ExampleComponent")
+        .map(|heritage| &heritage.instance_bindings);
+    assert!(
+        bindings.is_none_or(|bindings| {
+            !bindings
+                .iter()
+                .any(|(name, target)| name == "exampleService" && target == "ExampleService")
+        }),
+        "non-Angular inject() must not create component instance binding, found: {bindings:?}",
+    );
+}
+
+#[test]
+fn angular_injection_token_records_interface_type_argument() {
+    let info = parse(
+        r"
+        import { InjectionToken } from '@angular/core';
+        import { Greeter } from './greeter';
+
+        export const GREETER = new InjectionToken<Greeter>('GREETER');
+        ",
+    );
+
+    assert!(
+        info.injection_tokens
+            .contains(&("GREETER".to_string(), "Greeter".to_string())),
+        "new InjectionToken<Greeter>(...) should record (GREETER, Greeter), found: {:?}",
+        info.injection_tokens
+    );
+}
+
+#[test]
+fn non_angular_injection_token_is_not_recorded() {
+    let info = parse(
+        r"
+        import { InjectionToken } from './my-di';
+
+        export const GREETER = new InjectionToken<Greeter>('GREETER');
+        ",
+    );
+
+    assert!(
+        info.injection_tokens.is_empty(),
+        "InjectionToken not imported from @angular/core must not be recorded, found: {:?}",
+        info.injection_tokens
+    );
+}
+
+#[test]
+fn untyped_injection_token_is_not_recorded() {
+    let info = parse(
+        r"
+        import { InjectionToken } from '@angular/core';
+
+        export const GREETER = new InjectionToken('GREETER');
+        ",
+    );
+
+    assert!(
+        info.injection_tokens.is_empty(),
+        "InjectionToken without a type argument has no interface to resolve, found: {:?}",
+        info.injection_tokens
+    );
+}
+
+#[test]
 fn dotted_bound_receiver_preserves_suffix() {
     let info = parse(
         r"
@@ -2921,7 +4611,6 @@ fn fluent_chain_emits_sentinel_member_access() {
         "#,
     );
 
-    // The first chained call (`.setProcessId`) records chain prefix "".
     assert!(
         info.member_accesses.iter().any(|a| a.object
             == format!("{}EventBuilder:create:", crate::FLUENT_CHAIN_SENTINEL)
@@ -2929,7 +4618,6 @@ fn fluent_chain_emits_sentinel_member_access() {
         "first chained call should emit sentinel with empty chain prefix, found: {:?}",
         info.member_accesses,
     );
-    // The second chained call (`.setSubject`) records chain prefix "setProcessId".
     assert!(
         info.member_accesses.iter().any(|a| a.object
             == format!(
@@ -2940,7 +4628,6 @@ fn fluent_chain_emits_sentinel_member_access() {
         "second chained call should encode intermediate method in chain prefix, found: {:?}",
         info.member_accesses,
     );
-    // The terminal `.build()` records chain prefix "setProcessId,setSubject".
     assert!(
         info.member_accesses.iter().any(|a| a.object
             == format!(
@@ -2955,9 +4642,6 @@ fn fluent_chain_emits_sentinel_member_access() {
 
 #[test]
 fn new_expression_direct_member_access_recorded() {
-    // Issue #605: a method reached through a freshly-constructed instance must
-    // credit the class. `new Repo(client).search(data)` resolves the receiver
-    // to the bare class name, so the member access is keyed on `Repo`.
     let info = parse(
         r"
         import { Repo } from './repo';
@@ -2976,10 +4660,6 @@ fn new_expression_direct_member_access_recorded() {
 
 #[test]
 fn new_expression_fluent_chain_emits_new_sentinel() {
-    // Issue #605: a fluent chain rooted at a constructor encodes a separate
-    // sentinel (no root method, since the constructor always returns an
-    // instance). The first method off the constructor is a plain class-keyed
-    // access; downstream methods carry the new sentinel with the prior chain.
     let info = parse(
         r"
         import { OptionBuilder } from './option-builder';
@@ -2987,7 +4667,6 @@ fn new_expression_fluent_chain_emits_new_sentinel() {
         ",
     );
 
-    // First method directly off the constructor: plain class-keyed access.
     assert!(
         info.member_accesses
             .iter()
@@ -2995,7 +4674,6 @@ fn new_expression_fluent_chain_emits_new_sentinel() {
         "first method off `new OptionBuilder()` should be a class-keyed access, found: {:?}",
         info.member_accesses,
     );
-    // Second method: new sentinel with chain prefix "addDefault".
     assert!(
         info.member_accesses.iter().any(|a| a.object
             == format!(
@@ -3006,7 +4684,6 @@ fn new_expression_fluent_chain_emits_new_sentinel() {
         "second chained call should encode the first method in the chain prefix, found: {:?}",
         info.member_accesses,
     );
-    // Terminal `.build()`: new sentinel with chain prefix "addDefault,addFromCli".
     assert!(
         info.member_accesses.iter().any(|a| a.object
             == format!(
@@ -3021,13 +4698,6 @@ fn new_expression_fluent_chain_emits_new_sentinel() {
 
 #[test]
 fn new_expression_records_bare_identifier_even_for_builtin_shaped_names() {
-    // Issue #605: extraction is name-agnostic. `new Map().set(k, v)` records a
-    // `Map`-keyed access UNCONDITIONALLY; disambiguating a global `Map` from a
-    // user `class Map {}` is the analyze layer's job (a global resolves to no
-    // user export and drops, a user class is credited). Guarding on
-    // `is_builtin_constructor` here would silently drop the access for a
-    // user-defined class named like a builtin, re-introducing the #605 false
-    // positive (caught by Codex's parallel review for `class URL`).
     let info = parse(
         r"
         new Map().set(k, v);
@@ -3062,6 +4732,9 @@ fn self_returning_instance_method_flagged() {
             setY(value: number) {
                 return this;
             }
+            setZ(value: number): this {
+                return this.setY(value);
+            }
             build(): { x: number } {
                 return { x: 1 };
             }
@@ -3091,6 +4764,14 @@ fn self_returning_instance_method_flagged() {
     assert!(
         set_y.is_self_returning,
         "setY returns `this` as the last statement, should be marked self-returning",
+    );
+    let set_z = builder_members
+        .iter()
+        .find(|m| m.name == "setZ")
+        .expect("setZ should be in members");
+    assert!(
+        set_z.is_self_returning,
+        "setZ declares return type `this`, should be marked self-returning",
     );
     let build = builder_members
         .iter()
@@ -3272,8 +4953,6 @@ fn multiple_instances_same_class_mapped() {
     );
 }
 
-// ── Namespace destructuring ──────────────────────────────────
-
 #[test]
 fn namespace_import_destructuring() {
     let info = parse("import * as ns from './mod';\nconst { a, b } = ns;");
@@ -3344,8 +5023,6 @@ fn non_namespace_destructuring_not_tracked() {
     );
 }
 
-// ── new URL pattern ──────────────────────────────────────────
-
 #[test]
 fn new_url_import_meta_url_tracked() {
     let info = parse("new URL('./worker.js', import.meta.url);");
@@ -3368,8 +5045,6 @@ fn new_url_without_import_meta_url_not_tracked() {
     assert!(info.dynamic_imports.is_empty());
 }
 
-// Issue #399: `new URL('./', import.meta.url)` is the canonical __dirname
-// idiom and constructs a directory URL, not a module reference.
 #[test]
 fn new_url_dot_slash_not_tracked() {
     let info = parse("new URL('./', import.meta.url);");
@@ -3397,8 +5072,6 @@ fn new_url_subdir_trailing_slash_not_tracked() {
     );
 }
 
-// ── import.meta.glob ─────────────────────────────────────────
-
 #[test]
 fn import_meta_glob_string() {
     let info = parse("import.meta.glob('./components/*.tsx');");
@@ -3417,8 +5090,6 @@ fn import_meta_glob_non_relative_ignored() {
     let info = parse("import.meta.glob('node_modules/**/*.js');");
     assert!(info.dynamic_import_patterns.is_empty());
 }
-
-// ── require.context ──────────────────────────────────────────
 
 #[test]
 fn require_context_non_recursive_prefix() {
@@ -3450,8 +5121,6 @@ fn require_context_non_relative_ignored() {
     assert!(info.dynamic_import_patterns.is_empty());
 }
 
-// ── Function overload deduplication ──────────────────────────
-
 #[test]
 fn function_overloads_produce_single_export() {
     let info = parse(
@@ -3464,8 +5133,6 @@ fn function_overloads_produce_single_export() {
     assert_eq!(info.exports.len(), 1);
     assert_eq!(info.exports[0].name, ExportName::Named("parse".to_string()));
 }
-
-// ── Edge cases ───────────────────────────────────────────────
 
 #[test]
 fn empty_source_produces_no_results() {
@@ -3490,7 +5157,6 @@ fn no_module_syntax_produces_no_results() {
 #[test]
 fn namespace_import_adds_to_namespace_bindings() {
     let info = parse("import * as ns from './mod';\nns.foo();");
-    // ns should be tracked as a namespace binding and ns.foo as a member access
     assert!(
         info.member_accesses
             .iter()
@@ -3558,13 +5224,6 @@ fn import_and_re_export_same_source() {
     assert_eq!(info.imports[0].source, "./mod");
     assert_eq!(info.re_exports[0].source, "./mod");
 }
-
-// ── "Import then re-export" pattern detection ────────────────
-// Pattern: `import { X } from './a'; export { X };` is semantically
-// equivalent to `export { X } from './a';` and must be treated as a
-// re-export, not a local export. Without this, duplicate-export
-// detection fires and the re-export chain breaks.
-
 #[test]
 fn import_then_export_same_name_is_re_export() {
     let info = parse("import { Foo } from './types';\nexport { Foo };");
@@ -3607,9 +5266,6 @@ fn export_type_then_import_type_is_type_only_re_export() {
 
 #[test]
 fn value_import_then_type_export_is_type_only_re_export() {
-    // `import { MyEnum } from './a'; export type { MyEnum };`
-    // The `type` keyword on the export side erases the value reference,
-    // making this a type-only re-export even though the import is a value.
     let info = parse("import { MyEnum } from './a';\nexport type { MyEnum };");
     assert_eq!(info.re_exports.len(), 1);
     assert_eq!(info.exports.len(), 0);
@@ -3618,9 +5274,6 @@ fn value_import_then_type_export_is_type_only_re_export() {
 
 #[test]
 fn import_with_rename_then_export_is_re_export_with_original_name() {
-    // `import { X as Foo } from './a'; export { Foo };`
-    // The re-export must reference the ORIGINAL name on the remote side
-    // (`X`) even though the local binding is `Foo`.
     let info = parse("import { X as Foo } from './a';\nexport { Foo };");
     assert_eq!(info.re_exports.len(), 1);
     assert_eq!(info.exports.len(), 0);
@@ -3630,8 +5283,6 @@ fn import_with_rename_then_export_is_re_export_with_original_name() {
 
 #[test]
 fn import_then_export_with_rename_is_re_export_with_alias() {
-    // `import { X } from './a'; export { X as Y };`
-    // Re-export should carry both the original name and the alias.
     let info = parse("import { X } from './a';\nexport { X as Y };");
     assert_eq!(info.re_exports.len(), 1);
     assert_eq!(info.exports.len(), 0);
@@ -3650,7 +5301,6 @@ fn export_then_import_with_rename_is_re_export_with_alias() {
 
 #[test]
 fn default_import_then_export_is_re_export_of_default() {
-    // `import D from './a'; export { D };` re-exports the remote default.
     let info = parse("import D from './a';\nexport { D };");
     assert_eq!(info.re_exports.len(), 1);
     assert_eq!(info.exports.len(), 0);
@@ -3671,8 +5321,6 @@ fn default_export_then_import_is_re_export_of_default() {
 
 #[test]
 fn mixed_export_splits_into_local_and_re_export() {
-    // `import { X } from './a'; const Y = 1; export { X, Y };`
-    // X matches an import → re-export. Y is local → regular export.
     let info = parse("import { X } from './a';\nconst Y = 1;\nexport { X, Y };");
     assert_eq!(info.re_exports.len(), 1);
     assert_eq!(info.exports.len(), 1);
@@ -3699,7 +5347,6 @@ fn local_declaration_keeps_export_local_despite_later_import_collision() {
 
 #[test]
 fn local_export_without_matching_import_stays_local() {
-    // Regression guard: unrelated local exports must not be converted.
     let info = parse("const X = 1;\nexport { X };");
     assert_eq!(info.re_exports.len(), 0);
     assert_eq!(info.exports.len(), 1);
@@ -3708,8 +5355,6 @@ fn local_export_without_matching_import_stays_local() {
 
 #[test]
 fn namespace_import_then_export_stays_local() {
-    // `import * as ns from './a'; export { ns };` — namespace re-exports
-    // are an edge case and not converted by this heuristic.
     let info = parse("import * as ns from './a';\nexport { ns };");
     assert_eq!(info.re_exports.len(), 0);
     assert_eq!(info.exports.len(), 1);
@@ -3738,25 +5383,21 @@ mod proptests {
     }
 
     proptest! {
-        /// Parsing any valid JS/TS source never panics.
         #[test]
         fn parse_never_panics(source in "[a-zA-Z0-9 (){};=+\\-*/'\",.<>:\\n!?@#$%^&|~`_]{0,200}") {
             let _ = parse(&source);
         }
 
-        /// Star re-export sources should go into re_exports, not exports.
         #[test]
         fn star_reexport_does_not_pollute_exports(
             mod_name in "[a-z]{1,10}",
         ) {
             let source = format!("export * from './{mod_name}';");
             let info = parse(&source);
-            // Star re-exports should be in re_exports, not exports
             prop_assert!(
                 !info.re_exports.is_empty(),
                 "Star re-export should produce a re_export entry"
             );
-            // The export list should not contain the re-exported names
             for exp in &info.exports {
                 if let ExportName::Named(name) = &exp.name {
                     prop_assert_ne!(name, "*", "Star re-export should not appear in exports");
@@ -3764,7 +5405,6 @@ mod proptests {
             }
         }
 
-        /// All export names should be non-empty strings (for Named variants).
         #[test]
         fn export_names_are_non_empty(source in arb_valid_js_source()) {
             let info = parse(&source);
@@ -3775,7 +5415,6 @@ mod proptests {
             }
         }
 
-        /// All import sources should be non-empty strings.
         #[test]
         fn import_sources_are_non_empty(source in arb_valid_js_source()) {
             let info = parse(&source);
@@ -3788,8 +5427,6 @@ mod proptests {
         }
     }
 }
-
-// ── Angular @Component decorator detection ───────────────────
 
 #[test]
 fn angular_component_template_url_emits_side_effect_import() {
@@ -3876,9 +5513,6 @@ fn angular_component_style_urls_array_emits_multiple_imports() {
 
 #[test]
 fn angular_component_template_url_without_dot_slash_normalized() {
-    // Angular resolves `'app.component.html'` the same as `'./app.component.html'`.
-    // Plow must normalize the bare form so downstream resolution doesn't
-    // misclassify it as an unlisted npm package. Regression test for #99.
     let info = parse(
         r"
         import { Component } from '@angular/core';
@@ -3900,7 +5534,6 @@ fn angular_component_template_url_without_dot_slash_normalized() {
 
 #[test]
 fn angular_component_style_url_without_dot_slash_normalized() {
-    // Regression test for #99: bare `styleUrl` values must be normalized.
     let info = parse(
         r"
         import { Component } from '@angular/core';
@@ -3925,8 +5558,6 @@ fn angular_component_style_url_without_dot_slash_normalized() {
 
 #[test]
 fn angular_component_style_urls_array_without_dot_slash_normalized() {
-    // Regression test for #99: bare entries in a `styleUrls` array must be
-    // normalized individually, and a mixed array must preserve relative entries.
     let info = parse(
         r"
         import { Component } from '@angular/core';
@@ -3948,7 +5579,6 @@ fn angular_component_style_urls_array_without_dot_slash_normalized() {
     assert!(sources.contains(&"./app.component.html"));
     assert!(sources.contains(&"./app.component.scss"));
     assert!(sources.contains(&"./theme.scss"));
-    // The already-relative entry must not be double-prefixed.
     assert!(!sources.contains(&".//theme.scss"));
     assert!(!sources.contains(&"././theme.scss"));
 }
@@ -3991,8 +5621,6 @@ fn non_component_decorator_ignored() {
         .count();
     assert_eq!(side_effect_count, 0);
 }
-
-// ── Angular inline template scanning ──────────────────────────
 
 #[test]
 fn angular_inline_template_emits_sentinel_member_accesses() {
@@ -4069,10 +5697,6 @@ fn angular_inline_template_no_side_effect_imports() {
 
 #[test]
 fn angular_inline_template_complexity_anchored_at_decorator() {
-    // Inline `template: \`...\`` literals with non-trivial control-flow density
-    // emit a synthetic `<template>` finding on the host `.ts` file. The
-    // finding's line/col anchors at the `@Component` decorator so existing
-    // line-level suppression and jump-to-source land usefully.
     let source = "import { Component } from '@angular/core';\n\
 @Component({\n\
   selector: 'host-game',\n\
@@ -4103,15 +5727,12 @@ export class HostGameComponent {}\n";
         template.cognitive >= 4,
         "nested control-flow contributes to cognitive: {template:?}"
     );
-    // The decorator starts on line 2 (after the import on line 1).
     assert_eq!(template.line, 2, "anchored at @Component line");
     assert_eq!(template.col, 0, "anchored at @ column");
 }
 
 #[test]
 fn angular_inline_template_with_simple_template_emits_no_finding() {
-    // Trivial templates without control-flow should not produce a finding,
-    // matching the existing external-template behaviour.
     let info = crate::tests::parse_ts_with_complexity(
         "import { Component } from '@angular/core';\n\
 @Component({ selector: 'a', template: '<p>hi</p>' })\n\
@@ -4125,8 +5746,6 @@ export class A {}\n",
 
 #[test]
 fn angular_template_with_interpolation_expressions_is_skipped() {
-    // Template literals with `${...}` expressions are skipped
-    // (variable-substituted templates are out of scope for the first cut).
     let info = crate::tests::parse_ts_with_complexity(
         "import { Component } from '@angular/core';\n\
 const HEADER = 'h1';\n\
@@ -4138,8 +5757,6 @@ export class A {}\n",
         "interpolated templates are skipped"
     );
 }
-
-// ── Angular host binding detection ────────────────────────────
 
 #[test]
 fn angular_host_bindings_emit_sentinel_accesses() {
@@ -4196,7 +5813,6 @@ fn angular_host_binding_skips_keywords() {
         ",
     );
     let sentinel = crate::sfc_template::angular::ANGULAR_TPL_SENTINEL;
-    // "true" and "undefined" are keywords and should be skipped
     assert!(
         info.member_accesses
             .iter()
@@ -4206,8 +5822,6 @@ fn angular_host_binding_skips_keywords() {
             .is_none()
     );
 }
-
-// ── Angular inputs/outputs metadata arrays ────────────────────
 
 #[test]
 fn angular_inputs_outputs_metadata_emit_sentinel_accesses() {
@@ -4235,7 +5849,6 @@ fn angular_inputs_outputs_metadata_emit_sentinel_accesses() {
         .filter(|a| a.object == sentinel)
         .map(|a| a.member.as_str())
         .collect();
-    // 'bankName' from inputs, 'id' from 'id: account-id', 'clicked' from outputs
     assert!(refs.contains(&"bankName"));
     assert!(refs.contains(&"id"));
     assert!(refs.contains(&"clicked"));
@@ -4271,8 +5884,6 @@ fn angular_queries_metadata_emit_sentinel_accesses() {
     assert!(refs.contains(&"header"));
     assert!(refs.contains(&"footer"));
 }
-
-// ── Angular signal API detection ──────────────────────────────
 
 #[test]
 fn angular_signal_input_marks_member_as_decorated() {
@@ -4434,11 +6045,6 @@ fn angular_output_from_observable_marks_as_decorated() {
     );
 }
 
-// ── Angular signal/plural query call-graph tracing (issue #274) ──
-
-/// All eight Angular query patterns (4 signal + 4 decorator) should produce
-/// `MemberAccess { object: "ChildComponent", member: <method> }` entries so
-/// the analyzer's call-graph traces methods on the queried child.
 #[test]
 fn angular_signal_and_plural_queries_trace_child_method_calls() {
     let info = parse(
@@ -4510,8 +6116,6 @@ fn angular_signal_and_plural_queries_trace_child_method_calls() {
     }
 }
 
-// ── Angular combined metadata extraction ──────────────────────
-
 #[test]
 fn angular_component_all_metadata_combined() {
     let info = parse(
@@ -4539,14 +6143,12 @@ fn angular_component_all_metadata_combined() {
         }
         ",
     );
-    // templateUrl creates side-effect import
     let has_html_import = info
         .imports
         .iter()
         .any(|i| i.source == "./app.html" && matches!(i.imported_name, ImportedName::SideEffect));
     assert!(has_html_import);
 
-    // Sentinel accesses from inline template + host + inputs/outputs
     let sentinel = crate::sfc_template::angular::ANGULAR_TPL_SENTINEL;
     let refs: Vec<&str> = info
         .member_accesses
@@ -4554,12 +6156,11 @@ fn angular_component_all_metadata_combined() {
         .filter(|a| a.object == sentinel)
         .map(|a| a.member.as_str())
         .collect();
-    assert!(refs.contains(&"greeting")); // from inline template
-    assert!(refs.contains(&"handleClick")); // from host
-    assert!(refs.contains(&"externalInput")); // from inputs
-    assert!(refs.contains(&"externalOutput")); // from outputs
+    assert!(refs.contains(&"greeting"));
+    assert!(refs.contains(&"handleClick"));
+    assert!(refs.contains(&"externalInput"));
+    assert!(refs.contains(&"externalOutput"));
 
-    // Signal APIs mark members as decorated
     let app_export = info
         .exports
         .iter()
@@ -4578,14 +6179,6 @@ fn angular_component_all_metadata_combined() {
     assert!(name_member.has_decorator);
     assert!(saved_member.has_decorator);
 }
-
-// ── TSImportType (typeof import('./x').Foo) ──────────────────
-//
-// `unplugin-auto-import` (#396) and `unplugin-vue-components` (#397) embed
-// `typeof import('./path').X` references inside `declare global { ... }` and
-// `declare module 'vue' { ... }` ambient declarations. The visitor must trace
-// each reference as a type-only import so the target file stays reachable.
-
 #[test]
 fn ts_import_type_with_identifier_qualifier_named() {
     let info = parse("type T = typeof import('./composables/useCounter').useCounter;");
@@ -4618,8 +6211,6 @@ fn ts_import_type_with_qualified_name_credits_root() {
 
 #[test]
 fn ts_import_type_without_qualifier_is_side_effect() {
-    // `typeof import('./MyButton.vue')['default']` parses with no qualifier;
-    // the `['default']` is a TSIndexedAccessType wrapping the TSImportType.
     let info = parse("type T = typeof import('./MyButton.vue')['default'];");
     let entry = info
         .imports
@@ -4632,7 +6223,6 @@ fn ts_import_type_without_qualifier_is_side_effect() {
 
 #[test]
 fn ts_import_type_inside_declare_global() {
-    // Mirrors auto-imports.d.ts (issue #396).
     let info = parse(
         "export {};\n\
          declare global {\n\
@@ -4653,8 +6243,6 @@ fn ts_import_type_inside_declare_global() {
 
 #[test]
 fn ts_import_type_inside_actual_dts_file() {
-    // Parse with the actual `.d.ts` filename to confirm SourceType + visitor
-    // behavior matches the integration scenario.
     use crate::parse::parse_source_to_module;
     use plow_types::discover::FileId;
     use std::path::Path;
@@ -4689,7 +6277,6 @@ fn ts_import_type_inside_actual_dts_file() {
 
 #[test]
 fn ts_import_type_inside_declare_module_augmentation() {
-    // Mirrors components.d.ts (issue #397).
     let info = parse(
         "export {};\n\
          declare module 'vue' {\n\
@@ -4704,6 +6291,272 @@ fn ts_import_type_inside_declare_module_augmentation() {
         .find(|i| i.source == "./src/components/MyButton.vue")
         .expect("typeof import() inside `declare module` must produce an import");
     assert!(entry.is_type_only);
-    // No qualifier (the `['default']` is indexed-access wrapping), so SideEffect.
     assert!(matches!(entry.imported_name, ImportedName::SideEffect));
+}
+
+#[test]
+fn post_import_use_client_lands_in_misplaced_directives() {
+    // An import precedes the string, so oxc parses it as an expression statement
+    // in `program.body`, NOT a leading prologue directive.
+    let info = parse("import { x } from './x';\n\"use client\";\nexport const y = x;\n");
+
+    assert_eq!(
+        info.misplaced_directives.len(),
+        1,
+        "post-import \"use client\" must be captured as misplaced: {:?}",
+        info.misplaced_directives
+    );
+    assert!(
+        !info.misplaced_directives[0].is_server,
+        "\"use client\" is a client directive"
+    );
+    // It is NOT a honored prologue directive.
+    assert!(
+        !info.directives.iter().any(|d| d == "use client"),
+        "a misplaced directive must not appear in program.directives"
+    );
+}
+
+#[test]
+fn post_statement_use_server_lands_in_misplaced_directives() {
+    let info = parse("const a = 1;\n\"use server\";\nexport const b = a;\n");
+
+    assert_eq!(info.misplaced_directives.len(), 1);
+    assert!(
+        info.misplaced_directives[0].is_server,
+        "\"use server\" is a server directive"
+    );
+}
+
+#[test]
+fn leading_use_client_is_a_prologue_directive_not_misplaced() {
+    let info = parse("\"use client\";\nimport { x } from './x';\nexport const y = x;\n");
+
+    assert!(
+        info.misplaced_directives.is_empty(),
+        "a leading directive is honored and must not be flagged: {:?}",
+        info.misplaced_directives
+    );
+    assert!(
+        info.directives.iter().any(|d| d == "use client"),
+        "a leading directive lands in program.directives"
+    );
+}
+
+#[test]
+fn misplaced_use_strict_is_out_of_scope() {
+    let info = parse("import { x } from './x';\n\"use strict\";\nexport const y = x;\n");
+
+    assert!(
+        info.misplaced_directives.is_empty(),
+        "a misplaced \"use strict\" is harmless and out of scope: {:?}",
+        info.misplaced_directives
+    );
+}
+
+fn di_sites(info: &crate::ModuleInfo) -> Vec<(String, DiRole, DiFramework)> {
+    info.di_key_sites
+        .iter()
+        .map(|s| (s.key_local.clone(), s.role, s.framework))
+        .collect()
+}
+
+#[test]
+fn records_vue_provide_and_inject_identifier_keys() {
+    let info = parse(
+        r"
+        import { provide, inject } from 'vue'
+        import { KEY } from './keys'
+        export function setup() {
+          provide(KEY, 1)
+          const x = inject(KEY)
+          return x
+        }
+        ",
+    );
+    let sites = di_sites(&info);
+    assert!(
+        sites.contains(&("KEY".to_string(), DiRole::Provide, DiFramework::Vue)),
+        "provide(KEY) should record a Vue provide site: {sites:?}"
+    );
+    assert!(
+        sites.contains(&("KEY".to_string(), DiRole::Inject, DiFramework::Vue)),
+        "inject(KEY) should record a Vue inject site: {sites:?}"
+    );
+    assert!(!info.has_dynamic_provide);
+}
+
+#[test]
+fn records_app_level_provide_member_call() {
+    let info = parse(
+        r"
+        import { GLOBAL_KEY } from './keys'
+        const app = createApp()
+        app.provide(GLOBAL_KEY, 1)
+        ",
+    );
+    let sites = di_sites(&info);
+    assert!(
+        sites.contains(&("GLOBAL_KEY".to_string(), DiRole::Provide, DiFramework::Vue)),
+        "app.provide(GLOBAL_KEY, value) should record a provide site without a provenance gate: {sites:?}"
+    );
+}
+
+#[test]
+fn records_svelte_set_and_get_context() {
+    let info = parse(
+        r"
+        import { setContext, getContext } from 'svelte'
+        import { CTX } from './keys'
+        export function init() {
+          setContext(CTX, {})
+          return getContext(CTX)
+        }
+        ",
+    );
+    let sites = di_sites(&info);
+    assert!(
+        sites.contains(&("CTX".to_string(), DiRole::Provide, DiFramework::Svelte)),
+        "setContext(CTX) should record a Svelte provide site: {sites:?}"
+    );
+    assert!(
+        sites.contains(&("CTX".to_string(), DiRole::Inject, DiFramework::Svelte)),
+        "getContext(CTX) should record a Svelte inject site: {sites:?}"
+    );
+}
+
+#[test]
+fn string_literal_di_key_is_not_recorded() {
+    let info = parse(
+        r"
+        import { provide, inject } from 'vue'
+        export function setup() {
+          provide('strKey', 1)
+          return inject('strKey')
+        }
+        ",
+    );
+    assert!(
+        info.di_key_sites.is_empty(),
+        "string-literal DI keys are a different identity space and must not be recorded: {:?}",
+        info.di_key_sites
+    );
+    assert!(!info.has_dynamic_provide);
+}
+
+#[test]
+fn shadowed_provide_callee_is_not_a_vue_provide() {
+    let info = parse(
+        r"
+        import { KEY } from './keys'
+        export function setup() {
+          function provide(_k: symbol, _v: number) {}
+          provide(KEY, 1)
+        }
+        ",
+    );
+    assert!(
+        info.di_key_sites.is_empty(),
+        "a local provide() shadowing the Vue import must not be recorded: {:?}",
+        info.di_key_sites
+    );
+}
+
+#[test]
+fn provide_from_non_vue_source_is_not_recorded() {
+    let info = parse(
+        r"
+        import { provide } from './my-di'
+        import { KEY } from './keys'
+        export function setup() {
+          provide(KEY, 1)
+        }
+        ",
+    );
+    assert!(
+        info.di_key_sites.is_empty(),
+        "provide() not imported from vue must not be recorded: {:?}",
+        info.di_key_sites
+    );
+}
+
+#[test]
+fn loop_variable_provide_key_sets_dynamic_provide() {
+    let info = parse(
+        r"
+        import { provide } from 'vue'
+        import { A_KEY } from './keys'
+        export function setup(extra: symbol[]) {
+          [A_KEY, ...extra].forEach((k) => provide(k, 1))
+        }
+        ",
+    );
+    assert!(
+        info.has_dynamic_provide,
+        "a provide keyed by a transient loop variable must set has_dynamic_provide"
+    );
+    assert!(
+        !info.di_key_sites.iter().any(|s| s.role == DiRole::Provide),
+        "the loop-variable provide must not record a clean provide site: {:?}",
+        info.di_key_sites
+    );
+}
+
+#[test]
+fn spread_provide_key_sets_dynamic_provide() {
+    let info = parse(
+        r"
+        import { provide } from 'vue'
+        const pair: [symbol, number] = [Symbol(), 1]
+        export function setup() {
+          provide(...pair)
+        }
+        ",
+    );
+    assert!(
+        info.has_dynamic_provide,
+        "a spread provide argument must set has_dynamic_provide"
+    );
+}
+
+#[test]
+fn string_bound_const_di_key_is_dropped() {
+    // A module-scope const bound to a string literal has STRING identity, not a
+    // symbol: a provider supplying the literal (often inside a package) matches
+    // it, so the inject must abstain. The const may be declared after the call.
+    let info = parse(
+        r#"
+        import { inject } from 'vue'
+        export function setup() {
+          return inject(JSONFORMS_KEY)
+        }
+        const JSONFORMS_KEY = "jsonforms"
+        "#,
+    );
+    assert!(
+        info.di_key_sites.is_empty(),
+        "an inject keyed by a string-bound const must be dropped (string identity): {:?}",
+        info.di_key_sites
+    );
+}
+
+#[test]
+fn symbol_bound_const_di_key_is_kept() {
+    // A const bound to Symbol() keeps symbol identity and is recorded.
+    let info = parse(
+        r"
+        import { inject } from 'vue'
+        const KEY = Symbol('k')
+        export function setup() {
+          return inject(KEY)
+        }
+        ",
+    );
+    assert!(
+        info.di_key_sites
+            .iter()
+            .any(|s| s.key_local == "KEY" && s.role == DiRole::Inject),
+        "an inject keyed by a Symbol()-bound const must be recorded: {:?}",
+        info.di_key_sites
+    );
 }

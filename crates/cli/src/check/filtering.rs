@@ -1,13 +1,11 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use plow_config::{OutputFormat, WorkspaceInfo, discover_workspaces};
 use globset::Glob;
+use plow_config::{OutputFormat, WorkspaceInfo, discover_workspaces};
 use rustc_hash::FxHashSet;
 
 use crate::error::emit_error;
-
-// ── Workspace filtering ──────────────────────────────────────────
 
 /// Scope results to the union of the given workspace roots.
 ///
@@ -24,7 +22,6 @@ pub fn filter_to_workspaces(
     let pkg_jsons: Vec<PathBuf> = ws_roots.iter().map(|r| r.join("package.json")).collect();
     let in_pkg_jsons = |p: &Path| pkg_jsons.iter().any(|pkg| p == pkg);
 
-    // File-scoped issues: retain only those under any workspace root
     results.unused_files.retain(|f| any_under(&f.file.path));
     results.unused_exports.retain(|e| any_under(&e.export.path));
     results.unused_types.retain(|e| any_under(&e.export.path));
@@ -38,10 +35,27 @@ pub fn filter_to_workspaces(
         .unused_class_members
         .retain(|m| any_under(&m.member.path));
     results
+        .unused_store_members
+        .retain(|m| any_under(&m.member.path));
+    results
+        .unprovided_injects
+        .retain(|f| any_under(&f.inject.path));
+    results
+        .unrendered_components
+        .retain(|c| any_under(&c.component.path));
+    results
+        .unused_component_props
+        .retain(|p| any_under(&p.prop.path));
+    results
+        .unused_component_emits
+        .retain(|e| any_under(&e.emit.path));
+    results
+        .unused_server_actions
+        .retain(|a| any_under(&a.action.path));
+    results
         .unresolved_imports
         .retain(|i| any_under(&i.import.path));
 
-    // Dependency issues: scope to matching workspaces' package.json files
     results
         .unused_dependencies
         .retain(|d| in_pkg_jsons(&d.dep.path));
@@ -58,12 +72,10 @@ pub fn filter_to_workspaces(
         .test_only_dependencies
         .retain(|d| in_pkg_jsons(&d.dep.path));
 
-    // Unlisted deps: keep only if any importing file is in a matched workspace
     results
         .unlisted_dependencies
         .retain(|d| d.dep.imported_from.iter().any(|s| any_under(&s.path)));
 
-    // Duplicate exports: filter locations to workspace, drop groups with < 2
     for dup in &mut results.duplicate_exports {
         dup.export.locations.retain(|loc| any_under(&loc.path));
     }
@@ -71,39 +83,61 @@ pub fn filter_to_workspaces(
         .duplicate_exports
         .retain(|d| d.export.locations.len() >= 2);
 
-    // Circular deps: keep cycles where at least one file is in a matched workspace
     results
         .circular_dependencies
         .retain(|c| c.cycle.files.iter().any(|f| any_under(f)));
 
-    // Re-export cycles: same workspace-scoping shape as circular deps.
     results
         .re_export_cycles
         .retain(|c| c.cycle.files.iter().any(|f| any_under(f)));
 
-    // Boundary violations: keep if the importing file is in a matched workspace
     results
         .boundary_violations
         .retain(|v| any_under(&v.violation.from_path));
+    results
+        .boundary_coverage_violations
+        .retain(|v| any_under(&v.violation.path));
+    results
+        .boundary_call_violations
+        .retain(|v| any_under(&v.violation.path));
+    results
+        .policy_violations
+        .retain(|v| any_under(&v.violation.path));
 
-    // Stale suppressions: keep if the file is in a matched workspace
     results.stale_suppressions.retain(|s| any_under(&s.path));
 
-    // Catalog entries live in the project-root pnpm-workspace.yaml, not per-workspace.
-    // Workspace scoping is asking "show me findings for this subset of packages";
-    // catalog hygiene is a whole-project concern, so drop it when --workspace narrows.
+    results.security_findings.retain(|f| any_under(&f.path));
+    results
+        .security_unresolved_callee_diagnostics
+        .retain(|d| any_under(&d.path));
+
     results.unused_catalog_entries.clear();
     results.empty_catalog_groups.clear();
-    // Unresolved catalog references are anchored at consumer package.json paths,
-    // so they ARE workspace-scoped: retain only findings under the active set.
     results
         .unresolved_catalog_references
         .retain(|r| any_under(&r.reference.path));
-    // Dependency overrides live in the project-root pnpm-workspace.yaml or
-    // root package.json's pnpm.overrides, not per-workspace. Same reasoning as
-    // unused-catalog-entries: drop when --workspace narrows.
     results.unused_dependency_overrides.clear();
     results.misconfigured_dependency_overrides.clear();
+
+    results
+        .invalid_client_exports
+        .retain(|e| any_under(&e.export.path));
+
+    results
+        .mixed_client_server_barrels
+        .retain(|b| any_under(&b.barrel.path));
+
+    results
+        .misplaced_directives
+        .retain(|d| any_under(&d.directive_site.path));
+
+    results
+        .route_collisions
+        .retain(|c| any_under(&c.collision.path));
+
+    results
+        .dynamic_segment_name_conflicts
+        .retain(|c| any_under(&c.conflict.path));
 }
 
 /// Resolve `--workspace <patterns...>` to a set of workspace roots, or exit with
@@ -300,19 +334,10 @@ fn find_matches(
     Ok(hits)
 }
 
-// ── Changed-file filtering ───────────────────────────────────────
-
-// `filter_changed_files`, `try_get_changed_files`, `get_changed_files`, and
-// `ChangedFilesError` were promoted to `plow_core::changed_files` so the LSP
-// (which depends on `plow-core` but not `plow-cli`) can reuse the exact
-// same filter and git-resolution logic. Re-exported below for the existing
-// internal call sites in this crate.
 pub use plow_core::changed_files::{
     filter_results_by_changed_files as filter_changed_files, get_changed_files,
     try_get_changed_files,
 };
-
-// ── Diff-line filtering (issue #424) ─────────────────────────────
 
 /// Drop findings whose source line is not inside an added hunk of the
 /// supplied unified diff. Range-shaped findings (clone instances live in
@@ -356,10 +381,8 @@ pub fn filter_results_by_diff(
         }
     };
 
-    // File-only findings: keep when the file appears anywhere in the diff.
     results.unused_files.retain(|f| touches_file(&f.file.path));
 
-    // Point findings: keep when the source line is an added line.
     results
         .unused_exports
         .retain(|e| line_in_diff(&e.export.path, e.export.line));
@@ -376,14 +399,49 @@ pub fn filter_results_by_diff(
         .unused_class_members
         .retain(|m| line_in_diff(&m.member.path, m.member.line));
     results
+        .unused_store_members
+        .retain(|m| line_in_diff(&m.member.path, m.member.line));
+    results
+        .unprovided_injects
+        .retain(|f| line_in_diff(&f.inject.path, f.inject.line));
+    results
+        .unrendered_components
+        .retain(|c| line_in_diff(&c.component.path, c.component.line));
+    results
+        .unused_component_props
+        .retain(|p| line_in_diff(&p.prop.path, p.prop.line));
+    results
+        .unused_component_emits
+        .retain(|e| line_in_diff(&e.emit.path, e.emit.line));
+    results
+        .unused_server_actions
+        .retain(|a| line_in_diff(&a.action.path, a.action.line));
+    results
         .unresolved_imports
         .retain(|i| line_in_diff(&i.import.path, i.import.line));
+    results.security_findings.retain(|f| {
+        line_in_diff(&f.path, f.line)
+            || f.trace.iter().any(|hop| {
+                line_in_diff(&hop.path, hop.line)
+                    || (matches!(hop.role, plow_core::results::TraceHopRole::SecretSource)
+                        && touches_file(&hop.path))
+            })
+            || f.reachability.as_ref().is_some_and(|reachability| {
+                // Source-trace matching here is deliberately ROLE-AGNOSTIC (any
+                // hop on a changed line keeps the finding for advisory display).
+                // Do NOT add a role gate: unlike the strict `retain_gate_new`
+                // gate, the advisory display must surface a finding whose
+                // module-level `ModuleSource` source node sits on a changed line.
+                reachability
+                    .untrusted_source_trace
+                    .iter()
+                    .any(|hop| line_in_diff(&hop.path, hop.line))
+            })
+    });
+    results
+        .security_unresolved_callee_diagnostics
+        .retain(|d| line_in_diff(&d.path, d.line));
 
-    // Unlisted dependencies: keep if any importing site is in the diff.
-    // The package-name finding wraps an aggregate of import sites; we
-    // narrow the sites to the in-diff subset first so a future renderer
-    // can show only the relevant ones, then drop the finding entirely if
-    // nothing remains.
     for unlisted in &mut results.unlisted_dependencies {
         unlisted
             .dep
@@ -394,21 +452,6 @@ pub fn filter_results_by_diff(
         .unlisted_dependencies
         .retain(|d| !d.dep.imported_from.is_empty());
 
-    // Duplicate exports: group-level retention without narrowing the
-    // locations list. A PR that adds ONE new duplicate against an
-    // existing off-diff location is exactly the case this filter must
-    // surface: the PR caused the duplicate, so the finding belongs in
-    // the review comment even though only one location is in the diff.
-    // Keep the finding if ANY location is in the diff, and KEEP ALL
-    // locations so the renderer can show the conflict pair (in-diff
-    // location + off-diff sibling) for context and so the
-    // `add-to-config` action has the full list to suppress.
-    //
-    // Diverges from `filter_to_workspaces` (which DOES narrow + drop
-    // below 2) because workspace scoping asks "show me only THIS
-    // workspace's duplicates", whereas the diff filter asks "show me
-    // duplicates THIS PR caused or touched", which inherently spans
-    // diff and non-diff locations.
     results.duplicate_exports.retain(|d| {
         d.export
             .locations
@@ -416,51 +459,105 @@ pub fn filter_results_by_diff(
             .any(|loc| line_in_diff(&loc.path, loc.line))
     });
 
-    // Circular dependencies: keep cycle if any file in the cycle is in
-    // the diff. File-level rather than line-level because the cycle's
-    // line/col anchors at the import site of the first file only, but
-    // the cycle itself spans every file in `files[]`.
     results
         .circular_dependencies
         .retain(|c| c.cycle.files.iter().any(|f| touches_file(f)));
 
-    // Re-export cycles: same file-level treatment as circular deps; the
-    // diagnostic anchors at line 1 col 0 of each member so line-level
-    // diff matching would over-prune.
     results
         .re_export_cycles
         .retain(|c| c.cycle.files.iter().any(|f| touches_file(f)));
 
-    // Boundary violations: drop when the importing source line is not in
-    // the diff. The violation anchors at the offending `import` statement
-    // in `from_path`, so use that.
     results
         .boundary_violations
         .retain(|v| line_in_diff(&v.violation.from_path, v.violation.line));
 
-    // Stale suppressions: drop when the suppression's source line is not
-    // in the diff. A stale `// plow-ignore-next-line` is still real
-    // even when the PR doesn't touch it, but the diff filter is opt-in
-    // noise reduction, so consistent line-level treatment is the choice.
     results
         .stale_suppressions
         .retain(|s| line_in_diff(&s.path, s.line));
 
-    // Project-level findings (deps, catalog, override) bypass the filter.
-    // These anchor at fixed lines inside `package.json` /
-    // `pnpm-workspace.yaml` that a PR rarely touches even when the PR
-    // semantically caused the finding (e.g., removing the last consumer
-    // of a dep). See `pr_comment::PROJECT_LEVEL_RULE_IDS` for the
-    // canonical list and rationale.
-    //   unused_dependencies, unused_dev_dependencies,
-    //   unused_optional_dependencies, type_only_dependencies,
-    //   test_only_dependencies, unused_catalog_entries,
-    //   empty_catalog_groups, unresolved_catalog_references,
-    //   unused_dependency_overrides, misconfigured_dependency_overrides
-    // are NOT touched here.
+    results
+        .invalid_client_exports
+        .retain(|e| line_in_diff(&e.export.path, e.export.line));
+
+    results
+        .mixed_client_server_barrels
+        .retain(|b| line_in_diff(&b.barrel.path, b.barrel.line));
+
+    results
+        .misplaced_directives
+        .retain(|d| line_in_diff(&d.directive_site.path, d.directive_site.line));
+
+    results
+        .route_collisions
+        .retain(|c| line_in_diff(&c.collision.path, c.collision.line));
+
+    results
+        .dynamic_segment_name_conflicts
+        .retain(|c| line_in_diff(&c.conflict.path, c.conflict.line));
 }
 
-// ── Changed workspaces ───────────────────────────────────────────
+/// Strict gate predicate for `plow security --gate new` (issue #886): retain a
+/// security finding ONLY when the change INTRODUCED it, not merely when it lives
+/// in a changed file.
+///
+/// This is deliberately STRICTER than the advisory `filter_results_by_diff`: a
+/// CI gate that fails on "a pre-existing sink in a file the PR happened to touch"
+/// is a flapping gate, so this drops the two file-level / pass-through conditions
+/// the advisory display keeps:
+/// - the `SecretSource && touches_file` FILE-level exception (advisory keeps it so
+///   you SEE a leak when you edit the secret-reading file; in a gate it fires on
+///   an untouched sink the moment any env-config file is touched), and
+/// - the `Intermediate` / `ClientBoundary` pass-through hop lines (editing an
+///   unrelated line in a transit module is not new exposure).
+///
+/// It KEEPS the sink anchor on an added line (a genuinely new sink) AND an
+/// `UntrustedSource` / `ModuleSource` / `Sink` trace hop on an added line (a
+/// change that wires a new untrusted source INTO an existing sink is real new
+/// exposure that anchor-line-only would miss; `ModuleSource` covers the
+/// module-level cross-module source node, the role the arg-vs-module split
+/// (#1093) renamed it to, so wiring a source-module import on an added line
+/// still trips the gate). Unfilterable paths (outside `root`) are RETAINED
+/// (`line_in_diff` returns `true` for them): a candidate the gate cannot prove is
+/// old fails conservatively, the safe direction for a security gate.
+pub fn retain_gate_new(
+    results: &mut plow_core::results::AnalysisResults,
+    diff_index: &crate::report::ci::diff_filter::DiffIndex,
+    root: &Path,
+) {
+    use crate::report::ci::diff_filter::relative_to_diff_path;
+    use plow_core::results::TraceHopRole;
+
+    let line_in_diff = |path: &Path, line: u32| -> bool {
+        match relative_to_diff_path(path, root) {
+            Some(p) => diff_index
+                .added_lines_in(&p)
+                .is_some_and(|set| set.contains(&u64::from(line))),
+            None => true,
+        }
+    };
+    let taint_hop_added = |path: &Path, line: u32, role: TraceHopRole| -> bool {
+        matches!(
+            role,
+            TraceHopRole::UntrustedSource | TraceHopRole::ModuleSource | TraceHopRole::Sink
+        ) && line_in_diff(path, line)
+    };
+
+    results.security_findings.retain(|f| {
+        line_in_diff(&f.path, f.line)
+            || f.trace
+                .iter()
+                .any(|hop| taint_hop_added(&hop.path, hop.line, hop.role))
+            || f.reachability.as_ref().is_some_and(|reachability| {
+                reachability
+                    .untrusted_source_trace
+                    .iter()
+                    .any(|hop| taint_hop_added(&hop.path, hop.line, hop.role))
+            })
+    });
+    results
+        .security_unresolved_callee_diagnostics
+        .retain(|d| line_in_diff(&d.path, d.line));
+}
 
 /// Given a list of discovered workspaces and a set of changed file paths,
 /// return the indices of workspaces that contain any changed file.
@@ -554,11 +651,23 @@ mod tests {
     use super::*;
     use plow_core::extract::MemberKind;
     use plow_core::results::*;
+    use plow_types::extract::{SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason};
+    use plow_types::results::{SecurityReachability, SecuritySeverity};
     use std::path::PathBuf;
 
     /// Test shim: single-workspace variant on top of `filter_to_workspaces`.
     fn filter_to_workspace(results: &mut AnalysisResults, ws_root: &Path) {
         filter_to_workspaces(results, std::slice::from_ref(&ws_root.to_path_buf()));
+    }
+
+    fn unresolved_callee_diagnostic(path: &str, line: u32) -> SecurityUnresolvedCalleeDiagnostic {
+        SecurityUnresolvedCalleeDiagnostic {
+            path: PathBuf::from(path),
+            line,
+            col: 0,
+            reason: SkippedSecurityCalleeReason::DynamicDispatch,
+            expression_kind: SkippedSecurityCalleeExpressionKind::Other,
+        }
     }
 
     #[test]
@@ -582,6 +691,32 @@ mod tests {
         assert_eq!(
             results.unused_files[0].file.path,
             PathBuf::from("/project/packages/ui/src/button.ts")
+        );
+    }
+
+    #[test]
+    fn filter_to_workspace_scopes_unresolved_callee_diagnostics() {
+        let mut results = AnalysisResults::default();
+        results
+            .security_unresolved_callee_diagnostics
+            .push(unresolved_callee_diagnostic(
+                "/project/packages/ui/src/a.ts",
+                3,
+            ));
+        results
+            .security_unresolved_callee_diagnostics
+            .push(unresolved_callee_diagnostic(
+                "/project/packages/api/src/b.ts",
+                3,
+            ));
+
+        let ws_root = PathBuf::from("/project/packages/ui");
+        filter_to_workspace(&mut results, &ws_root);
+
+        assert_eq!(results.security_unresolved_callee_diagnostics.len(), 1);
+        assert_eq!(
+            results.security_unresolved_callee_diagnostics[0].path,
+            PathBuf::from("/project/packages/ui/src/a.ts")
         );
     }
 
@@ -704,8 +839,6 @@ mod tests {
         let ws_root = PathBuf::from("/project/packages/ui");
         filter_to_workspace(&mut results, &ws_root);
 
-        // "helper" had only 1 location in workspace — dropped
-        // "utils" had 2 locations in workspace — kept
         assert_eq!(results.duplicate_exports.len(), 1);
         assert_eq!(results.duplicate_exports[0].export.export_name, "utils");
     }
@@ -828,8 +961,6 @@ mod tests {
         assert_eq!(results.unused_class_members[0].member.member_name, "init");
     }
 
-    // ── filter_changed_files ────────────────────────────────────────
-
     #[test]
     fn filter_changed_files_keeps_only_changed() {
         let mut results = AnalysisResults::default();
@@ -882,7 +1013,6 @@ mod tests {
 
         filter_changed_files(&mut results, &changed);
 
-        // Dependency-level issues are NOT filtered by changed files
         assert_eq!(results.unused_dependencies.len(), 1);
         assert_eq!(results.unused_dev_dependencies.len(), 1);
     }
@@ -948,7 +1078,6 @@ mod tests {
 
         filter_changed_files(&mut results, &changed);
 
-        // Only one location is in changed files -> group dropped
         assert!(results.duplicate_exports.is_empty());
     }
 
@@ -966,6 +1095,7 @@ mod tests {
                     length: 2,
                     line: 1,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             ));
@@ -992,6 +1122,7 @@ mod tests {
                     length: 2,
                     line: 1,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             ));
@@ -1051,8 +1182,6 @@ mod tests {
 
         assert!(results.unlisted_dependencies.is_empty());
     }
-
-    // ── filter_to_workspace: additional coverage ───────────────────
 
     #[test]
     fn filter_to_workspace_scopes_optional_dependencies() {
@@ -1133,6 +1262,7 @@ mod tests {
                     length: 2,
                     line: 1,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             ));
@@ -1147,6 +1277,7 @@ mod tests {
                     length: 2,
                     line: 1,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             ));
@@ -1175,6 +1306,7 @@ mod tests {
                     length: 2,
                     line: 1,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             ));
@@ -1182,7 +1314,6 @@ mod tests {
         let ws_root = PathBuf::from("/project/packages/ui");
         filter_to_workspace(&mut results, &ws_root);
 
-        // Kept because at least one file is in the workspace
         assert_eq!(results.circular_dependencies.len(), 1);
     }
 
@@ -1222,8 +1353,6 @@ mod tests {
         filter_to_workspace(&mut results, &ws_root);
         assert_eq!(results.total_issues(), 0);
     }
-
-    // ── filter_changed_files: additional coverage ──────────────────
 
     #[test]
     fn filter_changed_files_filters_types_by_path() {
@@ -1363,7 +1492,6 @@ mod tests {
 
         filter_changed_files(&mut results, &changed);
 
-        // Dependency-level issues are NOT filtered by changed files
         assert_eq!(results.unused_optional_dependencies.len(), 1);
         assert_eq!(results.type_only_dependencies.len(), 1);
         assert_eq!(results.test_only_dependencies.len(), 1);
@@ -1545,8 +1673,6 @@ mod tests {
         assert_eq!(results.unresolved_imports[0].import.specifier, "./missing");
     }
 
-    // ── multi-workspace resolution ──────────────────────────────────
-
     fn ws(name: &str, rel: &str) -> plow_config::WorkspaceInfo {
         plow_config::WorkspaceInfo {
             root: PathBuf::from("/project").join(rel),
@@ -1579,8 +1705,6 @@ mod tests {
 
     #[test]
     fn find_matches_exact_name_short_circuits_glob_metachars() {
-        // Package named `web-[staging]` contains glob metachars. Exact-name
-        // short-circuit must match it without attempting to compile as a glob.
         let workspaces = vec![ws("web-[staging]", "apps/web-staging")];
         let rels = rel(&workspaces);
         let hits = find_matches(
@@ -1602,7 +1726,6 @@ mod tests {
         ];
         let rels = rel(&workspaces);
 
-        // Glob matching via name
         let hits = find_matches(
             "@scope/*",
             &workspaces,
@@ -1612,7 +1735,6 @@ mod tests {
         .unwrap();
         assert_eq!(hits, vec![0]);
 
-        // Glob matching via relative path
         let hits = find_matches(
             "apps/*",
             &workspaces,
@@ -1627,7 +1749,6 @@ mod tests {
     fn find_matches_invalid_glob_after_no_literal_match_errors() {
         let workspaces = vec![ws("web", "apps/web")];
         let rels = rel(&workspaces);
-        // `[` without closing is invalid glob syntax AND not a literal name.
         assert!(
             find_matches(
                 "web-[bad",
@@ -1744,8 +1865,6 @@ mod tests {
         assert_eq!(results.unused_files.len(), 0);
     }
 
-    // ── workspaces_containing_any (pure mapping) ────────────────────
-
     #[test]
     fn workspaces_containing_any_returns_only_hits() {
         let workspaces = vec![
@@ -1763,8 +1882,6 @@ mod tests {
 
     #[test]
     fn workspaces_containing_any_ignores_root_only_changes() {
-        // Root-level changes (lockfiles, CI config, top package.json) must not
-        // implicitly scope to "every workspace": they map to zero workspaces.
         let workspaces = vec![ws("ui", "packages/ui"), ws("api", "packages/api")];
         let mut changed = FxHashSet::default();
         changed.insert(PathBuf::from("/project/package.json"));
@@ -1797,8 +1914,6 @@ mod tests {
         assert_eq!(hits, vec![1]);
     }
 
-    // ── resolve_workspace_scope ─────────────────────────────────────
-
     #[test]
     fn resolve_workspace_scope_neither_flag_returns_none() {
         let root = Path::new("/project");
@@ -1817,10 +1932,6 @@ mod tests {
         );
     }
 
-    // ChangedFilesError::describe is tested in plow_core::changed_files
-
-    // ── filter_results_by_diff (issue #424) ────────────────────────
-
     fn build_diff(text: &str) -> crate::report::ci::diff_filter::DiffIndex {
         crate::report::ci::diff_filter::DiffIndex::from_unified_diff(text)
     }
@@ -1837,7 +1948,6 @@ mod tests {
         );
         let root = Path::new("/project");
         let mut results = AnalysisResults::default();
-        // Touched line 11 -> kept; untouched line 30 -> dropped.
         results
             .unused_exports
             .push(UnusedExportFinding::with_actions(UnusedExport {
@@ -1870,11 +1980,32 @@ mod tests {
     }
 
     #[test]
+    fn filter_by_diff_scopes_unresolved_callee_diagnostics_to_added_lines() {
+        let diff = build_diff(
+            "diff --git a/src/a.ts b/src/a.ts\n\
+             --- a/src/a.ts\n\
+             +++ b/src/a.ts\n\
+             @@ -10,1 +10,2 @@\n\
+              ctx\n\
+             +client[method](req.body.name);\n",
+        );
+        let root = Path::new("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .security_unresolved_callee_diagnostics
+            .push(unresolved_callee_diagnostic("/project/src/a.ts", 11));
+        results
+            .security_unresolved_callee_diagnostics
+            .push(unresolved_callee_diagnostic("/project/src/a.ts", 30));
+
+        filter_results_by_diff(&mut results, &diff, root);
+
+        assert_eq!(results.security_unresolved_callee_diagnostics.len(), 1);
+        assert_eq!(results.security_unresolved_callee_diagnostics[0].line, 11);
+    }
+
+    #[test]
     fn filter_by_diff_keeps_project_level_deps_even_when_diff_misses_package_json() {
-        // The bug Mira flagged: deleting `import 'lodash'` from a source
-        // file makes `lodash` an unused-dep, but the PR doesn't touch
-        // `package.json` so a naive line filter would silently drop the
-        // finding. Project-level findings MUST bypass the line filter.
         let diff = build_diff(
             "diff --git a/src/a.ts b/src/a.ts\n\
              --- a/src/a.ts\n\
@@ -1917,6 +2048,339 @@ mod tests {
             1,
             "unused-catalog-entry must bypass the diff filter"
         );
+    }
+
+    #[test]
+    fn filter_by_diff_keeps_security_finding_when_secret_source_changed() {
+        let diff = build_diff(
+            "diff --git a/src/server.ts b/src/server.ts\n\
+             --- a/src/server.ts\n\
+             +++ b/src/server.ts\n\
+             @@ -8,1 +8,2 @@\n\
+              const keep = true;\n\
+             +export const db = process.env.DATABASE_URL;\n",
+        );
+        let root = Path::new("/project");
+        let mut results = AnalysisResults::default();
+        results.security_findings.push(SecurityFinding {
+            finding_id: String::new(),
+            candidate: plow_types::results::SecurityCandidate::default(),
+            taint_flow: None,
+            attack_surface: None,
+            kind: SecurityFindingKind::ClientServerLeak,
+            category: None,
+            cwe: None,
+            path: PathBuf::from("/project/src/client.tsx"),
+            line: 2,
+            col: 0,
+            evidence: "candidate".into(),
+            source_backed: false,
+            source_read: None,
+            severity: SecuritySeverity::Low,
+            trace: vec![
+                TraceHop {
+                    path: PathBuf::from("/project/src/client.tsx"),
+                    line: 2,
+                    col: 0,
+                    role: TraceHopRole::ClientBoundary,
+                },
+                TraceHop {
+                    path: PathBuf::from("/project/src/server.ts"),
+                    line: 1,
+                    col: 0,
+                    role: TraceHopRole::SecretSource,
+                },
+            ],
+            actions: Vec::new(),
+            dead_code: None,
+            reachability: None,
+            runtime: None,
+        });
+
+        filter_results_by_diff(&mut results, &diff, root);
+
+        assert_eq!(results.security_findings.len(), 1);
+    }
+
+    #[test]
+    fn filter_by_diff_keeps_security_finding_when_untrusted_source_trace_changed() {
+        let diff = build_diff(
+            "diff --git a/src/route.ts b/src/route.ts\n\
+             --- a/src/route.ts\n\
+             +++ b/src/route.ts\n\
+             @@ -3,0 +3,1 @@\n\
+             +import { run } from './runner';\n",
+        );
+        let root = Path::new("/project");
+        let mut results = AnalysisResults::default();
+        results.security_findings.push(SecurityFinding {
+            finding_id: String::new(),
+            candidate: plow_types::results::SecurityCandidate::default(),
+            taint_flow: None,
+            attack_surface: None,
+            kind: SecurityFindingKind::TaintedSink,
+            category: Some("command-injection".into()),
+            cwe: Some(78),
+            path: PathBuf::from("/project/src/runner.ts"),
+            line: 10,
+            col: 0,
+            evidence: "candidate".into(),
+            source_backed: false,
+            source_read: None,
+            severity: SecuritySeverity::Low,
+            trace: vec![],
+            actions: Vec::new(),
+            dead_code: None,
+            reachability: Some(SecurityReachability {
+                reachable_from_entry: false,
+                reachable_from_untrusted_source: true,
+                taint_confidence: None,
+                untrusted_source_hop_count: Some(1),
+                untrusted_source_trace: vec![
+                    TraceHop {
+                        path: PathBuf::from("/project/src/route.ts"),
+                        line: 3,
+                        col: 0,
+                        role: TraceHopRole::UntrustedSource,
+                    },
+                    TraceHop {
+                        path: PathBuf::from("/project/src/runner.ts"),
+                        line: 10,
+                        col: 0,
+                        role: TraceHopRole::Sink,
+                    },
+                ],
+                blast_radius: 0,
+                crosses_boundary: false,
+            }),
+            runtime: None,
+        });
+
+        filter_results_by_diff(&mut results, &diff, root);
+
+        assert_eq!(results.security_findings.len(), 1);
+    }
+
+    #[test]
+    fn gate_keeps_new_sink_anchor_on_added_line() {
+        let diff = build_diff(
+            "diff --git a/src/render.ts b/src/render.ts\n\
+             --- a/src/render.ts\n\
+             +++ b/src/render.ts\n\
+             @@ -11,0 +12,1 @@\n\
+             +el.innerHTML = req.query.html;\n",
+        );
+        let root = Path::new("/project");
+        let mut results = AnalysisResults::default();
+        results.security_findings.push(SecurityFinding {
+            finding_id: String::new(),
+            candidate: plow_types::results::SecurityCandidate::default(),
+            taint_flow: None,
+            attack_surface: None,
+            kind: SecurityFindingKind::TaintedSink,
+            category: Some("dangerous-html".into()),
+            cwe: Some(79),
+            path: PathBuf::from("/project/src/render.ts"),
+            line: 12,
+            col: 0,
+            evidence: "candidate".into(),
+            source_backed: false,
+            source_read: None,
+            severity: SecuritySeverity::Low,
+            trace: vec![],
+            actions: Vec::new(),
+            dead_code: None,
+            reachability: None,
+            runtime: None,
+        });
+
+        retain_gate_new(&mut results, &diff, root);
+
+        assert_eq!(results.security_findings.len(), 1);
+    }
+
+    #[test]
+    fn gate_new_scopes_unresolved_callee_diagnostics_to_added_lines() {
+        let diff = build_diff(
+            "diff --git a/src/a.ts b/src/a.ts\n\
+             --- a/src/a.ts\n\
+             +++ b/src/a.ts\n\
+             @@ -2,1 +2,2 @@\n\
+              ctx\n\
+             +factory()(req.body.name);\n",
+        );
+        let root = Path::new("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .security_unresolved_callee_diagnostics
+            .push(unresolved_callee_diagnostic("/project/src/a.ts", 3));
+        results
+            .security_unresolved_callee_diagnostics
+            .push(unresolved_callee_diagnostic("/project/src/a.ts", 20));
+
+        retain_gate_new(&mut results, &diff, root);
+
+        assert_eq!(results.security_unresolved_callee_diagnostics.len(), 1);
+        assert_eq!(results.security_unresolved_callee_diagnostics[0].line, 3);
+    }
+
+    #[test]
+    fn gate_drops_secret_source_file_touched_when_anchor_unchanged() {
+        // The SAME shape the advisory `filter_by_diff` KEEPS (a SecretSource hop
+        // whose FILE is touched, anchor line unchanged). The gate MUST DROP it:
+        // editing a file that merely reads a secret is not a new sink, and the
+        // forbidden "a sink in a changed file fails the gate" false positive.
+        let diff = build_diff(
+            "diff --git a/src/server.ts b/src/server.ts\n\
+             --- a/src/server.ts\n\
+             +++ b/src/server.ts\n\
+             @@ -8,1 +8,2 @@\n\
+              const keep = true;\n\
+             +export const db = process.env.DATABASE_URL;\n",
+        );
+        let root = Path::new("/project");
+        let mut results = AnalysisResults::default();
+        results.security_findings.push(SecurityFinding {
+            finding_id: String::new(),
+            candidate: plow_types::results::SecurityCandidate::default(),
+            taint_flow: None,
+            attack_surface: None,
+            kind: SecurityFindingKind::ClientServerLeak,
+            category: None,
+            cwe: None,
+            path: PathBuf::from("/project/src/client.tsx"),
+            line: 2,
+            col: 0,
+            evidence: "candidate".into(),
+            source_backed: false,
+            source_read: None,
+            severity: SecuritySeverity::Low,
+            trace: vec![
+                TraceHop {
+                    path: PathBuf::from("/project/src/client.tsx"),
+                    line: 2,
+                    col: 0,
+                    role: TraceHopRole::ClientBoundary,
+                },
+                TraceHop {
+                    path: PathBuf::from("/project/src/server.ts"),
+                    line: 1,
+                    col: 0,
+                    role: TraceHopRole::SecretSource,
+                },
+            ],
+            actions: Vec::new(),
+            dead_code: None,
+            reachability: None,
+            runtime: None,
+        });
+
+        // Advisory keeps it; the gate drops it.
+        let mut advisory = results.clone();
+        filter_results_by_diff(&mut advisory, &diff, root);
+        assert_eq!(advisory.security_findings.len(), 1);
+
+        retain_gate_new(&mut results, &diff, root);
+        assert_eq!(results.security_findings.len(), 0);
+    }
+
+    #[test]
+    fn gate_keeps_untrusted_source_hop_on_added_line() {
+        // A pre-existing sink whose anchor is NOT added, but the PR wires a new
+        // UntrustedSource into it on an added line: genuine new exposure, kept.
+        let diff = build_diff(
+            "diff --git a/src/route.ts b/src/route.ts\n\
+             --- a/src/route.ts\n\
+             +++ b/src/route.ts\n\
+             @@ -3,0 +3,1 @@\n\
+             +import { run } from './runner';\n",
+        );
+        let root = Path::new("/project");
+        let mut results = AnalysisResults::default();
+        results.security_findings.push(SecurityFinding {
+            finding_id: String::new(),
+            candidate: plow_types::results::SecurityCandidate::default(),
+            taint_flow: None,
+            attack_surface: None,
+            kind: SecurityFindingKind::TaintedSink,
+            category: Some("command-injection".into()),
+            cwe: Some(78),
+            path: PathBuf::from("/project/src/runner.ts"),
+            line: 10,
+            col: 0,
+            evidence: "candidate".into(),
+            source_backed: false,
+            source_read: None,
+            severity: SecuritySeverity::Low,
+            trace: vec![],
+            actions: Vec::new(),
+            dead_code: None,
+            reachability: Some(SecurityReachability {
+                reachable_from_entry: false,
+                reachable_from_untrusted_source: true,
+                taint_confidence: None,
+                untrusted_source_hop_count: Some(1),
+                untrusted_source_trace: vec![TraceHop {
+                    path: PathBuf::from("/project/src/route.ts"),
+                    line: 3,
+                    col: 0,
+                    role: TraceHopRole::UntrustedSource,
+                }],
+                blast_radius: 0,
+                crosses_boundary: false,
+            }),
+            runtime: None,
+        });
+
+        retain_gate_new(&mut results, &diff, root);
+
+        assert_eq!(results.security_findings.len(), 1);
+    }
+
+    #[test]
+    fn gate_drops_intermediate_hop_pass_through() {
+        // Only an Intermediate (pass-through) hop sits on an added line; the sink
+        // anchor and any UntrustedSource/Sink hop are unchanged. Editing a transit
+        // module is not new exposure, so the gate drops it.
+        let diff = build_diff(
+            "diff --git a/src/transit.ts b/src/transit.ts\n\
+             --- a/src/transit.ts\n\
+             +++ b/src/transit.ts\n\
+             @@ -4,0 +4,1 @@\n\
+             +const passthrough = next;\n",
+        );
+        let root = Path::new("/project");
+        let mut results = AnalysisResults::default();
+        results.security_findings.push(SecurityFinding {
+            finding_id: String::new(),
+            candidate: plow_types::results::SecurityCandidate::default(),
+            taint_flow: None,
+            attack_surface: None,
+            kind: SecurityFindingKind::TaintedSink,
+            category: Some("dangerous-html".into()),
+            cwe: Some(79),
+            path: PathBuf::from("/project/src/sink.ts"),
+            line: 20,
+            col: 0,
+            evidence: "candidate".into(),
+            source_backed: false,
+            source_read: None,
+            severity: SecuritySeverity::Low,
+            trace: vec![TraceHop {
+                path: PathBuf::from("/project/src/transit.ts"),
+                line: 4,
+                col: 0,
+                role: TraceHopRole::Intermediate,
+            }],
+            actions: Vec::new(),
+            dead_code: None,
+            reachability: None,
+            runtime: None,
+        });
+
+        retain_gate_new(&mut results, &diff, root);
+
+        assert!(results.security_findings.is_empty());
     }
 
     #[test]
@@ -1991,15 +2455,6 @@ mod tests {
 
     #[test]
     fn filter_by_diff_keeps_duplicate_export_when_pr_adds_one_against_off_diff_existing() {
-        // The bug an external reviewer caught: a PR adds a new duplicate
-        // export in `src/a.ts:1` against an existing off-diff location in
-        // `src/b.ts:5`. The PR semantically CAUSED the duplicate, but the
-        // prior implementation narrowed `locations` to only the in-diff
-        // entry, then dropped the finding for falling below the 2-location
-        // floor. Result: zero findings reported even though the diff
-        // introduced a real duplicate. The fix keeps the finding when ANY
-        // location overlaps the diff AND preserves both locations so the
-        // renderer can show the conflict pair.
         let diff = build_diff(
             "diff --git a/src/a.ts b/src/a.ts\n\
              --- a/src/a.ts\n\
@@ -2079,7 +2534,6 @@ mod tests {
             ));
         filter_results_by_diff(&mut results, &diff, root);
         assert_eq!(results.unlisted_dependencies.len(), 1);
-        // Only the in-diff import site survives the inner retain.
         assert_eq!(results.unlisted_dependencies[0].dep.imported_from.len(), 1);
         assert_eq!(
             results.unlisted_dependencies[0].dep.imported_from[0].path,

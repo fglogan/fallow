@@ -7,9 +7,11 @@ set -euo pipefail
 # Blocks Claude Code git commit and git push when plow audit returns verdict fail.
 # Runtime errors fail open with a single stderr notice so skips stay visible.
 #
-# Version floor (PLOW_GATE_MIN_VERSION, default 2.46.0). Older binaries miss
-# the uncommitted-changes inclusion fix (aabb8e1b) and can silently pass
-# audits that should fail. Set the env var to the empty string to disable.
+# Version floor (PLOW_GATE_MIN_VERSION, default 2.85.0). The gate passes
+# --gate-marker agent (added in v2.85.0) so Impact can record containment;
+# older binaries reject the flag entirely, which would make every audit fail
+# open. The floor also covers the older uncommitted-changes inclusion fix
+# (aabb8e1b, v2.46.0). Set the env var to the empty string to disable.
 # Floor comparison uses `sort -V`; GNU and BSD agree on plain semver but
 # diverge on prereleases (BSD sorts `2.48.0-alpha.1` ABOVE `2.48.0`, GNU below).
 # If you set a prerelease floor explicitly, verify the behavior on the target OS.
@@ -41,14 +43,14 @@ VERSION_RAW="$("${RUNNER[@]}" --version 2>/dev/null || true)"
 VERSION="${VERSION_RAW#plow }"
 VERSION="${VERSION%% *}"
 
-MIN_VERSION="${PLOW_GATE_MIN_VERSION-2.46.0}"
+MIN_VERSION="${PLOW_GATE_MIN_VERSION-2.85.0}"
 if [ -n "$MIN_VERSION" ] && [ -n "$VERSION" ]; then
   LOWER="$(printf '%s\n%s\n' "$MIN_VERSION" "$VERSION" | sort -V | head -n1)"
   if [ "$LOWER" != "$MIN_VERSION" ]; then
     {
       echo "plow-gate: blocked: $BIN_DESC is plow $VERSION, below required $MIN_VERSION."
-      echo "plow-gate: older binaries miss the uncommitted-changes fix (v2.46.0) and can"
-      echo "plow-gate: silently pass audits that would otherwise fail."
+      echo "plow-gate: older binaries reject the --gate-marker flag this gate passes"
+      echo "plow-gate: (added in plow v2.85.0), so the audit cannot run."
       echo "plow-gate: upgrade the plow on PATH (e.g. npm install -g plow@latest or"
       echo "plow-gate: cargo install plow-cli), or set PLOW_GATE_MIN_VERSION= to disable."
     } >&2
@@ -63,7 +65,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if "${RUNNER[@]}" audit --format json --quiet --explain >"$TMP_JSON" 2>"$TMP_ERR"; then
+if "${RUNNER[@]}" audit --format json --quiet --explain --gate-marker agent >"$TMP_JSON" 2>"$TMP_ERR"; then
   STATUS=0
 else
   STATUS=$?

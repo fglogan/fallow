@@ -8,6 +8,7 @@ node_modules/
 !tests/fixtures/bin-script-deps/node_modules/
 !tests/fixtures/css-package-subpath-import/node_modules/
 !tests/fixtures/scss-node-modules-resolution/node_modules/
+!tests/fixtures/issue-754-eslint-meta-preset/node_modules/
 .DS_Store
 # macOS Spotlight index control markers (written into build output dirs)
 .metadata_never_index
@@ -19,7 +20,7 @@ reference/
 
 # Coverage reports
 coverage/
-# But allow the CLI's `fallow coverage` subcommand module
+# But allow the CLI's `plow coverage` subcommand module
 !crates/cli/src/coverage/
 # And allow the v8-coverage normalizer crate
 !crates/v8-coverage/
@@ -33,7 +34,7 @@ benchmarks/knip6
 benchmarks/knip6/
 
 # Incremental cache
-.fallow/
+.plow/
 
 # Python cache
 __pycache__/
@@ -45,13 +46,13 @@ proptest-regressions/
 *.tgz
 
 # npm platform binaries (added by CI, not committed)
-npm/darwin-arm64/fallow
-npm/darwin-x64/fallow
-npm/linux-x64-gnu/fallow
-npm/linux-arm64-gnu/fallow
-npm/linux-x64-musl/fallow
-npm/linux-arm64-musl/fallow
-npm/win32-x64-msvc/fallow.exe
+npm/darwin-arm64/plow
+npm/darwin-x64/plow
+npm/linux-x64-gnu/plow
+npm/linux-arm64-gnu/plow
+npm/linux-x64-musl/plow
+npm/linux-arm64-musl/plow
+npm/win32-x64-msvc/plow.exe
 
 # Internal planning docs
 .internal
@@ -76,6 +77,8 @@ editors/vscode/LICENSE
 # Claude
 .claude/*
 !.claude/settings.json
+!.claude/hooks/
+!.claude/hooks/pre-bash-guard.py
 !.claude/skills/
 !.claude/rules/
 !.claude/agents/
@@ -83,10 +86,20 @@ editors/vscode/LICENSE
 # Codex
 .codex/
 AGENTS.md
+!crates/cli/AGENTS.md
+!crates/core/AGENTS.md
+!crates/extract/AGENTS.md
+!crates/graph/AGENTS.md
+!editors/vscode/AGENTS.md
+!tests/AGENTS.md
+!.github/workflows/AGENTS.md
 
-# In-flight feature plans written by /fallow-implement and re-read by /panel-review,
-# the implementation phase, and /fallow-review. Transient; promoted concepts go to decisions/.
+# In-flight feature plans written by /plow-implement and re-read by /panel-review,
+# the implementation phase, and /plow-review. Transient; promoted concepts go to decisions/.
 .plans/
 
 # Crash-handover markers from sdk-cli automation
 /HANDOVER-CRASH-*.md
+
+decisions
+decisions/

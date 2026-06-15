@@ -20,6 +20,12 @@ vi.mock("vscode", () => {
     }
   }
   return {
+    DiagnosticSeverity: {
+      Error: 0,
+      Warning: 1,
+      Information: 2,
+      Hint: 3,
+    },
     EventEmitter: FakeEventEmitter,
     Uri: {
       parse: (s: string) => ({ toString: () => s, scheme: "file" }),
@@ -35,6 +41,7 @@ import {
   isPlowDiagnostic,
   parseDiagnosticCategories,
   resetDiagnosticCategories,
+  severityToDiagnosticSeverity,
   setDiagnosticCategories,
 } from "../src/diagnosticFilter.js";
 
@@ -42,11 +49,13 @@ interface FakeDiag {
   source?: string;
   code?: string | number | { value: string | number };
   message: string;
+  severity: number;
 }
 
 const diag = (overrides: Partial<FakeDiag>): FakeDiag => ({
   source: "plow",
   message: "test",
+  severity: 1,
   ...overrides,
 });
 
@@ -120,6 +129,12 @@ describe("isPlowDiagnostic", () => {
 });
 
 describe("DiagnosticFilter.applyFilter", () => {
+  it("maps diagnostic severity settings to VS Code severities", () => {
+    expect(severityToDiagnosticSeverity("warning")).toBe(1);
+    expect(severityToDiagnosticSeverity("information")).toBe(2);
+    expect(severityToDiagnosticSeverity("hint")).toBe(3);
+  });
+
   it("passes everything through when nothing is muted", () => {
     const f = new DiagnosticFilter(memento() as never);
     const input = [
@@ -128,6 +143,30 @@ describe("DiagnosticFilter.applyFilter", () => {
       diag({ source: "ts", code: "2304" }),
     ];
     expect(f.applyFilter(input as never)).toEqual(input);
+  });
+
+  it("renders only plow diagnostics as information", () => {
+    const f = new DiagnosticFilter(memento() as never, () => "information");
+    const input = [
+      diag({ code: "code-duplication" }),
+      diag({ source: "ts", code: "2304", severity: 1 }),
+    ];
+    const out = f.applyFilter(input as never);
+    expect(out[0]?.severity).toBe(2);
+    expect(out[1]?.severity).toBe(1);
+  });
+
+  it("renders plow diagnostics as hints after mute filtering", () => {
+    const f = new DiagnosticFilter(memento() as never, () => "hint");
+    f.setCategoryMuted("code-duplication", true);
+    const input = [
+      diag({ code: "code-duplication" }),
+      diag({ code: "unused-export" }),
+    ];
+    const out = f.applyFilter(input as never);
+    expect(out).toHaveLength(1);
+    expect(out[0]?.code).toBe("unused-export");
+    expect(out[0]?.severity).toBe(3);
   });
 
   it("drops only plow diagnostics with the muted code", () => {
@@ -142,6 +181,59 @@ describe("DiagnosticFilter.applyFilter", () => {
     expect(out).toHaveLength(2);
     expect(out.map((d) => d.code)).toEqual(["unused-export", "code-duplication"]);
     expect(out[1]?.source).toBe("eslint");
+  });
+
+  it("applies a team baseline on first open", () => {
+    const f = new DiagnosticFilter(
+      memento() as never,
+      () => "warning",
+      new Set(["code-duplication"])
+    );
+    const out = f.applyFilter(
+      [
+        diag({ code: "code-duplication" }),
+        diag({ code: "unused-export" }),
+      ] as never
+    );
+
+    expect(out.map((d) => d.code)).toEqual(["unused-export"]);
+  });
+
+  it("lets local mutes hide more than the team baseline", () => {
+    const f = new DiagnosticFilter(
+      memento() as never,
+      () => "warning",
+      new Set(["code-duplication"])
+    );
+    f.setCategoryMuted("unused-export", true);
+
+    const out = f.applyFilter(
+      [
+        diag({ code: "code-duplication" }),
+        diag({ code: "unused-export" }),
+        diag({ code: "stale-suppression" }),
+      ] as never
+    );
+
+    expect(out.map((d) => d.code)).toEqual(["stale-suppression"]);
+  });
+
+  it("lets a local override show a baseline-hidden category", () => {
+    const f = new DiagnosticFilter(
+      memento() as never,
+      () => "warning",
+      new Set(["code-duplication"])
+    );
+    f.setCategoryMuted("code-duplication", false);
+
+    const out = f.applyFilter(
+      [
+        diag({ code: "code-duplication" }),
+        diag({ code: "unused-export" }),
+      ] as never
+    );
+
+    expect(out.map((d) => d.code)).toEqual(["code-duplication", "unused-export"]);
   });
 
   it("drops every plow diagnostic when mutedAll is set, but never others", () => {
@@ -180,6 +272,21 @@ describe("DiagnosticFilter persistence", () => {
     expect(f.isMutedAll()).toBe(false);
   });
 
+  it("treats legacy muted categories as local mutes", () => {
+    const m = memento({
+      mutedAll: false,
+      mutedCategories: ["unused-export"],
+    });
+    const f = new DiagnosticFilter(
+      m as never,
+      () => "warning",
+      new Set(["code-duplication"])
+    );
+
+    expect(f.isCategoryMuted("code-duplication")).toBe(true);
+    expect(f.isCategoryMuted("unused-export")).toBe(true);
+  });
+
   it("writes through to memento on every change", async () => {
     const m = memento();
     const f = new DiagnosticFilter(m as never);
@@ -197,6 +304,47 @@ describe("DiagnosticFilter persistence", () => {
     );
   });
 
+  it("persists local visibility overrides for baseline categories", async () => {
+    const m = memento();
+    const f = new DiagnosticFilter(
+      m as never,
+      () => "warning",
+      new Set(["code-duplication"])
+    );
+
+    f.setCategoryMuted("code-duplication", false);
+    await flushPersistence();
+
+    expect(m.update).toHaveBeenLastCalledWith(
+      "plow.diagnosticFilter.v1",
+      expect.objectContaining({
+        localVisibleCategories: ["code-duplication"],
+        mutedCategories: [],
+      })
+    );
+  });
+
+  it("clear all keeps baseline categories visible locally", async () => {
+    const m = memento();
+    const f = new DiagnosticFilter(
+      m as never,
+      () => "warning",
+      new Set(["code-duplication"])
+    );
+
+    f.clearAllMutes();
+    await flushPersistence();
+
+    expect(f.isCategoryMuted("code-duplication")).toBe(false);
+    expect(m.update).toHaveBeenLastCalledWith(
+      "plow.diagnosticFilter.v1",
+      expect.objectContaining({
+        localVisibleCategories: ["code-duplication"],
+        mutedCategories: [],
+      })
+    );
+  });
+
   it("updates a category set with one persisted write", async () => {
     const m = memento();
     const f = new DiagnosticFilter(m as never);
@@ -209,6 +357,101 @@ describe("DiagnosticFilter persistence", () => {
         mutedCategories: ["code-duplication", "unused-export"],
       })
     );
+  });
+});
+
+describe("DiagnosticFilter corrupt-state recovery", () => {
+  it("does not throw when the persisted value is not an object", () => {
+    // A downgrade or hand-edit can leave a non-object (here a number) under the
+    // state key; the constructor must recover silently rather than disabling the
+    // whole extension for that workspace.
+    expect(() => new DiagnosticFilter(memento(42) as never)).not.toThrow();
+    const f = new DiagnosticFilter(memento(42) as never);
+    expect(f.isMutedAll()).toBe(false);
+    expect(f.anythingMuted()).toBe(false);
+  });
+
+  it("recovers to nothing-muted when array fields hold the wrong type", () => {
+    const f = new DiagnosticFilter(
+      memento({
+        mutedAll: "yes",
+        mutedCategories: 7,
+        localVisibleCategories: { a: 1 },
+      }) as never
+    );
+    expect(f.isMutedAll()).toBe(false);
+    expect(f.anythingMuted()).toBe(false);
+  });
+
+  it("filters non-string members out of a persisted category array", () => {
+    const f = new DiagnosticFilter(
+      memento({
+        mutedAll: false,
+        mutedCategories: ["code-duplication", 5, null, "unused-export"],
+      }) as never
+    );
+    expect(f.isCategoryMuted("code-duplication")).toBe(true);
+    expect(f.isCategoryMuted("unused-export")).toBe(true);
+  });
+});
+
+describe("DiagnosticFilter.applyMuteSelection", () => {
+  it("turns mute-all off and applies the selection in one persisted write", async () => {
+    const m = memento();
+    const f = new DiagnosticFilter(m as never, () => "warning", new Set(["code-duplication"]));
+
+    f.setMutedAll(true);
+    await flushPersistence();
+    m.update.mockClear();
+
+    // Mirrors the manage pick's accept when the global "All Findings" row is
+    // unchecked: select only `unused-export`, revealing the baseline category.
+    f.applyMuteSelection(false, new Set(["unused-export"]));
+    await flushPersistence();
+
+    expect(f.isMutedAll()).toBe(false);
+    expect(f.isCategoryMuted("unused-export")).toBe(true);
+    expect(f.isCategoryMuted("code-duplication")).toBe(false);
+    // One accept => exactly one persisted write (the old setMutedAll +
+    // setMutedCategories pair fired two).
+    expect(m.update).toHaveBeenCalledTimes(1);
+    expect(m.update).toHaveBeenLastCalledWith(
+      "plow.diagnosticFilter.v1",
+      expect.objectContaining({
+        mutedAll: false,
+        mutedCategories: ["unused-export"],
+        localVisibleCategories: ["code-duplication"],
+      })
+    );
+  });
+
+  it("is a no-op (no write) when the selection already matches state", async () => {
+    const m = memento();
+    const f = new DiagnosticFilter(m as never);
+    f.applyMuteSelection(false, new Set());
+    await flushPersistence();
+    expect(m.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("DiagnosticFilter.flushPersist", () => {
+  it("resolves after the in-flight persisted write lands", async () => {
+    const m = memento();
+    const f = new DiagnosticFilter(m as never);
+    f.setCategoryMuted("code-duplication", true);
+    // Await the public drain API directly (what deactivate() calls), not the
+    // raw microtask helper.
+    await f.flushPersist();
+    expect(m.update).toHaveBeenCalledWith(
+      "plow.diagnosticFilter.v1",
+      expect.objectContaining({ mutedCategories: ["code-duplication"] })
+    );
+  });
+
+  it("resolves immediately when there is nothing pending", async () => {
+    const m = memento();
+    const f = new DiagnosticFilter(m as never);
+    await expect(f.flushPersist()).resolves.toBeUndefined();
   });
 });
 
@@ -249,6 +492,69 @@ describe("DiagnosticFilter.handleDiagnostics + refresh", () => {
     expect(cleared?.diags).toHaveLength(2);
   });
 
+  it("preserves code/data/tags when re-rendering severity", () => {
+    // The LSP correlates "Fix all" / delete-file code actions by
+    // range + message + code, and rides changedSince / security triage facts in
+    // `data`. The severity re-render must not drop those fields.
+    let severity: "warning" | "hint" = "warning";
+    const f = new DiagnosticFilter(memento() as never, () => severity);
+    severity = "hint";
+    const d = {
+      source: "plow",
+      code: "unused-export",
+      message: "unused export",
+      severity: 1,
+      data: { changedSince: "origin/main" },
+      tags: [1],
+      relatedInformation: [{ message: "ref" }],
+    };
+    const out = f.applyFilter([d] as never) as unknown as Array<typeof d>;
+    expect(out).toHaveLength(1);
+    expect(out[0]?.severity).toBe(3); // Hint
+    expect(out[0]?.code).toBe("unused-export");
+    expect(out[0]?.data).toEqual({ changedSince: "origin/main" });
+    expect(out[0]?.tags).toEqual([1]);
+    expect(out[0]?.relatedInformation).toEqual([{ message: "ref" }]);
+  });
+
+  it("refresh re-applies a changed severity from cached diagnostics", () => {
+    let severity: "warning" | "hint" = "warning";
+    const f = new DiagnosticFilter(memento() as never, () => severity);
+    const c = collection();
+    f.attachClient({ diagnostics: c as never });
+    f.handleDiagnostics(
+      fakeUri("file:///a.ts") as never,
+      [diag({ code: "code-duplication", severity: 1 })] as never,
+      vi.fn()
+    );
+    c.sets.length = 0;
+    severity = "hint";
+    f.refresh();
+    const hinted = c.sets[c.sets.length - 1];
+    expect(hinted?.diags[0]?.severity).toBe(3);
+    severity = "warning";
+    f.refresh();
+    const warning = c.sets[c.sets.length - 1];
+    expect(warning?.diags[0]?.severity).toBe(1);
+  });
+
+  it("refreshes cached diagnostics when the workspace baseline changes", () => {
+    const f = new DiagnosticFilter(memento() as never);
+    const c = collection();
+    f.attachClient({ diagnostics: c as never });
+    f.handleDiagnostics(
+      fakeUri("file:///a.ts") as never,
+      [diag({ code: "code-duplication" }), diag({ code: "unused-export" })] as never,
+      vi.fn()
+    );
+
+    c.sets.length = 0;
+    f.updateBaselineMutedCategories(new Set(["code-duplication"]));
+
+    const lastCall = c.sets[c.sets.length - 1];
+    expect(lastCall?.diags.map((d) => d.code)).toEqual(["unused-export"]);
+  });
+
   it("caps the cache so a workspace-wide publish does not grow heap forever", () => {
     const f = new DiagnosticFilter(memento() as never);
     const c = collection();
@@ -269,6 +575,50 @@ describe("DiagnosticFilter.handleDiagnostics + refresh", () => {
     // The cap is 5000; refresh should touch at most 5000 URIs.
     expect(c.sets.length).toBeLessThanOrEqual(5000);
     expect(c.sets.length).toBeGreaterThan(0);
+  });
+
+  it("refresh re-pulls open documents so pull-mode diagnostics update on a toggle", () => {
+    const f = new DiagnosticFilter(memento() as never);
+    const c = collection();
+    const refreshPullDiagnostics = vi.fn();
+    f.attachClient({ diagnostics: c as never, refreshPullDiagnostics });
+    // attachClient -> refresh once on attach.
+    expect(refreshPullDiagnostics).toHaveBeenCalledTimes(1);
+    refreshPullDiagnostics.mockClear();
+
+    f.setMutedAll(true);
+    expect(refreshPullDiagnostics).toHaveBeenCalledTimes(1);
+    f.setMutedAll(false);
+    expect(refreshPullDiagnostics).toHaveBeenCalledTimes(2);
+    f.setCategoryMuted("code-duplication", true);
+    expect(refreshPullDiagnostics).toHaveBeenCalledTimes(3);
+    f.clearAllMutes();
+    expect(refreshPullDiagnostics).toHaveBeenCalledTimes(4);
+  });
+
+  it("refresh re-pulls even when the push collection is absent (pure pull mode)", () => {
+    const f = new DiagnosticFilter(memento() as never);
+    const refreshPullDiagnostics = vi.fn();
+    // No `diagnostics`: a pull-only client has no push DiagnosticCollection.
+    f.attachClient({ refreshPullDiagnostics });
+    refreshPullDiagnostics.mockClear();
+    f.setMutedAll(true);
+    expect(refreshPullDiagnostics).toHaveBeenCalledTimes(1);
+  });
+
+  it("refresh tolerates a client without a pull-refresh hook (push-only)", () => {
+    const f = new DiagnosticFilter(memento() as never);
+    const c = collection();
+    f.attachClient({ diagnostics: c as never });
+    f.handleDiagnostics(
+      fakeUri("file:///a.ts") as never,
+      [diag({ code: "code-duplication" }), diag({ code: "unused-export" })] as never,
+      vi.fn()
+    );
+    c.sets.length = 0;
+    expect(() => f.setMutedAll(true)).not.toThrow();
+    // Push collection still re-published when no pull hook is present.
+    expect(c.sets[c.sets.length - 1]?.diags).toHaveLength(0);
   });
 
   it("evictUri drops the cached entry so refresh stops touching it", () => {
@@ -336,6 +686,58 @@ describe("DiagnosticFilter pull-mode middleware", () => {
       next as never
     );
     expect((result as { kind: string }).kind).toBe("unchanged");
+  });
+
+  it("does not cache pull results, so refresh never duplicates open-file diagnostics into the push collection", async () => {
+    const f = new DiagnosticFilter(memento() as never);
+    const c = collection();
+    const refreshPullDiagnostics = vi.fn();
+    f.attachClient({ diagnostics: c as never, refreshPullDiagnostics });
+    // An open file delivered via the pull path.
+    await f.provideDiagnostics(
+      fakeUri("file:///open.ts") as never,
+      undefined,
+      {} as never,
+      vi.fn(async () => ({
+        kind: "full",
+        items: [diag({ code: "unused-export" })],
+      })) as never
+    );
+    c.sets.length = 0;
+    refreshPullDiagnostics.mockClear();
+    // A mute toggle must re-pull (so pull-mode squiggles update) but must NOT
+    // write the pulled open file into the push collection: the pull provider
+    // owns a separate collection, so a push re-publish would render it twice.
+    f.setMutedAll(true);
+    expect(refreshPullDiagnostics).toHaveBeenCalledTimes(1);
+    expect(c.sets.some((s) => s.uri === "file:///open.ts")).toBe(false);
+  });
+
+  it("refresh re-publishes push-delivered files but leaves pull-delivered files to the re-pull", async () => {
+    const f = new DiagnosticFilter(memento() as never);
+    const c = collection();
+    f.attachClient({ diagnostics: c as never, refreshPullDiagnostics: vi.fn() });
+    // Push-delivered (e.g. package.json unlisted-dependency, never opened).
+    f.handleDiagnostics(
+      fakeUri("file:///package.json") as never,
+      [diag({ code: "unlisted-dependency" })] as never,
+      vi.fn()
+    );
+    // Pull-delivered (an open source file).
+    await f.provideDiagnostics(
+      fakeUri("file:///open.ts") as never,
+      undefined,
+      {} as never,
+      vi.fn(async () => ({
+        kind: "full",
+        items: [diag({ code: "unused-export" })],
+      })) as never
+    );
+    c.sets.length = 0;
+    f.setMutedAll(true);
+    const uris = c.sets.map((s) => s.uri);
+    expect(uris).toContain("file:///package.json");
+    expect(uris).not.toContain("file:///open.ts");
   });
 });
 

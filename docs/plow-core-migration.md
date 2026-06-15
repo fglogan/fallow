@@ -1,42 +1,42 @@
-# Migrating from fallow-core analyzer functions
+# Migrating from plow-core analyzer functions
 
-ADR-008 makes `fallow-core` an internal implementation crate. Starting with
-2.76.0, the top-level `fallow_core::analyze*` entry points plus the
-detector helpers under `fallow_core::analyze::*` emit deprecation
+ADR-008 makes `plow-core` an internal implementation crate. Starting with
+2.76.0, the top-level `plow_core::analyze*` entry points plus the
+detector helpers under `plow_core::analyze::*` emit deprecation
 warnings. The next minor release (target `2.77.0`, no earlier than 2026-Q3)
-will flip `publish = false` on `fallow-core` so the crate is no longer
+will flip `publish = false` on `plow-core` so the crate is no longer
 fetchable from crates.io.
 
-Use the supported embedder API in `fallow_cli::programmatic` instead. The
+Use the supported embedder API in `plow_cli::programmatic` instead. The
 programmatic API returns `Result<serde_json::Value, ProgrammaticError>` whose
 JSON shape matches the matching CLI command with `--format json`; it does not
-return typed `AnalysisResults` or the bare finding structs from `fallow-core`.
+return typed `AnalysisResults` or the bare finding structs from `plow-core`.
 
 ## Function mapping
 
-| Deprecated `fallow_core` function | Replacement |
+| Deprecated `plow_core` function | Replacement |
 | --- | --- |
-| `fallow_core::analyze`, `analyze_with_usages`, `analyze_with_trace`, `analyze_retaining_modules`, `analyze_with_parse_result`, `analyze_project` | `fallow_cli::programmatic::detect_dead_code` (or `compute_health` / `detect_duplication` for those slices) |
-| `fallow_core::analyze::find_dead_code_full` | `fallow_cli::programmatic::detect_dead_code` |
-| `find_unused_files` | `fallow_cli::programmatic::detect_dead_code` |
-| `find_unused_exports` | `fallow_cli::programmatic::detect_dead_code` |
-| `find_duplicate_exports` | `fallow_cli::programmatic::detect_dead_code` |
-| `find_unused_dependencies` | `fallow_cli::programmatic::detect_dead_code` |
-| `find_unused_members` | `fallow_cli::programmatic::detect_dead_code` |
-| Catalog and dependency-override finders | `fallow_cli::programmatic::detect_dead_code` |
-| `find_boundary_violations` | `fallow_cli::programmatic::detect_boundary_violations` |
-| `collect_feature_flags`, `correlate_with_dead_code` | No programmatic equivalent today. Use `fallow flags --format json`; the `guarded_dead_exports` field on each flag carries the dead-code correlation. |
+| `plow_core::analyze`, `analyze_with_usages`, `analyze_with_trace`, `analyze_retaining_modules`, `analyze_with_parse_result`, `analyze_project` | `plow_cli::programmatic::detect_dead_code` (or `compute_health` / `detect_duplication` for those slices) |
+| `plow_core::analyze::find_dead_code_full` | `plow_cli::programmatic::detect_dead_code` |
+| `find_unused_files` | `plow_cli::programmatic::detect_dead_code` |
+| `find_unused_exports` | `plow_cli::programmatic::detect_dead_code` |
+| `find_duplicate_exports` | `plow_cli::programmatic::detect_dead_code` |
+| `find_unused_dependencies` | `plow_cli::programmatic::detect_dead_code` |
+| `find_unused_members` | `plow_cli::programmatic::detect_dead_code` |
+| Catalog and dependency-override finders | `plow_cli::programmatic::detect_dead_code` |
+| `find_boundary_violations` | `plow_cli::programmatic::detect_boundary_violations` |
+| `collect_feature_flags`, `correlate_with_dead_code` | No programmatic equivalent today. Use `plow flags --format json`; the `guarded_dead_exports` field on each flag carries the dead-code correlation. |
 
 For duplication clone detection, use
-`fallow_cli::programmatic::detect_duplication`. For health, complexity,
+`plow_cli::programmatic::detect_duplication`. For health, complexity,
 hotspots, targets, and coverage-gap output, use
-`fallow_cli::programmatic::compute_health` or
-`fallow_cli::programmatic::compute_complexity`.
+`plow_cli::programmatic::compute_health` or
+`plow_cli::programmatic::compute_complexity`.
 
 ## Minimal example
 
 ```rust
-use fallow_cli::programmatic::{AnalysisOptions, DeadCodeOptions, detect_dead_code};
+use plow_cli::programmatic::{AnalysisOptions, DeadCodeOptions, detect_dead_code};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let options = DeadCodeOptions {
@@ -55,8 +55,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 The JSON contract is documented in `docs/output-schema.json`. Consumers that
-previously matched Rust structs should now narrow by the documented JSON keys
-and deserialize into their own local DTOs if they need typed access.
+previously matched Rust structs should now narrow typed envelopes by the
+top-level `kind` field and deserialize into their own local DTOs if they need
+typed access. Set `AnalysisOptions::legacy_envelope` only while migrating
+consumers that still expect the previous root shape without `kind`.
 
 ## Semantic differences vs. the typed Rust API
 
@@ -79,7 +81,7 @@ old Rust structs; for example:
 Introspect the shape against any real fixture with:
 
 ```bash
-fallow check --format json --root path/to/project | jq '.unused_exports[0]'
+plow check --format json --root path/to/project | jq '.unused_exports[0]'
 ```
 
 `ProgrammaticError` carries the same exit-code ladder as the CLI

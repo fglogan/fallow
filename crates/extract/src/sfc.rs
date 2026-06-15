@@ -1,7 +1,9 @@
 //! Vue/Svelte Single File Component (SFC) script and style extraction.
 //!
 //! Extracts `<script>` block content from `.vue` and `.svelte` files using regex,
-//! handling `lang`, `src`, and `generic` attributes, and filtering HTML comments.
+//! handling `lang`, `src` metadata, and `generic` attributes, and filtering
+//! HTML comments. Vue external script references are emitted as graph edges;
+//! Svelte markup-level script `src` references are treated as runtime HTML.
 //! Also extracts `<style>` block sources (`@import` / `@use` / `@forward` /
 //! `@plugin` and `<style src="...">`) so referenced CSS / SCSS files become
 //! reachable from the component, preventing false `unused-files` reports on
@@ -17,69 +19,142 @@ use oxc_span::SourceType;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::asset_url::normalize_asset_url;
-use crate::parse::compute_import_binding_usage;
+use crate::parse::{
+    compute_auto_import_candidates, compute_import_binding_usage, compute_semantic_usage,
+};
 use crate::sfc_template::{SfcKind, collect_template_usage_with_bound_targets};
+use crate::source_map::ExtractionResult;
 use crate::visitor::ModuleInfoExtractor;
 use crate::{ImportInfo, ImportedName, ModuleInfo};
+use oxc_span::Span;
 use plow_types::discover::FileId;
 use plow_types::extract::{FunctionComplexity, byte_offset_to_line_col, compute_line_offsets};
-use oxc_span::Span;
 
 /// Regex to extract `<script>` block content from Vue/Svelte SFCs.
 /// The attrs pattern handles `>` inside quoted attribute values (e.g., `generic="T extends Foo<Bar>"`).
 static SCRIPT_BLOCK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(
+    crate::static_regex(
         r#"(?is)<script\b(?P<attrs>(?:[^>"']|"[^"]*"|'[^']*')*)>(?P<body>[\s\S]*?)</script>"#,
     )
-    .expect("valid regex")
 });
 
 /// Regex to extract the `lang` attribute value from a script tag.
 static LANG_ATTR_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r#"lang\s*=\s*["'](\w+)["']"#).expect("valid regex"));
+    LazyLock::new(|| crate::static_regex(r#"lang\s*=\s*["'](\w+)["']"#));
 
 /// Regex to extract the `src` attribute value from a script tag.
 /// Requires whitespace (or start of string) before `src` to avoid matching `data-src` etc.
-static SRC_ATTR_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r#"(?:^|\s)src\s*=\s*["']([^"']+)["']"#).expect("valid regex")
-});
+static SRC_ATTR_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r#"(?:^|\s)src\s*=\s*["']([^"']+)["']"#));
 
 /// Regex to detect Vue's bare `setup` attribute.
 static SETUP_ATTR_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"(?:^|\s)setup(?:\s|$)").expect("valid regex"));
+    LazyLock::new(|| crate::static_regex(r"(?:^|\s)setup(?:\s|$)"));
 
 /// Regex to detect Svelte's `context="module"` attribute.
 static CONTEXT_MODULE_ATTR_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r#"context\s*=\s*["']module["']"#).expect("valid regex"));
+    LazyLock::new(|| crate::static_regex(r#"context\s*=\s*["']module["']"#));
 
 /// Regex to extract Vue's `generic="..."` attribute value (script-setup
 /// generics). Matches the contents between the quotes and stops at the
 /// closing quote, mirroring `LANG_ATTR_RE`.
 static VUE_GENERIC_ATTR_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r#"(?:^|\s)generic\s*=\s*"([^"]*)"|(?:^|\s)generic\s*=\s*'([^']*)'"#)
-        .expect("valid regex")
+    crate::static_regex(r#"(?:^|\s)generic\s*=\s*"([^"]*)"|(?:^|\s)generic\s*=\s*'([^']*)'"#)
 });
 
 /// Regex to extract Svelte's `generics="..."` attribute value (Svelte 4
 /// generic script attribute, repurposed by some Svelte 5 code).
 static SVELTE_GENERICS_ATTR_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r#"(?:^|\s)generics\s*=\s*"([^"]*)"|(?:^|\s)generics\s*=\s*'([^']*)'"#)
-        .expect("valid regex")
+    crate::static_regex(r#"(?:^|\s)generics\s*=\s*"([^"]*)"|(?:^|\s)generics\s*=\s*'([^']*)'"#)
 });
 
 /// Regex to match HTML comments for filtering script blocks inside comments.
 static HTML_COMMENT_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"(?s)<!--.*?-->").expect("valid regex"));
+    LazyLock::new(|| crate::static_regex(r"(?s)<!--.*?-->"));
+
+/// Regex to detect a whole-object prop/attr spread in a Vue template:
+/// `v-bind="$attrs"`, `v-bind="$props"`, or `v-bind="props"` (with single or
+/// double quotes). A bound prop may be consumed indirectly, so the
+/// `unused-component-prop` detector abstains on the whole file when this matches.
+static PROPS_ATTRS_SPREAD_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r#"v-bind\s*=\s*["'](?:\$attrs|\$props|props)["']"#));
+
+/// Matches an emit-style call in template markup: a callee identifier (or
+/// `$emit`) followed by `(` and its first argument. Group 1 is the callee name
+/// (filtered against the harvested emit binding / `$emit` by the caller), groups
+/// 2 and 3 are a string-literal first arg (single- or double-quoted: the event
+/// name, credited as used), and group 4 is the first non-space character of a
+/// NON-literal first arg (a dynamic emit, whose event name is unknowable, forcing
+/// a whole-file abstain). Event names allow kebab and namespaced forms
+/// (`update:modelValue`, `my-event`). The Rust `regex` crate has no
+/// backreferences, so the two quote styles are separate alternatives.
+static TEMPLATE_EMIT_CALL_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r#"([\w$]+)\s*\(\s*(?:'([\w:-]*)'|"([\w:-]*)"|(\S))"#));
 
 /// Regex to extract `<style>` block content from Vue/Svelte SFCs.
 /// Mirrors `SCRIPT_BLOCK_RE`: handles `>` inside quoted attribute values and
 /// captures the body so `@import` / `@use` / `@forward` directives can be parsed.
 static STYLE_BLOCK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(
+    crate::static_regex(
         r#"(?is)<style\b(?P<attrs>(?:[^>"']|"[^"]*"|'[^']*')*)>(?P<body>[\s\S]*?)</style>"#,
     )
-    .expect("valid regex")
 });
+
+/// Static asset references in SFC markup: `<img src="./logo.png">`,
+/// `<source src="...">`, `<video poster="...">`, etc.
+///
+/// Scoped to genuine asset elements (`img` / `source` / `video` / `audio` /
+/// `track` / `embed`) so a custom component's `src` PROP (`<MyImage src="./x">`)
+/// is never misread as an asset edge. ONLY plain relative literals (`./` or
+/// `../`) are captured: dynamic bindings (`:src`, `v-bind:src`, `bind:src`,
+/// `src={...}`, `data-src`), alias-prefixed (`@/`), root-relative (`/foo`),
+/// remote, interpolated (`{{ }}` / `{ }`), and query/hash-suffixed values are
+/// all skipped (the value class excludes `{`, `?`, `#`, whitespace, and angle
+/// brackets, and the alternation anchors on a leading `./` or `../`). A
+/// captured ref becomes a `SideEffect` import; an existing asset resolves to
+/// `ExternalFile` (no finding) and a genuinely-missing one surfaces as
+/// `unresolved-import` on the trusted resolver path.
+static TEMPLATE_ASSET_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    crate::static_regex(
+        r#"(?si)<(?:img|source|video|audio|track|embed)\b(?:[^>"']|"[^"]*"|'[^']*')*?\s(?:src|poster)\s*=\s*(?:"((?:\./|\.\./)[^"<>{}?#\s]*)"|'((?:\./|\.\./)[^'<>{}?#\s]*)')"#,
+    )
+});
+
+/// Mask `<script>` / `<style>` blocks and HTML comments to equal-length spaces
+/// so a markup-region scan (asset refs) sees only the template, while byte
+/// offsets still map 1:1 into the original source for line/col reporting.
+fn mask_non_markup_regions(source: &str) -> String {
+    let mut masked = source.to_string();
+    for re in [&*SCRIPT_BLOCK_RE, &*STYLE_BLOCK_RE, &*HTML_COMMENT_RE] {
+        masked = re
+            .replace_all(&masked, |caps: &regex::Captures<'_>| {
+                " ".repeat(caps[0].len())
+            })
+            .into_owned();
+    }
+    masked
+}
+
+/// Collect static relative asset references from SFC markup as
+/// `(normalized_specifier, value_span)` pairs. See [`TEMPLATE_ASSET_RE`].
+fn collect_template_asset_refs(source: &str) -> Vec<(String, Span)> {
+    let masked = mask_non_markup_regions(source);
+    let mut refs = Vec::new();
+    for caps in TEMPLATE_ASSET_RE.captures_iter(&masked) {
+        let Some(value) = caps.get(1).or_else(|| caps.get(2)) else {
+            continue;
+        };
+        let raw = value.as_str();
+        if raw.is_empty() {
+            continue;
+        }
+        refs.push((
+            normalize_asset_url(raw),
+            Span::new(value.start() as u32, value.end() as u32),
+        ));
+    }
+    refs
+}
 
 /// An extracted `<script>` block from a Vue or Svelte SFC.
 pub struct SfcScript {
@@ -93,6 +168,8 @@ pub struct SfcScript {
     pub byte_offset: usize,
     /// External script source path from `src` attribute.
     pub src: Option<String>,
+    /// Span of the `src` attribute value in the full SFC source.
+    pub src_span: Option<Span>,
     /// Whether this script is a Vue `<script setup>` block.
     pub is_setup: bool,
     /// Whether this script is a Svelte module-context block.
@@ -105,9 +182,6 @@ pub struct SfcScript {
 
 /// Extract all `<script>` blocks from a Vue/Svelte SFC source string.
 pub fn extract_sfc_scripts(source: &str) -> Vec<SfcScript> {
-    // Build HTML comment ranges to filter out <script> blocks inside comments.
-    // Using ranges instead of source replacement avoids corrupting script body content
-    // (e.g., string literals containing "<!--" would be destroyed by replacement).
     let comment_ranges: Vec<(usize, usize)> = HTML_COMMENT_RE
         .find_iter(source)
         .map(|m| (m.start(), m.end()))
@@ -136,6 +210,13 @@ pub fn extract_sfc_scripts(source: &str) -> Vec<SfcScript> {
                 .captures(attrs)
                 .and_then(|c| c.get(1))
                 .map(|m| m.as_str().to_string());
+            let attrs_start = cap.name("attrs").map_or(0, |m| m.start());
+            let src_span = SRC_ATTR_RE.captures(attrs).and_then(|c| c.get(1)).map(|m| {
+                Span::new(
+                    (attrs_start + m.start()) as u32,
+                    (attrs_start + m.end()) as u32,
+                )
+            });
             let is_setup = SETUP_ATTR_RE.is_match(attrs);
             let is_context_module = CONTEXT_MODULE_ATTR_RE.is_match(attrs);
             let generic_attr = VUE_GENERIC_ATTR_RE
@@ -150,6 +231,7 @@ pub fn extract_sfc_scripts(source: &str) -> Vec<SfcScript> {
                 is_jsx,
                 byte_offset,
                 src,
+                src_span,
                 is_setup,
                 is_context_module,
                 generic_attr,
@@ -167,6 +249,10 @@ pub struct SfcStyle {
     pub lang: Option<String>,
     /// External style source path from the `src` attribute (`<style src="./theme.scss">`).
     pub src: Option<String>,
+    /// Span of the `src` attribute value in the full SFC source.
+    pub src_span: Option<Span>,
+    /// Byte offset of the style body within the full SFC source.
+    pub byte_offset: usize,
 }
 
 /// Extract all `<style>` blocks from a Vue/Svelte SFC source string.
@@ -192,6 +278,7 @@ pub fn extract_sfc_styles(source: &str) -> Vec<SfcStyle> {
         .map(|cap| {
             let attrs = cap.name("attrs").map_or("", |m| m.as_str());
             let body = cap.name("body").map_or("", |m| m.as_str()).to_string();
+            let byte_offset = cap.name("body").map_or(0, |m| m.start());
             let lang = LANG_ATTR_RE
                 .captures(attrs)
                 .and_then(|c| c.get(1))
@@ -200,7 +287,20 @@ pub fn extract_sfc_styles(source: &str) -> Vec<SfcStyle> {
                 .captures(attrs)
                 .and_then(|c| c.get(1))
                 .map(|m| m.as_str().to_string());
-            SfcStyle { body, lang, src }
+            let attrs_start = cap.name("attrs").map_or(0, |m| m.start());
+            let src_span = SRC_ATTR_RE.captures(attrs).and_then(|c| c.get(1)).map(|m| {
+                Span::new(
+                    (attrs_start + m.start()) as u32,
+                    (attrs_start + m.end()) as u32,
+                )
+            });
+            SfcStyle {
+                body,
+                lang,
+                src,
+                src_span,
+                byte_offset,
+            }
         })
         .collect()
 }
@@ -227,6 +327,8 @@ pub(crate) fn parse_sfc_to_module(
     let mut combined = empty_sfc_module(file_id, source, content_hash);
     let mut template_visible_imports: FxHashSet<String> = FxHashSet::default();
     let mut template_visible_bound_targets: FxHashMap<String, String> = FxHashMap::default();
+    let mut props_return_binding: Option<String> = None;
+    let mut emit_return_binding: Option<String> = None;
 
     for script in &scripts {
         merge_script_into_module(
@@ -235,6 +337,8 @@ pub(crate) fn parse_sfc_to_module(
             &mut combined,
             &mut template_visible_imports,
             &mut template_visible_bound_targets,
+            &mut props_return_binding,
+            &mut emit_return_binding,
             need_complexity,
         );
     }
@@ -243,19 +347,55 @@ pub(crate) fn parse_sfc_to_module(
         merge_style_into_module(style, &mut combined);
     }
 
+    // Whole-object prop/attr spread in the template (`v-bind="$attrs"`,
+    // `v-bind="$props"`, `v-bind="props"`) can consume a prop indirectly, so the
+    // `unused-component-prop` detector must abstain on the whole file.
+    if kind == SfcKind::Vue
+        && !combined.component_props.is_empty()
+        && PROPS_ATTRS_SPREAD_RE.is_match(source)
+    {
+        combined.has_props_attrs_fallthrough = true;
+    }
+
     apply_template_usage(
         kind,
         source,
         &template_visible_imports,
         &template_visible_bound_targets,
+        props_return_binding.as_deref(),
         &mut combined,
     );
+
+    // Credit `<emit_binding>('event')` / `$emit('event')` calls in the template
+    // (`@click="emit('close')"`), which the script-only emit usage walk cannot
+    // see. A dynamic template emit (`$emit(someVar)`) abstains the whole file.
+    if kind == SfcKind::Vue && !combined.component_emits.is_empty() {
+        apply_template_emit_usage(source, emit_return_binding.as_deref(), &mut combined);
+    }
+
+    // Static relative asset references in markup (`<img src="./logo.png">`)
+    // become SideEffect imports so a genuinely-missing asset surfaces as
+    // `unresolved-import` (existing assets resolve to `ExternalFile`, no finding).
+    for (specifier, span) in collect_template_asset_refs(source) {
+        combined.imports.push(ImportInfo {
+            source: specifier,
+            imported_name: ImportedName::SideEffect,
+            local_name: String::new(),
+            is_type_only: false,
+            from_style: false,
+            span,
+            source_span: span,
+        });
+    }
+
     combined.unused_import_bindings.sort_unstable();
     combined.unused_import_bindings.dedup();
     combined.type_referenced_import_bindings.sort_unstable();
     combined.type_referenced_import_bindings.dedup();
     combined.value_referenced_import_bindings.sort_unstable();
     combined.value_referenced_import_bindings.dedup();
+    combined.auto_import_candidates.sort_unstable();
+    combined.auto_import_candidates.dedup();
 
     combined
 }
@@ -269,8 +409,6 @@ fn sfc_kind(path: &Path) -> SfcKind {
 }
 
 fn empty_sfc_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleInfo {
-    // For SFC files, use string scanning for suppression comments since script block
-    // byte offsets don't correspond to the original file positions.
     let parsed = crate::suppress::parse_suppressions_from_source(source);
 
     ModuleInfo {
@@ -281,6 +419,7 @@ fn empty_sfc_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleI
         dynamic_imports: Vec::new(),
         dynamic_import_patterns: Vec::new(),
         require_calls: Vec::new(),
+        package_path_references: Vec::new(),
         member_accesses: Vec::new(),
         whole_object_uses: Vec::new(),
         has_cjs_exports: false,
@@ -295,24 +434,56 @@ fn empty_sfc_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleI
         complexity: Vec::new(),
         flag_uses: Vec::new(),
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        referenced_import_bindings: Vec::new(),
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "threads SFC script context plus the prop and emit template-credit return bindings into the per-script merge"
+)]
 fn merge_script_into_module(
     kind: SfcKind,
     script: &SfcScript,
     combined: &mut ModuleInfo,
     template_visible_imports: &mut FxHashSet<String>,
     template_visible_bound_targets: &mut FxHashMap<String, String>,
+    props_return_binding: &mut Option<String>,
+    emit_return_binding: &mut Option<String>,
     need_complexity: bool,
 ) {
-    if let Some(src) = &script.src {
-        add_script_src_import(combined, src);
+    if kind == SfcKind::Vue
+        && let Some(src) = &script.src
+    {
+        add_script_src_import(combined, src, script.src_span);
     }
 
     let allocator = Allocator::default();
@@ -320,32 +491,33 @@ fn merge_script_into_module(
         Parser::new(&allocator, &script.body, source_type_for_script(script)).parse();
     let mut extractor = ModuleInfoExtractor::new();
     extractor.visit_program(&parser_return.program);
+    let extraction = ExtractionResult::contiguous(&script.body, script.byte_offset);
+    extractor.remap_spans_with(|span| extraction.remap_span(span));
+    extractor.resolve_typed_destructure_bindings();
 
-    // The script-tag `generic="..."` (Vue) / `generics="..."` (Svelte)
-    // constraint lives on the tag, not in the script body. Imports referenced
-    // only inside it would be classified as unused without this augmentation.
-    // Append a synthetic `type _<...> = unknown;` declaration so oxc_semantic
-    // sees those references and routes the bindings into `type_referenced`.
     let augmented_body = build_generic_attr_probe_source(script);
-    // Vue/Svelte still credit template-visible imports via the post-hoc
-    // `apply_template_usage` retain pass below, so pass an empty skip-set
-    // here. (Folding the template scan in at this layer the way `.gts` /
-    // `.gjs` does is future work; see `crates/extract/src/parse.rs::
-    // collect_glimmer_template_into_extractor` for the target shape.)
     let empty_template_used = rustc_hash::FxHashSet::default();
-    let binding_usage = if let Some(augmented) = augmented_body.as_deref() {
+    let (binding_usage, auto_import_candidates) = if let Some(augmented) = augmented_body.as_deref()
+    {
         let augmented_return =
             Parser::new(&allocator, augmented, source_type_for_script(script)).parse();
-        compute_import_binding_usage(
-            &augmented_return.program,
-            &extractor.imports,
-            &empty_template_used,
+        (
+            compute_import_binding_usage(
+                &augmented_return.program,
+                &extractor.imports,
+                &empty_template_used,
+            ),
+            compute_auto_import_candidates(&parser_return.program),
         )
     } else {
-        compute_import_binding_usage(
+        let semantic_usage = compute_semantic_usage(
             &parser_return.program,
             &extractor.imports,
             &empty_template_used,
+        );
+        (
+            semantic_usage.import_binding_usage,
+            semantic_usage.auto_import_candidates,
         )
     };
     combined
@@ -357,12 +529,62 @@ fn merge_script_into_module(
     combined
         .value_referenced_import_bindings
         .extend(binding_usage.value_referenced.iter().cloned());
+    combined
+        .auto_import_candidates
+        .extend(auto_import_candidates);
     if need_complexity {
         combined.complexity.extend(translate_script_complexity(
             script,
             &parser_return.program,
             &combined.line_offsets,
         ));
+    }
+
+    // Vue `<script setup>` `defineProps` harvesting for `unused-component-prop`.
+    // Spans returned by the harvest are relative to the script body; remap onto
+    // the SFC source via the script byte offset.
+    if kind == SfcKind::Vue && script.is_setup {
+        let harvest = crate::sfc_props::harvest_define_props(&parser_return.program);
+        if harvest.has_unharvestable_props {
+            combined.has_unharvestable_props = true;
+        }
+        if harvest.has_props_attrs_fallthrough {
+            combined.has_props_attrs_fallthrough = true;
+        }
+        if harvest.has_define_expose {
+            combined.has_define_expose = true;
+        }
+        if harvest.has_define_model {
+            combined.has_define_model = true;
+        }
+        if let Some(binding) = harvest.props_return_binding {
+            *props_return_binding = Some(binding);
+        }
+        for mut prop in harvest.props {
+            prop.span_start += script.byte_offset as u32;
+            combined.component_props.push(prop);
+        }
+
+        // `defineEmits` harvesting for `unused-component-emit`. Same span remap.
+        // `defineModel` creates implicit `update:x` emits, so a file with
+        // `defineModel` must abstain emits too (reuse the props-side flag).
+        let emit_harvest = crate::sfc_props::harvest_define_emits(&parser_return.program);
+        if emit_harvest.has_unharvestable_emits {
+            combined.has_unharvestable_emits = true;
+        }
+        if emit_harvest.has_dynamic_emit {
+            combined.has_dynamic_emit = true;
+        }
+        if emit_harvest.has_emit_whole_object_use {
+            combined.has_emit_whole_object_use = true;
+        }
+        if let Some(binding) = emit_harvest.emit_binding {
+            *emit_return_binding = Some(binding);
+        }
+        for mut emit in emit_harvest.emits {
+            emit.span_start += script.byte_offset as u32;
+            combined.component_emits.push(emit);
+        }
     }
 
     if is_template_visible_script(kind, script) {
@@ -406,17 +628,16 @@ fn translate_script_complexity(
     complexity
 }
 
-fn add_script_src_import(module: &mut ModuleInfo, source: &str) {
-    // Normalize bare filenames (e.g., `<script src="logic.ts">`) so the
-    // resolver treats them as file-relative references, not npm packages.
+fn add_script_src_import(module: &mut ModuleInfo, source: &str, source_span: Option<Span>) {
+    let span = source_span.unwrap_or_default();
     module.imports.push(ImportInfo {
         source: normalize_asset_url(source),
         imported_name: ImportedName::SideEffect,
         local_name: String::new(),
         is_type_only: false,
         from_style: false,
-        span: Span::default(),
-        source_span: Span::default(),
+        span,
+        source_span: span,
     });
 }
 
@@ -434,19 +655,16 @@ fn style_lang_is_css_like(lang: Option<&str>) -> bool {
 }
 
 fn merge_style_into_module(style: &SfcStyle, combined: &mut ModuleInfo) {
-    // <style src="./theme.scss"> is symmetric to <script src="...">: seed the
-    // referenced file as a side-effect import. The resolver still applies SCSS
-    // partial / include-path / node_modules fallbacks because `from_style` is
-    // set on the import.
     if let Some(src) = &style.src {
+        let span = style.src_span.unwrap_or_default();
         combined.imports.push(ImportInfo {
             source: normalize_asset_url(src),
             imported_name: ImportedName::SideEffect,
             local_name: String::new(),
             is_type_only: false,
             from_style: true,
-            span: Span::default(),
-            source_span: Span::default(),
+            span,
+            source_span: span,
         });
     }
 
@@ -458,6 +676,10 @@ fn merge_style_into_module(style: &SfcStyle, combined: &mut ModuleInfo) {
     }
 
     for source in crate::css::extract_css_import_sources(&style.body, is_scss) {
+        let source_span = Span::new(
+            style.byte_offset as u32 + source.span.start,
+            style.byte_offset as u32 + source.span.end,
+        );
         combined.imports.push(ImportInfo {
             source: source.normalized,
             imported_name: if source.is_plugin {
@@ -468,8 +690,8 @@ fn merge_style_into_module(style: &SfcStyle, combined: &mut ModuleInfo) {
             local_name: String::new(),
             is_type_only: false,
             from_style: true,
-            span: Span::default(),
-            source_span: Span::default(),
+            span: source_span,
+            source_span,
         });
     }
 }
@@ -504,20 +726,81 @@ fn apply_template_usage(
     source: &str,
     template_visible_imports: &FxHashSet<String>,
     template_visible_bound_targets: &FxHashMap<String, String>,
+    props_return_binding: Option<&str>,
     combined: &mut ModuleInfo,
 ) {
-    // The scan must run even when there are no imports or bound targets: a Nuxt
-    // page may reference only convention auto-imported components (`<Card001 />`)
-    // with no `import` statement, and those unmatched tags are captured for
-    // graph-build-time auto-import resolution. With empty imports the
-    // used-bindings / member-access / whole-object outputs stay empty, so the
-    // only added work is collecting unresolved tag names. See issue #704.
+    // Props are NOT imports, so the template scanner does not credit them by
+    // default. Thread the harvested prop names (and the `defineProps` return
+    // binding, so `props.<name>` template member accesses are emitted) in as an
+    // additional credited set alongside `template_visible_imports`. Crediting a
+    // prop name against an import is inert (no import binding shares the name),
+    // so the unused-import retain is unaffected.
+    let credited: FxHashSet<String> = if combined.component_props.is_empty() {
+        template_visible_imports.clone()
+    } else {
+        let mut set = template_visible_imports.clone();
+        for prop in &combined.component_props {
+            // Credit both the declared name (Vue exposes props by name in the
+            // template) and the destructure local (a renamed prop is used via it).
+            set.insert(prop.name.clone());
+            set.insert(prop.local.clone());
+        }
+        // Vue's implicit `$props` whole-props object is always available in a
+        // template; credit `$props.<name>` member accesses too.
+        set.insert("$props".to_string());
+        if let Some(binding) = props_return_binding {
+            set.insert(binding.to_string());
+        }
+        set
+    };
+
     let template_usage = collect_template_usage_with_bound_targets(
         kind,
         source,
-        template_visible_imports,
+        &credited,
         template_visible_bound_targets,
     );
+
+    // A template reference credits `used_in_template`: either a bare prop name in
+    // `used_bindings` (destructured prop form, or template uses the bare name) OR
+    // a `<props>.<name>` / `$props.<name>` member access (the
+    // `const props = defineProps()` form and Vue's implicit `$props`).
+    if !combined.component_props.is_empty() {
+        let member_used: FxHashSet<&str> = template_usage
+            .member_accesses
+            .iter()
+            .filter(|access| {
+                access.object == "$props"
+                    || props_return_binding.is_some_and(|binding| access.object == binding)
+            })
+            .map(|access| access.member.as_str())
+            .collect();
+        for prop in &mut combined.component_props {
+            if template_usage.used_bindings.contains(&prop.name)
+                || template_usage.used_bindings.contains(&prop.local)
+                || member_used.contains(prop.name.as_str())
+            {
+                prop.used_in_template = true;
+            }
+        }
+    }
+
+    // A custom-named `defineProps` return spread as a whole object in the template
+    // (`const myProps = defineProps(); <Child v-bind="myProps" />`) consumes every
+    // prop opaquely; the literal `props`/`$props`/`$attrs` regex misses a custom
+    // name. The scanner records a bare `v-bind="myProps"` value as a used binding
+    // (not a whole-object use), so a bare reference to the return binding in either
+    // set means abstain on the whole file.
+    if let Some(binding) = props_return_binding
+        && (template_usage.used_bindings.contains(binding)
+            || template_usage
+                .whole_object_uses
+                .iter()
+                .any(|used| used == binding))
+    {
+        combined.has_props_attrs_fallthrough = true;
+    }
+
     combined
         .unused_import_bindings
         .retain(|binding| !template_usage.used_bindings.contains(binding));
@@ -527,11 +810,73 @@ fn apply_template_usage(
     combined
         .whole_object_uses
         .extend(template_usage.whole_object_uses);
+    combined
+        .security_sinks
+        .extend(template_usage.security_sinks);
     if !template_usage.unresolved_tag_names.is_empty() {
         let mut names: Vec<String> = template_usage.unresolved_tag_names.into_iter().collect();
         names.sort_unstable();
         combined.auto_import_candidates.extend(names);
         combined.auto_import_candidates.dedup();
+    }
+}
+
+/// Credit emit events fired from the `<template>` (`@click="emit('close')"`,
+/// `@click="$emit('remove')"`, `:close="{ onClick: () => emit('close') }"`),
+/// which the script-only emit usage walk in `harvest_define_emits` cannot see.
+///
+/// Scans the template-only region (scripts/styles/comments masked) for
+/// [`TEMPLATE_EMIT_CALL_RE`]: a call whose callee is the harvested emit binding
+/// (`emit` / `emits` / whatever it was bound to) or the implicit `$emit` (always
+/// available in a Vue template regardless of `<script setup>` binding). A
+/// string-literal first arg credits the matching `ComponentEmit` as used; a
+/// non-literal first arg (a variable / template-literal) is a dynamic template
+/// emit whose event is unknowable, so the whole file abstains (`has_dynamic_emit`)
+/// to preserve the zero-FP doctrine.
+///
+/// Over-crediting is the safe direction (it only suppresses a finding), so a
+/// liberal raw-source scan is intentional here. The scan is byte-safe: the regex
+/// runs over the `&str` template and only reads captured-group text, never
+/// slicing at arbitrary byte offsets.
+fn apply_template_emit_usage(
+    source: &str,
+    emit_return_binding: Option<&str>,
+    combined: &mut ModuleInfo,
+) {
+    let masked = mask_non_markup_regions(source);
+    let mut used: FxHashSet<String> = FxHashSet::default();
+    let mut dynamic = false;
+
+    for caps in TEMPLATE_EMIT_CALL_RE.captures_iter(&masked) {
+        let Some(callee) = caps.get(1) else {
+            continue;
+        };
+        let callee = callee.as_str();
+        let is_emit_call =
+            callee == "$emit" || emit_return_binding.is_some_and(|binding| callee == binding);
+        if !is_emit_call {
+            continue;
+        }
+        if let Some(event) = caps.get(2).or_else(|| caps.get(3)) {
+            // String-literal first arg (single- or double-quoted): the event
+            // name. Credit it as used.
+            used.insert(event.as_str().to_string());
+        } else if caps.get(4).is_some() {
+            // Non-literal first arg (`$emit(someVar)`, `emit(\`x\`)`): the event
+            // cannot be known. Abstain on the whole file.
+            dynamic = true;
+        }
+    }
+
+    if dynamic {
+        combined.has_dynamic_emit = true;
+    }
+    if !used.is_empty() {
+        for emit in &mut combined.component_emits {
+            if used.contains(&emit.name) {
+                emit.used = true;
+            }
+        }
     }
 }
 
@@ -542,13 +887,9 @@ fn is_template_visible_script(kind: SfcKind, script: &SfcScript) -> bool {
     }
 }
 
-// SFC tests exercise regex-based HTML string extraction — no unsafe code,
-// no Miri-specific value. Oxc parser tests are additionally ~1000x slower.
 #[cfg(all(test, not(miri)))]
 mod tests {
     use super::*;
-
-    // ── is_sfc_file ──────────────────────────────────────────────
 
     #[test]
     fn is_sfc_file_vue() {
@@ -574,8 +915,6 @@ mod tests {
     fn is_sfc_file_rejects_astro() {
         assert!(!is_sfc_file(Path::new("Layout.astro")));
     }
-
-    // ── extract_sfc_scripts: single script block ─────────────────
 
     #[test]
     fn single_plain_script() {
@@ -611,8 +950,6 @@ mod tests {
         assert!(scripts[0].is_jsx);
     }
 
-    // ── Multiple script blocks ───────────────────────────────────
-
     #[test]
     fn two_script_blocks() {
         let source = r#"
@@ -629,8 +966,6 @@ const count = 0;
         assert!(scripts[1].body.contains("count"));
     }
 
-    // ── <script setup> ───────────────────────────────────────────
-
     #[test]
     fn script_setup_extracted() {
         let scripts =
@@ -639,8 +974,6 @@ const count = 0;
         assert!(scripts[0].body.contains("import"));
         assert!(scripts[0].is_typescript);
     }
-
-    // ── <script src="..."> external script ───────────────────────
 
     #[test]
     fn script_src_detected() {
@@ -656,8 +989,6 @@ const count = 0;
         assert_eq!(scripts.len(), 1);
         assert!(scripts[0].src.is_none());
     }
-
-    // ── HTML comment filtering ───────────────────────────────────
 
     #[test]
     fn script_inside_html_comment_filtered() {
@@ -685,7 +1016,6 @@ const count = 0;
 
     #[test]
     fn string_containing_comment_markers_not_corrupted() {
-        // A string in the script body containing <!-- should not cause filtering issues
         let source = r#"
 <script setup lang="ts">
 const marker = "<!-- not a comment -->";
@@ -696,8 +1026,6 @@ import { ref } from 'vue';
         assert_eq!(scripts.len(), 1);
         assert!(scripts[0].body.contains("import"));
     }
-
-    // ── Generic attributes with > in quoted values ───────────────
 
     #[test]
     fn generic_attr_with_angle_bracket() {
@@ -716,8 +1044,6 @@ import { ref } from 'vue';
         assert_eq!(scripts[0].body, "const x = 1;");
     }
 
-    // ── lang attribute with single quotes ────────────────────────
-
     #[test]
     fn lang_single_quoted() {
         let scripts = extract_sfc_scripts("<script lang='ts'>const x = 1;</script>");
@@ -725,16 +1051,12 @@ import { ref } from 'vue';
         assert!(scripts[0].is_typescript);
     }
 
-    // ── Case-insensitive matching ────────────────────────────────
-
     #[test]
     fn uppercase_script_tag() {
         let scripts = extract_sfc_scripts(r#"<SCRIPT lang="ts">const x = 1;</SCRIPT>"#);
         assert_eq!(scripts.len(), 1);
         assert!(scripts[0].is_typescript);
     }
-
-    // ── Edge cases ───────────────────────────────────────────────
 
     #[test]
     fn no_script_block() {
@@ -761,7 +1083,6 @@ import { ref } from 'vue';
         let source = r#"<template><div/></template><script lang="ts">code</script>"#;
         let scripts = extract_sfc_scripts(source);
         assert_eq!(scripts.len(), 1);
-        // The byte_offset should point to where "code" starts in the source
         let offset = scripts[0].byte_offset;
         assert_eq!(&source[offset..offset + 4], "code");
     }
@@ -776,8 +1097,6 @@ import { ref } from 'vue';
         assert!(scripts[0].src.is_none());
     }
 
-    // ── Full parse tests (Oxc parser ~1000x slower under Miri) ──
-
     #[test]
     fn multiple_script_blocks_exports_combined() {
         let source = r#"
@@ -790,21 +1109,17 @@ const count = ref(0);
 </script>
 "#;
         let info = parse_sfc_to_module(FileId(0), Path::new("Dual.vue"), source, 0, false);
-        // The non-setup block exports `version`
         assert!(
             info.exports
                 .iter()
                 .any(|e| matches!(&e.name, crate::ExportName::Named(n) if n == "version")),
             "export from <script> block should be extracted"
         );
-        // The setup block imports `ref` from 'vue'
         assert!(
             info.imports.iter().any(|i| i.source == "vue"),
             "import from <script setup> block should be extracted"
         );
     }
-
-    // ── lang="tsx" detection ────────────────────────────────────
 
     #[test]
     fn lang_tsx_detected_as_typescript_jsx() {
@@ -814,8 +1129,6 @@ const count = ref(0);
         assert!(scripts[0].is_typescript, "lang=tsx should be typescript");
         assert!(scripts[0].is_jsx, "lang=tsx should be jsx");
     }
-
-    // ── HTML comment filtering of script blocks ─────────────────
 
     #[test]
     fn multiline_html_comment_filters_all_script_blocks_inside() {
@@ -831,8 +1144,6 @@ const count = ref(0);
         assert_eq!(scripts.len(), 1);
         assert!(scripts[0].body.contains("good"));
     }
-
-    // ── <script src="..."> generates side-effect import ─────────
 
     #[test]
     fn script_src_generates_side_effect_import() {
@@ -851,8 +1162,6 @@ const count = ref(0);
             "script src should generate a side-effect import"
         );
     }
-
-    // ── Additional coverage ─────────────────────────────────────
 
     #[test]
     fn parse_sfc_no_script_returns_empty_module() {
@@ -933,7 +1242,6 @@ export const foo = 1;
 <script setup lang="ts">const b = 2;</script>"#;
         let scripts = extract_sfc_scripts(source);
         assert_eq!(scripts.len(), 2);
-        // Both scripts should have valid byte offsets
         let offset0 = scripts[0].byte_offset;
         let offset1 = scripts[1].byte_offset;
         assert_eq!(
@@ -948,15 +1256,12 @@ export const foo = 1;
 
     #[test]
     fn script_with_src_and_lang() {
-        // src + lang should both be detected
         let scripts = extract_sfc_scripts(r#"<script src="./logic.ts" lang="tsx"></script>"#);
         assert_eq!(scripts.len(), 1);
         assert_eq!(scripts[0].src.as_deref(), Some("./logic.ts"));
         assert!(scripts[0].is_typescript);
         assert!(scripts[0].is_jsx);
     }
-
-    // ── extract_sfc_styles (issue #195 Case B) ──
 
     #[test]
     fn extract_style_block_lang_scss() {
@@ -1064,7 +1369,6 @@ export const foo = 1;
 
     #[test]
     fn parse_sfc_skips_unsupported_style_lang_body_but_keeps_src() {
-        // <style lang="postcss"> body is NOT scanned (custom directives); src is still seeded.
         let info = parse_sfc_to_module(
             FileId(0),
             Path::new("Baz.vue"),
@@ -1079,6 +1383,80 @@ export const foo = 1;
         assert!(
             !info.imports.iter().any(|i| i.source.contains("skipped")),
             "postcss body should not be scanned for @import directives"
+        );
+    }
+
+    fn asset_refs(source: &str) -> Vec<String> {
+        super::collect_template_asset_refs(source)
+            .into_iter()
+            .map(|(s, _)| s)
+            .collect()
+    }
+
+    #[test]
+    fn captures_static_relative_template_asset_refs() {
+        assert_eq!(
+            asset_refs(r#"<template><img src="./logo.png" /></template>"#),
+            vec!["./logo.png".to_string()]
+        );
+        assert_eq!(
+            asset_refs(r#"<source src="../media/clip.mp4">"#),
+            vec!["../media/clip.mp4".to_string()]
+        );
+        assert_eq!(
+            asset_refs(r#"<video poster="./thumb.jpg"></video>"#),
+            vec!["./thumb.jpg".to_string()]
+        );
+    }
+
+    #[test]
+    fn skips_dynamic_alias_root_remote_and_query_asset_refs() {
+        // Dynamic bindings (Vue `:src`, `v-bind:src`, Svelte `bind:src` / `src={}`).
+        assert!(asset_refs(r#"<img :src="logo" />"#).is_empty());
+        assert!(asset_refs(r#"<img v-bind:src="logo" />"#).is_empty());
+        assert!(asset_refs(r#"<img bind:src="logo" />"#).is_empty());
+        assert!(asset_refs(r"<img src={logo} />").is_empty());
+        assert!(asset_refs(r#"<img data-src="./x.png" />"#).is_empty());
+        // Alias-prefixed, root-relative, remote, bare: not plain relative literals.
+        assert!(asset_refs(r#"<img src="@/assets/x.png" />"#).is_empty());
+        assert!(asset_refs(r#"<img src="/logo.png" />"#).is_empty());
+        assert!(asset_refs(r#"<img src="https://cdn/x.png" />"#).is_empty());
+        // Query / hash suffix abstains (the resolver cannot verify them).
+        assert!(asset_refs(r#"<img src="./x.png?inline" />"#).is_empty());
+        // Interpolated value abstains.
+        assert!(asset_refs(r#"<img src="{{ logo }}" />"#).is_empty());
+    }
+
+    #[test]
+    fn skips_custom_component_src_prop() {
+        // A custom component's `src` PROP must never be read as an asset edge.
+        assert!(asset_refs(r#"<MyImage src="./x.png" />"#).is_empty());
+        assert!(asset_refs(r#"<AppIcon src="../icons/y.svg" />"#).is_empty());
+    }
+
+    #[test]
+    fn skips_asset_refs_inside_script_style_and_comments() {
+        // Masked regions must not contribute asset refs.
+        assert!(asset_refs(r#"<script>const x = "<img src='./a.png'>"</script>"#).is_empty());
+        assert!(asset_refs(r#"<style>/* <img src="./b.png"> */ .x{}</style>"#).is_empty());
+        assert!(asset_refs(r#"<!-- <img src="./c.png" /> -->"#).is_empty());
+    }
+
+    #[test]
+    fn parse_sfc_emits_template_asset_as_side_effect_import() {
+        let info = parse_sfc_to_module(
+            FileId(0),
+            Path::new("Hero.vue"),
+            r#"<template><img src="./hero.png" /></template><script>let x=1</script>"#,
+            0,
+            false,
+        );
+        assert!(
+            info.imports.iter().any(|i| i.source == "./hero.png"
+                && matches!(i.imported_name, ImportedName::SideEffect)
+                && !i.from_style),
+            "template <img src> should seed a SideEffect import: {:?}",
+            info.imports
         );
     }
 }

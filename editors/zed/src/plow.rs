@@ -9,7 +9,7 @@ use zed_extension_api::{
 };
 
 const LANGUAGE_SERVER_ID: &str = "plow";
-const RELEASE_REPOSITORY: &str = "plow-rs/plow";
+const RELEASE_REPOSITORY: &str = "fglogan/genesis-plow";
 const BINARY_BASENAME: &str = "plow-lsp";
 const MANAGED_DIR_PREFIX: &str = "plow-";
 const SIGNATURE_SUFFIX: &str = ".sig";

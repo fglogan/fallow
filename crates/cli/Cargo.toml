@@ -39,7 +39,7 @@ test-sidecar-key = []
 # single `JsonSchema` document covering health alongside the rest of the
 # output contract. Strictly additive: non-schema builds pay zero compile cost
 # because every derive is gated behind `#[cfg_attr(feature = "schema", ...)]`.
-schema = ["dep:schemars"]
+schema = ["dep:schemars", "plow-types/schema"]
 # Build-only feature that enables the `plow-schema-emit` binary, which
 # regenerates `docs/output-schema.json` from the Rust source of truth. Pulls in
 # schemars across the workspace via the per-crate `schema` features. Not part
@@ -55,9 +55,9 @@ schema-emit = [
 plow-core = { workspace = true }
 plow-config = { workspace = true }
 plow-types = { workspace = true }
-plow-v8-coverage = { version = "2.84.0", path = "../v8-coverage" }
-fallow-cov-protocol = "0.8"
-plow-license = { version = "2.84.0", path = "../license" }
+plow-v8-coverage = { version = "2.96.0", path = "../v8-coverage" }
+plow-cov-protocol = { package = "fallow-cov-protocol", version = "0.8" }
+plow-license = { version = "2.96.0", path = "../license" }
 ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 clap = { workspace = true }
 dunce = { workspace = true }
@@ -67,6 +67,7 @@ colored = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml_ng = { workspace = true }
+semver = { workspace = true }
 bitcode = { workspace = true }
 jsonc-parser = { workspace = true }
 tracing = { workspace = true }
@@ -77,7 +78,7 @@ tempfile = { workspace = true }
 miette = { workspace = true, features = ["fancy"] }
 rustc-hash = { workspace = true }
 oxc_coverage_instrument = { workspace = true }
-srcmap-sourcemap = "0.3.6"
+srcmap-sourcemap = "=0.3.7"
 httpdate = { workspace = true }
 ureq = { workspace = true }
 url = "2"
@@ -112,7 +113,7 @@ proc-macro2 = { version = "1", features = ["span-locations"] }
 syn = { version = "2", features = ["full"] }
 base64 = "0.22"
 ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
-fallow-cov-protocol = "0.8"
+plow-cov-protocol = { package = "fallow-cov-protocol", version = "0.8" }
 serde_yaml_ng = { workspace = true }
 
 [package.metadata.cargo-shear]

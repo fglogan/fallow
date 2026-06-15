@@ -17,7 +17,15 @@ use crate::mdx::{is_mdx_file, parse_mdx_to_module};
 use crate::sfc::{is_sfc_file, parse_sfc_to_module};
 use crate::visitor::ModuleInfoExtractor;
 use plow_types::discover::FileId;
-use plow_types::extract::{ImportInfo, VisibilityTag};
+use plow_types::extract::{FlagUse, FunctionComplexity, ImportInfo, VisibilityTag};
+
+struct JsxRetryParse {
+    extractor: ModuleInfoExtractor,
+    semantic_usage: SemanticUsage,
+    complexity: Vec<FunctionComplexity>,
+    flag_uses: Vec<FlagUse>,
+    parsed_suppressions: crate::suppress::ParsedSuppressions,
+}
 
 fn source_type_for_path(path: &Path) -> SourceType {
     match path.extension().and_then(|ext| ext.to_str()) {
@@ -42,10 +50,8 @@ pub fn parse_source_to_module(
 ) -> ModuleInfo {
     let mut module =
         parse_source_to_module_inner(file_id, path, source, content_hash, need_complexity);
-    // Scan the raw markup for static Iconify icon strings so the analysis layer
-    // can credit `@iconify-json/<prefix>` packages. One regex pass over
-    // markup/JSX file kinds only; no-op for other kinds. See issue #608.
     module.iconify_prefixes = crate::iconify::extract_iconify_prefixes(path, source);
+    module.iconify_icon_names = crate::iconify::extract_iconify_icon_names(path, source);
     module
 }
 
@@ -56,35 +62,11 @@ fn parse_source_to_module_inner(
     content_hash: u64,
     need_complexity: bool,
 ) -> ModuleInfo {
-    // Defense in depth: production entry points (`parse_single_file_cached`,
-    // `parse_single_file`, `parse_from_content`) already strip the BOM before
-    // hashing and before this call, so the strip here is a no-op on the hot
-    // path. Out-of-tree callers (fuzzers, integration fixtures, future
-    // embedders) that construct source manually still get the same alignment
-    // guarantee with no extra work. Issue #475.
     let source = crate::strip_bom(source);
-    if is_sfc_file(path) {
-        return parse_sfc_to_module(file_id, path, source, content_hash, need_complexity);
-    }
-    if is_astro_file(path) {
-        return parse_astro_to_module(file_id, source, content_hash);
-    }
-    if is_mdx_file(path) {
-        return parse_mdx_to_module(file_id, source, content_hash);
-    }
-    if is_css_file(path) {
-        return parse_css_to_module(file_id, path, source, content_hash);
-    }
-    if is_graphql_file(path) {
-        return parse_graphql_to_module(file_id, source, content_hash);
-    }
-    if is_html_file(path) {
-        return parse_html_to_module_with_complexity(
-            file_id,
-            source,
-            content_hash,
-            need_complexity,
-        );
+    if let Some(module) =
+        parse_non_js_source_to_module(file_id, path, source, content_hash, need_complexity)
+    {
+        return module;
     }
 
     let stripped_glimmer_source = is_glimmer_file(path)
@@ -95,40 +77,24 @@ fn parse_source_to_module_inner(
     let allocator = Allocator::default();
     let parser_return = Parser::new(&allocator, parser_source, source_type).parse();
 
-    // Parse suppression comments from AST comments initially;
-    // re-parsed from retry comments below if JSX retry succeeds.
     let mut parsed_suppressions =
         crate::suppress::parse_suppressions(&parser_return.program.comments, source);
 
-    // Extract imports/exports even if there are parse errors
     let mut extractor = ModuleInfoExtractor::new();
     extractor.visit_program(&parser_return.program);
     extractor.resolve_pending_local_export_specifiers();
 
-    // For `.gts` / `.gjs` files, scan `<template>` blocks against the captured
-    // imports and fold the result into the extractor BEFORE `oxc_semantic`
-    // runs: member accesses are pushed onto `extractor.member_accesses` (same
-    // path Angular uses for inline templates in `visit_class`), and
-    // template-credited binding names flow into `compute_import_binding_usage`
-    // as a skip-set so they never enter the `unused` vector in the first
-    // place. The `apply_*` post-construction mutation that used to live here
-    // is gone. All state now flows through the extractor.
-    let mut template_used_imports =
+    let template_used_imports =
         collect_glimmer_template_into_extractor(&mut extractor, path, source);
 
-    // Track unused imports plus whether each binding is referenced as a type,
-    // a runtime value, or both.
-    let mut import_binding_usage = compute_import_binding_usage(
+    let mut semantic_usage = compute_semantic_usage(
         &parser_return.program,
         &extractor.imports,
         &template_used_imports,
     );
 
-    // Line offsets are always needed (error location reporting in analysis).
     let line_offsets = plow_types::extract::compute_line_offsets(source);
 
-    // Per-function complexity metrics: only computed when the caller needs them
-    // (e.g. the `health` command).  The dead-code pipeline never reads this.
     let mut complexity = if need_complexity {
         crate::complexity::compute_complexity(&parser_return.program, parser_source, &line_offsets)
     } else {
@@ -142,8 +108,6 @@ fn parse_source_to_module_inner(
         );
     }
 
-    // Feature flag detection: always extracted (lightweight pattern matching).
-    // Custom SDK patterns/env prefixes are applied post-parse via config.
     let mut flag_uses = crate::flags::extract_flags(
         &parser_return.program,
         &line_offsets,
@@ -152,75 +116,28 @@ fn parse_source_to_module_inner(
         false, // config object heuristics off at parse time (opt-in via config)
     );
 
-    // If parsing produced very few results relative to source size (likely parse errors
-    // from Flow types or JSX in .js files), retry with JSX/TSX source type as a fallback.
     let total_extracted =
         extractor.exports.len() + extractor.imports.len() + extractor.re_exports.len();
-    let mut used_retry = false;
-    if total_extracted == 0 && source.len() > 100 && !source_type.is_jsx() {
-        let jsx_type = if source_type.is_typescript() {
-            SourceType::tsx()
-        } else {
-            SourceType::jsx()
-        };
-        let allocator2 = Allocator::default();
-        let retry_return = Parser::new(&allocator2, parser_source, jsx_type).parse();
-        let mut retry_extractor = ModuleInfoExtractor::new();
-        retry_extractor.visit_program(&retry_return.program);
-        retry_extractor.resolve_pending_local_export_specifiers();
-        let retry_total = retry_extractor.exports.len()
-            + retry_extractor.imports.len()
-            + retry_extractor.re_exports.len();
-        if retry_total > total_extracted {
-            // The JSX retry replaced the import list, so re-fold the Glimmer
-            // template scan against the retry extractor's imports before
-            // recomputing binding usage. Templates themselves are
-            // parser-agnostic, but `template_used_imports` is keyed by the
-            // import names visible to the current extractor.
-            template_used_imports =
-                collect_glimmer_template_into_extractor(&mut retry_extractor, path, source);
-            import_binding_usage = compute_import_binding_usage(
-                &retry_return.program,
-                &retry_extractor.imports,
-                &template_used_imports,
-            );
-            // Recompute complexity from the successful retry parse (only if requested)
-            if need_complexity {
-                complexity = crate::complexity::compute_complexity(
-                    &retry_return.program,
-                    parser_source,
-                    &line_offsets,
-                );
-                append_inline_template_complexity(
-                    &mut complexity,
-                    &retry_extractor.inline_template_findings,
-                    &line_offsets,
-                );
-            }
-            // Recompute flag extraction from the successful retry parse
-            flag_uses =
-                crate::flags::extract_flags(&retry_return.program, &line_offsets, &[], &[], false);
-            // Re-parse suppressions from the retry's comments (not the original failed parse)
-            parsed_suppressions =
-                crate::suppress::parse_suppressions(&retry_return.program.comments, source);
-            // Apply visibility tags from the retry parse's comments (not the original failed parse)
-            apply_jsdoc_visibility_tags(
-                &mut retry_extractor.exports,
-                &retry_return.program.comments,
-                source,
-            );
-            // Extract JSDoc `import()` type references from the retry parse's comments
-            extract_jsdoc_import_types(
-                &mut retry_extractor.imports,
-                &retry_return.program.comments,
-                source,
-            );
-            extractor = retry_extractor;
-            used_retry = true;
-        }
-    }
+    let retry_input = JsxRetryInput {
+        path,
+        source,
+        parser_source,
+        source_type,
+        total_extracted,
+        need_complexity,
+        line_offsets: &line_offsets,
+    };
+    let used_retry = if let Some(retry) = parse_with_jsx_retry(&retry_input) {
+        extractor = retry.extractor;
+        semantic_usage = retry.semantic_usage;
+        complexity = retry.complexity;
+        flag_uses = retry.flag_uses;
+        parsed_suppressions = retry.parsed_suppressions;
+        true
+    } else {
+        false
+    };
 
-    // Apply JSDoc visibility tags from the original parse (skip if retry was used above)
     if !used_retry {
         apply_jsdoc_visibility_tags(
             &mut extractor.exports,
@@ -235,14 +152,142 @@ fn parse_source_to_module_inner(
     }
 
     let mut info = extractor.into_module_info(file_id, content_hash, parsed_suppressions);
-    info.unused_import_bindings = import_binding_usage.unused;
-    info.type_referenced_import_bindings = import_binding_usage.type_referenced;
-    info.value_referenced_import_bindings = import_binding_usage.value_referenced;
+    info.unused_import_bindings = semantic_usage.import_binding_usage.unused;
+    info.type_referenced_import_bindings = semantic_usage.import_binding_usage.type_referenced;
+    info.value_referenced_import_bindings = semantic_usage.import_binding_usage.value_referenced;
+    info.auto_import_candidates = semantic_usage.auto_import_candidates;
     info.line_offsets = line_offsets;
     info.complexity = complexity;
     info.flag_uses = flag_uses;
 
     info
+}
+
+struct JsxRetryInput<'a> {
+    path: &'a Path,
+    source: &'a str,
+    parser_source: &'a str,
+    source_type: SourceType,
+    total_extracted: usize,
+    need_complexity: bool,
+    line_offsets: &'a [u32],
+}
+
+fn parse_with_jsx_retry(input: &JsxRetryInput<'_>) -> Option<JsxRetryParse> {
+    if input.total_extracted != 0 || input.source.len() <= 100 || input.source_type.is_jsx() {
+        return None;
+    }
+
+    let jsx_type = if input.source_type.is_typescript() {
+        SourceType::tsx()
+    } else {
+        SourceType::jsx()
+    };
+    let allocator = Allocator::default();
+    let retry_return = Parser::new(&allocator, input.parser_source, jsx_type).parse();
+    let mut extractor = ModuleInfoExtractor::new();
+    extractor.visit_program(&retry_return.program);
+    extractor.resolve_pending_local_export_specifiers();
+    let retry_total =
+        extractor.exports.len() + extractor.imports.len() + extractor.re_exports.len();
+    if retry_total <= input.total_extracted {
+        return None;
+    }
+
+    let template_used_imports =
+        collect_glimmer_template_into_extractor(&mut extractor, input.path, input.source);
+    let semantic_usage = compute_semantic_usage(
+        &retry_return.program,
+        &extractor.imports,
+        &template_used_imports,
+    );
+    let complexity = retry_complexity(
+        input.need_complexity,
+        &retry_return.program,
+        input.parser_source,
+        input.line_offsets,
+        &extractor,
+    );
+    let flag_uses =
+        crate::flags::extract_flags(&retry_return.program, input.line_offsets, &[], &[], false);
+    let parsed_suppressions =
+        crate::suppress::parse_suppressions(&retry_return.program.comments, input.source);
+    apply_jsdoc_visibility_tags(
+        &mut extractor.exports,
+        &retry_return.program.comments,
+        input.source,
+    );
+    extract_jsdoc_import_types(
+        &mut extractor.imports,
+        &retry_return.program.comments,
+        input.source,
+    );
+    Some(JsxRetryParse {
+        extractor,
+        semantic_usage,
+        complexity,
+        flag_uses,
+        parsed_suppressions,
+    })
+}
+
+fn retry_complexity(
+    need_complexity: bool,
+    program: &Program<'_>,
+    parser_source: &str,
+    line_offsets: &[u32],
+    extractor: &ModuleInfoExtractor,
+) -> Vec<FunctionComplexity> {
+    if !need_complexity {
+        return Vec::new();
+    }
+    let mut complexity =
+        crate::complexity::compute_complexity(program, parser_source, line_offsets);
+    append_inline_template_complexity(
+        &mut complexity,
+        &extractor.inline_template_findings,
+        line_offsets,
+    );
+    complexity
+}
+
+fn parse_non_js_source_to_module(
+    file_id: FileId,
+    path: &Path,
+    source: &str,
+    content_hash: u64,
+    need_complexity: bool,
+) -> Option<ModuleInfo> {
+    if is_sfc_file(path) {
+        return Some(parse_sfc_to_module(
+            file_id,
+            path,
+            source,
+            content_hash,
+            need_complexity,
+        ));
+    }
+    if is_astro_file(path) {
+        return Some(parse_astro_to_module(file_id, source, content_hash));
+    }
+    if is_mdx_file(path) {
+        return Some(parse_mdx_to_module(file_id, source, content_hash));
+    }
+    if is_css_file(path) {
+        return Some(parse_css_to_module(file_id, path, source, content_hash));
+    }
+    if is_graphql_file(path) {
+        return Some(parse_graphql_to_module(file_id, source, content_hash));
+    }
+    if is_html_file(path) {
+        return Some(parse_html_to_module_with_complexity(
+            file_id,
+            source,
+            content_hash,
+            need_complexity,
+        ));
+    }
+    None
 }
 
 /// Scan Glimmer `<template>...</template>` blocks in a `.gts` / `.gjs` file
@@ -281,11 +326,6 @@ fn collect_glimmer_template_into_extractor(
         return FxHashSet::default();
     }
 
-    // Collect import-binding names even if the set ends up empty: the scanner
-    // also emits `this.<member>` accesses that don't depend on imports, so a
-    // class component with no module-scope imports whose template wires
-    // arrow-function fields into a child (`<Child @on={{this.handle}} />`)
-    // still needs its member accesses recorded.
     let imported_bindings: FxHashSet<String> = extractor
         .imports
         .iter()
@@ -345,8 +385,6 @@ fn apply_jsdoc_visibility_tags(exports: &mut [ExportInfo], comments: &[Comment],
         return;
     }
 
-    // Collect byte offsets where visibility JSDoc comments attach, with tag.
-    // Priority: Public > Internal > Alpha > Beta (if multiple tags on one comment).
     let mut tag_offsets: Vec<(u32, VisibilityTag)> = Vec::new();
     for comment in comments {
         if comment.is_jsdoc() {
@@ -380,18 +418,15 @@ fn apply_jsdoc_visibility_tags(exports: &mut [ExportInfo], comments: &[Comment],
     tag_offsets.sort_unstable_by_key(|&(offset, _)| offset);
 
     for export in exports.iter_mut() {
-        // Skip synthetic exports (re-export entries with span 0..0)
         if export.span.start == 0 && export.span.end == 0 {
             continue;
         }
 
-        // Check for exact match first (e.g., `export default` where span = decl span)
         if let Ok(idx) = tag_offsets.binary_search_by_key(&export.span.start, |&(o, _)| o) {
             export.visibility = tag_offsets[idx].1;
             continue;
         }
 
-        // Find the largest tagged offset that is <= this export's span start
         let idx = tag_offsets.partition_point(|&(o, _)| o <= export.span.start);
         if idx > 0 {
             let (offset, tag) = tag_offsets[idx - 1];
@@ -399,9 +434,6 @@ fn apply_jsdoc_visibility_tags(exports: &mut [ExportInfo], comments: &[Comment],
             let export_start = export.span.start as usize;
             if offset < export_start && export_start <= source.len() {
                 let between = &source[offset..export_start];
-                // Validate: the text between the comment attachment and the identifier
-                // should be a clean export preamble (e.g., "export const ") with no
-                // statement boundaries separating them.
                 if between.starts_with("export") && !between.contains(';') && !between.contains('}')
                 {
                     export.visibility = tag;
@@ -481,7 +513,8 @@ const fn is_ident_char(b: u8) -> bool {
 ///
 /// All JSDoc tag contexts (`@param`, `@returns`, `@type`, `@typedef`,
 /// `@callback`, etc.) use the same `{type}` annotation syntax, so scanning
-/// the full comment body covers every call site in a single pass.
+/// type-bearing brace groups covers every call site without treating prose
+/// examples as imports.
 fn extract_jsdoc_import_types(imports: &mut Vec<ImportInfo>, comments: &[Comment], source: &str) {
     if comments.is_empty() {
         return;
@@ -512,12 +545,16 @@ fn scan_jsdoc_imports_in(body: &str, imports: &mut Vec<ImportInfo>) {
     let bytes = body.as_bytes();
     let mut cursor = 0;
     while let Some(rel) = body[cursor..].find("import(") {
-        let open = cursor + rel + "import(".len();
+        let import_pos = cursor + rel;
+        if !is_inside_jsdoc_type_brace_group(bytes, import_pos) {
+            cursor = import_pos + "import(".len();
+            continue;
+        }
+        let open = import_pos + "import(".len();
         cursor = open;
         if open >= bytes.len() {
             break;
         }
-        // Skip whitespace between `(` and the quote.
         let mut i = open;
         while i < bytes.len() && bytes[i].is_ascii_whitespace() {
             i += 1;
@@ -539,7 +576,6 @@ fn scan_jsdoc_imports_in(body: &str, imports: &mut Vec<ImportInfo>) {
             cursor = path_end + 1;
             continue;
         }
-        // Walk past the closing quote, optional whitespace, and the `)`.
         let mut j = path_end + 1;
         while j < bytes.len() && bytes[j].is_ascii_whitespace() {
             j += 1;
@@ -549,14 +585,11 @@ fn scan_jsdoc_imports_in(body: &str, imports: &mut Vec<ImportInfo>) {
             continue;
         }
         j += 1;
-        // Optional whitespace before `.`.
         while j < bytes.len() && bytes[j].is_ascii_whitespace() {
             j += 1;
         }
         cursor = j;
         if j >= bytes.len() || bytes[j] != b'.' {
-            // `import('./x')` with no member access: treat as side-effect-style
-            // reachability hint (still useful to keep the file reachable).
             imports.push(ImportInfo {
                 source: path.to_string(),
                 imported_name: plow_types::extract::ImportedName::SideEffect,
@@ -569,7 +602,6 @@ fn scan_jsdoc_imports_in(body: &str, imports: &mut Vec<ImportInfo>) {
             continue;
         }
         j += 1;
-        // Parse the member identifier (first segment only).
         let name_start = j;
         while j < bytes.len() && is_ident_char(bytes[j]) {
             j += 1;
@@ -591,20 +623,137 @@ fn scan_jsdoc_imports_in(body: &str, imports: &mut Vec<ImportInfo>) {
     }
 }
 
+/// Returns true when byte index `pos` falls inside a JSDoc type-expression
+/// brace group. Prose examples can contain ordinary JavaScript braces, so the
+/// enclosing brace must be tied to a JSDoc type tag.
+fn is_inside_jsdoc_type_brace_group(body: &[u8], pos: usize) -> bool {
+    let Some(open_brace) = enclosing_jsdoc_brace_start(body, pos) else {
+        return false;
+    };
+
+    let prefix = line_prefix_before(body, open_brace);
+    if jsdoc_line_prefix_has_type_tag(prefix) {
+        return true;
+    }
+
+    strip_jsdoc_line_prefix(prefix).is_empty()
+        && preceding_jsdoc_line_has_type_tag(body, open_brace)
+        && has_only_jsdoc_spacing_between(body, open_brace + 1, pos)
+}
+
+fn enclosing_jsdoc_brace_start(body: &[u8], pos: usize) -> Option<usize> {
+    let mut stack = Vec::new();
+    let limit = pos.min(body.len());
+    for (idx, &b) in body[..limit].iter().enumerate() {
+        match b {
+            b'{' => stack.push(idx),
+            b'}' => {
+                stack.pop();
+            }
+            _ => {}
+        }
+    }
+    stack.pop()
+}
+
+fn line_prefix_before(body: &[u8], pos: usize) -> &str {
+    let start = body[..pos]
+        .iter()
+        .rposition(|&b| b == b'\n')
+        .map_or(0, |idx| idx + 1);
+    std::str::from_utf8(&body[start..pos]).unwrap_or_default()
+}
+
+fn strip_jsdoc_line_prefix(prefix: &str) -> &str {
+    let trimmed = prefix.trim_start();
+    trimmed
+        .strip_prefix('*')
+        .map_or(trimmed, |rest| rest.trim_start())
+}
+
+fn jsdoc_line_prefix_has_type_tag(prefix: &str) -> bool {
+    const TYPE_TAGS: [&str; 17] = [
+        "@arg",
+        "@argument",
+        "@augments",
+        "@callback",
+        "@enum",
+        "@extends",
+        "@implements",
+        "@param",
+        "@property",
+        "@prop",
+        "@return",
+        "@returns",
+        "@satisfies",
+        "@template",
+        "@this",
+        "@type",
+        "@typedef",
+    ];
+
+    let prefix = strip_jsdoc_line_prefix(prefix);
+    TYPE_TAGS
+        .iter()
+        .any(|tag| contains_bare_jsdoc_tag(prefix, tag))
+}
+
+fn contains_bare_jsdoc_tag(text: &str, tag: &str) -> bool {
+    for (idx, _) in text.match_indices(tag) {
+        let after = idx + tag.len();
+        if after >= text.len() || !is_ident_char(text.as_bytes()[after]) {
+            return true;
+        }
+    }
+    false
+}
+
+fn preceding_jsdoc_line_has_type_tag(body: &[u8], pos: usize) -> bool {
+    let Some(line_end) = body[..pos].iter().rposition(|&b| b == b'\n') else {
+        return false;
+    };
+
+    let line_start = body[..line_end]
+        .iter()
+        .rposition(|&b| b == b'\n')
+        .map_or(0, |idx| idx + 1);
+
+    std::str::from_utf8(&body[line_start..line_end]).is_ok_and(jsdoc_line_prefix_has_type_tag)
+}
+
+fn has_only_jsdoc_spacing_between(body: &[u8], start: usize, end: usize) -> bool {
+    let mut at_line_start = true;
+    let mut i = start.min(body.len());
+    let end = end.min(body.len());
+    while i < end {
+        match body[i] {
+            b'\n' => {
+                at_line_start = true;
+                i += 1;
+            }
+            b'\r' | b'\t' | b' ' => {
+                i += 1;
+            }
+            b'*' if at_line_start => {
+                at_line_start = false;
+                i += 1;
+            }
+            _ => return false,
+        }
+    }
+    true
+}
+
 /// Check if a JSDoc comment body contains a `@public` or `@api public` tag.
 fn has_public_tag(comment_text: &str) -> bool {
-    // Check for @public (standalone tag, not part of another word)
     for (i, _) in comment_text.match_indices("@public") {
         let after = i + "@public".len();
-        // Must not be followed by an identifier char (alphanumeric or _)
         if after >= comment_text.len() || !is_ident_char(comment_text.as_bytes()[after]) {
             return true;
         }
     }
-    // Check for @api public (TSDoc convention)
     for (i, _) in comment_text.match_indices("@api") {
         let after = i + "@api".len();
-        // @api must be a standalone tag (not @apipublic, @api_foo)
         if after < comment_text.len() && !is_ident_char(comment_text.as_bytes()[after]) {
             let rest = comment_text[after..].trim_start();
             if rest.starts_with("public") {
@@ -625,34 +774,19 @@ pub struct ImportBindingUsage {
     pub value_referenced: Vec<String>,
 }
 
-/// Use `oxc_semantic` to summarize how import bindings are referenced in the file.
-///
-/// An import like `import { foo } from './utils'` where `foo` is never used
-/// anywhere in the file should not count as a reference to the `foo` export.
-/// This improves unused-export detection precision.
-///
-/// `template_used` lets framework template scanners (Glimmer `<template>`
-/// blocks today; Vue/Svelte SFCs will follow) credit imports referenced only
-/// in markup that `oxc_semantic` cannot see. Names in the set are filtered
-/// out of the `unused` result before it is built. Pass `&FxHashSet::default()`
-/// when no template scan applies.
-///
-/// Note: `get_resolved_references` counts both value-context and type-context
-/// references. A value import used only as a type annotation (`const x: Foo`)
-/// will have a type-position reference and will NOT appear in the unused list.
-/// This is correct: `import { Foo }` (without `type`) may be needed at runtime.
-pub fn compute_import_binding_usage(
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct SemanticUsage {
+    pub import_binding_usage: ImportBindingUsage,
+    pub auto_import_candidates: Vec<String>,
+}
+
+pub fn compute_semantic_usage(
     program: &Program<'_>,
     imports: &[ImportInfo],
     template_used: &rustc_hash::FxHashSet<String>,
-) -> ImportBindingUsage {
+) -> SemanticUsage {
     use oxc_semantic::SemanticBuilder;
     use rustc_hash::FxHashSet;
-
-    // Skip files with no imports
-    if imports.is_empty() {
-        return ImportBindingUsage::default();
-    }
 
     let semantic_ret = SemanticBuilder::new().build(program);
     let semantic = semantic_ret.semantic;
@@ -663,11 +797,9 @@ pub fn compute_import_binding_usage(
     let mut type_referenced_bindings: FxHashSet<String> = FxHashSet::default();
     let mut value_referenced_bindings: FxHashSet<String> = FxHashSet::default();
     for import in imports {
-        // Side-effect imports have no binding
         if import.local_name.is_empty() {
             continue;
         }
-        // Look up the import binding in the module scope
         let name = oxc_str::Ident::from(import.local_name.as_str());
         if let Some(symbol_id) = scoping.get_binding(root_scope, name) {
             let mut has_references = false;
@@ -681,8 +813,6 @@ pub fn compute_import_binding_usage(
             }
 
             if !has_references {
-                // Templates may credit a binding the JS semantic pass can't
-                // see, so skip it instead of flagging it unused.
                 if !template_used.contains(&import.local_name) {
                     unused.push(import.local_name.clone());
                 }
@@ -707,21 +837,75 @@ pub fn compute_import_binding_usage(
         value_referenced_bindings.into_iter().collect();
     value_referenced_bindings.sort_unstable();
 
-    ImportBindingUsage {
-        unused,
-        type_referenced: type_referenced_bindings,
-        value_referenced: value_referenced_bindings,
+    SemanticUsage {
+        import_binding_usage: ImportBindingUsage {
+            unused,
+            type_referenced: type_referenced_bindings,
+            value_referenced: value_referenced_bindings,
+        },
+        auto_import_candidates: compute_auto_import_candidates_from_semantic(scoping),
     }
+}
+
+pub fn compute_auto_import_candidates(program: &Program<'_>) -> Vec<String> {
+    use oxc_semantic::SemanticBuilder;
+
+    let semantic_ret = SemanticBuilder::new().build(program);
+    let semantic = semantic_ret.semantic;
+    compute_auto_import_candidates_from_semantic(semantic.scoping())
+}
+
+fn compute_auto_import_candidates_from_semantic(scoping: &oxc_semantic::Scoping) -> Vec<String> {
+    use rustc_hash::FxHashSet;
+
+    let mut candidates: FxHashSet<String> = FxHashSet::default();
+    for (name, reference_ids) in scoping.root_unresolved_references() {
+        if reference_ids
+            .iter()
+            .any(|reference_id| scoping.get_reference(*reference_id).is_value())
+        {
+            candidates.insert(name.as_str().to_string());
+        }
+    }
+
+    let mut candidates: Vec<String> = candidates.into_iter().collect();
+    candidates.sort_unstable();
+    candidates
+}
+
+/// Use `oxc_semantic` to summarize how import bindings are referenced in the file.
+///
+/// An import like `import { foo } from './utils'` where `foo` is never used
+/// anywhere in the file should not count as a reference to the `foo` export.
+/// This improves unused-export detection precision.
+///
+/// `template_used` lets framework template scanners (Glimmer `<template>`
+/// blocks today; Vue/Svelte SFCs will follow) credit imports referenced only
+/// in markup that `oxc_semantic` cannot see. Names in the set are filtered
+/// out of the `unused` result before it is built. Pass `&FxHashSet::default()`
+/// when no template scan applies.
+///
+/// Note: `get_resolved_references` counts both value-context and type-context
+/// references. A value import used only as a type annotation (`const x: Foo`)
+/// will have a type-position reference and will NOT appear in the unused list.
+/// This is correct: `import { Foo }` (without `type`) may be needed at runtime.
+pub fn compute_import_binding_usage(
+    program: &Program<'_>,
+    imports: &[ImportInfo],
+    template_used: &rustc_hash::FxHashSet<String>,
+) -> ImportBindingUsage {
+    compute_semantic_usage(program, imports, template_used).import_binding_usage
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        has_alpha_tag, has_beta_tag, has_internal_tag, has_public_tag, scan_jsdoc_imports_in,
+        has_alpha_tag, has_beta_tag, has_internal_tag, has_public_tag, parse_source_to_module,
+        scan_jsdoc_imports_in,
     };
+    use plow_types::discover::FileId;
     use plow_types::extract::{ImportInfo, ImportedName};
-
-    // ── has_public_tag ────────────────────────────────────────────
+    use std::path::Path;
 
     #[test]
     fn has_public_tag_matches_bare_tag() {
@@ -748,8 +932,6 @@ mod tests {
         assert!(!has_public_tag(" * public"));
     }
 
-    // ── has_internal_tag ──────────────────────────────────────────
-
     #[test]
     fn has_internal_tag_matches_bare_tag() {
         assert!(has_internal_tag(" * @internal"));
@@ -765,8 +947,6 @@ mod tests {
         assert!(!has_internal_tag(" * internal"));
     }
 
-    // ── has_beta_tag ─────────────────────────────────────────────
-
     #[test]
     fn has_beta_tag_matches_bare_tag() {
         assert!(has_beta_tag(" * @beta"));
@@ -781,8 +961,6 @@ mod tests {
     fn has_beta_tag_rejects_missing_at() {
         assert!(!has_beta_tag(" * beta"));
     }
-
-    // ── has_alpha_tag ─────────────────────────────────────────────
 
     #[test]
     fn alpha_tag_standalone() {
@@ -804,8 +982,6 @@ mod tests {
         assert!(!has_alpha_tag(" * alpha"));
     }
 
-    // ── scan_jsdoc_imports_in ─────────────────────────────────────
-
     fn scan(body: &str) -> Vec<ImportInfo> {
         let mut imports = Vec::new();
         scan_jsdoc_imports_in(body, &mut imports);
@@ -823,6 +999,63 @@ mod tests {
         );
         assert!(imports[0].is_type_only);
         assert!(imports[0].local_name.is_empty());
+    }
+
+    #[test]
+    fn script_auto_import_candidates_capture_zero_import_value_refs() {
+        let info = parse_source_to_module(
+            FileId(0),
+            Path::new("pages/index.ts"),
+            r"
+                useCounter();
+                const price = formatPrice(10);
+                const localOnly = () => null;
+                localOnly();
+                type Local = UseTypeOnly;
+            ",
+            0,
+            false,
+        );
+
+        assert!(
+            info.auto_import_candidates
+                .contains(&"formatPrice".to_string())
+        );
+        assert!(
+            info.auto_import_candidates
+                .contains(&"useCounter".to_string())
+        );
+        assert!(
+            !info
+                .auto_import_candidates
+                .contains(&"UseTypeOnly".to_string())
+        );
+        assert!(
+            !info
+                .auto_import_candidates
+                .contains(&"localOnly".to_string())
+        );
+    }
+
+    #[test]
+    fn script_auto_import_candidates_skip_explicit_imports() {
+        let info = parse_source_to_module(
+            FileId(0),
+            Path::new("pages/index.ts"),
+            "import { useCounter } from '../composables/useCounter';\nuseCounter();\nuseOther();\n",
+            0,
+            false,
+        );
+
+        assert!(
+            !info
+                .auto_import_candidates
+                .contains(&"useCounter".to_string())
+        );
+        assert!(
+            info.auto_import_candidates
+                .contains(&"useOther".to_string())
+        );
     }
 
     #[test]
@@ -899,22 +1132,18 @@ mod tests {
 
     #[test]
     fn scan_jsdoc_truncated_no_closing_quote_does_not_panic() {
-        // `find(quote)` returns None, inner loop breaks, no panic.
         let imports = scan(" * @type {import('./truncated");
         assert!(imports.is_empty());
     }
 
     #[test]
     fn scan_jsdoc_missing_closing_paren_is_skipped() {
-        // After the path, we expect `)`. If missing, skip this match and
-        // continue the outer loop.
         let imports = scan(" * @type {import('./types'.Foo}");
         assert!(imports.is_empty());
     }
 
     #[test]
     fn scan_jsdoc_whitespace_between_paren_and_dot() {
-        // `import('./types') .Foo` with whitespace before the dot.
         let imports = scan(" * @type {import('./types') .Foo}");
         assert_eq!(imports.len(), 1);
         assert_eq!(imports[0].source, "./types");
@@ -926,8 +1155,6 @@ mod tests {
 
     #[test]
     fn scan_jsdoc_whitespace_between_paren_and_quote() {
-        // `import( './types')` with whitespace between open-paren and the
-        // quote. Less common, but valid in loose formatters.
         let imports = scan(" * @type {import( './types').Foo}");
         assert_eq!(imports.len(), 1);
         assert_eq!(imports[0].source, "./types");
@@ -935,21 +1162,18 @@ mod tests {
 
     #[test]
     fn scan_jsdoc_non_quote_after_paren_skipped() {
-        // `import(identifier)` is not a string-literal form, so skip.
         let imports = scan(" * @type {import(foo).Bar}");
         assert!(imports.is_empty());
     }
 
     #[test]
     fn scan_jsdoc_ignores_prose_with_import_word() {
-        // The word "import" not followed by `(` must not match.
         let imports = scan(" * This is an important note about imports.");
         assert!(imports.is_empty());
     }
 
     #[test]
     fn scan_jsdoc_utf8_path_works() {
-        // Multi-byte characters in the path must not panic on slicing.
         let imports = scan(" * @type {import('./héllo').Foo}");
         assert_eq!(imports.len(), 1);
         assert_eq!(imports[0].source, "./héllo");
@@ -965,9 +1189,127 @@ mod tests {
         assert!(scan(" * @param foo The foo parameter").is_empty());
     }
 
+    /// Regression: `import('...')` in JSDoc prose (outside any `{...}` brace
+    /// group) is documentation/example syntax, not a type annotation. It must
+    /// not be reported as a real import. Without this scoping check, files
+    /// whose header doc documents which import forms they handle would surface
+    /// false-positive unresolved-import findings.
+    #[test]
+    fn scan_jsdoc_prose_import_outside_braces_is_skipped() {
+        // Mirrors the exact shape of an extractor's header doc that lists
+        // import forms as bullet-point examples.
+        let body = "\n * Handles:\n * - Dynamic imports (await import('./prose')) \n * - Barrel exports (export * from './prose')\n";
+        let imports = scan(body);
+        assert!(
+            imports.is_empty(),
+            "prose import() should not be matched; got: {:?}",
+            imports
+                .iter()
+                .map(|i| i.source.as_str())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn scan_jsdoc_prose_import_inside_example_object_is_skipped() {
+        let body = "\n * @example\n * const loaders = {\n *   admin: () => import('./prose')\n * }";
+        let imports = scan(body);
+        assert!(
+            imports.is_empty(),
+            "object-literal example import() should not be matched; got: {:?}",
+            imports
+                .iter()
+                .map(|i| i.source.as_str())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn scan_jsdoc_prose_import_inside_inline_braces_is_skipped() {
+        let imports = scan(" * Use {import('./prose')} as an example string.");
+        assert!(imports.is_empty());
+    }
+
+    #[test]
+    fn scan_jsdoc_bare_example_brace_import_is_skipped() {
+        let imports = scan("\n * @example\n * { import('./prose') }\n");
+        assert!(imports.is_empty());
+    }
+
+    /// A real `{@type ...}` annotation following a prose mention of `import()`
+    /// must still be matched. The fix narrows scope without breaking the
+    /// intended JSDoc type-annotation behavior.
+    #[test]
+    fn scan_jsdoc_braced_import_after_prose_is_still_matched() {
+        let body = " * Note: dynamic imports like import('./prose') are not types.\n * @type {import('./real').Foo}";
+        let imports = scan(body);
+        assert_eq!(imports.len(), 1, "got: {imports:?}");
+        assert_eq!(imports[0].source, "./real");
+        assert_eq!(
+            imports[0].imported_name,
+            ImportedName::Named("Foo".to_string())
+        );
+    }
+
+    #[test]
+    fn scan_jsdoc_multiline_braced_type_tag_is_still_matched() {
+        let body = "\n * @returns {\n *   import('./real').Foo\n * }";
+        let imports = scan(body);
+        assert_eq!(imports.len(), 1, "got: {imports:?}");
+        assert_eq!(imports[0].source, "./real");
+        assert_eq!(
+            imports[0].imported_name,
+            ImportedName::Named("Foo".to_string())
+        );
+    }
+
+    #[test]
+    fn scan_jsdoc_type_tag_before_brace_line_is_still_matched() {
+        let body = "\n * @type\n * { import('./real').Foo }\n";
+        let imports = scan(body);
+        assert_eq!(imports.len(), 1, "got: {imports:?}");
+        assert_eq!(imports[0].source, "./real");
+        assert_eq!(
+            imports[0].imported_name,
+            ImportedName::Named("Foo".to_string())
+        );
+    }
+
+    #[test]
+    fn scan_jsdoc_satisfies_type_tag_is_still_matched() {
+        let imports = scan(" * @satisfies {import('./real').Foo}");
+        assert_eq!(imports.len(), 1, "got: {imports:?}");
+        assert_eq!(imports[0].source, "./real");
+        assert_eq!(
+            imports[0].imported_name,
+            ImportedName::Named("Foo".to_string())
+        );
+    }
+
+    #[test]
+    fn scan_jsdoc_template_constraint_type_tag_is_still_matched() {
+        let imports = scan(" * @template {import('./real').Foo} T");
+        assert_eq!(imports.len(), 1, "got: {imports:?}");
+        assert_eq!(imports[0].source, "./real");
+        assert_eq!(
+            imports[0].imported_name,
+            ImportedName::Named("Foo".to_string())
+        );
+    }
+
+    #[test]
+    fn scan_jsdoc_enum_type_tag_is_still_matched() {
+        let imports = scan(" * @enum {import('./real').Foo}");
+        assert_eq!(imports.len(), 1, "got: {imports:?}");
+        assert_eq!(imports[0].source, "./real");
+        assert_eq!(
+            imports[0].imported_name,
+            ImportedName::Named("Foo".to_string())
+        );
+    }
+
     #[test]
     fn scan_jsdoc_appends_to_existing_imports() {
-        // Ensures the scanner appends rather than replaces.
         let mut imports = vec![ImportInfo {
             source: "existing".to_string(),
             imported_name: ImportedName::Default,
@@ -977,7 +1319,7 @@ mod tests {
             span: oxc_span::Span::default(),
             source_span: oxc_span::Span::default(),
         }];
-        scan_jsdoc_imports_in(" * {import('./new').Foo}", &mut imports);
+        scan_jsdoc_imports_in(" * @type {import('./new').Foo}", &mut imports);
         assert_eq!(imports.len(), 2);
         assert_eq!(imports[0].source, "existing");
         assert_eq!(imports[1].source, "./new");
@@ -985,7 +1327,6 @@ mod tests {
 
     #[test]
     fn scan_jsdoc_ident_boundary_stops_at_bracket() {
-        // Member parse stops at the first non-ident char (`}` here).
         let imports = scan(" * @type {import('./t').Abc}");
         assert_eq!(imports.len(), 1);
         assert_eq!(
@@ -996,8 +1337,6 @@ mod tests {
 
     #[test]
     fn scan_jsdoc_empty_member_name_is_skipped() {
-        // `import('./x').` with no ident after the dot: member name is empty,
-        // should be skipped (no ImportInfo pushed).
         let imports = scan(" * @type {import('./x').}");
         assert!(imports.is_empty());
     }

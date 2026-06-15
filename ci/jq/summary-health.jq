@@ -5,7 +5,7 @@ def pct(n): n | . * 10 | round / 10;
 def signed(n): if n > 0 then "+\(pct(n))" elif n < 0 then "\(pct(n))" else "0.0" end;
 def metric_delta(name):
   (.health_trend.metrics // []) | map(select(.name == name)) | first // null;
-def suppression_docs: "https://docs.fallow.tools/configuration/suppression";
+def suppression_docs: "https://docs.genesis-plow.dev/configuration/suppression";
 def complexity_findings: (.findings // []);
 def production_findings: (.runtime_coverage.findings // []);
 def production_hot_paths: (.runtime_coverage.hot_paths // []);
@@ -37,27 +37,27 @@ def prod_phrase(complex; prod):
       " \u00b7 \($cx_delta.label | ascii_downcase) \(pct($cx_delta.current)) (\(signed($cx_delta.delta)))"
     else "" end)
   else
-    "\n> _Set `FALLOW_SAVE_SNAPSHOT: \"true\"` to track score trends over time._"
+    "\n> _Set `PLOW_SAVE_SNAPSHOT: \"true\"` to track score trends over time._"
   end) +
   "\n\n"
 else "" end)) +
 if $prod == 0 and $hot == 0 then
   if $complex == 0 then
-    "## Fallow \u2014 Code Complexity\n\n" +
+    "## Plow \u2014 Code Complexity\n\n" +
     "> **No functions exceed complexity thresholds** \u00b7 \(.elapsed_ms)ms\n\n" +
     "\(.summary.functions_analyzed) functions analyzed (max cyclomatic: \(.summary.max_cyclomatic_threshold), max cognitive: \(.summary.max_cognitive_threshold), max CRAP: \(.summary.max_crap_threshold // 30))"
   else
-    "## Fallow \u2014 Code Complexity\n\n" +
+    "## Plow \u2014 Code Complexity\n\n" +
     "> :warning: **\(.summary.functions_above_threshold) function\(if .summary.functions_above_threshold == 1 then "" else "s" end) exceed\(if .summary.functions_above_threshold == 1 then "s" else "" end) thresholds** \u00b7 \(.elapsed_ms)ms\n\n" +
     "| File | Function | Severity | Cyclomatic | Cognitive | CRAP | Lines |\n|:-----|:---------|:---------|:-----------|:----------|:-----|:------|\n" +
     ([complexity_findings[:25][] |
       "| `\(.path):\(.line)` | `\(.name)` | \(.severity // "moderate") | \(.cyclomatic)\(if (.exceeded // "") | test("cyclomatic|both|all") then " **!**" else "" end) | \(.cognitive)\(if (.exceeded // "") | test("cognitive|both|all") then " **!**" else "" end) | \(if .crap == null then "-" else (.crap | tostring) + (if (.exceeded // "") | test("crap|all") then " **!**" else "" end) end) | \(.line_count) |"
     ] | join("\n")) +
-    (if $complex > 25 then "\n\n> \($complex - 25) more \u2014 run `fallow health` locally for the full list" else "" end) +
+    (if $complex > 25 then "\n\n> \($complex - 25) more \u2014 run `plow health` locally for the full list" else "" end) +
     "\n\n**\(.summary.files_analyzed)** files, **\(.summary.functions_analyzed)** functions analyzed (thresholds: cyclomatic > \(.summary.max_cyclomatic_threshold), cognitive > \(.summary.max_cognitive_threshold), CRAP >= \(.summary.max_crap_threshold // 30))"
   end
 else
-  "## Fallow \u2014 Health\n\n" +
+  "## Plow \u2014 Health\n\n" +
   (if $complex == 0 and $prod == 0 then
     "> **No failing health findings** \u00b7 \(.elapsed_ms)ms\n\n"
   else
@@ -69,7 +69,7 @@ else
     ([complexity_findings[:25][] |
       "| `\(.path):\(.line)` | `\(.name)` | \(.severity // "moderate") | \(.cyclomatic)\(if (.exceeded // "") | test("cyclomatic|both|all") then " **!**" else "" end) | \(.cognitive)\(if (.exceeded // "") | test("cognitive|both|all") then " **!**" else "" end) | \(if .crap == null then "-" else (.crap | tostring) + (if (.exceeded // "") | test("crap|all") then " **!**" else "" end) end) | \(.line_count) |"
     ] | join("\n")) +
-    (if $complex > 25 then "\n\n> \($complex - 25) more complexity findings \u2014 run `fallow health` locally for the full list" else "" end)
+    (if $complex > 25 then "\n\n> \($complex - 25) more complexity findings \u2014 run `plow health` locally for the full list" else "" end)
   else "" end) +
   (if $prod > 0 then
     (if $complex > 0 then "\n\n" else "" end) +
@@ -78,7 +78,7 @@ else
     ([production_findings[:25][] |
       "| `\(.path):\(.line)` | `\(.function)` | `\(.verdict)` | \(if .invocations == null then "\u2014" else (.invocations | tostring) end) | \(.confidence) |"
     ] | join("\n")) +
-    (if $prod > 25 then "\n\n> \($prod - 25) more runtime coverage findings \u2014 run `fallow health` locally for the full list" else "" end)
+    (if $prod > 25 then "\n\n> \($prod - 25) more runtime coverage findings \u2014 run `plow health` locally for the full list" else "" end)
   else "" end) +
   (if $hot > 0 then
     (if $complex > 0 or $prod > 0 then "\n\n" else "" end) +

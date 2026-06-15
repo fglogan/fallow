@@ -6,6 +6,7 @@ use oxc_span::Span;
 
 use crate::*;
 use plow_types::discover::FileId;
+use plow_types::extract::{SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason};
 
 use super::*;
 
@@ -23,6 +24,34 @@ fn cache_store_default_is_empty() {
 }
 
 #[test]
+fn cache_roundtrip_preserves_unresolved_callee_diagnostics() {
+    let module = parse_from_content(
+        FileId(7),
+        Path::new("src/security.ts"),
+        "client[method](req.body.name);",
+    );
+    assert_eq!(module.security_sinks_skipped, 1);
+    assert_eq!(module.security_unresolved_callee_sites.len(), 1);
+
+    let cached = module_to_cached(&module, 10, 20);
+    let restored = cached_to_module(&cached, FileId(7));
+    let diagnostic = restored
+        .security_unresolved_callee_sites
+        .first()
+        .expect("diagnostic round-tripped");
+
+    assert_eq!(restored.security_sinks_skipped, 1);
+    assert_eq!(
+        diagnostic.reason,
+        SkippedSecurityCalleeReason::ComputedMember
+    );
+    assert_eq!(
+        diagnostic.expression_kind,
+        SkippedSecurityCalleeExpressionKind::ComputedMemberExpression
+    );
+}
+
+#[test]
 fn cache_store_insert_and_get() {
     let mut store = CacheStore::new();
     let module = CachedModule {
@@ -35,6 +64,7 @@ fn cache_store_insert_and_get() {
         re_exports: vec![],
         dynamic_imports: vec![],
         require_calls: vec![],
+        package_path_references: vec![],
         member_accesses: vec![],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
@@ -49,11 +79,34 @@ fn cache_store_insert_and_get() {
         complexity: vec![],
         flag_uses: vec![],
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     };
     store.insert(Path::new("test.ts"), module);
     assert_eq!(store.len(), 1);
@@ -74,6 +127,7 @@ fn cache_store_hash_mismatch_returns_none() {
         re_exports: vec![],
         dynamic_imports: vec![],
         require_calls: vec![],
+        package_path_references: vec![],
         member_accesses: vec![],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
@@ -88,11 +142,34 @@ fn cache_store_hash_mismatch_returns_none() {
         complexity: vec![],
         flag_uses: vec![],
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     };
     store.insert(Path::new("test.ts"), module);
     assert!(store.get(Path::new("test.ts"), 99).is_none());
@@ -117,6 +194,7 @@ fn cache_store_overwrite_entry() {
         re_exports: vec![],
         dynamic_imports: vec![],
         require_calls: vec![],
+        package_path_references: vec![],
         member_accesses: vec![],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
@@ -131,11 +209,34 @@ fn cache_store_overwrite_entry() {
         complexity: vec![],
         flag_uses: vec![],
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     };
     let m2 = CachedModule {
         content_hash: 2,
@@ -147,6 +248,7 @@ fn cache_store_overwrite_entry() {
         re_exports: vec![],
         dynamic_imports: vec![],
         require_calls: vec![],
+        package_path_references: vec![],
         member_accesses: vec![],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
@@ -161,11 +263,34 @@ fn cache_store_overwrite_entry() {
         complexity: vec![],
         flag_uses: vec![],
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     };
     store.insert(Path::new("test.ts"), m1);
     store.insert(Path::new("test.ts"), m2);
@@ -192,6 +317,7 @@ fn module_to_cached_roundtrip_named_export() {
         re_exports: vec![],
         dynamic_imports: vec![],
         require_calls: vec![],
+        package_path_references: vec![],
         member_accesses: vec![],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
@@ -207,22 +333,48 @@ fn module_to_cached_roundtrip_named_export() {
         complexity: Vec::new(),
         flag_uses: Vec::new(),
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: vec!["jam".to_string(), "ic".to_string()],
+        iconify_icon_names: vec!["simple-icons-github".to_string()],
         auto_import_candidates: vec!["Card001".to_string(), "BaseButton".to_string()],
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
     let restored = cached_to_module(&cached, FileId(0));
 
-    // Non-empty iconify_prefixes must survive the cache round-trip (issue #608).
     assert_eq!(
         restored.iconify_prefixes,
         vec!["jam".to_string(), "ic".to_string()]
     );
-    // Non-empty auto_import_candidates must survive the cache round-trip (issue #704).
+    assert_eq!(
+        restored.iconify_icon_names,
+        vec!["simple-icons-github".to_string()]
+    );
     assert_eq!(
         restored.auto_import_candidates,
         vec!["Card001".to_string(), "BaseButton".to_string()]
@@ -256,6 +408,7 @@ fn module_to_cached_roundtrip_side_effect_used_export() {
         re_exports: vec![],
         dynamic_imports: vec![],
         require_calls: vec![],
+        package_path_references: vec![],
         member_accesses: vec![],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
@@ -271,11 +424,35 @@ fn module_to_cached_roundtrip_side_effect_used_export() {
         complexity: Vec::new(),
         flag_uses: Vec::new(),
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -307,6 +484,7 @@ fn module_to_cached_roundtrip_default_export() {
         re_exports: vec![],
         dynamic_imports: vec![],
         require_calls: vec![],
+        package_path_references: vec![],
         member_accesses: vec![],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
@@ -322,11 +500,35 @@ fn module_to_cached_roundtrip_default_export() {
         complexity: Vec::new(),
         flag_uses: Vec::new(),
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -381,6 +583,7 @@ fn module_to_cached_roundtrip_imports() {
         re_exports: vec![],
         dynamic_imports: vec![],
         require_calls: vec![],
+        package_path_references: vec![],
         member_accesses: vec![],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
@@ -396,11 +599,35 @@ fn module_to_cached_roundtrip_imports() {
         complexity: Vec::new(),
         flag_uses: Vec::new(),
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -439,6 +666,7 @@ fn module_to_cached_roundtrip_re_exports() {
         }],
         dynamic_imports: vec![],
         require_calls: vec![],
+        package_path_references: vec![],
         member_accesses: vec![],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
@@ -454,11 +682,35 @@ fn module_to_cached_roundtrip_re_exports() {
         complexity: Vec::new(),
         flag_uses: Vec::new(),
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -490,7 +742,9 @@ fn module_to_cached_roundtrip_dynamic_imports() {
             span: Span::new(15, 25),
             destructured_names: Vec::new(),
             local_name: None,
+            source_span: oxc_span::Span::default(),
         }],
+        package_path_references: vec![],
         member_accesses: vec![MemberAccess {
             object: "Status".to_string(),
             member: "Active".to_string(),
@@ -509,11 +763,35 @@ fn module_to_cached_roundtrip_dynamic_imports() {
         complexity: Vec::new(),
         flag_uses: Vec::new(),
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -579,6 +857,7 @@ fn module_to_cached_roundtrip_members() {
         re_exports: vec![],
         dynamic_imports: vec![],
         require_calls: vec![],
+        package_path_references: vec![],
         member_accesses: vec![],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
@@ -594,11 +873,35 @@ fn module_to_cached_roundtrip_members() {
         complexity: Vec::new(),
         flag_uses: Vec::new(),
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -625,7 +928,6 @@ fn test_cache_dir(name: &str) -> std::path::PathBuf {
         .join("plow_cache_tests")
         .join(name)
         .join(format!("{}", std::process::id()));
-    // Clean up any leftover from previous runs
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir
@@ -645,6 +947,7 @@ fn cache_save_and_load_roundtrip() {
         re_exports: vec![],
         dynamic_imports: vec![],
         require_calls: vec![],
+        package_path_references: vec![],
         member_accesses: vec![],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
@@ -659,11 +962,34 @@ fn cache_save_and_load_roundtrip() {
         complexity: vec![],
         flag_uses: vec![],
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     };
     store.insert(Path::new("test.ts"), module);
     store.save(&dir, 0, DEFAULT_CACHE_MAX_SIZE).unwrap();
@@ -695,6 +1021,7 @@ fn cache_version_mismatch_returns_none() {
         re_exports: vec![],
         dynamic_imports: vec![],
         require_calls: vec![],
+        package_path_references: vec![],
         member_accesses: vec![],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
@@ -709,29 +1036,46 @@ fn cache_version_mismatch_returns_none() {
         complexity: vec![],
         flag_uses: vec![],
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     };
     store.insert(Path::new("test.ts"), module);
     store.save(&dir, 0, DEFAULT_CACHE_MAX_SIZE).unwrap();
 
-    // Verify the cache loads correctly before tampering
     assert!(CacheStore::load(&dir, 0, DEFAULT_CACHE_MAX_SIZE).is_some());
 
-    // Read raw bytes and modify the version field.
-    // The version (CACHE_VERSION) is the first encoded field.
-    // Replace the first byte with a different version value (e.g., 255)
-    // to simulate a version mismatch.
     let cache_file = dir.join("cache.bin");
     let mut data = std::fs::read(&cache_file).unwrap();
     assert!(!data.is_empty());
     data[0] = 255; // Corrupt the version byte
     std::fs::write(&cache_file, &data).unwrap();
 
-    // Loading should return None due to version mismatch
     let result = CacheStore::load(&dir, 0, DEFAULT_CACHE_MAX_SIZE);
     assert!(result.is_none());
 
@@ -755,6 +1099,7 @@ fn module_to_cached_roundtrip_type_only_import() {
         re_exports: vec![],
         dynamic_imports: vec![],
         require_calls: vec![],
+        package_path_references: vec![],
         member_accesses: vec![],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
@@ -770,11 +1115,35 @@ fn module_to_cached_roundtrip_type_only_import() {
         complexity: Vec::new(),
         flag_uses: Vec::new(),
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -798,6 +1167,7 @@ fn get_by_path_only_returns_entry_regardless_of_hash() {
         re_exports: vec![],
         dynamic_imports: vec![],
         require_calls: vec![],
+        package_path_references: vec![],
         member_accesses: vec![],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
@@ -812,15 +1182,37 @@ fn get_by_path_only_returns_entry_regardless_of_hash() {
         complexity: vec![],
         flag_uses: vec![],
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     };
     store.insert(Path::new("test.ts"), module);
 
-    // get_by_path_only should return the entry without checking hash
     let result = store.get_by_path_only(Path::new("test.ts"));
     assert!(result.is_some());
     assert_eq!(result.unwrap().content_hash, 42);
@@ -852,6 +1244,7 @@ fn retain_paths_removes_stale_entries() {
         re_exports: vec![],
         dynamic_imports: vec![],
         require_calls: vec![],
+        package_path_references: vec![],
         member_accesses: vec![],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
@@ -866,11 +1259,34 @@ fn retain_paths_removes_stale_entries() {
         complexity: vec![],
         flag_uses: vec![],
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     };
 
     store.insert(Path::new("/project/a.ts"), m());
@@ -878,7 +1294,6 @@ fn retain_paths_removes_stale_entries() {
     store.insert(Path::new("/project/c.ts"), m());
     assert_eq!(store.len(), 3);
 
-    // Only a.ts and c.ts still exist in the project
     let files = vec![
         DiscoveredFile {
             id: FileId(0),
@@ -912,6 +1327,7 @@ fn retain_paths_with_empty_files_clears_cache() {
         re_exports: vec![],
         dynamic_imports: vec![],
         require_calls: vec![],
+        package_path_references: vec![],
         member_accesses: vec![],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
@@ -926,11 +1342,34 @@ fn retain_paths_with_empty_files_clears_cache() {
         complexity: vec![],
         flag_uses: vec![],
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     };
     store.insert(Path::new("a.ts"), m);
     assert_eq!(store.len(), 1);
@@ -952,6 +1391,7 @@ fn get_by_metadata_returns_entry_on_match() {
         re_exports: vec![],
         dynamic_imports: vec![],
         require_calls: vec![],
+        package_path_references: vec![],
         member_accesses: vec![],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
@@ -966,11 +1406,34 @@ fn get_by_metadata_returns_entry_on_match() {
         complexity: vec![],
         flag_uses: vec![],
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     };
     store.insert(Path::new("test.ts"), module);
 
@@ -992,6 +1455,7 @@ fn get_by_metadata_returns_none_on_mtime_mismatch() {
         re_exports: vec![],
         dynamic_imports: vec![],
         require_calls: vec![],
+        package_path_references: vec![],
         member_accesses: vec![],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
@@ -1006,11 +1470,34 @@ fn get_by_metadata_returns_none_on_mtime_mismatch() {
         complexity: vec![],
         flag_uses: vec![],
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     };
     store.insert(Path::new("test.ts"), module);
 
@@ -1034,6 +1521,7 @@ fn get_by_metadata_returns_none_on_size_mismatch() {
         re_exports: vec![],
         dynamic_imports: vec![],
         require_calls: vec![],
+        package_path_references: vec![],
         member_accesses: vec![],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
@@ -1048,11 +1536,34 @@ fn get_by_metadata_returns_none_on_size_mismatch() {
         complexity: vec![],
         flag_uses: vec![],
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     };
     store.insert(Path::new("test.ts"), module);
 
@@ -1076,6 +1587,7 @@ fn get_by_metadata_returns_none_for_zero_mtime() {
         re_exports: vec![],
         dynamic_imports: vec![],
         require_calls: vec![],
+        package_path_references: vec![],
         member_accesses: vec![],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
@@ -1090,15 +1602,37 @@ fn get_by_metadata_returns_none_for_zero_mtime() {
         complexity: vec![],
         flag_uses: vec![],
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     };
     store.insert(Path::new("test.ts"), module);
 
-    // Zero mtime should never match (falls through to content hash check)
     assert!(
         store
             .get_by_metadata(Path::new("test.ts"), 0, 500)
@@ -1125,6 +1659,7 @@ fn module_to_cached_stores_mtime_and_size() {
         re_exports: vec![],
         dynamic_imports: vec![],
         require_calls: vec![],
+        package_path_references: vec![],
         member_accesses: vec![],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
@@ -1140,11 +1675,35 @@ fn module_to_cached_stores_mtime_and_size() {
         complexity: Vec::new(),
         flag_uses: Vec::new(),
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     };
 
     let cached = module_to_cached(&module, 12345, 6789);
@@ -1162,6 +1721,7 @@ fn module_to_cached_roundtrip_line_offsets() {
         re_exports: vec![],
         dynamic_imports: vec![],
         require_calls: vec![],
+        package_path_references: vec![],
         member_accesses: vec![],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
@@ -1177,18 +1737,40 @@ fn module_to_cached_roundtrip_line_offsets() {
         complexity: Vec::new(),
         flag_uses: Vec::new(),
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     };
     let cached = module_to_cached(&module, 0, 0);
     let restored = cached_to_module(&cached, FileId(0));
     assert_eq!(restored.line_offsets, vec![0, 15, 30, 45]);
 }
-
-// ── Additional coverage ─────────────────────────────────────
 
 #[test]
 fn module_to_cached_roundtrip_suppressions_with_kinds() {
@@ -1201,6 +1783,7 @@ fn module_to_cached_roundtrip_suppressions_with_kinds() {
         re_exports: vec![],
         dynamic_imports: vec![],
         require_calls: vec![],
+        package_path_references: vec![],
         member_accesses: vec![],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
@@ -1211,50 +1794,73 @@ fn module_to_cached_roundtrip_suppressions_with_kinds() {
         value_referenced_import_bindings: vec![],
         content_hash: 0,
         suppressions: vec![
-            Suppression {
-                line: 0,
-                comment_line: 1,
-                kind: None,
-            },
-            Suppression {
-                line: 5,
-                comment_line: 4,
-                kind: Some(IssueKind::UnusedExport),
-            },
-            Suppression {
-                line: 10,
-                comment_line: 9,
-                kind: Some(IssueKind::UnusedFile),
-            },
+            Suppression::all(0, 1),
+            Suppression::issue(5, 4, IssueKind::UnusedExport),
+            Suppression::issue(10, 9, IssueKind::UnusedFile),
+            Suppression::policy_rule(12, 11, "team-policy", "no-child-process"),
         ],
         unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: Vec::new(),
         flag_uses: Vec::new(),
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
     let restored = cached_to_module(&cached, FileId(0));
 
-    assert_eq!(restored.suppressions.len(), 3);
+    assert_eq!(restored.suppressions.len(), 4);
     assert_eq!(restored.suppressions[0].line, 0);
-    assert!(restored.suppressions[0].kind.is_none());
+    assert!(restored.suppressions[0].issue_kind_target().is_none());
     assert_eq!(restored.suppressions[1].line, 5);
-    assert_eq!(restored.suppressions[1].kind, Some(IssueKind::UnusedExport));
+    assert_eq!(
+        restored.suppressions[1].issue_kind_target(),
+        Some(IssueKind::UnusedExport)
+    );
     assert_eq!(restored.suppressions[2].line, 10);
-    assert_eq!(restored.suppressions[2].kind, Some(IssueKind::UnusedFile));
+    assert_eq!(
+        restored.suppressions[2].issue_kind_target(),
+        Some(IssueKind::UnusedFile)
+    );
+    assert_eq!(restored.suppressions[3].line, 12);
+    let policy = restored.suppressions[3]
+        .policy_rule_target()
+        .expect("scoped policy target should round-trip");
+    assert_eq!(policy.pack, "team-policy");
+    assert_eq!(policy.rule_id, "no-child-process");
 }
 
 #[test]
 fn module_to_cached_roundtrip_unknown_suppression_kinds() {
-    // Issue #449: ensure CachedUnknownSuppressionKind round-trips so warm
-    // caches surface the same stale-suppression diagnostics as cold runs.
     use plow_types::suppress::UnknownSuppressionKind;
 
     let module = ModuleInfo {
@@ -1264,6 +1870,7 @@ fn module_to_cached_roundtrip_unknown_suppression_kinds() {
         re_exports: vec![],
         dynamic_imports: vec![],
         require_calls: vec![],
+        package_path_references: vec![],
         member_accesses: vec![],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
@@ -1290,11 +1897,35 @@ fn module_to_cached_roundtrip_unknown_suppression_kinds() {
         complexity: Vec::new(),
         flag_uses: Vec::new(),
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -1330,6 +1961,7 @@ fn module_to_cached_roundtrip_visibility() {
         re_exports: vec![],
         dynamic_imports: vec![],
         require_calls: vec![],
+        package_path_references: vec![],
         member_accesses: vec![],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
@@ -1345,11 +1977,35 @@ fn module_to_cached_roundtrip_visibility() {
         complexity: Vec::new(),
         flag_uses: Vec::new(),
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -1376,6 +2032,7 @@ fn module_to_cached_roundtrip_visibility_internal() {
         re_exports: vec![],
         dynamic_imports: vec![],
         require_calls: vec![],
+        package_path_references: vec![],
         member_accesses: vec![],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
@@ -1391,11 +2048,35 @@ fn module_to_cached_roundtrip_visibility_internal() {
         complexity: Vec::new(),
         flag_uses: Vec::new(),
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -1422,6 +2103,7 @@ fn module_to_cached_roundtrip_visibility_beta() {
         re_exports: vec![],
         dynamic_imports: vec![],
         require_calls: vec![],
+        package_path_references: vec![],
         member_accesses: vec![],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
@@ -1437,11 +2119,35 @@ fn module_to_cached_roundtrip_visibility_beta() {
         complexity: Vec::new(),
         flag_uses: Vec::new(),
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -1468,6 +2174,7 @@ fn module_to_cached_roundtrip_visibility_alpha() {
         re_exports: vec![],
         dynamic_imports: vec![],
         require_calls: vec![],
+        package_path_references: vec![],
         member_accesses: vec![],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
@@ -1483,11 +2190,35 @@ fn module_to_cached_roundtrip_visibility_alpha() {
         complexity: Vec::new(),
         flag_uses: Vec::new(),
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -1505,6 +2236,7 @@ fn module_to_cached_roundtrip_dynamic_import_patterns() {
         re_exports: vec![],
         dynamic_imports: vec![],
         require_calls: vec![],
+        package_path_references: vec![],
         member_accesses: vec![],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![
@@ -1531,11 +2263,35 @@ fn module_to_cached_roundtrip_dynamic_import_patterns() {
         complexity: Vec::new(),
         flag_uses: Vec::new(),
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -1562,6 +2318,7 @@ fn module_to_cached_roundtrip_unused_import_bindings() {
         re_exports: vec![],
         dynamic_imports: vec![],
         require_calls: vec![],
+        package_path_references: vec![],
         member_accesses: vec![],
         whole_object_uses: vec!["Status".to_string()],
         dynamic_import_patterns: vec![],
@@ -1577,11 +2334,35 @@ fn module_to_cached_roundtrip_unused_import_bindings() {
         complexity: Vec::new(),
         flag_uses: Vec::new(),
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -1612,6 +2393,7 @@ fn module_to_cached_roundtrip_complexity() {
         re_exports: vec![],
         dynamic_imports: vec![],
         require_calls: vec![],
+        package_path_references: vec![],
         member_accesses: vec![],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
@@ -1634,6 +2416,7 @@ fn module_to_cached_roundtrip_complexity() {
                 line_count: 20,
                 param_count: 4,
                 source_hash: Some("0123456789abcdef".to_string()),
+                contributions: Vec::new(),
             },
             FunctionComplexity {
                 name: "simple".to_string(),
@@ -1644,15 +2427,40 @@ fn module_to_cached_roundtrip_complexity() {
                 line_count: 3,
                 param_count: 0,
                 source_hash: None,
+                contributions: Vec::new(),
             },
         ],
         flag_uses: Vec::new(),
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -1681,7 +2489,9 @@ fn module_to_cached_roundtrip_require_with_destructured() {
             span: Span::new(0, 30),
             destructured_names: vec!["readFile".to_string(), "writeFile".to_string()],
             local_name: None,
+            source_span: oxc_span::Span::default(),
         }],
+        package_path_references: vec![],
         member_accesses: vec![],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
@@ -1697,11 +2507,35 @@ fn module_to_cached_roundtrip_require_with_destructured() {
         complexity: Vec::new(),
         flag_uses: Vec::new(),
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -1731,6 +2565,7 @@ fn module_to_cached_roundtrip_dynamic_import_with_local() {
             is_speculative: false,
         }],
         require_calls: vec![],
+        package_path_references: vec![],
         member_accesses: vec![],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
@@ -1746,11 +2581,35 @@ fn module_to_cached_roundtrip_dynamic_import_with_local() {
         complexity: Vec::new(),
         flag_uses: Vec::new(),
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -1779,6 +2638,7 @@ fn module_to_cached_roundtrip_source_span() {
         re_exports: vec![],
         dynamic_imports: vec![],
         require_calls: vec![],
+        package_path_references: vec![],
         member_accesses: vec![],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
@@ -1794,11 +2654,35 @@ fn module_to_cached_roundtrip_source_span() {
         complexity: Vec::new(),
         flag_uses: Vec::new(),
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -1834,6 +2718,7 @@ fn module_to_cached_roundtrip_member_decorators() {
         re_exports: vec![],
         dynamic_imports: vec![],
         require_calls: vec![],
+        package_path_references: vec![],
         member_accesses: vec![],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
@@ -1849,11 +2734,35 @@ fn module_to_cached_roundtrip_member_decorators() {
         complexity: Vec::new(),
         flag_uses: Vec::new(),
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        referenced_import_bindings: vec![],
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -1879,6 +2788,7 @@ fn synthetic_module(content_hash: u64, last_access_secs: u64, payload_kb: usize)
         re_exports: vec![],
         dynamic_imports: vec![],
         require_calls: vec![],
+        package_path_references: vec![],
         member_accesses: vec![],
         whole_object_uses: vec![payload],
         dynamic_import_patterns: vec![],
@@ -1893,11 +2803,34 @@ fn synthetic_module(content_hash: u64, last_access_secs: u64, payload_kb: usize)
         complexity: vec![],
         flag_uses: vec![],
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     }
 }
 
@@ -1908,7 +2841,6 @@ fn cache_save_no_eviction_when_under_threshold() {
     for i in 0..10u64 {
         store.insert(Path::new(&format!("file{i}.ts")), synthetic_module(i, i, 1));
     }
-    // 256 MB cap, 10 small entries: no eviction expected.
     store
         .save(&dir, 42, DEFAULT_CACHE_MAX_SIZE)
         .expect("save under threshold");
@@ -1923,8 +2855,6 @@ fn cache_save_no_eviction_when_under_threshold() {
 fn cache_save_evicts_when_over_threshold() {
     let dir = test_cache_dir("evict_over_threshold");
     let mut store = CacheStore::new();
-    // 50 entries, ~1 KB each, with increasing last_access_secs.
-    // Cap = 40 KB so the post-encode size sits well above the 32 KB trigger.
     for i in 0..50u64 {
         store.insert(Path::new(&format!("file{i}.ts")), synthetic_module(i, i, 1));
     }
@@ -1932,11 +2862,7 @@ fn cache_save_evicts_when_over_threshold() {
     store.save(&dir, 99, cap).expect("save with eviction");
 
     let loaded = CacheStore::load(&dir, 99, DEFAULT_CACHE_MAX_SIZE).expect("load after eviction");
-    // Some entries must have been evicted.
     assert!(loaded.len() < 50, "eviction removed entries");
-    // Eviction order is ascending last_access_secs: the oldest (lowest i)
-    // entries should leave first. Confirm at least one tail entry stays
-    // and at least one head entry is gone.
     let kept_max = (0..50u64)
         .filter(|i| {
             loaded
@@ -1959,8 +2885,6 @@ fn cache_save_evicts_when_over_threshold() {
         "oldest entry was evicted (kept_min = {kept_min})"
     );
 
-    // Final on-disk size sits below the 60% target (24 KB), with slack for
-    // the bitcode envelope.
     let on_disk = std::fs::read(dir.join("cache.bin")).unwrap();
     assert!(
         on_disk.len() < cap * 80 / 100,
@@ -1976,10 +2900,6 @@ fn cache_save_evicts_when_over_threshold() {
 fn cache_save_always_honors_cap_with_huge_entries() {
     let dir = test_cache_dir("huge_entry_overshoot");
     let mut store = CacheStore::new();
-    // One ~10 KB entry under a 1 KB cap. The single entry overshoots the
-    // cap; the store must persist it anyway (so the cache stays useful)
-    // and emit a `tracing::warn!` (not asserted directly here, since
-    // capturing tracing in unit tests requires an extra harness).
     store.insert(Path::new("huge.ts"), synthetic_module(7, 0, 10));
     store
         .save(&dir, 5, 1024)
@@ -2001,12 +2921,10 @@ fn cache_load_returns_none_on_config_hash_mismatch() {
         .save(&dir, 0xDEAD_BEEF, DEFAULT_CACHE_MAX_SIZE)
         .expect("save with config_hash A");
 
-    // Load with a different config_hash: must be None.
     assert!(
         CacheStore::load(&dir, 0xCAFE_BABE, DEFAULT_CACHE_MAX_SIZE).is_none(),
         "mismatched config_hash invalidates cache"
     );
-    // Same config_hash still round-trips.
     assert!(
         CacheStore::load(&dir, 0xDEAD_BEEF, DEFAULT_CACHE_MAX_SIZE).is_some(),
         "matching config_hash round-trips"
@@ -2037,12 +2955,6 @@ fn cache_load_round_trip_with_matching_config_hash() {
 
 #[test]
 fn cache_load_honors_user_max_size_above_default() {
-    // Regression: an earlier version of `load` gated on `DEFAULT_CACHE_MAX_SIZE`
-    // unconditionally, so a user setting `cache.maxSizeMb = 512` could write a
-    // 400 MB cache via `save` then have it silently discarded on the next run.
-    // The fix uses `max(max_size_bytes, DEFAULT_CACHE_MAX_SIZE)` as the load
-    // ceiling so user-supplied caps above the default actually take effect,
-    // and a misconfigured tiny cap does NOT discard a valid existing cache.
     let dir = test_cache_dir("load_honors_user_max");
     let mut store = CacheStore::new();
     store.insert(Path::new("a.ts"), synthetic_module(1, 0, 1));
@@ -2050,15 +2962,11 @@ fn cache_load_honors_user_max_size_above_default() {
         .save(&dir, 0, DEFAULT_CACHE_MAX_SIZE)
         .expect("save under default");
 
-    // Tiny user cap (1 byte) does NOT discard the existing valid cache:
-    // the default acts as a floor on the load ceiling.
     assert!(
         CacheStore::load(&dir, 0, 1).is_some(),
         "tiny user cap does not discard valid existing cache"
     );
 
-    // User cap above the default also works (matches the cap the cache was
-    // saved under).
     assert!(
         CacheStore::load(&dir, 0, DEFAULT_CACHE_MAX_SIZE * 2).is_some(),
         "user cap above default round-trips"
@@ -2069,17 +2977,8 @@ fn cache_load_honors_user_max_size_above_default() {
 
 #[test]
 fn cache_load_returns_none_on_bitcode_decode_failure() {
-    // Regression: across a CACHE_VERSION bump the on-disk schema typically
-    // gains or removes fields, so bitcode cannot deserialize old bytes into
-    // the new struct shape. The old `load` only emitted the upgrade
-    // `tracing::info!` AFTER the decode succeeded, so the common
-    // upgrade path went silent. The fix emits the info log on EITHER
-    // decode failure OR version mismatch, since both indicate
-    // "on-disk file incompatible with this build."
     let dir = test_cache_dir("decode_fail_info");
     std::fs::create_dir_all(&dir).unwrap();
-    // Write deliberately-malformed bytes (cannot decode into any CacheStore
-    // shape). The `load` path must return `None` without panicking.
     std::fs::write(dir.join("cache.bin"), b"not-a-valid-bitcode-payload").unwrap();
     assert!(CacheStore::load(&dir, 0, DEFAULT_CACHE_MAX_SIZE).is_none());
 
@@ -2095,7 +2994,6 @@ fn cache_save_atomic_write_leaves_no_tmp_on_success() {
         .save(&dir, 0, DEFAULT_CACHE_MAX_SIZE)
         .expect("save atomic");
 
-    // `cache.bin` exists, `cache.bin.tmp` does not.
     assert!(dir.join("cache.bin").exists(), "cache.bin present");
     assert!(
         !dir.join("cache.bin.tmp").exists(),

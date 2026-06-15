@@ -4,6 +4,14 @@
 //! (core, CLI, LSP). It has no analysis logic, only data structures.
 
 #![warn(missing_docs)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        reason = "tests use unwrap and expect to keep fixture setup concise"
+    )
+)]
 
 /// File discovery types: discovered files, file IDs, and entry points.
 pub mod discover;
@@ -16,6 +24,10 @@ pub mod discover;
 pub mod envelope;
 /// Module extraction types: exports, imports, re-exports, and member info.
 pub mod extract;
+/// Machine-readable manifest of the plow MCP server's tools, shared by
+/// `plow schema` and the telemetry tool-name allowlist; kept in sync with
+/// the live tool router by a drift test in `crates/mcp`.
+pub mod mcp_manifest;
 /// JSON-output augmentation types: `IssueAction` enum + variants.
 /// Schema-side counterpart of the augmentations the JSON layer adds to each
 /// dead-code finding. The structs are always compiled (typed dead-code

@@ -6,20 +6,23 @@ use crate::template_usage::TemplateUsage;
 
 use super::scanners::{scan_bracket_section, scan_curly_section, scan_html_tag};
 use super::shared::{
-    HTML_COMMENT_RE, merge_component_tag_usage, merge_expression_usage_with_bound_targets,
-    merge_pattern_binding_usage, merge_statement_usage_with_bound_targets, parse_tag_attrs,
+    HTML_COMMENT_RE, ParsedAttr, ParsedTag, merge_component_tag_usage,
+    merge_expression_usage_with_bound_targets, merge_pattern_binding_usage,
+    merge_statement_usage_with_bound_targets, parse_tag_attrs,
 };
 
-static TEMPLATE_BLOCK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(
-        r#"(?is)<template\b(?:[^>"']|"[^"]*"|'[^']*')*>(?P<body>[\s\S]*?)</template>"#,
-    )
-    .expect("valid regex")
-});
+/// Matches a `<template ...>` OPENING tag only (quote-aware over the attribute
+/// list). The matching `</template>` is located separately by
+/// [`find_template_body_end`] with nesting depth tracking, because a Vue SFC
+/// root `<template>` commonly contains nested `<template #slot>` elements and a
+/// non-greedy `</template>` body capture would truncate the body at the FIRST
+/// nested close, dropping every component rendered after it (issue: false
+/// `unused-export` on `<template #slot>` + later `<Component>`).
+static TEMPLATE_OPEN_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r#"(?is)<template\b(?:[^>"']|"[^"]*"|'[^']*')*>"#));
 
-static VUE_FOR_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r"(?is)^(?P<binding>.+?)\s+(?:in|of)\s+(?P<source>.+)$").expect("valid regex")
-});
+static VUE_FOR_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r"(?is)^(?P<binding>.+?)\s+(?:in|of)\s+(?P<source>.+)$"));
 
 #[cfg(test)]
 pub(super) fn collect_template_usage(
@@ -34,36 +37,109 @@ pub(super) fn collect_template_usage_with_bound_targets(
     imported_bindings: &FxHashSet<String>,
     bound_targets: &FxHashMap<String, String>,
 ) -> TemplateUsage {
-    // No early-return on empty imports: a Nuxt page may reference only convention
-    // auto-imported components (`<Card001 />`) with no import or bound target, and
-    // the scan still needs to capture those unmatched tags as auto-import
-    // candidates. With empty imports the used-binding / member-access outputs stay
-    // empty, so only unresolved tag-name capture is added. See issue #704.
     let comment_ranges: Vec<(usize, usize)> = HTML_COMMENT_RE
         .find_iter(source)
         .map(|m| (m.start(), m.end()))
         .collect();
 
     let mut usage = TemplateUsage::default();
-    for cap in TEMPLATE_BLOCK_RE.captures_iter(source) {
-        let Some(template_match) = cap.get(0) else {
+    // Cursor past the last fully-consumed root template body, so nested
+    // `<template>` opens (which `TEMPLATE_OPEN_RE` also matches) are skipped
+    // rather than rescanned as separate roots.
+    let mut scan_from = 0usize;
+    for open in TEMPLATE_OPEN_RE.find_iter(source) {
+        if open.start() < scan_from {
             continue;
-        };
+        }
         if comment_ranges
             .iter()
-            .any(|&(start, end)| template_match.start() >= start && template_match.start() < end)
+            .any(|&(start, end)| open.start() >= start && open.start() < end)
         {
             continue;
         }
-        let body = cap.name("body").map_or("", |m| m.as_str());
-        usage.merge(scan_template_body(body, imported_bindings, bound_targets));
+        // `<template/>` self-closing: no body.
+        if open.as_str().trim_end().ends_with("/>") {
+            continue;
+        }
+        let body_start = open.end();
+        let Some(body_end) = find_template_body_end(source, body_start) else {
+            continue;
+        };
+        usage.merge(scan_template_body(
+            &source[body_start..body_end],
+            body_start,
+            imported_bindings,
+            bound_targets,
+        ));
+        scan_from = body_end;
     }
 
     usage
 }
 
+/// Locate the `</template>` that closes the root template whose body starts at
+/// `body_start`, counting nested `<template>` opens so a slot template's close
+/// does not terminate the root body early. Returns the byte index of the `<` of
+/// the matching `</template>`, or `None` if the markup is unbalanced.
+fn find_template_body_end(source: &str, body_start: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let mut index = body_start;
+    let mut depth: usize = 1;
+    while index < bytes.len() {
+        // Byte-slice comparisons throughout: the fallback `index += 1` can land
+        // inside a multi-byte UTF-8 char (e.g. CJK text in a template), so string
+        // slicing here would panic on a non-char-boundary index.
+        if bytes[index..].starts_with(b"<!--") {
+            if let Some(rel) = source[index + 4..].find("-->") {
+                index += 4 + rel + 3;
+                continue;
+            }
+            // Unclosed comment (malformed markup): treat the `<` as ordinary
+            // text and keep scanning rather than bailing, so a valid root
+            // `</template>` later in the body is still found and the file's
+            // component renders stay credited.
+            index += 1;
+            continue;
+        }
+        if bytes[index] == b'<'
+            && let Some((tag, next_index)) = scan_html_tag(source, index)
+        {
+            let trimmed = tag.trim();
+            if trimmed.eq_ignore_ascii_case("</template>") {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(index);
+                }
+            } else if is_template_open_tag(trimmed) && !trimmed.trim_end().ends_with("/>") {
+                depth += 1;
+            }
+            index = next_index;
+            continue;
+        }
+        index += 1;
+    }
+    None
+}
+
+/// Whether `tag` (a full `<...>` tag string) is a `<template ...>` opening tag
+/// (case-insensitive), guarding against `<templatefoo>` via a boundary check.
+fn is_template_open_tag(tag: &str) -> bool {
+    let Some(rest) = tag.strip_prefix('<') else {
+        return false;
+    };
+    let Some(after) = rest.get(..8) else {
+        return false;
+    };
+    after.eq_ignore_ascii_case("template")
+        && rest[8..]
+            .chars()
+            .next()
+            .is_none_or(|c| c.is_whitespace() || c == '>' || c == '/')
+}
+
 fn scan_template_body(
     body: &str,
+    body_offset: usize,
     imported_bindings: &FxHashSet<String>,
     bound_targets: &FxHashMap<String, String>,
 ) -> TemplateUsage {
@@ -103,6 +179,8 @@ fn scan_template_body(
             };
             apply_tag(
                 tag,
+                body_offset + index,
+                body_offset + next_index,
                 imported_bindings,
                 bound_targets,
                 &mut scopes,
@@ -120,6 +198,8 @@ fn scan_template_body(
 
 fn apply_tag(
     tag: &str,
+    tag_start: usize,
+    tag_end: usize,
     imported_bindings: &FxHashSet<String>,
     bound_targets: &FxHashMap<String, String>,
     scopes: &mut Vec<Vec<String>>,
@@ -140,50 +220,11 @@ fn apply_tag(
     let current = current_locals(scopes);
     let parsed = parse_tag_attrs(trimmed, false);
     mark_tag_usage(&parsed.name, imported_bindings, &current, usage);
+    collect_v_html_sink(&parsed, tag_start, tag_end, usage);
 
-    let mut v_for_locals = Vec::new();
-    let mut slot_locals = Vec::new();
-    if let Some(value) = parsed
-        .attrs
-        .iter()
-        .find(|attr| attr.name == "v-for")
-        .and_then(|attr| attr.value.as_deref())
-        && let Some(captures) = VUE_FOR_RE.captures(value)
-    {
-        let binding = captures.name("binding").map_or("", |m| m.as_str()).trim();
-        let source_expr = captures.name("source").map_or("", |m| m.as_str()).trim();
-        merge_expression_usage_with_bound_targets(
-            usage,
-            source_expr,
-            imported_bindings,
-            bound_targets,
-            &current,
-        );
-        v_for_locals.extend(merge_pattern_binding_usage(
-            usage,
-            binding,
-            imported_bindings,
-            &current,
-        ));
-    }
-
-    if let Some(value) = parsed
-        .attrs
-        .iter()
-        .find(|attr| {
-            attr.name == "slot-scope"
-                || attr.name.starts_with("v-slot")
-                || attr.name.starts_with('#')
-        })
-        .and_then(|attr| attr.value.as_deref())
-    {
-        slot_locals.extend(merge_pattern_binding_usage(
-            usage,
-            value,
-            imported_bindings,
-            &current,
-        ));
-    }
+    let v_for_locals =
+        collect_v_for_locals(&parsed, imported_bindings, bound_targets, &current, usage);
+    let slot_locals = collect_slot_locals(&parsed, imported_bindings, &current, usage);
 
     let mut element_locals = v_for_locals.clone();
     element_locals.extend(slot_locals);
@@ -193,6 +234,86 @@ fn apply_tag(
     let mut arg_locals = current;
     arg_locals.extend(v_for_locals);
 
+    scan_vue_attrs(
+        &parsed,
+        imported_bindings,
+        bound_targets,
+        &arg_locals,
+        &attr_locals,
+        usage,
+    );
+
+    if !parsed.self_closing {
+        scopes.push(element_locals);
+    }
+}
+
+fn collect_v_html_sink(
+    parsed: &ParsedTag,
+    tag_start: usize,
+    tag_end: usize,
+    usage: &mut TemplateUsage,
+) {
+    if let Some(value) = attr_value(parsed, "v-html")
+        && let Some(sink) = crate::template_usage::template_html_sink(value, tag_start, tag_end)
+    {
+        usage.security_sinks.push(sink);
+    }
+}
+
+fn collect_v_for_locals(
+    parsed: &ParsedTag,
+    imported_bindings: &FxHashSet<String>,
+    bound_targets: &FxHashMap<String, String>,
+    current: &[String],
+    usage: &mut TemplateUsage,
+) -> Vec<String> {
+    let Some(value) = attr_value(parsed, "v-for") else {
+        return Vec::new();
+    };
+    let Some(captures) = VUE_FOR_RE.captures(value) else {
+        return Vec::new();
+    };
+    let binding = captures.name("binding").map_or("", |m| m.as_str()).trim();
+    let source_expr = captures.name("source").map_or("", |m| m.as_str()).trim();
+    merge_expression_usage_with_bound_targets(
+        usage,
+        source_expr,
+        imported_bindings,
+        bound_targets,
+        current,
+    );
+    merge_pattern_binding_usage(usage, binding, imported_bindings, current)
+}
+
+fn collect_slot_locals(
+    parsed: &ParsedTag,
+    imported_bindings: &FxHashSet<String>,
+    current: &[String],
+    usage: &mut TemplateUsage,
+) -> Vec<String> {
+    parsed
+        .attrs
+        .iter()
+        .find(|attr| {
+            attr.name == "slot-scope"
+                || attr.name.starts_with("v-slot")
+                || attr.name.starts_with('#')
+        })
+        .and_then(|attr| attr.value.as_deref())
+        .map_or_else(Vec::new, |value| {
+            merge_pattern_binding_usage(usage, value, imported_bindings, current)
+        })
+}
+
+fn scan_vue_attrs(
+    parsed: &ParsedTag,
+    imported_bindings: &FxHashSet<String>,
+    bound_targets: &FxHashMap<String, String>,
+    arg_locals: &[String],
+    attr_locals: &[String],
+    usage: &mut TemplateUsage,
+) {
     for attr in &parsed.attrs {
         mark_custom_directive_usage(&attr.name, imported_bindings, usage);
         if let Some(expr) = dynamic_argument_expression(&attr.name) {
@@ -201,41 +322,56 @@ fn apply_tag(
                 expr,
                 imported_bindings,
                 bound_targets,
-                &arg_locals,
+                arg_locals,
             );
         }
-        if let Some(expr) = attr.value.as_deref() {
-            if attr.name == "v-for"
-                || attr.name == "slot-scope"
-                || attr.name.starts_with("v-slot")
-                || attr.name.starts_with('#')
-            {
-                continue;
-            }
+        scan_vue_attr_value(attr, imported_bindings, bound_targets, attr_locals, usage);
+    }
+}
 
-            if is_statement_attr(&attr.name) {
-                merge_statement_usage_with_bound_targets(
-                    usage,
-                    expr,
-                    imported_bindings,
-                    bound_targets,
-                    &attr_locals,
-                );
-            } else if is_expression_attr(&attr.name) || is_custom_directive_attr(&attr.name) {
-                merge_expression_usage_with_bound_targets(
-                    usage,
-                    expr,
-                    imported_bindings,
-                    bound_targets,
-                    &attr_locals,
-                );
-            }
-        }
+fn scan_vue_attr_value(
+    attr: &ParsedAttr,
+    imported_bindings: &FxHashSet<String>,
+    bound_targets: &FxHashMap<String, String>,
+    attr_locals: &[String],
+    usage: &mut TemplateUsage,
+) {
+    let Some(expr) = attr.value.as_deref() else {
+        return;
+    };
+    if attr.name == "v-for"
+        || attr.name == "slot-scope"
+        || attr.name.starts_with("v-slot")
+        || attr.name.starts_with('#')
+    {
+        return;
     }
 
-    if !parsed.self_closing {
-        scopes.push(element_locals);
+    if is_statement_attr(&attr.name) {
+        merge_statement_usage_with_bound_targets(
+            usage,
+            expr,
+            imported_bindings,
+            bound_targets,
+            attr_locals,
+        );
+    } else if is_expression_attr(&attr.name) || is_custom_directive_attr(&attr.name) {
+        merge_expression_usage_with_bound_targets(
+            usage,
+            expr,
+            imported_bindings,
+            bound_targets,
+            attr_locals,
+        );
     }
+}
+
+fn attr_value<'a>(parsed: &'a ParsedTag, name: &str) -> Option<&'a str> {
+    parsed
+        .attrs
+        .iter()
+        .find(|attr| attr.name == name)
+        .and_then(|attr| attr.value.as_deref())
 }
 
 fn dynamic_argument_expression(attr_name: &str) -> Option<&str> {
@@ -408,6 +544,50 @@ mod tests {
     }
 
     #[test]
+    fn nested_slot_template_does_not_truncate_root_body() {
+        // A `<template #slot>` inside a component must NOT terminate the root
+        // template body at its `</template>`; components rendered AFTER it stay
+        // credited. Regression for the non-greedy `</template>` body capture.
+        let usage = collect_template_usage(
+            "<template><Header><template #logo>x</template></Header><Content /></template>",
+            &imported(&["Header", "Content"]),
+        );
+
+        assert!(usage.used_bindings.contains("Header"));
+        assert!(
+            usage.used_bindings.contains("Content"),
+            "component after a nested slot template must still be credited"
+        );
+    }
+
+    #[test]
+    fn multibyte_text_before_nested_template_does_not_panic() {
+        // Depth-aware body scanning must use byte-safe slicing: CJK text between
+        // tags must not cause a non-char-boundary panic, and the trailing
+        // component must still be credited.
+        let usage = collect_template_usage(
+            "<template><Header>住所<template #logo>都市</template></Header><Content />住所</template>",
+            &imported(&["Header", "Content"]),
+        );
+        assert!(usage.used_bindings.contains("Header"));
+        assert!(usage.used_bindings.contains("Content"));
+    }
+
+    #[test]
+    fn deeply_nested_slot_templates_credit_trailing_components() {
+        let usage = collect_template_usage(
+            "<template><A><template #a><B><template #b>y</template></B></template></A><C /><D /></template>",
+            &imported(&["A", "B", "C", "D"]),
+        );
+        for name in ["A", "B", "C", "D"] {
+            assert!(
+                usage.used_bindings.contains(name),
+                "{name} should be credited across nested slot templates"
+            );
+        }
+    }
+
+    #[test]
     fn v_for_alias_shadows_import_name() {
         let usage = collect_template_usage(
             "<script setup>import { item } from './utils';</script><template><li v-for=\"item in items\">{{ item }}</li></template>",
@@ -424,8 +604,6 @@ mod tests {
             &imported(&["item"]),
         );
 
-        // The shadowed `item` import must not be credited. `<List>` is captured
-        // as an auto-import candidate (it matches no import), which is expected.
         assert!(usage.used_bindings.is_empty());
         assert!(usage.member_accesses.is_empty());
     }
@@ -503,9 +681,6 @@ mod tests {
             &imported(&["Item"]),
         );
 
-        // The locally-shadowed `Item` import must not be credited; `<Item>` is a
-        // slot-scope local so it is not captured. `<List>` (no import) is captured
-        // as an auto-import candidate, which is expected.
         assert!(usage.used_bindings.is_empty());
         assert!(usage.member_accesses.is_empty());
     }
@@ -581,18 +756,13 @@ mod tests {
         assert!(usage.used_bindings.contains("fallbackItem"));
     }
 
-    // --- typed destructuring (TypeScript annotations) ---
-
     #[test]
     fn v_for_typed_destructure_does_not_infinite_recurse() {
-        // Regression: `{ id, name }: Item` in v-for caused infinite recursion
-        // because the type annotation prevented strip_wrapping from matching.
         let usage = collect_template_usage(
             "<script setup>import { id } from './utils';</script><template><li v-for=\"({ id, name }: Item) in items\">{{ id }}</li></template>",
             &imported(&["id"]),
         );
 
-        // id is shadowed by the v-for binding
         assert!(usage.is_empty());
     }
 
@@ -603,8 +773,6 @@ mod tests {
             &imported(&["data"]),
         );
 
-        // data is shadowed by the slot binding, so the import is not credited.
-        // `<List>` (no import) is captured as an auto-import candidate.
         assert!(usage.used_bindings.is_empty());
         assert!(usage.member_accesses.is_empty());
     }
@@ -616,11 +784,8 @@ mod tests {
             &imported(&["items"]),
         );
 
-        // items is used as the iterable expression
         assert!(usage.used_bindings.contains("items"));
     }
-
-    // --- bound_targets remap (script-local instance bindings) ---
 
     #[test]
     fn event_handler_member_call_maps_script_instance_to_class() {

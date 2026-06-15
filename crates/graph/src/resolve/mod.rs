@@ -1,15 +1,15 @@
 //! Import specifier resolution using `oxc_resolver`.
 //!
 //! Orchestrates the resolution pipeline: for every extracted module, resolves all
-//! import specifiers in parallel (via rayon) to an [`ResolveResult`] — internal file,
+//! import specifiers in parallel (via rayon) to an [`ResolveResult`], internal file,
 //! npm package, external file, or unresolvable. The entry point is [`resolve_all_imports`].
 //!
 //! Resolution is split into submodules by import kind:
-//! - `static_imports` — ES `import` declarations
-//! - `dynamic_imports` — `import()` expressions and glob-based dynamic patterns
-//! - `require_imports` — CommonJS `require()` calls
-//! - `re_exports` — `export { x } from './y'` re-export sources
-//! - `upgrades` — post-resolution pass fixing non-deterministic bare specifier results
+//! - `static_imports`: ES `import` declarations
+//! - `dynamic_imports`: `import()` expressions and glob-based dynamic patterns
+//! - `require_imports`: CommonJS `require()` calls
+//! - `re_exports`: `export { x } from './y'` re-export sources
+//! - `upgrades`: post-resolution pass fixing non-deterministic bare specifier results
 //!
 //! Handles tsconfig path aliases (auto-discovered per file), pnpm virtual store paths,
 //! React Native platform extensions, and package.json `exports` subpath resolution with
@@ -42,10 +42,10 @@ use std::sync::Mutex;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use oxc_span::Span;
 use plow_config::{AutoImportKind, AutoImportRule};
 use plow_types::discover::{DiscoveredFile, FileId};
 use plow_types::extract::{ImportInfo, ImportedName, ModuleInfo};
-use oxc_span::Span;
 
 use dynamic_imports::{resolve_dynamic_imports, resolve_dynamic_patterns};
 use re_exports::resolve_re_exports;
@@ -75,10 +75,6 @@ pub fn resolve_all_imports(
     root: &Path,
     extra_conditions: &[String],
 ) -> Vec<ResolvedModule> {
-    // Build workspace name → root index for pnpm store fallback.
-    // Canonicalize roots to match path_to_id (which uses canonical paths).
-    // Without this, macOS /var → /private/var and similar platform symlinks
-    // cause workspace roots to mismatch canonical file paths.
     let canonical_ws_roots: Vec<PathBuf> = workspaces
         .par_iter()
         .map(|ws| dunce::canonicalize(&ws.root).unwrap_or_else(|_| ws.root.clone()))
@@ -109,14 +105,8 @@ pub fn resolve_all_imports(
         }
     }
 
-    // Check if project root is already canonical (no symlinks in path).
-    // When true, raw paths == canonical paths for files under root, so we can skip
-    // the upfront bulk canonicalize() of all source files (21k+ syscalls on large projects).
-    // A lazy CanonicalFallback handles the rare intra-project symlink case.
     let root_is_canonical = dunce::canonicalize(root).is_ok_and(|c| c == root);
 
-    // Pre-compute canonical paths ONCE for all files in parallel (avoiding repeated syscalls).
-    // Skipped when root is canonical — the lazy fallback below handles edge cases.
     let canonical_paths: Vec<PathBuf> = if root_is_canonical {
         Vec::new()
     } else {
@@ -126,8 +116,6 @@ pub fn resolve_all_imports(
             .collect()
     };
 
-    // Primary path → FileId index. When root is canonical, uses raw paths (fast).
-    // Otherwise uses pre-computed canonical paths (correct for all symlink configurations).
     let path_to_id: FxHashMap<&Path, FileId> = if root_is_canonical {
         files.iter().map(|f| (f.path.as_path(), f.id)).collect()
     } else {
@@ -138,33 +126,27 @@ pub fn resolve_all_imports(
             .collect()
     };
 
-    // Also index by non-canonical path for fallback lookups
     let raw_path_to_id: FxHashMap<&Path, FileId> =
         files.iter().map(|f| (f.path.as_path(), f.id)).collect();
 
-    // FileIds are sequential 0..n, so direct array indexing is faster than FxHashMap.
     let file_paths: Vec<&Path> = files.iter().map(|f| f.path.as_path()).collect();
 
-    // Create resolvers ONCE and share across threads (oxc_resolver::Resolver is Send + Sync).
     let extensions = build_extensions(active_plugins);
     let condition_names = build_condition_names(active_plugins, extra_conditions);
     let resolver = create_resolver(active_plugins, extra_conditions);
     let mut style_conditions = extra_conditions.to_vec();
+    style_conditions.push("sass".to_string());
     style_conditions.push("style".to_string());
     let style_resolver = create_resolver(active_plugins, &style_conditions);
 
-    // Lazy canonical fallback — only needed when root is canonical (path_to_id uses raw paths).
-    // When root is NOT canonical, path_to_id already uses canonical paths, no fallback needed.
     let canonical_fallback = if root_is_canonical {
         Some(types::CanonicalFallback::new(files))
     } else {
         None
     };
 
-    // Dedup set for broken-tsconfig warnings. See `ResolveContext::tsconfig_warned`.
     let tsconfig_warned: Mutex<FxHashSet<String>> = Mutex::new(FxHashSet::default());
 
-    // Shared resolution context — avoids passing 6 arguments to every resolve_specifier call
     let ctx = ResolveContext {
         resolver: &resolver,
         style_resolver: &style_resolver,
@@ -182,64 +164,10 @@ pub fn resolve_all_imports(
         tsconfig_warned: &tsconfig_warned,
     };
 
-    // Resolve in parallel — shared resolver instance.
-    // Each file resolves its own imports independently (no shared bare specifier cache).
-    // oxc_resolver's internal caches (package.json, tsconfig, directory entries) are
-    // shared across threads for performance.
     let mut resolved: Vec<ResolvedModule> = modules
         .par_iter()
         .filter_map(|module| {
-            let Some(file_path) = file_paths.get(module.file_id.0 as usize) else {
-                tracing::warn!(
-                    file_id = module.file_id.0,
-                    "Skipping module with unknown file_id during resolution"
-                );
-                return None;
-            };
-
-            let mut all_imports = resolve_static_imports(&ctx, file_path, &module.imports);
-            all_imports.extend(resolve_require_imports(
-                &ctx,
-                file_path,
-                &module.require_calls,
-            ));
-
-            let from_dir = if canonical_paths.is_empty() {
-                // Root is canonical — raw paths are canonical
-                file_path.parent().unwrap_or(file_path)
-            } else {
-                canonical_paths
-                    .get(module.file_id.0 as usize)
-                    .and_then(|p| p.parent())
-                    .unwrap_or(file_path)
-            };
-
-            Some(ResolvedModule {
-                file_id: module.file_id,
-                path: file_path.to_path_buf(),
-                exports: module.exports.clone(),
-                re_exports: resolve_re_exports(&ctx, file_path, &module.re_exports),
-                resolved_imports: all_imports,
-                resolved_dynamic_imports: resolve_dynamic_imports(
-                    &ctx,
-                    file_path,
-                    &module.dynamic_imports,
-                ),
-                resolved_dynamic_patterns: resolve_dynamic_patterns(
-                    from_dir,
-                    &module.dynamic_import_patterns,
-                    &canonical_paths,
-                    files,
-                ),
-                member_accesses: module.member_accesses.clone(),
-                whole_object_uses: module.whole_object_uses.clone(),
-                has_cjs_exports: module.has_cjs_exports,
-                has_angular_component_template_url: module.has_angular_component_template_url,
-                unused_import_bindings: module.unused_import_bindings.iter().cloned().collect(),
-                type_referenced_import_bindings: module.type_referenced_import_bindings.clone(),
-                value_referenced_import_bindings: module.value_referenced_import_bindings.clone(),
-                namespace_object_aliases: module.namespace_object_aliases.clone(),
-            })
+            resolve_module_imports(module, &ctx, &file_paths, &canonical_paths, files)
         })
         .collect();
 
@@ -256,16 +184,88 @@ pub fn resolve_all_imports(
     resolved
 }
 
+fn resolve_module_imports(
+    module: &ModuleInfo,
+    ctx: &ResolveContext<'_>,
+    file_paths: &[&Path],
+    canonical_paths: &[PathBuf],
+    files: &[DiscoveredFile],
+) -> Option<ResolvedModule> {
+    let Some(file_path) = file_paths.get(module.file_id.0 as usize) else {
+        tracing::warn!(
+            file_id = module.file_id.0,
+            "Skipping module with unknown file_id during resolution"
+        );
+        return None;
+    };
+
+    let mut all_imports = resolve_static_imports(ctx, file_path, &module.imports);
+    all_imports.extend(resolve_require_imports(
+        ctx,
+        file_path,
+        &module.require_calls,
+    ));
+
+    let from_dir = if canonical_paths.is_empty() {
+        file_path.parent().unwrap_or(file_path)
+    } else {
+        canonical_paths
+            .get(module.file_id.0 as usize)
+            .and_then(|p| p.parent())
+            .unwrap_or(file_path)
+    };
+
+    Some(build_resolved_module(
+        module,
+        ctx,
+        file_path,
+        from_dir,
+        canonical_paths,
+        files,
+        all_imports,
+    ))
+}
+
+fn build_resolved_module(
+    module: &ModuleInfo,
+    ctx: &ResolveContext<'_>,
+    file_path: &Path,
+    from_dir: &Path,
+    canonical_paths: &[PathBuf],
+    files: &[DiscoveredFile],
+    all_imports: Vec<types::ResolvedImport>,
+) -> ResolvedModule {
+    ResolvedModule {
+        file_id: module.file_id,
+        path: file_path.to_path_buf(),
+        exports: module.exports.clone(),
+        re_exports: resolve_re_exports(ctx, file_path, &module.re_exports),
+        resolved_imports: all_imports,
+        resolved_dynamic_imports: resolve_dynamic_imports(ctx, file_path, &module.dynamic_imports),
+        resolved_dynamic_patterns: resolve_dynamic_patterns(
+            from_dir,
+            &module.dynamic_import_patterns,
+            canonical_paths,
+            files,
+        ),
+        member_accesses: module.member_accesses.clone(),
+        whole_object_uses: module.whole_object_uses.clone(),
+        has_cjs_exports: module.has_cjs_exports,
+        has_angular_component_template_url: module.has_angular_component_template_url,
+        unused_import_bindings: module.unused_import_bindings.iter().cloned().collect(),
+        type_referenced_import_bindings: module.type_referenced_import_bindings.clone(),
+        value_referenced_import_bindings: module.value_referenced_import_bindings.clone(),
+        namespace_object_aliases: module.namespace_object_aliases.clone(),
+    }
+}
+
 /// Synthesize module-graph edges for convention auto-imports.
 ///
 /// For each module, every captured `auto_import_candidates` name is matched
 /// against the active plugins' auto-import table; on a hit a synthetic
-/// [`ResolvedImport`] to the providing file is appended so the existing graph
-/// builder credits the edge. Name collisions across files (e.g. `Comments`
-/// declared in both `Comments.client.vue` and `Comments.server.vue`) over-credit
-/// every match, keeping each provider reachable. Resolution is recomputed every
-/// run from the live file index, so it is never folded into per-file caching.
-/// See issue #704.
+/// [`ResolvedImport`] is added so the existing graph builder credits the edge.
+/// Name collisions across files over-credit every match, keeping each provider
+/// reachable. Resolution is recomputed from the live file index each run.
 fn synthesize_auto_import_edges(
     resolved: &mut [ResolvedModule],
     modules: &[ModuleInfo],
@@ -277,8 +277,6 @@ fn synthesize_auto_import_edges(
         return;
     }
 
-    // Name -> providing files. Built from the live file index, so a rule whose
-    // source file was not discovered is skipped rather than synthesizing a dangling edge.
     let mut table: FxHashMap<&str, Vec<(FileId, AutoImportKind)>> = FxHashMap::default();
     for rule in auto_imports {
         let source = rule.source.as_path();
@@ -298,7 +296,6 @@ fn synthesize_auto_import_edges(
         return;
     }
 
-    // Captured candidate names keyed by the file that referenced them.
     let candidates: FxHashMap<FileId, &[String]> = modules
         .iter()
         .filter(|module| !module.auto_import_candidates.is_empty())
@@ -313,6 +310,9 @@ fn synthesize_auto_import_edges(
             continue;
         };
         for name in *names {
+            if is_auto_import_builtin(name) {
+                continue;
+            }
             let Some(targets) = table.get(name.as_str()) else {
                 continue;
             };
@@ -327,6 +327,132 @@ fn synthesize_auto_import_edges(
             }
         }
     }
+}
+
+fn is_auto_import_builtin(name: &str) -> bool {
+    is_js_auto_import_builtin(name)
+        || is_vue_auto_import_builtin(name)
+        || is_nuxt_auto_import_builtin(name)
+}
+
+fn is_js_auto_import_builtin(name: &str) -> bool {
+    matches!(
+        name,
+        "AbortController"
+            | "AbortSignal"
+            | "Array"
+            | "ArrayBuffer"
+            | "BigInt"
+            | "Blob"
+            | "Boolean"
+            | "Buffer"
+            | "CSS"
+            | "DOMParser"
+            | "Date"
+            | "Document"
+            | "Error"
+            | "Event"
+            | "EventTarget"
+            | "File"
+            | "FormData"
+            | "Intl"
+            | "JSON"
+            | "Map"
+            | "Math"
+            | "Number"
+            | "Object"
+            | "Promise"
+            | "Reflect"
+            | "RegExp"
+            | "Response"
+            | "Set"
+            | "String"
+            | "Symbol"
+            | "URL"
+            | "URLSearchParams"
+            | "WeakMap"
+            | "WeakSet"
+            | "Window"
+            | "alert"
+            | "clearInterval"
+            | "clearTimeout"
+            | "console"
+            | "document"
+            | "fetch"
+            | "global"
+            | "globalThis"
+            | "localStorage"
+            | "navigator"
+            | "process"
+            | "requestAnimationFrame"
+            | "sessionStorage"
+            | "setInterval"
+            | "setTimeout"
+            | "window"
+    )
+}
+
+fn is_vue_auto_import_builtin(name: &str) -> bool {
+    matches!(name, |"computed"| "customRef"
+        | "defineAsyncComponent"
+        | "defineComponent"
+        | "effectScope"
+        | "getCurrentInstance"
+        | "h"
+        | "inject"
+        | "isProxy"
+        | "isReactive"
+        | "isReadonly"
+        | "isRef"
+        | "markRaw"
+        | "nextTick"
+        | "onActivated"
+        | "onBeforeMount"
+        | "onBeforeUnmount"
+        | "onBeforeUpdate"
+        | "onDeactivated"
+        | "onErrorCaptured"
+        | "onMounted"
+        | "onRenderTracked"
+        | "onRenderTriggered"
+        | "onScopeDispose"
+        | "onServerPrefetch"
+        | "onUnmounted"
+        | "onUpdated"
+        | "provide"
+        | "reactive"
+        | "readonly"
+        | "ref"
+        | "resolveComponent"
+        | "shallowReactive"
+        | "shallowReadonly"
+        | "shallowRef"
+        | "toRaw"
+        | "toRef"
+        | "toRefs"
+        | "triggerRef"
+        | "unref"
+        | "watch"
+        | "watchEffect"
+        | "watchPostEffect"
+        | "watchSyncEffect")
+}
+
+fn is_nuxt_auto_import_builtin(name: &str) -> bool {
+    matches!(name, |"useAsyncData"| "useCookie"
+        | "useError"
+        | "useFetch"
+        | "useHead"
+        | "useLazyAsyncData"
+        | "useLazyFetch"
+        | "useNuxtApp"
+        | "useRequestEvent"
+        | "useRequestHeaders"
+        | "useRoute"
+        | "useRouter"
+        | "useRuntimeConfig"
+        | "useSeoMeta"
+        | "useState")
 }
 
 /// Build a synthetic [`ImportInfo`] for a convention auto-import. Component and

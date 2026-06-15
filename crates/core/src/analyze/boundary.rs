@@ -27,7 +27,6 @@ pub fn find_boundary_violations(
     let boundaries = &config.boundaries;
     let mut violations = Vec::new();
 
-    // Cache zone classification per FileId to avoid repeated glob matching.
     let mut zone_cache: FxHashMap<FileId, Option<String>> = FxHashMap::default();
 
     let classify =
@@ -47,7 +46,6 @@ pub fn find_boundary_violations(
         };
 
     for node in &graph.modules {
-        // Only check reachable files — unreachable files are already reported as unused.
         if !node.is_reachable() && !node.is_entry_point() {
             continue;
         }
@@ -56,13 +54,11 @@ pub fn find_boundary_violations(
             continue; // Unzoned files are unrestricted.
         };
 
-        // Check if this zone has any restrictions at all.
         let has_rule = boundaries.rules.iter().any(|r| r.from_zone == from_zone);
         if !has_rule {
             continue; // Unrestricted zone — skip all edge checks.
         }
 
-        // Check file-level suppression.
         if suppressions.is_file_suppressed(node.file_id, IssueKind::BoundaryViolation) {
             continue;
         }
@@ -76,13 +72,6 @@ pub fn find_boundary_violations(
                 continue;
             }
 
-            // Type-only escape hatch: if the edge is all-type-only and the
-            // rule lists `to_zone` under `allowTypeOnly`, the import is
-            // permitted. Mixed-specifier imports (`import { type Foo, Bar }`)
-            // still fire because at least one symbol carries a runtime
-            // dependency. Re-exports (`export type { Foo } from "./x"`)
-            // surface as side-effect symbols with the re-export's type-only
-            // flag, so they participate in the same allowance.
             if all_type_only && boundaries.is_type_only_allowed(&from_zone, &to_zone) {
                 tracing::debug!(
                     "boundary type-only allowed: '{}' -> '{}' ({} -> {})",
@@ -94,7 +83,6 @@ pub fn find_boundary_violations(
                 continue;
             }
 
-            // Check line-level suppression at the import site.
             let (line, col) = span_start.map_or((1, 0), |s| {
                 byte_offset_to_line_col(line_offsets_by_file, node.file_id, s)
             });
@@ -103,8 +91,6 @@ pub fn find_boundary_violations(
                 continue;
             }
 
-            // Use target's relative path as the import specifier since the raw
-            // specifier string is not carried in graph edges.
             let target_node = &graph.modules[target_id.0 as usize];
             let import_specifier = target_node.path.strip_prefix(&config.root).map_or_else(
                 |_| target_node.path.to_string_lossy().replace('\\', "/"),
@@ -123,7 +109,6 @@ pub fn find_boundary_violations(
         }
     }
 
-    // Warn about zones that matched zero files — likely a misconfiguration.
     if !boundaries.is_empty() {
         let classified_zones: rustc_hash::FxHashSet<&str> =
             zone_cache.values().filter_map(|z| z.as_deref()).collect();
@@ -153,8 +138,8 @@ mod tests {
     use crate::resolve::ResolvedModule;
     use crate::suppress::Suppression;
     use plow_config::{
-        BoundaryConfig, BoundaryRule, BoundaryZone, PlowConfig, OutputFormat, ResolvedConfig,
-        RulesConfig, Severity,
+        BoundaryCallsConfig, BoundaryConfig, BoundaryCoverageConfig, BoundaryRule, BoundaryZone,
+        OutputFormat, PlowConfig, ResolvedConfig, RulesConfig, Severity,
     };
     use rustc_hash::FxHashSet;
     use std::path::PathBuf;
@@ -215,7 +200,6 @@ mod tests {
             .iter()
             .map(|f| {
                 let mut rm = resolved_module(f.id, f.path.clone());
-                // Add import edges
                 for &(from, to, is_type_only) in edges {
                     if from == f.id.0 as usize {
                         rm.resolved_imports.push(crate::resolve::ResolvedImport {
@@ -262,6 +246,8 @@ mod tests {
     fn allowed_import_no_violation() {
         let root = PathBuf::from("/tmp/boundary-test");
         let boundaries = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -300,6 +286,8 @@ mod tests {
     fn disallowed_import_produces_violation() {
         let root = PathBuf::from("/tmp/boundary-test");
         let boundaries = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -346,6 +334,8 @@ mod tests {
     fn self_import_always_allowed() {
         let root = PathBuf::from("/tmp/boundary-test");
         let boundaries = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
@@ -376,6 +366,8 @@ mod tests {
     fn unzoned_files_unrestricted() {
         let root = PathBuf::from("/tmp/boundary-test");
         let boundaries = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
@@ -390,7 +382,6 @@ mod tests {
             }],
         };
         let config = make_config(root.clone(), boundaries);
-        // src/utils.ts is unzoned — importing it from ui should be allowed
         let (_, graph) = build_graph(
             &root,
             &["src/ui/Button.tsx", "src/utils.ts"],
@@ -407,6 +398,8 @@ mod tests {
     fn file_level_suppression_skips_file() {
         let root = PathBuf::from("/tmp/boundary-test");
         let boundaries = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -435,12 +428,7 @@ mod tests {
             &[(0, 1, false)],
         );
 
-        // File-level suppression (line 0)
-        let supps = vec![Suppression {
-            line: 0,
-            comment_line: 1,
-            kind: Some(IssueKind::BoundaryViolation),
-        }];
+        let supps = vec![Suppression::issue(0, 1, IssueKind::BoundaryViolation)];
         let mut supp_map = FxHashMap::default();
         supp_map.insert(FileId(0), supps.as_slice());
         let suppressions = SuppressionContext::from_map(supp_map);
@@ -450,12 +438,12 @@ mod tests {
         assert!(violations.is_empty());
     }
 
-    // ── allowTypeOnly escape hatch ──────────────────────────────────
-
     /// Build a ui->db restricted config with an optional `allowTypeOnly`
     /// list on the `ui` rule. Used by the type-only escape hatch tests.
     fn ui_db_boundaries(allow_type_only: Vec<String>) -> BoundaryConfig {
         BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -501,7 +489,6 @@ mod tests {
     #[test]
     fn type_only_import_still_blocked_when_zone_not_listed() {
         let root = PathBuf::from("/tmp/boundary-test");
-        // allowTypeOnly references a different zone, not `db`.
         let config = make_config(root.clone(), ui_db_boundaries(vec!["other".to_string()]));
         let (_, graph) = build_graph(
             &root,
@@ -542,8 +529,6 @@ mod tests {
     #[test]
     fn empty_allow_type_only_preserves_baseline_behavior() {
         let root = PathBuf::from("/tmp/boundary-test");
-        // Default (empty) allowTypeOnly. A type-only import must still fire,
-        // since the rule's allow list is empty and allowTypeOnly is empty.
         let config = make_config(root.clone(), ui_db_boundaries(vec![]));
         let (_, graph) = build_graph(
             &root,
@@ -564,9 +549,9 @@ mod tests {
     #[test]
     fn allow_type_only_is_independent_of_allow() {
         let root = PathBuf::from("/tmp/boundary-test");
-        // allow already includes `db`; the import must be permitted via the
-        // regular allow path. allowTypeOnly is a no-op here.
         let boundaries = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {

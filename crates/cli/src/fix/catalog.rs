@@ -36,167 +36,83 @@ use super::plan::{CapturedHashes, FixPlan, read_source_with_hash_check};
 /// `skipped_count` only counts entries that were intentionally not
 /// removed (hardcoded consumer, multi-doc YAML, line out of range); it
 /// does NOT count entries that produced a write error.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "fix-layer signatures match the orchestrator's call shape: root + entries + policy + (hashes, plan) for issue #454 batch atomicity + output/dry_run/fixes for the per-fixer wire"
-)]
+pub(super) struct CatalogFixContext<'a> {
+    pub(super) hashes: &'a CapturedHashes,
+    pub(super) plan: &'a mut FixPlan,
+    pub(super) output: OutputFormat,
+    pub(super) dry_run: bool,
+    pub(super) fixes: &'a mut Vec<serde_json::Value>,
+}
+
+type CatalogRemoval<'a> = (std::ops::Range<usize>, &'a UnusedCatalogEntry);
+
 pub(super) fn apply_catalog_entry_fixes(
     root: &Path,
     entries: &[UnusedCatalogEntryFinding],
     preceding_comment_policy: CatalogPrecedingCommentPolicy,
-    hashes: &CapturedHashes,
-    plan: &mut FixPlan,
-    output: OutputFormat,
-    dry_run: bool,
-    fixes: &mut Vec<serde_json::Value>,
+    ctx: CatalogFixContext<'_>,
 ) -> CatalogFixSummary {
+    let CatalogFixContext {
+        hashes,
+        plan,
+        output,
+        dry_run,
+        fixes,
+    } = ctx;
     let mut summary = CatalogFixSummary::default();
 
     if entries.is_empty() {
         return summary;
     }
 
-    // All entries share the same file (`pnpm-workspace.yaml`), but we group
-    // defensively so we read+write the file once even if a future detector
-    // adds entries from multiple files.
-    let mut by_path: rustc_hash::FxHashMap<&Path, Vec<&UnusedCatalogEntry>> =
-        rustc_hash::FxHashMap::default();
-    for entry in entries {
-        let entry = &entry.entry;
-        by_path.entry(entry.path.as_path()).or_default().push(entry);
-    }
+    let by_path = group_unused_catalog_entries_by_path(entries);
 
     for (relative_path, file_entries) in by_path {
         let absolute = root.join(relative_path);
         let Some((content, meta)) = read_source_with_hash_check(root, &absolute, hashes, plan)
         else {
-            // Skip silently when the workspace file is unreadable or escapes
-            // the root: matches the existing pattern in enum_members/deps.
-            // Hash mismatch records itself on `plan.skipped()`; the
-            // orchestrator surfaces it.
             continue;
         };
 
-        // Multi-document YAML defense (panel P1.6). The line scanner cannot
-        // reliably attribute lines to documents when `---` separators are
-        // present; refuse to edit and surface the skip.
         if is_multi_document_yaml(&content) {
-            for entry in &file_entries {
-                summary.skipped += 1;
-                fixes.push(skip_record(
-                    entry,
-                    "multi_document_yaml",
-                    "Skipped: pnpm-workspace.yaml contains a `---` document separator; plow fix does not support multi-document YAML",
-                    output,
-                    relative_path,
-                ));
-            }
+            skip_multi_document_catalog_entries(
+                &file_entries,
+                &mut summary,
+                fixes,
+                output,
+                relative_path,
+            );
             continue;
         }
 
         let lines: Vec<&str> = content.split(meta.line_ending).collect();
 
-        // Compute the line range for each entry and split into "remove" vs
-        // "skip" buckets.
-        let mut to_remove: Vec<(std::ops::Range<usize>, &UnusedCatalogEntry)> = Vec::new();
-        for entry in &file_entries {
-            if !entry.hardcoded_consumers.is_empty() {
-                summary.skipped += 1;
-                let consumer_summary = format_consumer_summary(&entry.hardcoded_consumers);
-                let description = format!(
-                    "Skipped: {consumer_summary} still pin `{}` with a hardcoded version. Switch the consumer(s) to \"{}\": \"catalog:{}\" first, then rerun plow fix.",
-                    entry.entry_name,
-                    entry.entry_name,
-                    if entry.catalog_name == "default" {
-                        String::new()
-                    } else {
-                        entry.catalog_name.clone()
-                    },
-                );
-                fixes.push(skip_record(
-                    entry,
-                    "hardcoded_consumers",
-                    &description,
-                    output,
-                    relative_path,
-                ));
-                continue;
-            }
-
-            let line_idx = entry.line.saturating_sub(1) as usize;
-            if line_idx >= lines.len() {
-                summary.skipped += 1;
-                fixes.push(skip_record(
-                    entry,
-                    "line_out_of_range",
-                    "Skipped: the reported line is past the end of pnpm-workspace.yaml; the file may have been edited since plow check ran",
-                    output,
-                    relative_path,
-                ));
-                continue;
-            }
-
-            let range = compute_deletion_range(&lines, line_idx, entry, preceding_comment_policy);
-            to_remove.push((range, entry));
-        }
+        let to_remove = collect_catalog_entry_removals(
+            &file_entries,
+            &lines,
+            preceding_comment_policy,
+            &mut summary,
+            fixes,
+            output,
+            relative_path,
+        );
 
         if to_remove.is_empty() {
             continue;
         }
 
-        // Sort descending by start so removals don't shift later indices.
-        // Use end as a tiebreaker (longer-range first) so an overlapping
-        // pair is handled deterministically.
-        to_remove.sort_by(|a, b| {
-            b.0.start
-                .cmp(&a.0.start)
-                .then_with(|| b.0.end.cmp(&a.0.end))
-        });
-
-        // Dedup overlapping ranges. With at most one entry per source line
-        // (the detector emits one finding per line), overlap should only
-        // occur on object-form entries where two findings somehow share a
-        // span. Keep the first (longer) range in each overlapping pair.
-        let mut deduped: Vec<(std::ops::Range<usize>, &UnusedCatalogEntry)> = Vec::new();
-        for (range, entry) in to_remove {
-            if let Some((last_range, _)) = deduped.last()
-                && last_range.start < range.end
-                && range.start < last_range.end
-            {
-                continue;
-            }
-            deduped.push((range, entry));
-        }
+        let deduped = dedupe_catalog_removals(to_remove);
 
         if dry_run {
-            for (range, entry) in &deduped {
-                if !matches!(output, OutputFormat::Json) {
-                    eprintln!(
-                        "Would remove catalog entry from {}:{} `{}` (catalog: {})",
-                        relative_path.display(),
-                        range.start + 1,
-                        entry.entry_name,
-                        entry.catalog_name,
-                    );
-                }
-                fixes.push(remove_record(entry, range, false, relative_path));
-            }
-            summary.applied += deduped.len();
+            record_catalog_removal_dry_run(&deduped, &mut summary, fixes, output, relative_path);
             continue;
         }
 
-        // Track the parent header line for each deletion so we can detect
-        // when an entire catalog group becomes empty (e.g. removing the
-        // last entry from `catalogs.react17` leaves `react17:` with a
-        // null value, which pnpm rejects with "Cannot convert undefined
-        // or null to object" at install time).
         let parent_header_indices: Vec<usize> = deduped
             .iter()
             .filter_map(|(_, entry)| find_parent_header_line(&lines, entry))
             .collect();
 
-        // Apply: drain ranges from a fresh Vec<String>, rewrite emptied
-        // parent headers to `key: {}`, validate by reparse, then atomic-write.
         let mut new_lines: Vec<String> = lines.iter().map(ToString::to_string).collect();
         for (range, _) in &deduped {
             new_lines.drain(range.clone());
@@ -208,11 +124,6 @@ pub(super) fn apply_catalog_entry_fixes(
             new_content.push_str(meta.line_ending);
         }
 
-        // Reparse-validate (panel P1.7). If the post-edit content fails to
-        // parse, abort the write rather than risk corrupting the file. We
-        // do not attempt a structural diff: any successful parse is a good
-        // enough signal here, because the failure modes the validator
-        // catches are syntactic (indent disasters, key-value disasters).
         if serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&new_content).is_err() {
             summary.write_error = true;
             eprintln!(
@@ -222,10 +133,6 @@ pub(super) fn apply_catalog_entry_fixes(
             continue;
         }
 
-        // Stage the post-edit YAML for the orchestrator's batch commit.
-        // Pre-stage YAML reparse-validation above ensures we never queue
-        // a syntactically broken document; rename-time errors are reported
-        // per-path by the orchestrator.
         plan.stage(
             absolute.clone(),
             super::io::bytes_with_optional_bom(new_content, &meta),
@@ -233,8 +140,6 @@ pub(super) fn apply_catalog_entry_fixes(
 
         for (range, entry) in &deduped {
             let mut record = remove_record(entry, range, true, relative_path);
-            // Sidechannel so the orchestrator can flip `applied: false`
-            // post-commit if the rename for this absolute path fails.
             record["__target"] = serde_json::json!(absolute.display().to_string());
             fixes.push(record);
             let entry_idx = entry.line.saturating_sub(1) as usize;
@@ -244,6 +149,152 @@ pub(super) fn apply_catalog_entry_fixes(
     }
 
     summary
+}
+
+fn collect_catalog_entry_removals<'a>(
+    file_entries: &[&'a UnusedCatalogEntry],
+    lines: &[&str],
+    preceding_comment_policy: CatalogPrecedingCommentPolicy,
+    summary: &mut CatalogFixSummary,
+    fixes: &mut Vec<serde_json::Value>,
+    output: OutputFormat,
+    relative_path: &Path,
+) -> Vec<CatalogRemoval<'a>> {
+    let mut to_remove = Vec::new();
+    for entry in file_entries {
+        if !entry.hardcoded_consumers.is_empty() {
+            skip_hardcoded_catalog_consumers(entry, summary, fixes, output, relative_path);
+            continue;
+        }
+
+        let line_idx = entry.line.saturating_sub(1) as usize;
+        if line_idx >= lines.len() {
+            skip_out_of_range_catalog_entry(entry, summary, fixes, output, relative_path);
+            continue;
+        }
+
+        let range = compute_deletion_range(lines, line_idx, entry, preceding_comment_policy);
+        to_remove.push((range, *entry));
+    }
+    to_remove
+}
+
+fn dedupe_catalog_removals(mut to_remove: Vec<CatalogRemoval<'_>>) -> Vec<CatalogRemoval<'_>> {
+    to_remove.sort_by(|a, b| {
+        b.0.start
+            .cmp(&a.0.start)
+            .then_with(|| b.0.end.cmp(&a.0.end))
+    });
+
+    let mut deduped: Vec<CatalogRemoval<'_>> = Vec::new();
+    for (range, entry) in to_remove {
+        if let Some((last_range, _)) = deduped.last()
+            && last_range.start < range.end
+            && range.start < last_range.end
+        {
+            continue;
+        }
+        deduped.push((range, entry));
+    }
+    deduped
+}
+
+fn record_catalog_removal_dry_run(
+    deduped: &[CatalogRemoval<'_>],
+    summary: &mut CatalogFixSummary,
+    fixes: &mut Vec<serde_json::Value>,
+    output: OutputFormat,
+    relative_path: &Path,
+) {
+    for (range, entry) in deduped {
+        if !matches!(output, OutputFormat::Json) {
+            eprintln!(
+                "Would remove catalog entry from {}:{} `{}` (catalog: {})",
+                relative_path.display(),
+                range.start + 1,
+                entry.entry_name,
+                entry.catalog_name,
+            );
+        }
+        fixes.push(remove_record(entry, range, false, relative_path));
+    }
+    summary.applied += deduped.len();
+}
+
+fn group_unused_catalog_entries_by_path(
+    entries: &[UnusedCatalogEntryFinding],
+) -> rustc_hash::FxHashMap<&Path, Vec<&UnusedCatalogEntry>> {
+    let mut by_path: rustc_hash::FxHashMap<&Path, Vec<&UnusedCatalogEntry>> =
+        rustc_hash::FxHashMap::default();
+    for entry in entries {
+        let entry = &entry.entry;
+        by_path.entry(entry.path.as_path()).or_default().push(entry);
+    }
+    by_path
+}
+
+fn skip_out_of_range_catalog_entry(
+    entry: &UnusedCatalogEntry,
+    summary: &mut CatalogFixSummary,
+    fixes: &mut Vec<serde_json::Value>,
+    output: OutputFormat,
+    relative_path: &Path,
+) {
+    summary.skipped += 1;
+    fixes.push(skip_record(
+        entry,
+        "line_out_of_range",
+        "Skipped: the reported line is past the end of pnpm-workspace.yaml; the file may have been edited since plow dead-code ran",
+        output,
+        relative_path,
+    ));
+}
+
+fn skip_multi_document_catalog_entries(
+    entries: &[&UnusedCatalogEntry],
+    summary: &mut CatalogFixSummary,
+    fixes: &mut Vec<serde_json::Value>,
+    output: OutputFormat,
+    relative_path: &Path,
+) {
+    for entry in entries {
+        summary.skipped += 1;
+        fixes.push(skip_record(
+            entry,
+            "multi_document_yaml",
+            "Skipped: pnpm-workspace.yaml contains a `---` document separator; plow fix does not support multi-document YAML",
+            output,
+            relative_path,
+        ));
+    }
+}
+
+fn skip_hardcoded_catalog_consumers(
+    entry: &UnusedCatalogEntry,
+    summary: &mut CatalogFixSummary,
+    fixes: &mut Vec<serde_json::Value>,
+    output: OutputFormat,
+    relative_path: &Path,
+) {
+    summary.skipped += 1;
+    let consumer_summary = format_consumer_summary(&entry.hardcoded_consumers);
+    let description = format!(
+        "Skipped: {consumer_summary} still pin `{}` with a hardcoded version. Switch the consumer(s) to \"{}\": \"catalog:{}\" first, then rerun plow fix.",
+        entry.entry_name,
+        entry.entry_name,
+        if entry.catalog_name == "default" {
+            String::new()
+        } else {
+            entry.catalog_name.clone()
+        },
+    );
+    fixes.push(skip_record(
+        entry,
+        "hardcoded_consumers",
+        &description,
+        output,
+        relative_path,
+    ));
 }
 
 /// Apply empty-catalog-group fixes to `pnpm-workspace.yaml`.
@@ -303,7 +354,7 @@ pub(super) fn apply_empty_catalog_group_fixes(
                 fixes.push(skip_group_record(
                     group,
                     "line_out_of_range",
-                    "Skipped: the reported line is past the end of pnpm-workspace.yaml; the file may have been edited since plow check ran",
+                    "Skipped: the reported line is past the end of pnpm-workspace.yaml; the file may have been edited since plow dead-code ran",
                     output,
                     relative_path,
                 ));
@@ -435,10 +486,6 @@ fn comment_block_start(
         return None;
     }
 
-    // Per-block escape hatch (`# plow-keep`): any line in the block bearing
-    // this marker preserves the entire block regardless of policy. Mirrors
-    // plow's existing `plow-ignore-next-line` / `plow-ignore-file`
-    // inline-suppression convention so users discover it without docs.
     let block = &lines[comment_start..entry_idx];
     if block.iter().any(|line| line.contains("plow-keep")) {
         return None;
@@ -448,11 +495,6 @@ fn comment_block_start(
         CatalogPrecedingCommentPolicy::Always => Some(comment_start),
         CatalogPrecedingCommentPolicy::Never => None,
         CatalogPrecedingCommentPolicy::Auto => {
-            // Section-banner heuristic: a comment line consisting of `#`
-            // followed by 3+ repeated separator characters (`=`, `-`, `*`,
-            // `_`, `~`, `+`, `#`) is treated as a curated banner that
-            // semantically owns the following section, not the next entry.
-            // Auto preserves the block when any line in it matches.
             if block.iter().any(|line| is_section_banner_line(line)) {
                 return None;
             }
@@ -518,10 +560,6 @@ fn find_parent_header_line(lines: &[&str], entry: &UnusedCatalogEntry) -> Option
     }
     let entry_indent = leading_spaces(lines[entry_line_idx]);
 
-    // Walk backwards from the entry line to find the first line at
-    // strictly lower indent. For default-catalog entries the parent
-    // must start with `catalog:`; for named-catalog entries the parent
-    // is the `<name>:` line at an intermediate indent under `catalogs:`.
     for idx in (0..entry_line_idx).rev() {
         let line = lines[idx];
         let stripped = line.trim_end();
@@ -536,7 +574,6 @@ fn find_parent_header_line(lines: &[&str], entry: &UnusedCatalogEntry) -> Option
         if entry.catalog_name == "default" {
             return content.starts_with("catalog:").then_some(idx);
         }
-        // Strip leading quotes for quoted-key catalog names.
         let key = content
             .trim_start_matches(['"', '\''])
             .split([':', '"', '\''])
@@ -565,11 +602,6 @@ fn rewrite_empty_catalog_parents(
     parent_indices: &[usize],
     deleted_ranges: &[(std::ops::Range<usize>, &UnusedCatalogEntry)],
 ) {
-    // Dedup parents and map their pre-deletion indices into post-deletion
-    // indices. A parent header line itself is NEVER inside a deletion
-    // range (deletions cover entry lines plus their multi-line children,
-    // which all sit BELOW the parent), so the mapping is simply
-    // `new_idx = pre_idx - (lines deleted strictly before pre_idx)`.
     let mut unique_parents: Vec<usize> = parent_indices.to_vec();
     unique_parents.sort_unstable();
     unique_parents.dedup();
@@ -580,11 +612,6 @@ fn rewrite_empty_catalog_parents(
             .map(|(range, _)| {
                 if range.end <= parent_pre_idx {
                     range.end - range.start
-                } else if range.start <= parent_pre_idx {
-                    // Parent inside a deletion range is impossible by
-                    // construction (deletions start at entry lines, which
-                    // are strictly below the parent). Skip defensively.
-                    0
                 } else {
                     0
                 }
@@ -597,10 +624,6 @@ fn rewrite_empty_catalog_parents(
         if has_remaining_children(new_lines, new_idx) {
             continue;
         }
-        // Append ` {}` to the header line, preserving any trailing
-        // whitespace / line ending semantics. `new_lines` was produced
-        // by `content.split(line_ending)`, so trailing whitespace is
-        // already trimmed and the line ending is added back on join.
         let original = new_lines[new_idx].clone();
         let trimmed_end = original.trim_end();
         let trailing = &original[trimmed_end.len()..];
@@ -647,14 +670,7 @@ fn skip_record(
                 entry
                     .hardcoded_consumers
                     .iter()
-                    .map(|p| {
-                        // Normalize separators to match the check-side
-                        // `hardcoded_consumers` shape (which uses
-                        // `serde_path::serialize_vec` doing `.replace('\\', "/")`)
-                        // so agents correlating check + fix output see the
-                        // same path strings on Windows.
-                        serde_json::Value::String(p.to_string_lossy().replace('\\', "/"))
-                    })
+                    .map(|p| serde_json::Value::String(p.to_string_lossy().replace('\\', "/")))
                     .collect(),
             ))
         } else {
@@ -691,11 +707,6 @@ fn remove_record(
         "entry_name": entry.entry_name,
         "catalog_name": entry.catalog_name,
         "file": relative_path.to_string_lossy().replace('\\', "/"),
-        // `line` is the first deleted line (the leading comment block when
-        // `fix.catalog.deletePrecedingComments` absorbs one). `entry_line`
-        // is the catalog entry's original line so consumers that keyed on
-        // the entry position (CI annotators, dedup caches) keep a stable
-        // anchor. Both are 1-based.
         "line": range.start + 1,
         "entry_line": entry.line,
         "removed_lines": removed_lines,
@@ -827,7 +838,16 @@ mod tests {
         let mut plan = FixPlan::new();
         let hashes = CapturedHashes::default();
         let mut summary = apply_catalog_entry_fixes(
-            root, entries, policy, &hashes, &mut plan, output, dry_run, fixes,
+            root,
+            entries,
+            policy,
+            CatalogFixContext {
+                hashes: &hashes,
+                plan: &mut plan,
+                output,
+                dry_run,
+                fixes,
+            },
         );
         if !dry_run && !plan.commit().failed.is_empty() {
             summary.write_error = true;
@@ -1064,8 +1084,6 @@ mod tests {
 
     #[test]
     fn auto_preserves_block_with_plow_keep_marker() {
-        // `# plow-keep` on any line in the contiguous comment block
-        // protects the entire block from deletion regardless of policy.
         let dir = tempfile::tempdir().unwrap();
         let content = "catalog:\n  # plow-keep: audit trail for CVE-2024-XXXX\n  is-even: ^1.0.0\n  is-odd: ^1.0.0\n";
         seed_workspace_file(dir.path(), content);
@@ -1091,9 +1109,6 @@ mod tests {
 
     #[test]
     fn always_preserves_block_with_plow_keep_marker() {
-        // `# plow-keep` is a per-block escape hatch that overrides even
-        // the `always` policy. The marker is the user's explicit intent
-        // to keep this specific block.
         let dir = tempfile::tempdir().unwrap();
         let content = "catalog:\n  # plow-keep\n  is-even: ^1.0.0\n  is-odd: ^1.0.0\n";
         seed_workspace_file(dir.path(), content);
@@ -1115,10 +1130,6 @@ mod tests {
 
     #[test]
     fn auto_preserves_section_banner_block() {
-        // Section-banner comments (`# === React 18 production pins ===`,
-        // `# ----`, etc.) semantically own the following section, not
-        // the next entry. Auto must NOT delete them even when sitting
-        // directly under the parent header.
         let dir = tempfile::tempdir().unwrap();
         let content =
             "catalog:\n  # === React 18 production pins ===\n  is-even: ^1.0.0\n  is-odd: ^1.0.0\n";
@@ -1145,10 +1156,6 @@ mod tests {
 
     #[test]
     fn always_deletes_section_banner_block() {
-        // The `always` policy still deletes banner-shaped blocks. The
-        // banner heuristic is an Auto-only refinement; users who opt
-        // into `always` get aggressive deletion. To protect a banner
-        // under `always`, add a `# plow-keep` marker.
         let dir = tempfile::tempdir().unwrap();
         let content = "catalog:\n  # ====\n  is-even: ^1.0.0\n  is-odd: ^1.0.0\n";
         seed_workspace_file(dir.path(), content);
@@ -1335,7 +1342,6 @@ mod tests {
             serde_json::json!("multi_document_yaml")
         );
 
-        // File must not have been modified.
         let result = std::fs::read_to_string(dir.path().join("pnpm-workspace.yaml")).unwrap();
         assert_eq!(result, content);
     }
@@ -1346,7 +1352,6 @@ mod tests {
         let content = "catalog:\n  is-even: ^1.0.0\n";
         seed_workspace_file(dir.path(), content);
 
-        // line 99 is way past EOF (file has 3 lines including trailing newline)
         let entries = vec![make_entry("is-even", "default", 99)];
         let mut fixes = Vec::new();
         let summary = run_catalog_entry_fix(
@@ -1389,10 +1394,6 @@ mod tests {
 
     #[test]
     fn rewrites_emptied_default_catalog_to_empty_map() {
-        // Regression: pnpm rejects `catalog:\n` (null value) with
-        // "Cannot convert undefined or null to object". When the fix
-        // empties the default catalog, the header must be rewritten to
-        // `catalog: {}` so the file stays installable.
         let dir = tempfile::tempdir().unwrap();
         let content = "catalog:\n  is-even: ^1.0.0\n";
         seed_workspace_file(dir.path(), content);
@@ -1422,9 +1423,6 @@ mod tests {
 
     #[test]
     fn rewrites_emptied_named_catalog_to_empty_map() {
-        // Regression: same as above for named catalogs. Reproduces the
-        // issue-329 fixture's `react17` group after removing both its
-        // entries.
         let dir = tempfile::tempdir().unwrap();
         let content = "catalogs:\n  react17:\n    react: ^17.0.2\n    react-dom: ^17.0.2\n  legacy:\n    is-odd: ^3.0.0\n";
         seed_workspace_file(dir.path(), content);
@@ -1460,8 +1458,6 @@ mod tests {
 
     #[test]
     fn preserves_non_empty_sibling_named_catalogs() {
-        // When one named catalog is emptied but a sibling stays populated,
-        // only the emptied one gets the `{}` rewrite.
         let dir = tempfile::tempdir().unwrap();
         let content = "catalogs:\n  react17:\n    react: ^17.0.2\n  vue3:\n    vue: ^3.4.0\n";
         seed_workspace_file(dir.path(), content);
@@ -1486,8 +1482,6 @@ mod tests {
 
     #[test]
     fn leaves_partially_populated_catalog_alone() {
-        // When only some entries of a catalog are removed and siblings
-        // remain, no `{}` rewrite is needed.
         let dir = tempfile::tempdir().unwrap();
         let content = "catalog:\n  is-odd: ^1.0.0\n  is-even: ^1.0.0\n";
         seed_workspace_file(dir.path(), content);
@@ -1506,8 +1500,6 @@ mod tests {
         let result = std::fs::read_to_string(dir.path().join("pnpm-workspace.yaml")).unwrap();
         assert_eq!(result, "catalog:\n  is-odd: ^1.0.0\n");
     }
-
-    // -- compute_deletion_range unit tests ----------------------------------
 
     #[test]
     fn deletion_range_scalar_form_spans_one_line() {
@@ -1542,7 +1534,6 @@ mod tests {
         assert!(is_multi_document_yaml("foo: bar\n---\nbaz: qux\n"));
         assert!(is_multi_document_yaml("---\nfoo: bar\n"));
         assert!(!is_multi_document_yaml("catalog:\n  is-even: ^1.0.0\n"));
-        // A `---` inside a quoted value or as a substring is not a separator.
         assert!(!is_multi_document_yaml("catalog:\n  foo: \"---\"\n"));
     }
 }

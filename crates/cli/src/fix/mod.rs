@@ -3,7 +3,7 @@ use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use plow_config::OutputFormat;
+use plow_config::{CatalogPrecedingCommentPolicy, OutputFormat};
 
 mod catalog;
 mod config;
@@ -48,13 +48,7 @@ pub struct FixOptions<'a> {
     pub no_create_config: bool,
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "orchestrator threads results across 5 per-issue-type fixers + the post-#454 commit + envelope assembly; splitting harms locality of the wire-format authoring"
-)]
 pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
-    // In non-TTY environments (CI, AI agents), require --yes or --dry-run
-    // to prevent accidental destructive operations.
     if !opts.dry_run && !opts.yes && !std::io::stdin().is_terminal() {
         let msg = "fix command requires --yes (or --force) in non-interactive environments. \
                    Use --dry-run to preview changes first, then pass --yes to confirm.";
@@ -80,57 +74,16 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
     };
 
     if results.total_issues() == 0 {
-        if matches!(opts.output, OutputFormat::Json) {
-            match serde_json::to_string_pretty(&serde_json::json!({
-                "dry_run": opts.dry_run,
-                "fixes": [],
-                "total_fixed": 0,
-                "skipped": 0,
-                "skipped_content_changed": 0,
-                "skipped_mixed_line_endings": 0,
-                "skipped_low_confidence_exports": 0,
-            })) {
-                Ok(json) => println!("{json}"),
-                Err(e) => {
-                    eprintln!("Error: failed to serialize fix output: {e}");
-                    return ExitCode::from(2);
-                }
-            }
-        } else if !opts.quiet {
-            eprintln!("No issues to fix.");
-        }
-        return ExitCode::SUCCESS;
+        return emit_empty_fix_output(opts);
     }
 
     let mut fixes: Vec<serde_json::Value> = Vec::new();
     let mut plan = FixPlan::new();
 
-    // Group exports by file path so we can apply all fixes to a single in-memory copy.
-    let mut exports_by_file: FxHashMap<PathBuf, Vec<&plow_core::results::UnusedExport>> =
-        FxHashMap::default();
-    for finding in &results.unused_exports {
-        exports_by_file
-            .entry(finding.export.path.clone())
-            .or_default()
-            .push(&finding.export);
-    }
-
-    // Files with at least one unresolved import have an incomplete local
-    // usage graph, so their "this export is unused" findings are lower
-    // confidence; the export fixer withholds removals there (issue #602).
-    // Paths are absolute (the detector stores them absolute; see the
-    // path-anchored-finding convention), matching `UnusedExport.path`.
-    let unresolved_import_files: FxHashSet<PathBuf> = results
-        .unresolved_imports
-        .iter()
-        .map(|finding| finding.import.path.clone())
-        .collect();
-
-    exports::apply_export_fixes(
+    apply_unused_export_fixes(
         opts.root,
-        &exports_by_file,
+        &results,
         &file_hashes,
-        &unresolved_import_files,
         &mut plan,
         opts.output,
         opts.dry_run,
@@ -157,114 +110,42 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
         &mut fixes,
     );
 
-    // Group unused enum members by file path for batch editing.
-    if !results.unused_enum_members.is_empty() {
-        let mut enum_members_by_file: FxHashMap<PathBuf, Vec<&plow_core::results::UnusedMember>> =
-            FxHashMap::default();
-        for finding in &results.unused_enum_members {
-            enum_members_by_file
-                .entry(finding.member.path.clone())
-                .or_default()
-                .push(&finding.member);
-        }
-
-        enum_members::apply_enum_member_fixes(
-            opts.root,
-            &enum_members_by_file,
-            &file_hashes,
-            &mut plan,
-            opts.output,
-            opts.dry_run,
-            &mut fixes,
-        );
-    }
-
-    let catalog_summary = catalog::apply_catalog_entry_fixes(
+    apply_unused_enum_member_fixes(
         opts.root,
-        &results.unused_catalog_entries,
-        config.fix.catalog.delete_preceding_comments,
+        &results,
         &file_hashes,
         &mut plan,
         opts.output,
         opts.dry_run,
         &mut fixes,
     );
-    had_write_error |= catalog_summary.write_error;
-    let empty_catalog_summary = catalog::apply_empty_catalog_group_fixes(
-        opts.root,
-        &results.empty_catalog_groups,
-        &file_hashes,
-        &mut plan,
-        opts.output,
-        opts.dry_run,
-        &mut fixes,
-    );
-    had_write_error |= empty_catalog_summary.write_error;
-    let catalog_applied = catalog_summary.applied + empty_catalog_summary.applied;
-    let catalog_skipped = catalog_summary.skipped + empty_catalog_summary.skipped;
-    let catalog_comment_lines_removed = catalog_summary.comment_lines_removed;
 
-    // Materialize hash-mismatch + mixed-EOL skip records on BOTH the dry-run
-    // and apply paths: the fixers' `read_source_with_hash_check` calls push
-    // to `plan.skipped()` regardless of dry_run, and the acceptance criterion
-    // is that dry-run surfaces both kinds of skips without writes. The skip
-    // records appear in the same `fixes` array the JSON renderer serializes,
-    // so consumers see one stream.
+    let mut catalog_request = CatalogFixRequest {
+        root: opts.root,
+        results: &results,
+        file_hashes: &file_hashes,
+        plan: &mut plan,
+        delete_preceding_comments: config.fix.catalog.delete_preceding_comments,
+        output: opts.output,
+        dry_run: opts.dry_run,
+        fixes: &mut fixes,
+    };
+    let catalog_totals = apply_catalog_fixes(&mut catalog_request);
+    had_write_error |= catalog_totals.write_error;
+
     let plan_skip_records = build_skipped_records(opts.root, plan.skipped(), opts.quiet);
     fixes.extend(plan_skip_records.iter().cloned());
 
-    // A recoverable skip (hash mismatch / mixed line endings) means a fix
-    // the user asked for could not complete; it flips the non-zero exit
-    // code. Intentional skips (low-confidence export preservation, #602) do
-    // NOT, so classify from the enum here before `commit` consumes `plan`.
     let has_recoverable_skip = plan
         .skipped()
         .iter()
         .any(|skip| !skip.reason.is_intentional());
 
-    // Commit the batched plan: stage every queued write, then promote.
-    // Stage failure leaves every target file at its original content; rename
-    // failure is reported per-path (the rename primitive is per-file atomic
-    // but there is no atomic multi-rename on POSIX). The dry-run path
-    // returns an empty outcome and bypasses commit entirely.
-    let commit_outcome = if opts.dry_run {
-        CommitOutcome::empty_for_dry_run()
-    } else {
-        let outcome = plan.commit();
-        patch_applied_field_on_failure(&mut fixes, opts.root, &outcome.failed);
-        outcome
-    };
+    let commit_outcome = commit_fix_plan(opts, plan, &mut fixes);
 
-    // Strip the __target sidechannel field before serialization. It is a
-    // correlation hint, not part of the public JSON contract.
     strip_target_sidechannel(&mut fixes);
 
-    let content_changed_count = plan_skip_records
-        .iter()
-        .filter(|r| {
-            r.get("skip_reason").and_then(serde_json::Value::as_str) == Some("content_changed")
-        })
-        .count();
-    let mixed_line_endings_count = plan_skip_records
-        .iter()
-        .filter(|r| {
-            r.get("skip_reason").and_then(serde_json::Value::as_str) == Some("mixed_line_endings")
-        })
-        .count();
-    // Low-confidence export skips (issue #602) are INTENTIONAL: the export
-    // was deliberately preserved, so they do NOT flip `had_write_error`
-    // (unlike the two recoverable skips above). The combined counter sums
-    // both off-graph-directory and unresolved-import skips; the per-record
-    // `skip_reason` keeps the two distinguishable for agents.
-    let low_confidence_count = plan_skip_records
-        .iter()
-        .filter(|r| {
-            matches!(
-                r.get("skip_reason").and_then(serde_json::Value::as_str),
-                Some("low_confidence_off_graph" | "low_confidence_unresolved_imports")
-            )
-        })
-        .count();
+    let skip_counts = count_fix_skips(&plan_skip_records);
     if commit_outcome.had_failures() {
         had_write_error = true;
     }
@@ -272,50 +153,38 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
         had_write_error = true;
     }
 
+    if let Err(code) = emit_fix_output(&FixOutputInput {
+        output: opts.output,
+        quiet: opts.quiet,
+        dry_run: opts.dry_run,
+        fixes: &fixes,
+        catalog_applied: catalog_totals.applied,
+        catalog_skipped: catalog_totals.skipped,
+        catalog_comment_lines_removed: catalog_totals.comment_lines_removed,
+        content_changed_count: skip_counts.content_changed,
+        mixed_line_endings_count: skip_counts.mixed_line_endings,
+        low_confidence_count: skip_counts.low_confidence,
+    }) {
+        return code;
+    }
+
+    if had_write_error {
+        ExitCode::from(2)
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
+fn emit_empty_fix_output(opts: &FixOptions<'_>) -> ExitCode {
     if matches!(opts.output, OutputFormat::Json) {
-        let applied_count = fixes
-            .iter()
-            .filter(|f| {
-                f.get("applied")
-                    .and_then(serde_json::Value::as_bool)
-                    .unwrap_or(false)
-            })
-            .count();
-        // The legacy `skipped` counter pre-dates #454 and meant "catalog /
-        // YAML fix skipped due to consumer / multi-doc / line-out-of-range
-        // guard". Hash-mismatch + mixed-EOL skips carry the same
-        // `skipped: true` flag for consumer convenience but are counted
-        // separately via `skipped_content_changed` /
-        // `skipped_mixed_line_endings`; exclude them here so the existing
-        // counter keeps its prior meaning.
-        let skipped_count = fixes
-            .iter()
-            .filter(|f| {
-                let is_skipped = f
-                    .get("skipped")
-                    .and_then(serde_json::Value::as_bool)
-                    .unwrap_or(false);
-                let reason = f.get("skip_reason").and_then(serde_json::Value::as_str);
-                let is_plan_skip = matches!(
-                    reason,
-                    Some(
-                        "content_changed"
-                            | "mixed_line_endings"
-                            | "low_confidence_off_graph"
-                            | "low_confidence_unresolved_imports"
-                    )
-                );
-                is_skipped && !is_plan_skip
-            })
-            .count();
         match serde_json::to_string_pretty(&serde_json::json!({
             "dry_run": opts.dry_run,
-            "fixes": fixes,
-            "total_fixed": applied_count,
-            "skipped": skipped_count,
-            "skipped_content_changed": content_changed_count,
-            "skipped_mixed_line_endings": mixed_line_endings_count,
-            "skipped_low_confidence_exports": low_confidence_count,
+            "fixes": [],
+            "total_fixed": 0,
+            "skipped": 0,
+            "skipped_content_changed": 0,
+            "skipped_mixed_line_endings": 0,
+            "skipped_low_confidence_exports": 0,
         })) {
             Ok(json) => println!("{json}"),
             Err(e) => {
@@ -324,23 +193,74 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
             }
         }
     } else if !opts.quiet {
-        emit_human_summary(
-            opts.dry_run,
-            &fixes,
-            catalog_applied,
-            catalog_skipped,
-            catalog_comment_lines_removed,
-            content_changed_count,
-            mixed_line_endings_count,
-            low_confidence_count,
-        );
+        eprintln!("No issues to fix.");
     }
+    ExitCode::SUCCESS
+}
 
-    if had_write_error {
-        ExitCode::from(2)
-    } else {
-        ExitCode::SUCCESS
+fn apply_unused_export_fixes(
+    root: &Path,
+    results: &plow_core::results::AnalysisResults,
+    file_hashes: &CapturedHashes,
+    plan: &mut FixPlan,
+    output: OutputFormat,
+    dry_run: bool,
+    fixes: &mut Vec<serde_json::Value>,
+) {
+    let mut exports_by_file: FxHashMap<PathBuf, Vec<&plow_core::results::UnusedExport>> =
+        FxHashMap::default();
+    for finding in &results.unused_exports {
+        exports_by_file
+            .entry(finding.export.path.clone())
+            .or_default()
+            .push(&finding.export);
     }
+    let unresolved_import_files: FxHashSet<PathBuf> = results
+        .unresolved_imports
+        .iter()
+        .map(|finding| finding.import.path.clone())
+        .collect();
+    exports::apply_export_fixes(
+        root,
+        &exports_by_file,
+        file_hashes,
+        &unresolved_import_files,
+        plan,
+        output,
+        dry_run,
+        fixes,
+    );
+}
+
+fn apply_unused_enum_member_fixes(
+    root: &Path,
+    results: &plow_core::results::AnalysisResults,
+    file_hashes: &CapturedHashes,
+    plan: &mut FixPlan,
+    output: OutputFormat,
+    dry_run: bool,
+    fixes: &mut Vec<serde_json::Value>,
+) {
+    if results.unused_enum_members.is_empty() {
+        return;
+    }
+    let mut enum_members_by_file: FxHashMap<PathBuf, Vec<&plow_core::results::UnusedMember>> =
+        FxHashMap::default();
+    for finding in &results.unused_enum_members {
+        enum_members_by_file
+            .entry(finding.member.path.clone())
+            .or_default()
+            .push(&finding.member);
+    }
+    enum_members::apply_enum_member_fixes(
+        root,
+        &enum_members_by_file,
+        file_hashes,
+        plan,
+        output,
+        dry_run,
+        fixes,
+    );
 }
 
 impl CommitOutcome {
@@ -356,6 +276,178 @@ impl CommitOutcome {
     pub(super) fn had_failures(&self) -> bool {
         !self.failed.is_empty()
     }
+}
+
+struct FixOutputInput<'a> {
+    output: OutputFormat,
+    quiet: bool,
+    dry_run: bool,
+    fixes: &'a [serde_json::Value],
+    catalog_applied: usize,
+    catalog_skipped: usize,
+    catalog_comment_lines_removed: usize,
+    content_changed_count: usize,
+    mixed_line_endings_count: usize,
+    low_confidence_count: usize,
+}
+
+struct CatalogFixTotals {
+    applied: usize,
+    skipped: usize,
+    comment_lines_removed: usize,
+    write_error: bool,
+}
+
+struct CatalogFixRequest<'a> {
+    root: &'a Path,
+    results: &'a plow_core::results::AnalysisResults,
+    file_hashes: &'a CapturedHashes,
+    plan: &'a mut FixPlan,
+    delete_preceding_comments: CatalogPrecedingCommentPolicy,
+    output: OutputFormat,
+    dry_run: bool,
+    fixes: &'a mut Vec<serde_json::Value>,
+}
+
+struct FixSkipCounts {
+    content_changed: usize,
+    mixed_line_endings: usize,
+    low_confidence: usize,
+}
+
+fn count_fix_skips(records: &[serde_json::Value]) -> FixSkipCounts {
+    let count_reason = |reason: &str| {
+        records
+            .iter()
+            .filter(|record| {
+                record
+                    .get("skip_reason")
+                    .and_then(serde_json::Value::as_str)
+                    == Some(reason)
+            })
+            .count()
+    };
+    let low_confidence = records
+        .iter()
+        .filter(|record| {
+            matches!(
+                record
+                    .get("skip_reason")
+                    .and_then(serde_json::Value::as_str),
+                Some("low_confidence_off_graph" | "low_confidence_unresolved_imports")
+            )
+        })
+        .count();
+    FixSkipCounts {
+        content_changed: count_reason("content_changed"),
+        mixed_line_endings: count_reason("mixed_line_endings"),
+        low_confidence,
+    }
+}
+
+fn apply_catalog_fixes(request: &mut CatalogFixRequest<'_>) -> CatalogFixTotals {
+    let catalog_summary = catalog::apply_catalog_entry_fixes(
+        request.root,
+        &request.results.unused_catalog_entries,
+        request.delete_preceding_comments,
+        catalog::CatalogFixContext {
+            hashes: request.file_hashes,
+            plan: &mut *request.plan,
+            output: request.output,
+            dry_run: request.dry_run,
+            fixes: &mut *request.fixes,
+        },
+    );
+    let empty_catalog_summary = catalog::apply_empty_catalog_group_fixes(
+        request.root,
+        &request.results.empty_catalog_groups,
+        request.file_hashes,
+        request.plan,
+        request.output,
+        request.dry_run,
+        request.fixes,
+    );
+    CatalogFixTotals {
+        applied: catalog_summary.applied + empty_catalog_summary.applied,
+        skipped: catalog_summary.skipped + empty_catalog_summary.skipped,
+        comment_lines_removed: catalog_summary.comment_lines_removed,
+        write_error: catalog_summary.write_error || empty_catalog_summary.write_error,
+    }
+}
+
+fn commit_fix_plan(
+    opts: &FixOptions<'_>,
+    plan: FixPlan,
+    fixes: &mut [serde_json::Value],
+) -> CommitOutcome {
+    if opts.dry_run {
+        return CommitOutcome::empty_for_dry_run();
+    }
+    let outcome = plan.commit();
+    patch_applied_field_on_failure(fixes, opts.root, &outcome.failed);
+    outcome
+}
+
+fn emit_fix_output(input: &FixOutputInput<'_>) -> Result<(), ExitCode> {
+    if matches!(input.output, OutputFormat::Json) {
+        let applied_count = input
+            .fixes
+            .iter()
+            .filter(|fix| {
+                fix.get("applied")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false)
+            })
+            .count();
+        let skipped_count = input
+            .fixes
+            .iter()
+            .filter(|fix| {
+                let is_skipped = fix
+                    .get("skipped")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false);
+                let reason = fix.get("skip_reason").and_then(serde_json::Value::as_str);
+                let is_plan_skip = matches!(
+                    reason,
+                    Some(
+                        "content_changed"
+                            | "mixed_line_endings"
+                            | "low_confidence_off_graph"
+                            | "low_confidence_unresolved_imports"
+                    )
+                );
+                is_skipped && !is_plan_skip
+            })
+            .count();
+        match serde_json::to_string_pretty(&serde_json::json!({
+            "dry_run": input.dry_run,
+            "fixes": input.fixes,
+            "total_fixed": applied_count,
+            "skipped": skipped_count,
+            "skipped_content_changed": input.content_changed_count,
+            "skipped_mixed_line_endings": input.mixed_line_endings_count,
+            "skipped_low_confidence_exports": input.low_confidence_count,
+        })) {
+            Ok(json) => println!("{json}"),
+            Err(e) => {
+                eprintln!("Error: failed to serialize fix output: {e}");
+                return Err(ExitCode::from(2));
+            }
+        }
+    } else if !input.quiet {
+        emit_human_summary(&HumanSummaryInput {
+            dry_run: input.dry_run,
+            fixes: input.fixes,
+            catalog_applied: input.catalog_applied,
+            catalog_skipped: input.catalog_skipped,
+            catalog_comment_lines_removed: input.catalog_comment_lines_removed,
+            content_changed_count: input.content_changed_count,
+            mixed_line_endings_count: input.mixed_line_endings_count,
+            low_confidence_count: input.low_confidence_count,
+        });
+    }
+    Ok(())
 }
 
 /// Build JSON entries for files the FixPlan decided to skip during the
@@ -435,20 +527,26 @@ fn strip_target_sidechannel(fixes: &mut [serde_json::Value]) {
 /// residual-work warnings. Skipped-entry counts come last because they
 /// describe work the user opted out of rather than work they need to
 /// do right now.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "each count drives an independent stderr line; grouping into a struct would just move the same scalars behind a name with no readability gain at the single call site"
-)]
-fn emit_human_summary(
+struct HumanSummaryInput<'a> {
     dry_run: bool,
-    fixes: &[serde_json::Value],
+    fixes: &'a [serde_json::Value],
     catalog_applied: usize,
     catalog_skipped: usize,
     catalog_comment_lines_removed: usize,
     content_changed_count: usize,
     mixed_line_endings_count: usize,
     low_confidence_count: usize,
-) {
+}
+
+fn emit_human_summary(input: &HumanSummaryInput<'_>) {
+    let dry_run = input.dry_run;
+    let fixes = input.fixes;
+    let catalog_applied = input.catalog_applied;
+    let catalog_skipped = input.catalog_skipped;
+    let catalog_comment_lines_removed = input.catalog_comment_lines_removed;
+    let content_changed_count = input.content_changed_count;
+    let mixed_line_endings_count = input.mixed_line_endings_count;
+    let low_confidence_count = input.low_confidence_count;
     if dry_run {
         eprintln!("Dry run complete. No files were modified.");
     } else {
@@ -495,7 +593,7 @@ fn emit_human_summary(
             "files"
         };
         eprintln!(
-            "Skipped {content_changed_count} {files_word} that changed since `plow check` ran. Re-run `plow fix` to refresh the analysis."
+            "Skipped {content_changed_count} {files_word} that changed since `plow dead-code` ran. Re-run `plow fix` to refresh the analysis."
         );
     }
     if mixed_line_endings_count > 0 {
@@ -509,15 +607,13 @@ fn emit_human_summary(
         );
     }
     if low_confidence_count > 0 {
-        // `low_confidence_count` of 1 is the common case (a single mock /
-        // e2e file), so pluralization matters here.
         let files_word = if low_confidence_count == 1 {
             "file"
         } else {
             "files"
         };
         eprintln!(
-            "Kept unused exports in {low_confidence_count} {files_word} where consumers may be invisible to plow (test, mock, and fixture directories, or files with unresolved imports). Still listed by `plow check`; remove by hand if you have confirmed they are unused.",
+            "Kept unused exports in {low_confidence_count} {files_word} where consumers may be invisible to plow (test, mock, and fixture directories, or files with unresolved imports). Still listed by `plow dead-code`; remove by hand if you have confirmed they are unused.",
         );
     }
 }

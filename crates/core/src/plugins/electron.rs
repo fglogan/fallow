@@ -1,10 +1,6 @@
 //! Electron plugin.
 //!
-//! Detects Electron projects and marks main/preload entry points and build
-//! tool config files as always used. Parses `electron.vite.config.*` to seed
-//! renderer / preload / main entry files declared in each section's
-//! `build.rollupOptions.input` (commonly multi-window HTML renderer entries
-//! declared via `resolve(__dirname, 'src/renderer/index.html')`).
+//! Detects Electron projects and marks main/preload entry points and tool config files as always used.
 
 use super::config_parser;
 use super::{Plugin, PluginResult};
@@ -52,14 +48,6 @@ define_plugin! {
     resolve_config(config_path, source, root) {
         let mut result = PluginResult::default();
 
-        // electron-vite declares per-window entries in
-        // `<section>.build.rollupOptions.input`. Renderer entries are HTML files
-        // whose `<script src>` trees are otherwise unreachable; main / preload
-        // may add extra entries beyond the static globs. Values are commonly
-        // `resolve(__dirname, 'src/renderer/index.html')`; the shared extractor
-        // evaluates those path-helper calls (see issue #604) in string / array /
-        // object positions. Each value is normalized relative to the config file
-        // (correct for monorepo subpackage configs). See issue #600.
         for &section in VITE_SECTIONS {
             let inputs = config_parser::extract_config_string_or_array(
                 source,
@@ -74,6 +62,12 @@ define_plugin! {
                 }
             }
         }
+
+        result.referenced_dependencies.extend(super::react_compiler::extract_dependencies(
+            source,
+            config_path,
+            &[&["main", "plugins"], &["preload", "plugins"], &["renderer", "plugins"]],
+        ));
 
         result
     },
@@ -163,8 +157,6 @@ mod tests {
 
     #[test]
     fn resolve_config_normalizes_relative_to_config_dir_in_monorepo() {
-        // Config in a subpackage: `resolve(__dirname, 'src/renderer/index.html')`
-        // must seed `apps/desktop/src/renderer/index.html`, not a root-relative miss.
         let source = r#"
             import { resolve } from "node:path";
             export default {
@@ -196,13 +188,58 @@ mod tests {
                 .entry_patterns
                 .is_empty()
         );
-        // No rollupOptions.input declared.
         let source = r"export default { renderer: { build: {} } };";
         assert!(
             ElectronPlugin
                 .resolve_config(&config_path(), source, Path::new("/project"))
                 .entry_patterns
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn resolve_config_credits_react_compiler_preset_in_renderer_plugins() {
+        let source = r"
+            import { defineConfig } from 'electron-vite'
+            import react, { reactCompilerPreset } from '@vitejs/plugin-react'
+            import babel from '@rolldown/plugin-babel'
+
+            export default defineConfig({
+                main: { build: { rollupOptions: { input: 'src/main/index.ts' } } },
+                renderer: {
+                    plugins: [react(), babel({ presets: [reactCompilerPreset()] })],
+                },
+            })
+        ";
+        let result = ElectronPlugin.resolve_config(&config_path(), source, Path::new("/project"));
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&"babel-plugin-react-compiler".to_string()),
+            "react compiler preset in renderer.plugins should be credited: {:?}",
+            result.referenced_dependencies
+        );
+    }
+
+    #[test]
+    fn resolve_config_local_react_compiler_preset_in_renderer_does_not_credit() {
+        let source = r"
+            import { defineConfig } from 'electron-vite'
+            import babel from '@rolldown/plugin-babel'
+
+            function reactCompilerPreset() {
+                return {};
+            }
+
+            export default defineConfig({
+                renderer: { plugins: [babel({ presets: [reactCompilerPreset()] })] },
+            })
+        ";
+        let result = ElectronPlugin.resolve_config(&config_path(), source, Path::new("/project"));
+        assert!(
+            !result
+                .referenced_dependencies
+                .contains(&"babel-plugin-react-compiler".to_string())
         );
     }
 }

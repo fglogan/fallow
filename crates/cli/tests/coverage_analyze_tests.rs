@@ -1,3 +1,9 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "tests and benches use unwrap and expect to keep fixture setup concise"
+)]
+
 #[path = "common/mod.rs"]
 mod common;
 
@@ -6,7 +12,7 @@ use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use common::{plow_bin, fixture_path, parse_json};
+use common::{fixture_path, parse_json, plow_bin};
 
 fn serve_once(body: &'static str) -> (String, Arc<Mutex<String>>, thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
@@ -132,9 +138,6 @@ fn coverage_analyze_cloud_fetches_percent_encoded_runtime_context() {
         request.starts_with("GET /v1/coverage/acme%2Fweb/runtime-context?"),
         "request path was not percent-encoded: {request}"
     );
-    // ureq is built without the gzip feature; advertising identity-encoding
-    // keeps the response body decodable as raw JSON. Caught the missing-gzip
-    // bug live against api.plow.cloud during the v2.57.0 release smoke.
     let lower = request.to_lowercase();
     assert!(
         lower.contains("accept-encoding: identity"),

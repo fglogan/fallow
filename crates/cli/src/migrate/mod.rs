@@ -62,13 +62,6 @@ impl OutputFormat {
         if use_jsonc {
             return Self::Jsonc;
         }
-        // Auto-mirror: if any source we read was JSONC-named, default to .plowrc.jsonc.
-        // Sources is populated with bare filenames ("knip.jsonc"), full paths
-        // ("<dir>/knip.jsonc"), or `<file> (knip key)` / `<file> (jscpd key)` /
-        // `<file> (knip config)` / `<file> (jscpd config)` suffixed forms. Strip
-        // any " (...)" suffix before checking the extension so the
-        // content-detection branch (which appends the tool tag for downstream
-        // gates like the glob-drift caveat) does not break auto-mirror.
         if result
             .sources
             .iter()
@@ -105,13 +98,7 @@ pub fn run_migrate(
     dry_run: bool,
     from: Option<&Path>,
 ) -> ExitCode {
-    // Check if a plow config already exists
-    let existing_names = [
-        ".plowrc.json",
-        ".plowrc.jsonc",
-        "plow.toml",
-        ".plow.toml",
-    ];
+    let existing_names = [".plowrc.json", ".plowrc.jsonc", "plow.toml", ".plow.toml"];
     if !dry_run {
         for name in &existing_names {
             let path = root.join(name);
@@ -158,15 +145,10 @@ pub fn run_migrate(
         eprintln!("Created {filename}");
     }
 
-    // Print source info, stripping any internal tool tag so the user sees
-    // the original filename and not the migrator's provenance marker. See
-    // issue #457.
     for source in &result.sources {
         eprintln!("Migrated from: {}", source_head(source));
     }
 
-    // Print warnings (singular/plural-aware: a single typo'd rule is the
-    // most common count==1 case now that unknown rules warn loudly).
     if !result.warnings.is_empty() {
         let count = result.warnings.len();
         let header = if count == 1 { "Warning" } else { "Warnings" };
@@ -178,14 +160,10 @@ pub fn run_migrate(
         }
     }
 
-    // Glob-semantics caveat: knip and plow use different glob engines, so
-    // migrated `entry` / `ignorePatterns` may match a slightly different file
-    // set than they did under knip. Single logical line so narrow terminals
-    // can soft-wrap. Issue #457.
     if should_emit_glob_caveat(&result) {
         eprintln!();
         eprintln!(
-            "Note: knip and plow use different glob engines; verify migrated entry / ignorePatterns with `plow check` before relying on CI. See https://docs.genesis-plow.dev/migration/from-knip"
+            "Note: knip and plow use different glob engines; verify migrated entry / ignorePatterns with `plow dead-code` before relying on CI. See https://docs.genesis-plow.dev/migration/from-knip"
         );
     }
 
@@ -202,7 +180,6 @@ fn migrate_auto_detect(root: &Path) -> Result<MigrationResult, String> {
     let mut warnings = Vec::new();
     let mut sources = Vec::new();
 
-    // Try knip configs
     let knip_files = [
         "knip.json",
         "knip.jsonc",
@@ -234,7 +211,6 @@ fn migrate_auto_detect(root: &Path) -> Result<MigrationResult, String> {
         }
     }
 
-    // Try jscpd standalone config
     let mut found_jscpd_file = false;
     let jscpd_path = root.join(".jscpd.json");
     if jscpd_path.exists() {
@@ -244,7 +220,6 @@ fn migrate_auto_detect(root: &Path) -> Result<MigrationResult, String> {
         found_jscpd_file = true;
     }
 
-    // Check package.json for embedded knip/jscpd config (single read)
     let need_pkg_knip = sources.is_empty();
     let need_pkg_jscpd = !found_jscpd_file;
     if need_pkg_knip || need_pkg_jscpd {
@@ -325,9 +300,7 @@ fn migrate_from_file(path: &Path) -> Result<MigrationResult, String> {
             ));
         }
     } else {
-        // Try to detect format from content
         let value = load_json_or_jsonc(path)?;
-        // If it has knip-like fields, treat as knip
         if value.get("entry").is_some()
             || value.get("ignore").is_some()
             || value.get("rules").is_some()
@@ -336,13 +309,8 @@ fn migrate_from_file(path: &Path) -> Result<MigrationResult, String> {
             || value.get("ignoreExportsUsedInFile").is_some()
         {
             migrate_knip(&value, &mut config, &mut warnings);
-            // Tag the source so `should_emit_glob_caveat` can detect knip
-            // provenance for `--from <custom-name>.json` paths whose
-            // filename does not contain "knip". Issue #457.
             sources.push(format!("{} (knip config)", path.display()));
-        }
-        // If it has jscpd-like fields, treat as jscpd
-        else if value.get("minTokens").is_some()
+        } else if value.get("minTokens").is_some()
             || value.get("minLines").is_some()
             || value.get("threshold").is_some()
             || value.get("mode").is_some()

@@ -11,8 +11,22 @@ use oxc_parser::Parser;
 use oxc_span::SourceType;
 
 use crate::ModuleInfo;
+use crate::source_map::{ExtractionResult, SfcExtractor};
 use crate::visitor::ModuleInfoExtractor;
 use plow_types::discover::FileId;
+
+struct MdxExtractor;
+
+impl SfcExtractor for MdxExtractor {
+    fn extract(&self, source: &str) -> Vec<ExtractionResult> {
+        let extracted = extract_mdx_source(source);
+        if extracted.body.is_empty() {
+            Vec::new()
+        } else {
+            vec![extracted]
+        }
+    }
+}
 
 /// Extract import/export statements from MDX content.
 ///
@@ -23,17 +37,22 @@ use plow_types::discover::FileId;
 /// NOTE: CSS/SCSS `@apply` is handled in `parse_css_to_module()`, not here.
 /// MDX import/export extraction only handles JS/TS `import`/`export` statements.
 #[must_use]
+pub fn extract_mdx_statements(source: &str) -> String {
+    extract_mdx_source(source).body
+}
+
 #[expect(
     clippy::cast_possible_truncation,
     reason = "brace counts per line are bounded by line length"
 )]
-pub fn extract_mdx_statements(source: &str) -> String {
+fn extract_mdx_source(source: &str) -> ExtractionResult {
+    let mut result = ExtractionResult::default();
     let mut statements = Vec::new();
     let mut in_multiline = false;
     let mut brace_depth: i32 = 0;
     let mut code_fence: Option<CodeFence> = None;
 
-    for line in source.lines() {
+    for (line_start, line) in lines_with_offsets(source) {
         let trimmed = line.trim();
 
         if let Some(fence) = code_fence {
@@ -49,7 +68,7 @@ pub fn extract_mdx_statements(source: &str) -> String {
         }
 
         if in_multiline {
-            statements.push(line.to_string());
+            statements.push((line_start, line));
             brace_depth += trimmed.chars().filter(|&c| c == '{').count() as i32;
             brace_depth -= trimmed.chars().filter(|&c| c == '}').count() as i32;
             if brace_depth <= 0
@@ -66,7 +85,7 @@ pub fn extract_mdx_statements(source: &str) -> String {
             || trimmed.starts_with("export ")
             || trimmed.starts_with("export{")
         {
-            statements.push(line.to_string());
+            statements.push((line_start, line));
             brace_depth = trimmed.chars().filter(|&c| c == '{').count() as i32
                 - trimmed.chars().filter(|&c| c == '}').count() as i32;
             if brace_depth > 0 && !trimmed.contains(" from ") {
@@ -75,7 +94,19 @@ pub fn extract_mdx_statements(source: &str) -> String {
         }
     }
 
-    statements.join("\n")
+    for (line_start, line) in statements {
+        result.push_mapped(line, line_start);
+    }
+    result
+}
+
+fn lines_with_offsets(source: &str) -> impl Iterator<Item = (usize, &str)> {
+    let mut offset = 0usize;
+    source.split_inclusive('\n').map(move |line| {
+        let start = offset;
+        offset += line.len();
+        (start, line)
+    })
 }
 
 #[derive(Clone, Copy)]
@@ -115,14 +146,15 @@ pub(crate) fn is_mdx_file(path: &Path) -> bool {
 pub(crate) fn parse_mdx_to_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleInfo {
     let parsed_suppressions = crate::suppress::parse_suppressions_from_source(source);
     let line_offsets = plow_types::extract::compute_line_offsets(source);
-    let statements = extract_mdx_statements(source);
+    let extraction = MdxExtractor.extract(source).into_iter().next();
 
-    if !statements.is_empty() {
+    if let Some(statements) = extraction {
         let source_type = SourceType::jsx();
         let allocator = Allocator::default();
-        let parser_return = Parser::new(&allocator, &statements, source_type).parse();
+        let parser_return = Parser::new(&allocator, &statements.body, source_type).parse();
         let mut extractor = ModuleInfoExtractor::new();
         extractor.visit_program(&parser_return.program);
+        extractor.remap_spans_with(|span| statements.remap_span(span));
         let mut info = extractor.into_module_info(file_id, content_hash, parsed_suppressions);
         info.line_offsets = line_offsets;
         return info;
@@ -134,13 +166,9 @@ pub(crate) fn parse_mdx_to_module(file_id: FileId, source: &str, content_hash: u
     info
 }
 
-// MDX tests exercise line-based import/export extraction — no unsafe code,
-// no Miri-specific value. Oxc parser tests are additionally ~1000x slower.
 #[cfg(all(test, not(miri)))]
 mod tests {
     use super::*;
-
-    // ── is_mdx_file ──────────────────────────────────────────────
 
     #[test]
     fn is_mdx_file_positive() {
@@ -161,8 +189,6 @@ mod tests {
     fn is_mdx_file_rejects_jsx() {
         assert!(!is_mdx_file(Path::new("component.jsx")));
     }
-
-    // ── extract_mdx_statements: import extraction ────────────────
 
     #[test]
     fn extracts_single_import() {
@@ -190,8 +216,6 @@ mod tests {
         assert!(result.contains("import{ Chart }"));
     }
 
-    // ── Export extraction ────────────────────────────────────────
-
     #[test]
     fn extracts_export_const() {
         let result = extract_mdx_statements("export const meta = { title: 'Hello' }\n\n# Title\n");
@@ -203,8 +227,6 @@ mod tests {
         let result = extract_mdx_statements("export{ foo } from './foo'\n\n# Title\n");
         assert!(result.contains("export{ foo }"));
     }
-
-    // ── Multi-line imports ───────────────────────────────────────
 
     #[test]
     fn multiline_import_with_braces() {
@@ -225,8 +247,6 @@ mod tests {
         assert!(result.contains("Bar"));
     }
 
-    // ── Mixed content ────────────────────────────────────────────
-
     #[test]
     fn imports_between_prose() {
         let source = "import { Header } from './Header'\n\n# Section 1\n\nSome content.\n\nimport { Footer } from './Footer'\n\n## Section 2\n";
@@ -245,8 +265,6 @@ mod tests {
         assert!(!result.contains("List item"));
     }
 
-    // Code fences
-
     #[test]
     fn fenced_import_is_ignored() {
         let source = r"import { Live } from './Live'
@@ -254,7 +272,7 @@ mod tests {
 # Example
 
 ```ts
-// file: exampleSlice.ts
+file: exampleSlice.ts
 import exampleSliceReducer from './exampleSlice'
 ```
 ";
@@ -322,8 +340,6 @@ import { Visible } from './Visible'
         assert!(result.contains("import { Visible } from './Visible'"));
     }
 
-    // ── Edge cases ───────────────────────────────────────────────
-
     #[test]
     fn empty_source() {
         let result = extract_mdx_statements("");
@@ -338,14 +354,12 @@ import { Visible } from './Visible'
 
     #[test]
     fn import_like_text_not_extracted() {
-        // "important" starts with "import" but doesn't match "import " or "import{"
         let result = extract_mdx_statements("This is an important note.\n");
         assert!(result.is_empty());
     }
 
     #[test]
     fn export_like_text_not_extracted() {
-        // "exporting" doesn't match "export " or "export{"
         let result = extract_mdx_statements("We are exporting goods overseas.\n");
         assert!(result.is_empty());
     }
@@ -364,13 +378,10 @@ import { Visible } from './Visible'
 
     #[test]
     fn single_line_import_with_braces_balanced() {
-        // Braces balanced on one line — should NOT enter multiline mode
         let source = "import { A } from './a'\n# Title\n";
         let result = extract_mdx_statements(source);
         assert_eq!(result.lines().count(), 1);
     }
-
-    // ── Multi-line import is extracted as one statement ──────────
 
     #[test]
     fn multiline_import_with_braces_extracted_as_one() {
@@ -384,16 +395,12 @@ import { Visible } from './Visible'
         );
     }
 
-    // ── Re-export with braces ───────────────────────────────────
-
     #[test]
     fn export_with_braces_from_module() {
         let source = "export { Foo, Bar } from './module'\n\n# Title\n";
         let result = extract_mdx_statements(source);
         assert!(result.contains("export { Foo, Bar } from './module'"));
     }
-
-    // ── Non-import/export lines between imports are ignored ─────
 
     #[test]
     fn non_import_lines_between_imports_ignored() {
@@ -406,11 +413,8 @@ import { Visible } from './Visible'
             !result.contains("paragraph"),
             "prose should not be extracted"
         );
-        // Only 2 lines total
         assert_eq!(result.lines().count(), 2);
     }
-
-    // ── Additional multi-line termination patterns ────────────────
 
     #[test]
     fn multiline_import_terminated_by_semicolon() {
@@ -447,13 +451,10 @@ import { Visible } from './Visible'
 
     #[test]
     fn import_with_from_on_same_line_not_multiline() {
-        // When 'from' is on the same line, braces don't trigger multiline mode
         let source = "import { A } from './a'\nimport { B } from './b'\n";
         let result = extract_mdx_statements(source);
         assert_eq!(result.lines().count(), 2);
     }
-
-    // ── Full parse tests (Oxc parser ~1000x slower under Miri) ──
 
     #[test]
     fn mdx_empty_source_returns_empty_module() {

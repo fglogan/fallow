@@ -27,9 +27,6 @@ pub struct CloudRequest {
     pub commit_sha: Option<String>,
 }
 
-// Manual `Debug` so any future `tracing::debug!`, `dbg!`, or `unwrap`-on-Err
-// with the `Debug` formatter does not leak the bearer token through
-// stderr. The derive would do; explicit redaction is unmissable.
 impl fmt::Debug for CloudRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("CloudRequest")
@@ -138,7 +135,7 @@ pub struct CloudRuntimeSummary {
 pub struct CloudRuntimeFunction {
     pub file_path: String,
     pub function_name: String,
-    /// Cross-surface `FunctionIdentity` join key (`fallow:fn:<hash>`) when the
+    /// Cross-surface `FunctionIdentity` join key (`plow:fn:<hash>`) when the
     /// cloud has been migrated to emit it (plow-cloud#63). `None` for the
     /// current un-migrated cloud, in which case the join falls back to
     /// `(file_path, function_name, line)` and the fuzzy line tier.
@@ -353,6 +350,10 @@ fn network_message(detail: &str) -> String {
     )
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "formatting percent-encoded bytes into String is infallible"
+)]
 pub fn url_encode_path_segment(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for byte in value.bytes() {
@@ -420,10 +421,6 @@ mod tests {
 
     #[test]
     fn cloud_request_debug_masks_api_key() {
-        // Future `tracing::debug!(?req)`, `dbg!(req)`, or unwrap-on-Err with
-        // the Debug formatter would surface the api_key in stderr. Mask at
-        // the type level so the next contributor cannot reintroduce it by
-        // accident.
         let req = CloudRequest {
             api_key: "plow_live_secret_token_value".to_owned(),
             api_endpoint: Some("https://api.plow.cloud".to_owned()),
@@ -442,17 +439,12 @@ mod tests {
             formatted.contains("api_key: \"***\""),
             "expected explicit redaction marker, got: {formatted}"
         );
-        // Non-secret fields must still be inspectable so Debug stays useful.
         assert!(formatted.contains("repo: \"acme/web\""));
         assert!(formatted.contains("period_days: 30"));
     }
 
     #[test]
     fn cloud_error_exit_code_for_validation_is_two() {
-        // Regression: HTTP 400 with code=validation_error must surface as
-        // CloudError::Validation (exit 2), not CloudError::Server (exit 7).
-        // Caught live against api.plow.cloud during the v2.57.0 smoke when
-        // --environment was rejected with HTTP 400.
         assert_eq!(CloudError::Validation("any".to_owned()).exit_code(), 2);
     }
 }

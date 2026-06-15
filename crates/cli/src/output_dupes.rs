@@ -22,8 +22,8 @@
 use std::path::PathBuf;
 
 use plow_core::duplicates::{
-    CloneFamily, CloneGroup, DuplicationReport, DuplicationStats, MirroredDirectory,
-    RefactoringSuggestion,
+    CloneFamily, CloneFingerprintSet, CloneGroup, DuplicationReport, DuplicationStats,
+    MirroredDirectory, RefactoringSuggestion,
 };
 use plow_types::envelope::AuditIntroduced;
 use plow_types::serde_path;
@@ -122,6 +122,19 @@ pub struct CloneGroupFinding {
     /// The underlying clone group.
     #[serde(flatten)]
     pub group: CloneGroup,
+    /// Stable content fingerprint, usually `dup:<8hex>` and widened on rare
+    /// report collisions. Addressable via `plow dupes --trace dup:<fp>` (and
+    /// the `trace_clone` MCP tool) to deep-dive this group; shown alongside
+    /// each group in the human listing.
+    pub fingerprint: String,
+    /// Best-effort human-readable name for the clone: the dominant repeated
+    /// identifier across the duplicated fragment (e.g. a shared `parseCsv`
+    /// function). `None` when the clone has no clear dominant name (generic or
+    /// tied identifiers); consumers then fall back to a file-based label. Lets
+    /// editors and agents label a clone by what it is rather than an opaque
+    /// ordinal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suggested_name: Option<String>,
     /// Suggested next steps: an `extract-shared` primary and a
     /// `suppress-line` secondary. Always emitted (possibly empty for
     /// forward-compat).
@@ -136,8 +149,20 @@ impl CloneGroupFinding {
     /// Build the wrapper from a raw [`CloneGroup`], computing the typed
     /// `actions` array inline. `introduced` stays `None` and is set later
     /// by `annotate_dupes_json` if the audit pass runs.
+    #[allow(
+        dead_code,
+        reason = "kept for focused wrapper tests and non-report construction paths"
+    )]
     #[must_use]
     pub fn with_actions(group: CloneGroup) -> Self {
+        let fingerprint = plow_core::duplicates::clone_fingerprint(&group.instances);
+        Self::with_fingerprint(group, fingerprint)
+    }
+
+    /// Build the wrapper with a precomputed report-scoped fingerprint.
+    #[must_use]
+    pub fn with_fingerprint(group: CloneGroup, fingerprint: String) -> Self {
+        let suggested_name = plow_core::duplicates::deepdive::dominant_identifier(&group);
         let line_count = group.line_count;
         let instance_count = group.instances.len();
         let actions = vec![
@@ -158,6 +183,8 @@ impl CloneGroupFinding {
             },
         ];
         Self {
+            fingerprint,
+            suggested_name,
             group,
             actions,
             introduced: None,
@@ -202,8 +229,20 @@ impl CloneFamilyFinding {
     /// Build the wrapper from a raw [`CloneFamily`], computing the typed
     /// `actions` array inline and wrapping each inner clone group with its
     /// own typed actions.
+    #[allow(
+        dead_code,
+        reason = "kept for focused wrapper tests and non-report construction paths"
+    )]
     #[must_use]
     pub fn with_actions(family: CloneFamily) -> Self {
+        let fingerprints = CloneFingerprintSet::from_groups(&family.groups);
+        Self::with_fingerprints(family, &fingerprints)
+    }
+
+    /// Build the wrapper using the report-scoped fingerprint assignment shared
+    /// by all duplication output surfaces.
+    #[must_use]
+    pub fn with_fingerprints(family: CloneFamily, fingerprints: &CloneFingerprintSet) -> Self {
         let actions = build_clone_family_actions(
             &family.groups,
             family.total_duplicated_lines,
@@ -214,7 +253,10 @@ impl CloneFamilyFinding {
             groups: family
                 .groups
                 .into_iter()
-                .map(CloneGroupFinding::with_actions)
+                .map(|group| {
+                    let fingerprint = fingerprints.fingerprint_for_group(&group);
+                    CloneGroupFinding::with_fingerprint(group, fingerprint)
+                })
                 .collect(),
             total_duplicated_lines: family.total_duplicated_lines,
             total_duplicated_tokens: family.total_duplicated_tokens,
@@ -274,6 +316,11 @@ pub struct AttributedCloneGroupFinding {
     /// The underlying attributed clone group.
     #[serde(flatten)]
     pub group: AttributedCloneGroup,
+    /// Stable content fingerprint, usually `dup:<8hex>` and widened on rare
+    /// report collisions. Addressable via `plow dupes --trace dup:<fp>`.
+    /// Computed from the group's instances, so it matches the top-level
+    /// `clone_groups[].fingerprint` for the same clone.
+    pub fingerprint: String,
     /// Suggested next steps. Always emitted.
     pub actions: Vec<CloneGroupAction>,
 }
@@ -282,8 +329,22 @@ impl AttributedCloneGroupFinding {
     /// Build the wrapper from an [`AttributedCloneGroup`], computing the
     /// typed `actions` array inline from the attributed group's
     /// `line_count` and instance count.
+    #[allow(
+        dead_code,
+        reason = "kept for focused wrapper tests and non-report construction paths"
+    )]
     #[must_use]
     pub fn with_actions(group: AttributedCloneGroup) -> Self {
+        let fingerprint = group.instances.first().map_or_else(
+            || plow_core::duplicates::fingerprint_for_fragment(""),
+            |ai| plow_core::duplicates::fingerprint_for_fragment(&ai.instance.fragment),
+        );
+        Self::with_fingerprint(group, fingerprint)
+    }
+
+    /// Build the wrapper with a precomputed report-scoped fingerprint.
+    #[must_use]
+    pub fn with_fingerprint(group: AttributedCloneGroup, fingerprint: String) -> Self {
         let line_count = group.line_count;
         let instance_count = group.instances.len();
         let actions = vec![
@@ -303,7 +364,11 @@ impl AttributedCloneGroupFinding {
                 comment: Some(SUPPRESS_COMMENT.to_string()),
             },
         ];
-        Self { group, actions }
+        Self {
+            group,
+            fingerprint,
+            actions,
+        }
     }
 }
 
@@ -342,18 +407,22 @@ impl DupesReportPayload {
     /// `mirrored_directories` and `stats` through unchanged.
     #[must_use]
     pub fn from_report(report: &DuplicationReport) -> Self {
+        let fingerprints = CloneFingerprintSet::from_groups(&report.clone_groups);
         Self {
             clone_groups: report
                 .clone_groups
                 .iter()
-                .cloned()
-                .map(CloneGroupFinding::with_actions)
+                .map(|group| {
+                    CloneGroupFinding::with_fingerprint(
+                        group.clone(),
+                        fingerprints.fingerprint_for_group(group),
+                    )
+                })
                 .collect(),
             clone_families: report
                 .clone_families
                 .iter()
-                .cloned()
-                .map(CloneFamilyFinding::with_actions)
+                .map(|family| CloneFamilyFinding::with_fingerprints(family.clone(), &fingerprints))
                 .collect(),
             mirrored_directories: report.mirrored_directories.clone(),
             stats: report.stats.clone(),
@@ -406,6 +475,43 @@ mod tests {
     }
 
     #[test]
+    fn clone_group_finding_surfaces_dominant_identifier() {
+        let fragment = "function parseCsv() { parseCsv(); parseCsv(); return parseCsv; }";
+        let g = CloneGroup {
+            instances: vec![
+                CloneInstance {
+                    file: PathBuf::from("/root/a.ts"),
+                    start_line: 1,
+                    end_line: 3,
+                    start_col: 0,
+                    end_col: 0,
+                    fragment: fragment.to_string(),
+                },
+                CloneInstance {
+                    file: PathBuf::from("/root/b.ts"),
+                    start_line: 1,
+                    end_line: 3,
+                    start_col: 0,
+                    end_col: 0,
+                    fragment: fragment.to_string(),
+                },
+            ],
+            token_count: 100,
+            line_count: 3,
+        };
+        let finding = CloneGroupFinding::with_actions(g);
+        assert_eq!(finding.suggested_name.as_deref(), Some("parseCsv"));
+    }
+
+    #[test]
+    fn clone_group_finding_suggested_name_none_for_unnamed_fragment() {
+        // The shared `instance` helper uses an empty fragment, so there is no
+        // dominant identifier and the label falls back to a file-based name.
+        let finding = CloneGroupFinding::with_actions(group(2));
+        assert!(finding.suggested_name.is_none());
+    }
+
+    #[test]
     fn clone_group_finding_description_pluralises_instance_count() {
         let single = CloneGroupFinding::with_actions(group(1));
         assert!(
@@ -447,7 +553,6 @@ mod tests {
             ],
         };
         let finding = CloneFamilyFinding::with_actions(family);
-        // 1 extract-shared + 2 apply-suggestion + 1 suppress-line = 4
         assert_eq!(finding.actions.len(), 4);
         assert_eq!(
             finding.actions[0].kind,
@@ -465,8 +570,6 @@ mod tests {
         );
         assert_eq!(finding.actions[2].description, "Extract module");
         assert_eq!(finding.actions[3].kind, CloneFamilyActionType::SuppressLine);
-        // Issue #393 regression: every nested clone group inside a family
-        // must also carry its own typed actions array.
         assert_eq!(finding.groups.len(), 2);
         for inner in &finding.groups {
             assert_eq!(inner.actions.len(), 2);
@@ -510,11 +613,9 @@ mod tests {
         let payload = DupesReportPayload::from_report(&report);
         assert_eq!(payload.clone_groups.len(), 2);
         assert_eq!(payload.clone_families.len(), 1);
-        // Sanity check: every group has the canonical 2-action array.
         for finding in &payload.clone_groups {
             assert_eq!(finding.actions.len(), 2);
         }
-        // Sanity check: family with zero suggestions has 2 actions.
         assert_eq!(payload.clone_families[0].actions.len(), 2);
     }
 

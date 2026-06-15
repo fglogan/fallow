@@ -4,24 +4,26 @@ use rmcp::model::{CallToolResult, Content, Implementation, ServerCapabilities, S
 use rmcp::{ErrorData as McpError, ServerHandler, tool, tool_router};
 
 use crate::params::{
-    AnalyzeParams, AuditParams, CheckChangedParams, CheckRuntimeCoverageParams, ExplainParams,
-    FeatureFlagsParams, FindDupesParams, FixParams, HealthParams, ListBoundariesParams,
-    ProjectInfoParams, TraceCloneParams, TraceDependencyParams, TraceExportParams, TraceFileParams,
+    AnalyzeParams, AuditParams, CheckChangedParams, CheckRuntimeCoverageParams, CodeExecuteParams,
+    ExplainParams, FeatureFlagsParams, FindDupesParams, FixParams, HealthParams, ImpactAllParams,
+    ImpactParams, InspectTargetParams, ListBoundariesParams, ProjectInfoParams,
+    SecurityCandidatesParams, TraceCloneParams, TraceDependencyParams, TraceExportParams,
+    TraceFileParams,
 };
 use crate::tools::{
     build_analyze_args, build_audit_args, build_check_changed_args,
     build_check_runtime_coverage_args, build_explain_args, build_feature_flags_args,
     build_find_dupes_args, build_fix_apply_args, build_fix_preview_args,
     build_get_blast_radius_args, build_get_cleanup_candidates_args, build_get_hot_paths_args,
-    build_get_importance_args, build_health_args, build_list_boundaries_args,
-    build_project_info_args, build_trace_clone_args, build_trace_dependency_args,
-    build_trace_export_args, build_trace_file_args, run_plow, run_plow_with_top_level_warnings,
+    build_get_importance_args, build_health_args, build_impact_all_args, build_impact_args,
+    build_list_boundaries_args, build_project_info_args, build_security_candidates_args,
+    build_trace_clone_args, build_trace_dependency_args, build_trace_export_args,
+    build_trace_file_args, execute_code_mode, inspect_target, run_tool,
+    run_tool_with_top_level_warnings,
 };
 
 #[cfg(test)]
 mod tests;
-
-// ── Server ─────────────────────────────────────────────────────────
 
 #[derive(Clone)]
 pub struct PlowMcp {
@@ -53,7 +55,6 @@ fn resolve_binary() -> String {
         return bin;
     }
 
-    // Check for sibling binary next to the current executable (npm install scenario)
     if let Ok(exe) = std::env::current_exe() {
         let sibling = exe.with_file_name("plow");
         if sibling.is_file()
@@ -66,18 +67,45 @@ fn resolve_binary() -> String {
     "plow".to_string()
 }
 
-// ── Tool implementations ───────────────────────────────────────────
+fn code_execute_enabled() -> bool {
+    std::env::var("PLOW_MCP_CODE_EXECUTE")
+        .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "yes" | "on"))
+}
 
 #[tool_router]
 impl PlowMcp {
     #[tool(
-        description = "Analyze a TypeScript/JavaScript project for unused code, circular dependencies, and re-export cycles (barrel files that form a structural loop, silently breaking re-exports). Detects unused files, exports, types, dependencies, enum/class members, unresolved imports, unlisted dependencies, duplicate exports, circular dependencies, re-export cycles, boundary violations, stale suppression comments, unused pnpm catalog entries (entries in pnpm-workspace.yaml `catalog:` / `catalogs:` not referenced by any workspace package), empty pnpm catalog groups (named `catalogs.<name>:` groups with no entries), unresolved catalog references (workspace package.json declares `catalog:` but the catalog has no entry), unused pnpm dependency overrides (`pnpm-workspace.yaml#overrides` or `package.json#pnpm.overrides` targets a package no workspace package declares and pnpm-lock.yaml does not resolve), and misconfigured pnpm dependency overrides (unparsable key or empty value; pnpm install will reject). Private type leaks are an opt-in API hygiene check via issue_types: [\"private-type-leaks\"]. Returns structured JSON with all issues found, grouped by issue type. For code duplication use find_dupes, for complexity hotspots use check_health. Supports baseline comparisons (baseline/save_baseline), regression detection (fail_on_regression, tolerance, regression_baseline, save_regression_baseline), and performance tuning (no_cache, threads). Set boundary_violations=true to check only architecture boundary violations (convenience alias for issue_types: [\"boundary-violations\"]). Set group_by to \"owner\" (CODEOWNERS), \"directory\", \"package\" (workspace), or \"section\" to group results. The `section` mode reads GitLab CODEOWNERS `[Section]` headers and emits `owners` metadata per group.",
+        description = "Execute a bounded, read-only JavaScript Code Mode snippet against plow's MCP host API. `code` must be a JavaScript function expression or function body that receives `{ plow, root }` and returns a JSON-serializable value. The embedded sandbox exposes only a typed `plow` object with read-only analysis calls: analyze, checkChanged, securityCandidates, findDupes, projectInfo, traceExport, traceFile, traceDependency, traceClone, checkHealth, audit, explain, listBoundaries, featureFlags, impact, checkRuntimeCoverage, getHotPaths, getBlastRadius, getImportance, getCleanupCandidates, plus `plow.run(tool, params)` for the same allowlist. Mutating fix tools are intentionally not exposed. The sandbox has no filesystem, network, imports, eval, Function, process, require, Deno, Bun, or shell access. `root` is injected into host calls that omit params.root. `timeout_ms` caps the whole snippet and `max_output_bytes` caps total plow JSON read by host calls.",
+        annotations(read_only_hint = true, open_world_hint = true)
+    )]
+    async fn code_execute(
+        &self,
+        params: Parameters<CodeExecuteParams>,
+    ) -> Result<CallToolResult, McpError> {
+        if !code_execute_enabled() {
+            return Ok(CallToolResult::error(vec![Content::text(
+                "code_execute is disabled by downstream policy. Set PLOW_MCP_CODE_EXECUTE=1 to enable bounded Code Mode execution.",
+            )]));
+        }
+        let binary = self.binary.clone();
+        let params = params.0;
+        tokio::task::spawn_blocking(move || execute_code_mode(binary, params))
+            .await
+            .map_err(|err| McpError::internal_error(format!("code mode task failed: {err}"), None))
+            .map(|result| match result {
+                Ok(output) => CallToolResult::success(vec![Content::text(output)]),
+                Err(output) => CallToolResult::error(vec![Content::text(output)]),
+            })
+    }
+
+    #[tool(
+        description = "Analyze a TypeScript/JavaScript project for unused code, circular dependencies, and re-export cycles (barrel files that form a structural loop, silently breaking re-exports). Detects unused files, exports, types, dependencies, enum/class members, unresolved imports, unlisted dependencies, duplicate exports, circular dependencies, re-export cycles, boundary violations, rule-pack policy violations (banned calls and banned imports declared via the rulePacks config key), stale suppression comments, unused pnpm catalog entries (entries in pnpm-workspace.yaml `catalog:` / `catalogs:` not referenced by any workspace package), empty pnpm catalog groups (named `catalogs.<name>:` groups with no entries), unresolved catalog references (workspace package.json declares `catalog:` but the catalog has no entry), unused pnpm dependency overrides (`pnpm-workspace.yaml#overrides` or `package.json#pnpm.overrides` targets a package no workspace package declares and pnpm-lock.yaml does not resolve), and misconfigured pnpm dependency overrides (unparsable key or empty value; pnpm install will reject). Private type leaks are an opt-in API hygiene check via issue_types: [\"private-type-leaks\"]. Returns structured JSON with all issues found, grouped by issue type. For code duplication use find_dupes, for complexity hotspots use check_health. Supports baseline comparisons (baseline/save_baseline), regression detection (fail_on_regression, tolerance, regression_baseline, save_regression_baseline), and performance tuning (no_cache, threads). Set boundary_violations=true to check only architecture boundary violations (convenience alias for issue_types: [\"boundary-violations\"]). Set group_by to \"owner\" (CODEOWNERS), \"directory\", \"package\" (workspace), or \"section\" to group results. The `section` mode reads GitLab CODEOWNERS `[Section]` headers and emits `owners` metadata per group. Responses also include a top-level `next_steps[]` array of read-only follow-up commands (`{id, command, reason}`) computed from the findings; the stable `id` (e.g. `trace-unused-export`, `trace-clone`, `complexity-breakdown`) maps to a sibling tool or `code_execute` host call (`traceExport`, `traceClone`, `checkHealth({complexity_breakdown:true})`), so dispatch on `id` rather than running the CLI `command` string verbatim.",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn analyze(&self, params: Parameters<AnalyzeParams>) -> Result<CallToolResult, McpError> {
         let params = params.0;
         match build_analyze_args(&params) {
-            Ok(args) => run_plow(&self.binary, &args).await,
+            Ok(args) => run_tool(&self.binary, "analyze", &args).await,
             Err(msg) => Ok(CallToolResult::error(vec![Content::text(msg)])),
         }
     }
@@ -91,11 +119,37 @@ impl PlowMcp {
         params: Parameters<CheckChangedParams>,
     ) -> Result<CallToolResult, McpError> {
         let args = build_check_changed_args(params.0);
-        run_plow(&self.binary, &args).await
+        run_tool(&self.binary, "check_changed", &args).await
     }
 
     #[tool(
-        description = "Find code duplication across the project. Detects clone groups (identical or similar code blocks) with configurable detection modes and thresholds. Returns clone families with refactoring suggestions. Set top=N to show only the N largest clone groups. Set group_by to \"owner\" (CODEOWNERS), \"directory\", \"package\" (workspace), or \"section\" (GitLab CODEOWNERS `[Section]` headers, with `owners` metadata per group) to partition results. explain_skipped only changes the human-format skipped-default-ignores note (human/markdown CLI output); MCP JSON responses stay clean. Supports config, workspace scoping, baseline comparisons, and performance tuning (no_cache, threads).",
+        description = "Returns unverified security candidates, not confirmed vulnerabilities. Runs `plow security --format json` and returns `kind: \"security\"`, `security_findings`, category, CWE, severity, evidence, structural trace, reachability ranking context, blind-spot counters, and optional unresolved-callee diagnostics for agent verification. `severity` is a review-priority tier, not a verified vulnerability verdict. Each finding also carries an agent-actionable `candidate` record (`source_kind`, the untrusted-input kind as a stable catalogue id or null; a self-contained `sink` with the captured callee and optional `url_shape` for URL candidates; and the `boundary` crossed), an optional `taint_flow` source-to-sink triple (present only when an untrusted source is import-reachable to the sink), and a stable `finding_id` (equal to the SARIF fingerprint) for correlating a candidate across runs. Set `surface: true` to include the top-level `attack_surface` inventory with source-to-sink paths and defensive-boundary verification prompts. Set gate to `new` for changed-line candidates or `newly-reachable` for candidates that became reachable from entry points; `newly-reachable` requires changed_since. There is no `impact` field: deciding exploitability is the agent's job. `reachability.untrusted_source_trace` is module-level context only and does not prove value flow. `reachability.taint_confidence` tiers reachable candidates as `arg-level` or `module-level`; tier from that field rather than evidence prose. Verify trace, reachability context, severity, and evidence before editing code or presenting a finding as a vulnerability. Supports root, config, workspace, changed_since, paths, changed_workspaces, surface, gate, no_cache, and threads. Use paths for the agent edit loop: it forwards to `plow security --file` and scopes returned candidates to matching finding anchors, trace hops, untrusted-source reachability trace hops, or unresolved-callee diagnostics while cached analysis keeps reruns fast. The CLI also honors `PLOW_DIFF_FILE` from the MCP server environment for line-level diff scoping. Security analysis can exceed the default 120s subprocess timeout on large repos; raise `PLOW_TIMEOUT_SECS` accordingly.",
+        annotations(read_only_hint = true, open_world_hint = true)
+    )]
+    async fn security_candidates(
+        &self,
+        params: Parameters<SecurityCandidatesParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let params = params.0;
+        match build_security_candidates_args(&params) {
+            Ok(args) => run_tool(&self.binary, "security_candidates", &args).await,
+            Err(msg) => Ok(CallToolResult::error(vec![Content::text(msg)])),
+        }
+    }
+
+    #[tool(
+        description = "Inspect one file or exported symbol and return one typed evidence bundle. Address a file with target={type:\"file\", file:\"src/a.ts\"}; address a symbol with target={type:\"symbol\", file:\"src/a.ts\", export_name:\"foo\"}. Composes existing read-only analysis systems only: trace_file, trace_export for symbols, file-scoped dead-code actions, duplication groups filtered to the file, complexity findings filtered to the file, and security candidates scoped to the file. production is forwarded only to child analyses that support it: trace, dead-code, and health. Symbol targets include file-scoped evidence with explicit scope fields because file:line enclosing-symbol mapping is a follow-up. This is a bundled evidence query that may run several subprocess analyses sequentially; large repositories can exceed the default 120s subprocess timeout, so raise PLOW_TIMEOUT_SECS when needed.",
+        annotations(read_only_hint = true, open_world_hint = true)
+    )]
+    async fn inspect_target(
+        &self,
+        params: Parameters<InspectTargetParams>,
+    ) -> Result<CallToolResult, McpError> {
+        inspect_target(&self.binary, &params.0).await
+    }
+
+    #[tool(
+        description = "Find code duplication across the project. Detects clone groups (identical or similar code blocks) with configurable detection modes and thresholds. Returns clone families with refactoring suggestions. Each clone_groups[] entry carries a stable `fingerprint` (dup:<id>); pass it to the trace_clone tool to deep-dive that group (locations, an extract-function suggestion with estimated savings, and a best-effort suggested name). Set top=N to show only the N largest clone groups. Set group_by to \"owner\" (CODEOWNERS), \"directory\", \"package\" (workspace), or \"section\" (GitLab CODEOWNERS `[Section]` headers, with `owners` metadata per group) to partition results. Import declarations are excluded from clone detection by default (sorted import blocks are a formatting artifact, not copy-paste); pass ignore_imports=false to count them again. explain_skipped only changes the human-format skipped-default-ignores note (human/markdown CLI output); MCP JSON responses stay clean. Supports config, workspace scoping, baseline comparisons, and performance tuning (no_cache, threads).",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn find_dupes(
@@ -104,27 +158,27 @@ impl PlowMcp {
     ) -> Result<CallToolResult, McpError> {
         let params = params.0;
         match build_find_dupes_args(&params) {
-            Ok(args) => run_plow(&self.binary, &args).await,
+            Ok(args) => run_tool(&self.binary, "find_dupes", &args).await,
             Err(msg) => Ok(CallToolResult::error(vec![Content::text(msg)])),
         }
     }
 
     #[tool(
-        description = "Preview auto-fixes without modifying any files. Shows what would be changed: which unused exports would be removed, which unused dependencies would be deleted from package.json, which unused enum members would be removed, which unused pnpm catalog entries would be cleaned up, and which duplicate-export `ignoreExports` rules would be added to the plow config file. For `add-to-config` actions, each fix entry carries a `proposed_diff` field with the unified-diff preview of the proposed config write. When no plow config exists outside a monorepo subpackage, fix_apply would CREATE `.plowrc.json` using `plow init`'s framework-aware scaffolding (`$schema`, `entry`, `ignorePatterns`, etc.) and layer the `ignoreExports` rules on top; preview entries on that path carry `created_files: [\".plowrc.json\"]`. Set `no_create_config: true` to skip the config-creation path with `skip_reason: \"no_create_config\"`; source-file previews are unaffected. When a source file's xxh3 content hash at preview time differs from the hash captured during the in-process analysis (parallel editor save or external mutation between the analysis read and the preview entry), the per-file entry is emitted with `skip_reason: \"content_changed\"` and the envelope's top-level `skipped_content_changed` count is incremented; re-run after refreshing analysis to pick up the new on-disk shape. When a source file mixes CRLF and bare-LF line endings (common after cross-platform edits without `core.autocrlf`), the per-file entry is emitted with `skip_reason: \"mixed_line_endings\"` and the envelope's top-level `skipped_mixed_line_endings` count is incremented; this skip is NOT self-healing because re-running plow alone does not normalize the file. The agent must run `dos2unix <path>` (or instruct the user to set `git config core.autocrlf input` and re-checkout) before re-running. When an unused export lives in a test, mock, or fixture directory (`__mocks__`, `e2e`, `e2e-tests`, `cypress`, `playwright`, `examples`, `fixtures`, `__fixtures__`, `evals`, `golden`), or in a file that itself has an unresolved import, its removal is withheld as low confidence because the consumer may be invisible to static analysis (Vitest mock aliases, off-workspace e2e trees, fixture build steps): the per-file entry carries `skip_reason: \"low_confidence_off_graph\"` or `\"low_confidence_unresolved_imports\"` and the envelope's top-level `skipped_low_confidence_exports` count is incremented. Unlike the two skips above this is INTENTIONAL and does NOT change the exit code; the export stays reported by `plow check` so it can be confirmed and removed by hand. Supports workspace scoping and performance tuning (no_cache, threads).",
+        description = "Preview auto-fixes without modifying any files. Shows what would be changed: which unused exports would be removed, which unused dependencies would be deleted from package.json, which unused enum members would be removed, which unused pnpm catalog entries would be cleaned up, and which duplicate-export `ignoreExports` rules would be added to the plow config file. For `add-to-config` actions, each fix entry carries a `proposed_diff` field with the unified-diff preview of the proposed config write. When no plow config exists outside a monorepo subpackage, fix_apply would CREATE `.plowrc.json` using `plow init`'s framework-aware scaffolding (`$schema`, `entry`, `ignorePatterns`, etc.) and layer the `ignoreExports` rules on top; preview entries on that path carry `created_files: [\".plowrc.json\"]`. Set `no_create_config: true` to skip the config-creation path with `skip_reason: \"no_create_config\"`; source-file previews are unaffected. When a source file's xxh3 content hash at preview time differs from the hash captured during the in-process analysis (parallel editor save or external mutation between the analysis read and the preview entry), the per-file entry is emitted with `skip_reason: \"content_changed\"` and the envelope's top-level `skipped_content_changed` count is incremented; re-run after refreshing analysis to pick up the new on-disk shape. When a source file mixes CRLF and bare-LF line endings (common after cross-platform edits without `core.autocrlf`), the per-file entry is emitted with `skip_reason: \"mixed_line_endings\"` and the envelope's top-level `skipped_mixed_line_endings` count is incremented; this skip is NOT self-healing because re-running plow alone does not normalize the file. The agent must run `dos2unix <path>` (or instruct the user to set `git config core.autocrlf input` and re-checkout) before re-running. When an unused export lives in a test, mock, or fixture directory (`__mocks__`, `e2e`, `e2e-tests`, `cypress`, `playwright`, `examples`, `fixtures`, `__fixtures__`, `evals`, `golden`), or in a file that itself has an unresolved import, its removal is withheld as low confidence because the consumer may be invisible to static analysis (Vitest mock aliases, off-workspace e2e trees, fixture build steps): the per-file entry carries `skip_reason: \"low_confidence_off_graph\"` or `\"low_confidence_unresolved_imports\"` and the envelope's top-level `skipped_low_confidence_exports` count is incremented. Unlike the two skips above this is INTENTIONAL and does NOT change the exit code; the export stays reported by `plow dead-code` so it can be confirmed and removed by hand. Supports workspace scoping and performance tuning (no_cache, threads).",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn fix_preview(&self, params: Parameters<FixParams>) -> Result<CallToolResult, McpError> {
         let args = build_fix_preview_args(&params.0);
-        run_plow(&self.binary, &args).await
+        run_tool(&self.binary, "fix_preview", &args).await
     }
 
     #[tool(
-        description = "Apply auto-fixes to the project. Removes unused exports from the public API, may delete dead exported enum declarations, deletes unused dependencies from package.json, removes unused enum members, removes unused pnpm catalog entries (rewriting empty groups to `{}` so pnpm install does not reject null), and appends duplicate-export `ignoreExports` rules to the plow config file. When no plow config exists outside a monorepo subpackage, this CREATES `.plowrc.json` using `plow init`'s framework-aware scaffolding (TypeScript / Storybook / Vitest / Jest / Playwright / React / Vue / Angular / Svelte detection, `$schema`, `entry`, `ignorePatterns`, sensible defaults) and layers the `ignoreExports` rules on top. Inside a monorepo subpackage (workspace marker `pnpm-workspace.yaml` / `package.json#workspaces` / `turbo.json` / `lerna.json` / `rush.json` above the invocation directory) the create-fallback refuses and emits `skip_reason: \"monorepo_subpackage\"` with a relative `workspace_root` path; the agent should re-run `plow init` at the workspace root or invoke from there. Set `no_create_config: true` to opt out of the create-fallback entirely (recommended for unsupervised agent flows or CI bots where silently materialising a new top-level config file would surprise the user); the duplicate-export path is skipped with `skip_reason: \"no_create_config\"` and source-file edits proceed normally. When a source file's xxh3 content hash at fix time differs from the hash captured during the in-process analysis (parallel editor save, CI rebase, or other tool mutated the file between analysis and write), the per-file fix is skipped with `skip_reason: \"content_changed\"`; the envelope's top-level `skipped_content_changed` count is incremented and the run exits with code 2 so CI surfaces the mismatch instead of treating the partial run as a clean no-op. When a source file mixes CRLF and bare-LF line endings, the per-file fix is skipped with `skip_reason: \"mixed_line_endings\"`; the envelope's top-level `skipped_mixed_line_endings` count is incremented and the run exits with code 2. This skip is NOT self-healing: re-running plow alone does not normalize the file and will loop. The agent must run `dos2unix <path>` (or instruct the user to set `git config core.autocrlf input` and re-checkout) before re-running. When an unused export lives in a test, mock, or fixture directory (`__mocks__`, `e2e`, `e2e-tests`, `cypress`, `playwright`, `examples`, `fixtures`, `__fixtures__`, `evals`, `golden`), or in a file that itself has an unresolved import, its removal is withheld as low confidence because the consumer may be invisible to static analysis (Vitest mock aliases, off-workspace e2e trees, fixture build steps): the per-file fix carries `skip_reason: \"low_confidence_off_graph\"` or `\"low_confidence_unresolved_imports\"` and the envelope's top-level `skipped_low_confidence_exports` count is incremented. Unlike the two skips above this is INTENTIONAL: it does NOT change the exit code (the run can still exit 0), and the export stays reported by `plow check` so it can be confirmed and removed by hand. Writes are batched: each per-file rewrite is staged to a sibling temp file, and the orchestrator promotes the batch only after every stage succeeds, so a single stage failure leaves the project untouched. Files with a UTF-8 BOM are read with the BOM stripped (so line offsets align with the parser) and written with the BOM re-prepended (so Windows-authored files round-trip unchanged); plow does not add or remove a BOM. This modifies files on disk. Use fix_preview first to review planned changes including any `proposed_diff` and `created_files` fields. Supports workspace scoping and performance tuning (no_cache, threads).",
+        description = "Apply auto-fixes to the project. Removes unused exports from the public API, may delete dead exported enum declarations, deletes unused dependencies from package.json, removes unused enum members, removes unused pnpm catalog entries (rewriting empty groups to `{}` so pnpm install does not reject null), and appends duplicate-export `ignoreExports` rules to the plow config file. When no plow config exists outside a monorepo subpackage, this CREATES `.plowrc.json` using `plow init`'s framework-aware scaffolding (TypeScript / Storybook / Vitest / Jest / Playwright / React / Vue / Angular / Svelte detection, `$schema`, `entry`, `ignorePatterns`, sensible defaults) and layers the `ignoreExports` rules on top. Inside a monorepo subpackage (workspace marker `pnpm-workspace.yaml` / `package.json#workspaces` / `turbo.json` / `lerna.json` / `rush.json` above the invocation directory) the create-fallback refuses and emits `skip_reason: \"monorepo_subpackage\"` with a relative `workspace_root` path; the agent should re-run `plow init` at the workspace root or invoke from there. Set `no_create_config: true` to opt out of the create-fallback entirely (recommended for unsupervised agent flows or CI bots where silently materialising a new top-level config file would surprise the user); the duplicate-export path is skipped with `skip_reason: \"no_create_config\"` and source-file edits proceed normally. When a source file's xxh3 content hash at fix time differs from the hash captured during the in-process analysis (parallel editor save, CI rebase, or other tool mutated the file between analysis and write), the per-file fix is skipped with `skip_reason: \"content_changed\"`; the envelope's top-level `skipped_content_changed` count is incremented and the run exits with code 2 so CI surfaces the mismatch instead of treating the partial run as a clean no-op. When a source file mixes CRLF and bare-LF line endings, the per-file fix is skipped with `skip_reason: \"mixed_line_endings\"`; the envelope's top-level `skipped_mixed_line_endings` count is incremented and the run exits with code 2. This skip is NOT self-healing: re-running plow alone does not normalize the file and will loop. The agent must run `dos2unix <path>` (or instruct the user to set `git config core.autocrlf input` and re-checkout) before re-running. When an unused export lives in a test, mock, or fixture directory (`__mocks__`, `e2e`, `e2e-tests`, `cypress`, `playwright`, `examples`, `fixtures`, `__fixtures__`, `evals`, `golden`), or in a file that itself has an unresolved import, its removal is withheld as low confidence because the consumer may be invisible to static analysis (Vitest mock aliases, off-workspace e2e trees, fixture build steps): the per-file fix carries `skip_reason: \"low_confidence_off_graph\"` or `\"low_confidence_unresolved_imports\"` and the envelope's top-level `skipped_low_confidence_exports` count is incremented. Unlike the two skips above this is INTENTIONAL: it does NOT change the exit code (the run can still exit 0), and the export stays reported by `plow dead-code` so it can be confirmed and removed by hand. Writes are batched: each per-file rewrite is staged to a sibling temp file, and the orchestrator promotes the batch only after every stage succeeds, so a single stage failure leaves the project untouched. Files with a UTF-8 BOM are read with the BOM stripped (so line offsets align with the parser) and written with the BOM re-prepended (so Windows-authored files round-trip unchanged); plow does not add or remove a BOM. This modifies files on disk. Use fix_preview first to review planned changes including any `proposed_diff` and `created_files` fields. Supports workspace scoping and performance tuning (no_cache, threads).",
         annotations(destructive_hint = true, read_only_hint = false)
     )]
     async fn fix_apply(&self, params: Parameters<FixParams>) -> Result<CallToolResult, McpError> {
         let args = build_fix_apply_args(&params.0);
-        run_plow(&self.binary, &args).await
+        run_tool(&self.binary, "fix_apply", &args).await
     }
 
     #[tool(
@@ -136,7 +190,7 @@ impl PlowMcp {
         params: Parameters<ProjectInfoParams>,
     ) -> Result<CallToolResult, McpError> {
         let args = build_project_info_args(&params.0);
-        run_plow(&self.binary, &args).await
+        run_tool(&self.binary, "project_info", &args).await
     }
 
     #[tool(
@@ -148,7 +202,7 @@ impl PlowMcp {
         params: Parameters<TraceExportParams>,
     ) -> Result<CallToolResult, McpError> {
         match build_trace_export_args(&params.0) {
-            Ok(args) => run_plow(&self.binary, &args).await,
+            Ok(args) => run_tool(&self.binary, "trace_export", &args).await,
             Err(msg) => Ok(CallToolResult::error(vec![Content::text(msg)])),
         }
     }
@@ -162,7 +216,7 @@ impl PlowMcp {
         params: Parameters<TraceFileParams>,
     ) -> Result<CallToolResult, McpError> {
         match build_trace_file_args(&params.0) {
-            Ok(args) => run_plow(&self.binary, &args).await,
+            Ok(args) => run_tool(&self.binary, "trace_file", &args).await,
             Err(msg) => Ok(CallToolResult::error(vec![Content::text(msg)])),
         }
     }
@@ -176,13 +230,13 @@ impl PlowMcp {
         params: Parameters<TraceDependencyParams>,
     ) -> Result<CallToolResult, McpError> {
         match build_trace_dependency_args(&params.0) {
-            Ok(args) => run_plow(&self.binary, &args).await,
+            Ok(args) => run_tool(&self.binary, "trace_dependency", &args).await,
             Err(msg) => Ok(CallToolResult::error(vec![Content::text(msg)])),
         }
     }
 
     #[tool(
-        description = "Trace duplicate-code groups containing a given file and line. Returns the matched clone instance plus every clone group that contains it. Useful when an agent wants to consolidate duplication but needs the exact sibling locations first.",
+        description = "Deep-dive a duplicate-code clone group. Address it either by a source location (file + line) or by a stable fingerprint (fingerprint=\"dup:<id>\" from a find_dupes clone_groups[].fingerprint, usually dup:<8hex> and widened only on rare report collisions). Returns the matched clone instance, every sibling clone group / location, plus per group an extract-function suggestion with estimated line savings and a best-effort suggested_name (the field is omitted, not null, when there is no confident name, so branch on key presence; advisory, verify before applying, never auto-apply). Provide exactly one addressing form. Import declarations are excluded from clone detection by default; pass ignore_imports=false to count them again. Use after find_dupes when consolidating duplication and you need exact sibling locations and a refactor target.",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn trace_clone(
@@ -190,13 +244,13 @@ impl PlowMcp {
         params: Parameters<TraceCloneParams>,
     ) -> Result<CallToolResult, McpError> {
         match build_trace_clone_args(&params.0) {
-            Ok(args) => run_plow(&self.binary, &args).await,
+            Ok(args) => run_tool(&self.binary, "trace_clone", &args).await,
             Err(msg) => Ok(CallToolResult::error(vec![Content::text(msg)])),
         }
     }
 
     #[tool(
-        description = "Check code health metrics (cyclomatic and cognitive complexity) for functions in the project. Returns structured JSON with complexity scores per function, sorted by severity. Set score=true for a single 0-100 health score with letter grade (A/B/C/D/F); runs duplication analysis automatically, but the churn-backed hotspot penalty requires hotspots=true (or targets=true). Set min_score=N to fail if score drops below a threshold (CI quality gate). Set file_scores=true for per-file health scores (maintainability index, fan-in, fan-out, dead code ratio, complexity density, CRAP risk), sorted in risk-aware triage order so lower MI and higher CRAP risk appear first. Set coverage_gaps=true to explicitly include static test coverage gaps: runtime files and exports with no test dependency path (not line-level coverage). A provided config file may also enable coverage gaps via rules.coverage-gaps when no health sections are explicitly selected. Set hotspots=true to identify files that are both complex and frequently changing (combines git churn with complexity). Set ownership=true (implies hotspots) to attach per-file ownership signals: bus factor, contributor count, declared CODEOWNERS owner, ownership_state, drift, and unowned-hotspot flag. Use ownership_email_mode=raw|handle|anonymized|hash for author email privacy (default handle; hash is the legacy spelling for anonymized output). Set targets=true for ranked refactoring recommendations sorted by efficiency (quick wins first), with confidence scores and adaptive percentile-based thresholds. Set trend=true to compare current metrics against the most recent saved snapshot and show per-metric deltas with directional indicators (improving/declining/stable). Implies --score. Requires prior snapshots saved with save_snapshot. Set effort to control analysis depth: 'low' (fast, surface-level), 'medium' (balanced, default), or 'high' (thorough, all heuristics). Set summary=true to include a natural-language summary of findings alongside the structured JSON. Set coverage to a path to Istanbul-format coverage data (coverage-final.json from Jest, Vitest, c8, nyc) for accurate per-function CRAP scores instead of the default static binary model. CRAP findings carry a `coverage_source` discriminator (`istanbul`, `estimated`, or `estimated_component_inherited`); synthetic `<template>` findings on Angular `.html` files use `estimated_component_inherited` and include an `inherited_from` path to the owning `.component.ts` so agents target the component file for coverage remediation rather than the template. Angular components whose class AND template both contribute to complexity also emit a synthetic `<component>` rollup finding anchored at the worst class method's `(line, col)`. The rollup's `cyclomatic` is `worst_class_method.cyclomatic + template.cyclomatic` (the same worst-by-cyclomatic method drives both metrics; cognitive is `worst.cognitive + template.cognitive`). The `component_rollup` payload carries the pre-summation breakdown: `class_worst_function` (method name), `class_cyclomatic` / `class_cognitive` (per-method numbers), `template_path` / `template_cyclomatic` / `template_cognitive`, plus a `component` identifier derived from the .ts owner's file stem. The rollup's `suppress-line` action uses `placement: \"above-component-worst-method\"`: a `// plow-ignore-next-line complexity` placed above the worst class method hides BOTH the per-function finding AND the rollup, so agents do not need to emit two suppression edits. Per-function and per-`<template>` entries stay alongside the rollup; ranking and `--targets` use the rollup so a template-heavy component surfaces as one unit rather than scattered medium findings. Set runtime_coverage to a path (V8 coverage directory, V8 JSON file, or Istanbul JSON file) for merged runtime runtime-coverage findings (paid feature; requires an active license via `plow license activate`). Runtime-coverage tuning: set min_invocations_hot=N to tune the hot-path threshold (default 100), min_observation_volume=N to tune the high-confidence verdict floor (default 5000), and low_traffic_threshold=RATIO to tune the active/low-traffic split (default 0.001). Set group_by to \"owner\" (CODEOWNERS), \"directory\", \"package\" (workspace), or \"section\" (GitLab CODEOWNERS `[Section]` headers, with `owners` metadata per group) to partition results. Each group gets its own `vital_signs`, `health_score`, `findings`, `file_scores`, `hotspots`, `large_functions`, and `targets` recomputed against the group's files (top-level metrics stay project-wide). Use this to answer per-team or per-package quality questions like \"which workspace has the worst maintainability?\" without running plow once per package. Supports config, baseline comparisons, and performance tuning (no_cache, threads). Useful for identifying hard-to-maintain code and prioritizing refactoring.",
+        description = "Check code health metrics (cyclomatic and cognitive complexity) for functions in the project. Returns structured JSON with complexity scores per function, sorted by severity. Set score=true for a single 0-100 health score with letter grade (A/B/C/D/F); runs duplication analysis automatically, but the churn-backed hotspot penalty requires hotspots=true (or targets=true). Set min_score=N to fail only when the score drops below a threshold (CI quality gate); min_score is authoritative, so complexity findings become informational and min_score=0 never fails. Exit codes are not surfaced over MCP (a findings exit still returns the JSON), so min_score and min_severity only affect the CLI exit code; min_severity, if also set, composes with min_score (the CLI run fails if either gate trips). Set file_scores=true for per-file health scores (maintainability index, fan-in, fan-out, dead code ratio, complexity density, CRAP risk), sorted in risk-aware triage order so lower MI and higher CRAP risk appear first. Set complexity_breakdown=true to add a `contributions[]` array to each complexity finding, breaking the cyclomatic and cognitive scores down per decision point (each entry names the construct: if, else-if, ternary, boolean operator, loop, case, catch, ... with its source line and weight) so you can explain WHY a function scored high and which specific lines to refactor. Set coverage_gaps=true to explicitly include static test coverage gaps: runtime files and exports with no test dependency path (not line-level coverage). A provided config file may also enable coverage gaps via rules.coverage-gaps when no health sections are explicitly selected. Set hotspots=true to identify files that are both complex and frequently changing (combines git churn with complexity). Set churn_file to a `plow-churn/v1` JSON path to power the churn-backed signals (hotspots, ownership, and refactoring targets) from imported VCS history instead of git, so they work on projects with no git repository (Yandex Arc, Mercurial, Perforce); a small wrapper translates the VCS log into the contract, and the `since` window then only labels output since the file is authoritative. Set ownership=true (implies hotspots) to attach per-file ownership signals: bus factor, contributor count, declared CODEOWNERS owner, ownership_state, drift, and unowned-hotspot flag. Use ownership_email_mode=raw|handle|anonymized|hash for author email privacy (default handle; hash is the legacy spelling for anonymized output). Set targets=true for ranked refactoring recommendations sorted by efficiency (quick wins first), with confidence scores and adaptive percentile-based thresholds. Set trend=true to compare current metrics against the most recent saved snapshot and show per-metric deltas with directional indicators (improving/declining/stable). Implies --score. Requires prior snapshots saved with save_snapshot. Set effort to control analysis depth: 'low' (fast, surface-level), 'medium' (balanced, default), or 'high' (thorough, all heuristics). Set summary=true to include a natural-language summary of findings alongside the structured JSON. Set coverage to a path to Istanbul-format coverage data (coverage-final.json from Jest, Vitest, c8, nyc) for accurate per-function CRAP scores instead of the default static binary model. CRAP findings carry a `coverage_source` discriminator (`istanbul`, `estimated`, or `estimated_component_inherited`); `summary.coverage_source_consistency` and grouped `coverage_source_consistency` report whether emitted CRAP finding sources are uniform or mixed; synthetic `<template>` findings on Angular `.html` files use `estimated_component_inherited` and include an `inherited_from` path to the owning `.component.ts` so agents target the component file for coverage remediation rather than the template. Angular components whose class AND template both contribute to complexity also emit a synthetic `<component>` rollup finding anchored at the worst class method's `(line, col)`. The rollup's `cyclomatic` is `worst_class_method.cyclomatic + template.cyclomatic` (the same worst-by-cyclomatic method drives both metrics; cognitive is `worst.cognitive + template.cognitive`). The `component_rollup` payload carries the pre-summation breakdown: `class_worst_function` (method name), `class_cyclomatic` / `class_cognitive` (per-method numbers), `template_path` / `template_cyclomatic` / `template_cognitive`, plus a `component` identifier derived from the .ts owner's file stem. The rollup's `suppress-line` action uses `placement: \"above-component-worst-method\"`: a `// plow-ignore-next-line complexity` placed above the worst class method hides BOTH the per-function finding AND the rollup, so agents do not need to emit two suppression edits. Per-function and per-`<template>` entries stay alongside the rollup; ranking and `--targets` use the rollup so a template-heavy component surfaces as one unit rather than scattered medium findings. Set runtime_coverage to a path (V8 coverage directory, V8 JSON file, or Istanbul JSON file) for merged runtime-coverage findings (a single local capture is free; continuous or multi-capture runtime monitoring requires an active license via `plow license activate`). Runtime-coverage tuning: set min_invocations_hot=N to tune the hot-path threshold (default 100), min_observation_volume=N to tune the high-confidence verdict floor (default 5000), and low_traffic_threshold=RATIO to tune the active/low-traffic split (default 0.001). Set group_by to \"owner\" (CODEOWNERS), \"directory\", \"package\" (workspace), or \"section\" (GitLab CODEOWNERS `[Section]` headers, with `owners` metadata per group) to partition results. Each group gets its own `vital_signs`, `health_score`, `findings`, `file_scores`, `hotspots`, `large_functions`, and `targets` recomputed against the group's files (top-level metrics stay project-wide). Use this to answer per-team or per-package quality questions like \"which workspace has the worst maintainability?\" without running plow once per package. When config health.thresholdOverrides is set, health findings use the resolved local thresholds and JSON includes threshold_overrides state so agents can see active, stale, and full-run no-match exceptions. Supports config, baseline comparisons, and performance tuning (no_cache, threads). Useful for identifying hard-to-maintain code and prioritizing refactoring.",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn check_health(
@@ -204,16 +258,16 @@ impl PlowMcp {
         params: Parameters<HealthParams>,
     ) -> Result<CallToolResult, McpError> {
         let args = build_health_args(&params.0);
-        run_plow(&self.binary, &args).await
+        run_tool(&self.binary, "check_health", &args).await
     }
 
     #[tool(
-        description = "Audit changed files for dead code, complexity, and duplication. Purpose-built for reviewing AI-generated code. Combines dead-code + complexity + duplication scoped to changed files and returns a verdict (pass/warn/fail). Auto-detects the base branch if not specified. By default, audit runs the base ref too and gates only findings introduced by the changeset; inherited findings are annotated with introduced=false and counted under attribution. Set gate=\"all\" or audit.gate=\"all\" in config to gate every finding. Returns JSON with verdict, summary counts per category, attribution counts, and full issue details with actions array for auto-correction. Set coverage to an Istanbul coverage-final.json path and coverage_root to an absolute coverage-data path prefix when paths need rebasing for accurate CRAP scoring in the health sub-analysis. Set group_by to \"owner\" (CODEOWNERS), \"directory\", \"package\" (workspace), or \"section\" (GitLab CODEOWNERS `[Section]` headers, with `owners` metadata per group) to partition results. Set dead_code_baseline, health_baseline, and/or dupes_baseline to per-analysis baseline file paths (as saved by `plow dead-code|health|dupes --save-baseline`) so pre-existing issues on touched files do not dominate the verdict; only new issues not present in the respective baseline contribute. explain_skipped only changes the human-format skipped-default-ignores note (human/markdown CLI output); MCP JSON responses stay clean. Set include_entry_exports=true to also report unused exports in entry files (catches typos in framework exports like `meatdata` vs `metadata`); the CLI flag ORs with the `includeEntryExports` config value. Set runtime_coverage to a V8 coverage directory, V8 JSON file, or Istanbul coverage-final.json to fold runtime-coverage findings into the same audit invocation: agents get the `hot-path-touched` verdict alongside dead-code and complexity in one call (License-gated; informational verdict, no exit-code change). Set min_invocations_hot=N to tune the runtime-coverage hot-path threshold used by audit (default 100). Health findings include Angular `<component>` rollups (synthetic per-component finding folding `worst_class_method + template` complexity); ranking and `--targets` use the rollup over per-function entries so a template-heavy component is surfaced as one unit. See `check_health` for the `component_rollup` payload shape. When `PLOW_DIFF_FILE` (path to a unified diff) is set in the agent's process environment, EVERY finding (dead-code, complexity, duplication, boundary, runtime-coverage hot paths) is narrowed to source lines inside an added hunk; project-level findings (unused deps, catalog entries, dependency overrides) bypass the filter because they anchor at fixed `package.json` / `pnpm-workspace.yaml` lines a PR rarely touches. When both `PLOW_DIFF_FILE` and `PLOW_CHANGED_SINCE` are set, the diff wins for line-level filtering and `--changed-since` still scopes file discovery. The `runtime_coverage.verdict` also promotes `hot-path-touched` over `cold-code-detected` for PR-review contexts; the full unprioritized signal set is in `runtime_coverage.signals[]`. Use this after generating code to verify quality before committing.",
+        description = "Audit changed files for dead code, complexity, and duplication. Purpose-built for reviewing AI-generated code. Combines dead-code + complexity + duplication scoped to changed files and returns a verdict (pass/warn/fail). Auto-detects the base branch if not specified. By default, audit runs the base ref too and gates only findings introduced by the changeset; inherited findings are annotated with introduced=false and counted under attribution. Set gate=\"all\" or audit.gate=\"all\" in config to gate every finding. Returns JSON with verdict, summary counts per category, attribution counts, and full issue details with actions array for auto-correction. Set coverage to an Istanbul coverage-final.json path and coverage_root to an absolute coverage-data path prefix when paths need rebasing for accurate CRAP scoring in the health sub-analysis. Audit health JSON includes `coverage_source` on CRAP findings and `summary.coverage_source_consistency` when emitted CRAP source data is uniform or mixed. Set group_by to \"owner\" (CODEOWNERS), \"directory\", \"package\" (workspace), or \"section\" (GitLab CODEOWNERS `[Section]` headers, with `owners` metadata per group) to partition results. Set dead_code_baseline, health_baseline, and/or dupes_baseline to per-analysis baseline file paths (as saved by `plow dead-code|health|dupes --save-baseline`) so pre-existing issues on touched files do not dominate the verdict; only new issues not present in the respective baseline contribute. explain_skipped only changes the human-format skipped-default-ignores note (human/markdown CLI output); MCP JSON responses stay clean. Set include_entry_exports=true to also report unused exports in entry files (catches typos in framework exports like `meatdata` vs `metadata`); the CLI flag ORs with the `includeEntryExports` config value. Set runtime_coverage to a V8 coverage directory, V8 JSON file, or Istanbul coverage-final.json to fold runtime-coverage findings into the same audit invocation: agents get the `hot-path-touched` verdict alongside dead-code and complexity in one call (a single local capture is free, continuous or multi-capture monitoring requires an active license; informational verdict, no exit-code change). Set min_invocations_hot=N to tune the runtime-coverage hot-path threshold used by audit (default 100). Health findings include Angular `<component>` rollups (synthetic per-component finding folding `worst_class_method + template` complexity); ranking and `--targets` use the rollup over per-function entries so a template-heavy component is surfaced as one unit. When config health.thresholdOverrides is set, audit health findings use the resolved local thresholds and nested health JSON includes threshold_overrides state. See `check_health` for the `component_rollup` payload shape. When `PLOW_DIFF_FILE` (path to a unified diff) is set in the agent's process environment, EVERY finding (dead-code, complexity, duplication, boundary, runtime-coverage hot paths) is narrowed to source lines inside an added hunk; project-level findings (unused deps, catalog entries, dependency overrides) bypass the filter because they anchor at fixed `package.json` / `pnpm-workspace.yaml` lines a PR rarely touches. When both `PLOW_DIFF_FILE` and `PLOW_CHANGED_SINCE` are set, the diff wins for line-level filtering and `--changed-since` still scopes file discovery. The `runtime_coverage.verdict` also promotes `hot-path-touched` over `cold-code-detected` for PR-review contexts; the full unprioritized signal set is in `runtime_coverage.signals[]`. Use this after generating code to verify quality before committing.",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn audit(&self, params: Parameters<AuditParams>) -> Result<CallToolResult, McpError> {
         match build_audit_args(&params.0) {
-            Ok(args) => run_plow(&self.binary, &args).await,
+            Ok(args) => run_tool(&self.binary, "audit", &args).await,
             Err(msg) => Ok(CallToolResult::error(vec![Content::text(msg)])),
         }
     }
@@ -227,7 +281,7 @@ impl PlowMcp {
         params: Parameters<ExplainParams>,
     ) -> Result<CallToolResult, McpError> {
         let args = build_explain_args(&params.0);
-        run_plow(&self.binary, &args).await
+        run_tool(&self.binary, "plow_explain", &args).await
     }
 
     #[tool(
@@ -239,7 +293,7 @@ impl PlowMcp {
         params: Parameters<ListBoundariesParams>,
     ) -> Result<CallToolResult, McpError> {
         let args = build_list_boundaries_args(&params.0);
-        run_plow(&self.binary, &args).await
+        run_tool(&self.binary, "list_boundaries", &args).await
     }
 
     #[tool(
@@ -251,11 +305,32 @@ impl PlowMcp {
         params: Parameters<FeatureFlagsParams>,
     ) -> Result<CallToolResult, McpError> {
         let args = build_feature_flags_args(&params.0);
-        run_plow(&self.binary, &args).await
+        run_tool(&self.binary, "feature_flags", &args).await
     }
 
     #[tool(
-        description = "Merge runtime-coverage data into the health report. Focused entry point for the runtime-coverage pipeline: pass a V8 coverage directory (`NODE_V8_COVERAGE=<dir>`), a single V8 coverage JSON file, or an Istanbul `coverage-final.json` via the required `coverage` field. A single local capture is free and runs without a license; continuous or multi-capture runtime monitoring (multiple JSON files in a V8 directory) requires an active license JWT (start a 30-day trial with `plow license activate --trial --email <addr>`; check state with `plow license status`). Returns structured JSON with a `runtime_coverage` block containing surfaced `findings` verdicts (`safe_to_delete` / `review_required` / `low_traffic` / `coverage_unavailable`), stable content-hash IDs (`fallow:prod:<hash>`), evidence, percentile-ranked hot paths (each with `start_line` and `end_line` so consumers can match against a PR diff), and on protocol-0.3+ sidecars a `summary.capture_quality` block that flags short-window captures. The sidecar may still classify other functions as `active`, but the CLI omits those from `runtime_coverage.findings` to keep the surfaced list actionable. Tunable via `min_invocations_hot` (hot-path threshold, default 100), `min_observation_volume` (high-confidence verdict floor, default 5000), and `low_traffic_threshold` (active/low_traffic split, default 0.001). `group_by` partitions results by CODEOWNERS / directory / package / section. PR-context behavior: when `PLOW_DIFF_FILE` (path to a unified diff) is set in the agent's process environment, the top-level `runtime_coverage.verdict` promotes `hot-path-touched` over `cold-code-detected` so reviewers see the diff-tied signal first, AND every hot path is narrowed to functions whose `[start_line, end_line]` overlaps an added hunk. `PLOW_CHANGED_SINCE` (git ref) also scopes (file-level). Without a change scope the verdict stays cold-code-primary and all hot paths are returned. The full unprioritized list is always in `runtime_coverage.signals[]` (kebab-case strings, severity-descending). Runtime coverage can exceed the default 120s MCP subprocess timeout on multi-megabyte dumps; raise `PLOW_TIMEOUT_SECS` accordingly. For general complexity / hotspot / CRAP analysis without a production dump, use `check_health` instead.",
+        description = "Read plow's local value-tracking report. Runs NO analysis: it reads a per-project history file from the user's private config dir (never inside the repo), answering \"what has plow done for me over time\" rather than \"what is wrong now\" (for live findings use analyze / audit / check_health). LOCAL-DEV ONLY: history accrues only on a developer's machine (local dev, or a persistent pre-commit gate); plow never records in CI, so in CI / ephemeral runners this returns an empty report (enabled:false) and must NOT be used as a CI metric. Always returns a populated JSON object (never {}): branch on `enabled` and `enabled_source` (`project` = an explicit per-repo enable/disable, `user` = the user-global default, `default` = off). When `enabled:false`, use `explicit_decision` to decide what to say: `explicit_decision:false` means tracking was never set up here, so recommend the user run `plow impact enable` (do not run it yourself); `explicit_decision:true` means the user deliberately disabled it here, so do NOT nag. Also branch on `record_count` (0 with enabled:true = set up but awaiting gate runs). When enabled with history it returns `surfacing` (issue counts from the most recent recorded run), `trend` (count delta vs the previous run; improving/declining/stable on the wire), `containment_count` + `recent_containment` (pre-commit gate runs that blocked a commit then later cleared), and a short-SHA `latest_git_sha` for correlation. On plow with impact v1.5+ the report also carries `resolved_total` / `suppressed_total` / `recent_resolved` / `attribution_active`, crediting findings plow saw genuinely fixed (code removed or refactored) and never counting a plow-ignore suppression as a win; older plow binaries omit these fields. On plow with impact v1.6+ the report also carries `project_surfacing` / `project_trend`: a WHOLE-PROJECT view from the last full `plow` run (additive optional under the same `schema_version`, omitted by older binaries). Treat changed-file `surfacing` as the actionable count for the current change and `project_surfacing` as whole-repo context, not a to-do list. Read-only; the mutating `plow impact enable` / `disable` / `default` lifecycle is intentionally not exposed over MCP.",
+        annotations(read_only_hint = true, idempotent_hint = true, open_world_hint = false)
+    )]
+    async fn impact(&self, params: Parameters<ImpactParams>) -> Result<CallToolResult, McpError> {
+        let args = build_impact_args(&params.0);
+        run_tool(&self.binary, "impact", &args).await
+    }
+
+    #[tool(
+        description = "Roll EVERY tracked plow project on this machine into one cross-repo value report (`plow impact --all --format json`). Runs NO analysis: it reads the per-project history files in the user's private config dir, answering \"what has plow done for me across all my repos\". Use this instead of `impact` when the agent wants a portfolio view rather than one repo; use `impact` (with `root`) for a single project. Returns `kind: \"impact-cross-repo\"` with `schema_version` \"1\", `project_count` (stores enumerated), `tracked_count` (projects with recorded history shown as rows), `unreadable_count` (corrupt/newer-schema stores skipped), a `totals` roll-up (resolved/contained/surfacing summed over ALL tracked projects, including repos since deleted from disk), and a `projects[]` array. Each project row carries a hashed `project_key` (never a filesystem path, and the only always-present identifier), an optional human `label` (the repo's directory basename; omitted on rows recorded by older plow binaries, so fall back to `project_key` when `label` is null/absent), `last_recorded`, and a nested per-project `report`. Privacy: the aggregate exposes NO absolute paths, only the hash key plus the basename label. Projects that are enabled but have no recorded history yet are counted in `project_count` but excluded from `projects[]` rows. `sort` orders rows (`recent` default / `resolved` / `contained` / `name`); `limit` caps the rows returned while `totals` still reflect every tracked project. LOCAL-DEV ONLY: history accrues only on developer machines (plow never records in CI), so in CI / ephemeral runners this returns zero tracked projects and must NOT be used as a CI metric. When `project_count` is 0, no project on this machine has tracking enabled yet: in a local dev session suggest the user run `plow impact enable` in a repo they care about (do not run it yourself), but in CI stay silent because zero is the expected, non-actionable result. Read-only; the mutating enable / disable / default / reset lifecycle is intentionally not exposed over MCP.",
+        annotations(read_only_hint = true, idempotent_hint = true, open_world_hint = true)
+    )]
+    async fn impact_all(
+        &self,
+        params: Parameters<ImpactAllParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let args = build_impact_all_args(&params.0);
+        run_tool(&self.binary, "impact_all", &args).await
+    }
+
+    #[tool(
+        description = "Merge runtime-coverage data into the health report. Focused entry point for the runtime-coverage pipeline: pass a V8 coverage directory (`NODE_V8_COVERAGE=<dir>`), a single V8 coverage JSON file, or an Istanbul `coverage-final.json` via the required `coverage` field. A single local capture is free and runs without a license; continuous or multi-capture runtime monitoring (multiple JSON files in a V8 directory) requires an active license JWT (start a 30-day trial with `plow license activate --trial --email <addr>`; check state with `plow license status`). Returns structured JSON with a `runtime_coverage` block containing surfaced `findings` verdicts (`safe_to_delete` / `review_required` / `low_traffic` / `coverage_unavailable`), stable content-hash IDs (`plow:prod:<hash>`), evidence, percentile-ranked hot paths (each with `start_line` and `end_line` so consumers can match against a PR diff), and on protocol-0.3+ sidecars a `summary.capture_quality` block that flags short-window captures. The sidecar may still classify other functions as `active`, but the CLI omits those from `runtime_coverage.findings` to keep the surfaced list actionable. Tunable via `min_invocations_hot` (hot-path threshold, default 100), `min_observation_volume` (high-confidence verdict floor, default 5000), and `low_traffic_threshold` (active/low_traffic split, default 0.001). `group_by` partitions results by CODEOWNERS / directory / package / section. PR-context behavior: when `PLOW_DIFF_FILE` (path to a unified diff) is set in the agent's process environment, the top-level `runtime_coverage.verdict` promotes `hot-path-touched` over `cold-code-detected` so reviewers see the diff-tied signal first, AND every hot path is narrowed to functions whose `[start_line, end_line]` overlaps an added hunk. `PLOW_CHANGED_SINCE` (git ref) also scopes (file-level). Without a change scope the verdict stays cold-code-primary and all hot paths are returned. The full unprioritized list is always in `runtime_coverage.signals[]` (kebab-case strings, severity-descending). Runtime coverage can exceed the default 120s MCP subprocess timeout on multi-megabyte dumps; raise `PLOW_TIMEOUT_SECS` accordingly. For general complexity / hotspot / CRAP analysis without a production dump, use `check_health` instead.",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn check_runtime_coverage(
@@ -263,7 +338,7 @@ impl PlowMcp {
         params: Parameters<CheckRuntimeCoverageParams>,
     ) -> Result<CallToolResult, McpError> {
         let args = build_check_runtime_coverage_args(&params.0);
-        run_plow(&self.binary, &args).await
+        run_tool(&self.binary, "check_runtime_coverage", &args).await
     }
 
     #[tool(
@@ -275,11 +350,11 @@ impl PlowMcp {
         params: Parameters<CheckRuntimeCoverageParams>,
     ) -> Result<CallToolResult, McpError> {
         let args = build_get_hot_paths_args(&params.0);
-        run_plow_with_top_level_warnings(&self.binary, &args).await
+        run_tool_with_top_level_warnings(&self.binary, "get_hot_paths", &args).await
     }
 
     #[tool(
-        description = "Return first-class blast-radius context alongside local runtime coverage. Pass `coverage` as a V8 coverage directory, single V8 JSON file, or Istanbul `coverage-final.json`. A single local capture is free and runs without a license; continuous or multi-capture runtime monitoring requires an active license. Returns the standard health JSON; agents should read `runtime_coverage.blast_radius`, which contains stable `fallow:blast:<hash>` IDs, caller counts, traffic-weighted caller reach, and low/medium/high risk bands.",
+        description = "Return first-class blast-radius context alongside local runtime coverage. Pass `coverage` as a V8 coverage directory, single V8 JSON file, or Istanbul `coverage-final.json`. A single local capture is free and runs without a license; continuous or multi-capture runtime monitoring requires an active license. Returns the standard health JSON; agents should read `runtime_coverage.blast_radius`, which contains stable `plow:blast:<hash>` IDs, caller counts, traffic-weighted caller reach, and low/medium/high risk bands.",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn get_blast_radius(
@@ -287,11 +362,11 @@ impl PlowMcp {
         params: Parameters<CheckRuntimeCoverageParams>,
     ) -> Result<CallToolResult, McpError> {
         let args = build_get_blast_radius_args(&params.0);
-        run_plow_with_top_level_warnings(&self.binary, &args).await
+        run_tool_with_top_level_warnings(&self.binary, "get_blast_radius", &args).await
     }
 
     #[tool(
-        description = "Return first-class production-importance context from local runtime coverage plus static health signals. Pass `coverage` as a V8 coverage directory, single V8 JSON file, or Istanbul `coverage-final.json`. A single local capture is free and runs without a license; continuous or multi-capture runtime monitoring requires an active license. Returns the standard health JSON; agents should read `runtime_coverage.importance`, which contains stable `fallow:importance:<hash>` IDs, invocations, cyclomatic complexity, owner count, a 0-100 score, and a templated reason.",
+        description = "Return first-class production-importance context from local runtime coverage plus static health signals. Pass `coverage` as a V8 coverage directory, single V8 JSON file, or Istanbul `coverage-final.json`. A single local capture is free and runs without a license; continuous or multi-capture runtime monitoring requires an active license. Returns the standard health JSON; agents should read `runtime_coverage.importance`, which contains stable `plow:importance:<hash>` IDs, invocations, cyclomatic complexity, owner count, a 0-100 score, and a templated reason.",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn get_importance(
@@ -299,7 +374,7 @@ impl PlowMcp {
         params: Parameters<CheckRuntimeCoverageParams>,
     ) -> Result<CallToolResult, McpError> {
         let args = build_get_importance_args(&params.0);
-        run_plow_with_top_level_warnings(&self.binary, &args).await
+        run_tool_with_top_level_warnings(&self.binary, "get_importance", &args).await
     }
 
     #[tool(
@@ -311,11 +386,9 @@ impl PlowMcp {
         params: Parameters<CheckRuntimeCoverageParams>,
     ) -> Result<CallToolResult, McpError> {
         let args = build_get_cleanup_candidates_args(&params.0);
-        run_plow_with_top_level_warnings(&self.binary, &args).await
+        run_tool_with_top_level_warnings(&self.binary, "get_cleanup_candidates", &args).await
     }
 }
-
-// ── ServerHandler ──────────────────────────────────────────────────
 
 #[rmcp::tool_handler]
 impl ServerHandler for PlowMcp {
@@ -327,7 +400,10 @@ impl ServerHandler for PlowMcp {
             )
             .with_instructions(
                 "Plow MCP server, codebase analysis for TypeScript/JavaScript projects. \
-                 Tools: analyze (full analysis), check_changed (incremental/PR analysis), \
+                 Tools: code_execute (disabled unless PLOW_MCP_CODE_EXECUTE=1; bounded read-only Code Mode composition over plow analysis tools), \
+                 analyze (full analysis), check_changed (incremental/PR analysis), \
+                 security_candidates (unverified local security candidates for agent verification), \
+                 inspect_target (one evidence bundle for a file or exported symbol), \
                  find_dupes (code duplication), fix_preview/fix_apply (auto-fix), \
                  project_info (plugins, files, entry points, boundary zones), \
                  trace_export / trace_file / trace_dependency / trace_clone (graph and clone evidence), \
@@ -337,7 +413,8 @@ impl ServerHandler for PlowMcp {
                  audit (combined dead-code + complexity + duplication for changed files, returns verdict), \
                  plow_explain (rule rationale and fix guidance without running analysis), \
                  list_boundaries (architecture boundary zones and access rules), \
-                 feature_flags (detect feature flag patterns). \
+                 feature_flags (detect feature flag patterns), \
+                 impact (read the local, opt-in value report: surfacing / trend / gate containment / resolved attribution; local-dev only, runs no analysis). \
                  Picking check_health vs check_runtime_coverage: use check_runtime_coverage when you have a V8 or Istanbul coverage dump and want surfaced dead-in-production verdicts; use check_health for general complexity / hotspot / CRAP analysis without a coverage dump.",
             )
     }

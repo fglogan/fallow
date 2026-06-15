@@ -3,6 +3,14 @@
     clippy::print_stderr,
     reason = "CLI binary produces intentional terminal output"
 )]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        reason = "tests use unwrap and expect to keep fixture setup concise"
+    )
+)]
 
 #[allow(
     dead_code,
@@ -21,7 +29,19 @@ pub mod audit;
     unused_imports,
     reason = "shared CLI library compiles bin-oriented support modules for reuse"
 )]
+mod base_worktree;
+#[allow(
+    dead_code,
+    unused_imports,
+    reason = "shared CLI library compiles bin-oriented support modules for reuse"
+)]
 mod baseline;
+#[allow(
+    dead_code,
+    unused_imports,
+    reason = "shared CLI library compiles bin-oriented support modules for reuse"
+)]
+mod cache_notice;
 #[allow(
     dead_code,
     unused_imports,
@@ -80,6 +100,12 @@ mod license;
 /// `plow dupes --format json`. Lives here (rather than in `plow-types`)
 /// because the bare findings live in `plow-core` and `crates/cli/src/report/dupes_grouping.rs`.
 pub mod output_dupes;
+#[allow(
+    dead_code,
+    unused_imports,
+    reason = "shared CLI library compiles bin-oriented support modules for reuse; the findings-present accumulator must be reachable from the lib-compiled analysis modules"
+)]
+mod telemetry;
 
 /// Typed envelope structs for the JSON output contract. Live here rather
 /// than in `plow-types` because the body fields reach into `plow-core`
@@ -118,18 +144,33 @@ pub mod report;
     unused_imports,
     reason = "shared CLI library compiles bin-oriented support modules for reuse"
 )]
+pub mod impact;
+#[allow(
+    dead_code,
+    unused_imports,
+    reason = "shared CLI library compiles bin-oriented support modules for reuse"
+)]
 mod runtime_support;
 #[allow(
     dead_code,
     unused_imports,
     reason = "shared CLI library compiles bin-oriented support modules for reuse"
 )]
-mod validate;
+pub mod security;
+/// Agent-discoverability task-to-command matrix shared by `init --agents`,
+/// `hooks install --target agent`, the schema manifest, and root `--help`.
 #[allow(
     dead_code,
     unused_imports,
     reason = "shared CLI library compiles bin-oriented support modules for reuse"
 )]
+mod task_matrix;
+#[allow(
+    dead_code,
+    unused_imports,
+    reason = "shared CLI library compiles bin-oriented support modules for reuse"
+)]
+mod validate;
 mod vital_signs;
 
 pub use runtime_support::{AnalysisKind, GroupBy};

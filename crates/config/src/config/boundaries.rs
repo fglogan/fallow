@@ -7,10 +7,15 @@ use globset::Glob;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// Which zone-reference surface on a `BoundaryRule` carries an unknown name.
-///
-/// The diagnostic surfaces the kind so users editing a multi-field rule know
-/// whether to fix `from`, `allow`, or `allowTypeOnly`.
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde skip_serializing_if predicates receive field references"
+)]
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+/// Which `BoundaryRule` field carries an unknown zone name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ZoneReferenceKind {
     /// Rule's `from` field names an undefined zone.
@@ -19,12 +24,14 @@ pub enum ZoneReferenceKind {
     Allow,
     /// One entry in the rule's `allowTypeOnly` list names an undefined zone.
     AllowTypeOnly,
+    /// A `boundaries.calls.forbidden[]` entry's `from` names an undefined zone.
+    CallsFrom,
 }
 
 impl ZoneReferenceKind {
     fn config_field(self) -> &'static str {
         match self {
-            Self::From => "from",
+            Self::From | Self::CallsFrom => "from",
             Self::Allow => "allow",
             Self::AllowTypeOnly => "allowTypeOnly",
         }
@@ -42,10 +49,7 @@ pub struct UnknownZoneRef {
     pub zone_name: String,
 }
 
-/// One offending redundant-root-prefix pattern in a `boundaries.zones[]` entry.
-///
-/// Patterns are resolved relative to the zone `root`, so prefixing the pattern
-/// with the same root double-prefixes the path and never matches a real file.
+/// One redundant-root-prefix pattern in a `boundaries.zones[]` entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RedundantRootPrefix {
     /// Name of the zone whose pattern redundantly includes its root.
@@ -56,26 +60,49 @@ pub struct RedundantRootPrefix {
     pub root: String,
 }
 
-/// Aggregated boundary-config validation error for `PlowConfig::validate_resolved_boundaries`.
+/// One rejected `boundaries.calls.forbidden[]` callee pattern.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InvalidForbiddenCallee {
+    /// Zero-based index into `boundaries.calls.forbidden[]`.
+    pub rule_index: usize,
+    /// The offending pattern as authored.
+    pub pattern: String,
+    /// Why the pattern was rejected.
+    pub reason: String,
+}
+
+/// Validation error from `PlowConfig::validate_resolved_boundaries`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ZoneValidationError {
-    /// A `boundaries.rules[]` entry references a zone NOT present in
-    /// `boundaries.zones[]` (post-preset-expansion and post-auto-discover).
+    /// A rule references an undefined zone.
     UnknownZoneReference(UnknownZoneRef),
-    /// A `boundaries.zones[].patterns[]` entry redundantly prefixes its
-    /// pattern with the zone `root`.
+    /// A zone pattern repeats the zone root.
     RedundantRootPrefix(RedundantRootPrefix),
+    /// A forbidden-call entry carries an unusable callee pattern.
+    InvalidForbiddenCallee(InvalidForbiddenCallee),
 }
 
 impl fmt::Display for ZoneValidationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::UnknownZoneReference(err) if err.kind == ZoneReferenceKind::CallsFrom => {
+                write!(
+                    f,
+                    "boundaries.calls.forbidden[{}].from: references undefined zone '{}'",
+                    err.rule_index, err.zone_name,
+                )
+            }
             Self::UnknownZoneReference(err) => write!(
                 f,
                 "boundaries.rules[{}].{}: references undefined zone '{}'",
                 err.rule_index,
                 err.kind.config_field(),
                 err.zone_name,
+            ),
+            Self::InvalidForbiddenCallee(err) => write!(
+                f,
+                "boundaries.calls.forbidden[{}].callee: pattern '{}' {}",
+                err.rule_index, err.pattern, err.reason,
             ),
             Self::RedundantRootPrefix(err) => write!(
                 f,
@@ -89,46 +116,21 @@ impl fmt::Display for ZoneValidationError {
 impl std::error::Error for ZoneValidationError {}
 
 /// Built-in architecture presets.
-///
-/// Each preset expands into a set of zones and import rules for a common
-/// architecture pattern. User-defined zones and rules merge on top of the
-/// preset defaults (zones with the same name replace the preset zone;
-/// rules with the same `from` replace the preset rule).
-///
-/// # Examples
-///
-/// ```
-/// use plow_config::BoundaryPreset;
-///
-/// let preset: BoundaryPreset = serde_json::from_str(r#""layered""#).unwrap();
-/// assert!(matches!(preset, BoundaryPreset::Layered));
-/// ```
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum BoundaryPreset {
-    /// Classic layered architecture: presentation → application → domain ← infrastructure.
-    /// Infrastructure may also import from application (common in DI frameworks).
+    /// Layered architecture.
     Layered,
-    /// Hexagonal / ports-and-adapters: adapters → ports → domain.
+    /// Hexagonal / ports-and-adapters.
     Hexagonal,
-    /// Feature-Sliced Design: app > pages > widgets > features > entities > shared.
-    /// Each layer may only import from layers below it.
+    /// Feature-Sliced Design.
     FeatureSliced,
-    /// Bulletproof React: app → features → shared + server.
-    /// Feature modules are isolated from each other via `autoDiscover`: every
-    /// immediate child of `src/features/` becomes its own `features/<name>` zone,
-    /// and cross-feature imports are reported as boundary violations.
-    /// Top-level files in `src/features/` are classified by the logical
-    /// `features` parent zone, so barrels can re-export child features while
-    /// non-barrel top-level files still obey the `features` boundary rule.
+    /// Bulletproof React.
     Bulletproof,
 }
 
 impl BoundaryPreset {
     /// Expand the preset into default zones and rules.
-    ///
-    /// `source_root` is the directory prefix for zone patterns (e.g., `"src"`, `"lib"`).
-    /// Patterns are generated as `{source_root}/{zone_name}/**`.
     #[must_use]
     pub fn default_config(&self, source_root: &str) -> (Vec<BoundaryZone>, Vec<BoundaryRule>) {
         match self {
@@ -207,9 +209,6 @@ impl BoundaryPreset {
         let zones = vec![
             Self::zone("app", source_root),
             BoundaryZone {
-                // Discovered child zones classify concrete feature modules
-                // first; the parent pattern catches top-level feature files
-                // such as barrels and shared types.
                 name: "features".to_owned(),
                 patterns: vec![format!("{source_root}/features/**")],
                 auto_discover: vec![format!("{source_root}/features")],
@@ -248,100 +247,115 @@ impl BoundaryPreset {
 }
 
 /// Architecture boundary configuration.
-///
-/// Defines zones (directory groupings) and rules (which zones may import from which).
-/// Optionally uses a built-in preset as a starting point.
-///
-/// # Examples
-///
-/// ```
-/// use plow_config::BoundaryConfig;
-///
-/// let json = r#"{
-///     "zones": [
-///         { "name": "ui", "patterns": ["src/components/**"] },
-///         { "name": "db", "patterns": ["src/db/**"] }
-///     ],
-///     "rules": [
-///         { "from": "ui", "allow": ["db"] }
-///     ]
-/// }"#;
-/// let config: BoundaryConfig = serde_json::from_str(json).unwrap();
-/// assert_eq!(config.zones.len(), 2);
-/// assert_eq!(config.rules.len(), 1);
-/// ```
-///
-/// Using a preset:
-///
-/// ```
-/// use plow_config::BoundaryConfig;
-///
-/// let json = r#"{ "preset": "layered" }"#;
-/// let mut config: BoundaryConfig = serde_json::from_str(json).unwrap();
-/// config.expand("src");
-/// assert_eq!(config.zones.len(), 4);
-/// assert_eq!(config.rules.len(), 4);
-/// ```
 #[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct BoundaryConfig {
-    /// Built-in architecture preset. When set, expands into default zones and rules.
-    /// User-defined zones and rules merge on top: zones with the same name replace
-    /// the preset zone; rules with the same `from` replace the preset rule.
-    /// Preset patterns use `{rootDir}/{zone}/**` where rootDir is auto-detected
-    /// from tsconfig.json (falls back to `src`).
-    /// Note: preset patterns are flat (`src/<zone>/**`). For monorepos with
-    /// per-package source directories, define zones explicitly instead.
+    /// Optional built-in preset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preset: Option<BoundaryPreset>,
-    /// Named zones mapping directory patterns to architectural layers.
+    /// Zone definitions.
     #[serde(default)]
     pub zones: Vec<BoundaryZone>,
-    /// Import rules between zones. A zone with a rule entry can only import
-    /// from the listed zones (plus itself). A zone without a rule entry is unrestricted.
+    /// Zone import rules.
     #[serde(default)]
     pub rules: Vec<BoundaryRule>,
+    /// Optional policy for files that match no zone.
+    #[serde(default, skip_serializing_if = "BoundaryCoverageConfig::is_default")]
+    pub coverage: BoundaryCoverageConfig,
+    /// Optional forbidden-call policy for zoned files.
+    #[serde(default, skip_serializing_if = "BoundaryCallsConfig::is_default")]
+    pub calls: BoundaryCallsConfig,
 }
 
-/// A named zone grouping files by directory pattern.
+/// Boundary zone coverage policy.
+#[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BoundaryCoverageConfig {
+    /// Report source files that do not match any boundary zone.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub require_all_files: bool,
+    /// Glob patterns for files that may remain unmatched by any zone.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allow_unmatched: Vec<String>,
+}
+
+impl BoundaryCoverageConfig {
+    fn is_default(value: &Self) -> bool {
+        !value.require_all_files && value.allow_unmatched.is_empty()
+    }
+}
+
+/// Boundary forbidden-call policy. Applies only to files classified into a
+/// zone; unzoned files are unrestricted, matching the import rules.
+#[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BoundaryCallsConfig {
+    /// Callee patterns that files in a zone may not call.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub forbidden: Vec<ForbiddenCallRule>,
+}
+
+impl BoundaryCallsConfig {
+    fn is_default(value: &Self) -> bool {
+        value.forbidden.is_empty()
+    }
+
+    /// Whether no forbidden-call rules are configured.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.forbidden.is_empty()
+    }
+}
+
+/// One forbidden-call entry: files in zone `from` may not call callees
+/// matching `callee`.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ForbiddenCallRule {
+    /// Zone whose files may not make matching calls.
+    pub from: String,
+    /// Forbidden callee pattern(s). Matching is segment-aware, not substring:
+    /// `child_process.*` matches `child_process.exec` (and named imports from
+    /// `child_process` / `node:child_process`), `fetch` matches only `fetch`,
+    /// and a leading `*.` suffix-matches any object (`*.innerHTML`).
+    pub callee: ForbiddenCallee,
+}
+
+/// One callee pattern or a list of patterns for a single `from` zone.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum ForbiddenCallee {
+    /// A single callee pattern.
+    Single(String),
+    /// Multiple callee patterns sharing the same `from` zone.
+    Many(Vec<String>),
+}
+
+impl ForbiddenCallee {
+    /// Iterate the configured pattern strings.
+    pub fn iter(&self) -> impl Iterator<Item = &str> {
+        match self {
+            Self::Single(pattern) => std::slice::from_ref(pattern),
+            Self::Many(patterns) => patterns.as_slice(),
+        }
+        .iter()
+        .map(String::as_str)
+    }
+}
+
+/// A zone grouping files by directory pattern.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct BoundaryZone {
-    /// Zone identifier referenced in rules (e.g., `"ui"`, `"database"`, `"shared"`).
+    /// Zone name.
     pub name: String,
-    /// Glob patterns (relative to project root) that define zone membership.
-    /// A file belongs to the first zone whose pattern matches.
+    /// Membership patterns.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub patterns: Vec<String>,
-    /// Directories whose immediate child directories should become separate
-    /// zones under this logical group.
-    ///
-    /// For example, `{ "name": "features", "autoDiscover": ["src/features"] }`
-    /// creates zones such as `features/auth` and `features/billing`, each with
-    /// a pattern for its own subtree. Rules that reference `features` expand to
-    /// every discovered child zone. If `patterns` is also set, the parent zone
-    /// remains as a fallback after discovered child zones.
+    /// Directories whose children become zones.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub auto_discover: Vec<String>,
-    /// Optional subtree scope for monorepo per-package boundaries.
-    ///
-    /// When set, the zone's `patterns` are matched against paths *relative*
-    /// to this directory rather than the project root. At classification
-    /// time, plow checks that a candidate path starts with `root` and
-    /// strips that prefix before glob-matching the patterns against the
-    /// remainder. Files outside the subtree never match the zone.
-    ///
-    /// Useful for monorepos where each package has the same internal
-    /// directory layout: instead of writing `packages/app/src/**` and
-    /// `packages/core/src/**` (which collide on shared zone names), set
-    /// `root: "packages/app/"` and `patterns: ["src/**"]` per package.
-    ///
-    /// Trailing slash and leading `./` are normalized; backslashes are
-    /// converted to forward slashes. Patterns must NOT redundantly include
-    /// the root prefix: `root: "packages/app/"` with
-    /// `patterns: ["packages/app/src/**"]` is rejected with
-    /// `PLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX` because patterns are
-    /// resolved relative to the root.
+    /// Optional subtree scope.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub root: Option<String>,
 }
@@ -350,23 +364,12 @@ pub struct BoundaryZone {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct BoundaryRule {
-    /// The zone this rule applies to (the importing side).
+    /// Source zone.
     pub from: String,
-    /// Zones that `from` is allowed to import from. Self-imports are always allowed.
-    /// An empty list means the zone may not import from any other zone.
+    /// Allowed target zones.
     #[serde(default)]
     pub allow: Vec<String>,
-    /// Zones that `from` may type-only-import from even when not listed in
-    /// `allow`. Mirrors the `allow` shape: a list of target zone names. A
-    /// type-only import declaration (`import type {...}`, `import type * as ns`,
-    /// or a per-specifier inline `type` qualifier on every named specifier) to a
-    /// listed zone is not reported as a boundary violation. Mixed-specifier
-    /// imports (`import { type Foo, Bar }`) that carry at least one value
-    /// symbol still fire because the runtime dependency on `Bar` is real.
-    /// Type-only re-exports (`export type { Foo } from "..."`) participate
-    /// in the same allowance because they surface as edges flagged
-    /// `is_type_only: true` and, like type-only imports, are erased at
-    /// compile time.
+    /// Allowed type-only targets.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allow_type_only: Vec<String>,
 }
@@ -374,123 +377,78 @@ pub struct BoundaryRule {
 /// Resolved boundary config with pre-compiled glob matchers.
 #[derive(Debug, Default)]
 pub struct ResolvedBoundaryConfig {
-    /// Zones with compiled glob matchers for fast file classification.
+    /// Compiled zones.
     pub zones: Vec<ResolvedZone>,
-    /// Rules indexed by source zone name.
+    /// Compiled rules.
     pub rules: Vec<ResolvedBoundaryRule>,
-    /// Pre-expansion logical groups captured during `expand_auto_discover`,
-    /// preserved here for observability (`plow list --boundaries --format
-    /// json`). One entry per `autoDiscover`-bearing zone in user-declaration
-    /// order. Empty unless the user (or a preset) wrote at least one
-    /// `autoDiscover`. See [`LogicalGroup`] for the per-entry shape.
+    /// Captured logical groups.
     pub logical_groups: Vec<LogicalGroup>,
+    /// Resolved coverage policy.
+    pub coverage: ResolvedBoundaryCoverageConfig,
+    /// Forbidden callee patterns grouped by `from` zone, in config order.
+    /// Patterns stay raw strings; the analysis layer parses them into its
+    /// segment-aware matcher.
+    pub calls_forbidden_by_zone: rustc_hash::FxHashMap<String, Vec<String>>,
 }
 
-/// A user-declared zone that fanned out into one or more child zones via
-/// `autoDiscover`. Surfaced verbatim through `plow list --boundaries
-/// --format json` so consumers (config UIs, Sankey renderers, agent-driven
-/// config tooling, dashboards) can reconstruct the original grouping intent
-/// after expansion has flattened the parent name out of `zones[]`.
+/// Resolved boundary zone coverage policy.
+#[derive(Debug, Default)]
+pub struct ResolvedBoundaryCoverageConfig {
+    /// Report source files that do not match any boundary zone.
+    pub require_all_files: bool,
+    /// Compiled allow-list matchers for unmatched files.
+    pub allow_unmatched: Vec<globset::GlobMatcher>,
+}
+
+/// A user-declared zone that fanned out via `autoDiscover`.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct LogicalGroup {
-    /// Logical parent zone name as authored by the user (e.g. `"features"`).
+    /// Parent zone name.
     pub name: String,
-    /// Discovered child zone names in stable directory-sorted order
-    /// (e.g. `["features/auth", "features/billing"]`). Empty when the parent
-    /// directory was empty or unreadable; `status` discriminates the two.
+    /// Child zone names.
     pub children: Vec<String>,
-    /// The exact `autoDiscover` strings the user wrote, preserved verbatim
-    /// (no normalization). Round-trip tooling depends on byte-exact match
-    /// against the user's config source.
+    /// Authored `autoDiscover` paths.
     pub auto_discover: Vec<String>,
-    /// Pre-expansion rule keyed on this parent zone name, captured before
-    /// `expand_auto_discover` rewrote it into per-child rules. `None` when
-    /// the user wrote no rule for the parent (the children are then
-    /// unrestricted unless a per-child rule exists).
+    /// Authored parent rule, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub authored_rule: Option<AuthoredRule>,
-    /// When the parent zone also carried explicit `patterns`, it stayed in
-    /// `zones[]` after expansion as a fallback classifier. This is its name
-    /// (always equal to [`Self::name`]). `None` when the parent had no
-    /// patterns and was dropped from `zones[]` entirely. Lets consumers wire
-    /// the logical-group entry to its zone twin without name-matching
-    /// heuristics.
+    /// Fallback zone name, if the parent kept patterns.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fallback_zone: Option<String>,
-    /// Position of the parent zone in the user's pre-expansion `zones[]`
-    /// array. Enables byte-accurate config patches by agent tooling without
-    /// re-parsing the user's config source.
+    /// Original `zones[]` index.
     pub source_zone_index: usize,
-    /// Why [`Self::children`] is what it is.
+    /// Discovery status.
     pub status: LogicalGroupStatus,
-    /// Parent zone indices whose declarations were merged into this group
-    /// because they shared a name (`{ name: "features", autoDiscover: [...] }`
-    /// declared twice). `None` on the common case (single declaration);
-    /// `Some([i, j, ...])` when at least two declarations were merged. The
-    /// FIRST entry equals [`Self::source_zone_index`]; subsequent entries are
-    /// the positions of the additional declarations in user-declaration order.
-    /// Surfaced in JSON so consumers (config-edit agents, config-hygiene
-    /// dashboards) can detect duplicates that `tracing::warn!` would otherwise
-    /// hide from `--format json` consumption.
+    /// Merged duplicate parent indices.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merged_from: Option<Vec<usize>>,
-    /// The parent zone's `root` (subtree scope) as the user authored it,
-    /// echoed onto the logical group so monorepo-aware tooling can tell
-    /// whether `root` was set on the parent (and inherited by every
-    /// discovered child) or set per-child. `None` when the parent had no
-    /// `root` field. The string is verbatim from the user's config (not
-    /// the post-`normalize_zone_root` form) for byte-exact round-trip.
+    /// Authored parent root, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub original_zone_root: Option<String>,
-    /// For each entry in [`Self::children`], the index into
-    /// [`Self::auto_discover`] of the path that produced it (or the FIRST
-    /// path that produced it when multiple `autoDiscover` entries each yield
-    /// the same child name). Empty when only one `autoDiscover` path was
-    /// authored (every child trivially maps to index 0); populated only when
-    /// the parent has two or more `autoDiscover` entries so consumers can
-    /// attribute children to specific source directories. The length equals
-    /// `children.len()` when populated.
-    ///
-    /// `#[serde(default)]` pairs with `skip_serializing_if` so the JSON
-    /// runtime omits this field on the common single-path case AND the
-    /// derived schema marks it optional (schemars 1 promotes any field with a
-    /// `serde(default)` attribute out of `required`).
+    /// Child-to-source indexes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub child_source_indices: Vec<usize>,
 }
 
-/// Discovery outcome for a [`LogicalGroup`]. Discriminates "no children" into
-/// "the directory exists and is empty" versus "at least one `autoDiscover`
-/// path was invalid or unreadable", so consumers can render an actionable
-/// hint instead of "0 children, mystery".
+/// Discovery outcome for a [`LogicalGroup`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum LogicalGroupStatus {
-    /// At least one child zone was discovered.
+    /// Children were discovered.
     Ok,
-    /// Every `autoDiscover` path resolved to a readable directory, but
-    /// none contained child directories.
+    /// Paths were readable but empty.
     Empty,
-    /// At least one `autoDiscover` path was malformed (contained `..`,
-    /// absolute) or did not resolve to a readable directory, and zero
-    /// children were discovered across all paths. When a mix of invalid and
-    /// valid paths produces children, status is [`Self::Ok`] instead.
+    /// A path was invalid or unreadable.
     InvalidPath,
 }
 
-/// Pre-expansion `from`-rule preserved on a [`LogicalGroup`]. Surfaces the
-/// user's original intent (`{ from: "features", allow: ["shared"] }`) even
-/// after `expand_auto_discover` rewrote it into per-child rules
-/// (`features/auth -> shared`, `features/billing -> shared`).
+/// Pre-expansion rule preserved on a [`LogicalGroup`].
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct AuthoredRule {
-    /// Pre-expansion `allow` list as the user wrote it.
+    /// Authored `allow` list.
     pub allow: Vec<String>,
-    /// Pre-expansion `allowTypeOnly` list as the user wrote it. Omitted
-    /// from JSON output when empty; `serde(default)` keeps the derived
-    /// schema in lock-step (schemars 1 marks any field with a
-    /// `serde(default)` attribute as non-required).
+    /// Authored `allowTypeOnly` list.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allow_type_only: Vec<String>,
 }
@@ -498,29 +456,22 @@ pub struct AuthoredRule {
 /// A zone with pre-compiled glob matchers.
 #[derive(Debug)]
 pub struct ResolvedZone {
-    /// Zone identifier.
+    /// Zone name.
     pub name: String,
-    /// Pre-compiled glob matchers for zone membership.
-    /// When `root` is set, matchers are applied to the path with the
-    /// `root` prefix stripped (subtree-relative patterns).
+    /// Compiled matchers.
     pub matchers: Vec<globset::GlobMatcher>,
-    /// Normalized subtree scope (e.g. `"packages/app/"`). When present,
-    /// only paths starting with this prefix can match this zone, and the
-    /// prefix is stripped before glob matching. Forward slashes only,
-    /// always trailing slash. `None` means patterns are matched against
-    /// the project-root-relative path as-is.
+    /// Normalized subtree scope.
     pub root: Option<String>,
 }
 
 /// A resolved boundary rule.
 #[derive(Debug)]
 pub struct ResolvedBoundaryRule {
-    /// The zone this rule restricts.
+    /// Source zone.
     pub from_zone: String,
-    /// Zones that `from_zone` is allowed to import from.
+    /// Allowed imports.
     pub allowed_zones: Vec<String>,
-    /// Zones that `from_zone` may type-only-import from even when not listed
-    /// in `allowed_zones`. See `BoundaryRule::allow_type_only`.
+    /// Allowed type-only imports.
     pub allow_type_only_zones: Vec<String>,
 }
 
@@ -528,18 +479,13 @@ impl BoundaryConfig {
     /// Whether any boundaries are configured (including via preset).
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.preset.is_none() && self.zones.is_empty()
+        self.preset.is_none()
+            && self.zones.is_empty()
+            && !self.coverage.require_all_files
+            && self.calls.is_empty()
     }
 
-    /// Expand the preset (if set) into zones and rules, merging user overrides on top.
-    ///
-    /// `source_root` is the directory prefix for preset zone patterns (e.g., `"src"`).
-    /// After expansion, `self.preset` is cleared and all zones/rules are explicit.
-    ///
-    /// Merge semantics:
-    /// - User zones with the same name as a preset zone **replace** the preset zone entirely.
-    /// - User rules with the same `from` as a preset rule **replace** the preset rule.
-    /// - User zones/rules with new names **add** to the preset set.
+    /// Expand the preset into explicit zones and rules.
     pub fn expand(&mut self, source_root: &str) {
         let Some(preset) = self.preset.take() else {
             return;
@@ -547,11 +493,9 @@ impl BoundaryConfig {
 
         let (preset_zones, preset_rules) = preset.default_config(source_root);
 
-        // Build set of user-defined zone names for override detection.
         let user_zone_names: rustc_hash::FxHashSet<&str> =
             self.zones.iter().map(|z| z.name.as_str()).collect();
 
-        // Start with preset zones, replacing any that the user overrides.
         let mut merged_zones: Vec<BoundaryZone> = preset_zones
             .into_iter()
             .filter(|pz| {
@@ -566,11 +510,9 @@ impl BoundaryConfig {
                 }
             })
             .collect();
-        // Append all user zones (both overrides and additions).
         merged_zones.append(&mut self.zones);
         self.zones = merged_zones;
 
-        // Build set of user-defined rule `from` names for override detection.
         let user_rule_sources: rustc_hash::FxHashSet<&str> =
             self.rules.iter().map(|r| r.from.as_str()).collect();
 
@@ -592,35 +534,7 @@ impl BoundaryConfig {
         self.rules = merged_rules;
     }
 
-    /// Expand auto-discovered boundary groups into concrete child zones.
-    ///
-    /// A zone with `autoDiscover: ["src/features"]` discovers the immediate
-    /// child directories below `src/features` and emits child zones named
-    /// `zone_name/child`. Rules that reference the logical parent are expanded
-    /// to all discovered children. If the parent also has explicit `patterns`,
-    /// it is kept after the children as a fallback so child directories remain
-    /// isolated by first-match classification. The parent fallback rule
-    /// automatically allows its discovered children so top-level barrels can
-    /// re-export child modules without relaxing sibling isolation on the child
-    /// rules.
-    ///
-    /// Returns one [`LogicalGroup`] per pre-expansion zone that carried a
-    /// non-empty `autoDiscover`, in user-declaration order. The caller (the
-    /// resolution pipeline) stashes the result onto
-    /// [`ResolvedBoundaryConfig::logical_groups`] for `plow list
-    /// --boundaries --format json` to render. Discarding the return is fine
-    /// for callers that only need the expansion side effect (classification);
-    /// the data is regenerated on the next run.
-    ///
-    /// Duplicate parent zone name behavior: when two `BoundaryZone`
-    /// declarations share a name and both carry `autoDiscover`, their
-    /// discovered children merge into a single `LogicalGroup` whose
-    /// `auto_discover` concatenates both source path lists in declaration
-    /// order. This mirrors the existing rule-side merge behavior (both rules
-    /// expand to the same union of child names). A `tracing::warn!` surfaces
-    /// the duplicate at config-load time so the user can deduplicate the
-    /// source; the merged behavior is a soft default rather than a hard
-    /// rejection so existing configs continue to load.
+    /// Expand `autoDiscover` zones into concrete child zones.
     pub fn expand_auto_discover(&mut self, project_root: &Path) -> Vec<LogicalGroup> {
         if self.zones.iter().all(|zone| zone.auto_discover.is_empty()) {
             return Vec::new();
@@ -630,178 +544,35 @@ impl BoundaryConfig {
         let mut expanded_zones = Vec::new();
         let mut group_expansions: rustc_hash::FxHashMap<String, Vec<String>> =
             rustc_hash::FxHashMap::default();
-        // Preserves user-declaration order: `FxHashMap` iteration is not
-        // insertion-ordered, and consumers (snapshot tests, diff-based
-        // dashboards) depend on stable JSON output across runs.
         let mut group_drafts: Vec<LogicalGroupDraft> = Vec::new();
 
-        for (source_zone_index, mut zone) in original_zones.into_iter().enumerate() {
+        for (source_zone_index, zone) in original_zones.into_iter().enumerate() {
             if zone.auto_discover.is_empty() {
                 expanded_zones.push(zone);
                 continue;
             }
 
-            let group_name = zone.name.clone();
-            // Capture the user's verbatim `autoDiscover` strings before
-            // discovery normalizes them; round-trip tooling depends on
-            // byte-exact match against the source.
-            let raw_auto_discover = zone.auto_discover.clone();
-            let original_zone_root = zone.root.clone();
-            let DiscoveryOutcome {
-                zones: discovered_zones,
-                source_indices: discovered_source_indices,
-                had_invalid_path,
-            } = discover_child_zones(project_root, &zone);
-            let discovered_count = discovered_zones.len();
-            let mut expanded_names: Vec<String> = discovered_zones
-                .iter()
-                .map(|child| child.name.clone())
-                .collect();
-            let child_names_only = expanded_names.clone();
-            for child_zone in discovered_zones {
-                merge_zone_by_name(&mut expanded_zones, child_zone);
-            }
-
-            let fallback_zone = if zone.patterns.is_empty() {
-                None
-            } else {
-                expanded_names.push(group_name.clone());
-                zone.auto_discover.clear();
-                merge_zone_by_name(&mut expanded_zones, zone);
-                Some(group_name.clone())
-            };
-
-            if !expanded_names.is_empty() {
+            let expansion = expand_auto_discover_zone(
+                project_root,
+                zone,
+                source_zone_index,
+                &mut expanded_zones,
+            );
+            if !expansion.expanded_names.is_empty() {
                 group_expansions
-                    .entry(group_name.clone())
+                    .entry(expansion.group_name.clone())
                     .or_default()
-                    .extend(expanded_names);
+                    .extend(expansion.expanded_names);
             }
-
-            let status = if discovered_count > 0 {
-                LogicalGroupStatus::Ok
-            } else if had_invalid_path {
-                LogicalGroupStatus::InvalidPath
-            } else {
-                LogicalGroupStatus::Empty
-            };
-
-            // Merge into existing draft if the user declared the same parent
-            // name twice. Concatenates `auto_discover`, dedupes `children`
-            // against the existing set so a duplicate declaration discovering
-            // the same child does not double-count via `file_count` lookup,
-            // preserves the FIRST `source_zone_index` and `original_zone_root`,
-            // shifts the new batch's `child_source_indices` by the existing
-            // `auto_discover.len()` so they continue to address the
-            // post-concatenation array (and drops indices for children
-            // already present, since attribution belongs to the first
-            // producer), and appends the new `source_zone_index` to
-            // `merged_from` so the duplicate is visible in JSON output.
-            if let Some(existing) = group_drafts.iter_mut().find(|d| d.name == group_name) {
-                tracing::warn!(
-                    "boundary zone '{}' is declared multiple times with autoDiscover; merging discovered children",
-                    group_name
-                );
-                let auto_discover_offset = existing.auto_discover.len();
-                existing.auto_discover.extend(raw_auto_discover);
-                let existing_children: rustc_hash::FxHashSet<String> =
-                    existing.children.iter().cloned().collect();
-                for (idx, name) in child_names_only.iter().enumerate() {
-                    if existing_children.contains(name) {
-                        continue;
-                    }
-                    existing.children.push(name.clone());
-                    existing
-                        .child_source_indices
-                        .push(discovered_source_indices[idx] + auto_discover_offset);
-                }
-                if existing.fallback_zone.is_none() {
-                    existing.fallback_zone = fallback_zone;
-                }
-                existing.status = merge_status(existing.status, status);
-                let chain = existing
-                    .merged_from
-                    .get_or_insert_with(|| vec![existing.source_zone_index]);
-                chain.push(source_zone_index);
-            } else {
-                group_drafts.push(LogicalGroupDraft {
-                    name: group_name,
-                    children: child_names_only,
-                    auto_discover: raw_auto_discover,
-                    fallback_zone,
-                    source_zone_index,
-                    status,
-                    merged_from: None,
-                    original_zone_root,
-                    child_source_indices: discovered_source_indices,
-                });
-            }
+            merge_logical_group_draft(&mut group_drafts, expansion.draft);
         }
 
         self.zones = expanded_zones;
 
-        // Index draft names so we can look up the authored rule per logical
-        // group regardless of whether the group produced any children.
-        // Groups whose discovery was Empty / InvalidPath contribute NO entry
-        // to `group_expansions` (no children means no rule expansion), but
-        // their authored rule still belongs on the surfaced LogicalGroup so
-        // consumers see the user's intent even when discovery turned up
-        // empty.
-        let draft_names: rustc_hash::FxHashSet<&str> =
-            group_drafts.iter().map(|d| d.name.as_str()).collect();
-
-        // Capture authored rules BEFORE `original_rules` is consumed below.
-        // The match-up is by `rule.from == group_name`; the last matching
-        // rule wins to mirror `dedupe_rules_keep_last` semantics.
         let original_rules = std::mem::take(&mut self.rules);
-        let authored_rules: rustc_hash::FxHashMap<&str, AuthoredRule> = original_rules
-            .iter()
-            .filter(|rule| draft_names.contains(rule.from.as_str()))
-            .map(|rule| {
-                (
-                    rule.from.as_str(),
-                    AuthoredRule {
-                        allow: rule.allow.clone(),
-                        allow_type_only: rule.allow_type_only.clone(),
-                    },
-                )
-            })
-            .collect();
-
-        let logical_groups: Vec<LogicalGroup> = group_drafts
-            .into_iter()
-            .map(|draft| {
-                // `child_source_indices` is only signal-bearing when the
-                // parent has two or more `auto_discover` paths; with one
-                // path every child trivially has index 0. Skip the noise
-                // on the common case so the JSON stays tight; the field
-                // is `#[serde(default, skip_serializing_if = "Vec::is_empty")]`.
-                let child_source_indices = if draft.auto_discover.len() > 1 {
-                    draft.child_source_indices
-                } else {
-                    Vec::new()
-                };
-                LogicalGroup {
-                    authored_rule: authored_rules.get(draft.name.as_str()).cloned(),
-                    name: draft.name,
-                    children: draft.children,
-                    auto_discover: draft.auto_discover,
-                    fallback_zone: draft.fallback_zone,
-                    source_zone_index: draft.source_zone_index,
-                    status: draft.status,
-                    merged_from: draft.merged_from,
-                    original_zone_root: draft.original_zone_root,
-                    child_source_indices,
-                }
-            })
-            .collect();
+        let logical_groups = build_logical_groups_from_drafts(group_drafts, &original_rules);
 
         if group_expansions.is_empty() {
-            // No groups produced any children, so rule expansion is a no-op;
-            // restore the rules verbatim. `logical_groups` still carries the
-            // Empty / InvalidPath drafts so consumers can render the user's
-            // grouping intent and act on the "discovery turned up nothing"
-            // signal.
             self.rules = original_rules;
             return logical_groups;
         }
@@ -811,16 +582,175 @@ impl BoundaryConfig {
     }
 }
 
-/// Merge a discovered (or fallback) zone into the post-expansion zones
-/// vector by name. A naive `expanded_zones.push(zone)` duplicates entries
-/// when the user declared the same parent name twice (each iteration of the
-/// outer expansion loop re-runs discovery on its own `autoDiscover` paths
-/// and would push the same child names again, producing duplicates in
-/// `zones[]` AND triggering the `file_count` summation in
-/// `compute_boundary_data` to double-count each child). Merging by name
-/// keeps `zones[]` unique and unifies the patterns from both declarations
-/// on the same `BoundaryZone`. Existing patterns are preserved verbatim;
-/// only NEW patterns are appended.
+struct AutoDiscoverExpansion {
+    group_name: String,
+    expanded_names: Vec<String>,
+    draft: LogicalGroupDraft,
+}
+
+fn expand_auto_discover_zone(
+    project_root: &Path,
+    mut zone: BoundaryZone,
+    source_zone_index: usize,
+    expanded_zones: &mut Vec<BoundaryZone>,
+) -> AutoDiscoverExpansion {
+    let group_name = zone.name.clone();
+    let raw_auto_discover = zone.auto_discover.clone();
+    let original_zone_root = zone.root.clone();
+    let DiscoveryOutcome {
+        zones: discovered_zones,
+        source_indices: discovered_source_indices,
+        had_invalid_path,
+    } = discover_child_zones(project_root, &zone);
+    let status = discovery_status(discovered_zones.len(), had_invalid_path);
+    let mut expanded_names: Vec<String> = discovered_zones
+        .iter()
+        .map(|child| child.name.clone())
+        .collect();
+    let child_names_only = expanded_names.clone();
+
+    for child_zone in discovered_zones {
+        merge_zone_by_name(expanded_zones, child_zone);
+    }
+
+    let fallback_zone = merge_fallback_auto_discover_zone(&mut zone, &group_name, expanded_zones);
+    if fallback_zone.is_some() {
+        expanded_names.push(group_name.clone());
+    }
+
+    AutoDiscoverExpansion {
+        group_name: group_name.clone(),
+        expanded_names,
+        draft: LogicalGroupDraft {
+            name: group_name,
+            children: child_names_only,
+            auto_discover: raw_auto_discover,
+            fallback_zone,
+            source_zone_index,
+            status,
+            merged_from: None,
+            original_zone_root,
+            child_source_indices: discovered_source_indices,
+        },
+    }
+}
+
+const fn discovery_status(discovered_count: usize, had_invalid_path: bool) -> LogicalGroupStatus {
+    if discovered_count > 0 {
+        LogicalGroupStatus::Ok
+    } else if had_invalid_path {
+        LogicalGroupStatus::InvalidPath
+    } else {
+        LogicalGroupStatus::Empty
+    }
+}
+
+fn merge_fallback_auto_discover_zone(
+    zone: &mut BoundaryZone,
+    group_name: &str,
+    expanded_zones: &mut Vec<BoundaryZone>,
+) -> Option<String> {
+    if zone.patterns.is_empty() {
+        return None;
+    }
+    zone.auto_discover.clear();
+    merge_zone_by_name(expanded_zones, zone.clone());
+    Some(group_name.to_owned())
+}
+
+fn merge_logical_group_draft(group_drafts: &mut Vec<LogicalGroupDraft>, draft: LogicalGroupDraft) {
+    let Some(existing) = group_drafts.iter_mut().find(|d| d.name == draft.name) else {
+        group_drafts.push(draft);
+        return;
+    };
+
+    tracing::warn!(
+        "boundary zone '{}' is declared multiple times with autoDiscover; merging discovered children",
+        draft.name
+    );
+    let auto_discover_offset = existing.auto_discover.len();
+    merge_logical_group_children(existing, &draft, auto_discover_offset);
+    existing.auto_discover.extend(draft.auto_discover);
+    if existing.fallback_zone.is_none() {
+        existing.fallback_zone = draft.fallback_zone;
+    }
+    existing.status = merge_status(existing.status, draft.status);
+    let chain = existing
+        .merged_from
+        .get_or_insert_with(|| vec![existing.source_zone_index]);
+    chain.push(draft.source_zone_index);
+}
+
+fn merge_logical_group_children(
+    existing: &mut LogicalGroupDraft,
+    draft: &LogicalGroupDraft,
+    auto_discover_offset: usize,
+) {
+    let existing_children: rustc_hash::FxHashSet<String> =
+        existing.children.iter().cloned().collect();
+    for (idx, name) in draft.children.iter().enumerate() {
+        if existing_children.contains(name) {
+            continue;
+        }
+        existing.children.push(name.clone());
+        existing
+            .child_source_indices
+            .push(draft.child_source_indices[idx] + auto_discover_offset);
+    }
+}
+
+fn build_logical_groups_from_drafts(
+    group_drafts: Vec<LogicalGroupDraft>,
+    original_rules: &[BoundaryRule],
+) -> Vec<LogicalGroup> {
+    let authored_rules = authored_rules_for_logical_groups(&group_drafts, original_rules);
+
+    group_drafts
+        .into_iter()
+        .map(|draft| {
+            let child_source_indices = if draft.auto_discover.len() > 1 {
+                draft.child_source_indices
+            } else {
+                Vec::new()
+            };
+            LogicalGroup {
+                authored_rule: authored_rules.get(draft.name.as_str()).cloned(),
+                name: draft.name,
+                children: draft.children,
+                auto_discover: draft.auto_discover,
+                fallback_zone: draft.fallback_zone,
+                source_zone_index: draft.source_zone_index,
+                status: draft.status,
+                merged_from: draft.merged_from,
+                original_zone_root: draft.original_zone_root,
+                child_source_indices,
+            }
+        })
+        .collect()
+}
+
+fn authored_rules_for_logical_groups<'a>(
+    group_drafts: &[LogicalGroupDraft],
+    original_rules: &'a [BoundaryRule],
+) -> rustc_hash::FxHashMap<&'a str, AuthoredRule> {
+    let draft_names: rustc_hash::FxHashSet<&str> =
+        group_drafts.iter().map(|d| d.name.as_str()).collect();
+    original_rules
+        .iter()
+        .filter(|rule| draft_names.contains(rule.from.as_str()))
+        .map(|rule| {
+            (
+                rule.from.as_str(),
+                AuthoredRule {
+                    allow: rule.allow.clone(),
+                    allow_type_only: rule.allow_type_only.clone(),
+                },
+            )
+        })
+        .collect()
+}
+
+/// Merge a discovered zone into `zones[]` by name.
 fn merge_zone_by_name(expanded_zones: &mut Vec<BoundaryZone>, zone: BoundaryZone) {
     if let Some(existing) = expanded_zones.iter_mut().find(|z| z.name == zone.name) {
         for pattern in zone.patterns {
@@ -833,19 +763,7 @@ fn merge_zone_by_name(expanded_zones: &mut Vec<BoundaryZone>, zone: BoundaryZone
     }
 }
 
-/// Rewrite the user's pre-expansion rules to reference the discovered child
-/// zones in place of the logical parent. Three rule shapes are produced:
-///
-/// 1. Rules whose `from` is the parent group expand into one explicit rule
-///    per child (or one for the parent fallback when the parent kept its
-///    `patterns`).
-/// 2. Rules whose `allow` references a group expand to allow every child
-///    of that group.
-/// 3. Rules untouched by group expansion pass through unchanged.
-///
-/// Extracted out of [`BoundaryConfig::expand_auto_discover`] so the
-/// orchestrator stays under the SIG unit-size threshold; the body itself
-/// is unchanged from the pre-#373 inline form.
+/// Expand rules across discovered child groups.
 fn expand_rules_for_groups(
     original_rules: Vec<BoundaryRule>,
     group_expansions: &rustc_hash::FxHashMap<String, Vec<String>>,
@@ -910,15 +828,7 @@ impl BoundaryConfig {
         })
     }
 
-    /// Validate that no zone's pattern redundantly includes its `root`
-    /// prefix. Patterns are resolved relative to the zone root, so prefixing
-    /// the pattern with the same root double-prefixes the path and never
-    /// matches.
-    ///
-    /// The rendered diagnostic carries the legacy
-    /// `PLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX` tag via
-    /// [`ZoneValidationError`]'s `Display` impl, so CI logs grepping for the
-    /// old text continue to work.
+    /// Validate that patterns do not repeat the zone root.
     #[must_use]
     pub fn validate_root_prefixes(&self) -> Vec<RedundantRootPrefix> {
         let mut errors = Vec::new();
@@ -927,10 +837,6 @@ impl BoundaryConfig {
                 continue;
             };
             let normalized = normalize_zone_root(raw_root);
-            // Skip empty-root zones: `""`, `"."`, and `"./"` all normalize to
-            // `""`, which behaves as no root at classification time. Without
-            // this guard `starts_with("")` is always true and every pattern
-            // produces a spurious redundant-prefix error.
             if normalized.is_empty() {
                 continue;
             }
@@ -951,12 +857,7 @@ impl BoundaryConfig {
         errors
     }
 
-    /// Validate that all zone names referenced in rules are defined in `zones`.
-    ///
-    /// Walks every zone-reference surface on `BoundaryRule`: `from`, `allow`,
-    /// and `allow_type_only`. An unknown zone in `allow_type_only` silently
-    /// behaves as "not allowed" at runtime, so it MUST surface here for parity
-    /// with the existing `allow`-side diagnostic.
+    /// Validate that every zone reference points at a defined zone.
     #[must_use]
     pub fn validate_zone_references(&self) -> Vec<UnknownZoneRef> {
         let zone_names: rustc_hash::FxHashSet<&str> =
@@ -990,13 +891,74 @@ impl BoundaryConfig {
                 }
             }
         }
+        for (i, rule) in self.calls.forbidden.iter().enumerate() {
+            if !zone_names.contains(rule.from.as_str()) {
+                errors.push(UnknownZoneRef {
+                    rule_index: i,
+                    kind: ZoneReferenceKind::CallsFrom,
+                    zone_name: rule.from.clone(),
+                });
+            }
+        }
+        errors
+    }
+
+    /// Validate `boundaries.calls.forbidden[]` callee patterns. Rejects
+    /// patterns that would parse but silently match nothing (empty or
+    /// whitespace-only patterns, a bare `*` with no callee segments, empty
+    /// dot-segments) and entries with an empty pattern list, so an inert rule
+    /// fails loudly at load time instead of reporting zero findings forever.
+    #[must_use]
+    pub fn validate_call_rules(&self) -> Vec<InvalidForbiddenCallee> {
+        let mut errors = Vec::new();
+        for (i, rule) in self.calls.forbidden.iter().enumerate() {
+            if rule.callee.iter().next().is_none() {
+                errors.push(InvalidForbiddenCallee {
+                    rule_index: i,
+                    pattern: String::new(),
+                    reason: "must list at least one callee pattern".to_owned(),
+                });
+                continue;
+            }
+            for pattern in rule.callee.iter() {
+                let trimmed = pattern.trim();
+                if trimmed.is_empty() {
+                    errors.push(InvalidForbiddenCallee {
+                        rule_index: i,
+                        pattern: pattern.to_owned(),
+                        reason: "must not be empty".to_owned(),
+                    });
+                } else if trimmed == "*" {
+                    errors.push(InvalidForbiddenCallee {
+                        rule_index: i,
+                        pattern: pattern.to_owned(),
+                        reason: "matches nothing: a bare `*` has no callee segments. Name a \
+                                 specific callee such as `console.*` or `child_process.exec`"
+                            .to_owned(),
+                    });
+                } else if trimmed.split('.').any(|segment| segment.trim().is_empty()) {
+                    errors.push(InvalidForbiddenCallee {
+                        rule_index: i,
+                        pattern: pattern.to_owned(),
+                        reason: "contains an empty path segment".to_owned(),
+                    });
+                } else if let Some(reason) = wildcard_placement_error(trimmed) {
+                    errors.push(InvalidForbiddenCallee {
+                        rule_index: i,
+                        pattern: pattern.to_owned(),
+                        reason,
+                    });
+                }
+            }
+        }
         errors
     }
 
     /// Resolve into compiled form with pre-built glob matchers.
-    ///
-    /// User patterns were validated at config load time
-    /// (see `PlowConfig::validate_user_globs`).
+    #[expect(
+        clippy::expect_used,
+        reason = "boundary glob patterns are validated before config resolution"
+    )]
     #[must_use]
     pub fn resolve(&self) -> ResolvedBoundaryConfig {
         let zones = self
@@ -1031,23 +993,81 @@ impl BoundaryConfig {
             })
             .collect();
 
+        let coverage = ResolvedBoundaryCoverageConfig {
+            require_all_files: self.coverage.require_all_files,
+            allow_unmatched: self
+                .coverage
+                .allow_unmatched
+                .iter()
+                .map(|pattern| {
+                    Glob::new(pattern)
+                        .expect(
+                            "boundaries.coverage.allowUnmatched was validated at config load time",
+                        )
+                        .compile_matcher()
+                })
+                .collect(),
+        };
+
+        let mut calls_forbidden_by_zone: rustc_hash::FxHashMap<String, Vec<String>> =
+            rustc_hash::FxHashMap::default();
+        for rule in &self.calls.forbidden {
+            let patterns = calls_forbidden_by_zone
+                .entry(rule.from.clone())
+                .or_default();
+            for pattern in rule.callee.iter() {
+                patterns.push(pattern.trim().to_owned());
+            }
+        }
+
         ResolvedBoundaryConfig {
             zones,
             rules,
-            // `expand_auto_discover` is the only producer; the resolution
-            // pipeline (`crates/config/src/config/resolution.rs`) assigns the
-            // returned `Vec<LogicalGroup>` onto the resolved boundaries after
-            // `resolve()` runs. `resolve()` itself has no view of the
-            // pre-expansion state, so it leaves the field empty here.
             logical_groups: Vec::new(),
+            coverage,
+            calls_forbidden_by_zone,
         }
     }
 }
 
-/// Normalize a zone `root` string into the canonical form used at
-/// classification time: forward slashes, no leading `./`, always a
-/// trailing slash. Empty / `"."` / `"./"` collapse to `""` which means
-/// "subtree is the project root" and effectively behaves like no root.
+/// Reject `*` placements the segment-aware callee matcher cannot honor.
+/// Callee patterns are not globs: `*` must be a whole segment, and only the
+/// leading object position (`*.member`) or the trailing member position
+/// (`object.*`) is supported, never both and never mid-path.
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "the parent module is glob re-exported from lib.rs, so `pub` would leak this helper into the public API; pub(crate) is the minimal widening for the rule-pack validator"
+)]
+pub(crate) fn wildcard_placement_error(pattern: &str) -> Option<String> {
+    let segments: Vec<&str> = pattern.split('.').collect();
+    let last = segments.len() - 1;
+    if segments
+        .iter()
+        .any(|segment| segment.contains('*') && *segment != "*")
+    {
+        return Some(
+            "uses `*` inside a segment; callee patterns are not globs, so `*` must be a \
+             whole segment (`*.member` or `object.*`)"
+                .to_owned(),
+        );
+    }
+    let star_positions: Vec<usize> = segments
+        .iter()
+        .enumerate()
+        .filter(|(_, segment)| **segment == "*")
+        .map(|(i, _)| i)
+        .collect();
+    if star_positions.len() > 1 || star_positions.iter().any(|&i| i != 0 && i != last) {
+        return Some(
+            "may use `*` only as the leading object segment (`*.member`) or the trailing \
+             member segment (`object.*`), not both and not mid-path"
+                .to_owned(),
+        );
+    }
+    None
+}
+
+/// Normalize a zone root for classification.
 fn normalize_zone_root(raw: &str) -> String {
     let with_slashes = raw.replace('\\', "/");
     let trimmed = with_slashes.trim_start_matches("./");
@@ -1082,21 +1102,14 @@ fn join_relative_path(prefix: &str, suffix: &str) -> String {
     }
 }
 
-/// Discovery result for a single auto-discover zone. Carries the discovered
-/// child `BoundaryZone`s, a flag for "at least one `autoDiscover` path was
-/// malformed or unreadable" (distinguishes [`LogicalGroupStatus::InvalidPath`]
-/// from [`LogicalGroupStatus::Empty`]), and parallel-to-zones
-/// `source_indices` recording which `autoDiscover` entry produced each child
-/// (FIRST producer wins when two paths yield the same child name).
+/// Discovery result for one auto-discover zone.
 struct DiscoveryOutcome {
     zones: Vec<BoundaryZone>,
     source_indices: Vec<usize>,
     had_invalid_path: bool,
 }
 
-/// Intermediate accumulator for a [`LogicalGroup`] before its
-/// [`AuthoredRule`] is resolved (rules are not consumed until after the zone
-/// loop completes, so the rule lookup happens in a second pass).
+/// Intermediate accumulator for a [`LogicalGroup`].
 struct LogicalGroupDraft {
     name: String,
     children: Vec<String>,
@@ -1104,26 +1117,15 @@ struct LogicalGroupDraft {
     fallback_zone: Option<String>,
     source_zone_index: usize,
     status: LogicalGroupStatus,
-    /// `None` until a second declaration with the same `name` is merged in;
-    /// then `Some(vec![first_index, ..])` with one entry per merged
-    /// declaration in user-declaration order.
+    /// Merged duplicate declarations.
     merged_from: Option<Vec<usize>>,
-    /// Echo of the parent zone's `root` field as the user authored it
-    /// (verbatim, not normalized). On duplicate-merge, the FIRST declaration
-    /// wins (consistent with `source_zone_index`).
+    /// Authored parent root.
     original_zone_root: Option<String>,
-    /// Parallel to `children`: for child at index `i`, the index into
-    /// `auto_discover` of the path that produced it (FIRST producer wins on
-    /// collisions). When merging duplicate parent declarations, indices from
-    /// the second batch are shifted by the first batch's `auto_discover.len()`
-    /// so they continue to address the concatenated `auto_discover` array.
+    /// Child-to-source index mapping.
     child_source_indices: Vec<usize>,
 }
 
-/// Merge two `LogicalGroupStatus` values when a duplicate parent zone name
-/// is encountered: `Ok` wins (at least one child was discovered),
-/// `InvalidPath` beats `Empty` (a malformed/unreadable path is a louder
-/// signal than "no subdirs"), and otherwise we keep the existing status.
+/// Merge duplicate `LogicalGroupStatus` values.
 const fn merge_status(existing: LogicalGroupStatus, new: LogicalGroupStatus) -> LogicalGroupStatus {
     match (existing, new) {
         (LogicalGroupStatus::Ok, _) | (_, LogicalGroupStatus::Ok) => LogicalGroupStatus::Ok,
@@ -1137,10 +1139,6 @@ const fn merge_status(existing: LogicalGroupStatus, new: LogicalGroupStatus) -> 
 fn discover_child_zones(project_root: &Path, zone: &BoundaryZone) -> DiscoveryOutcome {
     let mut zones_by_name: rustc_hash::FxHashMap<String, BoundaryZone> =
         rustc_hash::FxHashMap::default();
-    // Tracks which `autoDiscover` path index FIRST produced each child zone
-    // name. When two paths yield the same child name, the first producer
-    // wins (the merged `BoundaryZone` accumulates patterns from both but
-    // attribution stays stable).
     let mut first_source_index: rustc_hash::FxHashMap<String, usize> =
         rustc_hash::FxHashMap::default();
     let normalized_root = zone
@@ -1215,10 +1213,6 @@ fn discover_child_zones(project_root: &Path, zone: &BoundaryZone) -> DiscoveryOu
     let source_indices: Vec<usize> = zones
         .iter()
         .map(|z| {
-            // Every entry inserted into `zones_by_name` was also inserted
-            // into `first_source_index` in the same loop body, so this lookup
-            // is infallible. Fall back to 0 defensively for any future
-            // refactor that decouples the two maps.
             first_source_index
                 .get(z.name.as_str())
                 .copied()
@@ -1306,25 +1300,15 @@ fn dedupe_rules_keep_last(rules: Vec<BoundaryRule>) -> Vec<BoundaryRule> {
 
 impl ResolvedBoundaryConfig {
     /// Whether any boundaries are configured.
-    ///
-    /// Considers `logical_groups` too: when every `autoDiscover` zone
-    /// produced zero children, `zones` is empty but the user authored a
-    /// boundaries section that should still be surfaced (so `plow list
-    /// --boundaries` can render the `Empty` / `InvalidPath` status to the
-    /// user). Without this, the whole boundaries block silently disappears
-    /// from the output the moment discovery finds nothing.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.zones.is_empty() && self.logical_groups.is_empty()
+        self.zones.is_empty()
+            && self.logical_groups.is_empty()
+            && !self.coverage.require_all_files
+            && self.calls_forbidden_by_zone.is_empty()
     }
 
-    /// Classify a file path into a zone. Returns the first matching zone name.
-    /// Path should be relative to the project root with forward slashes.
-    ///
-    /// When a zone declares a `root` (subtree scope), the path must start
-    /// with that prefix and the prefix is stripped before glob matching;
-    /// otherwise the zone is skipped. Zones without a `root` keep
-    /// project-root-relative behavior.
+    /// Classify a project-relative path into a zone.
     #[must_use]
     pub fn classify_zone(&self, relative_path: &str) -> Option<&str> {
         for zone in &self.zones {
@@ -1344,34 +1328,31 @@ impl ResolvedBoundaryConfig {
         None
     }
 
-    /// Check if an import from `from_zone` to `to_zone` is allowed.
-    /// Returns `true` if the import is permitted.
+    /// Whether an unmatched file is explicitly allowed by coverage policy.
+    #[must_use]
+    pub fn allows_unmatched(&self, relative_path: &str) -> bool {
+        self.coverage
+            .allow_unmatched
+            .iter()
+            .any(|matcher| matcher.is_match(relative_path))
+    }
+
+    /// Check whether an import is allowed.
     #[must_use]
     pub fn is_import_allowed(&self, from_zone: &str, to_zone: &str) -> bool {
-        // Self-imports are always allowed.
         if from_zone == to_zone {
             return true;
         }
 
-        // Find the rule for the source zone.
         let rule = self.rules.iter().find(|r| r.from_zone == from_zone);
 
         match rule {
-            // Zone has no rule entry — unrestricted.
             None => true,
-            // Zone has a rule — check the allowlist.
             Some(r) => r.allowed_zones.iter().any(|z| z == to_zone),
         }
     }
 
-    /// Check whether a type-only import from `from_zone` to `to_zone` is
-    /// permitted by the rule's `allowTypeOnly` list. Only consulted by the
-    /// boundary detector after `is_import_allowed` has already returned
-    /// `false`; the caller is responsible for verifying the import is in
-    /// fact type-only (all symbols on the edge carry the type-only flag).
-    /// Returns `false` when no rule exists for `from_zone`, since rule-less
-    /// zones are unrestricted and `is_import_allowed` short-circuits before
-    /// this is called.
+    /// Check whether a type-only import is allowed.
     #[must_use]
     pub fn is_type_only_allowed(&self, from_zone: &str, to_zone: &str) -> bool {
         let Some(rule) = self.rules.iter().find(|r| r.from_zone == from_zone) else {
@@ -1418,6 +1399,21 @@ mod tests {
     }
 
     #[test]
+    fn deserialize_boundary_coverage() {
+        let json = r#"{
+            "coverage": {
+                "requireAllFiles": true,
+                "allowUnmatched": ["src/generated/**"]
+            }
+        }"#;
+        let config: BoundaryConfig = serde_json::from_str(json).unwrap();
+
+        assert!(config.coverage.require_all_files);
+        assert_eq!(config.coverage.allow_unmatched, vec!["src/generated/**"]);
+        assert!(!config.is_empty());
+    }
+
+    #[test]
     fn deserialize_toml() {
         let toml_str = r#"
 [[zones]]
@@ -1438,12 +1434,160 @@ allow = ["db"]
     }
 
     #[test]
+    fn deserialize_boundary_calls_single_and_array() {
+        let json = r#"{
+            "zones": [{ "name": "domain", "patterns": ["src/domain/**"] }],
+            "calls": {
+                "forbidden": [
+                    { "from": "domain", "callee": "child_process.*" },
+                    { "from": "domain", "callee": ["console.*", "process.exit"] }
+                ]
+            }
+        }"#;
+        let config: BoundaryConfig = serde_json::from_str(json).unwrap();
+
+        assert_eq!(config.calls.forbidden.len(), 2);
+        assert_eq!(
+            config.calls.forbidden[0].callee.iter().collect::<Vec<_>>(),
+            vec!["child_process.*"]
+        );
+        assert_eq!(
+            config.calls.forbidden[1].callee.iter().collect::<Vec<_>>(),
+            vec!["console.*", "process.exit"]
+        );
+        assert!(!config.is_empty());
+        assert!(config.validate_zone_references().is_empty());
+        assert!(config.validate_call_rules().is_empty());
+    }
+
+    #[test]
+    fn deserialize_boundary_calls_toml() {
+        let toml_str = r#"
+[[zones]]
+name = "domain"
+patterns = ["src/domain/**"]
+
+[[calls.forbidden]]
+from = "domain"
+callee = "child_process.*"
+
+[[calls.forbidden]]
+from = "domain"
+callee = ["console.*"]
+"#;
+        let config: BoundaryConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.calls.forbidden.len(), 2);
+        assert_eq!(
+            config.calls.forbidden[0].callee.iter().collect::<Vec<_>>(),
+            vec!["child_process.*"]
+        );
+        assert_eq!(
+            config.calls.forbidden[1].callee.iter().collect::<Vec<_>>(),
+            vec!["console.*"]
+        );
+    }
+
+    #[test]
+    fn validate_zone_references_calls_from_unknown() {
+        let json = r#"{
+            "zones": [{ "name": "domain", "patterns": ["src/domain/**"] }],
+            "calls": { "forbidden": [{ "from": "nonexistent", "callee": "console.*" }] }
+        }"#;
+        let config: BoundaryConfig = serde_json::from_str(json).unwrap();
+        let errors = config.validate_zone_references();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].kind, ZoneReferenceKind::CallsFrom);
+        assert_eq!(errors[0].zone_name, "nonexistent");
+        let rendered = ZoneValidationError::UnknownZoneReference(errors[0].clone()).to_string();
+        assert!(
+            rendered.contains("boundaries.calls.forbidden[0].from"),
+            "unexpected rendering: {rendered}"
+        );
+    }
+
+    #[test]
+    fn validate_call_rules_rejects_inert_patterns() {
+        let json = r#"{
+            "zones": [{ "name": "domain", "patterns": ["src/domain/**"] }],
+            "calls": {
+                "forbidden": [
+                    { "from": "domain", "callee": "*" },
+                    { "from": "domain", "callee": "  " },
+                    { "from": "domain", "callee": "foo..bar" },
+                    { "from": "domain", "callee": [] }
+                ]
+            }
+        }"#;
+        let config: BoundaryConfig = serde_json::from_str(json).unwrap();
+        let errors = config.validate_call_rules();
+        assert_eq!(errors.len(), 4);
+        assert!(errors[0].reason.contains("matches nothing"));
+        assert!(errors[1].reason.contains("must not be empty"));
+        assert!(errors[2].reason.contains("empty path segment"));
+        assert!(errors[3].reason.contains("at least one callee pattern"));
+    }
+
+    #[test]
+    fn validate_call_rules_rejects_misplaced_wildcards() {
+        let json = r#"{
+            "zones": [{ "name": "domain", "patterns": ["src/domain/**"] }],
+            "calls": {
+                "forbidden": [
+                    { "from": "domain", "callee": "a.*.b" },
+                    { "from": "domain", "callee": "*.query.*" },
+                    { "from": "domain", "callee": "con*ole.log" },
+                    { "from": "domain", "callee": ["console.*", "*.innerHTML", "child_process.exec"] }
+                ]
+            }
+        }"#;
+        let config: BoundaryConfig = serde_json::from_str(json).unwrap();
+        let errors = config.validate_call_rules();
+        assert_eq!(errors.len(), 3);
+        assert!(errors[0].reason.contains("not both and not mid-path"));
+        assert!(errors[1].reason.contains("not both and not mid-path"));
+        assert!(errors[2].reason.contains("not globs"));
+    }
+
+    #[test]
+    fn resolve_groups_calls_by_zone() {
+        let json = r#"{
+            "zones": [
+                { "name": "domain", "patterns": ["src/domain/**"] },
+                { "name": "ui", "patterns": ["src/ui/**"] }
+            ],
+            "calls": {
+                "forbidden": [
+                    { "from": "domain", "callee": "child_process.*" },
+                    { "from": "domain", "callee": ["console.*"] },
+                    { "from": "ui", "callee": "process.exit" }
+                ]
+            }
+        }"#;
+        let config: BoundaryConfig = serde_json::from_str(json).unwrap();
+        let resolved = config.resolve();
+        assert_eq!(
+            resolved.calls_forbidden_by_zone.get("domain"),
+            Some(&vec![
+                "child_process.*".to_string(),
+                "console.*".to_string()
+            ])
+        );
+        assert_eq!(
+            resolved.calls_forbidden_by_zone.get("ui"),
+            Some(&vec!["process.exit".to_string()])
+        );
+        assert!(!resolved.is_empty());
+    }
+
+    #[test]
     fn auto_discover_expands_child_zones_and_parent_rules() {
         let temp = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
         std::fs::create_dir_all(temp.path().join("src/features/billing")).unwrap();
 
         let mut config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -1516,6 +1660,8 @@ allow = ["db"]
         std::fs::create_dir_all(temp.path().join("src/features/billing")).unwrap();
 
         let mut config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -1634,6 +1780,8 @@ allow = ["db"]
             };
 
             let mut config = BoundaryConfig {
+                coverage: BoundaryCoverageConfig::default(),
+                calls: BoundaryCallsConfig::default(),
                 preset: None,
                 zones: vec![
                     BoundaryZone {
@@ -1675,8 +1823,6 @@ allow = ["db"]
         }
     }
 
-    // ── LogicalGroup return value (issue #373) ──────────────────
-
     #[test]
     fn logical_groups_returned_for_simple_auto_discover_zone() {
         let temp = tempfile::tempdir().unwrap();
@@ -1684,6 +1830,8 @@ allow = ["db"]
         std::fs::create_dir_all(temp.path().join("src/features/billing")).unwrap();
 
         let mut config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -1714,7 +1862,6 @@ allow = ["db"]
         assert_eq!(g.auto_discover, vec!["src/features"]);
         assert_eq!(g.source_zone_index, 1);
         assert_eq!(g.status, LogicalGroupStatus::Ok);
-        // Parent had no explicit patterns → not retained as fallback.
         assert!(g.fallback_zone.is_none());
         let rule = g
             .authored_rule
@@ -1730,13 +1877,12 @@ allow = ["db"]
         std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
 
         let mut config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "features".to_string(),
                 patterns: vec![],
-                // Trailing slash + leading `./` are normalized during discovery
-                // but the logical group must echo the user's literal string so
-                // round-trip config tooling does not introduce spurious diffs.
                 auto_discover: vec!["./src/features/".to_string()],
                 root: None,
             }],
@@ -1755,11 +1901,10 @@ allow = ["db"]
         std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
 
         let mut config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
-                // Bulletproof shape: parent carries BOTH patterns AND
-                // autoDiscover, so the parent stays in zones[] as a fallback
-                // classifier while ALSO becoming a logical group.
                 name: "features".to_string(),
                 patterns: vec!["src/features/**".to_string()],
                 auto_discover: vec!["src/features".to_string()],
@@ -1771,7 +1916,6 @@ allow = ["db"]
         let groups = config.expand_auto_discover(temp.path());
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].fallback_zone.as_deref(), Some("features"));
-        // Parent zone is still present in zones[] as the fallback classifier.
         assert!(config.zones.iter().any(|z| z.name == "features"));
     }
 
@@ -1779,9 +1923,9 @@ allow = ["db"]
     fn logical_groups_status_empty_when_no_child_dirs() {
         let temp = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(temp.path().join("src/features")).unwrap();
-        // No child subdirs created.
-
         let mut config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "features".to_string(),
@@ -1801,9 +1945,9 @@ allow = ["db"]
     #[test]
     fn logical_groups_status_invalid_path_when_dir_missing() {
         let temp = tempfile::tempdir().unwrap();
-        // src/features intentionally not created.
-
         let mut config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "features".to_string(),
@@ -1824,9 +1968,9 @@ allow = ["db"]
     fn logical_groups_status_ok_wins_over_invalid_when_mixed() {
         let temp = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
-        // src/modules intentionally not created (invalid path).
-
         let mut config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "features".to_string(),
@@ -1839,8 +1983,6 @@ allow = ["db"]
 
         let groups = config.expand_auto_discover(temp.path());
         assert_eq!(groups.len(), 1);
-        // One path produced children → status is Ok even though another path
-        // was invalid. The InvalidPath warning still surfaces via tracing.
         assert_eq!(groups[0].status, LogicalGroupStatus::Ok);
         assert_eq!(groups[0].children, vec!["features/auth"]);
     }
@@ -1853,6 +1995,8 @@ allow = ["db"]
         std::fs::create_dir_all(temp.path().join("src/mid/a")).unwrap();
 
         let mut config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -1878,20 +2022,19 @@ allow = ["db"]
         };
 
         let groups = config.expand_auto_discover(temp.path());
-        // Insertion order is preserved; not alphabetized.
         let names: Vec<&str> = groups.iter().map(|g| g.name.as_str()).collect();
         assert_eq!(names, vec!["zeta", "alpha", "mid"]);
     }
 
     #[test]
     fn logical_groups_merged_from_records_duplicate_indices() {
-        // The single-declaration path leaves merged_from None; the
-        // duplicate-merge path populates it with every contributing index.
         let temp = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
         std::fs::create_dir_all(temp.path().join("src/extra/billing")).unwrap();
 
         let mut config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -1917,11 +2060,7 @@ allow = ["db"]
         };
         let groups = config.expand_auto_discover(temp.path());
         assert_eq!(groups.len(), 1);
-        // merged_from holds both contributing zone indices in declaration
-        // order: position 0 and position 2 (the "other" zone at position 1
-        // is unrelated).
         assert_eq!(groups[0].merged_from.as_deref(), Some(&[0_usize, 2][..]));
-        // The first index also wins source_zone_index.
         assert_eq!(groups[0].source_zone_index, 0);
     }
 
@@ -1931,6 +2070,8 @@ allow = ["db"]
         std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
 
         let mut config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "features".to_string(),
@@ -1941,7 +2082,6 @@ allow = ["db"]
             rules: vec![],
         };
         let groups = config.expand_auto_discover(temp.path());
-        // Common case: no duplicate, no merged_from.
         assert!(groups[0].merged_from.is_none());
     }
 
@@ -1951,14 +2091,13 @@ allow = ["db"]
         std::fs::create_dir_all(temp.path().join("packages/app/src/features/auth")).unwrap();
 
         let mut config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "features".to_string(),
                 patterns: vec![],
                 auto_discover: vec!["src/features".to_string()],
-                // Monorepo subtree scope on the parent; should round-trip
-                // verbatim to logical_groups[0].original_zone_root so
-                // patcher tools can distinguish parent-set vs per-child root.
                 root: Some("packages/app/".to_string()),
             }],
             rules: vec![],
@@ -1976,6 +2115,8 @@ allow = ["db"]
         std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
 
         let mut config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "features".to_string(),
@@ -1996,13 +2137,12 @@ allow = ["db"]
         std::fs::create_dir_all(temp.path().join("src/modules/billing")).unwrap();
 
         let mut config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "features".to_string(),
                 patterns: vec![],
-                // Two paths: each produces one child. Children are
-                // alphabetically sorted across paths, so auth (from index 0)
-                // sorts before billing (from index 1).
                 auto_discover: vec!["src/features".to_string(), "src/modules".to_string()],
                 root: None,
             }],
@@ -2023,6 +2163,8 @@ allow = ["db"]
         std::fs::create_dir_all(temp.path().join("src/features/billing")).unwrap();
 
         let mut config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "features".to_string(),
@@ -2033,23 +2175,18 @@ allow = ["db"]
             rules: vec![],
         };
         let groups = config.expand_auto_discover(temp.path());
-        // With one path, every child trivially has source index 0. The
-        // helper field is suppressed (empty Vec) so the JSON stays tight
-        // on the common case.
         assert!(groups[0].child_source_indices.is_empty());
     }
 
     #[test]
     fn logical_groups_child_source_indices_after_duplicate_merge_shifted() {
-        // When two parent declarations merge, the child indices from the
-        // SECOND batch must be shifted by the FIRST batch's
-        // auto_discover.len() so they continue to address the
-        // post-concatenation `auto_discover` array correctly.
         let temp = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
         std::fs::create_dir_all(temp.path().join("src/extra/billing")).unwrap();
 
         let mut config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -2069,9 +2206,6 @@ allow = ["db"]
         };
         let groups = config.expand_auto_discover(temp.path());
         assert_eq!(groups.len(), 1);
-        // Merged auto_discover has 2 entries; index 0 = src/features,
-        // index 1 = src/extra. The features/billing child came from the
-        // second batch's first path, which post-shift is index 1.
         assert_eq!(groups[0].auto_discover, vec!["src/features", "src/extra"]);
         let auth_idx = groups[0]
             .children
@@ -2094,6 +2228,8 @@ allow = ["db"]
         std::fs::create_dir_all(temp.path().join("src/extra/billing")).unwrap();
 
         let mut config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -2113,8 +2249,6 @@ allow = ["db"]
         };
 
         let groups = config.expand_auto_discover(temp.path());
-        // The two declarations merge into a single logical group with
-        // concatenated auto_discover paths and children.
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].name, "features");
         assert_eq!(groups[0].auto_discover, vec!["src/features", "src/extra"]);
@@ -2125,17 +2259,13 @@ allow = ["db"]
 
     #[test]
     fn logical_groups_duplicate_identical_declarations_no_double_count() {
-        // Regression for codex parallel review (post-impl pass): two
-        // identical `features` declarations with the same `autoDiscover`
-        // path used to emit duplicate `zones[]` entries, duplicate
-        // `children[]`, and double-counted `file_count` (4 for 2 real
-        // files). `merge_zone_by_name` keeps `zones[]` unique by name and
-        // the merge logic dedupes children against the existing set.
         let temp = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
         std::fs::create_dir_all(temp.path().join("src/features/billing")).unwrap();
 
         let mut config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -2156,23 +2286,16 @@ allow = ["db"]
 
         let groups = config.expand_auto_discover(temp.path());
         assert_eq!(groups.len(), 1);
-        // zones[] must NOT contain duplicates of features/auth or
-        // features/billing.
         let zone_names: Vec<&str> = config.zones.iter().map(|z| z.name.as_str()).collect();
         assert_eq!(zone_names, vec!["features/auth", "features/billing"]);
-        // children[] must NOT contain duplicates.
         assert_eq!(
             groups[0].children,
             vec!["features/auth", "features/billing"]
         );
-        // auto_discover preserves both verbatim (the duplicate is visible
-        // via merged_from + the warning, but the path list itself
-        // concatenates).
         assert_eq!(
             groups[0].auto_discover,
             vec!["src/features", "src/features"]
         );
-        // merged_from records both zone indices.
         assert_eq!(groups[0].merged_from.as_deref(), Some(&[0_usize, 1][..]));
     }
 
@@ -2180,6 +2303,8 @@ allow = ["db"]
     fn logical_groups_empty_when_no_auto_discover_present() {
         let temp = tempfile::tempdir().unwrap();
         let mut config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
@@ -2195,13 +2320,12 @@ allow = ["db"]
 
     #[test]
     fn logical_groups_propagate_through_resolve() {
-        // End-to-end: data populated by expand_auto_discover survives a
-        // round trip through `BoundaryConfig::resolve()` so consumers of
-        // `ResolvedBoundaryConfig.logical_groups` see the same content.
         let temp = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
 
         let mut config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "features".to_string(),
@@ -2213,9 +2337,6 @@ allow = ["db"]
         };
         let groups = config.expand_auto_discover(temp.path());
         let mut resolved = config.resolve();
-        // `resolve()` itself does not have access to the pre-expansion state;
-        // the resolution pipeline stitches the groups back on. Mirror that
-        // here so the test exercises the same shape consumers see.
         resolved.logical_groups = groups;
         assert_eq!(resolved.logical_groups.len(), 1);
         assert_eq!(resolved.logical_groups[0].name, "features");
@@ -2225,6 +2346,8 @@ allow = ["db"]
     #[test]
     fn validate_zone_references_valid() {
         let config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -2252,6 +2375,8 @@ allow = ["db"]
     #[test]
     fn validate_zone_references_invalid_from() {
         let config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
@@ -2275,6 +2400,8 @@ allow = ["db"]
     #[test]
     fn validate_zone_references_invalid_allow() {
         let config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
@@ -2296,10 +2423,9 @@ allow = ["db"]
 
     #[test]
     fn validate_zone_references_invalid_allow_type_only() {
-        // An undefined zone in `allowTypeOnly` silently behaves as "not
-        // allowed" at runtime, which the user almost always meant as a typo
-        // for an existing zone. Surface the same diagnostic as `allow`.
         let config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
@@ -2322,6 +2448,8 @@ allow = ["db"]
     #[test]
     fn resolve_and_classify() {
         let config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -2351,6 +2479,8 @@ allow = ["db"]
     #[test]
     fn first_match_wins() {
         let config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -2382,6 +2512,8 @@ allow = ["db"]
     #[test]
     fn self_import_always_allowed() {
         let config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
@@ -2402,6 +2534,8 @@ allow = ["db"]
     #[test]
     fn unrestricted_zone_allows_all() {
         let config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -2426,6 +2560,8 @@ allow = ["db"]
     #[test]
     fn restricted_zone_blocks_unlisted() {
         let config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -2461,6 +2597,8 @@ allow = ["db"]
     #[test]
     fn empty_allow_blocks_all_except_self() {
         let config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -2490,6 +2628,8 @@ allow = ["db"]
     #[test]
     fn zone_root_filters_classification_to_subtree() {
         let config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -2508,30 +2648,24 @@ allow = ["db"]
             rules: vec![],
         };
         let resolved = config.resolve();
-        // Files inside packages/app/ classify as ui
         assert_eq!(
             resolved.classify_zone("packages/app/src/login.tsx"),
             Some("ui")
         );
-        // Files inside packages/core/ classify as domain (same pattern, different root)
         assert_eq!(
             resolved.classify_zone("packages/core/src/order.ts"),
             Some("domain")
         );
-        // Files outside either subtree do not match
         assert_eq!(resolved.classify_zone("src/login.tsx"), None);
         assert_eq!(resolved.classify_zone("packages/utils/src/x.ts"), None);
     }
 
-    /// Case-sensitivity contract: `root` matching is case-sensitive,
-    /// matching the existing globset case-sensitivity for `patterns`. On
-    /// case-insensitive filesystems (HFS+, NTFS) two files differing only
-    /// in case still classify only when the configured `root` exactly
-    /// matches the path's case as plow recorded it. Locking this down
-    /// prevents silent platform-divergent classification.
+    /// `root` matching is case-sensitive.
     #[test]
     fn zone_root_is_case_sensitive() {
         let config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
@@ -2562,6 +2696,8 @@ allow = ["db"]
     #[test]
     fn zone_root_normalizes_trailing_slash_and_dot_prefix() {
         let config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -2595,6 +2731,8 @@ allow = ["db"]
     #[test]
     fn validate_root_prefixes_flags_redundant_pattern() {
         let config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
@@ -2609,8 +2747,6 @@ allow = ["db"]
         assert_eq!(errors[0].zone_name, "ui");
         assert_eq!(errors[0].pattern, "packages/app/src/**");
         assert_eq!(errors[0].root, "packages/app/");
-        // Display preserves the legacy PLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX
-        // tag so existing CI grep recipes continue to work.
         let rendered = ZoneValidationError::RedundantRootPrefix(errors[0].clone()).to_string();
         assert!(
             rendered.contains("PLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX"),
@@ -2628,9 +2764,9 @@ allow = ["db"]
 
     #[test]
     fn validate_root_prefixes_handles_unnormalized_root() {
-        // Root without trailing slash + pattern with leading "./" should
-        // still be detected as redundant after normalization.
         let config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
@@ -2647,6 +2783,8 @@ allow = ["db"]
     #[test]
     fn validate_root_prefixes_empty_when_no_overlap() {
         let config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
@@ -2669,15 +2807,13 @@ allow = ["db"]
         assert!(config.validate_root_prefixes().is_empty());
     }
 
-    /// Regression: an empty `root` (or `"."`/`"./"`, both of which normalize
-    /// to `""`) used to make `starts_with("")` always true, producing a
-    /// spurious PLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX error for every
-    /// pattern in the zone. The validation must skip empty-normalized roots
-    /// the same way `classify_zone` does.
+    /// Empty-normalized roots must be ignored.
     #[test]
     fn validate_root_prefixes_skips_empty_root() {
         for raw_root in ["", ".", "./"] {
             let config = BoundaryConfig {
+                coverage: BoundaryCoverageConfig::default(),
+                calls: BoundaryCallsConfig::default(),
                 preset: None,
                 zones: vec![BoundaryZone {
                     name: "ui".to_string(),
@@ -2706,8 +2842,6 @@ allow = ["db"]
         let config: BoundaryConfig = serde_json::from_str(json).unwrap();
         assert_eq!(config.zones[0].root.as_deref(), Some("packages/app/"));
     }
-
-    // ── Preset deserialization ─────────────────────────────────
 
     #[test]
     fn deserialize_preset_json() {
@@ -2755,6 +2889,8 @@ allow = ["db"]
     #[test]
     fn preset_makes_config_non_empty() {
         let config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: Some(BoundaryPreset::Layered),
             zones: vec![],
             rules: vec![],
@@ -2762,11 +2898,11 @@ allow = ["db"]
         assert!(!config.is_empty());
     }
 
-    // ── Preset expansion ───────────────────────────────────────
-
     #[test]
     fn expand_layered_produces_four_zones() {
         let mut config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: Some(BoundaryPreset::Layered),
             zones: vec![],
             rules: vec![],
@@ -2782,29 +2918,27 @@ allow = ["db"]
     #[test]
     fn expand_layered_rules_correct() {
         let mut config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: Some(BoundaryPreset::Layered),
             zones: vec![],
             rules: vec![],
         };
         config.expand("src");
-        // presentation → application only
         let pres_rule = config
             .rules
             .iter()
             .find(|r| r.from == "presentation")
             .unwrap();
         assert_eq!(pres_rule.allow, vec!["application"]);
-        // application → domain only
         let app_rule = config
             .rules
             .iter()
             .find(|r| r.from == "application")
             .unwrap();
         assert_eq!(app_rule.allow, vec!["domain"]);
-        // domain → nothing
         let dom_rule = config.rules.iter().find(|r| r.from == "domain").unwrap();
         assert!(dom_rule.allow.is_empty());
-        // infrastructure → domain + application (DI-friendly)
         let infra_rule = config
             .rules
             .iter()
@@ -2816,6 +2950,8 @@ allow = ["db"]
     #[test]
     fn expand_hexagonal_produces_three_zones() {
         let mut config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: Some(BoundaryPreset::Hexagonal),
             zones: vec![],
             rules: vec![],
@@ -2831,6 +2967,8 @@ allow = ["db"]
     #[test]
     fn expand_feature_sliced_produces_six_zones() {
         let mut config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: Some(BoundaryPreset::FeatureSliced),
             zones: vec![],
             rules: vec![],
@@ -2838,16 +2976,13 @@ allow = ["db"]
         config.expand("src");
         assert_eq!(config.zones.len(), 6);
         assert_eq!(config.rules.len(), 6);
-        // app can import everything below
         let app_rule = config.rules.iter().find(|r| r.from == "app").unwrap();
         assert_eq!(
             app_rule.allow,
             vec!["pages", "widgets", "features", "entities", "shared"]
         );
-        // shared imports nothing
         let shared_rule = config.rules.iter().find(|r| r.from == "shared").unwrap();
         assert!(shared_rule.allow.is_empty());
-        // entities → shared only
         let ent_rule = config.rules.iter().find(|r| r.from == "entities").unwrap();
         assert_eq!(ent_rule.allow, vec!["shared"]);
     }
@@ -2855,6 +2990,8 @@ allow = ["db"]
     #[test]
     fn expand_bulletproof_produces_four_zones() {
         let mut config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: Some(BoundaryPreset::Bulletproof),
             zones: vec![],
             rules: vec![],
@@ -2866,7 +3003,6 @@ allow = ["db"]
         assert_eq!(config.zones[1].name, "features");
         assert_eq!(config.zones[2].name, "shared");
         assert_eq!(config.zones[3].name, "server");
-        // shared zone has multiple patterns
         assert!(config.zones[2].patterns.len() > 1);
         assert!(
             config.zones[2]
@@ -2889,31 +3025,28 @@ allow = ["db"]
     #[test]
     fn expand_bulletproof_rules_correct() {
         let mut config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: Some(BoundaryPreset::Bulletproof),
             zones: vec![],
             rules: vec![],
         };
         config.expand("src");
-        // app → features, shared, server
         let app_rule = config.rules.iter().find(|r| r.from == "app").unwrap();
         assert_eq!(app_rule.allow, vec!["features", "shared", "server"]);
-        // features → shared, server
         let feat_rule = config.rules.iter().find(|r| r.from == "features").unwrap();
         assert_eq!(feat_rule.allow, vec!["shared", "server"]);
-        // server → shared
         let srv_rule = config.rules.iter().find(|r| r.from == "server").unwrap();
         assert_eq!(srv_rule.allow, vec!["shared"]);
-        // shared → nothing (isolated)
         let shared_rule = config.rules.iter().find(|r| r.from == "shared").unwrap();
         assert!(shared_rule.allow.is_empty());
     }
 
     #[test]
     fn expand_bulletproof_then_resolve_classifies() {
-        // `expand()` alone (without `expand_auto_discover`) does not produce
-        // the per-feature child zones yet, but the parent `features` fallback
-        // still classifies top-level and nested `src/features/...` files.
         let mut config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: Some(BoundaryPreset::Bulletproof),
             zones: vec![],
             rules: vec![],
@@ -2941,7 +3074,6 @@ allow = ["db"]
             resolved.classify_zone("src/server/db/schema/users.ts"),
             Some("server")
         );
-        // features cannot import shared directly — only via allowed rules
         assert!(resolved.is_import_allowed("features", "shared"));
         assert!(resolved.is_import_allowed("features", "server"));
         assert!(!resolved.is_import_allowed("features", "app"));
@@ -2949,11 +3081,7 @@ allow = ["db"]
         assert!(!resolved.is_import_allowed("server", "features"));
     }
 
-    /// Regression for the bulletproof barrel pattern: a top-level
-    /// `src/features/index.ts` barrel re-exporting child features must NOT
-    /// trigger `features → features/<child>` boundary violations. The parent
-    /// fallback rule allows discovered children while generated child rules
-    /// still enforce sibling isolation.
+    /// Bulletproof barrels should not violate child boundaries.
     #[test]
     fn bulletproof_features_barrel_can_import_children() {
         let temp = tempfile::tempdir().unwrap();
@@ -2961,6 +3089,8 @@ allow = ["db"]
         std::fs::create_dir_all(temp.path().join("src/features/billing")).unwrap();
 
         let mut config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: Some(BoundaryPreset::Bulletproof),
             zones: vec![],
             rules: vec![],
@@ -2969,13 +3099,11 @@ allow = ["db"]
         config.expand_auto_discover(temp.path());
         let resolved = config.resolve();
 
-        // Top-level barrel inside src/features falls back to the parent zone.
         assert_eq!(
             resolved.classify_zone("src/features/index.ts"),
             Some("features"),
             "src/features/index.ts barrel should classify as the parent features zone"
         );
-        // Discovered child zones still classify normally.
         assert_eq!(
             resolved.classify_zone("src/features/auth/login.ts"),
             Some("features/auth")
@@ -2984,16 +3112,16 @@ allow = ["db"]
             resolved.classify_zone("src/features/billing/invoice.ts"),
             Some("features/billing")
         );
-        // Parent barrels can re-export child features.
         assert!(resolved.is_import_allowed("features", "features/auth"));
         assert!(resolved.is_import_allowed("features", "features/billing"));
-        // Sibling-feature import is still a cross-zone violation.
         assert!(!resolved.is_import_allowed("features/auth", "features/billing"));
     }
 
     #[test]
     fn expand_uses_custom_source_root() {
         let mut config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: Some(BoundaryPreset::Hexagonal),
             zones: vec![],
             rules: vec![],
@@ -3003,11 +3131,11 @@ allow = ["db"]
         assert_eq!(config.zones[2].patterns, vec!["lib/domain/**"]);
     }
 
-    // ── Preset merge behavior ──────────────────────────────────
-
     #[test]
     fn user_zone_replaces_preset_zone() {
         let mut config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: Some(BoundaryPreset::Hexagonal),
             zones: vec![BoundaryZone {
                 name: "domain".to_string(),
@@ -3018,7 +3146,6 @@ allow = ["db"]
             rules: vec![],
         };
         config.expand("src");
-        // 3 zones total: adapters + ports from preset, domain from user
         assert_eq!(config.zones.len(), 3);
         let domain = config.zones.iter().find(|z| z.name == "domain").unwrap();
         assert_eq!(domain.patterns, vec!["src/core/**"]);
@@ -3027,6 +3154,8 @@ allow = ["db"]
     #[test]
     fn user_zone_adds_to_preset() {
         let mut config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: Some(BoundaryPreset::Hexagonal),
             zones: vec![BoundaryZone {
                 name: "shared".to_string(),
@@ -3037,13 +3166,15 @@ allow = ["db"]
             rules: vec![],
         };
         config.expand("src");
-        assert_eq!(config.zones.len(), 4); // 3 preset + 1 user
+        assert_eq!(config.zones.len(), 4);
         assert!(config.zones.iter().any(|z| z.name == "shared"));
     }
 
     #[test]
     fn user_rule_replaces_preset_rule() {
         let mut config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: Some(BoundaryPreset::Hexagonal),
             zones: vec![],
             rules: vec![BoundaryRule {
@@ -3054,9 +3185,7 @@ allow = ["db"]
         };
         config.expand("src");
         let adapter_rule = config.rules.iter().find(|r| r.from == "adapters").unwrap();
-        // User rule allows both ports and domain (preset only allowed ports)
         assert_eq!(adapter_rule.allow, vec!["ports", "domain"]);
-        // Other preset rules untouched
         assert_eq!(
             config.rules.iter().filter(|r| r.from == "adapters").count(),
             1
@@ -3066,6 +3195,8 @@ allow = ["db"]
     #[test]
     fn expand_without_preset_is_noop() {
         let mut config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
@@ -3083,6 +3214,8 @@ allow = ["db"]
     #[test]
     fn expand_then_validate_succeeds() {
         let mut config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: Some(BoundaryPreset::Layered),
             zones: vec![],
             rules: vec![],
@@ -3094,6 +3227,8 @@ allow = ["db"]
     #[test]
     fn expand_then_resolve_classifies() {
         let mut config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: Some(BoundaryPreset::Hexagonal),
             zones: vec![],
             rules: vec![],
@@ -3112,6 +3247,8 @@ allow = ["db"]
     #[test]
     fn preset_name_returns_correct_string() {
         let config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: Some(BoundaryPreset::FeatureSliced),
             zones: vec![],
             rules: vec![],
@@ -3132,6 +3269,8 @@ allow = ["db"]
         ];
         for (preset, expected_name) in cases {
             let config = BoundaryConfig {
+                coverage: BoundaryCoverageConfig::default(),
+                calls: BoundaryCallsConfig::default(),
                 preset: Some(preset),
                 zones: vec![],
                 rules: vec![],
@@ -3144,8 +3283,6 @@ allow = ["db"]
         }
     }
 
-    // ── ResolvedBoundaryConfig::is_empty ────────────────────────────
-
     #[test]
     fn resolved_boundary_config_empty() {
         let resolved = ResolvedBoundaryConfig::default();
@@ -3155,6 +3292,8 @@ allow = ["db"]
     #[test]
     fn resolved_boundary_config_with_zones_not_empty() {
         let config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
@@ -3170,12 +3309,6 @@ allow = ["db"]
 
     #[test]
     fn resolved_boundary_config_with_only_logical_groups_not_empty() {
-        // Regression for issue #373 smoke: a config whose every autoDiscover
-        // zone produced zero children ends up with empty `zones[]` but a
-        // populated `logical_groups[]`. The boundaries section must still
-        // surface so `plow list --boundaries` can render the Empty /
-        // InvalidPath status (otherwise the whole block silently disappears
-        // and the user has no signal that discovery turned up nothing).
         let resolved = ResolvedBoundaryConfig {
             zones: vec![],
             rules: vec![],
@@ -3191,17 +3324,17 @@ allow = ["db"]
                 original_zone_root: None,
                 child_source_indices: vec![],
             }],
+            coverage: ResolvedBoundaryCoverageConfig::default(),
+            calls_forbidden_by_zone: rustc_hash::FxHashMap::default(),
         };
         assert!(!resolved.is_empty());
     }
 
-    // ── BoundaryConfig::is_empty edge cases ─────────────────────────
-
     #[test]
     fn boundary_config_with_only_rules_is_empty() {
-        // Having rules but no zones/preset is still "empty" since rules without zones
-        // cannot produce boundary violations.
         let config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![],
             rules: vec![BoundaryRule {
@@ -3216,6 +3349,8 @@ allow = ["db"]
     #[test]
     fn boundary_config_with_zones_not_empty() {
         let config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
@@ -3228,11 +3363,11 @@ allow = ["db"]
         assert!(!config.is_empty());
     }
 
-    // ── Multiple zone patterns ──────────────────────────────────────
-
     #[test]
     fn zone_with_multiple_patterns_matches_any() {
         let config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
@@ -3259,11 +3394,11 @@ allow = ["db"]
         assert_eq!(resolved.classify_zone("src/utils/helpers.ts"), None);
     }
 
-    // ── validate_zone_references with multiple errors ───────────────
-
     #[test]
     fn validate_zone_references_multiple_errors() {
         let config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
@@ -3285,16 +3420,14 @@ allow = ["db"]
             ],
         };
         let errors = config.validate_zone_references();
-        // Rule 0: invalid "from" + invalid "allow" = 2 errors
-        // Rule 1: valid "from", invalid "allow" = 1 error
         assert_eq!(errors.len(), 3);
     }
-
-    // ── Preset expansion with custom source root ────────────────────
 
     #[test]
     fn expand_feature_sliced_with_custom_root() {
         let mut config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: Some(BoundaryPreset::FeatureSliced),
             zones: vec![],
             rules: vec![],
@@ -3304,11 +3437,11 @@ allow = ["db"]
         assert_eq!(config.zones[5].patterns, vec!["lib/shared/**"]);
     }
 
-    // ── is_import_allowed for zone not in rules (unrestricted) ──────
-
     #[test]
     fn zone_not_in_rules_is_unrestricted() {
         let config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![
                 BoundaryZone {
@@ -3337,17 +3470,12 @@ allow = ["db"]
             }],
         };
         let resolved = config.resolve();
-        // "a" is restricted: can import from "b" but not "c"
         assert!(resolved.is_import_allowed("a", "b"));
         assert!(!resolved.is_import_allowed("a", "c"));
-        // "b" has no rule entry: unrestricted
         assert!(resolved.is_import_allowed("b", "a"));
         assert!(resolved.is_import_allowed("b", "c"));
-        // "c" has no rule entry: unrestricted
         assert!(resolved.is_import_allowed("c", "a"));
     }
-
-    // ── Preset serialization/deserialization roundtrip ───────────────
 
     #[test]
     fn boundary_preset_json_roundtrip() {
@@ -3371,16 +3499,12 @@ allow = ["db"]
         assert_eq!(config.preset, Some(BoundaryPreset::Bulletproof));
     }
 
-    // ── Zone with invalid glob ──────────────────────────────────────
-
     #[test]
     #[should_panic(expected = "validated at config load time")]
     fn resolve_panics_on_unvalidated_invalid_zone_glob() {
-        // Per issue #463, boundaries.zones[].patterns are validated by
-        // PlowConfig::load before reaching resolve(). A program that
-        // constructs a config in-code with an invalid pattern has skipped
-        // that validation; resolve() asserts the invariant by panicking.
         let config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
             preset: None,
             zones: vec![BoundaryZone {
                 name: "broken".to_string(),

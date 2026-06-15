@@ -11,7 +11,7 @@ expression: redact_sarif_version(&json_str)
         "driver": {
           "name": "plow",
           "version": "[VERSION]",
-          "informationUri": "https://github.com/plow-rs/plow",
+          "informationUri": "https://github.com/fglogan/genesis-plow",
           "rules": [
             {
               "id": "plow/unused-file",
@@ -157,6 +157,19 @@ expression: redact_sarif_version(&json_str)
               }
             },
             {
+              "id": "plow/unused-store-member",
+              "shortDescription": {
+                "text": "Store member is never accessed by any consumer"
+              },
+              "fullDescription": {
+                "text": "Pinia store members (a `state` / `getters` / `actions` key, or a setup-store returned key) declared but never accessed by any consumer project-wide. The store binding is imported (so the module is reachable) yet a specific member is dead. Defaults to warn, not error: a store has an open declaration surface (plugins, dynamic dispatch) so confidence is lower. Activates only when pinia or @pinia/nuxt is a declared dependency."
+              },
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#unused-store-members",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
               "id": "plow/unresolved-import",
               "shortDescription": {
                 "text": "Import could not be resolved"
@@ -232,6 +245,175 @@ expression: redact_sarif_version(&json_str)
               "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#boundary-violations",
               "defaultConfiguration": {
                 "level": "error"
+              }
+            },
+            {
+              "id": "plow/boundary-coverage",
+              "shortDescription": {
+                "text": "Source file matches no configured architecture boundary zone"
+              },
+              "fullDescription": {
+                "text": "A reachable source file is not assigned to any configured boundary zone while boundaries.coverage.requireAllFiles is enabled. Add the file to a zone pattern, move it under an existing zone, or allow-list generated and intentionally unzoned paths with boundaries.coverage.allowUnmatched."
+              },
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#boundary-violations",
+              "defaultConfiguration": {
+                "level": "error"
+              }
+            },
+            {
+              "id": "plow/boundary-call-violation",
+              "shortDescription": {
+                "text": "Zoned file calls a callee its zone forbids"
+              },
+              "fullDescription": {
+                "text": "A file classified into a boundary zone calls a callee matching one of the zone's boundaries.calls.forbidden patterns. The check is syntactic: it matches the written callee path and the import-resolved canonical path, and it only applies to files classified into a zone. Move the call behind an allowed abstraction, or adjust the zone's forbidden patterns if the rule was wrong."
+              },
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#boundary-violations",
+              "defaultConfiguration": {
+                "level": "error"
+              }
+            },
+            {
+              "id": "plow/policy-violation",
+              "shortDescription": {
+                "text": "Banned call or import matched a rule-pack rule"
+              },
+              "fullDescription": {
+                "text": "A call site or import matched a banned-call or banned-import rule from a configured rule pack (the rulePacks config key). Packs are pure declarative data; the check is syntactic and does not follow aliased or re-bound callees, and import matching uses the raw specifier. Replace the banned usage per the rule's message, scope the rule with files/exclude globs, or adjust its severity."
+              },
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#policy-violations",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "plow/invalid-client-export",
+              "shortDescription": {
+                "text": "\"use client\" file exports a server-only / route-config name"
+              },
+              "fullDescription": {
+                "text": "A file carrying the `\"use client\"` directive also exports a Next.js server-only or route-segment config name (such as `metadata`, `generateMetadata`, `revalidate`, `generateStaticParams`, or a route HTTP method like `GET`/`POST`). Next.js rejects this combination at build time. Move the server-only export to a non-client module (a server component, a `route.ts`, or a separate config file), or remove the `\"use client\"` directive if the module does not need to be a client boundary. The check runs only when the project declares `next`."
+              },
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#invalid-client-exports",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "plow/mixed-client-server-barrel",
+              "shortDescription": {
+                "text": "Barrel re-exports both a \"use client\" module and a server-only module"
+              },
+              "fullDescription": {
+                "text": "A barrel file (a module whose exports are `export ... from` re-exports) forwards a name from a `\"use client\"` module alongside a name from a server-only module (one carrying `\"use server\"`, importing the `server-only` package, or importing a server-only Next.js API such as `next/headers`). Importing one name from such a barrel drags the other's directive context across the React Server Components boundary, the documented Next.js App Router footgun. Type-only re-exports are ignored (erased at build), and a barrel re-exporting a client module alongside an ordinary undirected utility does NOT flag. To fix: split the barrel so client and server-only modules are re-exported from separate entry points. The check runs only when the project declares `next`."
+              },
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#mixed-client-server-barrels",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "plow/misplaced-directive",
+              "shortDescription": {
+                "text": "\"use client\" / \"use server\" directive is not in the leading position and is ignored"
+              },
+              "fullDescription": {
+                "text": "A `\"use client\"` or `\"use server\"` directive string appears as an expression statement after a non-directive statement (an `import`, a `const`). React Server Components bundlers only honor a directive in the leading prologue, before any other statement; once any statement precedes it the string is parsed as an ordinary expression and SILENTLY IGNORED. The intended client/server boundary never takes effect, so the file is treated as a server module. To fix: move the directive to the very top of the file, above every import. The check runs only when the project declares `next`."
+              },
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#misplaced-directives",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "plow/unprovided-inject",
+              "shortDescription": {
+                "text": "inject() / getContext() reads a key that no provide() / setContext() supplies"
+              },
+              "fullDescription": {
+                "text": "A Vue `inject(KEY)` or Svelte `getContext(KEY)` reads a dependency-injection key (an imported or module-local symbol) that no matching `provide(KEY)` / `setContext(KEY)` supplies anywhere in the project. The read resolves to undefined at runtime, surfaced only at render. To fix: add a matching provider for the key, or remove the dead inject. Defaults to warn, not error: a provider may live outside the analyzed graph (an app-level provide registered elsewhere, a plugin, a host application). String-literal keys and keys imported from a package are abstained."
+              },
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#unprovided-injects",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "plow/unrendered-component",
+              "shortDescription": {
+                "text": "A Vue / Svelte component is reachable through a barrel but rendered nowhere"
+              },
+              "fullDescription": {
+                "text": "A Vue or Svelte single-file component (the default export of a `.vue` / `.svelte` file) is reachable in the module graph (a barrel re-exports it) but instantiated NOWHERE in the project: no `<Tag>`, no `:is` / `this=` binding, no `components` / `app.component` registration, no `h()` / auto-import use, and no script value-read. It survives unused-file (the barrel keeps it reachable) and unused-export (the re-export counts as a use), yet no file actually renders it. To fix: render the component somewhere, or delete it and drop the dead re-export. Defaults to warn, not error: a component can be rendered reflectively (a dynamic `<component :is>` resolved from a non-literal value), so analyzer confidence is lower. Components that are themselves entry points (route pages, layouts, `App.vue`) and components re-exported from a non-private package entry point are abstained."
+              },
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#unrendered-components",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "plow/unused-component-prop",
+              "shortDescription": {
+                "text": "A Vue <script setup> defineProps prop is referenced nowhere in its own component"
+              },
+              "fullDescription": {
+                "text": "A Vue `<script setup>` defineProps declared prop that is referenced nowhere in its own component (neither script nor template). vue-tsc / Volar check caller-side prop correctness, not this in-component dead-input direction. Conservative: abstains on `$attrs` fallthrough, whole-object props use, defineExpose, defineModel, and imported prop-type aliases. Default warn; suppress or remove the prop."
+              },
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#unused-component-props",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "plow/unused-component-emit",
+              "shortDescription": {
+                "text": "A Vue <script setup> defineEmits event is emitted nowhere in its own component"
+              },
+              "fullDescription": {
+                "text": "A Vue `<script setup>` defineEmits declared event that is emitted nowhere in its own component (no `emit('<name>')` call). vue-tsc / Volar check caller-side emit correctness, not this in-component dead-output direction. Conservative: abstains on `$attrs` fallthrough, whole-object emit use, defineExpose, defineModel, and imported emit-type aliases. Default warn; suppress or remove the emit."
+              },
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#unused-component-emits",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "plow/unused-server-action",
+              "shortDescription": {
+                "text": "A Next.js Server Action exported from a \"use server\" file is referenced by no code in the project"
+              },
+              "fullDescription": {
+                "text": "A Next.js Server Action (an export of a `\"use server\"` file) that no code in the project references: no import-and-call, no `action={fn}` JSX binding, no `<form action={fn}>`. This is the cross-graph \"declared but zero consumers\" direction, reclassified out of `unused-export` for `\"use server\"` files so the finding carries the action-specific signal. eslint-plugin-next is single-file and cannot see cross-file usage. It does NOT mean the endpoint is unreachable: Next.js still registers a generated action id, so it stays POST-able; it means no project code references it (likely forgotten or dead, and a candidate for removal to shrink surface area). Default warn; wire the action to a consumer or remove it. The check runs only when the project declares `next`."
+              },
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#unused-server-actions",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "plow/route-collision",
+              "shortDescription": {
+                "text": "Two or more Next.js App Router route files resolve to the same URL"
+              },
+              "fullDescription": {
+                "text": "Two or more App Router route files (a `page` or a `route` handler) resolve to the SAME URL within one app-root. Route groups `(name)` and parallel slots `@name` do not change the URL, so `app/(marketing)/about/page.tsx` and `app/(shop)/about/page.tsx` both own `/about`. Next.js fails the build (\"You cannot have two parallel pages that resolve to the same path\") because a URL can have at most one owner, whether a Page or a Route Handler. plow surfaces every colliding file at once; the build error names only one. Buckets are scoped per app-root (per workspace package), so a monorepo with several independent Next apps sharing a path is not flagged. Files under a private `_folder` or an intercepting marker `(.)`/`(..)`/`(...)` are excluded. There is no safe auto-fix: move or merge one of the files so each URL has a single owner. The check runs only when the project declares `next`."
+              },
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#route-collisions",
+              "defaultConfiguration": {
+                "level": "error"
+              }
+            },
+            {
+              "id": "plow/dynamic-segment-name-conflict",
+              "shortDescription": {
+                "text": "Sibling Next.js dynamic route segments use different slug names at the same position"
+              },
+              "fullDescription": {
+                "text": "Two or more sibling dynamic route segments at the same App Router tree position use different param spellings (`[id]` vs `[slug]`, or a catch-all `[...x]` vs an optional catch-all `[[...x]]`). Next.js throws \"You cannot use different slug names for the same dynamic path\" at dev and production runtime when the position is hit, because one position must resolve to a single param name. `next build` does NOT catch this (the build succeeds), so CI passes while the route crashes on its first request; plow's static catch closes that gap. Route groups are transparent to the position and parallel slots fork it, so only genuinely-sibling segments conflict. To fix: rename the dynamic segments at the position to one consistent slug name. The check runs only when the project declares `next`."
+              },
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#dynamic-segment-name-conflicts",
+              "defaultConfiguration": {
+                "level": "warning"
               }
             },
             {

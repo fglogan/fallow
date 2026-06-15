@@ -1,15 +1,17 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "tests and benches use unwrap and expect to keep fixture setup concise"
+)]
+
 #[path = "common/mod.rs"]
 mod common;
 
 use std::fmt::Write as _;
 use std::process::Command;
 
-use common::{CommandOutput, plow_bin, parse_json, run_plow, run_plow_raw};
+use common::{CommandOutput, parse_json, plow_bin, run_plow, run_plow_raw};
 use tempfile::TempDir;
-
-// ---------------------------------------------------------------------------
-// --production mode
-// ---------------------------------------------------------------------------
 
 #[test]
 fn production_mode_check_exits_successfully() {
@@ -301,10 +303,6 @@ fn audit_accepts_production_health_flag() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// --workspace scoping
-// ---------------------------------------------------------------------------
-
 #[test]
 fn workspace_scoping_limits_output_to_package() {
     let output = run_plow(
@@ -320,7 +318,6 @@ fn workspace_scoping_limits_output_to_package() {
     );
     let json = parse_json(&output);
 
-    // All reported file paths should be within packages/shared/
     for file in json["unused_files"].as_array().unwrap_or(&Vec::new()) {
         let path = file["path"]
             .as_str()
@@ -356,18 +353,12 @@ fn workspace_scoping_on_nonexistent_package() {
             "--quiet",
         ],
     );
-    // Should either exit 0 with no issues (package not found = nothing scoped)
-    // or exit 2 (invalid workspace). Both are acceptable.
     assert!(
         output.code == 0 || output.code == 2,
         "nonexistent workspace should exit 0 or 2, got {}",
         output.code
     );
 }
-
-// ---------------------------------------------------------------------------
-// --regression-baseline round-trip
-// ---------------------------------------------------------------------------
 
 #[test]
 fn regression_baseline_round_trip() {
@@ -376,7 +367,6 @@ fn regression_baseline_round_trip() {
     let _ = std::fs::create_dir_all(&dir);
     let baseline_path = dir.join("regression.json");
 
-    // Save regression baseline
     let output = run_plow(
         "check",
         "basic-project",
@@ -397,10 +387,6 @@ fn regression_baseline_round_trip() {
         "--save-regression-baseline should create file"
     );
 
-    // Run with --fail-on-regression against same project — counts unchanged
-    // Note: exit code 1 is still possible because check exits 1 on error-severity issues.
-    // --fail-on-regression only adds an ADDITIONAL exit-1 if counts increased.
-    // The important thing is it doesn't exit 2 (crash) and the regression check passes.
     let output = run_plow(
         "check",
         "basic-project",

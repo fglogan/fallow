@@ -1,3 +1,9 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "tests and benches use unwrap and expect to keep fixture setup concise"
+)]
+
 mod common;
 
 use std::io::{Read, Write};
@@ -6,7 +12,7 @@ use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use common::{plow_bin, parse_json};
+use common::{parse_json, plow_bin};
 
 #[derive(Clone)]
 struct MockResponse {

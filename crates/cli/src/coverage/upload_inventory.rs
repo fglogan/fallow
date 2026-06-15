@@ -19,11 +19,13 @@ use std::fmt::{self, Write as _};
 use std::path::Path;
 use std::process::{Command, ExitCode};
 
+use globset::{Glob, GlobSet, GlobSetBuilder};
 use plow_config::{PlowConfig, ResolvedConfig};
 use plow_core::extract::inventory::{InventoryEntry, walk_source};
 use plow_core::git_env::clear_ambient_git_env;
-use fallow_cov_protocol::{FunctionIdentity, IdentityResolution, function_identity_id};
-use globset::{Glob, GlobSet, GlobSetBuilder};
+use plow_cov_protocol::{
+    FunctionIdentity, IdentityResolution, function_identity_id as protocol_function_identity_id,
+};
 use rustc_hash::FxHashSet;
 use serde::{Deserialize, Serialize};
 
@@ -39,6 +41,14 @@ use crate::api::{
 /// Matches the pattern `plow license:` / `plow coverage setup:` established
 /// by sibling commands so CI log parsers can anchor on it.
 const LOG_PREFIX: &str = "plow coverage upload-inventory";
+
+fn function_identity_id(file: &str, name: &str, start_line: u32) -> String {
+    let stable_id = protocol_function_identity_id(file, name, start_line);
+    match stable_id.strip_prefix("fallow:") {
+        Some(rest) => format!("plow:{rest}"),
+        None => stable_id,
+    }
+}
 
 /// Server-enforced cap on inventory size. Mirrors `INVENTORY_MAX_FUNCTIONS` in
 /// `plow-cloud/src/services/inventory.ts`. Validated client-side so users
@@ -99,8 +109,6 @@ pub struct UploadInventoryArgs {
     pub ignore_upload_errors: bool,
 }
 
-// Manual `Debug` so `tracing::debug!(?args)` / `dbg!(args)` / unwrap-on-Err
-// formatting cannot bleed the API key into stderr.
 impl fmt::Debug for UploadInventoryArgs {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("UploadInventoryArgs")
@@ -159,10 +167,6 @@ impl UploadError {
             "error".red().bold()
         };
         eprintln!("{LOG_PREFIX}: {severity}: {body}");
-        // Validation, payload, and auth errors are always fatal; the user
-        // needs to fix their inputs or credentials. The
-        // --ignore-upload-errors opt-out only applies to transient transport
-        // and server failures.
         if soft_fail {
             eprintln!("  -> --ignore-upload-errors set, continuing with exit 0");
             return ExitCode::SUCCESS;
@@ -224,8 +228,6 @@ fn run_inner(args: &UploadInventoryArgs, root: &Path) -> Result<(), UploadError>
         &payload,
     )
 }
-
-// ── Project ID resolution ────────────────────────────────────────────
 
 fn resolve_project_id(args: &UploadInventoryArgs, root: &Path) -> Result<String, UploadError> {
     if let Some(explicit) = args.project_id.as_deref() {
@@ -292,13 +294,11 @@ fn git_origin_project_id(root: &Path) -> Option<String> {
 /// (`git@github.com:owner/repo(.git)?`), and `ssh://` / `git://` variants.
 fn parse_git_remote_to_project_id(url: &str) -> Option<String> {
     let stripped_suffix = url.trim().trim_end_matches(".git");
-    // Shape 1: `git@host:owner/repo`
     if let Some((_, path)) = stripped_suffix.split_once(':')
         && let Some(project_id) = take_last_two_segments(path)
     {
         return Some(project_id);
     }
-    // Shape 2: `scheme://host/owner/repo`
     if let Some(path_part) = stripped_suffix.split("://").nth(1)
         && let Some((_, tail)) = path_part.split_once('/')
         && let Some(project_id) = take_last_two_segments(tail)
@@ -317,8 +317,6 @@ fn take_last_two_segments(path: &str) -> Option<String> {
     let owner = parts.pop()?;
     Some(format!("{owner}/{repo}"))
 }
-
-// ── Git SHA resolution ───────────────────────────────────────────────
 
 fn resolve_git_sha(args: &UploadInventoryArgs, root: &Path) -> Result<String, UploadError> {
     let sha = if let Some(explicit) = args.git_sha.as_deref() {
@@ -390,8 +388,6 @@ fn dirty_worktree(root: &Path) -> bool {
     }
     output.stdout.iter().any(|b| !b.is_ascii_whitespace())
 }
-
-// ── Config + discovery ───────────────────────────────────────────────
 
 fn load_resolved_config(root: &Path) -> Result<ResolvedConfig, UploadError> {
     let user_config = match PlowConfig::find_and_load(root) {
@@ -504,11 +500,6 @@ fn normalize_path_prefix(raw: Option<&str>) -> Result<Option<String>, UploadErro
             "--path-prefix '{trimmed}' contains backslashes. Use POSIX separators (forward slashes) even on Windows, because the runtime beacon emits POSIX paths."
         )));
     }
-    // Leading slash requirement: runtime paths are always absolute inside
-    // containers (V8 reports `/app/src/*`, `/workspace/src/*`). A
-    // relative-looking prefix (`app`) would silently join to
-    // `app/src/foo.ts` and miss every runtime row. Keep the guard strict
-    // so typos surface immediately.
     if !trimmed.starts_with('/') {
         return Err(UploadError::Validation(format!(
             "--path-prefix '{trimmed}' must start with '/'. Runtime paths are absolute inside containers; a relative prefix won't match. Example: --path-prefix /app"
@@ -518,9 +509,6 @@ fn normalize_path_prefix(raw: Option<&str>) -> Result<Option<String>, UploadErro
 }
 
 fn extension_supported(path: &Path) -> bool {
-    // Skip TypeScript declaration files. Their "functions" are ambient type
-    // signatures, not runtime code - including them would make every signature
-    // appear as `untracked` in the dashboard.
     if is_typescript_declaration(path) {
         return false;
     }
@@ -553,12 +541,8 @@ fn exclude_matcher_matches(matcher: &GlobSet, rel_path: &Path) -> bool {
 }
 
 fn to_posix_string(path: &Path) -> String {
-    // Windows walker paths carry `\` separators; the server and the beacon
-    // both key on POSIX slashes, so normalize before sending.
     path.to_string_lossy().replace('\\', "/")
 }
-
-// ── Payload + HTTP ───────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize)]
 struct InventoryFunction {
@@ -592,11 +576,6 @@ impl InventoryFunction {
             start_column: Some(entry.start_column),
             end_line: Some(entry.end_line),
             end_column: Some(entry.end_column),
-            // Content digest of the function's full-span source slice, computed
-            // by the inventory walker. Optional cross-producer tiebreaker that
-            // lets runtime-coverage baselines survive line moves; excluded from
-            // `stable_id`. Resolution stays `Resolved` because byte-accurate
-            // UTF-16 columns satisfy that contract independently of `source_hash`.
             source_hash: Some(entry.source_hash.clone()),
             resolution: IdentityResolution::Resolved,
             stable_id,
@@ -688,6 +667,10 @@ fn endpoint_url(override_endpoint: Option<&str>, project_id: &str) -> String {
 /// Project IDs can be bare (`plow-cloud-api`) or slash-scoped
 /// (`acme/widgets`), but the server receives them as a single percent-encoded
 /// segment under `/v1/coverage/{repo}/inventory`, so `/` must be encoded too.
+#[expect(
+    clippy::expect_used,
+    reason = "formatting percent-encoded bytes into String is infallible"
+)]
 fn url_encode_path_segment(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for byte in value.bytes() {
@@ -712,8 +695,6 @@ fn url_encode_path_segment(value: &str) -> String {
 /// rolls up lazy-parsed functions.
 fn print_overlap_warning_if_needed(overlap: &PathOverlap) {
     if overlap.sampled == 0 {
-        // No runtime data for this SHA yet. The success message already
-        // tells the user to wait for the beacon; don't add noise here.
         return;
     }
     if overlap.matched.saturating_mul(2) >= overlap.sampled {
@@ -747,8 +728,6 @@ fn upload(
     payload: &InventoryRequest<'_>,
 ) -> Result<(), UploadError> {
     let url = endpoint_url(endpoint_override, project_id);
-    // Informational progress output goes to stdout alongside the dry-run
-    // summary for symmetry. Only errors and warnings use stderr.
     println!(
         "{LOG_PREFIX}: uploading {} functions for {project_id} @ {}",
         format_count(payload.functions.len()),
@@ -778,11 +757,6 @@ fn upload(
             format_count(func_count),
             format_bytes(data.data.blob_size),
         );
-        // Intentional wording: the Untracked filter needs BOTH the static
-        // inventory (this upload) AND runtime coverage from the beacon for
-        // the same SHA. Users who upload first on a new SHA will see a
-        // "waiting for runtime data" state; do not promise immediate results
-        // or the first-run UX looks broken.
         println!(
             "  -> Inventory stored. The Untracked filter lights up once runtime coverage arrives for this SHA. Dashboard: https://plow.cloud/{project_id}"
         );
@@ -792,10 +766,6 @@ fn upload(
         return Ok(());
     }
 
-    // Parse the body once so we can dispatch by the machine-readable `code`
-    // field and also render a human-friendly message. We deliberately do NOT
-    // route through `http_status_message`; it collapses code + message into
-    // one formatted string, which forces callers to string-scan to classify.
     let body = response.read_to_string().unwrap_or_default();
     let envelope = parse_error_envelope(&body);
     let code = envelope.code();
@@ -861,8 +831,6 @@ fn format_bytes(bytes: u64) -> String {
         format!("{bytes} B")
     }
 }
-
-// ── Dry-run output ───────────────────────────────────────────────────
 
 fn print_dry_run_summary(
     project_id: &str,
@@ -938,8 +906,6 @@ mod tests {
 
     #[test]
     fn upload_inventory_args_debug_masks_api_key() {
-        // Future `tracing::debug!(?args)` or `dbg!(args)` calls must not leak
-        // the bearer token through stderr.
         let args = UploadInventoryArgs {
             api_key: Some("plow_live_secret_token_value".to_owned()),
             api_endpoint: Some("https://api.plow.cloud".to_owned()),
@@ -955,7 +921,6 @@ mod tests {
             formatted.contains("api_key: Some(\"***\")"),
             "expected explicit redaction marker, got: {formatted}"
         );
-        // None case must remain distinguishable from "set but redacted".
         let bare = UploadInventoryArgs::default();
         let formatted_bare = format!("{bare:?}");
         assert!(
@@ -967,8 +932,8 @@ mod tests {
     #[test]
     fn parse_git_remote_https_with_dot_git() {
         assert_eq!(
-            parse_git_remote_to_project_id("https://github.com/plow-rs/plow.git"),
-            Some("plow-rs/plow".to_owned())
+            parse_git_remote_to_project_id("https://github.com/fglogan/genesis-plow.git"),
+            Some("fglogan/genesis-plow".to_owned())
         );
     }
 
@@ -983,24 +948,21 @@ mod tests {
     #[test]
     fn parse_git_remote_ssh_colon_shape() {
         assert_eq!(
-            parse_git_remote_to_project_id("git@github.com:plow-rs/plow.git"),
-            Some("plow-rs/plow".to_owned())
+            parse_git_remote_to_project_id("git@github.com:fglogan/genesis-plow.git"),
+            Some("fglogan/genesis-plow".to_owned())
         );
     }
 
     #[test]
     fn parse_git_remote_ssh_scheme_shape() {
         assert_eq!(
-            parse_git_remote_to_project_id("ssh://git@github.com/plow-rs/plow.git"),
-            Some("plow-rs/plow".to_owned())
+            parse_git_remote_to_project_id("ssh://git@github.com/fglogan/genesis-plow.git"),
+            Some("fglogan/genesis-plow".to_owned())
         );
     }
 
     #[test]
     fn parse_git_remote_nested_group_uses_last_two_segments() {
-        // GitLab supports nested groups. Auto-detection keeps the familiar
-        // trailing `owner/repo` pair; repos that want the full namespace can
-        // pass --project-id explicitly.
         assert_eq!(
             parse_git_remote_to_project_id("https://gitlab.com/acme/team/widgets.git"),
             Some("team/widgets".to_owned())
@@ -1015,13 +977,11 @@ mod tests {
 
     #[test]
     fn validate_project_id_accepts_owner_repo() {
-        assert!(validate_project_id("plow-rs/plow").is_ok());
+        assert!(validate_project_id("fglogan/genesis-plow").is_ok());
     }
 
     #[test]
     fn validate_project_id_accepts_bare_name() {
-        // Dogfood projects use bare repo names (`plow-cloud-api`), not
-        // `owner/repo`. Both shapes are legitimate on the server side.
         assert!(validate_project_id("plow-cloud-api").is_ok());
     }
 
@@ -1039,8 +999,8 @@ mod tests {
     #[test]
     fn url_encode_path_segment_preserves_safe_chars() {
         assert_eq!(
-            url_encode_path_segment("plow-rs/plow"),
-            "plow-rs%2Fplow"
+            url_encode_path_segment("fglogan/genesis-plow"),
+            "fglogan%2Fgenesis-plow"
         );
     }
 
@@ -1065,6 +1025,43 @@ mod tests {
     fn display_endpoint_url_uses_override_when_provided() {
         let url = display_endpoint_url(Some("http://127.0.0.1:3000/"), "a/b");
         assert_eq!(url, "http://127.0.0.1:3000/v1/coverage/a/b/inventory");
+    }
+
+    #[test]
+    fn resolve_api_key_trims_explicit_value() {
+        let args = UploadInventoryArgs {
+            api_key: Some("  plow_key_123  ".to_owned()),
+            ..UploadInventoryArgs::default()
+        };
+
+        assert_eq!(resolve_api_key(&args).unwrap(), "plow_key_123");
+    }
+
+    #[test]
+    fn compile_exclude_matcher_rejects_invalid_glob() {
+        let err = compile_exclude_matcher(&["[".to_owned()])
+            .expect_err("invalid glob should be reported as validation");
+
+        let UploadError::Validation(message) = err else {
+            panic!("expected validation error, got {err:?}");
+        };
+        assert!(message.contains("invalid --exclude-paths"));
+    }
+
+    #[test]
+    fn collect_inventory_applies_path_prefix_and_excludes() {
+        let project = project_with_one_function();
+        let config = load_resolved_config(project.path()).unwrap();
+        let include_all = compile_exclude_matcher(&[]).unwrap();
+
+        let functions = collect_inventory(&config, &include_all, Some("/app"));
+
+        assert_eq!(functions.len(), 1);
+        assert_eq!(functions[0].file_path, "/app/src/index.ts");
+        assert_eq!(functions[0].identity.file, "src/index.ts");
+
+        let exclude_src = compile_exclude_matcher(&["src/**".to_owned()]).unwrap();
+        assert!(collect_inventory(&config, &exclude_src, Some("/app")).is_empty());
     }
 
     #[test]
@@ -1199,8 +1196,6 @@ mod tests {
 
     #[test]
     fn extension_supported_still_accepts_non_declaration_ts() {
-        // Regression guard: the .d.ts skip must not accidentally reject
-        // files whose names contain ".d." but are not declarations.
         for name in ["vite.config.ts", "file.weird.d.name.ts"] {
             let path = PathBuf::from(name);
             assert!(extension_supported(&path), "{name} should still be walked");
@@ -1337,6 +1332,7 @@ mod tests {
     fn create_dirty_git_repo() -> TempDir {
         let dir = tempfile::tempdir().expect("create temp repo");
         run_git(dir.path(), &["init", "-q"]);
+        run_git(dir.path(), &["config", "commit.gpgsign", "false"]);
         run_git(dir.path(), &["config", "user.email", "review@example.com"]);
         run_git(dir.path(), &["config", "user.name", "Reviewer"]);
         std::fs::write(dir.path().join("a.js"), "function committed() {}\n")
@@ -1373,11 +1369,6 @@ mod tests {
 
     #[test]
     fn identity_stable_id_is_repo_relative_not_prefixed() {
-        // The legacy filePath carries the container prefix; the identity must
-        // be computed over the repo-relative path so it matches the protocol's
-        // project-root-relative contract AND plow's own consumer-side
-        // identity. Hashing the prefixed path here would silently break the
-        // cross-surface join.
         let func =
             InventoryFunction::from_entry("/app/src/render.tsx", "src/render.tsx", sample_entry());
         assert_eq!(func.file_path, "/app/src/render.tsx");
@@ -1390,8 +1381,6 @@ mod tests {
 
     #[test]
     fn identity_stable_id_unchanged_by_path_prefix() {
-        // With and without --path-prefix, the identity (and stable_id) stay
-        // pinned to the repo-relative path; only filePath moves.
         let with_prefix =
             InventoryFunction::from_entry("/app/src/render.tsx", "src/render.tsx", sample_entry());
         let without_prefix =
@@ -1406,11 +1395,9 @@ mod tests {
 
     #[test]
     fn identity_matches_protocol_conformance_fixture() {
-        // Pin the cross-producer join key to the protocol's anchor fixture so
-        // a divergent helper change is caught in plow CI, not at join time.
         assert_eq!(
             function_identity_id("src/render.tsx", "render", 42),
-            "fallow:fn:cb4482d6aef7c79a"
+            "plow:fn:cb4482d6aef7c79a"
         );
     }
 
@@ -1424,6 +1411,119 @@ mod tests {
         assert_eq!(
             func.identity.source_hash.as_deref(),
             Some("0123456789abcdef")
+        );
+    }
+
+    fn project_with_one_function() -> TempDir {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("package.json"), r#"{"name":"inv"}"#).unwrap();
+        std::fs::write(
+            root.join("src/index.ts"),
+            "export function boot() {\n  return 1;\n}\n",
+        )
+        .unwrap();
+        dir
+    }
+
+    fn dry_run_args() -> UploadInventoryArgs {
+        UploadInventoryArgs {
+            project_id: Some("acme/web".to_owned()),
+            git_sha: Some("abcdef1".to_owned()),
+            api_endpoint: Some("http://localhost:3000".to_owned()),
+            allow_dirty: true,
+            dry_run: true,
+            ..UploadInventoryArgs::default()
+        }
+    }
+
+    #[test]
+    fn run_dry_run_emits_inventory_and_exits_zero() {
+        let project = project_with_one_function();
+        // Explicit project_id + git_sha keep this env- and git-free.
+        let code = run(&dry_run_args(), project.path());
+        assert_eq!(code, ExitCode::SUCCESS);
+    }
+
+    #[test]
+    fn run_with_no_functions_is_a_validation_exit() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("package.json"), r#"{"name":"inv"}"#).unwrap();
+        // Only a declaration file: the walker intentionally skips `*.d.ts`, so
+        // the inventory is empty and run_inner returns a validation error.
+        std::fs::write(
+            root.join("src/types.d.ts"),
+            "export declare const x: number;\n",
+        )
+        .unwrap();
+        let code = run(&dry_run_args(), root);
+        assert_eq!(code, ExitCode::from(EXIT_VALIDATION));
+    }
+
+    #[test]
+    fn into_exit_maps_variants_and_soft_fails_transient_when_opted_in() {
+        // Hard-fail mapping (no soft-fail opt-in).
+        assert_eq!(
+            UploadError::Validation("v".to_owned()).into_exit(false),
+            ExitCode::from(EXIT_VALIDATION)
+        );
+        assert_eq!(
+            UploadError::PayloadTooLarge("p".to_owned()).into_exit(false),
+            ExitCode::from(EXIT_PAYLOAD_TOO_LARGE)
+        );
+        assert_eq!(
+            UploadError::AuthRejected("a".to_owned()).into_exit(false),
+            ExitCode::from(EXIT_AUTH_REJECTED)
+        );
+        assert_eq!(
+            UploadError::ServerError("s".to_owned()).into_exit(false),
+            ExitCode::from(EXIT_SERVER_ERROR)
+        );
+        assert_eq!(
+            UploadError::Network("n".to_owned()).into_exit(false),
+            ExitCode::from(NETWORK_EXIT_CODE)
+        );
+
+        // With --ignore-upload-errors, only transient (server/network) failures
+        // downgrade to exit 0; auth rejection stays fatal.
+        assert_eq!(
+            UploadError::ServerError("s".to_owned()).into_exit(true),
+            ExitCode::SUCCESS
+        );
+        assert_eq!(
+            UploadError::Network("n".to_owned()).into_exit(true),
+            ExitCode::SUCCESS
+        );
+        assert_eq!(
+            UploadError::AuthRejected("a".to_owned()).into_exit(true),
+            ExitCode::from(EXIT_AUTH_REJECTED)
+        );
+    }
+
+    #[test]
+    fn resolve_git_sha_validates_explicit_value() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        let with_sha = |sha: &str| UploadInventoryArgs {
+            git_sha: Some(sha.to_owned()),
+            ..UploadInventoryArgs::default()
+        };
+
+        assert_eq!(
+            resolve_git_sha(&with_sha("abcdef1"), root).unwrap(),
+            "abcdef1"
+        );
+        assert!(resolve_git_sha(&with_sha(""), root).is_err(), "empty sha");
+        assert!(
+            resolve_git_sha(&with_sha(&"a".repeat(GIT_SHA_MAX_LEN + 1)), root).is_err(),
+            "over-length sha"
+        );
+        assert!(
+            resolve_git_sha(&with_sha("bad sha!"), root).is_err(),
+            "illegal characters"
         );
     }
 }

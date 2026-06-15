@@ -1,5 +1,5 @@
 {
-  "$schema": "https://raw.githubusercontent.com/plow-rs/plow/main/schema.json",
+  "$schema": "https://raw.githubusercontent.com/fglogan/genesis-plow/main/schema.json",
   "ignorePatterns": [
     "tests/fixtures/**",
     "tests/conformance/fixtures/**",

@@ -1,16 +1,16 @@
 //! Metric and rule definitions for explainable CLI output.
 //!
 //! Provides structured metadata that describes what each metric, threshold,
-//! and rule means — consumed by the `_meta` object in JSON output and by
+//! and rule means, consumed by the `_meta` object in JSON output and by
 //! SARIF `fullDescription` / `helpUri` fields.
 
+use std::collections::BTreeMap;
 use std::process::ExitCode;
 
 use colored::Colorize;
 use plow_config::OutputFormat;
+use plow_types::envelope::{Meta, MetaRule};
 use serde_json::{Value, json};
-
-// ── Docs base URL ────────────────────────────────────────────────
 
 const DOCS_BASE: &str = "https://docs.genesis-plow.dev";
 
@@ -24,12 +24,14 @@ pub const HEALTH_DOCS: &str = "https://docs.genesis-plow.dev/cli/health";
 pub const DUPES_DOCS: &str = "https://docs.genesis-plow.dev/cli/dupes";
 
 /// Docs URL for the runtime coverage setup command's agent-readable JSON.
-pub const COVERAGE_SETUP_DOCS: &str = "https://docs.genesis-plow.dev/cli/coverage#agent-readable-json";
+pub const COVERAGE_SETUP_DOCS: &str =
+    "https://docs.genesis-plow.dev/cli/coverage#agent-readable-json";
 
 /// Docs URL for `plow coverage analyze --format json --explain`.
 pub const COVERAGE_ANALYZE_DOCS: &str = "https://docs.genesis-plow.dev/cli/coverage#analyze";
 
-// ── Shared field definitions ────────────────────────────────────
+/// Docs URL for the security command.
+pub const SECURITY_DOCS: &str = "https://docs.genesis-plow.dev/cli/security";
 
 /// `_meta` description for the per-finding `actions[]` array shared across
 /// `check`, `health`, and `dupes` JSON output.
@@ -40,8 +42,6 @@ const ACTIONS_FIELD_DEFINITION: &str = "Per-finding fix and suppression suggesti
 /// per-instance flips so agents know to branch on the field value of EACH
 /// finding's action, not on the action `type` alone.
 const ACTIONS_AUTO_FIXABLE_FIELD_DEFINITION: &str = "Evaluated PER FINDING, not per action type. The same `type` may carry `auto_fixable: true` on one finding and `auto_fixable: false` on another when per-instance guards in the `plow fix` applier discriminate. Filter on this bool of each individual action, not on `type` alone. Current per-instance flips: (1) `remove-catalog-entry` is `true` only when the finding's `hardcoded_consumers` array is empty (else plow fix skips the entry to avoid breaking `pnpm install`); (2) the primary dependency action flips between `remove-dependency` (`auto_fixable: true`) and `move-dependency` (`auto_fixable: false`) based on `used_in_workspaces`; (3) `add-to-config` for `ignoreExports` is `true` when plow fix can safely apply the action, which means EITHER a plow config file already exists OR no config exists and the working directory is NOT inside a monorepo subpackage (the applier then creates `.plowrc.json` using `plow init`'s framework-aware scaffolding and layers the new rules on top); `false` inside a monorepo subpackage with no workspace-root config because the applier refuses to fragment per-package configs; (4) `update-catalog-reference` is always `false` today (catalog-switching applier not yet wired). All `suppress-line` and `suppress-file` actions are uniformly `false`.";
-
-// ── Check rules ─────────────────────────────────────────────────
 
 /// Rule definition for SARIF `fullDescription` and JSON `_meta`.
 pub struct RuleDef {
@@ -149,6 +149,14 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#unused-class-members",
     },
     RuleDef {
+        id: "plow/unused-store-member",
+        category: "Dead code",
+        name: "Unused Store Members",
+        short: "Store member is never accessed by any consumer",
+        full: "Pinia store members (a `state` / `getters` / `actions` key, or a setup-store returned key) declared but never accessed by any consumer project-wide. The store binding is imported (so the module is reachable) yet a specific member is dead. Defaults to warn, not error: a store has an open declaration surface (plugins, dynamic dispatch) so confidence is lower. Activates only when pinia or @pinia/nuxt is a declared dependency.",
+        docs_path: "explanations/dead-code#unused-store-members",
+    },
+    RuleDef {
         id: "plow/unresolved-import",
         category: "Dead code",
         name: "Unresolved Imports",
@@ -195,6 +203,30 @@ pub const CHECK_RULES: &[RuleDef] = &[
         short: "Import crosses a configured architecture boundary",
         full: "A module imports from a zone that its configured boundary rules do not allow. Boundary checks help keep layered architecture, feature slices, and package ownership rules enforceable.",
         docs_path: "explanations/dead-code#boundary-violations",
+    },
+    RuleDef {
+        id: "plow/boundary-coverage",
+        category: "Architecture",
+        name: "Boundary Coverage",
+        short: "Source file matches no configured architecture boundary zone",
+        full: "A reachable source file is not assigned to any configured boundary zone while boundaries.coverage.requireAllFiles is enabled. Add the file to a zone pattern, move it under an existing zone, or allow-list generated and intentionally unzoned paths with boundaries.coverage.allowUnmatched.",
+        docs_path: "explanations/dead-code#boundary-violations",
+    },
+    RuleDef {
+        id: "plow/boundary-call-violation",
+        category: "Architecture",
+        name: "Boundary Call Violation",
+        short: "Zoned file calls a callee its zone forbids",
+        full: "A file classified into a boundary zone calls a callee matching one of the zone's boundaries.calls.forbidden patterns. The check is syntactic: it matches the written callee path and the import-resolved canonical path, and it only applies to files classified into a zone. Move the call behind an allowed abstraction, or adjust the zone's forbidden patterns if the rule was wrong.",
+        docs_path: "explanations/dead-code#boundary-violations",
+    },
+    RuleDef {
+        id: "plow/policy-violation",
+        category: "Policy",
+        name: "Policy Violation",
+        short: "Banned call or import matched a rule-pack rule",
+        full: "A call site or import matched a banned-call or banned-import rule from a configured rule pack (the rulePacks config key). Packs are pure declarative data; the check is syntactic and does not follow aliased or re-bound callees, and import matching uses the raw specifier. Replace the banned usage per the rule's message, scope the rule with files/exclude globs, or adjust its severity.",
+        docs_path: "explanations/dead-code#policy-violations",
     },
     RuleDef {
         id: "plow/stale-suppression",
@@ -244,6 +276,86 @@ pub const CHECK_RULES: &[RuleDef] = &[
         full: "An entry in `pnpm-workspace.yaml`'s `overrides:` or `package.json`'s `pnpm.overrides` whose key or value does not parse as a valid pnpm override spec. Common shapes: empty key, empty value, malformed version selector on the target (`@types/react@<<18`), unbalanced parent matcher (`react>`), or unsupported `npm:alias@` syntax in the version (only the `-`, `$ref`, and `npm:alias` pnpm idioms are allowed). pnpm rejects the workspace at install time with a parser error. To fix: correct the key/value shape, or remove the entry. See also: plow/unused-dependency-override.",
         docs_path: "explanations/dead-code#misconfigured-dependency-overrides",
     },
+    RuleDef {
+        id: "plow/invalid-client-export",
+        category: "Policy",
+        name: "Invalid client export",
+        short: "\"use client\" file exports a server-only / route-config name",
+        full: "A file carrying the `\"use client\"` directive also exports a Next.js server-only or route-segment config name (such as `metadata`, `generateMetadata`, `revalidate`, `generateStaticParams`, or a route HTTP method like `GET`/`POST`). Next.js rejects this combination at build time. Move the server-only export to a non-client module (a server component, a `route.ts`, or a separate config file), or remove the `\"use client\"` directive if the module does not need to be a client boundary. The check runs only when the project declares `next`.",
+        docs_path: "explanations/dead-code#invalid-client-exports",
+    },
+    RuleDef {
+        id: "plow/mixed-client-server-barrel",
+        category: "Policy",
+        name: "Mixed client/server barrel",
+        short: "Barrel re-exports both a \"use client\" module and a server-only module",
+        full: "A barrel file (a module whose exports are `export ... from` re-exports) forwards a name from a `\"use client\"` module alongside a name from a server-only module (one carrying `\"use server\"`, importing the `server-only` package, or importing a server-only Next.js API such as `next/headers`). Importing one name from such a barrel drags the other's directive context across the React Server Components boundary, the documented Next.js App Router footgun. Type-only re-exports are ignored (erased at build), and a barrel re-exporting a client module alongside an ordinary undirected utility does NOT flag. To fix: split the barrel so client and server-only modules are re-exported from separate entry points. The check runs only when the project declares `next`.",
+        docs_path: "explanations/dead-code#mixed-client-server-barrels",
+    },
+    RuleDef {
+        id: "plow/misplaced-directive",
+        category: "Policy",
+        name: "Misplaced directive",
+        short: "\"use client\" / \"use server\" directive is not in the leading position and is ignored",
+        full: "A `\"use client\"` or `\"use server\"` directive string appears as an expression statement after a non-directive statement (an `import`, a `const`). React Server Components bundlers only honor a directive in the leading prologue, before any other statement; once any statement precedes it the string is parsed as an ordinary expression and SILENTLY IGNORED. The intended client/server boundary never takes effect, so the file is treated as a server module. To fix: move the directive to the very top of the file, above every import. The check runs only when the project declares `next`.",
+        docs_path: "explanations/dead-code#misplaced-directives",
+    },
+    RuleDef {
+        id: "plow/unprovided-inject",
+        category: "Dead code",
+        name: "Unprovided injects",
+        short: "inject() / getContext() reads a key that no provide() / setContext() supplies",
+        full: "A Vue `inject(KEY)` or Svelte `getContext(KEY)` reads a dependency-injection key (an imported or module-local symbol) that no matching `provide(KEY)` / `setContext(KEY)` supplies anywhere in the project. The read resolves to undefined at runtime, surfaced only at render. To fix: add a matching provider for the key, or remove the dead inject. Defaults to warn, not error: a provider may live outside the analyzed graph (an app-level provide registered elsewhere, a plugin, a host application). String-literal keys and keys imported from a package are abstained.",
+        docs_path: "explanations/dead-code#unprovided-injects",
+    },
+    RuleDef {
+        id: "plow/unrendered-component",
+        category: "Dead code",
+        name: "Unrendered components",
+        short: "A Vue / Svelte component is reachable through a barrel but rendered nowhere",
+        full: "A Vue or Svelte single-file component (the default export of a `.vue` / `.svelte` file) is reachable in the module graph (a barrel re-exports it) but instantiated NOWHERE in the project: no `<Tag>`, no `:is` / `this=` binding, no `components` / `app.component` registration, no `h()` / auto-import use, and no script value-read. It survives unused-file (the barrel keeps it reachable) and unused-export (the re-export counts as a use), yet no file actually renders it. To fix: render the component somewhere, or delete it and drop the dead re-export. Defaults to warn, not error: a component can be rendered reflectively (a dynamic `<component :is>` resolved from a non-literal value), so analyzer confidence is lower. Components that are themselves entry points (route pages, layouts, `App.vue`) and components re-exported from a non-private package entry point are abstained.",
+        docs_path: "explanations/dead-code#unrendered-components",
+    },
+    RuleDef {
+        id: "plow/unused-component-prop",
+        category: "Dead code",
+        name: "Unused component props",
+        short: "A Vue <script setup> defineProps prop is referenced nowhere in its own component",
+        full: "A Vue `<script setup>` defineProps declared prop that is referenced nowhere in its own component (neither script nor template). vue-tsc / Volar check caller-side prop correctness, not this in-component dead-input direction. Conservative: abstains on `$attrs` fallthrough, whole-object props use, defineExpose, defineModel, and imported prop-type aliases. Default warn; suppress or remove the prop.",
+        docs_path: "explanations/dead-code#unused-component-props",
+    },
+    RuleDef {
+        id: "plow/unused-component-emit",
+        category: "Dead code",
+        name: "Unused component emits",
+        short: "A Vue <script setup> defineEmits event is emitted nowhere in its own component",
+        full: "A Vue `<script setup>` defineEmits declared event that is emitted nowhere in its own component (no `emit('<name>')` call). vue-tsc / Volar check caller-side emit correctness, not this in-component dead-output direction. Conservative: abstains on `$attrs` fallthrough, whole-object emit use, defineExpose, defineModel, and imported emit-type aliases. Default warn; suppress or remove the emit.",
+        docs_path: "explanations/dead-code#unused-component-emits",
+    },
+    RuleDef {
+        id: "plow/unused-server-action",
+        category: "Dead code",
+        name: "Unused server actions",
+        short: "A Next.js Server Action exported from a \"use server\" file is referenced by no code in the project",
+        full: "A Next.js Server Action (an export of a `\"use server\"` file) that no code in the project references: no import-and-call, no `action={fn}` JSX binding, no `<form action={fn}>`. This is the cross-graph \"declared but zero consumers\" direction, reclassified out of `unused-export` for `\"use server\"` files so the finding carries the action-specific signal. eslint-plugin-next is single-file and cannot see cross-file usage. It does NOT mean the endpoint is unreachable: Next.js still registers a generated action id, so it stays POST-able; it means no project code references it (likely forgotten or dead, and a candidate for removal to shrink surface area). Default warn; wire the action to a consumer or remove it. The check runs only when the project declares `next`.",
+        docs_path: "explanations/dead-code#unused-server-actions",
+    },
+    RuleDef {
+        id: "plow/route-collision",
+        category: "Policy",
+        name: "Route collision",
+        short: "Two or more Next.js App Router route files resolve to the same URL",
+        full: "Two or more App Router route files (a `page` or a `route` handler) resolve to the SAME URL within one app-root. Route groups `(name)` and parallel slots `@name` do not change the URL, so `app/(marketing)/about/page.tsx` and `app/(shop)/about/page.tsx` both own `/about`. Next.js fails the build (\"You cannot have two parallel pages that resolve to the same path\") because a URL can have at most one owner, whether a Page or a Route Handler. plow surfaces every colliding file at once; the build error names only one. Buckets are scoped per app-root (per workspace package), so a monorepo with several independent Next apps sharing a path is not flagged. Files under a private `_folder` or an intercepting marker `(.)`/`(..)`/`(...)` are excluded. There is no safe auto-fix: move or merge one of the files so each URL has a single owner. The check runs only when the project declares `next`.",
+        docs_path: "explanations/dead-code#route-collisions",
+    },
+    RuleDef {
+        id: "plow/dynamic-segment-name-conflict",
+        category: "Policy",
+        name: "Dynamic segment name conflict",
+        short: "Sibling Next.js dynamic route segments use different slug names at the same position",
+        full: "Two or more sibling dynamic route segments at the same App Router tree position use different param spellings (`[id]` vs `[slug]`, or a catch-all `[...x]` vs an optional catch-all `[[...x]]`). Next.js throws \"You cannot use different slug names for the same dynamic path\" at dev and production runtime when the position is hit, because one position must resolve to a single param name. `next build` does NOT catch this (the build succeeds), so CI passes while the route crashes on its first request; plow's static catch closes that gap. Route groups are transparent to the position and parallel slots fork it, so only genuinely-sibling segments conflict. To fix: rename the dynamic segments at the position to one consistent slug name. The check runs only when the project declares `next`.",
+        docs_path: "explanations/dead-code#dynamic-segment-name-conflicts",
+    },
 ];
 
 /// Look up a rule definition by its SARIF rule ID across all rule sets.
@@ -253,6 +365,8 @@ pub fn rule_by_id(id: &str) -> Option<&'static RuleDef> {
         .iter()
         .chain(HEALTH_RULES.iter())
         .chain(DUPES_RULES.iter())
+        .chain(FLAGS_RULES.iter())
+        .chain(SECURITY_RULES.iter())
         .find(|r| r.id == id)
 }
 
@@ -292,7 +406,47 @@ pub fn rule_by_token(token: &str) -> Option<&'static RuleDef> {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join("-");
-    let alias = match normalized.as_str() {
+    let alias = dead_code_alias_id(&normalized)
+        .or_else(|| catalog_alias_id(&normalized))
+        .or_else(|| health_alias_id(&normalized))
+        .or_else(|| security_alias_id(&normalized));
+    if let Some(id) = alias
+        && let Some(rule) = rule_by_id(id)
+    {
+        return Some(rule);
+    }
+    let security_token = normalized.strip_prefix("security-").unwrap_or(&normalized);
+    let security_id = format!("security/{security_token}");
+    if let Some(rule) = rule_by_id(&security_id) {
+        return Some(rule);
+    }
+    let singular = normalized
+        .strip_suffix('s')
+        .filter(|_| normalized != "unused-class")
+        .unwrap_or(&normalized);
+    let singular_security_token = singular.strip_prefix("security-").unwrap_or(singular);
+    let singular_security_id = format!("security/{singular_security_token}");
+    if let Some(rule) = rule_by_id(&singular_security_id) {
+        return Some(rule);
+    }
+    let id = format!("plow/{singular}");
+    rule_by_id(&id).or_else(|| {
+        CHECK_RULES
+            .iter()
+            .chain(HEALTH_RULES.iter())
+            .chain(DUPES_RULES.iter())
+            .chain(FLAGS_RULES.iter())
+            .chain(SECURITY_RULES.iter())
+            .find(|rule| {
+                rule.docs_path.ends_with(&normalized)
+                    || rule.docs_path.ends_with(singular)
+                    || rule.name.eq_ignore_ascii_case(trimmed)
+            })
+    })
+}
+
+fn dead_code_alias_id(normalized: &str) -> Option<&'static str> {
+    match normalized {
         "unused-files" => Some("plow/unused-file"),
         "unused-exports" => Some("plow/unused-export"),
         "unused-types" => Some("plow/unused-type"),
@@ -306,12 +460,27 @@ pub fn rule_by_token(token: &str) -> Option<&'static RuleDef> {
         "test-only-deps" | "test-only-dependencies" => Some("plow/test-only-dependency"),
         "unused-enum-members" => Some("plow/unused-enum-member"),
         "unused-class-members" => Some("plow/unused-class-member"),
+        "unused-store-members" => Some("plow/unused-store-member"),
+        "unprovided-injects" | "unprovided-inject" => Some("plow/unprovided-inject"),
+        "unrendered-components" | "unrendered-component" => Some("plow/unrendered-component"),
+        "unused-component-props" | "unused-component-prop" => Some("plow/unused-component-prop"),
+        "unused-component-emits" | "unused-component-emit" => Some("plow/unused-component-emit"),
+        "unused-server-actions" | "unused-server-action" => Some("plow/unused-server-action"),
         "unresolved-imports" => Some("plow/unresolved-import"),
         "unlisted-deps" | "unlisted-dependencies" => Some("plow/unlisted-dependency"),
         "duplicate-exports" => Some("plow/duplicate-export"),
         "circular-deps" | "circular-dependencies" => Some("plow/circular-dependency"),
         "boundary-violations" => Some("plow/boundary-violation"),
+        "boundary-coverage" | "boundary-coverage-violations" => Some("plow/boundary-coverage"),
+        "boundary-calls" | "boundary-call-violations" => Some("plow/boundary-call-violation"),
+        "policy-violation" | "policy-violations" => Some("plow/policy-violation"),
         "stale-suppressions" => Some("plow/stale-suppression"),
+        _ => None,
+    }
+}
+
+fn catalog_alias_id(normalized: &str) -> Option<&'static str> {
+    match normalized {
         "unused-catalog-entries" | "unused-catalog-entry" | "catalog" => {
             Some("plow/unused-catalog-entry")
         }
@@ -329,6 +498,12 @@ pub fn rule_by_token(token: &str) -> Option<&'static RuleDef> {
         | "misconfigured-dependency-override"
         | "misconfigured-override"
         | "misconfigured-overrides" => Some("plow/misconfigured-dependency-override"),
+        _ => None,
+    }
+}
+
+fn health_alias_id(normalized: &str) -> Option<&'static str> {
+    match normalized {
         "complexity" | "high-complexity" => Some("plow/high-complexity"),
         "cyclomatic" | "high-cyclomatic" | "high-cyclomatic-complexity" => {
             Some("plow/high-cyclomatic-complexity")
@@ -338,35 +513,46 @@ pub fn rule_by_token(token: &str) -> Option<&'static RuleDef> {
         }
         "crap" | "high-crap" | "high-crap-score" => Some("plow/high-crap-score"),
         "duplication" | "dupes" | "code-duplication" => Some("plow/code-duplication"),
+        "feature-flag" | "feature-flags" | "flags" => Some("plow/feature-flag"),
         _ => None,
-    };
-    if let Some(id) = alias
-        && let Some(rule) = rule_by_id(id)
-    {
-        return Some(rule);
     }
-    let singular = normalized
-        .strip_suffix('s')
-        .filter(|_| normalized != "unused-class")
-        .unwrap_or(&normalized);
-    let id = format!("plow/{singular}");
-    rule_by_id(&id).or_else(|| {
-        CHECK_RULES
-            .iter()
-            .chain(HEALTH_RULES.iter())
-            .chain(DUPES_RULES.iter())
-            .find(|rule| {
-                rule.docs_path.ends_with(&normalized)
-                    || rule.docs_path.ends_with(singular)
-                    || rule.name.eq_ignore_ascii_case(trimmed)
-            })
-    })
+}
+
+fn security_alias_id(normalized: &str) -> Option<&'static str> {
+    match normalized {
+        "security"
+        | "security-candidate"
+        | "security-candidates"
+        | "tainted-sink"
+        | "tainted-sinks"
+        | "security-sink"
+        | "security-sinks" => Some("security/tainted-sink"),
+        "client-server-leak"
+        | "client-server-leaks"
+        | "security-client-server-leak"
+        | "security-client-server-leaks" => Some("security/client-server-leak"),
+        "hardcoded-secret" | "hardcoded-secrets" | "hard-coded-secret" | "hard-coded-secrets" => {
+            Some("security/hardcoded-secret")
+        }
+        _ => None,
+    }
 }
 
 /// Return worked-example and fix guidance for a rule.
 #[must_use]
 pub fn rule_guide(rule: &RuleDef) -> RuleGuide {
-    match rule.id {
+    source_dead_code_rule_guide(rule.id)
+        .or_else(|| member_import_rule_guide(rule.id))
+        .or_else(|| architecture_rule_guide(rule.id))
+        .or_else(|| catalog_rule_guide(rule.id))
+        .or_else(|| health_runtime_rule_guide(rule.id))
+        .or_else(|| duplication_rule_guide(rule.id))
+        .or_else(|| security_rule_guide(rule.id))
+        .unwrap_or_else(fallback_rule_guide)
+}
+
+fn source_dead_code_rule_guide(id: &str) -> Option<RuleGuide> {
+    Some(match id {
         "plow/unused-file" => RuleGuide {
             example: "src/old-widget.ts is not imported by any entry point, route, script, or config file.",
             how_to_fix: "Delete the file if it is genuinely dead. If a framework loads it implicitly, add the right plugin/config pattern or mark it in alwaysUsed.",
@@ -397,6 +583,12 @@ pub fn rule_guide(rule: &RuleDef) -> RuleGuide {
             example: "vitest is listed in dependencies, but only test files import it.",
             how_to_fix: "Move the package to devDependencies unless production code imports it at runtime.",
         },
+        _ => return None,
+    })
+}
+
+fn member_import_rule_guide(id: &str) -> Option<RuleGuide> {
+    Some(match id {
         "plow/unused-enum-member" => RuleGuide {
             example: "Status.Legacy remains in an exported enum, but no code reads that member.",
             how_to_fix: "Remove the member after checking serialized/API compatibility, or suppress it with a reason when external data still uses it.",
@@ -404,6 +596,30 @@ pub fn rule_guide(rule: &RuleDef) -> RuleGuide {
         "plow/unused-class-member" => RuleGuide {
             example: "class Parser has a public parseLegacy method that is never called in the project.",
             how_to_fix: "Remove or privatize the member. For reflection/framework lifecycle hooks, configure or suppress the intentional entry point.",
+        },
+        "plow/unused-store-member" => RuleGuide {
+            example: "useCartStore declares a discountTotal getter that no component, composable, or other store ever reads.",
+            how_to_fix: "Remove the unused state property, getter, or action. If it is consumed reflectively (a Pinia plugin, $onAction, or dynamic dispatch), suppress the line with // plow-ignore-next-line unused-store-member.",
+        },
+        "plow/unprovided-inject" => RuleGuide {
+            example: "A component calls inject(ThemeKey) (Vue) or getContext(ThemeKey) (Svelte) with an imported symbol key, but no provide(ThemeKey) / setContext(ThemeKey) exists anywhere in the project.",
+            how_to_fix: "Add a matching provide() / setContext() for the key, or remove the dead inject() / getContext(). If a provider lives outside the analyzed graph (an app-level provide registered elsewhere, a plugin, a host app), suppress the line with // plow-ignore-next-line unprovided-inject.",
+        },
+        "plow/unrendered-component" => RuleGuide {
+            example: "components/Orphan.vue is re-exported from a barrel (export { default as Orphan } from './Orphan.vue') but no template, registration, h() call, or dynamic import ever renders it.",
+            how_to_fix: "Render the component where it belongs, or delete it and remove the dead barrel re-export. If it is rendered reflectively (a dynamic <component :is> from a non-literal value), suppress the line with // plow-ignore-next-line unrendered-component.",
+        },
+        "plow/unused-component-prop" => RuleGuide {
+            example: "Widget.vue declares defineProps<{ size: string }>() but `size` is referenced nowhere in the component's script or template.",
+            how_to_fix: "Remove the unused prop, or reference it in the script / template. If the prop is part of a deliberately-stable public component API, suppress the line with // plow-ignore-next-line unused-component-prop.",
+        },
+        "plow/unused-component-emit" => RuleGuide {
+            example: "Widget.vue declares defineEmits<{ close: [] }>() but `emit('close')` is called nowhere in the component's script.",
+            how_to_fix: "Remove the unused emit, or emit it in the script. If the emit is part of a deliberately-stable public component API, suppress the line with // plow-ignore-next-line unused-component-emit.",
+        },
+        "plow/unused-server-action" => RuleGuide {
+            example: "app/actions.ts has \"use server\" and exports submitForm, but no component imports it, binds it via action={submitForm}, or uses it in <form action={submitForm}>.",
+            how_to_fix: "Wire the action to a consumer (an import-and-call, an action={fn} binding, or a <form action={fn}>), or remove it. If it is invoked reflectively (an action registry dispatching by id, or a non-JS caller), suppress the line with // plow-ignore-next-line unused-server-action.",
         },
         "plow/unresolved-import" => RuleGuide {
             example: "src/app.ts imports ./routes/admin, but no matching file exists after extension and index resolution.",
@@ -417,6 +633,12 @@ pub fn rule_guide(rule: &RuleDef) -> RuleGuide {
             example: "Button is exported from both src/ui/button.ts and src/components/button.ts.",
             how_to_fix: "Rename or consolidate the exports so consumers have one intentional import target.",
         },
+        _ => return None,
+    })
+}
+
+fn architecture_rule_guide(id: &str) -> Option<RuleGuide> {
+    Some(match id {
         "plow/circular-dependency" => RuleGuide {
             example: "src/a.ts imports src/b.ts, and src/b.ts imports src/a.ts.",
             how_to_fix: "Extract shared code to a third module, invert the dependency, or split initialization-time side effects from type-only contracts.",
@@ -425,10 +647,28 @@ pub fn rule_guide(rule: &RuleDef) -> RuleGuide {
             example: "features/billing imports app/admin even though the configured boundary only allows imports from shared and entities.",
             how_to_fix: "Move the shared contract to an allowed zone, invert the dependency, or update the boundary config only if the architecture rule was wrong.",
         },
+        "plow/boundary-coverage" => RuleGuide {
+            example: "src/generated/client.ts is reachable but does not match any boundaries.zones[].patterns entry.",
+            how_to_fix: "Add the file to the intended zone pattern, move it under a zoned directory, or add a generated-file glob to boundaries.coverage.allowUnmatched.",
+        },
+        "plow/boundary-call-violation" => RuleGuide {
+            example: "src/domain/policy.ts calls execSync from node:child_process while boundaries.calls.forbidden bans child_process.* from the domain zone.",
+            how_to_fix: "Move the call into a zone that may perform the effect, route it through an allowed abstraction, or narrow the forbidden pattern if the rule was wrong. To suppress, use the boundary family token: `// plow-ignore-next-line boundary-violation` governs import, coverage, and call findings alike (the rule-id-shaped `boundary-call-violation` is accepted as an alias).",
+        },
+        "plow/policy-violation" => RuleGuide {
+            example: "src/app.ts imports moment while a rule pack bans the moment specifier with the message 'Use date-fns.'",
+            how_to_fix: "Replace the banned call or import with the alternative named in the rule's message. To waive one rule, use `// plow-ignore-next-line policy-violation:<pack>/<rule-id>` or the file-level form. Use bare `policy-violation` only when you intend to suppress every rule-pack finding at that scope.",
+        },
         "plow/stale-suppression" => RuleGuide {
             example: "// plow-ignore-next-line unused-export remains above an export that is now used.",
             how_to_fix: "Remove the suppression. If a different issue is still intentional, replace it with a current, specific suppression.",
         },
+        _ => return None,
+    })
+}
+
+fn catalog_rule_guide(id: &str) -> Option<RuleGuide> {
+    Some(match id {
         "plow/unused-catalog-entry" => RuleGuide {
             example: "pnpm-workspace.yaml declares `catalog: { is-even: ^1.0.0 }`, but no workspace package.json declares `\"is-even\": \"catalog:\"`.",
             how_to_fix: "Delete the entry from pnpm-workspace.yaml. If any consumer uses a hardcoded version (surfaced in `hardcoded_consumers`), switch that consumer to `catalog:` first to keep versions aligned.",
@@ -449,6 +689,12 @@ pub fn rule_guide(rule: &RuleDef) -> RuleGuide {
             example: "pnpm-workspace.yaml declares `overrides: { \"@types/react@<<18\": \"18.0.0\" }`. The doubled `<<` is not a valid pnpm version selector and pnpm will reject the workspace at install time.",
             how_to_fix: "Fix the key/value to match pnpm's override grammar: bare names (`axios`), scoped names (`@types/react`), targets with version selectors (`@types/react@<18`), parent matchers (`react>react-dom`), and parent chains with selectors on either side. Allowed value idioms: bare version range, `-` (delete), `$ref`, and `npm:alias`. If the entry was experimental, remove it.",
         },
+        _ => return None,
+    })
+}
+
+fn health_runtime_rule_guide(id: &str) -> Option<RuleGuide> {
+    Some(match id {
         "plow/high-cyclomatic-complexity"
         | "plow/high-cognitive-complexity"
         | "plow/high-complexity" => RuleGuide {
@@ -475,14 +721,46 @@ pub fn rule_guide(rule: &RuleDef) -> RuleGuide {
             example: "Runtime coverage shows a function was never called, barely called, or could not be matched during the capture window.",
             how_to_fix: "Treat high-confidence cold static-dead code as delete candidates. For advisory or unavailable coverage, inspect seasonality, workers, source maps, and capture quality first.",
         },
+        _ => return None,
+    })
+}
+
+fn duplication_rule_guide(id: &str) -> Option<RuleGuide> {
+    Some(match id {
         "plow/code-duplication" => RuleGuide {
             example: "Two files contain the same normalized token sequence across a multi-line block.",
             how_to_fix: "Extract the shared logic when the duplicated behavior should evolve together. Leave it duplicated when the similarity is accidental and likely to diverge.",
         },
-        _ => RuleGuide {
-            example: "Run the relevant command with --format json --quiet --explain to inspect this rule in context.",
-            how_to_fix: "Use the issue action hints, source location, and docs URL to decide whether to remove, move, configure, or suppress the finding.",
+        _ => return None,
+    })
+}
+
+fn security_rule_guide(id: &str) -> Option<RuleGuide> {
+    Some(match id {
+        "security/tainted-sink" => RuleGuide {
+            example: "A non-literal request field reaches a catalogue sink such as security/sql-injection or security/dangerous-html. The finding is a candidate, not proof of exploitability.",
+            how_to_fix: "Trace the source, sink, sanitization, and runtime context. Fix confirmed issues with parameterization, escaping, validation, or safer APIs, and suppress only reviewed false positives with context.",
         },
+        "security/client-server-leak" => RuleGuide {
+            example: "A module marked `use client` imports code that reads a non-public `process.env` or `import.meta.env` value through a static path.",
+            how_to_fix: "Keep non-public env reads on the server side, move the value behind an API boundary, or rename only intentionally public values to the framework's public prefix.",
+        },
+        "security/hardcoded-secret" => RuleGuide {
+            example: "A provider-prefixed token-shaped literal is assigned to a secret-shaped variable, and the hardcoded-secret category is explicitly included.",
+            how_to_fix: "Rotate real credentials, move them to a secret manager or environment variable, and keep test-only literals clearly fake so they do not resemble provider tokens.",
+        },
+        id if id.starts_with("security/") => RuleGuide {
+            example: "A `plow security` candidate uses this catalogue category as its SARIF rule id, for example security/sql-injection for a matched SQL sink.",
+            how_to_fix: "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
+        },
+        _ => return None,
+    })
+}
+
+fn fallback_rule_guide() -> RuleGuide {
+    RuleGuide {
+        example: "Run the relevant command with --format json --quiet --explain to inspect this rule in context.",
+        how_to_fix: "Use the issue action hints, source location, and docs URL to decide whether to remove, move, configure, or suppress the finding.",
     }
 }
 
@@ -490,13 +768,16 @@ pub fn rule_guide(rule: &RuleDef) -> RuleGuide {
 #[must_use]
 pub fn run_explain(issue_type: &str, output: OutputFormat) -> ExitCode {
     let Some(rule) = rule_by_token(issue_type) else {
-        return crate::error::emit_error(
-            &format!(
+        let message = if looks_security_explain_token(issue_type) {
+            format!(
+                "unknown issue type '{issue_type}'. Try values like tainted-sink, client-server-leak, hardcoded-secret, sql-injection, or security/sql-injection"
+            )
+        } else {
+            format!(
                 "unknown issue type '{issue_type}'. Try values like unused files, unused-export, high complexity, or code duplication"
-            ),
-            2,
-            output,
-        );
+            )
+        };
+        return crate::error::emit_error(&message, 2, output);
     };
     let guide = rule_guide(rule);
     match output {
@@ -510,7 +791,9 @@ pub fn run_explain(issue_type: &str, output: OutputFormat) -> ExitCode {
                 how_to_fix: guide.how_to_fix.to_string(),
                 docs: rule_docs_url(rule),
             };
-            match serde_json::to_value(&envelope) {
+            match crate::output_envelope::serialize_root_output(
+                crate::output_envelope::PlowOutput::Explain(envelope),
+            ) {
                 Ok(value) => crate::report::emit_json(&value, "explain"),
                 Err(e) => {
                     crate::error::emit_error(&format!("JSON serialization error: {e}"), 2, output)
@@ -532,6 +815,16 @@ pub fn run_explain(issue_type: &str, output: OutputFormat) -> ExitCode {
             output,
         ),
     }
+}
+
+fn looks_security_explain_token(issue_type: &str) -> bool {
+    let normalized = issue_type.trim().to_ascii_lowercase().replace('_', "-");
+    normalized.contains("security")
+        || normalized.contains("secret")
+        || normalized.contains("sink")
+        || normalized.contains("cwe")
+        || normalized.contains("client-server")
+        || normalized.contains("injection")
 }
 
 fn print_explain_human(rule: &RuleDef, guide: &RuleGuide) -> ExitCode {
@@ -580,8 +873,6 @@ fn print_explain_markdown(rule: &RuleDef, guide: &RuleGuide) -> ExitCode {
     println!("[Docs]({})", rule_docs_url(rule));
     ExitCode::SUCCESS
 }
-
-// ── Health SARIF rules ──────────────────────────────────────────
 
 pub const HEALTH_RULES: &[RuleDef] = &[
     RuleDef {
@@ -680,6 +971,38 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         full: "Generic runtime-coverage finding for verdicts not covered by a more specific rule. Covers the forward-compat `unknown` sentinel; the CLI filters `active` entries out of `runtime_coverage.findings` so the surfaced list stays actionable.",
         docs_path: "explanations/health#runtime-coverage",
     },
+    RuleDef {
+        id: "plow/coverage-intelligence-risky-change",
+        category: "Health",
+        name: "Coverage Intelligence Risky Change",
+        short: "Changed hot path combines high CRAP and low test coverage",
+        full: "Coverage intelligence combined change scope, runtime hot-path evidence, low test coverage, and high CRAP into a risky-change finding. Add focused tests or split the change before merging.",
+        docs_path: "explanations/health#coverage-intelligence",
+    },
+    RuleDef {
+        id: "plow/coverage-intelligence-delete",
+        category: "Health",
+        name: "Coverage Intelligence Delete",
+        short: "Static and runtime evidence indicate code can be deleted",
+        full: "Coverage intelligence combined static unused status, runtime cold evidence, and lack of test reachability into a high-confidence delete recommendation.",
+        docs_path: "explanations/health#coverage-intelligence",
+    },
+    RuleDef {
+        id: "plow/coverage-intelligence-review",
+        category: "Health",
+        name: "Coverage Intelligence Review",
+        short: "Cold reachable uncovered code needs owner review",
+        full: "Coverage intelligence found code that is statically reachable but cold in runtime evidence, uncovered by tests, and ownership-risky. Route it to an owner before changing or deleting it.",
+        docs_path: "explanations/health#coverage-intelligence",
+    },
+    RuleDef {
+        id: "plow/coverage-intelligence-refactor",
+        category: "Health",
+        name: "Coverage Intelligence Refactor",
+        short: "Hot covered code has high CRAP and should be refactored carefully",
+        full: "Coverage intelligence found hot production code that is covered by tests but still has high CRAP. Refactor carefully while preserving behavior.",
+        docs_path: "explanations/health#coverage-intelligence",
+    },
 ];
 
 pub const DUPES_RULES: &[RuleDef] = &[RuleDef {
@@ -691,7 +1014,161 @@ pub const DUPES_RULES: &[RuleDef] = &[RuleDef {
     docs_path: "explanations/duplication#clone-groups",
 }];
 
-// ── JSON _meta builders ─────────────────────────────────────────
+pub const FLAGS_RULES: &[RuleDef] = &[RuleDef {
+    id: "plow/feature-flag",
+    category: "Flags",
+    name: "Feature Flags",
+    short: "Detected feature flag pattern",
+    full: "A feature flag pattern detected by `plow flags`: environment-variable checks, flag SDK calls (LaunchDarkly, Unleash, and similar), or config-object lookups. Long-lived flags accumulate dead branches; review old flags for retirement and pair with dead-code analysis to find branches that can no longer execute.",
+    docs_path: "cli/flags",
+}];
+
+macro_rules! security_catalogue_rule {
+    ($id:literal, $name:literal, $cwe:literal) => {
+        RuleDef {
+            id: concat!("security/", $id),
+            category: "Security",
+            name: $name,
+            short: concat!("Catalogue security candidate for CWE-", $cwe),
+            full: concat!(
+                $name,
+                " is a data-driven `plow security` tainted-sink catalogue category with CWE-",
+                $cwe,
+                " metadata. plow reports it as an unverified candidate when a captured sink shape matches this category. Use it to understand or filter `security/",
+                $id,
+                "` findings, then inspect the trace, source, sink, sanitization, and application context before treating it as exploitable."
+            ),
+            docs_path: "cli/security",
+        }
+    };
+}
+
+pub const SECURITY_RULES: &[RuleDef] = &[
+    RuleDef {
+        id: "security/tainted-sink",
+        category: "Security",
+        name: "Tainted Sink Candidates",
+        short: "Syntactic security sink candidates require verification",
+        full: "The `tainted-sink` family covers data-driven `plow security` catalogue categories. These findings are unverified candidates, not confirmed vulnerabilities. plow can connect known source signals to captured sink shapes and add CWE metadata, but it does not prove attacker control, missing sanitization, exploitability, or business impact.",
+        docs_path: "cli/security",
+    },
+    RuleDef {
+        id: "security/client-server-leak",
+        category: "Security",
+        name: "Client-server Secret Leak Candidates",
+        short: "Client-bound code reaches a non-public env read",
+        full: "`client-server-leak` reports a candidate when a `use client` module can transitively reach a static non-public `process.env` or `import.meta.env` read. Public-by-convention env prefixes are treated as public. The finding is advisory and still needs bundle, framework, and runtime verification before treating it as a real exposure.",
+        docs_path: "cli/security",
+    },
+    RuleDef {
+        id: "security/hardcoded-secret",
+        category: "Security",
+        name: "Hardcoded Secret Candidates",
+        short: "Provider-prefixed or contextual secret literals require verification",
+        full: "`hardcoded-secret` reports opt-in candidates for provider-prefixed or contextual secret-shaped literals. The category is include-required and only runs when listed in `security.categories.include`. It avoids raw entropy alone, but every result still requires review, secret rotation decisions, and context before acting.",
+        docs_path: "cli/security",
+    },
+    security_catalogue_rule!("dangerous-html", "Dangerous HTML sink", "79"),
+    security_catalogue_rule!(
+        "template-escape-bypass",
+        "Template escape bypass sink",
+        "79"
+    ),
+    security_catalogue_rule!("command-injection", "OS command injection sink", "78"),
+    security_catalogue_rule!("code-injection", "Code injection sink", "94"),
+    security_catalogue_rule!("dynamic-regex", "Dynamic regular expression sink", "1333"),
+    security_catalogue_rule!("redos-regex", "ReDoS regex sink", "1333"),
+    security_catalogue_rule!(
+        "resource-amplification",
+        "Resource amplification sink",
+        "400"
+    ),
+    security_catalogue_rule!("dynamic-module-load", "Dynamic module load sink", "95"),
+    security_catalogue_rule!("sql-injection", "SQL injection sink", "89"),
+    security_catalogue_rule!("ssrf", "Server-side request forgery sink", "918"),
+    security_catalogue_rule!(
+        "secret-to-network",
+        "Secret reaches a network request",
+        "201"
+    ),
+    security_catalogue_rule!("path-traversal", "Path traversal sink", "22"),
+    security_catalogue_rule!(
+        "header-injection",
+        "HTTP response header injection sink",
+        "113"
+    ),
+    security_catalogue_rule!("open-redirect", "Open redirect sink", "601"),
+    security_catalogue_rule!(
+        "postmessage-wildcard-origin",
+        "Wildcard postMessage target origin",
+        "346"
+    ),
+    security_catalogue_rule!("tls-validation-disabled", "TLS validation disabled", "295"),
+    security_catalogue_rule!("cleartext-transport", "Cleartext transport URL", "319"),
+    security_catalogue_rule!(
+        "electron-unsafe-webpreferences",
+        "Unsafe Electron BrowserWindow preferences",
+        "1188"
+    ),
+    security_catalogue_rule!(
+        "world-writable-permission",
+        "World-writable chmod mode",
+        "732"
+    ),
+    security_catalogue_rule!(
+        "insecure-temp-file",
+        "Predictable temporary file path",
+        "377"
+    ),
+    security_catalogue_rule!(
+        "mysql-multiple-statements",
+        "MySQL multiple statements enabled",
+        "89"
+    ),
+    security_catalogue_rule!("permissive-cors", "Permissive CORS policy", "942"),
+    security_catalogue_rule!("insecure-cookie", "Insecure cookie options", "614"),
+    security_catalogue_rule!("mass-assignment", "Mass assignment sink", "915"),
+    security_catalogue_rule!("weak-crypto", "Runtime-selectable crypto algorithm", "327"),
+    security_catalogue_rule!("insecure-randomness", "Insecure randomness sink", "338"),
+    security_catalogue_rule!("jwt-alg-none", "JWT alg none", "347"),
+    security_catalogue_rule!(
+        "jwt-verify-missing-algorithms",
+        "JWT verify missing algorithms allowlist",
+        "347"
+    ),
+    security_catalogue_rule!("deprecated-cipher", "Deprecated cipher constructor", "327"),
+    security_catalogue_rule!(
+        "unsafe-buffer-alloc",
+        "Unsafe Buffer allocation sink",
+        "1188"
+    ),
+    security_catalogue_rule!(
+        "unsafe-deserialization",
+        "Unsafe deserialization sink",
+        "502"
+    ),
+    security_catalogue_rule!(
+        "angular-trusted-html",
+        "Angular bypassSecurityTrust sink",
+        "79"
+    ),
+    security_catalogue_rule!("nextjs-open-redirect", "Next.js open redirect sink", "601"),
+    security_catalogue_rule!("dom-document-write", "DOM document.write sink", "79"),
+    security_catalogue_rule!("jquery-html", "jQuery .html() sink", "79"),
+    security_catalogue_rule!(
+        "route-send-file",
+        "Route file-send path traversal sink",
+        "22"
+    ),
+    security_catalogue_rule!("webview-injection", "WebView injected-script sink", "94"),
+    security_catalogue_rule!("prototype-pollution", "Prototype pollution sink", "1321"),
+    security_catalogue_rule!("zip-slip", "Archive path-traversal (zip-slip) sink", "22"),
+    security_catalogue_rule!("nosql-injection", "NoSQL injection sink", "943"),
+    security_catalogue_rule!("ssti", "Server-side template injection sink", "1336"),
+    security_catalogue_rule!("xxe", "XML external entity (XXE) sink", "611"),
+    security_catalogue_rule!("secret-pii-log", "Secret or PII logged", "532"),
+    security_catalogue_rule!("xpath-injection", "XPath injection sink", "643"),
+];
 
 /// Build the `_meta` object for `plow dead-code --format json --explain`.
 #[must_use]
@@ -739,10 +1216,6 @@ pub fn combined_meta(include_check: bool, include_dupes: bool, include_health: b
 
 /// Build the `_meta` object for `plow health --format json --explain`.
 #[must_use]
-#[expect(
-    clippy::too_many_lines,
-    reason = "flat metric table: every entry is 3-4 short lines of metadata and keeping them in one map is clearer than splitting into per-metric helpers"
-)]
 pub fn health_meta() -> Value {
     json!({
         "docs": HEALTH_DOCS,
@@ -750,7 +1223,36 @@ pub fn health_meta() -> Value {
             "actions[]": ACTIONS_FIELD_DEFINITION,
             "actions[].auto_fixable": ACTIONS_AUTO_FIXABLE_FIELD_DEFINITION
         },
-        "metrics": {
+        "metrics": health_metrics()
+    })
+}
+
+fn health_metrics() -> Value {
+    let mut metrics = serde_json::Map::new();
+    for section in [
+        health_size_complexity_metrics(),
+        health_quality_metrics(),
+        health_coupling_metrics(),
+        health_churn_metrics(),
+        health_refactoring_rank_metrics(),
+        health_refactoring_confidence_metrics(),
+        health_risk_metrics(),
+        health_contributor_metrics(),
+        health_ownership_metrics(),
+        health_runtime_verdict_metrics(),
+        health_runtime_observation_metrics(),
+        health_runtime_production_metrics(),
+    ] {
+        let Value::Object(section) = section else {
+            continue;
+        };
+        metrics.extend(section);
+    }
+    Value::Object(metrics)
+}
+
+fn health_size_complexity_metrics() -> Value {
+    json!({
             "cyclomatic": {
                 "name": "Cyclomatic Complexity",
                 "description": "McCabe cyclomatic complexity: 1 + number of decision points (if/else, switch cases, loops, ternary, logical operators). Measures the number of independent paths through a function.",
@@ -774,7 +1276,12 @@ pub fn health_meta() -> Value {
                 "description": "Total lines of code in the file (from line offsets). Provides scale context for other metrics: a file with 0.4 complexity density at 80 LOC is different from 0.4 density at 800 LOC.",
                 "range": "[1, \u{221e})",
                 "interpretation": "context-dependent; large files may benefit from splitting even if individual functions are small"
-            },
+            }
+    })
+}
+
+fn health_quality_metrics() -> Value {
+    json!({
             "maintainability_index": {
                 "name": "Maintainability Index",
                 "description": "Composite score: 100 - (complexity_density \u{00d7} 30 \u{00d7} dampening) - (dead_code_ratio \u{00d7} 20) - min(ln(fan_out+1) \u{00d7} 4, 15), where dampening = min(lines/50, 1.0). Clamped to [0, 100]. Higher is better.",
@@ -792,7 +1299,12 @@ pub fn health_meta() -> Value {
                 "description": "Fraction of value exports (excluding type-only exports like interfaces and type aliases) with zero references across the project.",
                 "range": "[0, 1]",
                 "interpretation": "lower is better; 0 = all exports are used"
-            },
+            }
+    })
+}
+
+fn health_coupling_metrics() -> Value {
+    json!({
             "fan_in": {
                 "name": "Fan-in (Importers)",
                 "description": "Number of files that import this file. High fan-in means high blast radius \u{2014} changes to this file affect many dependents.",
@@ -805,6 +1317,11 @@ pub fn health_meta() -> Value {
                 "range": "[0, \u{221e})",
                 "interpretation": "lower is better; MI penalty caps at ~40 imports"
             },
+    })
+}
+
+fn health_churn_metrics() -> Value {
+    json!({
             "score": {
                 "name": "Hotspot Score",
                 "description": "normalized_churn \u{00d7} normalized_complexity \u{00d7} 100, where normalization is against the project maximum. Identifies files that are both complex AND frequently changing.",
@@ -822,7 +1339,12 @@ pub fn health_meta() -> Value {
                 "description": "Compares recent vs older commit frequency within the analysis window. accelerating = recent > 1.5\u{00d7} older, cooling = recent < 0.67\u{00d7} older, stable = in between.",
                 "values": ["accelerating", "stable", "cooling"],
                 "interpretation": "accelerating files need attention; cooling files are stabilizing"
-            },
+            }
+    })
+}
+
+fn health_refactoring_rank_metrics() -> Value {
+    json!({
             "priority": {
                 "name": "Refactoring Priority",
                 "description": "Weighted score: complexity density (30%), hotspot boost (25%), dead code ratio (20%), fan-in (15%), fan-out (10%). Fan-in and fan-out normalization uses adaptive percentile-based thresholds (p95 of the project distribution). Does not use the maintainability index to avoid double-counting.",
@@ -841,6 +1363,11 @@ pub fn health_meta() -> Value {
                 "values": ["low", "medium", "high"],
                 "interpretation": "low = quick win, high = needs planning and coordination"
             },
+    })
+}
+
+fn health_refactoring_confidence_metrics() -> Value {
+    json!({
             "confidence": {
                 "name": "Confidence Level",
                 "description": "Reliability of the recommendation based on data source. High: deterministic graph/AST analysis (dead code, circular deps, complexity). Medium: heuristic thresholds (fan-in/fan-out coupling). Low: depends on git history quality (churn-based recommendations).",
@@ -852,13 +1379,23 @@ pub fn health_meta() -> Value {
                 "description": "Project-level aggregate score computed from vital signs: dead code, complexity, maintainability, hotspots, unused dependencies, and circular dependencies. Penalties subtracted from 100. Missing metrics (from pipelines that didn't run) don't penalize. Use --score to compute the score; add --hotspots, or --targets with --score, when the score should include the churn-backed hotspot penalty.",
                 "range": "[0, 100]",
                 "interpretation": "higher is better; A (85\u{2013}100), B (70\u{2013}84), C (55\u{2013}69), D (40\u{2013}54), F (0\u{2013}39)"
-            },
+            }
+    })
+}
+
+fn health_risk_metrics() -> Value {
+    json!({
             "crap_max": {
                 "name": "Untested Complexity Risk (CRAP)",
                 "description": "Change Risk Anti-Patterns score (Savoia & Evans, 2007). Formula: CC\u{00b2} \u{00d7} (1 - cov/100)\u{00b3} + CC. Default model (static_estimated): estimates per-function coverage from export references \u{2014} directly test-referenced exports get 85%, indirectly test-reachable functions get 40%, untested files get 0%. Provide --coverage <path> with Istanbul-format coverage-final.json (from Jest, Vitest, c8, nyc) for exact per-function CRAP scores.",
                 "range": "[1, \u{221e})",
                 "interpretation": "lower is better; >=30 is high-risk (CC >= 5 without test path)"
             },
+    })
+}
+
+fn health_contributor_metrics() -> Value {
+    json!({
             "bus_factor": {
                 "name": "Bus Factor",
                 "description": "Avelino truck factor: the minimum number of distinct contributors who together account for at least 50% of recency-weighted commits to this file in the analysis window. Bot authors are excluded.",
@@ -877,6 +1414,11 @@ pub fn health_meta() -> Value {
                 "range": "[0, 1]",
                 "interpretation": "share close to 1.0 indicates dominance and pairs with low bus_factor"
             },
+    })
+}
+
+fn health_ownership_metrics() -> Value {
+    json!({
             "stale_days": {
                 "name": "Stale Days",
                 "description": "Days since this contributor last touched the file. Computed at analysis time.",
@@ -894,13 +1436,23 @@ pub fn health_meta() -> Value {
                 "description": "true = a CODEOWNERS file exists but no rule matches this file; false = a rule matches; null = no CODEOWNERS file was discovered for the repository (cannot determine).",
                 "values": [true, false, null],
                 "interpretation": "true on a hotspot is a review-bottleneck risk; null means the signal is unavailable, not absent"
-            },
+            }
+    })
+}
+
+fn health_runtime_verdict_metrics() -> Value {
+    json!({
             "runtime_coverage_verdict": {
                 "name": "Runtime Coverage Verdict",
                 "description": "Overall verdict across all runtime-coverage findings. `clean` = nothing cold; `cold-code-detected` = one or more tracked functions had zero invocations; `hot-path-touched` = a function modified in the current change set is on the hot path (requires `--diff-file` or `--changed-since` to fire; without a change scope the verdict cannot promote); `license-expired-grace` = analysis ran but the license is in its post-expiry grace window; `unknown` = verdict could not be computed (degenerate input).",
                 "values": ["clean", "hot-path-touched", "cold-code-detected", "license-expired-grace", "unknown"],
                 "interpretation": "`cold-code-detected` is the primary actionable signal in standalone analysis; `hot-path-touched` is promoted to primary in PR context (when a change scope is supplied) so reviewers see the diff-tied signal first. `signals[]` carries the full unprioritized set."
             },
+    })
+}
+
+fn health_runtime_observation_metrics() -> Value {
+    json!({
             "runtime_coverage_state": {
                 "name": "Runtime Coverage State",
                 "description": "Per-function observation: `called` = V8 saw at least one invocation; `never-called` = V8 tracked the function but it never ran; `coverage-unavailable` = the function was not in the V8 tracking set (e.g., lazy-parsed, worker thread, dynamic code); `unknown` = forward-compat sentinel for newer sidecar states.",
@@ -912,7 +1464,12 @@ pub fn health_meta() -> Value {
                 "description": "Confidence in a runtime-coverage finding. `high` = tracked by V8 with a statistically meaningful observation volume; `medium` = either low observation volume or indirect evidence; `low` = minimal data; `unknown` = insufficient information to classify.",
                 "values": ["high", "medium", "low", "unknown"],
                 "interpretation": "high = act on it; medium = verify context; low = treat as a signal only"
-            },
+            }
+    })
+}
+
+fn health_runtime_production_metrics() -> Value {
+    json!({
             "production_invocations": {
                 "name": "Production Invocations",
                 "description": "Observed invocation count for the function over the collected coverage window. For `coverage-unavailable` findings this is `0` and semantically means `null` (not tracked). Absolute counts are not directly comparable across services without normalizing by trace_count.",
@@ -925,7 +1482,6 @@ pub fn health_meta() -> Value {
                 "range": "[0, 100]",
                 "interpretation": "lower is better; values above ~10% on a long-running service indicate a large cleanup opportunity"
             }
-        }
     })
 }
 
@@ -975,6 +1531,102 @@ pub fn dupes_meta() -> Value {
             }
         }
     })
+}
+
+/// Build the `_meta` object for `plow security --format json --explain`.
+#[must_use]
+pub fn security_meta() -> Meta {
+    let rules = SECURITY_RULES
+        .iter()
+        .map(|rule| {
+            (
+                rule.id.to_string(),
+                MetaRule {
+                    name: Some(rule.name.to_string()),
+                    description: Some(rule.full.to_string()),
+                    docs: Some(rule_docs_url(rule)),
+                },
+            )
+        })
+        .collect();
+
+    Meta {
+        docs: Some(SECURITY_DOCS.to_string()),
+        telemetry: None,
+        field_definitions: BTreeMap::from([
+            (
+                "version".to_string(),
+                "plow CLI version that produced this output.".to_string(),
+            ),
+            (
+                "elapsed_ms".to_string(),
+                "Wall-clock milliseconds spent producing the security report.".to_string(),
+            ),
+            (
+                "config".to_string(),
+                "Privacy-safe config context relevant to security candidate generation."
+                    .to_string(),
+            ),
+            (
+                "config.rules.*.configured".to_string(),
+                "Severity from resolved config before the security command forced default-off rules on."
+                    .to_string(),
+            ),
+            (
+                "config.rules.*.effective".to_string(),
+                "Severity used for this security command run.".to_string(),
+            ),
+            (
+                "config.categories_include".to_string(),
+                "Configured security category include list. null means unset, [] means explicitly empty."
+                    .to_string(),
+            ),
+            (
+                "config.categories_exclude".to_string(),
+                "Configured security category exclude list. null means unset, [] means explicitly empty."
+                    .to_string(),
+            ),
+            (
+                "security_findings[]".to_string(),
+                "Unverified security candidates for downstream human or agent verification."
+                    .to_string(),
+            ),
+            (
+                "summary.security_findings".to_string(),
+                "Number of security candidates after all filters, gates, and scopes.".to_string(),
+            ),
+            (
+                "summary.by_severity".to_string(),
+                "Fixed high, medium, and low severity counts for summary JSON.".to_string(),
+            ),
+            (
+                "summary.by_category".to_string(),
+                "Candidate counts by catalogue category, or by kind for uncategorized findings."
+                    .to_string(),
+            ),
+            (
+                "summary.by_reachability".to_string(),
+                "Fixed reachability and source-backed ranking-signal counts for summary JSON."
+                    .to_string(),
+            ),
+            (
+                "summary.by_runtime_state".to_string(),
+                "Fixed production-runtime coverage state counts for summary JSON.".to_string(),
+            ),
+            (
+                "unresolved_edge_files".to_string(),
+                "Number of client files whose import cone contains dynamic edges the graph could not follow."
+                    .to_string(),
+            ),
+            (
+                "unresolved_callee_sites".to_string(),
+                "Number of sink-shaped nodes whose callee could not be flattened to a static path."
+                    .to_string(),
+            ),
+        ]),
+        metrics: BTreeMap::new(),
+        rules,
+    }
 }
 
 /// Build the `_meta` object for `plow coverage setup --json --explain`.
@@ -1032,9 +1684,9 @@ pub fn coverage_analyze_meta() -> Value {
             "runtime_coverage.summary.data_source": "Which evidence source produced the report. local = on-disk artifact via --runtime-coverage <path>; cloud = explicit pull via --cloud / --runtime-coverage-cloud / PLOW_RUNTIME_COVERAGE_SOURCE=cloud.",
             "runtime_coverage.summary.last_received_at": "ISO-8601 timestamp of the newest runtime payload included in the report. Null for local artifacts that do not carry receipt metadata.",
             "runtime_coverage.summary.capture_quality": "Capture-window telemetry derived from the runtime evidence. lazy_parse_warning trips when more than 30% of tracked functions are V8-untracked, which usually indicates a short observation window.",
-            "runtime_coverage.findings[].id": "Per-finding SUPPRESSION key (fallow:prod:<hash>). Hashes file + function + the current line, so it changes when the function moves. Use it to suppress one finding at its current location.",
-            "runtime_coverage.findings[].stable_id": "Cross-surface JOIN key (fallow:fn:<hash>) from fallow_cov_protocol::function_identity_id, hashing file + name + start_line. The same function shares ONE value across findings, hot paths, blast-radius, and importance entries (the per-finding id uses a per-surface salt and differs), and across V8/Istanbul/oxc producers (columns are excluded from the hash). Like id, it changes when the function's file, name, or start line changes: it is a cross-surface/cross-producer join key, NOT a line-move-immune one. Omitted from the JSON entirely (not emitted as null) when the producing surface or an un-migrated cloud supplied no FunctionIdentity. New baselines key on this when present to align with the cross-surface join key; the grace-window reader accepts the legacy id too.",
-            "runtime_coverage._matching": "Function-identity fallback order when joining runtime evidence to local static analysis: (1) exact stable_id match (fallow:fn:<hash>) when both sides carry one; (2) exact (path, name, start_line); (3) fuzzy nearest candidate within a line tolerance. Baseline suppression accepts BOTH the stable_id and the legacy fallow:prod: id during the grace window, so baselines written before this version keep suppressing.",
+            "runtime_coverage.findings[].id": "Per-finding SUPPRESSION key (plow:prod:<hash>). Hashes file + function + the current line, so it changes when the function moves. Use it to suppress one finding at its current location.",
+            "runtime_coverage.findings[].stable_id": "Cross-surface JOIN key (plow:fn:<hash>) from plow_cov_protocol::function_identity_id, hashing file + name + start_line. The same function shares ONE value across findings, hot paths, blast-radius, and importance entries (the per-finding id uses a per-surface salt and differs), and across V8/Istanbul/oxc producers (columns are excluded from the hash). Like id, it changes when the function's file, name, or start line changes: it is a cross-surface/cross-producer join key, NOT a line-move-immune one. Omitted from the JSON entirely (not emitted as null) when the producing surface or an un-migrated cloud supplied no FunctionIdentity. New baselines key on this when present to align with the cross-surface join key; the grace-window reader accepts the legacy id too.",
+            "runtime_coverage._matching": "Function-identity fallback order when joining runtime evidence to local static analysis: (1) exact stable_id match (plow:fn:<hash>) when both sides carry one; (2) exact (path, name, start_line); (3) fuzzy nearest candidate within a line tolerance. Baseline suppression accepts BOTH the stable_id and the legacy plow:prod: id during the grace window, so baselines written before this version keep suppressing.",
             "runtime_coverage.findings[].evidence.static_status": "used = the function is reachable in the AST module graph; unused = it is dead by static analysis.",
             "runtime_coverage.findings[].evidence.test_coverage": "covered = the local test suite hits the function; not_covered otherwise.",
             "runtime_coverage.findings[].evidence.v8_tracking": "tracked = V8 observed the function during the capture window; untracked otherwise.",
@@ -1063,8 +1715,6 @@ pub fn coverage_analyze_meta() -> Value {
 mod tests {
     use super::*;
 
-    // ── rule_by_id ───────────────────────────────────────────────────
-
     #[test]
     fn rule_by_id_finds_check_rule() {
         let rule = rule_by_id("plow/unused-file").unwrap();
@@ -1084,12 +1734,16 @@ mod tests {
     }
 
     #[test]
+    fn rule_by_id_finds_security_rule() {
+        let rule = rule_by_id("security/tainted-sink").unwrap();
+        assert_eq!(rule.name, "Tainted Sink Candidates");
+    }
+
+    #[test]
     fn rule_by_id_returns_none_for_unknown() {
         assert!(rule_by_id("plow/nonexistent").is_none());
         assert!(rule_by_id("").is_none());
     }
-
-    // ── rule_docs_url ────────────────────────────────────────────────
 
     #[test]
     fn rule_docs_url_format() {
@@ -1098,8 +1752,6 @@ mod tests {
         assert!(url.starts_with("https://docs.genesis-plow.dev/"));
         assert!(url.contains("unused-exports"));
     }
-
-    // ── CHECK_RULES completeness ─────────────────────────────────────
 
     #[test]
     fn check_rules_all_have_plow_prefix() {
@@ -1126,12 +1778,16 @@ mod tests {
     #[test]
     fn check_rules_no_duplicate_ids() {
         let mut seen = rustc_hash::FxHashSet::default();
-        for rule in CHECK_RULES.iter().chain(HEALTH_RULES).chain(DUPES_RULES) {
+        for rule in CHECK_RULES
+            .iter()
+            .chain(HEALTH_RULES)
+            .chain(DUPES_RULES)
+            .chain(FLAGS_RULES)
+            .chain(SECURITY_RULES)
+        {
             assert!(seen.insert(rule.id), "duplicate rule id: {}", rule.id);
         }
     }
-
-    // ── check_meta ───────────────────────────────────────────────────
 
     #[test]
     fn check_meta_has_docs_and_rules() {
@@ -1139,7 +1795,6 @@ mod tests {
         assert!(meta.get("docs").is_some());
         assert!(meta.get("rules").is_some());
         let rules = meta["rules"].as_object().unwrap();
-        // Verify all 13 rule categories are present (stripped plow/ prefix)
         assert_eq!(rules.len(), CHECK_RULES.len());
         assert!(rules.contains_key("unused-file"));
         assert!(rules.contains_key("unused-export"));
@@ -1209,8 +1864,6 @@ mod tests {
         }
     }
 
-    // ── health_meta ──────────────────────────────────────────────────
-
     #[test]
     fn health_meta_has_metrics() {
         let meta = health_meta();
@@ -1224,8 +1877,6 @@ mod tests {
         assert!(metrics.contains_key("fan_out"));
     }
 
-    // ── dupes_meta ───────────────────────────────────────────────────
-
     #[test]
     fn dupes_meta_has_metrics() {
         let meta = dupes_meta();
@@ -1236,8 +1887,6 @@ mod tests {
         assert!(metrics.contains_key("clone_groups"));
         assert!(metrics.contains_key("clone_families"));
     }
-
-    // ── coverage_setup_meta ─────────────────────────────────────────
 
     #[test]
     fn coverage_setup_meta_has_docs_fields_enums_and_warnings() {
@@ -1287,8 +1936,6 @@ mod tests {
         );
     }
 
-    // ── coverage_analyze_meta ────────────────────────────────────────
-
     #[test]
     fn coverage_analyze_meta_documents_data_source_and_action_vocabulary() {
         let meta = coverage_analyze_meta();
@@ -1309,8 +1956,6 @@ mod tests {
         let warnings = meta["warnings"].as_object().unwrap();
         assert!(warnings.contains_key("cloud_functions_unmatched"));
     }
-
-    // ── HEALTH_RULES completeness ──────────────────────────────────
 
     #[test]
     fn health_rules_all_have_plow_prefix() {
@@ -1355,8 +2000,6 @@ mod tests {
         }
     }
 
-    // ── DUPES_RULES completeness ───────────────────────────────────
-
     #[test]
     fn dupes_rules_all_have_plow_prefix() {
         for rule in DUPES_RULES {
@@ -1396,7 +2039,48 @@ mod tests {
         }
     }
 
-    // ── CHECK_RULES field completeness ─────────────────────────────
+    #[test]
+    fn security_rules_all_have_security_prefix() {
+        for rule in SECURITY_RULES {
+            assert!(
+                rule.id.starts_with("security/"),
+                "security rule {} should start with security/",
+                rule.id
+            );
+        }
+    }
+
+    #[test]
+    fn security_rules_all_have_docs_path() {
+        for rule in SECURITY_RULES {
+            assert_eq!(
+                rule.docs_path, "cli/security",
+                "security rule {} should point at security docs",
+                rule.id
+            );
+        }
+    }
+
+    #[test]
+    fn security_rules_all_have_non_empty_fields() {
+        for rule in SECURITY_RULES {
+            assert!(
+                !rule.name.is_empty(),
+                "security rule {} missing name",
+                rule.id
+            );
+            assert!(
+                !rule.short.is_empty(),
+                "security rule {} missing short description",
+                rule.id
+            );
+            assert!(
+                !rule.full.is_empty(),
+                "security rule {} missing full description",
+                rule.id
+            );
+        }
+    }
 
     #[test]
     fn check_rules_all_have_non_empty_fields() {
@@ -1415,8 +2099,6 @@ mod tests {
         }
     }
 
-    // ── rule_docs_url with health/dupes rules ──────────────────────
-
     #[test]
     fn rule_docs_url_health_rule() {
         let rule = rule_by_id("plow/high-cyclomatic-complexity").unwrap();
@@ -1433,7 +2115,12 @@ mod tests {
         assert!(url.contains("duplication"));
     }
 
-    // ── health_meta metric structure ───────────────────────────────
+    #[test]
+    fn rule_docs_url_security_rule() {
+        let rule = rule_by_id("security/sql-injection").unwrap();
+        let url = rule_docs_url(rule);
+        assert_eq!(url, "https://docs.genesis-plow.dev/cli/security");
+    }
 
     #[test]
     fn health_meta_all_metrics_have_name_and_description() {
@@ -1496,8 +2183,6 @@ mod tests {
         }
     }
 
-    // ── dupes_meta metric structure ────────────────────────────────
-
     #[test]
     fn dupes_meta_all_metrics_have_name_and_description() {
         let meta = dupes_meta();
@@ -1521,8 +2206,6 @@ mod tests {
         assert!(metrics.contains_key("line_count"));
     }
 
-    // ── docs URLs ─────────────────────────────────────────────────
-
     #[test]
     fn check_docs_url_valid() {
         assert!(CHECK_DOCS.starts_with("https://"));
@@ -1541,8 +2224,6 @@ mod tests {
         assert!(DUPES_DOCS.contains("dupes"));
     }
 
-    // ── check_meta docs URL matches constant ──────────────────────
-
     #[test]
     fn check_meta_docs_url_matches_constant() {
         let meta = check_meta();
@@ -1560,8 +2241,6 @@ mod tests {
         let meta = dupes_meta();
         assert_eq!(meta["docs"].as_str().unwrap(), DUPES_DOCS);
     }
-
-    // ── rule_by_id finds all check rules ──────────────────────────
 
     #[test]
     fn rule_by_id_finds_all_check_rules() {
@@ -1596,21 +2275,85 @@ mod tests {
         }
     }
 
-    // ── Rule count verification ───────────────────────────────────
+    #[test]
+    fn rule_by_id_finds_all_security_rules() {
+        for rule in SECURITY_RULES {
+            assert!(
+                rule_by_id(rule.id).is_some(),
+                "rule_by_id should find security rule {}",
+                rule.id
+            );
+        }
+    }
 
     #[test]
     fn check_rules_count() {
-        assert_eq!(CHECK_RULES.len(), 23);
+        assert_eq!(CHECK_RULES.len(), 37);
     }
 
     #[test]
     fn health_rules_count() {
-        assert_eq!(HEALTH_RULES.len(), 12);
+        assert_eq!(HEALTH_RULES.len(), 16);
     }
 
     #[test]
     fn dupes_rules_count() {
         assert_eq!(DUPES_RULES.len(), 1);
+    }
+
+    #[test]
+    fn flags_rules_count() {
+        assert_eq!(FLAGS_RULES.len(), 1);
+    }
+
+    #[test]
+    fn security_rules_count() {
+        assert_eq!(
+            SECURITY_RULES.len(),
+            matcher_entries_from_security_catalogue().len() + 3
+        );
+    }
+
+    #[test]
+    fn security_rules_cover_every_catalogue_matcher() {
+        let mut rule_ids = rustc_hash::FxHashSet::default();
+        for rule in SECURITY_RULES {
+            rule_ids.insert(rule.id);
+        }
+
+        for matcher in matcher_entries_from_security_catalogue() {
+            let rule_id = format!("security/{}", matcher.id);
+            assert!(
+                rule_ids.contains(rule_id.as_str()),
+                "security matcher {} has no explain rule",
+                matcher.id
+            );
+        }
+    }
+
+    #[test]
+    fn security_catalogue_rules_match_catalogue_title_and_cwe() {
+        for matcher in matcher_entries_from_security_catalogue() {
+            let rule_id = format!("security/{}", matcher.id);
+            let rule = rule_by_id(&rule_id)
+                .unwrap_or_else(|| panic!("security matcher {} has no explain rule", matcher.id));
+            let cwe = format!("CWE-{}", matcher.cwe);
+            assert_eq!(
+                rule.name, matcher.title,
+                "security matcher {} has stale explain title",
+                matcher.id
+            );
+            assert!(
+                rule.short.contains(&cwe),
+                "security matcher {} explain summary does not mention {cwe}",
+                matcher.id
+            );
+            assert!(
+                rule.full.contains(&cwe),
+                "security matcher {} explain rationale does not mention {cwe}",
+                matcher.id
+            );
+        }
     }
 
     /// Every registered rule must declare a category. The PR/MR sticky
@@ -1627,8 +2370,17 @@ mod tests {
             "Health",
             "Architecture",
             "Suppressions",
+            "Security",
+            "Policy",
+            "Flags",
         ];
-        for rule in CHECK_RULES.iter().chain(HEALTH_RULES).chain(DUPES_RULES) {
+        for rule in CHECK_RULES
+            .iter()
+            .chain(HEALTH_RULES)
+            .chain(DUPES_RULES)
+            .chain(FLAGS_RULES)
+            .chain(SECURITY_RULES)
+        {
             assert!(
                 !rule.category.is_empty(),
                 "rule {} has empty category",
@@ -1642,5 +2394,65 @@ mod tests {
                 allowed
             );
         }
+    }
+
+    #[derive(Debug)]
+    struct MatcherEntry {
+        id: &'static str,
+        title: &'static str,
+        cwe: &'static str,
+    }
+
+    fn matcher_entries_from_security_catalogue() -> Vec<MatcherEntry> {
+        let toml = include_str!("../../core/data/security_matchers.toml");
+        let mut entries = Vec::new();
+        let mut in_matcher = false;
+        let mut id = None;
+        let mut title = None;
+        let mut cwe = None;
+
+        for line in toml.lines() {
+            let trimmed = line.trim();
+            if trimmed == "[[matcher]]" {
+                if let (Some(id), Some(title), Some(cwe)) = (id.take(), title.take(), cwe.take()) {
+                    entries.push(MatcherEntry { id, title, cwe });
+                }
+                in_matcher = true;
+                continue;
+            }
+            if trimmed.starts_with("[[") {
+                if let (Some(id), Some(title), Some(cwe)) = (id.take(), title.take(), cwe.take()) {
+                    entries.push(MatcherEntry { id, title, cwe });
+                }
+                in_matcher = false;
+                continue;
+            }
+            if !in_matcher {
+                continue;
+            }
+            if let Some(value) = trimmed
+                .strip_prefix("id = \"")
+                .and_then(|value| value.strip_suffix('"'))
+            {
+                id = Some(value);
+            } else if let Some(value) = trimmed
+                .strip_prefix("title = \"")
+                .and_then(|value| value.strip_suffix('"'))
+            {
+                title = Some(value);
+            } else if let Some(value) = trimmed.strip_prefix("cwe = ") {
+                cwe = Some(value);
+            }
+        }
+
+        if let (Some(id), Some(title), Some(cwe)) = (id.take(), title.take(), cwe.take()) {
+            entries.push(MatcherEntry { id, title, cwe });
+        }
+
+        let mut seen = rustc_hash::FxHashSet::default();
+        entries
+            .into_iter()
+            .filter(|entry| seen.insert(entry.id))
+            .collect()
     }
 }

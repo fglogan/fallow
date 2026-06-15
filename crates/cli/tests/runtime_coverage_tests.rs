@@ -1,3 +1,9 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "tests and benches use unwrap and expect to keep fixture setup concise"
+)]
+
 //! End-to-end integration tests for `plow health --runtime-coverage`.
 //!
 //! Exercises the full CLI → sidecar pipeline with a signed stub sidecar:
@@ -32,7 +38,7 @@ mod gated {
 
     use tempfile::TempDir;
 
-    use super::common::{plow_bin, fixture_path, parse_json};
+    use super::common::{fixture_path, parse_json, plow_bin};
     use super::sign;
 
     struct Harness {
@@ -50,9 +56,6 @@ mod gated {
             let home = root.join("home");
             fs::create_dir_all(&home).expect("create fake home");
 
-            // A minimal V8-shaped coverage file so the CLI accepts the input
-            // and the shape classification picks V8 (not Istanbul). The stub
-            // does not read the content, so an empty result array suffices.
             let coverage_file = root.join("coverage-final-v8.json");
             fs::write(&coverage_file, br#"{"result":[]}"#).expect("write coverage input");
 
@@ -70,28 +73,15 @@ mod gated {
             let mut cmd = Command::new(plow_bin());
             cmd.env("NO_COLOR", "1");
             cmd.env("RUST_LOG", "");
-            // Remove any inherited license material so the developer's real
-            // license cannot leak into tests. Each test case that needs a
-            // license sets `PLOW_LICENSE` explicitly.
             cmd.env_remove("PLOW_LICENSE");
             cmd.env_remove("PLOW_LICENSE_PATH");
-            // Same for the alternative sidecar override.
             cmd.env_remove("PLOW_COV_BINARY_PATH");
-            // And for unrelated plow env vars that could leak in from the
-            // developer's shell and perturb analysis (PLOW_COVERAGE feeds
-            // CRAP scoring; PLOW_BIN overrides the binary MCP looks up).
             cmd.env_remove("PLOW_COVERAGE");
             cmd.env_remove("PLOW_BIN");
             cmd.env_remove("PLOW_FORMAT");
             cmd.env_remove("PLOW_QUIET");
-            // Point HOME at a fresh directory so discovery of the default
-            // license path (`~/.plow/license.jwt`) cannot pick up a real
-            // license from the developer's machine.
             cmd.env("HOME", &self.home);
             cmd.env("USERPROFILE", &self.home);
-            // Explicit override takes precedence over the auto-discovery
-            // ladder, so the stub is the one and only sidecar the CLI can
-            // see during each test case.
             cmd.env("PLOW_COV_BIN", &self.stub_bin);
             cmd
         }
@@ -114,6 +104,20 @@ mod gated {
                 coverage_path.to_string_lossy().into_owned(),
                 "--format".to_owned(),
                 format.to_owned(),
+                "--quiet".to_owned(),
+            ]
+        }
+
+        fn security_args(&self) -> Vec<String> {
+            let fixture = fixture_path("security-dangerous-html");
+            vec![
+                "security".to_owned(),
+                "--root".to_owned(),
+                fixture.to_string_lossy().into_owned(),
+                "--runtime-coverage".to_owned(),
+                self.coverage_file.to_string_lossy().into_owned(),
+                "--format".to_owned(),
+                "json".to_owned(),
                 "--quiet".to_owned(),
             ]
         }
@@ -165,9 +169,6 @@ mod gated {
         let harness = Harness::new();
         let mut cmd = harness.plow();
         cmd.env("PLOW_STUB_MODE", "ok");
-        // No PLOW_LICENSE, no file at ~/.plow/license.jwt under the
-        // sandboxed HOME. ADR 010 makes one local coverage source free; the
-        // CLI must pass an empty JWT to the sidecar instead of pre-gating.
         for arg in harness.health_args() {
             cmd.arg(arg);
         }
@@ -258,12 +259,46 @@ mod gated {
     }
 
     #[test]
+    fn security_runtime_coverage_marks_hot_sink_candidate() {
+        let harness = Harness::new();
+        let mut cmd = harness.plow();
+        cmd.env("PLOW_LICENSE", sign::mint_runtime_coverage_jwt());
+        cmd.env("PLOW_STUB_MODE", "security-hot");
+        for arg in harness.security_args() {
+            cmd.arg(arg);
+        }
+        let (stdout, stderr, code) = run_with(cmd);
+        assert_eq!(
+            code,
+            0,
+            "security runtime coverage must exit 0; stderr={stderr}; stdout head={}",
+            &stdout.chars().take(400).collect::<String>()
+        );
+        let json: serde_json::Value =
+            serde_json::from_str(&stdout).expect("security output should be JSON");
+        let first = json
+            .pointer("/security_findings/0")
+            .expect("first security finding");
+
+        assert_eq!(
+            first.pointer("/path"),
+            Some(&serde_json::Value::String("src/sink.ts".to_owned()))
+        );
+        assert_eq!(
+            first.pointer("/runtime/state"),
+            Some(&serde_json::Value::String("runtime-hot".to_owned()))
+        );
+        assert_eq!(
+            first.pointer("/runtime/invocations"),
+            Some(&serde_json::Value::Number(250.into()))
+        );
+    }
+
+    #[test]
     fn sidecar_missing_exits_4() {
         let harness = Harness::new();
         let mut cmd = harness.plow();
         cmd.env("PLOW_LICENSE", sign::mint_runtime_coverage_jwt());
-        // Deliberately point at a path that does not exist so discovery
-        // hits the explicit-beats-implicit bailout in discover_sidecar.
         cmd.env("PLOW_COV_BIN", harness.home.join("does-not-exist"));
         for arg in harness.health_args() {
             cmd.arg(arg);
@@ -330,7 +365,6 @@ mod gated {
     #[test]
     fn bad_sidecar_signature_exits_4() {
         let harness = Harness::new();
-        // Corrupt the .sig file with zeros; Ed25519 rejects this.
         let mut sig_os = harness.stub_bin.as_os_str().to_os_string();
         sig_os.push(".sig");
         let sig_path = PathBuf::from(sig_os);
@@ -349,9 +383,6 @@ mod gated {
         );
     }
 
-    /// Happy path + JSON inspection sanity check. Re-uses the harness but
-    /// goes a little further than the headline test: the license watermark
-    /// field should be absent for a fresh (non-expired) JWT.
     #[test]
     fn happy_path_does_not_set_watermark() {
         let harness = Harness::new();
@@ -378,9 +409,6 @@ mod gated {
         );
     }
 
-    /// ADR 009 step 6b: a short-window capture must show both the warning
-    /// banner and the quantified trial CTA in human output. The stub returns
-    /// a 12-minute capture with `lazy_parse_warning: true`.
     #[test]
     fn capture_quality_short_renders_warning_and_upgrade_prompt_in_human_output() {
         let harness = Harness::new();
@@ -418,7 +446,6 @@ mod gated {
         );
     }
 
-    /// ADR 009 step 6b: a long-window capture must be quiet. No warning, no CTA.
     #[test]
     fn capture_quality_long_shows_neither_warning_nor_upgrade_prompt() {
         let harness = Harness::new();
@@ -444,9 +471,6 @@ mod gated {
         );
     }
 
-    /// The trial CTA is a human-format sales touchpoint. It must never land in
-    /// machine-readable formats (JSON, SARIF, etc.); those feed agent pipelines
-    /// and scripted consumers that would choke on free text.
     #[test]
     fn capture_quality_short_does_not_emit_upgrade_prompt_in_json() {
         let harness = Harness::new();

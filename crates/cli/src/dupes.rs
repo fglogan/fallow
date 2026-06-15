@@ -51,7 +51,10 @@ pub struct DupesOptions<'a> {
     pub threshold: Option<f64>,
     pub skip_local: bool,
     pub cross_language: bool,
-    pub ignore_imports: bool,
+    /// CLI/caller override for excluding import declarations from clone
+    /// detection. `None` defers to the config value (which defaults to `true`);
+    /// `Some(false)` is the explicit opt-out (`--no-ignore-imports`).
+    pub ignore_imports: Option<bool>,
     pub top: Option<usize>,
     pub baseline_path: Option<&'a std::path::Path>,
     pub save_baseline_path: Option<&'a std::path::Path>,
@@ -93,14 +96,50 @@ fn parse_trace_spec(spec: &str) -> Result<(&str, usize), &'static str> {
     Ok((file_path, line))
 }
 
+/// Resolve a `--trace` spec, print the clone-trace deep-dive, and return the
+/// process exit code. Two address forms: `dup:<fp>` resolves a clone group by
+/// its stable content fingerprint (discoverable from the listing or
+/// `--format json`); `FILE:LINE` resolves the clone(s) containing a source
+/// location.
+fn run_clone_trace(
+    report: &plow_core::duplicates::DuplicationReport,
+    root: &std::path::Path,
+    trace_spec: &str,
+    output: OutputFormat,
+) -> ExitCode {
+    let (trace_result, not_found) =
+        if let Some(fp) = trace_spec.strip_prefix(plow_core::duplicates::FINGERPRINT_PREFIX) {
+            let fingerprint = format!("{}{fp}", plow_core::duplicates::FINGERPRINT_PREFIX);
+            let result = plow_core::trace::trace_clone_by_fingerprint(report, root, &fingerprint);
+            (
+                result,
+                format!("no clone group with fingerprint {fingerprint}"),
+            )
+        } else {
+            let (file_path, line) = match parse_trace_spec(trace_spec) {
+                Ok(parsed) => parsed,
+                Err(msg) => return emit_error(msg, 2, output),
+            };
+            let result = plow_core::trace::trace_clone(report, root, file_path, line);
+            (result, format!("no clone found at {file_path}:{line}"))
+        };
+    if trace_result.matched_instance.is_none() {
+        return emit_error(&not_found, 2, output);
+    }
+    crate::report::print_clone_trace(&trace_result, root, output);
+    ExitCode::SUCCESS
+}
+
 /// Build a `DuplicatesConfig` from CLI options, merging with values from the config file.
 ///
 /// CLI scalar fields (`mode`, `min_tokens`, `min_lines`, `threshold`) are
 /// `Option<T>` so an absent flag falls through to the value declared in
 /// `toml_dupes`. This is what lets users set e.g. `duplicates.minLines = 8`
-/// in `.plowrc.jsonc` and have `plow dupes` honor it. Boolean toggles
-/// (`skip_local`, `cross_language`, `ignore_imports`) use OR-merge, so any
-/// `true` (CLI or config) wins.
+/// in `.plowrc.jsonc` and have `plow dupes` honor it. The opt-in toggles
+/// (`skip_local`, `cross_language`) use OR-merge, so any `true` (CLI or config)
+/// wins. `ignore_imports` defaults to `true` and supports opt-out, so it uses
+/// precedence instead: an explicit CLI `Some(true|false)` wins over config,
+/// `None` defers to the config value.
 fn build_dupes_config(
     opts: &DupesOptions<'_>,
     toml_dupes: &plow_config::DuplicatesConfig,
@@ -122,7 +161,7 @@ fn build_dupes_config(
         ignore_defaults: toml_dupes.ignore_defaults,
         skip_local: opts.skip_local || toml_dupes.skip_local,
         cross_language: opts.cross_language || toml_dupes.cross_language,
-        ignore_imports: opts.ignore_imports || toml_dupes.ignore_imports,
+        ignore_imports: opts.ignore_imports.unwrap_or(toml_dupes.ignore_imports),
         normalization: toml_dupes.normalization.clone(),
         min_corpus_size_for_shingle_filter: toml_dupes.min_corpus_size_for_shingle_filter,
         min_corpus_size_for_token_cache: toml_dupes.min_corpus_size_for_token_cache,
@@ -136,9 +175,6 @@ fn exceeds_threshold(threshold: f64, duplication_percentage: f64) -> bool {
     threshold > 0.0 && duplication_percentage > threshold
 }
 
-// Changed-file filtering for duplication reports lives in
-// `plow_core::changed_files` so the LSP can reuse it. Re-export here under
-// the existing local name so call sites in this crate stay readable.
 use plow_core::changed_files::filter_duplication_by_changed_files as filter_by_changed_files;
 
 /// Filter a duplication report to only retain clone groups where at least one
@@ -162,10 +198,8 @@ fn filter_by_workspaces(
     });
     report.clone_families =
         plow_core::duplicates::families::group_into_families(&report.clone_groups, root);
-    report.mirrored_directories = plow_core::duplicates::families::detect_mirrored_directories(
-        &report.clone_families,
-        root,
-    );
+    report.mirrored_directories =
+        plow_core::duplicates::families::detect_mirrored_directories(&report.clone_families, root);
     report.stats = recompute_stats(report);
 }
 
@@ -200,10 +234,8 @@ fn filter_by_diff(
         .retain(|g| g.instances.iter().any(instance_overlaps));
     report.clone_families =
         plow_core::duplicates::families::group_into_families(&report.clone_groups, root);
-    report.mirrored_directories = plow_core::duplicates::families::detect_mirrored_directories(
-        &report.clone_families,
-        root,
-    );
+    report.mirrored_directories =
+        plow_core::duplicates::families::detect_mirrored_directories(&report.clone_families, root);
     report.stats = recompute_stats(report);
 }
 
@@ -218,6 +250,10 @@ pub struct DupesResult {
     /// the human-format note to display the value that was actually applied;
     /// `config.duplicates.min_occurrences` only carries the toml value.
     pub min_occurrences: usize,
+    /// Effective `ignoreImports` (CLI override merged with config). Used by the
+    /// human-format note; `config.duplicates.ignore_imports` only carries the
+    /// toml value, not the resolved CLI/default precedence.
+    pub ignore_imports: bool,
     pub explain_skipped: bool,
 }
 
@@ -270,111 +306,22 @@ fn execute_dupes_inner(
         effective_changed_files,
     );
 
-    // Handle trace (diagnostic mode — early return)
     if let Some(trace_spec) = opts.trace {
-        let (file_path, line) = match parse_trace_spec(trace_spec) {
-            Ok(parsed) => parsed,
-            Err(msg) => return Err(emit_error(msg, 2, opts.output)),
-        };
-        let trace_result = plow_core::trace::trace_clone(&report, &config.root, file_path, line);
-        if trace_result.matched_instance.is_none() {
-            return Err(emit_error(
-                &format!("no clone found at {file_path}:{line}"),
-                2,
-                opts.output,
-            ));
-        }
-        crate::report::print_clone_trace(&trace_result, &config.root, opts.output);
-        return Err(ExitCode::SUCCESS);
+        return Err(run_clone_trace(
+            &report,
+            &config.root,
+            trace_spec,
+            opts.output,
+        ));
     }
 
-    // Save baseline
-    if let Some(path) = opts.save_baseline_path {
-        let baseline_data = DuplicationBaselineData::from_report(&report, &config.root);
-        match serde_json::to_string_pretty(&baseline_data) {
-            Ok(json) => {
-                if let Some(parent) = path.parent()
-                    && !parent.as_os_str().is_empty()
-                    && let Err(e) = std::fs::create_dir_all(parent)
-                {
-                    return Err(emit_error(
-                        &format!("failed to create duplication baseline directory: {e}"),
-                        2,
-                        opts.output,
-                    ));
-                }
-                if let Err(e) = std::fs::write(path, json) {
-                    return Err(emit_error(
-                        &format!("failed to write duplication baseline: {e}"),
-                        2,
-                        opts.output,
-                    ));
-                }
-                if !opts.quiet {
-                    eprintln!("Saved duplication baseline to {}", path.display());
-                }
-            }
-            Err(e) => {
-                return Err(emit_error(
-                    &format!("failed to serialize duplication baseline: {e}"),
-                    2,
-                    opts.output,
-                ));
-            }
-        }
-    }
+    save_duplication_baseline(&report, &config, opts)?;
+    apply_duplication_baseline(&mut report, &config, opts)?;
 
-    // Filter against baseline
-    if let Some(path) = opts.baseline_path {
-        match std::fs::read_to_string(path) {
-            Ok(json) => match serde_json::from_str::<DuplicationBaselineData>(&json) {
-                Ok(baseline_data) => {
-                    let baseline_entries = baseline_data.clone_groups.len();
-                    let before = report.clone_groups.len();
-                    report = filter_new_clone_groups(report, &baseline_data, &config.root);
-                    let matched = before.saturating_sub(report.clone_groups.len());
-                    if !opts.quiet {
-                        eprintln!("Comparing against duplication baseline: {}", path.display());
-                    }
-                    if baseline_entries > 0 && matched == 0 && !opts.quiet {
-                        eprintln!(
-                            "Warning: duplication baseline has {baseline_entries} entries but \
-                             matched 0 current clone groups. Your paths may have changed, or \
-                             the baseline was saved on a different machine. Re-save with: \
-                             --save-baseline {}",
-                            path.display(),
-                        );
-                    }
-                }
-                Err(e) => {
-                    return Err(emit_error(
-                        &format!("failed to parse duplication baseline: {e}"),
-                        2,
-                        opts.output,
-                    ));
-                }
-            },
-            Err(e) => {
-                return Err(emit_error(
-                    &format!("failed to read duplication baseline: {e}"),
-                    2,
-                    opts.output,
-                ));
-            }
-        }
-    }
-
-    // Filter to only changed files. Focused mode in `run_duplication_analysis`
-    // already prunes groups that don't touch a changed file when
-    // `effective_changed_files` is set; this pass is a safety net (no-op when
-    // the focused path was used).
     if let Some(changed) = effective_changed_files {
         filter_by_changed_files(&mut report, changed, &config.root);
     }
 
-    // Diff-line filtering (issue #424). CLI calls use the startup cache;
-    // programmatic/NAPI calls pass an explicit per-call index so concurrent
-    // requests cannot inherit another request's diff scope.
     if let Some(diff_index) = match opts.diff_index {
         Some(index) => Some(index),
         None if opts.use_shared_diff_index => crate::report::ci::diff_filter::shared_diff_index(),
@@ -383,11 +330,6 @@ fn execute_dupes_inner(
         filter_by_diff(&mut report, diff_index, &config.root);
     }
 
-    // Workspace scoping (either --workspace or --changed-workspaces).
-    // Applied AFTER --changed-since so both can compose: in combined mode
-    // the user might pass --changed-workspaces origin/main (auto-derived
-    // workspace set) plus --changed-since origin/main (per-file filter
-    // within those workspaces).
     if let Some(ws_roots) = resolve_workspace_scope(
         opts.root,
         opts.workspace,
@@ -397,10 +339,6 @@ fn execute_dupes_inner(
         filter_by_workspaces(&mut report, &ws_roots, &config.root);
     }
 
-    // Apply --top.
-    // Skip when --group-by is active: per-group stats must be computed over
-    // the full bucket (not a globally-truncated subset), and the human/JSON
-    // grouped renderers apply their own per-bucket caps at render time.
     if let Some(n) = opts.top
         && opts.group_by.is_none()
     {
@@ -409,17 +347,140 @@ fn execute_dupes_inner(
 
     let elapsed = start.elapsed();
 
+    // Report result volume to telemetry from the real result, independent of
+    // the duplication threshold gate. Exact counts are bucketed before
+    // serialization.
+    crate::telemetry::note_result_count(report.clone_groups.len());
+    crate::telemetry::note_analysis_scale(Some(report.stats.total_files), None);
+
     Ok(DupesResult {
         report,
         default_ignore_skips,
         config,
         elapsed,
-        // Use the merged threshold so the failure gate honors `.plowrc.jsonc`
-        // when `--threshold` is omitted on the CLI.
         threshold: dupes_config.threshold,
         min_occurrences: dupes_config.min_occurrences,
+        ignore_imports: dupes_config.ignore_imports,
         explain_skipped: opts.explain_skipped,
     })
+}
+
+fn save_duplication_baseline(
+    report: &DuplicationReport,
+    config: &ResolvedConfig,
+    opts: &DupesOptions<'_>,
+) -> Result<(), ExitCode> {
+    let Some(path) = opts.save_baseline_path else {
+        return Ok(());
+    };
+
+    let json = serialize_duplication_baseline(report, config, opts.output)?;
+    ensure_duplication_baseline_parent(path, opts.output)?;
+    if let Err(e) = std::fs::write(path, json) {
+        return Err(emit_error(
+            &format!("failed to write duplication baseline: {e}"),
+            2,
+            opts.output,
+        ));
+    }
+    if !opts.quiet {
+        eprintln!("Saved duplication baseline to {}", path.display());
+    }
+
+    Ok(())
+}
+
+fn serialize_duplication_baseline(
+    report: &DuplicationReport,
+    config: &ResolvedConfig,
+    output: OutputFormat,
+) -> Result<String, ExitCode> {
+    let baseline_data = DuplicationBaselineData::from_report(report, &config.root);
+    serde_json::to_string_pretty(&baseline_data).map_err(|e| {
+        emit_error(
+            &format!("failed to serialize duplication baseline: {e}"),
+            2,
+            output,
+        )
+    })
+}
+
+fn ensure_duplication_baseline_parent(
+    path: &std::path::Path,
+    output: OutputFormat,
+) -> Result<(), ExitCode> {
+    let Some(parent) = path.parent() else {
+        return Ok(());
+    };
+    if parent.as_os_str().is_empty() {
+        return Ok(());
+    }
+    std::fs::create_dir_all(parent).map_err(|e| {
+        emit_error(
+            &format!("failed to create duplication baseline directory: {e}"),
+            2,
+            output,
+        )
+    })
+}
+
+fn apply_duplication_baseline(
+    report: &mut DuplicationReport,
+    config: &ResolvedConfig,
+    opts: &DupesOptions<'_>,
+) -> Result<(), ExitCode> {
+    let Some(path) = opts.baseline_path else {
+        return Ok(());
+    };
+
+    let baseline_data = read_duplication_baseline(path, opts.output)?;
+    let baseline_entries = baseline_data.clone_groups.len();
+    let before = report.clone_groups.len();
+    *report = filter_new_clone_groups(std::mem::take(report), &baseline_data, &config.root);
+    let matched = before.saturating_sub(report.clone_groups.len());
+    if !opts.quiet {
+        eprintln!("Comparing against duplication baseline: {}", path.display());
+    }
+    warn_unmatched_duplication_baseline(path, baseline_entries, matched, opts.quiet);
+
+    Ok(())
+}
+
+fn read_duplication_baseline(
+    path: &std::path::Path,
+    output: OutputFormat,
+) -> Result<DuplicationBaselineData, ExitCode> {
+    let json = std::fs::read_to_string(path).map_err(|e| {
+        emit_error(
+            &format!("failed to read duplication baseline: {e}"),
+            2,
+            output,
+        )
+    })?;
+    serde_json::from_str::<DuplicationBaselineData>(&json).map_err(|e| {
+        emit_error(
+            &format!("failed to parse duplication baseline: {e}"),
+            2,
+            output,
+        )
+    })
+}
+
+fn warn_unmatched_duplication_baseline(
+    path: &std::path::Path,
+    baseline_entries: usize,
+    matched: usize,
+    quiet: bool,
+) {
+    if baseline_entries > 0 && matched == 0 && !quiet {
+        eprintln!(
+            "Warning: duplication baseline has {baseline_entries} entries but \
+             matched 0 current clone groups. Your paths may have changed, or \
+             the baseline was saved on a different machine. Re-save with: \
+             --save-baseline {}",
+            path.display(),
+        );
+    }
 }
 
 /// Resolve `--changed-since` to a concrete file set up front so the focused
@@ -466,15 +527,8 @@ fn apply_top(report: &mut DuplicationReport, n: usize, root: &std::path::Path) {
     report.clone_groups.truncate(n);
     report.clone_families =
         plow_core::duplicates::families::group_into_families(&report.clone_groups, root);
-    report.mirrored_directories = plow_core::duplicates::families::detect_mirrored_directories(
-        &report.clone_families,
-        root,
-    );
-    // Match `stats.clone_groups` and `stats.clone_instances` to the truncated
-    // array length so consumers iterating `clone_groups[]` see the same count
-    // as the stats block. `duplication_percentage`, `duplicated_lines`, and
-    // `duplicated_tokens` stay corpus-wide for trend-line stability (mirrors
-    // the minOccurrences split documented in `docs/output-schema.json`).
+    report.mirrored_directories =
+        plow_core::duplicates::families::detect_mirrored_directories(&report.clone_families, root);
     report.stats.clone_groups = report.clone_groups.len();
     report.stats.clone_instances = report.clone_groups.iter().map(|g| g.instances.len()).sum();
     report.sort();
@@ -546,6 +600,7 @@ pub fn print_dupes_result(
     };
     print_default_ignore_note(result, quiet);
     print_min_occurrences_note(result, quiet);
+    print_ignore_imports_note(result, quiet);
     let report_code = report::print_duplication_report(&result.report, &ctx, result.config.output);
     if report_code != ExitCode::SUCCESS {
         return report_code;
@@ -672,6 +727,7 @@ fn print_dupes_result_with_grouping(
     };
     print_default_ignore_note(result, quiet);
     print_min_occurrences_note(result, quiet);
+    print_ignore_imports_note(result, quiet);
     report::print_duplication_report(&result.report, &ctx, result.config.output)
 }
 
@@ -743,6 +799,33 @@ pub fn print_min_occurrences_note(result: &DupesResult, quiet: bool) {
     );
 }
 
+/// Emit a stderr note when import declarations were excluded from clone
+/// detection (the default since #1224). Human-format only, so machine readers
+/// never see decorative stderr noise. Fires only when clone groups were
+/// reported, so a clean run stays quiet; it tells users the report excludes a
+/// category and how to opt back in.
+pub fn print_ignore_imports_note(result: &DupesResult, quiet: bool) {
+    if quiet
+        || !result.ignore_imports
+        || result.report.clone_groups.is_empty()
+        || !matches!(
+            result.config.output,
+            OutputFormat::Human
+                | OutputFormat::Markdown
+                | OutputFormat::PrCommentGithub
+                | OutputFormat::PrCommentGitlab
+                | OutputFormat::ReviewGithub
+                | OutputFormat::ReviewGitlab
+        )
+    {
+        return;
+    }
+
+    eprintln!(
+        "note: import declarations excluded from clone detection (--no-ignore-imports to include them)"
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -750,8 +833,6 @@ mod tests {
     use plow_config::{DetectionMode, DuplicatesConfig, NormalizationConfig};
     use plow_core::duplicates::{CloneGroup, CloneInstance, DuplicationReport, DuplicationStats};
     use std::path::{Path, PathBuf};
-
-    // ── Helpers ──────────────────────────────────────────────────────
 
     fn instance(file: &str, start: usize, end: usize) -> CloneInstance {
         CloneInstance {
@@ -818,7 +899,7 @@ mod tests {
             threshold: Some(0.0),
             skip_local: false,
             cross_language: false,
-            ignore_imports: false,
+            ignore_imports: None,
             top: None,
             baseline_path: None,
             save_baseline_path: None,
@@ -839,8 +920,6 @@ mod tests {
         }
     }
 
-    // ── parse_trace_spec ─────────────────────────────────────────────
-
     #[test]
     fn parse_trace_spec_valid() {
         let (file, line) = parse_trace_spec("src/utils.ts:42").unwrap();
@@ -850,8 +929,6 @@ mod tests {
 
     #[test]
     fn parse_trace_spec_windows_path_with_drive() {
-        // The rsplit_once(':') should split on the LAST colon, so
-        // C:\path\file.ts:10 -> file = "C:\path\file.ts", line = 10
         let (file, line) = parse_trace_spec("C:\\path\\file.ts:10").unwrap();
         assert_eq!(file, "C:\\path\\file.ts");
         assert_eq!(line, 10);
@@ -874,7 +951,6 @@ mod tests {
 
     #[test]
     fn parse_trace_spec_negative_line() {
-        // "-1" cannot parse as usize, so it hits the catch-all error
         let err = parse_trace_spec("src/utils.ts:-1").unwrap_err();
         assert!(err.contains("positive integer"));
     }
@@ -887,7 +963,6 @@ mod tests {
 
     #[test]
     fn parse_trace_spec_empty_line() {
-        // "src/utils.ts:" -> line_str = ""
         let err = parse_trace_spec("src/utils.ts:").unwrap_err();
         assert!(err.contains("positive integer"));
     }
@@ -901,24 +976,18 @@ mod tests {
 
     #[test]
     fn parse_trace_spec_file_with_colons_in_path() {
-        // Edge case: file path contains colons (e.g., absolute path on Windows or unusual naming)
-        // rsplit_once splits at the LAST colon, so "a:b:c:10" -> ("a:b:c", "10")
         let (file, line) = parse_trace_spec("a:b:c:10").unwrap();
         assert_eq!(file, "a:b:c");
         assert_eq!(line, 10);
     }
 
-    // ── exceeds_threshold ────────────────────────────────────────────
-
     #[test]
     fn threshold_zero_never_fails() {
-        // When threshold is 0.0 (disabled), even 100% duplication should pass
         assert!(!exceeds_threshold(0.0, 100.0));
     }
 
     #[test]
     fn threshold_negative_never_fails() {
-        // Negative threshold is nonsensical but should not trigger failure
         assert!(!exceeds_threshold(-1.0, 50.0));
     }
 
@@ -929,7 +998,6 @@ mod tests {
 
     #[test]
     fn threshold_exactly_at_boundary() {
-        // Duplication == threshold should NOT exceed (the condition is strict >)
         assert!(!exceeds_threshold(5.0, 5.0));
     }
 
@@ -948,14 +1016,8 @@ mod tests {
         assert!(!exceeds_threshold(5.0, 0.0));
     }
 
-    // ── apply_top ────────────────────────────────────────────────────
-
     #[test]
     fn apply_top_keeps_the_most_duplicated_groups() {
-        // Build 5 groups with decreasing instance counts. The path-sorted
-        // order (before --top) would have placed `a.ts` first; the
-        // instance-count-desc order should pick the 33-instance group
-        // first regardless of file name.
         let groups = vec![
             make_group(vec![instance("z-most.ts", 1, 10); 33], 50, 10),
             make_group(vec![instance("y-mid.ts", 1, 10); 8], 50, 10),
@@ -990,7 +1052,6 @@ mod tests {
 
     #[test]
     fn apply_top_tiebreaks_by_line_count_desc() {
-        // Same instance count, different line counts; larger lines wins.
         let groups = vec![
             make_group(vec![instance("a.ts", 1, 10); 3], 50, 10),
             make_group(vec![instance("b.ts", 1, 60); 3], 200, 60),
@@ -1011,11 +1072,6 @@ mod tests {
 
     #[test]
     fn apply_top_recomputes_clone_groups_and_clone_instances_stats() {
-        // Build 4 groups; --top 1 must keep one and update the stats block so
-        // `stats.clone_groups == clone_groups.len()` and
-        // `stats.clone_instances == sum of surviving instances`. Without the
-        // recompute the JSON contract documented in docs/output-schema.json
-        // breaks: array length 1 but stats.clone_groups still reports 4.
         let groups = vec![
             make_group(vec![instance("a.ts", 1, 10); 5], 50, 10),
             make_group(vec![instance("b.ts", 1, 10); 3], 50, 10),
@@ -1044,8 +1100,6 @@ mod tests {
         );
     }
 
-    // ── build_dupes_config ───────────────────────────────────────────
-
     #[test]
     fn build_config_maps_all_modes() {
         let root = PathBuf::from("/project");
@@ -1071,7 +1125,6 @@ mod tests {
             ..DuplicatesConfig::default()
         };
         let config = build_dupes_config(&opts, &toml);
-        // The dupes command always enables duplication detection
         assert!(config.enabled);
     }
 
@@ -1094,7 +1147,6 @@ mod tests {
             ..DuplicatesConfig::default()
         };
         let config = build_dupes_config(&opts, &toml);
-        // OR semantics: toml.cross_language || opts.cross_language
         assert!(config.cross_language);
     }
 
@@ -1168,11 +1220,6 @@ mod tests {
         let config = build_dupes_config(&opts, &toml);
         assert!(config.skip_local);
     }
-
-    // ── Config-fallback tests ────────────────────────────────────────
-    // These regression tests cover the bug where CLI scalars wiped out
-    // the values declared in `.plowrc.jsonc`. With `Option<T>` opts,
-    // a `None` must fall through to the toml value.
 
     #[test]
     fn build_config_falls_back_to_toml_min_lines_when_cli_unset() {
@@ -1270,37 +1317,55 @@ mod tests {
     }
 
     #[test]
-    fn build_config_ignore_imports_cli_true_overrides_toml_false() {
+    fn build_config_ignore_imports_cli_none_defers_to_config_default_true() {
+        // No CLI override: the config default (now true) flows through.
         let root = PathBuf::from("/project");
-        let mut opts = default_opts_for_config(&root, DupesMode::Mild);
-        opts.ignore_imports = true;
+        let opts = default_opts_for_config(&root, DupesMode::Mild);
         let toml = DuplicatesConfig::default();
         let config = build_dupes_config(&opts, &toml);
         assert!(config.ignore_imports);
     }
 
     #[test]
-    fn build_config_ignore_imports_toml_true_with_cli_false() {
+    fn build_config_ignore_imports_cli_opt_out_overrides_config_true() {
+        // `--no-ignore-imports` (Some(false)) wins over a config `ignoreImports: true`.
         let root = PathBuf::from("/project");
-        let opts = default_opts_for_config(&root, DupesMode::Mild);
+        let mut opts = default_opts_for_config(&root, DupesMode::Mild);
+        opts.ignore_imports = Some(false);
         let toml = DuplicatesConfig {
             ignore_imports: true,
             ..DuplicatesConfig::default()
         };
         let config = build_dupes_config(&opts, &toml);
-        assert!(config.ignore_imports, "OR semantics: toml true should win");
+        assert!(!config.ignore_imports, "CLI opt-out must win over config");
     }
 
     #[test]
-    fn build_config_ignore_imports_both_false() {
+    fn build_config_ignore_imports_cli_opt_in_overrides_config_false() {
+        // `--ignore-imports` (Some(true)) wins over a config `ignoreImports: false`.
+        let root = PathBuf::from("/project");
+        let mut opts = default_opts_for_config(&root, DupesMode::Mild);
+        opts.ignore_imports = Some(true);
+        let toml = DuplicatesConfig {
+            ignore_imports: false,
+            ..DuplicatesConfig::default()
+        };
+        let config = build_dupes_config(&opts, &toml);
+        assert!(config.ignore_imports, "CLI opt-in must win over config");
+    }
+
+    #[test]
+    fn build_config_ignore_imports_cli_none_defers_to_config_false() {
+        // Config opt-out with no CLI override: imports are counted.
         let root = PathBuf::from("/project");
         let opts = default_opts_for_config(&root, DupesMode::Mild);
-        let toml = DuplicatesConfig::default();
+        let toml = DuplicatesConfig {
+            ignore_imports: false,
+            ..DuplicatesConfig::default()
+        };
         let config = build_dupes_config(&opts, &toml);
         assert!(!config.ignore_imports);
     }
-
-    // ── DuplicationBaselineData integration ──────────────────────────
 
     #[test]
     fn baseline_save_load_round_trip() {
@@ -1316,7 +1381,6 @@ mod tests {
         let report = make_report(vec![group], 10, 1000);
         let baseline = DuplicationBaselineData::from_report(&report, root);
 
-        // Serialize and deserialize
         let json = serde_json::to_string_pretty(&baseline).unwrap();
         let loaded: DuplicationBaselineData = serde_json::from_str(&json).unwrap();
         assert_eq!(loaded.clone_groups, baseline.clone_groups);
@@ -1368,7 +1432,6 @@ mod tests {
         let report = make_report(vec![old_group, new_group], 10, 1000);
         let filtered = filter_new_clone_groups(report, &baseline, root);
         assert_eq!(filtered.clone_groups.len(), 1);
-        // The remaining group should be the new one (c.ts, d.ts)
         assert_eq!(filtered.clone_groups[0].instances.len(), 2);
         assert!(
             filtered.clone_groups[0]
@@ -1377,8 +1440,6 @@ mod tests {
                 .any(|i| i.file == std::path::Path::new("/project/src/c.ts"))
         );
     }
-
-    // ── recompute_stats ──────────────────────────────────────────────
 
     #[test]
     fn recompute_stats_empty_report() {
@@ -1405,14 +1466,12 @@ mod tests {
         let stats = recompute_stats(&report);
         assert_eq!(stats.clone_groups, 1);
         assert_eq!(stats.clone_instances, 2);
-        // 5 lines in a.ts + 5 lines in b.ts = 10 duplicated lines
         assert_eq!(stats.duplicated_lines, 10);
         assert!((stats.duplication_percentage - 10.0).abs() < f64::EPSILON);
     }
 
     #[test]
     fn recompute_stats_deduplicates_overlapping_lines_in_same_file() {
-        // Two groups both mark lines 3-7 as cloned in the same file
         let group1 = make_group(
             vec![
                 instance("/project/src/a.ts", 1, 5),
@@ -1432,9 +1491,6 @@ mod tests {
         let mut report = make_report(vec![group1, group2], 10, 100);
         report.stats.total_lines = 100;
         let stats = recompute_stats(&report);
-        // a.ts: lines 1-5 + lines 3-7 = lines 1-7 = 7 unique lines
-        // b.ts: lines 1-5 = 5 unique lines
-        // c.ts: lines 10-14 = 5 unique lines
         assert_eq!(stats.duplicated_lines, 17);
         assert_eq!(stats.files_with_clones, 3);
     }
@@ -1469,21 +1525,13 @@ mod tests {
         report.stats.total_lines = 500;
         report.stats.total_tokens = 10000;
         let stats = recompute_stats(&report);
-        // Computed: 2 groups
         assert_eq!(stats.clone_groups, 2);
-        // Computed: 4 instances total
         assert_eq!(stats.clone_instances, 4);
-        // Computed: a.ts 10 + b.ts 10 + c.ts 6 + d.ts 6 = 32 duplicated lines
         assert_eq!(stats.duplicated_lines, 32);
-        // Computed: (50*2) + (30*2) = 160 duplicated tokens
         assert_eq!(stats.duplicated_tokens, 160);
-        // Computed: 4 unique files with clones
         assert_eq!(stats.files_with_clones, 4);
-        // Computed: 32/500 * 100 = 6.4%
         assert!((stats.duplication_percentage - 6.4).abs() < f64::EPSILON);
     }
-
-    // ── filter_by_changed_files ─────────────────────────────────────
 
     #[test]
     fn filter_by_changed_files_retains_groups_with_at_least_one_changed_instance() {
@@ -1524,13 +1572,11 @@ mod tests {
 
     #[test]
     fn filter_by_changed_files_partial_group_retention() {
-        // Group 1: a.ts <-> b.ts (a.ts is changed)
         let group1 = make_group(
             vec![instance("src/a.ts", 1, 10), instance("src/b.ts", 1, 10)],
             50,
             10,
         );
-        // Group 2: c.ts <-> d.ts (neither is changed)
         let group2 = make_group(
             vec![instance("src/c.ts", 1, 10), instance("src/d.ts", 1, 10)],
             50,
@@ -1543,7 +1589,6 @@ mod tests {
         filter_by_changed_files(&mut report, &changed, Path::new(""));
 
         assert_eq!(report.clone_groups.len(), 1);
-        // The retained group should be the one containing a.ts
         assert!(
             report.clone_groups[0]
                 .instances
@@ -1567,18 +1612,12 @@ mod tests {
         assert!(report.clone_groups.is_empty());
     }
 
-    // ── filter_by_diff (issue #424) ─────────────────────────────────
-
     fn build_diff(text: &str) -> crate::report::ci::diff_filter::DiffIndex {
         crate::report::ci::diff_filter::DiffIndex::from_unified_diff(text)
     }
 
     #[test]
     fn filter_by_diff_keeps_group_when_one_of_four_instances_overlaps() {
-        // Panel-guided shape: a clone group with 4 instances; only the
-        // first instance's [1..=10] overlaps the diff line at 5. The
-        // group MUST survive at the group level even though the other 3
-        // instances are off-diff.
         let group = make_group(
             vec![
                 instance("src/a.ts", 1, 10),
@@ -1635,8 +1674,6 @@ mod tests {
 
     #[test]
     fn filter_by_diff_drops_group_when_instance_path_matches_but_range_does_not() {
-        // Same file is in the diff, but the clone's [100..=110] doesn't
-        // overlap the touched line at 5. The group must drop.
         let group = make_group(
             vec![
                 instance("src/a.ts", 100, 110),
@@ -1662,8 +1699,6 @@ mod tests {
 
     #[test]
     fn filter_by_diff_handles_long_instance_with_diff_in_middle() {
-        // Hotspot-shaped: a 200-line clone with the diff touching line
-        // 150 in the middle. Must overlap.
         let group = make_group(
             vec![
                 instance("src/big.ts", 50, 250),
@@ -1686,8 +1721,6 @@ mod tests {
 
         assert_eq!(report.clone_groups.len(), 1);
     }
-
-    // ── filter_by_workspaces ────────────────────────────────────────
 
     #[test]
     fn filter_by_workspaces_retains_group_with_instance_under_any_root() {
@@ -1784,14 +1817,10 @@ mod tests {
 
     #[test]
     fn baseline_empty_json_object_uses_defaults() {
-        // An empty JSON object should deserialize with empty clone_groups
-        // (this tests that the format is forward-compatible)
         let result = serde_json::from_str::<DuplicationBaselineData>(r#"{"clone_groups": []}"#);
         assert!(result.is_ok());
         assert!(result.unwrap().clone_groups.is_empty());
     }
-
-    // ── Families rebuilt after filtering ──────────────────────────────
 
     #[test]
     fn families_rebuilt_after_baseline_filter() {
@@ -1813,21 +1842,16 @@ mod tests {
             11,
         );
 
-        // Baseline only knows about group1
         let baseline_report = make_report(vec![group1.clone()], 10, 1000);
         let baseline = DuplicationBaselineData::from_report(&baseline_report, root);
 
-        // Full report has both groups
         let report = make_report(vec![group1, group2], 10, 1000);
         let filtered = filter_new_clone_groups(report, &baseline, root);
 
-        // Families should be rebuilt from the remaining group(s)
         assert_eq!(filtered.clone_groups.len(), 1);
         assert_eq!(filtered.clone_families.len(), 1);
         assert_eq!(filtered.clone_families[0].groups.len(), 1);
     }
-
-    // ── Stats after changed_since filter ─────────────────────────────
 
     #[test]
     fn stats_recomputed_after_changed_since_filter() {
@@ -1846,18 +1870,14 @@ mod tests {
 
         filter_by_changed_files(&mut report, &changed, Path::new(""));
 
-        // All groups filtered out, stats should reflect that
         assert_eq!(report.stats.clone_groups, 0);
         assert_eq!(report.stats.clone_instances, 0);
         assert_eq!(report.stats.duplicated_lines, 0);
         assert!((report.stats.duplication_percentage - 0.0).abs() < f64::EPSILON);
-        // Pass-through fields are preserved from the original stats
         assert_eq!(report.stats.total_lines, 100);
         assert_eq!(report.stats.total_tokens, 5000);
         assert_eq!(report.stats.total_files, 10);
     }
-
-    // ── recompute_stats token counting ───────────────────────────────
 
     #[test]
     fn recompute_stats_counts_tokens_per_instance() {
@@ -1873,7 +1893,6 @@ mod tests {
         let mut report = make_report(vec![group], 10, 100);
         report.stats.total_lines = 100;
         let stats = recompute_stats(&report);
-        // 40 tokens * 3 instances = 120
         assert_eq!(stats.duplicated_tokens, 120);
     }
 }

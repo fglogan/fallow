@@ -1,3 +1,12 @@
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        reason = "tests use unwrap and expect to keep fixture setup concise"
+    )
+)]
+
 mod code_actions;
 mod code_lens;
 mod diagnostics;
@@ -10,14 +19,15 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use tokio::sync::{Mutex, RwLock};
-use tower_lsp::jsonrpc::Result;
 #[allow(clippy::wildcard_imports, reason = "many LSP types used")]
-use tower_lsp::lsp_types::*;
-use tower_lsp::{Client, LanguageServer, LspService, Server};
+use ls_types::*;
+use tokio::sync::{Mutex, RwLock};
+use tower_lsp_server::jsonrpc::Result;
+use tower_lsp_server::{Client, LanguageServer, LspService, Server};
 
 use serde::{Deserialize, Serialize};
 
+use plow_config::{DetectionMode, DuplicatesConfig};
 use plow_core::changed_files::{
     filter_duplication_by_changed_files, filter_results_by_changed_files, resolve_git_toplevel,
     try_get_changed_files_with_toplevel,
@@ -25,7 +35,7 @@ use plow_core::changed_files::{
 use plow_core::duplicates::DuplicationReport;
 use plow_core::results::AnalysisResults;
 
-// ── Custom LSP notification: plow/analysisComplete ──────────────────────
+use crate::code_lens::{InlineComplexityExceeded, InlineComplexityFinding};
 
 /// Custom notification sent to the client after every analysis completes.
 /// Carries summary stats so the extension can update the status bar, context
@@ -50,6 +60,12 @@ struct AnalysisCompleteParams {
     unused_optional_dependencies: usize,
     unused_enum_members: usize,
     unused_class_members: usize,
+    unused_store_members: usize,
+    unprovided_injects: usize,
+    unrendered_components: usize,
+    unused_component_props: usize,
+    unused_component_emits: usize,
+    unused_server_actions: usize,
     unresolved_imports: usize,
     unlisted_dependencies: usize,
     duplicate_exports: usize,
@@ -66,6 +82,46 @@ struct AnalysisCompleteParams {
     misconfigured_dependency_overrides: usize,
     duplication_percentage: f64,
     clone_groups: usize,
+}
+
+fn analysis_complete_params(
+    results: &AnalysisResults,
+    duplication: &DuplicationReport,
+) -> AnalysisCompleteParams {
+    AnalysisCompleteParams {
+        total_issues: results.total_issues(),
+        unused_files: results.unused_files.len(),
+        unused_exports: results.unused_exports.len(),
+        unused_types: results.unused_types.len(),
+        private_type_leaks: results.private_type_leaks.len(),
+        unused_dependencies: results.unused_dependencies.len(),
+        unused_dev_dependencies: results.unused_dev_dependencies.len(),
+        unused_optional_dependencies: results.unused_optional_dependencies.len(),
+        unused_enum_members: results.unused_enum_members.len(),
+        unused_class_members: results.unused_class_members.len(),
+        unused_store_members: results.unused_store_members.len(),
+        unprovided_injects: results.unprovided_injects.len(),
+        unrendered_components: results.unrendered_components.len(),
+        unused_component_props: results.unused_component_props.len(),
+        unused_component_emits: results.unused_component_emits.len(),
+        unused_server_actions: results.unused_server_actions.len(),
+        unresolved_imports: results.unresolved_imports.len(),
+        unlisted_dependencies: results.unlisted_dependencies.len(),
+        duplicate_exports: results.duplicate_exports.len(),
+        type_only_dependencies: results.type_only_dependencies.len(),
+        test_only_dependencies: results.test_only_dependencies.len(),
+        circular_dependencies: results.circular_dependencies.len(),
+        re_export_cycles: results.re_export_cycles.len(),
+        boundary_violations: results.boundary_violations.len(),
+        stale_suppressions: results.stale_suppressions.len(),
+        unused_catalog_entries: results.unused_catalog_entries.len(),
+        empty_catalog_groups: results.empty_catalog_groups.len(),
+        unresolved_catalog_references: results.unresolved_catalog_references.len(),
+        unused_dependency_overrides: results.unused_dependency_overrides.len(),
+        misconfigured_dependency_overrides: results.misconfigured_dependency_overrides.len(),
+        duplication_percentage: duplication.stats.duplication_percentage,
+        clone_groups: duplication.stats.clone_groups,
+    }
 }
 
 /// Diagnostic codes that the LSP client can disable via initializationOptions.
@@ -137,6 +193,11 @@ const DIAGNOSTIC_ISSUE_TYPES: &[DiagnosticIssueType] = &[
         label: "Unused Class Members",
     },
     DiagnosticIssueType {
+        config_key: Some("unused-store-members"),
+        code: "unused-store-member",
+        label: "Unused Store Members",
+    },
+    DiagnosticIssueType {
         config_key: Some("unresolved-imports"),
         code: "unresolved-import",
         label: "Unresolved Imports",
@@ -177,6 +238,61 @@ const DIAGNOSTIC_ISSUE_TYPES: &[DiagnosticIssueType] = &[
         label: "Boundary Violations",
     },
     DiagnosticIssueType {
+        config_key: Some("policy-violation"),
+        code: "policy-violation",
+        label: "Policy Violations",
+    },
+    DiagnosticIssueType {
+        config_key: Some("invalid-client-export"),
+        code: "invalid-client-export",
+        label: "Invalid Client Exports",
+    },
+    DiagnosticIssueType {
+        config_key: Some("mixed-client-server-barrel"),
+        code: "mixed-client-server-barrel",
+        label: "Mixed Client/Server Barrels",
+    },
+    DiagnosticIssueType {
+        config_key: Some("misplaced-directive"),
+        code: "misplaced-directive",
+        label: "Misplaced Directives",
+    },
+    DiagnosticIssueType {
+        config_key: Some("unprovided-injects"),
+        code: "unprovided-inject",
+        label: "Unprovided Injects",
+    },
+    DiagnosticIssueType {
+        config_key: Some("unrendered-components"),
+        code: "unrendered-component",
+        label: "Unrendered Components",
+    },
+    DiagnosticIssueType {
+        config_key: Some("unused-component-props"),
+        code: "unused-component-prop",
+        label: "Unused Component Props",
+    },
+    DiagnosticIssueType {
+        config_key: Some("unused-component-emits"),
+        code: "unused-component-emit",
+        label: "Unused Component Emits",
+    },
+    DiagnosticIssueType {
+        config_key: Some("unused-server-actions"),
+        code: "unused-server-action",
+        label: "Unused Server Actions",
+    },
+    DiagnosticIssueType {
+        config_key: Some("route-collision"),
+        code: "route-collision",
+        label: "Route Collisions",
+    },
+    DiagnosticIssueType {
+        config_key: Some("dynamic-segment-name-conflict"),
+        code: "dynamic-segment-name-conflict",
+        label: "Dynamic Segment Conflicts",
+    },
+    DiagnosticIssueType {
         config_key: Some("stale-suppressions"),
         code: "stale-suppression",
         label: "Stale Suppressions",
@@ -205,6 +321,16 @@ const DIAGNOSTIC_ISSUE_TYPES: &[DiagnosticIssueType] = &[
         config_key: Some("misconfigured-dependency-overrides"),
         code: "misconfigured-dependency-override",
         label: "Misconfigured Dependency Overrides",
+    },
+    DiagnosticIssueType {
+        config_key: Some("security-sink"),
+        code: "security-sink",
+        label: "Security Sink Candidates",
+    },
+    DiagnosticIssueType {
+        config_key: Some("security-client-server-leak"),
+        code: "security-client-server-leak",
+        label: "Security Client-Server Leaks",
     },
 ];
 
@@ -237,14 +363,22 @@ fn config_load_error_detail(
 /// findings to the merged accumulators and a status message to
 /// `config_messages`. Extracted out of `run_analysis` to keep that method
 /// under the 150-line clippy ceiling.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "LSP analysis merges dead-code, duplication, inline complexity, and config messages"
+)]
 fn analyze_project_root(
     project_root: &Path,
     config_path: Option<&Path>,
+    duplication_options: Option<&LspDuplicationOptions>,
+    production_override: Option<bool>,
+    inline_complexity_enabled: bool,
     merged_results: &mut AnalysisResults,
     merged_duplication: &mut DuplicationReport,
+    merged_inline_complexity: &mut Vec<InlineComplexityFinding>,
     config_messages: &mut Vec<(MessageType, String)>,
 ) {
-    let (config, message) = match plow_core::config_for_project(project_root, config_path) {
+    let (mut config, message) = match plow_core::config_for_project(project_root, config_path) {
         Ok((config, Some(path))) => (
             config,
             (
@@ -263,11 +397,6 @@ fn analyze_project_root(
             ),
         ),
         Err(e) => {
-            // WARNING (not INFO) so VS Code's notification system pops the
-            // message; INFO goes only to the (hidden-by-default) Output
-            // channel. Only fall back to defaults when the user has NOT
-            // explicitly set a config path; an explicit-but-broken path
-            // should fail loudly rather than silently using defaults.
             let detail = config_load_error_detail(project_root, config_path, &e);
             config_messages.push((MessageType::WARNING, detail));
             if config_path.is_none() {
@@ -280,26 +409,50 @@ fn analyze_project_root(
                 }
                 let duplication = plow_core::duplicates::find_duplicates_in_project(
                     project_root,
-                    &plow_config::DuplicatesConfig::default(),
+                    &DuplicatesConfig::default(),
                 );
                 merge_duplication(merged_duplication, duplication);
             }
             return;
         }
     };
+
+    // Override the project config's production resolution when the editor
+    // forwarded an explicit `plow.production` (on/off). Mirrors the
+    // CLI-driven sidebar receiving `--production`/`--no-production`, so the two
+    // surfaces agree; `None` leaves the project config in force (issue #1055).
+    if let Some(production) = production_override {
+        config.production = production;
+    }
+
     config_messages.push(message);
 
-    #[expect(
-        deprecated,
-        reason = "ADR-008 deprecates plow_core::analyze_with_usages externally; the LSP still uses the workspace path dependency"
-    )]
-    if let Ok(results) = plow_core::analyze_with_usages(&config) {
-        merge_results(merged_results, results);
+    if inline_complexity_enabled {
+        #[expect(
+            deprecated,
+            reason = "ADR-008 deprecates plow_core typed analysis externally; the LSP still uses the workspace path dependency"
+        )]
+        if let Ok(output) = plow_core::analyze_with_usages_and_complexity(&config) {
+            merged_inline_complexity.extend(collect_inline_complexity(&config, &output));
+            merge_results(merged_results, output.results);
+        }
+    } else {
+        #[expect(
+            deprecated,
+            reason = "ADR-008 deprecates plow_core::analyze_with_usages externally; the LSP still uses the workspace path dependency"
+        )]
+        if let Ok(results) = plow_core::analyze_with_usages(&config) {
+            merge_results(merged_results, results);
+        }
     }
 
     let files = plow_core::discover::discover_files_with_plugin_scopes(&config);
+    let duplicates_config = duplication_options.map_or_else(
+        || config.duplicates.clone(),
+        |options| options.merge_with(&config.duplicates),
+    );
     let duplication =
-        plow_core::duplicates::find_duplicates(project_root, &files, &config.duplicates);
+        plow_core::duplicates::find_duplicates(project_root, &files, &duplicates_config);
     merge_duplication(merged_duplication, duplication);
 }
 
@@ -319,7 +472,7 @@ struct DocumentState {
 /// document has been edited during the analysis run. A type alias so future
 /// readers can grep for the snapshot's identity (it is also a stable seam
 /// for tests).
-type VersionSnapshot = FxHashMap<Url, i32>;
+type VersionSnapshot = FxHashMap<Uri, i32>;
 
 fn initialization_config_path(opts: &serde_json::Value, root: Option<&Path>) -> Option<PathBuf> {
     let raw = opts.get("configPath").and_then(|v| v.as_str())?.trim();
@@ -339,12 +492,151 @@ fn initialization_config_path(opts: &serde_json::Value, root: Option<&Path>) -> 
     Some(path.canonicalize().unwrap_or(path))
 }
 
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct LspDuplicationOptions {
+    mode: Option<DetectionMode>,
+    threshold: Option<f64>,
+    min_tokens: Option<usize>,
+    min_lines: Option<usize>,
+    min_occurrences: Option<usize>,
+    skip_local: Option<bool>,
+    cross_language: Option<bool>,
+    ignore_imports: Option<bool>,
+}
+
+impl LspDuplicationOptions {
+    fn merge_with(&self, config: &DuplicatesConfig) -> DuplicatesConfig {
+        DuplicatesConfig {
+            enabled: config.enabled,
+            mode: self.mode.unwrap_or(config.mode),
+            min_tokens: self.min_tokens.unwrap_or(config.min_tokens),
+            min_lines: self.min_lines.unwrap_or(config.min_lines),
+            min_occurrences: self
+                .min_occurrences
+                .filter(|min| *min >= 2)
+                .unwrap_or(config.min_occurrences),
+            threshold: self.threshold.unwrap_or(config.threshold),
+            ignore: config.ignore.clone(),
+            ignore_defaults: config.ignore_defaults,
+            skip_local: self.skip_local.unwrap_or(config.skip_local),
+            cross_language: self.cross_language.unwrap_or(config.cross_language),
+            ignore_imports: self.ignore_imports.unwrap_or(config.ignore_imports),
+            normalization: config.normalization.clone(),
+            min_corpus_size_for_shingle_filter: config.min_corpus_size_for_shingle_filter,
+            min_corpus_size_for_token_cache: config.min_corpus_size_for_token_cache,
+        }
+    }
+}
+
+fn initialization_duplication_options(opts: &serde_json::Value) -> Option<LspDuplicationOptions> {
+    serde_json::from_value(opts.get("duplication")?.clone()).ok()
+}
+
+/// Read the optional production-mode override from `initializationOptions`.
+/// `Some(true)`/`Some(false)` force production on/off; a missing or non-boolean
+/// `production` key yields `None`, deferring to the project config (issue
+/// #1055). VS Code omits the key for the `"auto"` setting state.
+fn initialization_production_override(opts: &serde_json::Value) -> Option<bool> {
+    opts.get("production").and_then(serde_json::Value::as_bool)
+}
+
+fn initialization_inline_complexity_enabled(opts: &serde_json::Value) -> bool {
+    opts.get("health")
+        .and_then(|health| health.get("inlineComplexity"))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+}
+
+fn build_health_ignore_set(patterns: &[String]) -> Option<globset::GlobSet> {
+    if patterns.is_empty() {
+        return None;
+    }
+
+    let mut builder = globset::GlobSetBuilder::new();
+    for pattern in patterns {
+        let Ok(glob) = globset::Glob::new(pattern) else {
+            continue;
+        };
+        builder.add(glob);
+    }
+    builder.build().ok()
+}
+
+fn collect_inline_complexity(
+    config: &plow_config::ResolvedConfig,
+    output: &plow_core::AnalysisOutput,
+) -> Vec<InlineComplexityFinding> {
+    let Some(modules) = output.modules.as_ref() else {
+        return Vec::new();
+    };
+    let Some(files) = output.files.as_ref() else {
+        return Vec::new();
+    };
+
+    let file_paths: FxHashMap<_, _> = files.iter().map(|file| (file.id, &file.path)).collect();
+    let ignore_set = build_health_ignore_set(&config.health.ignore);
+    let mut findings = Vec::new();
+
+    for module in modules {
+        let Some(path) = file_paths.get(&module.file_id) else {
+            continue;
+        };
+        let relative = path.strip_prefix(&config.root).unwrap_or(path);
+        if ignore_set
+            .as_ref()
+            .is_some_and(|set| set.is_match(relative))
+        {
+            continue;
+        }
+
+        for function in &module.complexity {
+            if plow_core::suppress::is_suppressed(
+                &module.suppressions,
+                function.line,
+                plow_core::suppress::IssueKind::Complexity,
+            ) {
+                continue;
+            }
+
+            let exceeds_cyclomatic = function.cyclomatic > config.health.max_cyclomatic;
+            let exceeds_cognitive = function.cognitive > config.health.max_cognitive;
+            let exceeded = match (exceeds_cyclomatic, exceeds_cognitive) {
+                (true, true) => InlineComplexityExceeded::CyclomaticAndCognitive,
+                (true, false) => InlineComplexityExceeded::Cyclomatic,
+                (false, true) => InlineComplexityExceeded::Cognitive,
+                (false, false) => continue,
+            };
+
+            findings.push(InlineComplexityFinding {
+                path: (*path).clone(),
+                name: function.name.clone(),
+                line: function.line,
+                col: function.col,
+                cyclomatic: function.cyclomatic,
+                cognitive: function.cognitive,
+                exceeded,
+            });
+        }
+    }
+
+    findings
+}
+
+fn filter_inline_complexity_by_changed_files(
+    findings: &mut Vec<InlineComplexityFinding>,
+    changed_files: &FxHashSet<PathBuf>,
+) {
+    findings.retain(|finding| changed_files.contains(&finding.path));
+}
+
 struct PlowLspServer {
     client: Client,
     root: Arc<RwLock<Option<PathBuf>>>,
     results: Arc<RwLock<Option<AnalysisResults>>>,
     duplication: Arc<RwLock<Option<DuplicationReport>>>,
-    previous_diagnostic_uris: Arc<RwLock<FxHashSet<Url>>>,
+    inline_complexity: Arc<RwLock<Vec<InlineComplexityFinding>>>,
+    previous_diagnostic_uris: Arc<RwLock<FxHashSet<Uri>>>,
     last_analysis: Arc<Mutex<Instant>>,
     analysis_guard: Arc<tokio::sync::Mutex<()>>,
     /// Per-URI document state tracked from `did_open` / `did_change` /
@@ -352,7 +644,7 @@ struct PlowLspServer {
     /// `run_analysis` to snapshot the document state at analysis start and
     /// by `publish_collected_diagnostics` to skip stale publishes; see
     /// `.claude/rules/lsp-server.md` for the staleness invariant.
-    documents: Arc<RwLock<FxHashMap<Url, DocumentState>>>,
+    documents: Arc<RwLock<FxHashMap<Uri, DocumentState>>>,
     /// Diagnostic codes to suppress (parsed from initializationOptions.issueTypes)
     disabled_diagnostic_codes: Arc<RwLock<FxHashSet<String>>>,
     /// Optional git ref from `initializationOptions.changedSince`. When set,
@@ -362,6 +654,18 @@ struct PlowLspServer {
     /// Optional explicit config path from `initializationOptions.configPath`.
     /// Mirrors the CLI's `--config` flag for editor clients.
     config_path: Arc<RwLock<Option<PathBuf>>>,
+    /// Optional duplication overrides from `initializationOptions.duplication`.
+    /// VS Code sends these so live diagnostics match the sidebar CLI run.
+    duplication_options: Arc<RwLock<Option<LspDuplicationOptions>>>,
+    /// Optional production-mode override from `initializationOptions.production`.
+    /// `Some(true)`/`Some(false)` force production on/off so the editor's
+    /// diagnostics match the CLI-driven sidebar (which receives
+    /// `--production`/`--no-production`); `None` defers to the project config,
+    /// mirroring the CLI default. Without this the sidebar and editor squiggles
+    /// disagree whenever `plow.production` is set (issue #1055).
+    production_override: Arc<RwLock<Option<bool>>>,
+    /// Whether the client opted in to heuristic complexity code lenses.
+    inline_complexity_enabled: Arc<RwLock<bool>>,
     /// Canonical git toplevel for the workspace `root`, resolved on first
     /// analysis run and reused thereafter. Cached so we do not pay for an
     /// extra `git rev-parse --show-toplevel` subprocess on every save.
@@ -378,7 +682,17 @@ struct PlowLspServer {
     /// this cache (and `self.root`) to avoid stale path joins.
     git_toplevel: Arc<RwLock<Option<PathBuf>>>,
     /// Cached diagnostics for pull-model support (textDocument/diagnostic)
-    cached_diagnostics: Arc<RwLock<FxHashMap<Url, Vec<Diagnostic>>>>,
+    cached_diagnostics: Arc<RwLock<FxHashMap<Uri, Vec<Diagnostic>>>>,
+    /// Set to `true` the first time the client issues a `textDocument/diagnostic`
+    /// request. This is the only reliable signal that a client genuinely
+    /// consumes pull diagnostics. Advertising `workspace.diagnostics.refreshSupport`
+    /// is NOT sufficient: refresh-capable clients can still choose not to pull
+    /// for a given document. Keying push-suppression on the advertised capability
+    /// silently blanked open-file diagnostics for such clients. Push-suppression,
+    /// the `did_open` push clear, and the `workspace/diagnostic/refresh` nudge
+    /// therefore all key on THIS flag so push-only clients keep receiving
+    /// open-file diagnostics.
+    client_pulls: Arc<AtomicBool>,
     /// Set by `shutdown()`. `run_analysis` checks this at the top and
     /// before publishing diagnostics so a closing client does not receive
     /// spurious post-shutdown publishes. The 250ms grace on the
@@ -391,14 +705,13 @@ struct PlowLspServer {
 
 /// Build the `ServerCapabilities` advertised by `initialize`.
 ///
-/// `diagnostic_provider` is required for strict LSP 3.17 clients
-/// (Helix, Zed, and other editors that gate the pull-model diagnostic
-/// request on the advertised capability). Without it, `textDocument/diagnostic`
-/// is dead code for those clients even though the handler is wired up.
+/// `diagnostic_provider` is advertised only for clients that can refresh pulled
+/// diagnostics. Clients without refresh support stay push-only so empty
+/// `publishDiagnostics` notifications can clear their diagnostics immediately.
 /// `inter_file_dependencies = true` because changing exports or imports in one
 /// file can flip diagnostics in another (unused exports, unused dependencies).
 /// `workspace_diagnostics = false` because we do not serve `workspace/diagnostic`.
-fn build_server_capabilities() -> ServerCapabilities {
+fn build_server_capabilities(advertise_pull_diagnostics: bool) -> ServerCapabilities {
     ServerCapabilities {
         text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
         code_action_provider: Some(CodeActionProviderCapability::Options(CodeActionOptions {
@@ -409,41 +722,48 @@ fn build_server_capabilities() -> ServerCapabilities {
             resolve_provider: Some(false),
         }),
         hover_provider: Some(HoverProviderCapability::Simple(true)),
-        diagnostic_provider: Some(DiagnosticServerCapabilities::Options(DiagnosticOptions {
-            identifier: Some("plow".to_string()),
-            inter_file_dependencies: true,
-            workspace_diagnostics: false,
-            work_done_progress_options: WorkDoneProgressOptions::default(),
-        })),
+        diagnostic_provider: advertise_pull_diagnostics.then(|| {
+            DiagnosticServerCapabilities::Options(DiagnosticOptions {
+                identifier: Some("plow".to_string()),
+                inter_file_dependencies: true,
+                workspace_diagnostics: false,
+                work_done_progress_options: WorkDoneProgressOptions::default(),
+            })
+        }),
         ..Default::default()
     }
 }
 
-#[tower_lsp::async_trait]
+fn client_supports_workspace_diagnostic_refresh(capabilities: &ClientCapabilities) -> bool {
+    capabilities
+        .workspace
+        .as_ref()
+        .and_then(|workspace| workspace.diagnostics.as_ref())
+        .and_then(|diagnostics| diagnostics.refresh_support)
+        .unwrap_or(false)
+}
+
 impl LanguageServer for PlowLspServer {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
         let root = params
-            .root_uri
-            .and_then(|u| u.to_file_path().ok())
+            .workspace_folders
+            .as_deref()
+            .and_then(|fs| fs.first())
+            .and_then(|f| f.uri.to_file_path().map(|path| path.into_owned()))
             .or_else(|| {
+                #[expect(
+                    deprecated,
+                    reason = "root_uri remains a fallback for legacy LSP clients"
+                )]
                 params
-                    .workspace_folders
-                    .as_deref()
-                    .and_then(|fs| fs.first())
-                    .and_then(|f| f.uri.to_file_path().ok())
+                    .root_uri
+                    .and_then(|u| u.to_file_path().map(|path| path.into_owned()))
             });
-        // Canonicalize the workspace root so absolute paths emitted by
-        // `analyze_project` agree with paths produced by `resolve_git_toplevel`
-        // (which is also canonicalized). On macOS, /tmp -> /private/tmp; on
-        // Windows, 8.3 short paths get expanded. Without this, the
-        // `--changed-since` filter silently fails to match because the two
-        // sides start from different prefixes for the same files.
         let canonical_root = root.map(|path| path.canonicalize().unwrap_or(path));
         if let Some(path) = &canonical_root {
             *self.root.write().await = Some(path.clone());
         }
 
-        // Parse initializationOptions for issue type toggles and changedSince
         if let Some(opts) = &params.initialization_options {
             if let Some(issue_types) = opts.get("issueTypes").and_then(|v| v.as_object()) {
                 let mut disabled = FxHashSet::default();
@@ -459,14 +779,9 @@ impl LanguageServer for PlowLspServer {
                         disabled.insert(issue_type.code.to_string());
                     }
                 }
-                // "code-duplication" is controlled by the duplication.* settings,
-                // not issueTypes (always enabled at the LSP level).
                 *self.disabled_diagnostic_codes.write().await = disabled;
             }
 
-            // changedSince: a git ref (tag, branch, or SHA). Empty string is
-            // treated as "unset" so users can clear the setting via the
-            // settings UI without restarting.
             if let Some(git_ref) = opts.get("changedSince").and_then(|v| v.as_str()) {
                 let trimmed = git_ref.trim();
                 *self.changed_since.write().await = if trimmed.is_empty() {
@@ -478,10 +793,17 @@ impl LanguageServer for PlowLspServer {
 
             *self.config_path.write().await =
                 initialization_config_path(opts, canonical_root.as_deref());
+            *self.duplication_options.write().await = initialization_duplication_options(opts);
+            *self.production_override.write().await = initialization_production_override(opts);
+            *self.inline_complexity_enabled.write().await =
+                initialization_inline_complexity_enabled(opts);
         }
 
+        let advertise_pull_diagnostics =
+            client_supports_workspace_diagnostic_refresh(&params.capabilities);
+
         Ok(InitializeResult {
-            capabilities: build_server_capabilities(),
+            capabilities: build_server_capabilities(advertise_pull_diagnostics),
             ..Default::default()
         })
     }
@@ -491,7 +813,6 @@ impl LanguageServer for PlowLspServer {
             .log_message(MessageType::INFO, "plow LSP server initialized")
             .await;
 
-        // Run initial analysis
         self.run_analysis().await;
     }
 
@@ -517,6 +838,22 @@ impl LanguageServer for PlowLspServer {
         params: DocumentDiagnosticParams,
     ) -> Result<DocumentDiagnosticReportResult> {
         let uri = params.text_document.uri;
+
+        // The first pull request proves this client genuinely consumes pull
+        // diagnostics. On that transition, clear any push-model
+        // diagnostics emitted for open documents during startup (before the
+        // first pull) so they do not double with the pull namespace in clients
+        // like Neovim that surface both. The client re-pulls each open buffer,
+        // so the pull namespace stays authoritative.
+        if !self.client_pulls.swap(true, Ordering::SeqCst) {
+            let open_uris: Vec<Uri> = self.documents.read().await.keys().cloned().collect();
+            for open_uri in open_uris {
+                self.client
+                    .publish_diagnostics(open_uri, vec![], None)
+                    .await;
+            }
+        }
+
         let items = self
             .cached_diagnostics
             .read()
@@ -536,19 +873,15 @@ impl LanguageServer for PlowLspServer {
     }
 
     async fn did_save(&self, _params: DidSaveTextDocumentParams) {
-        // Debounce: skip if last analysis was less than 500ms ago
         {
             let now = Instant::now();
             let mut last = self.last_analysis.lock().await;
             if now.duration_since(*last) < std::time::Duration::from_millis(500) {
                 return;
             }
-            // Update timestamp under the lock to prevent TOCTOU races
-            // where multiple saves pass the debounce check simultaneously
             *last = now;
         }
 
-        // Re-run analysis on save
         self.run_analysis().await;
     }
 
@@ -559,15 +892,17 @@ impl LanguageServer for PlowLspServer {
         self.documents
             .write()
             .await
-            .insert(uri, DocumentState { version, text });
+            .insert(uri.clone(), DocumentState { version, text });
+
+        if self.client_pulls.load(Ordering::SeqCst) {
+            self.client
+                .publish_diagnostics(uri, vec![], Some(version))
+                .await;
+            self.spawn_diagnostic_refresh();
+        }
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        // Store the latest document text alongside the version supplied by
-        // the client. Version is the load-bearing field for the staleness
-        // check in `publish_collected_diagnostics`. `TextDocumentSyncKind::FULL`
-        // ships the full text in one entry, so the last `content_changes`
-        // entry is the new full document.
         if let Some(change) = params.content_changes.into_iter().last() {
             self.documents.write().await.insert(
                 params.text_document.uri,
@@ -597,14 +932,12 @@ impl LanguageServer for PlowLspServer {
         };
 
         let uri = &params.text_document.uri;
-        let Ok(file_path) = uri.to_file_path() else {
+        let Some(file_path) = uri.to_file_path() else {
             return Ok(None);
         };
 
         let mut actions = Vec::new();
 
-        // Read file content once for computing line positions and edit ranges.
-        // Prefer in-memory document text (from did_open/did_change), fall back to disk.
         let documents = self.documents.read().await;
         let file_content = documents.get(uri).map_or_else(
             || std::fs::read_to_string(&file_path).unwrap_or_default(),
@@ -613,7 +946,6 @@ impl LanguageServer for PlowLspServer {
         drop(documents);
         let file_lines: Vec<&str> = file_content.lines().collect();
 
-        // Generate "Remove export" code actions for unused exports
         actions.extend(code_actions::build_remove_export_actions(
             results,
             &file_path,
@@ -622,7 +954,6 @@ impl LanguageServer for PlowLspServer {
             &file_lines,
         ));
 
-        // Generate "Delete this file" code actions for unused files
         actions.extend(code_actions::build_delete_file_actions(
             results,
             &file_path,
@@ -630,13 +961,6 @@ impl LanguageServer for PlowLspServer {
             &params.range,
         ));
 
-        // Generate "Remove unused catalog entry" code actions for
-        // pnpm-workspace.yaml findings. `entry.path` is stored relative
-        // to the analyzer root, so we pass the cached root through.
-        // Pass `file_lines` (already computed above from in-memory
-        // document text or disk fallback) so the deletion range
-        // matches what the user actually sees in their editor when
-        // they have unsaved edits to pnpm-workspace.yaml.
         let root = self.root.read().await.clone();
         if let Some(root) = root {
             actions.extend(code_actions::build_remove_catalog_entry_actions(
@@ -655,6 +979,14 @@ impl LanguageServer for PlowLspServer {
             ));
         }
 
+        actions.extend(code_actions::build_suppress_security_actions(
+            results,
+            &file_path,
+            uri,
+            &params.range,
+            &file_lines,
+        ));
+
         if actions.is_empty() {
             Ok(None)
         } else {
@@ -672,11 +1004,17 @@ impl LanguageServer for PlowLspServer {
             return Ok(None);
         };
 
-        let Ok(file_path) = params.text_document.uri.to_file_path() else {
+        let Some(file_path) = params.text_document.uri.to_file_path() else {
             return Ok(None);
         };
 
-        let lenses = code_lens::build_code_lenses(results, &file_path, &params.text_document.uri);
+        let inline_complexity = self.inline_complexity.read().await;
+        let lenses = code_lens::build_code_lenses(
+            results,
+            &inline_complexity,
+            &file_path,
+            &params.text_document.uri,
+        );
 
         if lenses.is_empty() {
             Ok(None)
@@ -696,7 +1034,7 @@ impl LanguageServer for PlowLspServer {
         };
 
         let uri = &params.text_document_position_params.text_document.uri;
-        let Ok(file_path) = uri.to_file_path() else {
+        let Some(file_path) = uri.to_file_path() else {
             return Ok(None);
         };
 
@@ -722,6 +1060,7 @@ impl PlowLspServer {
             root: Arc::new(RwLock::new(None)),
             results: Arc::new(RwLock::new(None)),
             duplication: Arc::new(RwLock::new(None)),
+            inline_complexity: Arc::new(RwLock::new(Vec::new())),
             previous_diagnostic_uris: Arc::new(RwLock::new(FxHashSet::default())),
             last_analysis: Arc::new(Mutex::new(
                 Instant::now()
@@ -733,18 +1072,47 @@ impl PlowLspServer {
             disabled_diagnostic_codes: Arc::new(RwLock::new(FxHashSet::default())),
             changed_since: Arc::new(RwLock::new(None)),
             config_path: Arc::new(RwLock::new(None)),
+            duplication_options: Arc::new(RwLock::new(None)),
+            production_override: Arc::new(RwLock::new(None)),
+            inline_complexity_enabled: Arc::new(RwLock::new(false)),
             git_toplevel: Arc::new(RwLock::new(None)),
             cached_diagnostics: Arc::new(RwLock::new(FxHashMap::default())),
+            client_pulls: Arc::new(AtomicBool::new(false)),
             cancellation: Arc::new(AtomicBool::new(false)),
         }
     }
 
     #[expect(
         clippy::unused_async,
-        reason = "tower-lsp custom_method handlers are async methods"
+        reason = "tower-lsp-server custom_method handlers are async methods"
     )]
     async fn issue_types(&self) -> Result<Vec<IssueTypeInfo>> {
         Ok(diagnostic_issue_types())
+    }
+
+    /// Re-drive `workspace/diagnostic/refresh` on demand.
+    ///
+    /// The editor's mute toggle changes only the client-side diagnostic filter
+    /// (no server round-trip), so open-file pull diagnostics never re-render
+    /// until the next edit. The client-side re-pull (`triggerPullDiagnosticRefresh`)
+    /// is gated per document by `getProvider(document)`, which can silently
+    /// match nothing; the server-driven refresh fires every registered provider
+    /// via `getAllProviders()`, the SAME path proven to re-render after analysis
+    /// and on `did_open`. Routing the un-hide through here makes revealing
+    /// findings reliable, not best-effort (discussion #287).
+    ///
+    /// No-op for push-only clients: without pull diagnostics the editor
+    /// re-publishes the push collection from its own cache, so a
+    /// `workspace/diagnostic/refresh` would do nothing useful.
+    #[expect(
+        clippy::unused_async,
+        reason = "tower-lsp-server custom_method handlers are async methods"
+    )]
+    async fn refresh_diagnostics(&self) -> Result<()> {
+        if self.client_pulls.load(Ordering::SeqCst) {
+            self.spawn_diagnostic_refresh();
+        }
+        Ok(())
     }
 
     /// Resolve the canonical git toplevel for `root`, populating the cache
@@ -787,10 +1155,6 @@ impl PlowLspServer {
     }
 
     async fn run_analysis(&self) {
-        // Short-circuit any work post-shutdown. The cancellation flag
-        // remains set for the rest of the process lifetime; subsequent
-        // `did_save` deliveries are no-ops until tower-lsp's `exit`
-        // notification tears down the runtime.
         if self.cancellation.load(Ordering::SeqCst) {
             return;
         }
@@ -802,14 +1166,6 @@ impl PlowLspServer {
             return; // analysis already running
         };
 
-        // Capture the per-URI document-version snapshot ONCE at analysis
-        // entry, holding it across the `spawn_blocking` join. The blocking
-        // task does not need versions, so the snapshot stays in the async
-        // scope. The snapshot is the load-bearing input to the staleness
-        // check inside `publish_collected_diagnostics`: any URI whose live
-        // version advances past the snapshot during the analysis run has
-        // its publish skipped. See `.claude/rules/lsp-server.md` for the
-        // "diagnostic publish staleness" invariant.
         let version_snapshot: VersionSnapshot = self
             .documents
             .read()
@@ -822,33 +1178,19 @@ impl PlowLspServer {
             .log_message(MessageType::INFO, "Running plow analysis...")
             .await;
 
-        // Discover all project roots: the workspace root itself, plus any
-        // subdirectories with their own package.json (sub-projects, fixtures, etc.)
         let project_roots = find_project_roots(&root);
 
         self.client
-            .log_message(
-                MessageType::INFO,
-                format!("Found {} project root(s)", project_roots.len()),
-            )
+            .log_message(MessageType::INFO, "Analyzing workspace root")
             .await;
 
         let changed_since = self.changed_since.read().await.clone();
-        // Keep an outer-scope copy: the spawn_blocking closure consumes
-        // `changed_since` by move, but `attach_changed_since_data` (called
-        // after the join) needs to know whether the filter was active so
-        // it can stamp `Diagnostic.data.changedSince` accordingly.
         let changed_since_for_data = changed_since.clone();
         let config_path = self.config_path.read().await.clone();
+        let duplication_options = self.duplication_options.read().await.clone();
+        let production_override = *self.production_override.read().await;
+        let inline_complexity_enabled = *self.inline_complexity_enabled.read().await;
 
-        // Resolve and cache the canonical git toplevel for `root`. Done even
-        // when `changed_since` is None so we can warn the user once if their
-        // workspace differs from the toplevel; that mismatch is the most
-        // common cause of "changedSince doesn't filter what I expect"
-        // reports (issue #190). The warn-once is gated inside
-        // `resolved_git_toplevel` so it does not spam the Output panel on
-        // every save. Caching avoids an extra `git rev-parse
-        // --show-toplevel` subprocess on every save.
         let resolved_toplevel = self.resolved_git_toplevel(&root).await;
 
         let blocking_root = root.clone();
@@ -857,38 +1199,23 @@ impl PlowLspServer {
         let join_result = tokio::task::spawn_blocking(move || {
             let mut merged_results = AnalysisResults::default();
             let mut merged_duplication = DuplicationReport::default();
-            // Collect "loaded config: ..." messages alongside results so the
-            // async caller can surface them via log_message without doing
-            // blocking I/O on the async executor or calling find_and_load
-            // twice per project root.
+            let mut merged_inline_complexity = Vec::new();
             let mut config_messages: Vec<(MessageType, String)> =
                 Vec::with_capacity(project_roots.len());
             for project_root in &project_roots {
                 analyze_project_root(
                     project_root,
                     config_path.as_deref(),
+                    duplication_options.as_ref(),
+                    production_override,
+                    inline_complexity_enabled,
                     &mut merged_results,
                     &mut merged_duplication,
+                    &mut merged_inline_complexity,
                     &mut config_messages,
                 );
             }
 
-            // Dedupe cross-root duplicates introduced by `merge_results`'s
-            // `.extend()`. In monorepos where the workspace root and a
-            // sub-package both walk the same source files, every finding
-            // is accumulated once per overlapping root and produces N
-            // stacked diagnostics on the same range. See `dedup_results`
-            // for the per-type identity keys.
-            dedup_results(&mut merged_results);
-
-            // Apply --changed-since-equivalent filter, if configured. Paths
-            // are joined against the canonical git toplevel resolved above
-            // (or the workspace root as a fallback when not in a git repo)
-            // so that file paths match what `analyze_project` produces in
-            // monorepos where the workspace root is a subdirectory of the
-            // repository. On git failure, log the reason and leave results
-            // unfiltered so the user sees what's wrong instead of an
-            // unexplained empty Problems panel.
             let changed_message = if let Some(ref git_ref) = changed_since {
                 let toplevel = blocking_toplevel
                     .as_deref()
@@ -900,6 +1227,10 @@ impl PlowLspServer {
                             &mut merged_duplication,
                             &changed,
                             &blocking_root,
+                        );
+                        filter_inline_complexity_by_changed_files(
+                            &mut merged_inline_complexity,
+                            &changed,
                         );
                         Some((
                             MessageType::INFO,
@@ -924,6 +1255,7 @@ impl PlowLspServer {
             (
                 merged_results,
                 merged_duplication,
+                merged_inline_complexity,
                 config_messages,
                 changed_message,
             )
@@ -931,79 +1263,37 @@ impl PlowLspServer {
         .await;
 
         match join_result {
-            Ok((results, duplication, config_messages, changed_message)) => {
-                // Re-check the cancellation flag after the blocking task
-                // returns. The shutdown handler may have flipped it while
-                // the analysis was running; in that case skip publish so
-                // we don't push diagnostics into a closing client.
+            Ok((results, duplication, inline_complexity, config_messages, changed_message)) => {
                 if self.cancellation.load(Ordering::SeqCst) {
                     return;
                 }
 
-                // Surface which config was loaded for each project root so users
-                // can verify their config is picked up (addresses silent
-                // config-loss UX). Emitted from the async context after the
-                // blocking task returns.
                 for (level, msg) in config_messages {
                     self.client.log_message(level, msg).await;
                 }
 
-                // Report on changedSince outcome so users see why the Problems
-                // panel is scoped (or why the filter was dropped).
                 if let Some((level, msg)) = changed_message {
                     self.client.log_message(level, msg).await;
                 }
 
-                // Build diagnostics once from the merged results.
-                // Each result item already carries its own file path, so a single
-                // `build_diagnostics` call covers all roots. The workspace root is
-                // used only for unlisted-dependency diagnostics (placed on its
-                // package.json). Previously this looped per-root, duplicating every
-                // diagnostic N times (#90).
                 let mut all_diagnostics =
                     diagnostics::build_diagnostics(&results, &duplication, &root);
                 attach_changed_since_data(&mut all_diagnostics, changed_since_for_data.as_deref());
                 self.publish_collected_diagnostics(all_diagnostics, &version_snapshot)
                     .await;
 
-                // Send summary stats to the client before storing results
                 self.client
-                    .send_notification::<AnalysisComplete>(AnalysisCompleteParams {
-                        total_issues: results.total_issues(),
-                        unused_files: results.unused_files.len(),
-                        unused_exports: results.unused_exports.len(),
-                        unused_types: results.unused_types.len(),
-                        private_type_leaks: results.private_type_leaks.len(),
-                        unused_dependencies: results.unused_dependencies.len(),
-                        unused_dev_dependencies: results.unused_dev_dependencies.len(),
-                        unused_optional_dependencies: results.unused_optional_dependencies.len(),
-                        unused_enum_members: results.unused_enum_members.len(),
-                        unused_class_members: results.unused_class_members.len(),
-                        unresolved_imports: results.unresolved_imports.len(),
-                        unlisted_dependencies: results.unlisted_dependencies.len(),
-                        duplicate_exports: results.duplicate_exports.len(),
-                        type_only_dependencies: results.type_only_dependencies.len(),
-                        test_only_dependencies: results.test_only_dependencies.len(),
-                        circular_dependencies: results.circular_dependencies.len(),
-                        re_export_cycles: results.re_export_cycles.len(),
-                        boundary_violations: results.boundary_violations.len(),
-                        stale_suppressions: results.stale_suppressions.len(),
-                        unused_catalog_entries: results.unused_catalog_entries.len(),
-                        empty_catalog_groups: results.empty_catalog_groups.len(),
-                        unresolved_catalog_references: results.unresolved_catalog_references.len(),
-                        unused_dependency_overrides: results.unused_dependency_overrides.len(),
-                        misconfigured_dependency_overrides: results
-                            .misconfigured_dependency_overrides
-                            .len(),
-                        duplication_percentage: duplication.stats.duplication_percentage,
-                        clone_groups: duplication.stats.clone_groups,
-                    })
+                    .send_notification::<AnalysisComplete>(analysis_complete_params(
+                        &results,
+                        &duplication,
+                    ))
                     .await;
 
                 *self.results.write().await = Some(results);
                 *self.duplication.write().await = Some(duplication);
+                *self.inline_complexity.write().await = inline_complexity;
 
-                let _ = self.client.code_lens_refresh().await;
+                self.spawn_code_lens_refresh();
 
                 self.client
                     .log_message(MessageType::INFO, "Analysis complete")
@@ -1028,29 +1318,31 @@ impl PlowLspServer {
     ///   2. The URI was in the snapshot AND the live document is now absent
     ///      (closed via `did_close` between snapshot and publish; we cannot
     ///      prove the client still owns the document).
-    ///   3. The URI is absent from the snapshot BUT present in `live_versions`
-    ///      (opened via `did_open` between snapshot and publish; the analysis
-    ///      ran without seeing the buffer the client now holds, and we have
-    ///      no version to attach to the publish so the client cannot drop a
-    ///      mismatched payload server-to-client). The next analysis triggered
-    ///      by `did_save` will publish a fresh result with a version slot.
+    ///   3. The URI is absent from the snapshot BUT present in `live_documents`
+    ///      and the live buffer differs from the on-disk file (opened or edited
+    ///      between snapshot and publish; the analysis ran without seeing the
+    ///      buffer the client now holds). If the live buffer still matches disk,
+    ///      the analysis did see the same text and the URI is safe to publish/cache.
     ///
-    /// Only URIs absent from BOTH the snapshot AND `live_versions` are NOT
-    /// stale: these are cross-file diagnostics anchored to files the user
-    /// never `did_open`'d via the LSP (e.g. `package.json` for unlisted
-    /// dependencies, `pnpm-workspace.yaml` for catalog references). No
-    /// version race exists for them.
+    /// URIs absent from BOTH the snapshot AND `live_documents` are NOT stale:
+    /// these are cross-file diagnostics anchored to files the user never
+    /// `did_open`'d via the LSP (e.g. `package.json` for unlisted dependencies,
+    /// `pnpm-workspace.yaml` for catalog references). No version race exists for them.
+    fn opened_mid_run_buffer_matches_disk(uri: &Uri, state: &DocumentState) -> bool {
+        uri.to_file_path()
+            .and_then(|path| std::fs::read_to_string(path).ok())
+            .is_some_and(|disk_text| disk_text == state.text)
+    }
+
     fn uri_is_stale(
-        uri: &Url,
+        uri: &Uri,
         snapshot: &VersionSnapshot,
-        live_versions: &FxHashMap<Url, i32>,
+        live_documents: &FxHashMap<Uri, DocumentState>,
     ) -> bool {
-        match (snapshot.get(uri), live_versions.get(uri)) {
-            (Some(&snapshot_version), Some(&live_version)) => live_version > snapshot_version,
-            // (Some(_), None) closed-mid-run + (None, Some(_)) opened-mid-run.
-            // Both share the same "skip publish" outcome but for distinct
-            // reasons documented in the helper's doc comment.
-            (Some(_), None) | (None, Some(_)) => true,
+        match (snapshot.get(uri), live_documents.get(uri)) {
+            (Some(&snapshot_version), Some(live_state)) => live_state.version > snapshot_version,
+            (Some(_), None) => true,
+            (None, Some(live_state)) => !Self::opened_mid_run_buffer_matches_disk(uri, live_state),
             (None, None) => false,
         }
     }
@@ -1061,41 +1353,26 @@ impl PlowLspServer {
     )]
     async fn publish_collected_diagnostics(
         &self,
-        diagnostics_by_file: FxHashMap<Url, Vec<Diagnostic>>,
+        diagnostics_by_file: FxHashMap<Uri, Vec<Diagnostic>>,
         snapshot: &VersionSnapshot,
     ) {
         let disabled = self.disabled_diagnostic_codes.read().await;
 
-        // Read the live per-URI versions ONCE at entry into a local map.
-        // Doing it once avoids holding `documents.read()` across each
-        // `publish_diagnostics().await` and pre-computes the values needed
-        // by the stale-clearing branch below (which must NOT acquire
-        // `documents.read()` while holding `cached_diagnostics.write()`,
-        // to keep lock ordering clean).
-        let live_versions: FxHashMap<Url, i32> = self
+        let live_documents: FxHashMap<Uri, DocumentState> = self
             .documents
             .read()
             .await
             .iter()
-            .map(|(uri, state)| (uri.clone(), state.version))
+            .map(|(uri, state)| (uri.clone(), state.clone()))
             .collect();
 
-        // Collect the set of URIs we are publishing to (or skipping). Stale
-        // URIs ARE inserted into `new_uris` so the next-run stale-clearing
-        // loop does not erase last-valid diagnostics from the client while
-        // the user is still editing.
-        let mut new_uris: FxHashSet<Url> = FxHashSet::default();
+        let use_pull_diagnostics = self.client_pulls.load(Ordering::SeqCst);
+        let mut new_uris: FxHashSet<Uri> = FxHashSet::default();
 
-        // Publish diagnostics for current results, filtering out disabled
-        // issue types and skipping stale URIs.
         for (uri, diags) in &diagnostics_by_file {
             new_uris.insert(uri.clone());
 
-            if Self::uri_is_stale(uri, snapshot, &live_versions) {
-                // Skip publish AND cache update. The cache stays at its
-                // last-valid state; pull-model `textDocument/diagnostic`
-                // consumers continue to see consistent v(N) data even
-                // though the document is now at v(N+1).
+            if Self::uri_is_stale(uri, snapshot, &live_documents) {
                 continue;
             }
 
@@ -1114,27 +1391,18 @@ impl PlowLspServer {
                     .collect()
             };
 
-            // Pass `Some(version)` when we have a snapshotted version for
-            // this URI so LSP 3.17 clients can use the standard
-            // PublishDiagnosticsParams.version slot to discard any
-            // already-superseded publish. URIs not in the snapshot (file
-            // never `did_open`'d via the LSP) get `None`.
-            self.client
-                .publish_diagnostics(uri.clone(), filtered.clone(), snapshot.get(uri).copied())
-                .await;
+            if !use_pull_diagnostics || !live_documents.contains_key(uri) {
+                self.client
+                    .publish_diagnostics(uri.clone(), filtered.clone(), snapshot.get(uri).copied())
+                    .await;
+            }
 
-            // Cache for pull-model requests (textDocument/diagnostic)
             self.cached_diagnostics
                 .write()
                 .await
                 .insert(uri.clone(), filtered);
         }
 
-        // Clear stale diagnostics: send empty arrays for URIs that had
-        // diagnostics in the previous run but not in this one. Skip the
-        // empty publish (and the cache eviction) for URIs that have
-        // themselves moved past the snapshot, so we do not erase
-        // last-valid diagnostics on the client while the user is editing.
         {
             let previous_uris = self.previous_diagnostic_uris.read().await;
             let mut cache = self.cached_diagnostics.write().await;
@@ -1142,27 +1410,75 @@ impl PlowLspServer {
                 if new_uris.contains(old_uri) {
                     continue;
                 }
-                if Self::uri_is_stale(old_uri, snapshot, &live_versions) {
-                    // Keep the URI tracked so the next valid run can
-                    // either republish a fresh result or perform the
-                    // clear once the analysis catches up.
+                if Self::uri_is_stale(old_uri, snapshot, &live_documents) {
                     new_uris.insert(old_uri.clone());
                     continue;
                 }
-                self.client
-                    .publish_diagnostics(old_uri.clone(), vec![], snapshot.get(old_uri).copied())
-                    .await;
+                if !use_pull_diagnostics || !live_documents.contains_key(old_uri) {
+                    self.client
+                        .publish_diagnostics(
+                            old_uri.clone(),
+                            vec![],
+                            snapshot.get(old_uri).copied(),
+                        )
+                        .await;
+                }
                 cache.remove(old_uri);
             }
         }
 
-        // Update the tracked URIs for next run
         *self.previous_diagnostic_uris.write().await = new_uris;
+
+        if use_pull_diagnostics {
+            self.spawn_diagnostic_refresh();
+        }
+    }
+
+    /// Fire `workspace/diagnostic/refresh` without blocking on the client's
+    /// response. The refresh is a server-to-client request that
+    /// `tower-lsp-server` resolves only once the client replies; awaiting it
+    /// inline would let a slow or unresponsive client stall `run_analysis`
+    /// (which holds `analysis_guard`) and delay the `plow/analysisComplete`
+    /// signal. Spawning keeps the request on the wire while decoupling analysis
+    /// throughput from client responsiveness.
+    fn spawn_diagnostic_refresh(&self) {
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            let _ = client.workspace_diagnostic_refresh().await;
+        });
+    }
+
+    /// Fire `workspace/codeLens/refresh` detached, for the same reason as
+    /// [`Self::spawn_diagnostic_refresh`]: it is a server-to-client request whose
+    /// reply must not gate `run_analysis` completion.
+    fn spawn_code_lens_refresh(&self) {
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            let _ = client.code_lens_refresh().await;
+        });
     }
 }
 
 #[tokio::main]
 async fn main() {
+    // Honor `--version` / `-V` / `-v` before starting the stdio server. Without
+    // this the server reads stdin, hits EOF, and exits silently, so a version
+    // probe (the VS Code extension's binary-skew check) gets no output. Match
+    // the CLI's clap output shape (`<bin> <version>`) so consumers can parse it.
+    if std::env::args()
+        .skip(1)
+        .any(|arg| arg == "--version" || arg == "-V" || arg == "-v")
+    {
+        #[expect(
+            clippy::print_stdout,
+            reason = "version query writes to stdout by design"
+        )]
+        {
+            println!("plow-lsp {}", env!("CARGO_PKG_VERSION"));
+        }
+        return;
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter("plow=info")
         .with_writer(std::io::stderr)
@@ -1174,37 +1490,43 @@ async fn main() {
 
     let (service, socket) = LspService::build(PlowLspServer::new)
         .custom_method("plow/issueTypes", PlowLspServer::issue_types)
+        .custom_method(
+            "plow/refreshDiagnostics",
+            PlowLspServer::refresh_diagnostics,
+        )
         .finish();
 
     Server::new(stdin, stdout, socket).serve(service).await;
 }
 
-/// Find all project roots under a workspace directory.
+/// Resolve the single analysis root for an LSP run: the canonicalized
+/// workspace root.
 ///
-/// Uses the workspace root plus any configured monorepo workspaces
-/// (package.json `workspaces`, pnpm-workspace.yaml, tsconfig references).
-/// All returned paths are canonicalized so they agree with the canonical
-/// `git_toplevel` used by the `--changed-since` filter; otherwise file
-/// paths in `AnalysisResults` and the changed-files set start from
-/// different prefixes for the same files (e.g. `/tmp/x` vs `/private/tmp/x`
-/// on macOS) and the filter silently drops everything.
+/// The LSP analyzes the workspace root ONCE over the whole tree, matching the
+/// CLI (`plow dead-code` loads one config via `find_and_load(root)` and runs one
+/// `analyze_full` pass). `analyze_full` is already workspace-aware: it discovers
+/// every workspace package and runs `run_workspace_fast` per package for plugin
+/// and script detection, so a single root pass covers all sub-package source
+/// files, all per-package plugin configs, and full cross-package reachability.
+///
+/// The root is canonicalized so it agrees with the canonical `git_toplevel`
+/// used by the `--changed-since` filter; otherwise file paths in
+/// `AnalysisResults` and the changed-files set start from different prefixes
+/// for the same files (e.g. `/tmp/x` vs `/private/tmp/x` on macOS) and the
+/// filter silently drops everything.
+///
+/// Earlier revisions returned the workspace root plus every sub-package and
+/// re-ran the entire pipeline per root (issue #971). That re-walked overlapping
+/// files once per root, and analyzing a sub-package in isolation lost
+/// cross-package reachability, surfacing false-positive `unused-export`
+/// findings the root pass resolves. Single-root removes both and keeps the LSP
+/// in agreement with the CLI. A `Vec` is returned (always length one) so the
+/// caller's accumulate-then-publish structure stays uniform.
 fn find_project_roots(workspace_root: &std::path::Path) -> Vec<std::path::PathBuf> {
-    let mut roots = vec![workspace_root.to_path_buf()];
-
-    let workspaces = plow_config::discover_workspaces(workspace_root);
-    for ws in &workspaces {
-        roots.push(ws.root.clone());
-    }
-
-    for root in &mut roots {
-        if let Ok(canon) = root.canonicalize() {
-            *root = canon;
-        }
-    }
-
-    roots.sort();
-    roots.dedup();
-    roots
+    let root = workspace_root
+        .canonicalize()
+        .unwrap_or_else(|_| workspace_root.to_path_buf());
+    vec![root]
 }
 
 /// Stamp `Diagnostic.data` with `{ "changedSince": "<git_ref>" }` on every
@@ -1226,7 +1548,7 @@ fn find_project_roots(workspace_root: &std::path::Path) -> Vec<std::path::PathBu
 /// not used by `build_diagnostics` today and is logged via the structured
 /// fact that `data` for any plow diagnostic should be an object.
 fn attach_changed_since_data(
-    diagnostics_by_file: &mut FxHashMap<Url, Vec<Diagnostic>>,
+    diagnostics_by_file: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     changed_since: Option<&str>,
 ) {
     let Some(git_ref) = changed_since else {
@@ -1242,294 +1564,26 @@ fn attach_changed_since_data(
                 Some(serde_json::Value::Object(obj)) => {
                     obj.insert("changedSince".to_string(), value.clone());
                 }
-                // Non-object existing payload: leave it intact. Plow's
-                // own diagnostics never set `data` to a non-object today;
-                // if a future caller does, they get to keep their value.
                 Some(_) => {}
             }
         }
     }
 }
 
-/// Drop entries with duplicate identity keys, preserving the original
-/// insertion order of the first occurrence.
+/// Fold the analysis results from the single project root into the accumulator.
 ///
-/// Identity-based dedup helper: two entries with the same key are
-/// considered the same finding (e.g., same file at same line/col)
-/// regardless of any other fields. Used by [`dedup_results`] to collapse
-/// the cross-root duplicates that `merge_results` accumulates when a
-/// monorepo's workspace root and a sub-package both walk the same source
-/// files.
-///
-/// Order preservation matters: `build_diagnostics` and downstream
-/// consumers receive results in the order detection emitted them, which
-/// for many issue types is source-position-aligned. Sort-then-dedup would
-/// silently reorder diagnostics; the `FxHashSet`-backed retain here
-/// keeps the contract intact.
-fn dedup_by_key_preserving_order<T, K, F>(vec: &mut Vec<T>, mut key: F)
-where
-    K: Eq + std::hash::Hash,
-    F: FnMut(&T) -> K,
-{
-    let mut seen: FxHashSet<K> = FxHashSet::default();
-    vec.retain(|item| seen.insert(key(item)));
-}
-
-/// Collapse cross-root duplicates in `target`.
-///
-/// `merge_results` accumulates findings from every project root (the
-/// workspace root plus each sub-package in `find_project_roots`). When two
-/// roots overlap (the most common case is the workspace root and a
-/// sub-package both walking `apps/web/src/foo.ts`), the same finding
-/// appears N times in the merged vec and `build_diagnostics` produces N
-/// stacked diagnostics on the same range. Identity-based dedup here
-/// removes the duplicates without collapsing genuinely distinct findings:
-/// the same export *name* in two different files keeps both entries
-/// because the keys include the file path.
-///
-/// `UnlistedDependency` is the one case that gets a real merge instead of
-/// a plain dedup: two roots typically observe overlapping but non-equal
-/// `imported_from` site lists for the same package, and the union is the
-/// correct combined view (no over- or under-reporting). All other types
-/// are deterministic per (path, position) so plain key-based dedup is
-/// sufficient.
-#[expect(
-    clippy::too_many_lines,
-    reason = "one dedup-by-key block per issue type keeps each rule's identity key local; the line count grows linearly with new issue types and the structure is intentional"
-)]
-fn dedup_results(target: &mut AnalysisResults) {
-    dedup_by_key_preserving_order(&mut target.unused_files, |f| f.file.path.clone());
-    dedup_by_key_preserving_order(&mut target.unused_exports, |e| {
-        (
-            e.export.path.clone(),
-            e.export.export_name.clone(),
-            e.export.line,
-            e.export.col,
-        )
-    });
-    dedup_by_key_preserving_order(&mut target.unused_types, |e| {
-        (
-            e.export.path.clone(),
-            e.export.export_name.clone(),
-            e.export.line,
-            e.export.col,
-        )
-    });
-    dedup_by_key_preserving_order(&mut target.private_type_leaks, |e| {
-        (
-            e.leak.path.clone(),
-            e.leak.export_name.clone(),
-            e.leak.type_name.clone(),
-            e.leak.line,
-            e.leak.col,
-        )
-    });
-    dedup_by_key_preserving_order(&mut target.unused_dependencies, |d| {
-        (d.dep.package_name.clone(), d.dep.path.clone(), d.dep.line)
-    });
-    dedup_by_key_preserving_order(&mut target.unused_dev_dependencies, |d| {
-        (d.dep.package_name.clone(), d.dep.path.clone(), d.dep.line)
-    });
-    dedup_by_key_preserving_order(&mut target.unused_optional_dependencies, |d| {
-        (d.dep.package_name.clone(), d.dep.path.clone(), d.dep.line)
-    });
-    dedup_by_key_preserving_order(&mut target.unused_enum_members, |m| {
-        (
-            m.member.path.clone(),
-            m.member.parent_name.clone(),
-            m.member.member_name.clone(),
-        )
-    });
-    dedup_by_key_preserving_order(&mut target.unused_class_members, |m| {
-        (
-            m.member.path.clone(),
-            m.member.parent_name.clone(),
-            m.member.member_name.clone(),
-        )
-    });
-    dedup_by_key_preserving_order(&mut target.unresolved_imports, |i| {
-        (
-            i.import.path.clone(),
-            i.import.specifier.clone(),
-            i.import.line,
-            i.import.col,
-        )
-    });
-    dedup_by_key_preserving_order(&mut target.duplicate_exports, |d| {
-        // `locations` is a Vec<DuplicateLocation>; sort the paths so two
-        // roots that emitted the same group in different orders collapse
-        // to one identity.
-        let mut locs: Vec<_> = d
-            .export
-            .locations
-            .iter()
-            .map(|l| (l.path.clone(), l.line, l.col))
-            .collect();
-        locs.sort();
-        (d.export.export_name.clone(), locs)
-    });
-    dedup_by_key_preserving_order(&mut target.type_only_dependencies, |d| {
-        (d.dep.package_name.clone(), d.dep.path.clone(), d.dep.line)
-    });
-    dedup_by_key_preserving_order(&mut target.test_only_dependencies, |d| {
-        (d.dep.package_name.clone(), d.dep.path.clone(), d.dep.line)
-    });
-    dedup_by_key_preserving_order(&mut target.circular_dependencies, |c| {
-        let mut files: Vec<_> = c.cycle.files.clone();
-        files.sort();
-        (files, c.cycle.length)
-    });
-    dedup_by_key_preserving_order(&mut target.re_export_cycles, |c| {
-        let mut files: Vec<_> = c.cycle.files.clone();
-        files.sort();
-        // Include the kind discriminant so a self-loop on a single file
-        // cannot collide with any future single-file multi-node shape.
-        let kind = match c.cycle.kind {
-            plow_core::results::ReExportCycleKind::SelfLoop => 1u8,
-            plow_core::results::ReExportCycleKind::MultiNode => 0u8,
-        };
-        (kind, files)
-    });
-    dedup_by_key_preserving_order(&mut target.boundary_violations, |v| {
-        (
-            v.violation.from_path.clone(),
-            v.violation.to_path.clone(),
-            v.violation.import_specifier.clone(),
-            v.violation.line,
-            v.violation.col,
-        )
-    });
-    dedup_by_key_preserving_order(&mut target.export_usages, |u| {
-        (u.path.clone(), u.export_name.clone(), u.line, u.col)
-    });
-    dedup_by_key_preserving_order(&mut target.stale_suppressions, |s| {
-        (s.path.clone(), s.line, s.col)
-    });
-    dedup_by_key_preserving_order(&mut target.unused_catalog_entries, |e| {
-        (
-            e.entry.path.clone(),
-            e.entry.catalog_name.clone(),
-            e.entry.entry_name.clone(),
-        )
-    });
-    dedup_by_key_preserving_order(&mut target.empty_catalog_groups, |g| {
-        (g.group.path.clone(), g.group.catalog_name.clone())
-    });
-    dedup_by_key_preserving_order(&mut target.unresolved_catalog_references, |f| {
-        (
-            f.reference.path.clone(),
-            f.reference.line,
-            f.reference.catalog_name.clone(),
-            f.reference.entry_name.clone(),
-        )
-    });
-    dedup_by_key_preserving_order(&mut target.unused_dependency_overrides, |o| {
-        (
-            o.entry.path.clone(),
-            o.entry.source,
-            o.entry.raw_key.clone(),
-        )
-    });
-    dedup_by_key_preserving_order(&mut target.misconfigured_dependency_overrides, |o| {
-        (
-            o.entry.path.clone(),
-            o.entry.source,
-            o.entry.raw_key.clone(),
-        )
-    });
-
-    // UnlistedDependency: real merge, not plain dedup. The same package can
-    // be reported by two roots with different `imported_from` site lists
-    // (each root sees only the imports inside its subtree). Collapse to
-    // one entry per package_name with the union of import sites; keep
-    // sites stable-sorted for deterministic output.
-    if target.unlisted_dependencies.len() > 1 {
-        let mut merged: FxHashMap<String, plow_core::results::UnlistedDependencyFinding> =
-            FxHashMap::default();
-        for dep in target.unlisted_dependencies.drain(..) {
-            merged
-                .entry(dep.dep.package_name.clone())
-                .and_modify(|existing| {
-                    existing
-                        .dep
-                        .imported_from
-                        .extend(dep.dep.imported_from.clone());
-                })
-                .or_insert(dep);
-        }
-        target.unlisted_dependencies = merged.into_values().collect();
-        for dep in &mut target.unlisted_dependencies {
-            // Dedup imported_from by (path, line, col) so a site that two
-            // roots both observed lands as a single ImportSite.
-            dedup_by_key_preserving_order(&mut dep.dep.imported_from, |s| {
-                (s.path.clone(), s.line, s.col)
-            });
-        }
-        target
-            .unlisted_dependencies
-            .sort_by(|a, b| a.dep.package_name.cmp(&b.dep.package_name));
-    }
-}
-
-/// Merge analysis results from a sub-project into the accumulated results.
+/// Thin wrapper over [`AnalysisResults::merge_into`], the single
+/// field-exhaustive union (issue #444). The LSP analyzes one root per run
+/// (see [`find_project_roots`]), so this folds exactly one result; the wrapper
+/// stays because [`AnalysisResults::merge_into`] is the field-drift guard that
+/// `merge_results_covers_all_fields` pins against new `AnalysisResults` fields.
 fn merge_results(target: &mut AnalysisResults, source: AnalysisResults) {
-    target.unused_files.extend(source.unused_files);
-    target.unused_exports.extend(source.unused_exports);
-    target.unused_types.extend(source.unused_types);
-    target.private_type_leaks.extend(source.private_type_leaks);
-    target
-        .unused_dependencies
-        .extend(source.unused_dependencies);
-    target
-        .unused_dev_dependencies
-        .extend(source.unused_dev_dependencies);
-    target
-        .unused_optional_dependencies
-        .extend(source.unused_optional_dependencies);
-    target
-        .unused_enum_members
-        .extend(source.unused_enum_members);
-    target
-        .unused_class_members
-        .extend(source.unused_class_members);
-    target.unresolved_imports.extend(source.unresolved_imports);
-    target
-        .unlisted_dependencies
-        .extend(source.unlisted_dependencies);
-    target.duplicate_exports.extend(source.duplicate_exports);
-    target
-        .type_only_dependencies
-        .extend(source.type_only_dependencies);
-    target
-        .circular_dependencies
-        .extend(source.circular_dependencies);
-    target.re_export_cycles.extend(source.re_export_cycles);
-    target
-        .test_only_dependencies
-        .extend(source.test_only_dependencies);
-    target
-        .boundary_violations
-        .extend(source.boundary_violations);
-    target.export_usages.extend(source.export_usages);
-    target.stale_suppressions.extend(source.stale_suppressions);
-    target
-        .unused_catalog_entries
-        .extend(source.unused_catalog_entries);
-    target
-        .empty_catalog_groups
-        .extend(source.empty_catalog_groups);
-    target
-        .unresolved_catalog_references
-        .extend(source.unresolved_catalog_references);
-    target
-        .unused_dependency_overrides
-        .extend(source.unused_dependency_overrides);
-    target
-        .misconfigured_dependency_overrides
-        .extend(source.misconfigured_dependency_overrides);
+    target.merge_into(source);
 }
 
-/// Merge duplication reports from a sub-project into the accumulated report.
+/// Fold the duplication report from the single project root into the
+/// accumulator. The LSP analyzes one root per run (see [`find_project_roots`]),
+/// so this folds exactly one report.
 fn merge_duplication(target: &mut DuplicationReport, source: DuplicationReport) {
     target.clone_groups.extend(source.clone_groups);
     target.clone_families.extend(source.clone_families);
@@ -1544,7 +1598,6 @@ fn merge_duplication(target: &mut DuplicationReport, source: DuplicationReport) 
     target.stats.duplicated_lines += source.stats.duplicated_lines;
     target.stats.total_tokens += source.stats.total_tokens;
     target.stats.duplicated_tokens += source.stats.duplicated_tokens;
-    // Recompute percentage from merged totals (don't sum sub-project percentages)
     target.stats.duplication_percentage = if target.stats.total_lines > 0 {
         (target.stats.duplicated_lines as f64 / target.stats.total_lines as f64) * 100.0
     } else {
@@ -1559,26 +1612,23 @@ mod tests {
     use plow_core::duplicates::{CloneGroup, CloneInstance, DuplicationStats};
     use plow_core::results::{
         BoundaryViolation, BoundaryViolationFinding, CircularDependency, CircularDependencyFinding,
-        ExportUsage, TestOnlyDependency, TestOnlyDependencyFinding, TypeOnlyDependency,
-        UnlistedDependency, UnlistedDependencyFinding, UnusedClassMemberFinding, UnusedDependency,
-        UnusedDependencyFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExport,
-        UnusedExportFinding, UnusedFile, UnusedFileFinding, UnusedMember,
-        UnusedOptionalDependencyFinding, UnusedTypeFinding,
+        ExportUsage, SecuritySeverity, TestOnlyDependency, TestOnlyDependencyFinding,
+        TypeOnlyDependency, UnlistedDependency, UnlistedDependencyFinding,
+        UnusedClassMemberFinding, UnusedDependency, UnusedDependencyFinding,
+        UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExport, UnusedExportFinding,
+        UnusedFile, UnusedFileFinding, UnusedMember, UnusedOptionalDependencyFinding,
+        UnusedStoreMemberFinding, UnusedTypeFinding,
     };
     use serde_json::json;
     use tower::{Service, ServiceExt};
-    use tower_lsp::jsonrpc::Request;
-
-    // -----------------------------------------------------------------------
-    // build_server_capabilities
-    // -----------------------------------------------------------------------
+    use tower_lsp_server::jsonrpc::Request;
 
     #[test]
     fn server_capabilities_advertise_pull_diagnostics() {
-        let caps = build_server_capabilities();
+        let caps = build_server_capabilities(true);
         let provider = caps
             .diagnostic_provider
-            .expect("diagnostic_provider must be advertised so strict LSP 3.17 clients (Helix, Zed) call textDocument/diagnostic");
+            .expect("diagnostic_provider must be advertised for clients that can refresh pulled diagnostics");
         match provider {
             DiagnosticServerCapabilities::Options(opts) => {
                 assert_eq!(opts.identifier.as_deref(), Some("plow"));
@@ -1598,12 +1648,43 @@ mod tests {
     }
 
     #[test]
-    fn server_capabilities_keep_existing_providers() {
-        let caps = build_server_capabilities();
+    fn server_capabilities_omit_pull_diagnostics_when_not_refreshable() {
+        let caps = build_server_capabilities(false);
+        assert!(caps.diagnostic_provider.is_none());
         assert!(caps.text_document_sync.is_some());
         assert!(caps.code_action_provider.is_some());
         assert!(caps.code_lens_provider.is_some());
         assert!(caps.hover_provider.is_some());
+    }
+
+    #[test]
+    fn server_capabilities_keep_existing_providers() {
+        let caps = build_server_capabilities(true);
+        assert!(caps.text_document_sync.is_some());
+        assert!(caps.code_action_provider.is_some());
+        assert!(caps.code_lens_provider.is_some());
+        assert!(caps.hover_provider.is_some());
+    }
+
+    #[test]
+    fn default_client_capabilities_do_not_support_workspace_diagnostic_refresh() {
+        assert!(!client_supports_workspace_diagnostic_refresh(
+            &ClientCapabilities::default()
+        ));
+    }
+
+    #[test]
+    fn client_capabilities_support_workspace_diagnostic_refresh() {
+        let capabilities: ClientCapabilities = serde_json::from_value(json!({
+            "workspace": {
+                "diagnostics": {
+                    "refreshSupport": true
+                }
+            }
+        }))
+        .expect("workspace.diagnostics.refreshSupport should deserialize");
+
+        assert!(client_supports_workspace_diagnostic_refresh(&capabilities));
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -1625,14 +1706,6 @@ mod tests {
     async fn run_analysis_short_circuits_after_shutdown() {
         let (service, _) = LspService::build(PlowLspServer::new).finish();
         let backend = service.inner();
-        // Set a workspace root so the flag check, not the missing-root
-        // check, is what would normally let analysis proceed. After
-        // shutdown the cancellation gate at the top of `run_analysis`
-        // must short-circuit before `spawn_blocking` populates
-        // `self.results`. Asserting on `results.is_none()` is the
-        // post-condition that proves the short-circuit fired; a
-        // try_lock-based assertion would be vacuous because try_lock
-        // is non-blocking and the guard is released on return.
         *backend.root.write().await = Some(std::env::temp_dir());
         backend.shutdown().await.expect("shutdown returns Ok");
         backend.run_analysis().await;
@@ -1656,6 +1729,8 @@ mod tests {
         assert!(codes.contains(&"test-only-dependency"));
         assert!(codes.contains(&"boundary-violation"));
         assert!(codes.contains(&"stale-suppression"));
+        assert!(codes.contains(&"security-sink"));
+        assert!(codes.contains(&"security-client-server-leak"));
         assert_eq!(
             issue_types
                 .iter()
@@ -1682,6 +1757,8 @@ mod tests {
             .expect("initialize request should be handled")
             .expect("initialize request should return a response");
         assert!(response.is_ok());
+        let result = response.result().expect("initialize response should be ok");
+        assert_eq!(result["capabilities"].get("diagnosticProvider"), None);
 
         let diagnostics = Request::build("textDocument/diagnostic")
             .params(json!({
@@ -1708,6 +1785,38 @@ mod tests {
         let result = response.result().expect("diagnostic response should be ok");
         assert_eq!(result["kind"], json!("full"));
         assert_eq!(result["items"], json!([]));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn initialize_advertises_pull_diagnostics_for_refreshable_clients() {
+        let (mut service, _) = LspService::build(PlowLspServer::new).finish();
+
+        let initialize = Request::build("initialize")
+            .params(json!({
+                "capabilities": {
+                    "workspace": {
+                        "diagnostics": {
+                            "refreshSupport": true
+                        }
+                    }
+                }
+            }))
+            .id(1)
+            .finish();
+        let response = service
+            .ready()
+            .await
+            .expect("service should be ready")
+            .call(initialize)
+            .await
+            .expect("initialize request should be handled")
+            .expect("initialize request should return a response");
+
+        let result = response.result().expect("initialize response should be ok");
+        assert_eq!(
+            result["capabilities"]["diagnosticProvider"]["identifier"],
+            json!("plow")
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -1759,6 +1868,45 @@ mod tests {
                 .any(|v| v["code"] == json!("test-only-dependency")
                     && v["label"] == json!("Test-Only Dependencies")),
             "response should include every diagnostic code emitted by plow-lsp"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn plow_refresh_diagnostics_request_is_served() {
+        let (mut service, _) = LspService::build(PlowLspServer::new)
+            .custom_method(
+                "plow/refreshDiagnostics",
+                PlowLspServer::refresh_diagnostics,
+            )
+            .finish();
+
+        let initialize = Request::build("initialize")
+            .params(json!({"capabilities": {}}))
+            .id(1)
+            .finish();
+        let response = service
+            .ready()
+            .await
+            .expect("service should be ready")
+            .call(initialize)
+            .await
+            .expect("initialize request should be handled")
+            .expect("initialize request should return a response");
+        assert!(response.is_ok());
+
+        let refresh = Request::build("plow/refreshDiagnostics").id(2).finish();
+        let response = service
+            .ready()
+            .await
+            .expect("service should be ready")
+            .call(refresh)
+            .await
+            .expect("custom request should be handled")
+            .expect("custom request should return a response");
+
+        assert!(
+            response.is_ok(),
+            "plow/refreshDiagnostics must not return method_not_found"
         );
     }
 
@@ -1818,9 +1966,377 @@ mod tests {
         assert_eq!(initialization_config_path(&opts, None), None);
     }
 
-    // -----------------------------------------------------------------------
-    // merge_results
-    // -----------------------------------------------------------------------
+    #[test]
+    fn initialization_duplication_options_reads_vscode_payload() {
+        let opts = json!({
+            "duplication": {
+                "mode": "semantic",
+                "threshold": 7.5,
+                "minTokens": 64,
+                "minLines": 8,
+                "minOccurrences": 3,
+                "skipLocal": true,
+                "crossLanguage": true,
+                "ignoreImports": true
+            }
+        });
+
+        let parsed =
+            initialization_duplication_options(&opts).expect("duplication options should parse");
+
+        assert_eq!(parsed.mode, Some(DetectionMode::Semantic));
+        assert_eq!(parsed.threshold, Some(7.5));
+        assert_eq!(parsed.min_tokens, Some(64));
+        assert_eq!(parsed.min_lines, Some(8));
+        assert_eq!(parsed.min_occurrences, Some(3));
+        assert_eq!(parsed.skip_local, Some(true));
+        assert_eq!(parsed.cross_language, Some(true));
+        assert_eq!(parsed.ignore_imports, Some(true));
+    }
+
+    #[test]
+    fn lsp_duplication_options_override_project_config() {
+        let project = DuplicatesConfig {
+            mode: DetectionMode::Weak,
+            min_tokens: 50,
+            min_lines: 5,
+            min_occurrences: 4,
+            threshold: 2.0,
+            skip_local: true,
+            cross_language: false,
+            ignore_imports: false,
+            ignore: vec!["generated/**".to_string()],
+            ..DuplicatesConfig::default()
+        };
+        let options = LspDuplicationOptions {
+            mode: Some(DetectionMode::Semantic),
+            threshold: Some(10.0),
+            min_tokens: Some(80),
+            min_lines: Some(9),
+            min_occurrences: Some(3),
+            skip_local: Some(false),
+            cross_language: Some(true),
+            ignore_imports: Some(true),
+        };
+
+        let merged = options.merge_with(&project);
+
+        assert_eq!(merged.mode, DetectionMode::Semantic);
+        assert!((merged.threshold - 10.0).abs() < f64::EPSILON);
+        assert_eq!(merged.min_tokens, 80);
+        assert_eq!(merged.min_lines, 9);
+        assert_eq!(merged.min_occurrences, 3);
+        assert!(!merged.skip_local);
+        assert!(merged.cross_language);
+        assert!(merged.ignore_imports);
+        assert_eq!(merged.ignore, vec!["generated/**".to_string()]);
+    }
+
+    #[test]
+    fn initialization_inline_complexity_defaults_off() {
+        let opts = serde_json::json!({});
+
+        assert!(!initialization_inline_complexity_enabled(&opts));
+    }
+
+    #[test]
+    fn initialization_inline_complexity_reads_health_option() {
+        let opts = serde_json::json!({
+            "health": {
+                "inlineComplexity": true
+            }
+        });
+
+        assert!(initialization_inline_complexity_enabled(&opts));
+    }
+
+    #[test]
+    fn initialization_production_override_reads_boolean() {
+        assert_eq!(
+            initialization_production_override(&serde_json::json!({ "production": true })),
+            Some(true)
+        );
+        assert_eq!(
+            initialization_production_override(&serde_json::json!({ "production": false })),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn initialization_production_override_defers_when_absent_or_non_boolean() {
+        assert_eq!(
+            initialization_production_override(&serde_json::json!({})),
+            None
+        );
+        assert_eq!(
+            initialization_production_override(&serde_json::json!({ "production": "on" })),
+            None
+        );
+    }
+
+    #[test]
+    fn analyze_project_root_production_override_excludes_test_files() {
+        // The project config does NOT set production. Production mode excludes
+        // test files from discovery, so an unreferenced `*.test.ts` file is only
+        // reported as an unused file when production is OFF. This pins the editor
+        // `plow.production` -> LSP parity contract: `"on"` (Some(true)) must
+        // drop the test file the sidebar's `--production` run also drops; `"off"`
+        // (Some(false)) and `"auto"` (None, project config defers to off) keep it
+        // (issue #1055).
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).expect("create src dir");
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"lsp-production-override","private":true,"main":"src/index.ts"}"#,
+        )
+        .expect("write package");
+        std::fs::write(root.join("src/index.ts"), "export const used = 1;\n").expect("write index");
+        std::fs::write(
+            root.join("src/orphan.test.ts"),
+            "export const orphanedHelper = 2;\n",
+        )
+        .expect("write test file");
+
+        let test_file_reported = |production_override: Option<bool>| {
+            let mut results = AnalysisResults::default();
+            let mut duplication = DuplicationReport::default();
+            let mut inline_complexity = Vec::new();
+            let mut messages = Vec::new();
+            analyze_project_root(
+                root,
+                None,
+                None,
+                production_override,
+                false,
+                &mut results,
+                &mut duplication,
+                &mut inline_complexity,
+                &mut messages,
+            );
+            results
+                .unused_files
+                .iter()
+                .any(|finding| finding.file.path.ends_with("orphan.test.ts"))
+        };
+
+        assert!(
+            test_file_reported(None),
+            "deferring to the project config keeps the test file in analysis"
+        );
+        assert!(
+            !test_file_reported(Some(true)),
+            "forcing production on excludes the test file from analysis"
+        );
+        assert!(
+            test_file_reported(Some(false)),
+            "forcing production off keeps the test file in analysis"
+        );
+    }
+
+    #[test]
+    fn analyze_project_root_applies_lsp_duplication_options() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).expect("create src dir");
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"lsp-dupes-options","private":true,"main":"src/a.ts"}"#,
+        )
+        .expect("write package");
+        std::fs::write(
+            root.join(".plowrc.jsonc"),
+            r#"{"duplicates":{"minTokens":5,"minLines":1,"minOccurrences":2}}"#,
+        )
+        .expect("write config");
+        let source = r"
+            export const calculate = (input: number): number => {
+                const doubled = input * 2;
+                const incremented = doubled + 1;
+                return incremented;
+            };
+        ";
+        std::fs::write(root.join("src/a.ts"), source).expect("write a");
+        std::fs::write(root.join("src/b.ts"), source).expect("write b");
+
+        let mut baseline_results = AnalysisResults::default();
+        let mut baseline_duplication = DuplicationReport::default();
+        let mut baseline_inline_complexity = Vec::new();
+        let mut baseline_messages = Vec::new();
+        analyze_project_root(
+            root,
+            None,
+            None,
+            None,
+            false,
+            &mut baseline_results,
+            &mut baseline_duplication,
+            &mut baseline_inline_complexity,
+            &mut baseline_messages,
+        );
+
+        assert!(
+            baseline_duplication.stats.clone_groups > 0,
+            "fixture should produce pair-only duplicate findings"
+        );
+
+        let mut filtered_results = AnalysisResults::default();
+        let mut filtered_duplication = DuplicationReport::default();
+        let mut filtered_inline_complexity = Vec::new();
+        let mut filtered_messages = Vec::new();
+        let options = LspDuplicationOptions {
+            min_occurrences: Some(3),
+            ..LspDuplicationOptions::default()
+        };
+        analyze_project_root(
+            root,
+            None,
+            Some(&options),
+            None,
+            false,
+            &mut filtered_results,
+            &mut filtered_duplication,
+            &mut filtered_inline_complexity,
+            &mut filtered_messages,
+        );
+
+        assert_eq!(filtered_duplication.stats.clone_groups, 0);
+    }
+
+    fn write_inline_complexity_fixture(root: &Path) {
+        std::fs::create_dir_all(root.join("src")).expect("create src dir");
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"lsp-inline-complexity","private":true,"main":"src/index.ts"}"#,
+        )
+        .expect("write package");
+        std::fs::write(
+            root.join(".plowrc.jsonc"),
+            r#"{"health":{"maxCyclomatic":2,"maxCognitive":2}}"#,
+        )
+        .expect("write config");
+        std::fs::write(
+            root.join("src/index.ts"),
+            r#"
+export function choose(value: number): string {
+  if (value > 10) {
+    return "large";
+  }
+  if (value > 5) {
+    return "medium";
+  }
+  return "small";
+}
+"#,
+        )
+        .expect("write source");
+    }
+
+    #[test]
+    fn analyze_project_root_keeps_inline_complexity_off_by_default() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        write_inline_complexity_fixture(root);
+
+        let mut results = AnalysisResults::default();
+        let mut duplication = DuplicationReport::default();
+        let mut inline_complexity = Vec::new();
+        let mut messages = Vec::new();
+
+        analyze_project_root(
+            root,
+            None,
+            None,
+            None,
+            false,
+            &mut results,
+            &mut duplication,
+            &mut inline_complexity,
+            &mut messages,
+        );
+
+        assert!(
+            inline_complexity.is_empty(),
+            "default LSP analysis must not emit inline complexity lenses"
+        );
+    }
+
+    #[test]
+    fn analyze_project_root_collects_opt_in_inline_complexity() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        write_inline_complexity_fixture(root);
+
+        let mut results = AnalysisResults::default();
+        let mut duplication = DuplicationReport::default();
+        let mut inline_complexity = Vec::new();
+        let mut messages = Vec::new();
+
+        analyze_project_root(
+            root,
+            None,
+            None,
+            None,
+            true,
+            &mut results,
+            &mut duplication,
+            &mut inline_complexity,
+            &mut messages,
+        );
+
+        let finding = inline_complexity
+            .iter()
+            .find(|finding| finding.name == "choose")
+            .expect("complex function should produce an inline lens finding");
+        assert_eq!(finding.path, root.join("src/index.ts"));
+        assert_eq!(finding.line, 2);
+        assert_eq!(finding.col, 7);
+        assert_eq!(finding.exceeded, InlineComplexityExceeded::Cyclomatic);
+        assert!(finding.cyclomatic > 2);
+    }
+
+    #[test]
+    fn find_project_roots_returns_only_workspace_root() {
+        // A monorepo with two workspace packages must still yield exactly one
+        // analysis root: the workspace root. The single root pass already walks
+        // the whole tree and is workspace-aware, so the LSP no longer re-runs
+        // the pipeline per sub-package (issue #971).
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        std::fs::write(
+            root.join("pnpm-workspace.yaml"),
+            "packages:\n  - 'packages/*'\n",
+        )
+        .expect("write pnpm-workspace");
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"monorepo","private":true,"workspaces":["packages/*"]}"#,
+        )
+        .expect("write root package");
+        for pkg in ["a", "b"] {
+            let pkg_dir = root.join("packages").join(pkg);
+            std::fs::create_dir_all(&pkg_dir).expect("create package dir");
+            std::fs::write(
+                pkg_dir.join("package.json"),
+                format!(r#"{{"name":"@monorepo/{pkg}","main":"index.ts"}}"#),
+            )
+            .expect("write package");
+        }
+
+        // Sanity: the fixture really does have discoverable workspace packages,
+        // so a single returned root proves the per-package loop is gone (not
+        // that discovery found nothing).
+        assert_eq!(
+            plow_config::discover_workspaces(root).len(),
+            2,
+            "fixture should expose two workspace packages"
+        );
+
+        let roots = find_project_roots(root);
+        assert_eq!(roots.len(), 1, "LSP analyzes exactly one root per run");
+        let expected = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+        assert_eq!(roots[0], expected, "the single root is the workspace root");
+    }
 
     #[test]
     fn merge_results_into_empty_target() {
@@ -1944,6 +2460,10 @@ mod tests {
         }
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "intentionally names every AnalysisResults field (no ..Default::default()) so a new field is a compile error here; see #444"
+    )]
     fn merge_test_source_with_all_fields() -> AnalysisResults {
         AnalysisResults {
             unused_files: vec![UnusedFileFinding::with_actions(UnusedFile {
@@ -1980,12 +2500,10 @@ mod tests {
                 merge_test_unused_member("E", "A", plow_core::extract::MemberKind::EnumMember, 6),
             )],
             unused_class_members: vec![UnusedClassMemberFinding::with_actions(
-                merge_test_unused_member(
-                    "C",
-                    "m",
-                    plow_core::extract::MemberKind::ClassMethod,
-                    7,
-                ),
+                merge_test_unused_member("C", "m", plow_core::extract::MemberKind::ClassMethod, 7),
+            )],
+            unused_store_members: vec![UnusedStoreMemberFinding::with_actions(
+                merge_test_unused_member("S", "a", plow_core::extract::MemberKind::StoreMember, 7),
             )],
             unresolved_imports: vec![plow_core::results::UnresolvedImportFinding::with_actions(
                 plow_core::results::UnresolvedImport {
@@ -2021,6 +2539,7 @@ mod tests {
                     length: 2,
                     line: 10,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             )],
@@ -2040,15 +2559,241 @@ mod tests {
                 line: 12,
                 col: 0,
             })],
+            boundary_coverage_violations: vec![
+                plow_core::results::BoundaryCoverageViolationFinding::with_actions(
+                    plow_core::results::BoundaryCoverageViolation {
+                        path: "/unzoned.ts".into(),
+                        line: 13,
+                        col: 0,
+                    },
+                ),
+            ],
+            boundary_call_violations: vec![
+                plow_core::results::BoundaryCallViolationFinding::with_actions(
+                    plow_core::results::BoundaryCallViolation {
+                        path: "/zoned.ts".into(),
+                        line: 14,
+                        col: 0,
+                        zone: "domain".to_string(),
+                        callee: "console.log".to_string(),
+                        pattern: "console.*".to_string(),
+                    },
+                ),
+            ],
+            policy_violations: vec![plow_core::results::PolicyViolationFinding::with_actions(
+                plow_core::results::PolicyViolation {
+                    path: "/zoned.ts".into(),
+                    line: 15,
+                    col: 0,
+                    pack: "team-policy".to_string(),
+                    rule_id: "no-console".to_string(),
+                    kind: plow_core::results::PolicyRuleKind::BannedCall,
+                    matched: "console.log".to_string(),
+                    severity: plow_core::results::PolicyViolationSeverity::Warn,
+                    message: None,
+                },
+            )],
             export_usages: vec![ExportUsage {
                 path: "/f.ts".into(),
                 export_name: "used".to_string(),
-                line: 13,
+                line: 15,
                 col: 0,
                 reference_count: 3,
                 reference_locations: vec![],
             }],
-            ..Default::default()
+            private_type_leaks: vec![plow_core::results::PrivateTypeLeakFinding::with_actions(
+                plow_core::results::PrivateTypeLeak {
+                    path: "/f.ts".into(),
+                    export_name: "pub_fn".to_string(),
+                    type_name: "Secret".to_string(),
+                    line: 14,
+                    col: 0,
+                    span_start: 0,
+                },
+            )],
+            re_export_cycles: vec![plow_core::results::ReExportCycleFinding::with_actions(
+                plow_core::results::ReExportCycle {
+                    files: vec!["/barrel.ts".into()],
+                    kind: plow_core::results::ReExportCycleKind::SelfLoop,
+                },
+            )],
+            stale_suppressions: vec![plow_core::results::StaleSuppression {
+                path: "/f.ts".into(),
+                line: 15,
+                col: 0,
+                origin: plow_core::results::SuppressionOrigin::Comment {
+                    issue_kind: None,
+                    is_file_level: false,
+                    kind_known: true,
+                },
+            }],
+            unused_catalog_entries: vec![
+                plow_core::results::UnusedCatalogEntryFinding::with_actions(
+                    plow_core::results::UnusedCatalogEntry {
+                        entry_name: "react".to_string(),
+                        catalog_name: "default".to_string(),
+                        path: "/pnpm-workspace.yaml".into(),
+                        line: 16,
+                        hardcoded_consumers: vec![],
+                    },
+                ),
+            ],
+            empty_catalog_groups: vec![plow_core::results::EmptyCatalogGroupFinding::with_actions(
+                plow_core::results::EmptyCatalogGroup {
+                    catalog_name: "ui".to_string(),
+                    path: "/pnpm-workspace.yaml".into(),
+                    line: 17,
+                },
+            )],
+            unresolved_catalog_references: vec![
+                plow_core::results::UnresolvedCatalogReferenceFinding::with_actions(
+                    plow_core::results::UnresolvedCatalogReference {
+                        entry_name: "vue".to_string(),
+                        catalog_name: "default".to_string(),
+                        path: "/pkg.json".into(),
+                        line: 18,
+                        available_in_catalogs: vec![],
+                    },
+                ),
+            ],
+            unused_dependency_overrides: vec![
+                plow_core::results::UnusedDependencyOverrideFinding::with_actions(
+                    plow_core::results::UnusedDependencyOverride {
+                        raw_key: "react".to_string(),
+                        target_package: "react".to_string(),
+                        parent_package: None,
+                        version_constraint: None,
+                        version_range: "18".to_string(),
+                        source: plow_core::results::DependencyOverrideSource::PnpmWorkspaceYaml,
+                        path: "/pnpm-workspace.yaml".into(),
+                        line: 19,
+                        hint: None,
+                    },
+                ),
+            ],
+            misconfigured_dependency_overrides: vec![
+                plow_core::results::MisconfiguredDependencyOverrideFinding::with_actions(
+                    plow_core::results::MisconfiguredDependencyOverride {
+                        raw_key: "bad>".to_string(),
+                        target_package: None,
+                        raw_value: String::new(),
+                        reason: plow_core::results::DependencyOverrideMisconfigReason::EmptyValue,
+                        source: plow_core::results::DependencyOverrideSource::PnpmPackageJson,
+                        path: "/pkg.json".into(),
+                        line: 20,
+                    },
+                ),
+            ],
+            invalid_client_exports: vec![
+                plow_core::results::InvalidClientExportFinding::with_actions(
+                    plow_core::results::InvalidClientExport {
+                        path: "/app/page.tsx".into(),
+                        export_name: "metadata".to_string(),
+                        directive: "use client".to_string(),
+                        line: 22,
+                        col: 0,
+                    },
+                ),
+            ],
+            mixed_client_server_barrels: vec![
+                plow_core::results::MixedClientServerBarrelFinding::with_actions(
+                    plow_core::results::MixedClientServerBarrel {
+                        path: "/app/components/index.ts".into(),
+                        client_origin: "./Button".to_string(),
+                        server_origin: "./fetchUser".to_string(),
+                        line: 23,
+                        col: 0,
+                    },
+                ),
+            ],
+            misplaced_directives: vec![
+                plow_core::results::MisplacedDirectiveFinding::with_actions(
+                    plow_core::results::MisplacedDirective {
+                        path: "/app/widget.tsx".into(),
+                        directive: "use client".to_string(),
+                        line: 24,
+                        col: 0,
+                    },
+                ),
+            ],
+            unprovided_injects: vec![],
+            unrendered_components: vec![],
+            unused_component_props: vec![],
+            unused_component_emits: vec![],
+            unused_server_actions: vec![],
+            route_collisions: vec![plow_core::results::RouteCollisionFinding::with_actions(
+                plow_core::results::RouteCollision {
+                    path: "/app/(a)/about/page.tsx".into(),
+                    url: "/about".to_string(),
+                    conflicting_paths: vec!["/app/(b)/about/page.tsx".into()],
+                    line: 1,
+                    col: 0,
+                },
+            )],
+            dynamic_segment_name_conflicts: vec![
+                plow_core::results::DynamicSegmentNameConflictFinding::with_actions(
+                    plow_core::results::DynamicSegmentNameConflict {
+                        path: "/app/shop/[id]/page.tsx".into(),
+                        position: "/shop".to_string(),
+                        conflicting_segments: vec!["[id]".to_string(), "[slug]".to_string()],
+                        conflicting_paths: vec!["/app/shop/[slug]/edit/page.tsx".into()],
+                        line: 1,
+                        col: 0,
+                    },
+                ),
+            ],
+            suppression_count: 1,
+            active_suppressions: Vec::new(),
+            feature_flags: vec![plow_core::results::FeatureFlag {
+                path: "/f.ts".into(),
+                flag_name: "ENABLE_X".to_string(),
+                kind: plow_core::results::FlagKind::EnvironmentVariable,
+                confidence: plow_core::results::FlagConfidence::High,
+                line: 21,
+                col: 0,
+                guard_span_start: None,
+                guard_span_end: None,
+                sdk_name: None,
+                guard_line_start: None,
+                guard_line_end: None,
+                guarded_dead_exports: vec![],
+            }],
+            entry_point_summary: Some(plow_core::results::EntryPointSummary {
+                total: 0,
+                by_source: vec![],
+            }),
+            security_findings: vec![plow_core::results::SecurityFinding {
+                finding_id: String::new(),
+                candidate: plow_core::results::SecurityCandidate::default(),
+                taint_flow: None,
+                attack_surface: None,
+                kind: plow_core::results::SecurityFindingKind::ClientServerLeak,
+                category: None,
+                cwe: None,
+                path: "/client.tsx".into(),
+                line: 1,
+                col: 0,
+                evidence: "transitively reaches DATABASE_URL".to_string(),
+                source_backed: false,
+                source_read: None,
+                severity: SecuritySeverity::Low,
+                trace: vec![],
+                actions: vec![],
+                dead_code: None,
+                reachability: None,
+                runtime: None,
+            }],
+            security_unresolved_edge_files: 2,
+            security_unresolved_callee_sites: 0,
+            security_unresolved_callee_diagnostics: vec![
+                plow_core::results::SecurityUnresolvedCalleeDiagnostic {
+                    path: "/client.tsx".into(),
+                    line: 2,
+                    col: 0,
+                    reason: plow_core::extract::SkippedSecurityCalleeReason::DynamicDispatch,
+                    expression_kind: plow_core::extract::SkippedSecurityCalleeExpressionKind::Other,
+                },
+            ],
         }
     }
 
@@ -2062,19 +2807,39 @@ mod tests {
         assert_eq!(target.unused_files.len(), 1);
         assert_eq!(target.unused_exports.len(), 1);
         assert_eq!(target.unused_types.len(), 1);
+        assert_eq!(target.private_type_leaks.len(), 1);
         assert_eq!(target.unused_dependencies.len(), 1);
         assert_eq!(target.unused_dev_dependencies.len(), 1);
         assert_eq!(target.unused_optional_dependencies.len(), 1);
         assert_eq!(target.unused_enum_members.len(), 1);
         assert_eq!(target.unused_class_members.len(), 1);
+        assert_eq!(target.unused_store_members.len(), 1);
         assert_eq!(target.unresolved_imports.len(), 1);
         assert_eq!(target.unlisted_dependencies.len(), 1);
         assert_eq!(target.duplicate_exports.len(), 1);
         assert_eq!(target.type_only_dependencies.len(), 1);
-        assert_eq!(target.circular_dependencies.len(), 1);
         assert_eq!(target.test_only_dependencies.len(), 1);
+        assert_eq!(target.circular_dependencies.len(), 1);
+        assert_eq!(target.re_export_cycles.len(), 1);
         assert_eq!(target.boundary_violations.len(), 1);
+        assert_eq!(target.boundary_call_violations.len(), 1);
+        assert_eq!(target.policy_violations.len(), 1);
+        assert_eq!(target.stale_suppressions.len(), 1);
+        assert_eq!(target.unused_catalog_entries.len(), 1);
+        assert_eq!(target.empty_catalog_groups.len(), 1);
+        assert_eq!(target.unresolved_catalog_references.len(), 1);
+        assert_eq!(target.unused_dependency_overrides.len(), 1);
+        assert_eq!(target.misconfigured_dependency_overrides.len(), 1);
+        assert_eq!(target.invalid_client_exports.len(), 1);
+        assert_eq!(target.mixed_client_server_barrels.len(), 1);
+        assert_eq!(target.misplaced_directives.len(), 1);
         assert_eq!(target.export_usages.len(), 1);
+        assert_eq!(target.feature_flags.len(), 1);
+        assert_eq!(target.security_findings.len(), 1);
+        assert_eq!(target.security_unresolved_edge_files, 2);
+        assert_eq!(target.security_unresolved_callee_diagnostics.len(), 1);
+        assert_eq!(target.suppression_count, 1);
+        assert!(target.entry_point_summary.is_some());
     }
 
     #[test]
@@ -2089,194 +2854,8 @@ mod tests {
         let source = AnalysisResults::default();
         merge_results(&mut target, source);
 
-        // Target should be unchanged
         assert_eq!(target.unused_files.len(), 1);
     }
-
-    // -----------------------------------------------------------------------
-    // dedup_results: cross-root collapse.
-    //
-    // In monorepos `find_project_roots` returns the workspace root plus
-    // each sub-package. Two roots that overlap walk the same source files
-    // and emit identical findings; `merge_results` extends both into the
-    // accumulated vec. Without `dedup_results`, the LSP publishes N
-    // stacked diagnostics on the same range. These tests pin the per-type
-    // identity keys so a future refactor that collapses two genuinely
-    // distinct findings (e.g., same export name in two different files)
-    // breaks loudly.
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn dedup_results_collapses_cross_root_unused_files() {
-        let mut results = AnalysisResults::default();
-        // Workspace-root pass and sub-package pass both walked the same file.
-        results
-            .unused_files
-            .push(UnusedFileFinding::with_actions(UnusedFile {
-                path: "/repo/apps/web/src/foo.ts".into(),
-            }));
-        results
-            .unused_files
-            .push(UnusedFileFinding::with_actions(UnusedFile {
-                path: "/repo/apps/web/src/foo.ts".into(),
-            }));
-        // A genuinely distinct unused file.
-        results
-            .unused_files
-            .push(UnusedFileFinding::with_actions(UnusedFile {
-                path: "/repo/apps/api/src/bar.ts".into(),
-            }));
-
-        dedup_results(&mut results);
-
-        assert_eq!(results.unused_files.len(), 2);
-    }
-
-    #[test]
-    fn dedup_results_keeps_same_export_name_in_distinct_files() {
-        // Two files both export `helper`. Identity is (path, name, line, col),
-        // so these stay as two separate findings even though the name is
-        // identical. The user explicitly called this out as a regression
-        // we must not introduce.
-        let mut results = AnalysisResults::default();
-        results
-            .unused_exports
-            .push(UnusedExportFinding::with_actions(UnusedExport {
-                path: "/a.ts".into(),
-                export_name: "helper".to_string(),
-                is_type_only: false,
-                line: 1,
-                col: 0,
-                span_start: 0,
-                is_re_export: false,
-            }));
-        results
-            .unused_exports
-            .push(UnusedExportFinding::with_actions(UnusedExport {
-                path: "/b.ts".into(),
-                export_name: "helper".to_string(),
-                is_type_only: false,
-                line: 1,
-                col: 0,
-                span_start: 0,
-                is_re_export: false,
-            }));
-        // Cross-root duplicate of the first.
-        results
-            .unused_exports
-            .push(UnusedExportFinding::with_actions(UnusedExport {
-                path: "/a.ts".into(),
-                export_name: "helper".to_string(),
-                is_type_only: false,
-                line: 1,
-                col: 0,
-                span_start: 0,
-                is_re_export: false,
-            }));
-
-        dedup_results(&mut results);
-
-        assert_eq!(results.unused_exports.len(), 2);
-    }
-
-    #[test]
-    fn dedup_results_keeps_distinct_circular_dependencies() {
-        let mut results = AnalysisResults::default();
-        let cycle_ab = CircularDependencyFinding::with_actions(CircularDependency {
-            files: vec!["/a.ts".into(), "/b.ts".into()],
-            length: 2,
-            line: 1,
-            col: 0,
-            is_cross_package: false,
-        });
-        let cycle_cd = CircularDependencyFinding::with_actions(CircularDependency {
-            files: vec!["/c.ts".into(), "/d.ts".into()],
-            length: 2,
-            line: 5,
-            col: 0,
-            is_cross_package: false,
-        });
-        // Same cycle observed by two roots, with files in different orders.
-        let cycle_ab_reversed = CircularDependencyFinding::with_actions(CircularDependency {
-            files: vec!["/b.ts".into(), "/a.ts".into()],
-            length: 2,
-            line: 1,
-            col: 0,
-            is_cross_package: false,
-        });
-        results
-            .circular_dependencies
-            .extend([cycle_ab, cycle_cd, cycle_ab_reversed]);
-
-        dedup_results(&mut results);
-
-        // {a,b} and {c,d} survive; the reordered duplicate of {a,b}
-        // collapses because the dedup key sorts the file list.
-        assert_eq!(results.circular_dependencies.len(), 2);
-    }
-
-    #[test]
-    fn dedup_results_merges_unlisted_dependency_imported_from() {
-        // Workspace root sees `lodash` imported from packages/a + packages/b.
-        // Sub-package root for packages/a sees `lodash` imported from
-        // packages/a only. Without merging, the user gets two `lodash`
-        // entries in the Problems panel; with merging, they get one with
-        // the union of import sites.
-        let mut results = AnalysisResults::default();
-        results
-            .unlisted_dependencies
-            .push(UnlistedDependencyFinding::with_actions(
-                UnlistedDependency {
-                    package_name: "lodash".to_string(),
-                    imported_from: vec![
-                        plow_core::results::ImportSite {
-                            path: "/repo/packages/a/x.ts".into(),
-                            line: 1,
-                            col: 0,
-                        },
-                        plow_core::results::ImportSite {
-                            path: "/repo/packages/b/y.ts".into(),
-                            line: 2,
-                            col: 0,
-                        },
-                    ],
-                },
-            ));
-        results
-            .unlisted_dependencies
-            .push(UnlistedDependencyFinding::with_actions(
-                UnlistedDependency {
-                    package_name: "lodash".to_string(),
-                    imported_from: vec![plow_core::results::ImportSite {
-                        path: "/repo/packages/a/x.ts".into(),
-                        line: 1,
-                        col: 0,
-                    }],
-                },
-            ));
-
-        dedup_results(&mut results);
-
-        assert_eq!(results.unlisted_dependencies.len(), 1);
-        let merged = &results.unlisted_dependencies[0];
-        assert_eq!(merged.dep.package_name, "lodash");
-        assert_eq!(
-            merged.dep.imported_from.len(),
-            2,
-            "imported_from should be the union of import sites, not duplicated"
-        );
-    }
-
-    // -----------------------------------------------------------------------
-    // attach_changed_since_data
-    //
-    // When the LSP scopes diagnostics with `changedSince`, every published
-    // Diagnostic must carry a standard LSP `data` payload with the active
-    // ref so AI agents reading via `vscode.languages.getDiagnostics()` can
-    // verify the filter and avoid acting on baseline-excluded findings.
-    // When changedSince is None, no `data` is set so unfiltered runs
-    // remain clean.
-    // -----------------------------------------------------------------------
 
     fn make_diagnostic() -> Diagnostic {
         Diagnostic {
@@ -2298,10 +2877,18 @@ mod tests {
         }
     }
 
+    /// Whether a `publishDiagnostics` params payload carries a `security-sink`
+    /// coded diagnostic. Extracted to keep the delivery test's loop flat.
+    fn pushed_diagnostics_have_security_sink(params: &serde_json::Value) -> bool {
+        params["diagnostics"]
+            .as_array()
+            .is_some_and(|items| items.iter().any(|d| d["code"] == json!("security-sink")))
+    }
+
     #[test]
     fn attach_changed_since_data_sets_payload_when_active() {
-        let mut map: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
-        let uri = Url::parse("file:///a.ts").unwrap();
+        let mut map: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
+        let uri = "file:///a.ts".parse::<Uri>().unwrap();
         map.insert(uri.clone(), vec![make_diagnostic(), make_diagnostic()]);
 
         attach_changed_since_data(&mut map, Some("plow-baseline"));
@@ -2318,8 +2905,8 @@ mod tests {
 
     #[test]
     fn attach_changed_since_data_noop_when_filter_absent() {
-        let mut map: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
-        let uri = Url::parse("file:///a.ts").unwrap();
+        let mut map: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
+        let uri = "file:///a.ts".parse::<Uri>().unwrap();
         map.insert(uri.clone(), vec![make_diagnostic()]);
 
         attach_changed_since_data(&mut map, None);
@@ -2332,20 +2919,15 @@ mod tests {
 
     #[test]
     fn attach_changed_since_data_handles_empty_map() {
-        let mut map: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
+        let mut map: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
         attach_changed_since_data(&mut map, Some("origin/main"));
         assert!(map.is_empty());
     }
 
     #[test]
     fn attach_changed_since_data_merges_into_existing_object_data() {
-        // Regression for the case where a future `build_diagnostics`
-        // pre-populates `Diagnostic.data` (e.g., codeAction/resolve token).
-        // The stamp must merge into that object, not overwrite it. Without
-        // merge logic the resolve token would silently disappear and the
-        // editor's lightbulb fix flow would break.
-        let mut map: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
-        let uri = Url::parse("file:///a.ts").unwrap();
+        let mut map: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
+        let uri = "file:///a.ts".parse::<Uri>().unwrap();
         let mut d = make_diagnostic();
         d.data = Some(serde_json::json!({ "resolveToken": "abc-123" }));
         map.insert(uri.clone(), vec![d]);
@@ -2359,12 +2941,8 @@ mod tests {
 
     #[test]
     fn attach_changed_since_data_leaves_non_object_data_intact() {
-        // If a future caller stamped `data` to a non-object (string,
-        // number, array), don't silently coerce or destroy it. This
-        // shouldn't happen for plow's own diagnostics (we always use
-        // objects), but the stamp must be defensive.
-        let mut map: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
-        let uri = Url::parse("file:///a.ts").unwrap();
+        let mut map: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
+        let uri = "file:///a.ts".parse::<Uri>().unwrap();
         let mut d = make_diagnostic();
         d.data = Some(serde_json::Value::String("custom-token".to_string()));
         map.insert(uri.clone(), vec![d]);
@@ -2377,41 +2955,6 @@ mod tests {
             "non-object data must be preserved verbatim"
         );
     }
-
-    #[test]
-    fn dedup_results_collapses_cross_root_dependencies() {
-        let mut results = AnalysisResults::default();
-        // Same package.json analyzed twice.
-        for _ in 0..2 {
-            results
-                .unused_dependencies
-                .push(UnusedDependencyFinding::with_actions(UnusedDependency {
-                    package_name: "lodash".to_string(),
-                    location: plow_core::results::DependencyLocation::Dependencies,
-                    path: "/repo/package.json".into(),
-                    line: 5,
-                    used_in_workspaces: Vec::new(),
-                }));
-        }
-        // Genuinely distinct: different package.json (sub-package).
-        results
-            .unused_dependencies
-            .push(UnusedDependencyFinding::with_actions(UnusedDependency {
-                package_name: "lodash".to_string(),
-                location: plow_core::results::DependencyLocation::Dependencies,
-                path: "/repo/packages/web/package.json".into(),
-                line: 5,
-                used_in_workspaces: Vec::new(),
-            }));
-
-        dedup_results(&mut results);
-
-        assert_eq!(results.unused_dependencies.len(), 2);
-    }
-
-    // -----------------------------------------------------------------------
-    // merge_duplication
-    // -----------------------------------------------------------------------
 
     #[test]
     fn merge_duplication_into_empty_target() {
@@ -2493,8 +3036,6 @@ mod tests {
 
         merge_duplication(&mut target, source);
 
-        // Merged: total_lines=500, duplicated_lines=80
-        // Recomputed: 80/500 * 100 = 16.0 (NOT 10.0 + 20.0 = 30.0)
         assert_eq!(target.stats.total_files, 8);
         assert_eq!(target.stats.files_with_clones, 2);
         assert_eq!(target.stats.total_lines, 500);
@@ -2544,19 +3085,13 @@ mod tests {
         let source = DuplicationReport::default();
         merge_duplication(&mut target, source);
 
-        // Target stats should remain the same (merged with zeros)
         assert_eq!(target.clone_groups.len(), 1);
         assert_eq!(target.stats.total_files, 5);
         assert!((target.stats.duplication_percentage - 10.0).abs() < f64::EPSILON);
     }
 
-    // -----------------------------------------------------------------------
-    // DIAGNOSTIC_ISSUE_TYPES
-    // -----------------------------------------------------------------------
-
     #[test]
     fn issue_type_mapping_has_expected_entries() {
-        // Verify all expected issue types are present
         let keys: Vec<&str> = DIAGNOSTIC_ISSUE_TYPES
             .iter()
             .filter_map(|issue_type| issue_type.config_key)
@@ -2571,6 +3106,7 @@ mod tests {
         assert!(keys.contains(&"unused-optional-dependencies"));
         assert!(keys.contains(&"unused-enum-members"));
         assert!(keys.contains(&"unused-class-members"));
+        assert!(keys.contains(&"unused-store-members"));
         assert!(keys.contains(&"unresolved-imports"));
         assert!(keys.contains(&"unlisted-dependencies"));
         assert!(keys.contains(&"duplicate-exports"));
@@ -2579,16 +3115,16 @@ mod tests {
         assert!(keys.contains(&"circular-dependencies"));
         assert!(keys.contains(&"boundary-violation"));
         assert!(keys.contains(&"stale-suppressions"));
+        assert!(keys.contains(&"security-sink"));
+        assert!(keys.contains(&"security-client-server-leak"));
     }
 
     #[test]
     fn issue_type_mapping_codes_are_singular() {
-        // All diagnostic codes should be singular (e.g., "unused-file" not "unused-files")
         for issue_type in DIAGNOSTIC_ISSUE_TYPES {
             let Some(config_key) = issue_type.config_key else {
                 continue;
             };
-            // Config keys are plural, diagnostic codes are singular
             assert!(
                 !issue_type.code.ends_with('s') || issue_type.code.ends_with("ss"),
                 "Diagnostic code '{}' for config key '{config_key}' should be singular",
@@ -2597,18 +3133,7 @@ mod tests {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // publish_collected_diagnostics: stale-publish guard (issue #450)
-    //
-    // The LSP captures a per-URI version snapshot at `run_analysis` entry
-    // and threads it into `publish_collected_diagnostics`. Any URI whose
-    // live document version has advanced past the snapshot (or that has
-    // been closed mid-run) is treated as STALE: its publish + cache update
-    // are skipped, but the URI is still tracked so the next-run stale
-    // clearer does not erase prior valid diagnostics from the client.
-    // -----------------------------------------------------------------------
-
-    async fn install_document(backend: &PlowLspServer, uri: &Url, version: i32, text: &str) {
+    async fn install_document(backend: &PlowLspServer, uri: &Uri, version: i32, text: &str) {
         backend.documents.write().await.insert(
             uri.clone(),
             DocumentState {
@@ -2623,14 +3148,13 @@ mod tests {
         let (service, _) = LspService::build(PlowLspServer::new).finish();
         let backend = service.inner();
 
-        let uri = Url::parse("file:///stale.ts").unwrap();
+        let uri = "file:///stale.ts".parse::<Uri>().unwrap();
         install_document(backend, &uri, 1, "v1").await;
         let snapshot: VersionSnapshot = std::iter::once((uri.clone(), 1)).collect();
 
-        // Simulate did_change landing between snapshot capture and publish.
         install_document(backend, &uri, 2, "v2").await;
 
-        let mut diags_by_file: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
+        let mut diags_by_file: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
         diags_by_file.insert(uri.clone(), vec![make_diagnostic()]);
         backend
             .publish_collected_diagnostics(diags_by_file, &snapshot)
@@ -2644,17 +3168,14 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn publish_emits_when_live_version_equals_snapshot() {
-        // Boundary case for the strict `>` comparison: equal versions are
-        // NOT stale; the analysis ran against exactly the document the
-        // client still holds.
         let (service, _) = LspService::build(PlowLspServer::new).finish();
         let backend = service.inner();
 
-        let uri = Url::parse("file:///fresh.ts").unwrap();
+        let uri = "file:///fresh.ts".parse::<Uri>().unwrap();
         install_document(backend, &uri, 1, "v1").await;
         let snapshot: VersionSnapshot = std::iter::once((uri.clone(), 1)).collect();
 
-        let mut diags_by_file: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
+        let mut diags_by_file: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
         diags_by_file.insert(uri.clone(), vec![make_diagnostic()]);
         backend
             .publish_collected_diagnostics(diags_by_file, &snapshot)
@@ -2675,18 +3196,13 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn publish_emits_when_uri_absent_from_snapshot_and_live() {
-        // Diagnostics on files the user never `did_open`'d via the LSP
-        // (e.g. unlisted-dependency findings on a `package.json`, catalog
-        // reference findings on a `pnpm-workspace.yaml`) must publish
-        // normally. With the URI absent from BOTH the snapshot AND the
-        // live `documents` map, no version race exists.
         let (service, _) = LspService::build(PlowLspServer::new).finish();
         let backend = service.inner();
 
-        let uri = Url::parse("file:///never-opened/package.json").unwrap();
+        let uri = "file:///never-opened/package.json".parse::<Uri>().unwrap();
         let snapshot: VersionSnapshot = FxHashMap::default();
 
-        let mut diags_by_file: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
+        let mut diags_by_file: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
         diags_by_file.insert(uri.clone(), vec![make_diagnostic()]);
         backend
             .publish_collected_diagnostics(diags_by_file, &snapshot)
@@ -2700,22 +3216,15 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn publish_skips_uri_when_opened_mid_run() {
-        // URI was absent from the snapshot (file was not open via the LSP
-        // when analysis started) but is now present in live `documents`
-        // (did_open landed between snapshot capture and publish). The
-        // analysis ran without seeing this buffer; we have no version to
-        // attach to a publish so the client cannot drop a mismatched
-        // payload server-to-client. Skip until the next analysis cycle.
         let (service, _) = LspService::build(PlowLspServer::new).finish();
         let backend = service.inner();
 
-        let uri = Url::parse("file:///opened-mid-run.ts").unwrap();
+        let uri = "file:///opened-mid-run.ts".parse::<Uri>().unwrap();
         let snapshot: VersionSnapshot = FxHashMap::default();
 
-        // Simulate did_open landing between snapshot capture and publish.
         install_document(backend, &uri, 1, "v1").await;
 
-        let mut diags_by_file: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
+        let mut diags_by_file: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
         diags_by_file.insert(uri.clone(), vec![make_diagnostic()]);
         backend
             .publish_collected_diagnostics(diags_by_file, &snapshot)
@@ -2734,22 +3243,43 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn publish_caches_diagnostics_for_uri_opened_mid_run_when_buffer_matches_disk() {
+        let temp = tempfile::tempdir().expect("tempdir should be created");
+        let file_path = temp.path().join("opened-mid-run.ts");
+        std::fs::write(&file_path, "export const value = 1;\n")
+            .expect("fixture file should be written");
+
+        let (service, _) = LspService::build(PlowLspServer::new).finish();
+        let backend = service.inner();
+        let uri = Uri::from_file_path(&file_path).expect("temp path should convert to file URI");
+        let snapshot: VersionSnapshot = FxHashMap::default();
+
+        install_document(backend, &uri, 1, "export const value = 1;\n").await;
+
+        let mut diags_by_file: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
+        diags_by_file.insert(uri.clone(), vec![make_diagnostic()]);
+        backend
+            .publish_collected_diagnostics(diags_by_file, &snapshot)
+            .await;
+
+        assert!(
+            backend.cached_diagnostics.read().await.contains_key(&uri),
+            "opened-mid-run URI should update the pull cache when the live buffer matches disk",
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn publish_skips_uri_when_closed_mid_run() {
-        // URI was in the snapshot (file was open when analysis started)
-        // but has since been removed from `documents` via did_close. We
-        // cannot prove the client still owns the document, so treat as
-        // stale and skip publish.
         let (service, _) = LspService::build(PlowLspServer::new).finish();
         let backend = service.inner();
 
-        let uri = Url::parse("file:///closed.ts").unwrap();
+        let uri = "file:///closed.ts".parse::<Uri>().unwrap();
         install_document(backend, &uri, 1, "v1").await;
         let snapshot: VersionSnapshot = std::iter::once((uri.clone(), 1)).collect();
 
-        // Simulate did_close between snapshot capture and publish.
         backend.documents.write().await.remove(&uri);
 
-        let mut diags_by_file: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
+        let mut diags_by_file: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
         diags_by_file.insert(uri.clone(), vec![make_diagnostic()]);
         backend
             .publish_collected_diagnostics(diags_by_file, &snapshot)
@@ -2763,12 +3293,6 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn publish_threads_snapshot_version_to_client() {
-        // Drain the ClientSocket to inspect the actual JSON-RPC notification
-        // emitted by `publish_diagnostics`. Asserts that the LSP 3.17
-        // `version` slot carries the snapshot version (was always `None`
-        // before this change). Must drive `initialize` first because
-        // tower-lsp's `Client::send_notification` suppresses messages
-        // until the server state is `Initialized`.
         use futures::StreamExt;
 
         let (mut service, socket) = LspService::build(PlowLspServer::new).finish();
@@ -2788,20 +3312,17 @@ mod tests {
 
         let backend = service.inner();
 
-        let uri = Url::parse("file:///versioned.ts").unwrap();
+        let uri = "file:///versioned.ts".parse::<Uri>().unwrap();
         install_document(backend, &uri, 7, "v7").await;
         let snapshot: VersionSnapshot = std::iter::once((uri.clone(), 7)).collect();
 
-        let mut diags_by_file: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
+        let mut diags_by_file: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
         diags_by_file.insert(uri.clone(), vec![make_diagnostic()]);
         backend
             .publish_collected_diagnostics(diags_by_file, &snapshot)
             .await;
 
         let mut socket = socket;
-        // The client emits each log_message + publish through the same
-        // socket stream. Drain until we find the publishDiagnostics
-        // notification (skip the initialized acks / log messages).
         let request = loop {
             let next = tokio::time::timeout(Duration::from_millis(500), socket.next())
                 .await
@@ -2823,21 +3344,650 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn publish_requests_workspace_diagnostic_refresh_when_client_pulls() {
+        use futures::{SinkExt, StreamExt};
+        use tower_lsp_server::jsonrpc::Response;
+
+        let (mut service, socket) = LspService::build(PlowLspServer::new).finish();
+
+        let initialize = Request::build("initialize")
+            .params(json!({
+                "capabilities": {
+                    "workspace": {
+                        "diagnostics": {
+                            "refreshSupport": true
+                        }
+                    }
+                }
+            }))
+            .id(1)
+            .finish();
+        service
+            .ready()
+            .await
+            .expect("service ready")
+            .call(initialize)
+            .await
+            .expect("initialize call")
+            .expect("initialize response");
+
+        let backend = service.inner();
+        // Simulate a client that genuinely pulls so push-suppression engages.
+        backend.client_pulls.store(true, Ordering::SeqCst);
+        let uri = "file:///refresh.ts".parse::<Uri>().unwrap();
+        install_document(backend, &uri, 1, "v1").await;
+        let snapshot: VersionSnapshot = std::iter::once((uri.clone(), 1)).collect();
+        let mut diags_by_file: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
+        diags_by_file.insert(uri.clone(), vec![make_diagnostic()]);
+
+        let mut socket = socket;
+        let publish = backend.publish_collected_diagnostics(diags_by_file, &snapshot);
+        let client = async {
+            loop {
+                let request = tokio::time::timeout(Duration::from_millis(500), socket.next())
+                    .await
+                    .expect("server-to-client request must arrive within timeout")
+                    .expect("ClientSocket stream ended before workspace diagnostic refresh");
+                assert_ne!(
+                    request.method(),
+                    "textDocument/publishDiagnostics",
+                    "refresh-capable clients use pull diagnostics only to avoid duplicate namespaces"
+                );
+                if request.method() != "workspace/diagnostic/refresh" {
+                    continue;
+                }
+
+                let id = request
+                    .id()
+                    .expect("workspace diagnostic refresh is a request")
+                    .clone();
+                socket
+                    .send(Response::from_ok(id, json!(null)))
+                    .await
+                    .expect("refresh response should send");
+                break;
+            }
+        };
+
+        tokio::join!(publish, client);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn publish_pushes_unopened_file_diagnostics_when_client_pulls() {
+        use futures::{SinkExt, StreamExt};
+        use tower_lsp_server::jsonrpc::Response;
+
+        let (mut service, socket) = LspService::build(PlowLspServer::new).finish();
+
+        let initialize = Request::build("initialize")
+            .params(json!({
+                "capabilities": {
+                    "workspace": {
+                        "diagnostics": {
+                            "refreshSupport": true
+                        }
+                    }
+                }
+            }))
+            .id(1)
+            .finish();
+        service
+            .ready()
+            .await
+            .expect("service ready")
+            .call(initialize)
+            .await
+            .expect("initialize call")
+            .expect("initialize response");
+
+        let backend = service.inner();
+        // Simulate a client that genuinely pulls so the refresh nudge fires.
+        backend.client_pulls.store(true, Ordering::SeqCst);
+        let uri = "file:///unopened.ts".parse::<Uri>().unwrap();
+        let mut diags_by_file: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
+        diags_by_file.insert(uri.clone(), vec![make_diagnostic()]);
+
+        let mut socket = socket;
+        let snapshot = FxHashMap::default();
+        let publish = backend.publish_collected_diagnostics(diags_by_file, &snapshot);
+        let client = async {
+            let mut saw_publish = false;
+            loop {
+                let request = tokio::time::timeout(Duration::from_millis(500), socket.next())
+                    .await
+                    .expect("server-to-client request must arrive within timeout")
+                    .expect("ClientSocket stream ended before workspace diagnostic refresh");
+                if request.method() == "textDocument/publishDiagnostics" {
+                    let params = request
+                        .params()
+                        .expect("publishDiagnostics carries params on every call");
+                    assert_eq!(params["uri"], json!(uri.to_string()));
+                    saw_publish = true;
+                    continue;
+                }
+                if request.method() != "workspace/diagnostic/refresh" {
+                    continue;
+                }
+
+                let id = request
+                    .id()
+                    .expect("workspace diagnostic refresh is a request")
+                    .clone();
+                socket
+                    .send(Response::from_ok(id, json!(null)))
+                    .await
+                    .expect("refresh response should send");
+                break;
+            }
+            assert!(saw_publish, "unopened files still need push diagnostics");
+        };
+
+        tokio::join!(publish, client);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn open_files_keep_push_when_client_never_pulls() {
+        use futures::StreamExt;
+
+        let (mut service, socket) = LspService::build(PlowLspServer::new).finish();
+
+        // A refresh-capable client can advertise `workspace.diagnostics.refreshSupport`
+        // without issuing `textDocument/diagnostic`. Suppressing open-file pushes
+        // on the advertised capability blanked diagnostics for such clients; they
+        // must keep push until they actually pull.
+        let initialize = Request::build("initialize")
+            .params(json!({
+                "capabilities": {
+                    "workspace": {
+                        "diagnostics": {
+                            "refreshSupport": true
+                        }
+                    }
+                }
+            }))
+            .id(1)
+            .finish();
+        service
+            .ready()
+            .await
+            .expect("service ready")
+            .call(initialize)
+            .await
+            .expect("initialize call")
+            .expect("initialize response");
+
+        let backend = service.inner();
+        // `client_pulls` is intentionally NOT set: this client never pulls.
+        let uri = "file:///never-pulled.ts".parse::<Uri>().unwrap();
+        install_document(backend, &uri, 1, "v1").await;
+        let snapshot: VersionSnapshot = std::iter::once((uri.clone(), 1)).collect();
+        let mut diags_by_file: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
+        diags_by_file.insert(uri.clone(), vec![make_diagnostic()]);
+
+        let mut socket = socket;
+        let publish = backend.publish_collected_diagnostics(diags_by_file, &snapshot);
+        let client = async {
+            let mut saw_open_file_push = false;
+            loop {
+                let Ok(Some(request)) =
+                    tokio::time::timeout(Duration::from_millis(500), socket.next()).await
+                else {
+                    break; // stream idle: no further messages
+                };
+                assert_ne!(
+                    request.method(),
+                    "workspace/diagnostic/refresh",
+                    "a client that never pulls must not be asked to re-pull",
+                );
+                if request.method() == "textDocument/publishDiagnostics" {
+                    let params = request
+                        .params()
+                        .expect("publishDiagnostics carries params on every call");
+                    if params["uri"] == json!(uri.to_string())
+                        && params["diagnostics"]
+                            .as_array()
+                            .is_some_and(|items| !items.is_empty())
+                    {
+                        saw_open_file_push = true;
+                    }
+                }
+            }
+            assert!(
+                saw_open_file_push,
+                "open-file diagnostics must still push when the client never pulls",
+            );
+        };
+
+        tokio::join!(publish, client);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn security_diagnostics_push_when_client_never_pulls() {
+        use futures::StreamExt;
+
+        // The opt-in author-time security surface must reach a client that
+        // advertises pull-diagnostics `refreshSupport` but never issues a
+        // `textDocument/diagnostic` (plow's own VS Code extension does
+        // exactly this). Delivery keys on the OBSERVED pull, so the new
+        // `security-sink` code rides the push path like any other. This locks
+        // the exact path that silently blanked once (issue #891 / rec 4).
+        let (mut service, socket) = LspService::build(PlowLspServer::new).finish();
+        let initialize = Request::build("initialize")
+            .params(json!({
+                "capabilities": {
+                    "workspace": { "diagnostics": { "refreshSupport": true } }
+                }
+            }))
+            .id(1)
+            .finish();
+        service
+            .ready()
+            .await
+            .expect("service ready")
+            .call(initialize)
+            .await
+            .expect("initialize call")
+            .expect("initialize response");
+
+        let backend = service.inner();
+        // `client_pulls` is intentionally NOT set: this client never pulls.
+        let uri = "file:///render.ts".parse::<Uri>().unwrap();
+        install_document(backend, &uri, 1, "doRender();").await;
+        let snapshot: VersionSnapshot = std::iter::once((uri.clone(), 1)).collect();
+
+        let finding = plow_core::results::SecurityFinding {
+            finding_id: String::new(),
+            candidate: plow_core::results::SecurityCandidate::default(),
+            taint_flow: None,
+            attack_surface: None,
+            kind: plow_core::results::SecurityFindingKind::TaintedSink,
+            category: Some("dangerous-html".to_string()),
+            cwe: Some(79),
+            path: std::path::PathBuf::from("/render.ts"),
+            line: 1,
+            col: 0,
+            evidence: "sink".to_string(),
+            source_backed: false,
+            source_read: None,
+            severity: SecuritySeverity::Low,
+            trace: vec![],
+            actions: vec![],
+            dead_code: None,
+            reachability: None,
+            runtime: None,
+        };
+        let mut diags_by_file: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
+        diags_by_file.insert(
+            uri.clone(),
+            vec![crate::diagnostics::security::security_diagnostic(&finding)],
+        );
+
+        let mut socket = socket;
+        let publish = backend.publish_collected_diagnostics(diags_by_file, &snapshot);
+        let client = async {
+            let mut saw_security_push = false;
+            while let Ok(Some(request)) =
+                tokio::time::timeout(Duration::from_millis(500), socket.next()).await
+            {
+                if request.method() != "textDocument/publishDiagnostics" {
+                    continue;
+                }
+                let params = request
+                    .params()
+                    .expect("publishDiagnostics carries params on every call");
+                if params["uri"] == json!(uri.to_string())
+                    && pushed_diagnostics_have_security_sink(params)
+                {
+                    saw_security_push = true;
+                }
+            }
+            assert!(
+                saw_security_push,
+                "opt-in security diagnostics must push to a never-pulling client",
+            );
+        };
+
+        tokio::join!(publish, client);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn did_open_clears_push_diagnostics_when_client_pulls() {
+        use futures::{SinkExt, StreamExt};
+        use tower_lsp_server::jsonrpc::Response;
+
+        let (mut service, mut socket) = LspService::build(PlowLspServer::new).finish();
+
+        let initialize = Request::build("initialize")
+            .params(json!({
+                "capabilities": {
+                    "workspace": {
+                        "diagnostics": {
+                            "refreshSupport": true
+                        }
+                    }
+                }
+            }))
+            .id(1)
+            .finish();
+        service
+            .ready()
+            .await
+            .expect("service ready")
+            .call(initialize)
+            .await
+            .expect("initialize call")
+            .expect("initialize response");
+
+        let uri = "file:///opened-after-push.ts".parse::<Uri>().unwrap();
+        let backend = service.inner();
+        // Simulate a client that already pulled so did_open clears + refreshes.
+        backend.client_pulls.store(true, Ordering::SeqCst);
+        let did_open = backend.did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem::new(
+                uri.clone(),
+                "typescript".to_string(),
+                3,
+                "export const value = 1;".to_string(),
+            ),
+        });
+        let client = async {
+            let request = tokio::time::timeout(Duration::from_millis(500), socket.next())
+                .await
+                .expect("publishDiagnostics clear must arrive within timeout")
+                .expect("ClientSocket stream ended before yielding the clear");
+            assert_eq!(request.method(), "textDocument/publishDiagnostics");
+            let params = request
+                .params()
+                .expect("publishDiagnostics carries params on every call");
+            assert_eq!(params["uri"], json!(uri.to_string()));
+            assert_eq!(params["version"], json!(3));
+            assert_eq!(params["diagnostics"], json!([]));
+
+            let request = tokio::time::timeout(Duration::from_millis(500), socket.next())
+                .await
+                .expect("workspace diagnostic refresh must arrive within timeout")
+                .expect("ClientSocket stream ended before yielding the refresh");
+            assert_eq!(request.method(), "workspace/diagnostic/refresh");
+            let id = request
+                .id()
+                .expect("workspace diagnostic refresh is a request")
+                .clone();
+            socket
+                .send(Response::from_ok(id, json!(null)))
+                .await
+                .expect("refresh response should send");
+        };
+
+        tokio::join!(did_open, client);
+
+        assert!(backend.documents.read().await.contains_key(&uri));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn text_document_diagnostic_returns_cached_diagnostics_after_open_refresh() {
+        let (mut service, _) = LspService::build(PlowLspServer::new).finish();
+
+        let initialize = Request::build("initialize")
+            .params(json!({
+                "capabilities": {
+                    "workspace": {
+                        "diagnostics": {
+                            "refreshSupport": true
+                        }
+                    }
+                }
+            }))
+            .id(1)
+            .finish();
+        service
+            .ready()
+            .await
+            .expect("service ready")
+            .call(initialize)
+            .await
+            .expect("initialize call")
+            .expect("initialize response");
+
+        let backend = service.inner();
+        let uri = "file:///cached-after-open.ts".parse::<Uri>().unwrap();
+        backend
+            .cached_diagnostics
+            .write()
+            .await
+            .insert(uri.clone(), vec![make_diagnostic()]);
+        backend.documents.write().await.insert(
+            uri.clone(),
+            DocumentState {
+                version: 1,
+                text: "export const value = 1;".to_string(),
+            },
+        );
+
+        let diagnostics = Request::build("textDocument/diagnostic")
+            .params(json!({
+                "textDocument": {
+                    "uri": uri.to_string()
+                },
+                "identifier": "plow"
+            }))
+            .id(2)
+            .finish();
+        let response = service.ready().await;
+        let response = response
+            .expect("service should be ready")
+            .call(diagnostics)
+            .await
+            .expect("diagnostic request should be handled")
+            .expect("diagnostic request should return a response");
+
+        let result = response.result().expect("diagnostic response should be ok");
+        assert_eq!(result["kind"], json!("full"));
+        assert_eq!(result["items"].as_array().map(Vec::len), Some(1));
+    }
+
+    /// Write a JSON-RPC message with LSP `Content-Length` framing.
+    async fn write_lsp_message<W: tokio::io::AsyncWrite + Unpin>(
+        writer: &mut W,
+        value: &serde_json::Value,
+    ) {
+        use tokio::io::AsyncWriteExt;
+        let body = serde_json::to_string(value).expect("serialize message");
+        writer
+            .write_all(format!("Content-Length: {}\r\n\r\n", body.len()).as_bytes())
+            .await
+            .expect("write header");
+        writer.write_all(body.as_bytes()).await.expect("write body");
+        writer.flush().await.expect("flush");
+    }
+
+    /// Read one `Content-Length`-framed JSON-RPC message off the wire.
+    async fn read_lsp_message<R: tokio::io::AsyncBufRead + Unpin>(
+        reader: &mut R,
+    ) -> serde_json::Value {
+        use tokio::io::{AsyncBufReadExt, AsyncReadExt};
+        let mut content_length = 0usize;
+        loop {
+            let mut line = String::new();
+            let read = reader.read_line(&mut line).await.expect("read header line");
+            assert_ne!(read, 0, "stream closed before a full message arrived");
+            let trimmed = line.trim_end_matches(['\r', '\n']);
+            if trimmed.is_empty() {
+                break;
+            }
+            if let Some(rest) = trimmed.strip_prefix("Content-Length:") {
+                content_length = rest.trim().parse().expect("parse content-length");
+            }
+        }
+        let mut body = vec![0u8; content_length];
+        reader.read_exact(&mut body).await.expect("read body");
+        serde_json::from_slice(&body).expect("parse json-rpc body")
+    }
+
+    /// Reply to a server-to-client request with an empty `result`.
+    async fn respond_ok<W: tokio::io::AsyncWrite + Unpin>(writer: &mut W, id: i64) {
+        write_lsp_message(
+            writer,
+            &json!({ "jsonrpc": "2.0", "id": id, "result": null }),
+        )
+        .await;
+    }
+
+    /// Drain messages until the response to `id` arrives, auto-acking any
+    /// server-to-client request seen along the way (e.g. `workspace/codeLens/refresh`),
+    /// which `tower-lsp-server` awaits a reply to before the analysis can finish.
+    async fn pump_to_response<
+        R: tokio::io::AsyncBufRead + Unpin,
+        W: tokio::io::AsyncWrite + Unpin,
+    >(
+        reader: &mut R,
+        writer: &mut W,
+        id: i64,
+    ) -> serde_json::Value {
+        loop {
+            let message = read_lsp_message(reader).await;
+            let method = message.get("method").and_then(serde_json::Value::as_str);
+            let message_id = message.get("id").and_then(serde_json::Value::as_i64);
+            match (method, message_id) {
+                (Some(_), Some(request_id)) => respond_ok(writer, request_id).await,
+                (None, Some(response_id)) if response_id == id => return message,
+                _ => {}
+            }
+        }
+    }
+
+    /// Drain messages until the server sends a request with `method`, auto-acking
+    /// every other server-to-client request. Returns the target request's `id`.
+    async fn pump_to_request<
+        R: tokio::io::AsyncBufRead + Unpin,
+        W: tokio::io::AsyncWrite + Unpin,
+    >(
+        reader: &mut R,
+        writer: &mut W,
+        method: &str,
+    ) -> i64 {
+        loop {
+            let message = read_lsp_message(reader).await;
+            let msg_method = message.get("method").and_then(serde_json::Value::as_str);
+            let Some(message_id) = message.get("id").and_then(serde_json::Value::as_i64) else {
+                continue; // notification
+            };
+            if msg_method == Some(method) {
+                return message_id;
+            }
+            if msg_method.is_some() {
+                respond_ok(writer, message_id).await; // unrelated server-to-client request
+            }
+        }
+    }
+
+    // Exercises the REAL `Server::serve` loop + LSP codec over duplex byte
+    // streams (the stdin/stdout path), not the `ClientSocket` backend the other
+    // tests use. It responds to the server-to-client `workspace/diagnostic/refresh`
+    // request, proving the fire-and-forget refresh survives the wire round-trip
+    // once a client has actually pulled. Guards against the regression a codex
+    // smoke caught: a refresh that the backend-level tests see but that never
+    // reaches the real wire.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn serve_emits_workspace_diagnostic_refresh_over_stdio_after_pull() {
+        use tokio::io::BufReader;
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().canonicalize().expect("canonical root");
+        write_inline_complexity_fixture(&root);
+        // Build file URIs the cross-platform way (Windows drive letters / encoding),
+        // matching how the server round-trips them via `to_file_path`.
+        let root_uri = Uri::from_file_path(&root)
+            .expect("root file uri")
+            .to_string();
+        let file_uri = Uri::from_file_path(root.join("src/index.ts"))
+            .expect("file uri")
+            .to_string();
+
+        let (mut client_tx, server_rx) = tokio::io::duplex(64 * 1024);
+        let (server_tx, client_rx) = tokio::io::duplex(64 * 1024);
+        let mut reader = BufReader::new(client_rx);
+
+        let (service, socket) = LspService::build(PlowLspServer::new).finish();
+        let server = tokio::spawn(async move {
+            Server::new(server_rx, server_tx, socket)
+                .serve(service)
+                .await;
+        });
+
+        let exchange = async {
+            write_lsp_message(
+                &mut client_tx,
+                &json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "rootUri": root_uri,
+                        "capabilities": {
+                            "workspace": { "diagnostics": { "refreshSupport": true } }
+                        }
+                    }
+                }),
+            )
+            .await;
+            let init = pump_to_response(&mut reader, &mut client_tx, 1).await;
+            assert!(
+                init["result"]["capabilities"]["diagnosticProvider"].is_object(),
+                "pull provider must be advertised to refresh-capable clients",
+            );
+
+            // Pull BEFORE `initialized` so the server registers a real pull
+            // (state is already `Initialized` once the initialize response is sent).
+            // The first analysis then runs pull-aware and must emit the refresh,
+            // which keeps this to a single analysis and avoids racing the guard.
+            write_lsp_message(
+                &mut client_tx,
+                &json!({
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "textDocument/diagnostic",
+                    "params": {
+                        "textDocument": { "uri": file_uri },
+                        "identifier": "plow"
+                    }
+                }),
+            )
+            .await;
+            assert_eq!(
+                pump_to_response(&mut reader, &mut client_tx, 2).await["result"]["kind"],
+                json!("full"),
+            );
+
+            // `initialized` triggers analysis; with the client already pulling, the
+            // server must emit `workspace/diagnostic/refresh` over the real wire.
+            write_lsp_message(
+                &mut client_tx,
+                &json!({ "jsonrpc": "2.0", "method": "initialized", "params": {} }),
+            )
+            .await;
+            let refresh_id =
+                pump_to_request(&mut reader, &mut client_tx, "workspace/diagnostic/refresh").await;
+            respond_ok(&mut client_tx, refresh_id).await;
+        };
+
+        tokio::time::timeout(Duration::from_secs(30), exchange)
+            .await
+            .expect("server must emit workspace/diagnostic/refresh after a pull");
+
+        drop(client_tx);
+        let _ = tokio::time::timeout(Duration::from_secs(5), server).await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn stale_clearing_skips_uri_when_live_version_advanced() {
-        // Seed previous_diagnostic_uris with a URI by running a first
-        // publish, then run a second publish with empty diagnostics_by_file
-        // and a snapshot capturing the pre-edit version. The URI's live
-        // version has moved on; the stale-clearing branch must NOT emit
-        // an empty publish for it (which would erase last-valid diagnostics
-        // from the client) and must NOT evict the cached entry.
         let (service, _) = LspService::build(PlowLspServer::new).finish();
         let backend = service.inner();
 
-        let uri = Url::parse("file:///clearing.ts").unwrap();
+        let uri = "file:///clearing.ts".parse::<Uri>().unwrap();
         install_document(backend, &uri, 1, "v1").await;
         let snapshot_v1: VersionSnapshot = std::iter::once((uri.clone(), 1)).collect();
 
-        let mut first_run: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
+        let mut first_run: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
         first_run.insert(uri.clone(), vec![make_diagnostic()]);
         backend
             .publish_collected_diagnostics(first_run, &snapshot_v1)
@@ -2847,11 +3997,9 @@ mod tests {
             "precondition: first run must seed the cache",
         );
 
-        // User edits the file between runs; live version is now 2 but the
-        // SECOND analysis ran against v1 (snapshot still v1).
         install_document(backend, &uri, 2, "v2").await;
 
-        let empty: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
+        let empty: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
         backend
             .publish_collected_diagnostics(empty, &snapshot_v1)
             .await;
@@ -2869,21 +4017,15 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn publish_inserts_skipped_uri_into_new_uris() {
-        // Positive assertion guarding the load-bearing detail that even
-        // skipped (stale) URIs are inserted into `new_uris`. Without this,
-        // the next run's stale-clearing loop would treat the URI as
-        // "disappeared" and erase its last-valid diagnostics on the
-        // client. Detects a regression where a future refactor "fixes"
-        // the skip by also dropping the new_uris insertion.
         let (service, _) = LspService::build(PlowLspServer::new).finish();
         let backend = service.inner();
 
-        let uri = Url::parse("file:///tracked.ts").unwrap();
+        let uri = "file:///tracked.ts".parse::<Uri>().unwrap();
         install_document(backend, &uri, 1, "v1").await;
         let snapshot: VersionSnapshot = std::iter::once((uri.clone(), 1)).collect();
         install_document(backend, &uri, 2, "v2").await;
 
-        let mut diags_by_file: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
+        let mut diags_by_file: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
         diags_by_file.insert(uri.clone(), vec![make_diagnostic()]);
         backend
             .publish_collected_diagnostics(diags_by_file, &snapshot)

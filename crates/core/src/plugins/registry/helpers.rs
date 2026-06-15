@@ -8,12 +8,12 @@ use std::path::{Path, PathBuf};
 
 use rustc_hash::FxHashSet;
 
-use plow_config::{ExternalPluginDef, PluginDetection, UsedClassMemberRule};
+use plow_config::{ExternalPluginDef, PackageJson, PluginDetection, UsedClassMemberRule};
 
 use crate::discover::SOURCE_EXTENSIONS;
 
 use super::super::{PathRule, Plugin, PluginResult, PluginUsedExportRule, UsedExportRule};
-use super::AggregatedPluginResult;
+use super::{AggregatedPluginResult, PluginRegexValidationError};
 
 /// True when a config pattern names a source-extension config file living
 /// directly in some directory (no path separator, no leading dot, all expanded
@@ -45,9 +45,7 @@ pub fn is_source_ext_root_pattern(pat: &str) -> bool {
     true
 }
 
-/// Prepare a config pattern for `globset::Glob`. Source-extension root-anchored
-/// patterns get a `**/` prefix so they match nested files (where Phase 3b's FS
-/// walk previously caught them); other patterns pass through unchanged.
+/// Prepare a config pattern for `globset::Glob`.
 #[must_use]
 pub fn prepare_config_pattern(pat: &str) -> Cow<'_, str> {
     if is_source_ext_root_pattern(pat) {
@@ -124,6 +122,39 @@ pub fn process_static_patterns(
     }
 }
 
+/// Resolve package.json metadata hooks for active plugins.
+pub fn process_package_json_metadata(
+    active: &[&dyn Plugin],
+    pkg: &PackageJson,
+    root: &Path,
+    result: &mut AggregatedPluginResult,
+    regex_errors: &mut Vec<PluginRegexValidationError>,
+) {
+    for plugin in active {
+        let package_referenced = plugin.package_json_referenced_dependencies(pkg, root);
+        if !package_referenced.is_empty() {
+            let pkg_path = root.join("package.json");
+            result.package_referenced_dependencies.extend(
+                package_referenced
+                    .into_iter()
+                    .map(|dep| (pkg_path.clone(), dep)),
+            );
+        }
+        let plugin_result = plugin.resolve_package_json(pkg, root);
+        if plugin_result.is_empty() {
+            continue;
+        }
+        tracing::debug!(
+            plugin = plugin.name(),
+            deps = plugin_result.referenced_dependencies.len(),
+            "resolved package.json metadata"
+        );
+        if let Err(mut errors) = process_config_result(plugin.name(), plugin_result, result, None) {
+            regex_errors.append(&mut errors);
+        }
+    }
+}
+
 /// Determine whether an external plugin activates against the given project.
 ///
 /// Shared between [`process_external_plugins`] and the collision-warning
@@ -170,8 +201,6 @@ pub fn process_external_plugins(
                     .iter()
                     .map(|p| (PathRule::new(p.clone()), ext.name.clone())),
             );
-            // Track config patterns for introspection (not used for AST parsing —
-            // external plugins cannot do resolve_config())
             result.config_patterns.extend(ext.config_patterns.clone());
             result.always_used.extend(
                 ext.config_patterns
@@ -321,79 +350,80 @@ fn expand_brace_pattern(pattern: &str) -> Vec<String> {
     expanded
 }
 
-/// Eagerly validate the user-supplied exclude regexes attached to a
-/// `PathRule`, dropping any that fail to compile and emitting one enriched
-/// `tracing::warn!` per invalid pattern.
+/// Validate the user-supplied exclude regexes attached to a `PathRule`.
 ///
-/// The originating plugin and the source config file are surfaced in the
-/// warning so the user can locate the typo. Matches the #467 / #510 precedent:
-/// load continues with the invalid pattern stripped, no exit non-zero.
-fn validate_path_rule_regexes(
-    rule: &mut crate::plugins::PathRule,
+/// The originating plugin and source config file are surfaced so users can
+/// locate every typo in one config-load error.
+fn collect_path_rule_regex_errors(
+    rule: &crate::plugins::PathRule,
     plugin_name: &str,
     config_path: Option<&Path>,
+    rule_kind: &'static str,
+    errors: &mut Vec<PluginRegexValidationError>,
 ) {
-    rule.exclude_regexes
-        .retain(|pattern| match regex::Regex::new(pattern) {
-            Ok(_) => true,
-            Err(err) => {
-                let loc = config_path
-                    .map(|p| format!(" in {}", p.display()))
-                    .unwrap_or_default();
-                tracing::warn!(
-                    "plugin '{plugin_name}'{loc}: invalid excluded regex \
-                     '{pattern}' for entry pattern '{rule_pattern}': {err}; \
-                     the pattern will be ignored. A future release may reject \
-                     invalid regex patterns at config load.",
-                    rule_pattern = rule.pattern,
-                );
-                false
-            }
-        });
-    rule.exclude_segment_regexes
-        .retain(|pattern| match regex::Regex::new(pattern) {
-            Ok(_) => true,
-            Err(err) => {
-                let loc = config_path
-                    .map(|p| format!(" in {}", p.display()))
-                    .unwrap_or_default();
-                tracing::warn!(
-                    "plugin '{plugin_name}'{loc}: invalid excluded segment \
-                     regex '{pattern}' for entry pattern '{rule_pattern}': \
-                     {err}; the pattern will be ignored. A future release \
-                     may reject invalid regex patterns at config load.",
-                    rule_pattern = rule.pattern,
-                );
-                false
-            }
-        });
+    for pattern in &rule.exclude_regexes {
+        if let Err(source) = regex::Regex::new(pattern) {
+            errors.push(PluginRegexValidationError::new(
+                plugin_name,
+                config_path,
+                rule_kind,
+                "exclude_regexes",
+                &rule.pattern,
+                pattern,
+                &source,
+            ));
+        }
+    }
+    for pattern in &rule.exclude_segment_regexes {
+        if let Err(source) = regex::Regex::new(pattern) {
+            errors.push(PluginRegexValidationError::new(
+                plugin_name,
+                config_path,
+                rule_kind,
+                "exclude_segment_regexes",
+                &rule.pattern,
+                pattern,
+                &source,
+            ));
+        }
+    }
 }
 
 /// Merge a `PluginResult` from config parsing into the aggregated result.
 ///
 /// `config_path` is the source config file the plugin parsed (when known).
-/// It is only used to enrich `tracing::warn!` messages emitted by
-/// [`validate_path_rule_regexes`] so users can find their typo. Tests and
-/// inline package.json fallbacks may pass `None`.
+/// It is only used to enrich config-load errors so users can find their typo.
+/// Tests and inline package.json fallbacks may pass `None`.
 pub fn process_config_result(
     plugin_name: &str,
-    mut plugin_result: PluginResult,
+    plugin_result: PluginResult,
     result: &mut AggregatedPluginResult,
     config_path: Option<&Path>,
-) {
+) -> Result<(), Vec<PluginRegexValidationError>> {
     let pname = plugin_name.to_string();
+    let mut regex_errors = Vec::new();
 
-    // Eager regex validation for user-authored patterns extracted by the
-    // plugin from the source config file. See #479.
-    for rule in &mut plugin_result.entry_patterns {
-        validate_path_rule_regexes(rule, plugin_name, config_path);
+    for rule in &plugin_result.entry_patterns {
+        collect_path_rule_regex_errors(
+            rule,
+            plugin_name,
+            config_path,
+            "entry_patterns[]",
+            &mut regex_errors,
+        );
     }
-    for rule in &mut plugin_result.used_exports {
-        validate_path_rule_regexes(&mut rule.path, plugin_name, config_path);
+    for rule in &plugin_result.used_exports {
+        collect_path_rule_regex_errors(
+            &rule.path,
+            plugin_name,
+            config_path,
+            "used_exports[].path",
+            &mut regex_errors,
+        );
     }
-    // When the config explicitly defines entry patterns or used-export rules,
-    // treat it as a full override of that plugin's static defaults instead of
-    // layering both sets together.
+    if !regex_errors.is_empty() {
+        return Err(regex_errors);
+    }
     if plugin_result.replace_entry_patterns && !plugin_result.entry_patterns.is_empty() {
         result.entry_patterns.retain(|(_, name)| name != &pname);
     }
@@ -451,6 +481,7 @@ pub fn process_config_result(
     result
         .provided_dependencies
         .extend(plugin_result.provided_dependencies);
+    Ok(())
 }
 
 /// Check if a plugin already has a config file matched against discovered files.
@@ -478,7 +509,6 @@ pub fn check_plugin_detection(
     match detection {
         PluginDetection::Dependency { package } => all_deps.iter().any(|d| *d == package),
         PluginDetection::FileExists { pattern } => {
-            // Check against discovered files first (fast path)
             if let Ok(matcher) = globset::Glob::new(pattern).map(|g| g.compile_matcher()) {
                 for file in discovered_files {
                     let relative = file.strip_prefix(root).unwrap_or(file);
@@ -487,7 +517,6 @@ pub fn check_plugin_detection(
                     }
                 }
             }
-            // Fall back to glob on disk for non-source files (e.g., config files)
             let full_pattern = root.join(pattern).to_string_lossy().to_string();
             glob::glob(&full_pattern)
                 .ok()

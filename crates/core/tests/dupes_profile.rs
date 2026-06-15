@@ -1,3 +1,9 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "tests and benches use unwrap and expect to keep fixture setup concise"
+)]
+
 //! Quick profiling harness for clone detection steps.
 //! Run with: cargo test -p plow-core --test dupes_profile --release -- --nocapture
 //!
@@ -6,10 +12,10 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
+use oxc_span::Span;
 use plow_core::duplicates::detect::CloneDetector;
 use plow_core::duplicates::normalize::HashedToken;
 use plow_core::duplicates::tokenize::{FileTokens, SourceToken, TokenKind};
-use oxc_span::Span;
 
 fn make_hashed_tokens(hashes: &[u64]) -> Vec<HashedToken> {
     hashes
@@ -94,7 +100,6 @@ fn profile_scenario(name: &str, data: &DupeInput, runs: usize) {
 
     eprintln!("\n=== {name} ({n_files} files, {total_tokens} total tokens) ===");
 
-    // Warmup
     let _ = CloneDetector::new(30, 5, false).detect(data.clone());
 
     let mut times = Vec::with_capacity(runs);
@@ -125,7 +130,6 @@ fn profile_scenario(name: &str, data: &DupeInput, runs: usize) {
 
 #[test]
 fn profile_dupe_detection() {
-    // Install tracing if PLOW_PROFILE is set
     if std::env::var("PLOW_PROFILE").is_ok() {
         tracing_subscriber::fmt()
             .with_max_level(tracing::Level::DEBUG)

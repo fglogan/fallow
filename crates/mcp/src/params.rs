@@ -1,39 +1,21 @@
 //! MCP tool parameter structs.
 //!
-//! Field descriptions live in `///` doc comments. They flow into the published
-//! JSON Schema via schemars and into rustdoc identically, so there is one
-//! canonical source.
-//!
-//! Use `#[schemars(description = "...")]` only when the schema text must differ
-//! from rustdoc (e.g. a richer agent-facing string than what makes sense in the
-//! Rust API docs). Never combine both forms on the same field: the explicit
-//! attribute wins and a later edit to the `///` comment silently fails to
-//! reach the schema. A drift gate in `crates/mcp/src/server/tests/server_info.rs`
-//! fails the build when both forms co-occur.
+//! Doc comments feed both rustdoc and the published JSON Schema.
 
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-/// Privacy mode for author emails emitted by the `--ownership` health flag.
-///
-/// Mirrors `plow_config::EmailMode` but lives in the MCP crate so the JSON
-/// Schema published to agents lists the exact set of accepted values and
-/// rejects typos at the protocol layer instead of the CLI subprocess.
+/// Privacy mode for author emails emitted by `--ownership`.
 #[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum EmailModeParam {
-    /// Show full email addresses as recorded in git history.
     Raw,
-    /// Show local-part only (default). Unwraps GitHub-style noreply prefixes.
     Handle,
-    /// Show stable non-cryptographic pseudonyms (`xxh3:<hex>`).
     Anonymized,
-    /// Legacy spelling for anonymized output.
     Hash,
 }
 
 impl EmailModeParam {
-    /// Render as the corresponding CLI flag value.
     pub const fn as_cli(self) -> &'static str {
         match self {
             Self::Raw => "raw",
@@ -46,403 +28,331 @@ impl EmailModeParam {
 
 #[derive(Default, Deserialize, JsonSchema)]
 pub struct AnalyzeParams {
-    /// Root directory of the project to analyze. Defaults to current working directory.
     pub root: Option<String>,
 
-    /// Path to plow config file (.plowrc.json, .plowrc.jsonc, plow.toml, or .plow.toml).
     pub config: Option<String>,
 
-    /// Only analyze production code (excludes tests, stories, dev files).
     pub production: Option<bool>,
 
-    /// Scope analysis to one or more workspaces. Accepts a single package name
-    /// for the common case, or a comma-separated list with globs and `!` negation
-    /// (e.g. `"web,admin"`, `"apps/*"`, `"apps/*,!apps/legacy"`). Patterns match
-    /// against both the package name and the workspace path relative to the repo
-    /// root. Passed through to the CLI's `--workspace` flag.
     pub workspace: Option<String>,
 
-    /// Issue types to include. When set, only these types are reported.
-    /// Valid values: unused-files, unused-exports, unused-types,
-    /// private-type-leaks, unused-deps, unused-enum-members, unused-class-members, unresolved-imports,
-    /// unlisted-deps, duplicate-exports, circular-deps, re-export-cycles,
-    /// boundary-violations,
-    /// stale-suppressions, unused-catalog-entries (catalog declares packages no
-    /// consumer references; dead config), empty-catalog-groups (named pnpm
-    /// catalog groups with no entries), unresolved-catalog-references
-    /// (consumer references catalogs that do not declare the package; broken
-    /// config that pnpm install will reject), unused-dependency-overrides
-    /// (pnpm.overrides targets a package no workspace package declares and
-    /// pnpm-lock.yaml does not resolve), misconfigured-dependency-overrides
-    /// (pnpm.overrides key/value is unparsable; pnpm install will reject).
     pub issue_types: Option<Vec<String>>,
 
-    /// Set to true to check only boundary violations. Convenience alias for
-    /// `issue_types: ["boundary-violations"]`.
+    /// Analyze only architecture boundary violations.
     pub boundary_violations: Option<bool>,
 
-    /// Compare results against a saved baseline file. Only new issues (not in the baseline) are reported.
     pub baseline: Option<String>,
 
-    /// Save current results as a baseline file for future comparisons.
     pub save_baseline: Option<String>,
 
-    /// Fail if issue counts regressed compared to the regression baseline.
     pub fail_on_regression: Option<bool>,
 
-    /// Regression tolerance. Accepts a percentage ("2%") or absolute count ("5").
     pub tolerance: Option<String>,
 
-    /// Path to a regression baseline file to compare against.
     pub regression_baseline: Option<String>,
 
-    /// Save current results as a regression baseline file for future comparisons.
     pub save_regression_baseline: Option<String>,
 
-    /// Group results by CODEOWNERS ownership, directory, workspace package, or
-    /// GitLab CODEOWNERS section. Values: "owner", "directory", "package",
-    /// "section". The `section` mode produces distinct groups per `[Section]`
-    /// header even when sections share a default reviewer, and attaches an
-    /// `owners: string[]` array to each group in the JSON output (populated
-    /// from the section's default owners). The `owners` field is absent for
-    /// Owner/Directory/Package modes.
     pub group_by: Option<String>,
 
-    /// Only report issues in the specified file(s). Useful for lint-staged pre-commit hooks.
-    /// Dependency-level issues are suppressed in file mode.
     pub file: Option<Vec<String>>,
 
-    /// Report unused exports in entry files instead of auto-marking them as used.
-    /// Catches typos in framework exports (e.g., `meatdata` instead of `metadata`).
     pub include_entry_exports: Option<bool>,
 
-    /// Disable the incremental parse cache. Forces a full re-parse of all files.
     pub no_cache: Option<bool>,
 
-    /// Number of parser threads. Defaults to available CPU cores.
     pub threads: Option<usize>,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub struct CheckChangedParams {
-    /// Root directory of the project to analyze. Defaults to current working directory.
     pub root: Option<String>,
 
-    /// Git ref to compare against (e.g., "main", "HEAD~5", a commit SHA).
-    /// Only files changed since this ref are reported.
     pub since: String,
 
-    /// Path to plow config file.
     pub config: Option<String>,
 
-    /// Only analyze production code.
     pub production: Option<bool>,
 
-    /// Scope analysis to one or more workspaces. Accepts a single package name
-    /// for the common case, or a comma-separated list with globs and `!` negation
-    /// (e.g. `"web,admin"`, `"apps/*"`, `"apps/*,!apps/legacy"`). Patterns match
-    /// against both the package name and the workspace path relative to the repo
-    /// root. Passed through to the CLI's `--workspace` flag.
     pub workspace: Option<String>,
 
-    /// Compare results against a saved baseline file. Only new issues (not in the baseline) are reported.
     pub baseline: Option<String>,
 
-    /// Save current results as a baseline file for future comparisons.
     pub save_baseline: Option<String>,
 
-    /// Fail if issue counts regressed compared to the regression baseline.
     pub fail_on_regression: Option<bool>,
 
-    /// Regression tolerance. Accepts a percentage ("2%") or absolute count ("5").
     pub tolerance: Option<String>,
 
-    /// Path to a regression baseline file to compare against.
     pub regression_baseline: Option<String>,
 
-    /// Save current results as a regression baseline file for future comparisons.
     pub save_regression_baseline: Option<String>,
 
-    /// Report unused exports in entry files instead of auto-marking them as used.
     pub include_entry_exports: Option<bool>,
 
-    /// Disable the incremental parse cache. Forces a full re-parse of all files.
     pub no_cache: Option<bool>,
 
-    /// Number of parser threads. Defaults to available CPU cores.
+    pub threads: Option<usize>,
+}
+
+/// Parameters for the `security_candidates` tool.
+///
+/// Security analysis can exceed the default MCP subprocess timeout on large
+/// repos. Raise `PLOW_TIMEOUT_SECS` in the server environment when needed.
+#[derive(Default, Deserialize, JsonSchema)]
+pub struct SecurityCandidatesParams {
+    pub root: Option<String>,
+
+    pub config: Option<String>,
+
+    /// Scope candidates to selected workspace roots. Mutually exclusive with
+    /// `changed_workspaces`.
+    pub workspace: Option<String>,
+
+    /// Git ref to compare against when limiting candidates to changed files.
+    pub changed_since: Option<String>,
+
+    /// Scope candidates to just-edited files for the agent edit loop. Each path
+    /// is passed to `plow security --file` and matches finding anchors or
+    /// trace hops.
+    pub paths: Option<Vec<String>>,
+
+    /// Scope candidates to workspaces touched since this git ref. Mutually
+    /// exclusive with `workspace`.
+    pub changed_workspaces: Option<String>,
+
+    /// Include the attack-surface inventory with defensive-boundary verification
+    /// prompts in the JSON response.
+    pub surface: Option<bool>,
+
+    /// Optional security regression gate. Valid values: "new" or
+    /// "newly-reachable". The "newly-reachable" gate requires `changed_since`.
+    pub gate: Option<String>,
+
+    pub no_cache: Option<bool>,
+
     pub threads: Option<usize>,
 }
 
 #[derive(Default, Deserialize, JsonSchema)]
 pub struct FindDupesParams {
-    /// Root directory of the project to analyze. Defaults to current working directory.
     pub root: Option<String>,
 
-    /// Path to plow config file (.plowrc.json, .plowrc.jsonc, plow.toml, or .plow.toml).
     pub config: Option<String>,
 
-    /// Scope analysis to one or more workspaces. Accepts a single package name
-    /// for the common case, or a comma-separated list with globs and `!` negation
-    /// (e.g. `"web,admin"`, `"apps/*"`, `"apps/*,!apps/legacy"`). Patterns match
-    /// against both the package name and the workspace path relative to the repo
-    /// root. Passed through to the CLI's `--workspace` flag.
     pub workspace: Option<String>,
 
-    /// Detection mode: "strict" (exact tokens), "mild" (normalized identifiers),
-    /// "weak" (structural only), or "semantic" (type-aware). Defaults to "mild".
     pub mode: Option<String>,
 
-    /// Minimum token count for a clone to be reported. Default: 50.
     pub min_tokens: Option<u32>,
 
-    /// Minimum line count for a clone to be reported. Default: 5.
     pub min_lines: Option<u32>,
 
-    /// Minimum number of occurrences before a clone group is reported.
-    /// Increase to focus on widespread copy-paste worth refactoring and skip
-    /// 2-instance noise. Must be at least 2. Default: 2.
     #[schemars(range(min = 2))]
     pub min_occurrences: Option<u32>,
 
-    /// Fail if duplication percentage exceeds this value. 0 = no limit.
     pub threshold: Option<f64>,
 
-    /// Skip file-local duplicates, only report cross-file clones.
     pub skip_local: Option<bool>,
 
-    /// Enable cross-language detection (strip TS type annotations for TS<->JS matching).
     pub cross_language: Option<bool>,
 
-    /// Exclude import declarations from clone detection (reduces noise from sorted import blocks).
+    /// Exclude import declarations from clone detection. Defaults to `true`
+    /// (sorted import blocks are a formatting artifact, not copy-paste); set
+    /// `false` to count them again.
     pub ignore_imports: Option<bool>,
 
-    /// Show a per-pattern breakdown for default duplicates ignores.
-    /// Human-format only (human/markdown CLI output); MCP JSON responses suppress the note.
     pub explain_skipped: Option<bool>,
 
-    /// Show only the N largest clone groups.
     pub top: Option<usize>,
 
-    /// Compare results against a saved baseline file. Only new issues (not in the baseline) are reported.
     pub baseline: Option<String>,
 
-    /// Save current results as a baseline file for future comparisons.
     pub save_baseline: Option<String>,
 
-    /// Disable the incremental parse cache. Forces a full re-parse of all files.
     pub no_cache: Option<bool>,
 
-    /// Number of parser threads. Defaults to available CPU cores.
     pub threads: Option<usize>,
 
-    /// Only report issues in files changed since this git ref (branch, tag,
-    /// or commit SHA).
+    /// Git ref to compare against when limiting duplication to changed files.
     pub changed_since: Option<String>,
 
-    /// Group clone families by CODEOWNERS ownership, directory, workspace
-    /// package, or GitLab CODEOWNERS section. Values: "owner", "directory",
-    /// "package", "section". `section` attaches an `owners: string[]` array
-    /// to each group. Passed through to the CLI's `--group-by` flag.
     pub group_by: Option<String>,
 }
 
 #[derive(Default, Deserialize, JsonSchema)]
 pub struct FixParams {
-    /// Root directory of the project. Defaults to current working directory.
     pub root: Option<String>,
 
-    /// Path to plow config file.
     pub config: Option<String>,
 
-    /// Only analyze production code (excludes tests, stories, dev files).
     pub production: Option<bool>,
 
-    /// Scope analysis to one or more workspaces. Accepts a single package name
-    /// for the common case, or a comma-separated list with globs and `!` negation
-    /// (e.g. `"web,admin"`, `"apps/*"`, `"apps/*,!apps/legacy"`). Patterns match
-    /// against both the package name and the workspace path relative to the repo
-    /// root. Passed through to the CLI's `--workspace` flag.
     pub workspace: Option<String>,
 
-    /// Refuse to create a new `.plowrc.json` when none exists. By default,
-    /// `plow fix` creates a fresh config file (using `plow init`'s
-    /// framework-aware scaffolding) and layers `ignoreExports` rules on top
-    /// when it finds duplicate-export findings in a project with no plow
-    /// config. Set this to `true` to opt out: the duplicate-export
-    /// config-add path is skipped with an explanatory entry; source-file
-    /// edits proceed normally. Recommended for agent flows where silently
-    /// materialising a new top-level file would surprise the user.
-    /// Forwards the CLI's `--no-create-config` flag.
     pub no_create_config: Option<bool>,
 
-    /// Disable the incremental parse cache. Forces a full re-parse of all files.
     pub no_cache: Option<bool>,
 
-    /// Number of parser threads. Defaults to available CPU cores.
     pub threads: Option<usize>,
 }
 
 #[derive(Default, Deserialize, JsonSchema)]
 pub struct ProjectInfoParams {
-    /// Root directory of the project. Defaults to current working directory.
     pub root: Option<String>,
 
-    /// Path to plow config file.
     pub config: Option<String>,
 
-    /// Show detected entry points.
+    /// Include entry-point patterns in the response.
     pub entry_points: Option<bool>,
 
-    /// Show all discovered source files.
+    /// Include discovered source files in the response.
     pub files: Option<bool>,
 
-    /// Show active framework plugins.
+    /// Include active framework plugins in the response.
     pub plugins: Option<bool>,
 
-    /// Show architecture boundary zones, rules, and per-zone file counts.
+    /// Include discovered architecture boundary zones in the response.
     pub boundaries: Option<bool>,
 
-    /// Disable the incremental parse cache. Forces a full re-parse of all files.
     pub no_cache: Option<bool>,
 
-    /// Number of parser threads. Defaults to available CPU cores.
+    pub threads: Option<usize>,
+}
+
+/// Parameters for the `inspect_target` tool.
+///
+/// The tool composes several existing read-only analyses into one evidence
+/// bundle. Large repositories can exceed the default MCP subprocess timeout;
+/// raise `PLOW_TIMEOUT_SECS` in the server environment when needed.
+#[derive(Deserialize, JsonSchema)]
+pub struct InspectTargetParams {
+    pub target: InspectTarget,
+
+    pub root: Option<String>,
+
+    pub config: Option<String>,
+
+    pub production: Option<bool>,
+
+    pub workspace: Option<String>,
+
+    pub no_cache: Option<bool>,
+
     pub threads: Option<usize>,
 }
 
 #[derive(Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum InspectTarget {
+    File {
+        #[schemars(length(min = 1))]
+        file: String,
+    },
+    Symbol {
+        #[schemars(length(min = 1))]
+        file: String,
+        #[schemars(length(min = 1))]
+        export_name: String,
+    },
+}
+
+#[derive(Deserialize, JsonSchema)]
 pub struct TraceExportParams {
-    /// File containing the export to trace, relative to the project root.
     #[schemars(length(min = 1))]
     pub file: String,
 
-    /// Export name to trace (use "default" for default exports).
     #[schemars(length(min = 1))]
     pub export_name: String,
 
-    /// Root directory of the project. Defaults to current working directory.
     pub root: Option<String>,
 
-    /// Path to plow config file.
     pub config: Option<String>,
 
-    /// Only analyze production code (excludes tests, stories, dev files).
     pub production: Option<bool>,
 
-    /// Scope analysis to one or more workspaces. Accepts a single package name
-    /// for the common case, or a comma-separated list with globs and `!` negation.
     pub workspace: Option<String>,
 
-    /// Disable the incremental parse cache. Forces a full re-parse of all files.
     pub no_cache: Option<bool>,
 
-    /// Number of parser threads. Defaults to available CPU cores.
     pub threads: Option<usize>,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub struct TraceFileParams {
-    /// File to trace, relative to the project root.
     #[schemars(length(min = 1))]
     pub file: String,
 
-    /// Root directory of the project. Defaults to current working directory.
     pub root: Option<String>,
 
-    /// Path to plow config file.
     pub config: Option<String>,
 
-    /// Only analyze production code (excludes tests, stories, dev files).
     pub production: Option<bool>,
 
-    /// Scope analysis to one or more workspaces. Accepts a single package name
-    /// for the common case, or a comma-separated list with globs and `!` negation.
     pub workspace: Option<String>,
 
-    /// Disable the incremental parse cache. Forces a full re-parse of all files.
     pub no_cache: Option<bool>,
 
-    /// Number of parser threads. Defaults to available CPU cores.
     pub threads: Option<usize>,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub struct TraceDependencyParams {
-    /// Package name to trace (for example "react" or "@scope/pkg").
     #[schemars(length(min = 1))]
     pub package_name: String,
 
-    /// Root directory of the project. Defaults to current working directory.
     pub root: Option<String>,
 
-    /// Path to plow config file.
     pub config: Option<String>,
 
-    /// Only analyze production code (excludes tests, stories, dev files).
     pub production: Option<bool>,
 
-    /// Scope analysis to one or more workspaces. Accepts a single package name
-    /// for the common case, or a comma-separated list with globs and `!` negation.
     pub workspace: Option<String>,
 
-    /// Disable the incremental parse cache. Forces a full re-parse of all files.
     pub no_cache: Option<bool>,
 
-    /// Number of parser threads. Defaults to available CPU cores.
     pub threads: Option<usize>,
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Default, Deserialize, JsonSchema)]
 pub struct TraceCloneParams {
-    /// File containing the clone candidate, relative to the project root.
-    #[schemars(length(min = 1))]
-    pub file: String,
+    #[serde(default)]
+    pub file: Option<String>,
 
-    /// 1-based line number inside the clone candidate.
-    #[schemars(range(min = 1))]
-    pub line: usize,
+    #[serde(default)]
+    pub line: Option<usize>,
 
-    /// Root directory of the project. Defaults to current working directory.
+    #[serde(default)]
+    pub fingerprint: Option<String>,
+
     pub root: Option<String>,
 
-    /// Path to plow config file (.plowrc.json, .plowrc.jsonc, plow.toml, or .plow.toml).
     pub config: Option<String>,
 
-    /// Scope analysis to one or more workspaces. Accepts a single package name
-    /// for the common case, or a comma-separated list with globs and `!` negation.
     pub workspace: Option<String>,
 
-    /// Detection mode: "strict" (exact tokens), "mild" (normalized identifiers),
-    /// "weak" (structural only), or "semantic" (type-aware). Defaults to "mild".
     pub mode: Option<String>,
 
-    /// Minimum token count for a clone to be reported. Default: 50.
     pub min_tokens: Option<u32>,
 
-    /// Minimum line count for a clone to be reported. Default: 5.
     pub min_lines: Option<u32>,
 
-    /// Minimum number of occurrences before a clone group is reported.
-    /// Increase to focus on widespread copy-paste worth refactoring and skip
-    /// 2-instance noise. Must be at least 2. Default: 2.
     #[schemars(range(min = 2))]
     pub min_occurrences: Option<u32>,
 
-    /// Fail if duplication percentage exceeds this value. 0 = no limit.
     pub threshold: Option<f64>,
 
-    /// Skip file-local duplicates, only report cross-file clones.
     pub skip_local: Option<bool>,
 
-    /// Enable cross-language detection (strip TS type annotations for TS<->JS matching).
     pub cross_language: Option<bool>,
 
-    /// Exclude import declarations from clone detection (reduces noise from sorted import blocks).
+    /// Exclude import declarations from clone detection. Defaults to `true`
+    /// (sorted import blocks are a formatting artifact, not copy-paste); set
+    /// `false` to count them again.
     pub ignore_imports: Option<bool>,
 
-    /// Disable the incremental parse cache. Forces a full re-parse of all files.
     pub no_cache: Option<bool>,
 
-    /// Number of parser threads. Defaults to available CPU cores.
     pub threads: Option<usize>,
 }
 
@@ -477,6 +387,13 @@ pub struct HealthParams {
 
     /// Show only complexity findings. By default all sections are shown; use this to select only complexity.
     pub complexity: Option<bool>,
+
+    /// Include the per-decision-point complexity breakdown (`contributions[]`) on
+    /// each complexity finding. Each entry names the construct (if, else-if,
+    /// loop, boolean operator, ...) and its cyclomatic/cognitive weight, so the
+    /// agent can explain WHY a function scored high and which lines to refactor.
+    /// Forwards `--complexity-breakdown`. Off by default to keep output lean.
+    pub complexity_breakdown: Option<bool>,
 
     /// Show only per-file health scores, sorted by risk-aware triage concern:
     /// lower maintainability index and higher CRAP risk first.
@@ -518,6 +435,15 @@ pub struct HealthParams {
 
     /// Minimum commits for a file to appear in hotspot ranking.
     pub min_commits: Option<u32>,
+
+    /// Import change history from a `plow-churn/v1` JSON file instead of `git
+    /// log`, so `hotspots` / `ownership` / `targets` work on projects with no git
+    /// repository (Yandex Arc, Mercurial, Perforce). A small wrapper translates
+    /// the VCS log into the contract. Resolved relative to `root`. Powers the
+    /// churn-backed signals (hotspots, ownership, refactoring targets) only; the
+    /// `since` window labels the header but does not filter imported events (the
+    /// file is authoritative).
+    pub churn_file: Option<String>,
 
     /// Scope output to one or more workspaces. Accepts a single package name
     /// for the common case, or a comma-separated list with globs and `!` negation
@@ -683,8 +609,10 @@ pub struct AuditParams {
     /// Path to plow config file (.plowrc.json, .plowrc.jsonc, plow.toml, or .plow.toml).
     pub config: Option<String>,
 
-    /// Git ref to compare against (e.g., "main", "HEAD~5").
-    /// Auto-detects the default branch if not specified.
+    /// Git ref to compare against (e.g., "main", "HEAD~5"). When unset, the
+    /// base is the git merge-base against the branch's upstream or the remote
+    /// default (`origin/main`); set `PLOW_AUDIT_BASE` in the server env to pin
+    /// it.
     pub base: Option<String>,
 
     /// Only analyze production code (excludes tests, stories, dev files).
@@ -808,6 +736,50 @@ pub struct ListBoundariesParams {
 
     /// Number of threads for file parsing (defaults to CPU core count).
     pub threads: Option<usize>,
+}
+
+/// Parameters for the `impact` value-report tool.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub struct ImpactParams {
+    /// Project root directory whose local value report to read. History is
+    /// stored per-project in the user's private config dir (never inside the
+    /// repo). Defaults to the current working directory.
+    pub root: Option<String>,
+}
+
+/// Parameters for the `impact_all` cross-repo value-report tool.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub struct ImpactAllParams {
+    /// Row ordering: `recent` (default, most recently recorded project first),
+    /// `resolved` (most findings resolved first), `contained` (most commits
+    /// contained first), or `name` (alphabetical by project label).
+    pub sort: Option<String>,
+
+    /// Cap the number of project rows returned. Grand totals still reflect
+    /// every tracked project, including any beyond the cap. Omit for all rows.
+    pub limit: Option<usize>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct CodeExecuteParams {
+    /// JavaScript function expression or function body. The function receives
+    /// `{ plow, root }` and must return a JSON-serializable value.
+    #[schemars(length(min = 1, max = 20000))]
+    pub code: String,
+
+    /// Default project root injected into plow host calls when their params
+    /// omit `root`.
+    pub root: Option<String>,
+
+    /// Overall sandbox timeout in milliseconds. Defaults to 5000 and is capped
+    /// at 30000.
+    #[schemars(range(min = 1, max = 30000))]
+    pub timeout_ms: Option<u64>,
+
+    /// Maximum total bytes of plow JSON output that sandbox host calls may
+    /// read. Defaults to 1000000 and is capped at 4000000.
+    #[schemars(range(min = 1024, max = 4_000_000))]
+    pub max_output_bytes: Option<usize>,
 }
 
 #[derive(Default, Deserialize, JsonSchema)]

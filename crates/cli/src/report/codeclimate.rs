@@ -8,7 +8,10 @@ use plow_core::results::AnalysisResults;
 use super::ci::{fingerprint, severity};
 use super::grouping::{self, OwnershipResolver};
 use super::{emit_json, normalize_uri, relative_path};
-use crate::health_types::{ExceededThreshold, HealthReport};
+use crate::health_types::{
+    ComplexityViolation, CoverageIntelligenceFinding, ExceededThreshold, HealthReport,
+    RuntimeCoverageFinding, UntestedExportFinding, UntestedFileFinding,
+};
 use crate::output_envelope::{
     CodeClimateIssue, CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation,
     CodeClimateSeverity,
@@ -63,6 +66,254 @@ fn cc_issue(
     }
 }
 
+fn coverage_intelligence_check_name(
+    recommendation: crate::health_types::CoverageIntelligenceRecommendation,
+) -> &'static str {
+    match recommendation {
+        crate::health_types::CoverageIntelligenceRecommendation::AddTestOrSplitBeforeMerge => {
+            "plow/coverage-intelligence-risky-change"
+        }
+        crate::health_types::CoverageIntelligenceRecommendation::DeleteAfterConfirmingOwner => {
+            "plow/coverage-intelligence-delete"
+        }
+        crate::health_types::CoverageIntelligenceRecommendation::ReviewBeforeChanging => {
+            "plow/coverage-intelligence-review"
+        }
+        crate::health_types::CoverageIntelligenceRecommendation::RefactorCarefullyKeepBehavior => {
+            "plow/coverage-intelligence-refactor"
+        }
+    }
+}
+
+struct HealthCodeClimateContext<'a> {
+    root: &'a Path,
+    cyc_t: u16,
+    cog_t: u16,
+    crap_t: f64,
+}
+
+impl HealthCodeClimateContext<'_> {
+    fn complexity_issue(&self, finding: &ComplexityViolation) -> CodeClimateIssue {
+        let path = cc_path(&finding.path, self.root);
+        let check_name = complexity_check_name(finding);
+        let line_str = finding.line.to_string();
+        let fp = fingerprint_hash(&[check_name, &path, &line_str, &finding.name]);
+        cc_issue(
+            check_name,
+            &self.complexity_description(finding),
+            health_finding_severity(finding.severity),
+            "Complexity",
+            &path,
+            Some(finding.line),
+            &fp,
+        )
+    }
+
+    fn complexity_description(&self, finding: &ComplexityViolation) -> String {
+        match finding.exceeded {
+            ExceededThreshold::Both => format!(
+                "'{}' has cyclomatic complexity {} (threshold: {}) and cognitive complexity {} (threshold: {})",
+                finding.name, finding.cyclomatic, self.cyc_t, finding.cognitive, self.cog_t
+            ),
+            ExceededThreshold::Cyclomatic => format!(
+                "'{}' has cyclomatic complexity {} (threshold: {})",
+                finding.name, finding.cyclomatic, self.cyc_t
+            ),
+            ExceededThreshold::Cognitive => format!(
+                "'{}' has cognitive complexity {} (threshold: {})",
+                finding.name, finding.cognitive, self.cog_t
+            ),
+            ExceededThreshold::Crap
+            | ExceededThreshold::CyclomaticCrap
+            | ExceededThreshold::CognitiveCrap
+            | ExceededThreshold::All => {
+                let crap = finding.crap.unwrap_or(0.0);
+                let coverage = finding
+                    .coverage_pct
+                    .map(|pct| format!(", coverage {pct:.0}%"))
+                    .unwrap_or_default();
+                format!(
+                    "'{}' has CRAP score {crap:.1} (threshold: {:.1}, cyclomatic {}{coverage})",
+                    finding.name, self.crap_t, finding.cyclomatic,
+                )
+            }
+        }
+    }
+
+    fn runtime_coverage_issue(&self, finding: &RuntimeCoverageFinding) -> CodeClimateIssue {
+        let path = cc_path(&finding.path, self.root);
+        let check_name = runtime_coverage_check_name(finding.verdict);
+        let invocations_hint = finding.invocations.map_or_else(
+            || "untracked".to_owned(),
+            |hits| format!("{hits} invocations"),
+        );
+        let description = format!(
+            "'{}' runtime coverage verdict: {} ({})",
+            finding.function,
+            finding.verdict.human_label(),
+            invocations_hint,
+        );
+        let fp = fingerprint_hash(&[
+            check_name,
+            &path,
+            &finding.line.to_string(),
+            &finding.function,
+        ]);
+        cc_issue(
+            check_name,
+            &description,
+            runtime_coverage_severity(finding.verdict),
+            "Bug Risk",
+            &path,
+            Some(finding.line),
+            &fp,
+        )
+    }
+
+    fn coverage_intelligence_issue(
+        &self,
+        finding: &CoverageIntelligenceFinding,
+    ) -> Option<CodeClimateIssue> {
+        let severity = coverage_intelligence_severity(finding.verdict)?;
+        let path = cc_path(&finding.path, self.root);
+        let check_name = coverage_intelligence_check_name(finding.recommendation);
+        let identity = finding.identity.as_deref().unwrap_or("code");
+        let description = format!(
+            "'{}' coverage intelligence verdict: {} ({})",
+            identity, finding.verdict, finding.recommendation,
+        );
+        let fp = fingerprint_hash(&[
+            check_name,
+            &path,
+            &finding.line.to_string(),
+            identity,
+            &finding.id,
+        ]);
+        Some(cc_issue(
+            check_name,
+            &description,
+            severity,
+            "Bug Risk",
+            &path,
+            Some(finding.line),
+            &fp,
+        ))
+    }
+
+    fn untested_file_issue(&self, item: &UntestedFileFinding) -> CodeClimateIssue {
+        let path = cc_path(&item.file.path, self.root);
+        let description = format!(
+            "File is runtime-reachable but has no test dependency path ({} value export{})",
+            item.file.value_export_count,
+            if item.file.value_export_count == 1 {
+                ""
+            } else {
+                "s"
+            },
+        );
+        let fp = fingerprint_hash(&["plow/untested-file", &path]);
+        cc_issue(
+            "plow/untested-file",
+            &description,
+            CodeClimateSeverity::Minor,
+            "Coverage",
+            &path,
+            None,
+            &fp,
+        )
+    }
+
+    fn untested_export_issue(&self, item: &UntestedExportFinding) -> CodeClimateIssue {
+        let path = cc_path(&item.export.path, self.root);
+        let description = format!(
+            "Export '{}' is runtime-reachable but never referenced by test-reachable modules",
+            item.export.export_name
+        );
+        let line_str = item.export.line.to_string();
+        let fp = fingerprint_hash(&[
+            "plow/untested-export",
+            &path,
+            &line_str,
+            &item.export.export_name,
+        ]);
+        cc_issue(
+            "plow/untested-export",
+            &description,
+            CodeClimateSeverity::Minor,
+            "Coverage",
+            &path,
+            Some(item.export.line),
+            &fp,
+        )
+    }
+}
+
+const fn complexity_check_name(finding: &ComplexityViolation) -> &'static str {
+    match finding.exceeded {
+        ExceededThreshold::Both => "plow/high-complexity",
+        ExceededThreshold::Cyclomatic => "plow/high-cyclomatic-complexity",
+        ExceededThreshold::Cognitive => "plow/high-cognitive-complexity",
+        ExceededThreshold::Crap
+        | ExceededThreshold::CyclomaticCrap
+        | ExceededThreshold::CognitiveCrap
+        | ExceededThreshold::All => "plow/high-crap-score",
+    }
+}
+
+const fn health_finding_severity(
+    severity: crate::health_types::FindingSeverity,
+) -> CodeClimateSeverity {
+    match severity {
+        crate::health_types::FindingSeverity::Critical => CodeClimateSeverity::Critical,
+        crate::health_types::FindingSeverity::High => CodeClimateSeverity::Major,
+        crate::health_types::FindingSeverity::Moderate => CodeClimateSeverity::Minor,
+    }
+}
+
+const fn runtime_coverage_check_name(
+    verdict: crate::health_types::RuntimeCoverageVerdict,
+) -> &'static str {
+    match verdict {
+        crate::health_types::RuntimeCoverageVerdict::SafeToDelete => "plow/runtime-safe-to-delete",
+        crate::health_types::RuntimeCoverageVerdict::ReviewRequired => {
+            "plow/runtime-review-required"
+        }
+        crate::health_types::RuntimeCoverageVerdict::LowTraffic => "plow/runtime-low-traffic",
+        crate::health_types::RuntimeCoverageVerdict::CoverageUnavailable => {
+            "plow/runtime-coverage-unavailable"
+        }
+        crate::health_types::RuntimeCoverageVerdict::Active
+        | crate::health_types::RuntimeCoverageVerdict::Unknown => "plow/runtime-coverage",
+    }
+}
+
+const fn runtime_coverage_severity(
+    verdict: crate::health_types::RuntimeCoverageVerdict,
+) -> CodeClimateSeverity {
+    match verdict {
+        crate::health_types::RuntimeCoverageVerdict::SafeToDelete => CodeClimateSeverity::Critical,
+        crate::health_types::RuntimeCoverageVerdict::ReviewRequired => CodeClimateSeverity::Major,
+        _ => CodeClimateSeverity::Minor,
+    }
+}
+
+const fn coverage_intelligence_severity(
+    verdict: crate::health_types::CoverageIntelligenceVerdict,
+) -> Option<CodeClimateSeverity> {
+    match verdict {
+        crate::health_types::CoverageIntelligenceVerdict::RiskyChangeDetected
+        | crate::health_types::CoverageIntelligenceVerdict::HighConfidenceDelete => {
+            Some(CodeClimateSeverity::Major)
+        }
+        crate::health_types::CoverageIntelligenceVerdict::ReviewRequired
+        | crate::health_types::CoverageIntelligenceVerdict::RefactorCarefully => {
+            Some(CodeClimateSeverity::Minor)
+        }
+        crate::health_types::CoverageIntelligenceVerdict::Clean
+        | crate::health_types::CoverageIntelligenceVerdict::Unknown => None,
+    }
+}
+
 /// Push CodeClimate issues for unused dependencies with a shared structure.
 fn push_dep_cc_issues<'a, I>(
     issues: &mut Vec<CodeClimateIssue>,
@@ -74,10 +325,6 @@ fn push_dep_cc_issues<'a, I>(
 ) where
     I: IntoIterator<Item = &'a plow_core::results::UnusedDependency>,
 {
-    // Map severity lazily: in production mode, rules can resolve to
-    // `Severity::Off` and arrive here paired with empty (or filtered-down)
-    // dep slices; `severity_to_codeclimate` panics on `Off`, so the call must
-    // only fire once we have a finding to emit.
     for dep in deps {
         let level = severity_to_codeclimate(severity);
         let path = cc_path(&dep.path, root);
@@ -150,7 +397,6 @@ fn push_unused_export_issues<'a, I>(
 ) where
     I: IntoIterator<Item = &'a plow_core::results::UnusedExport>,
 {
-    // Map severity lazily; see `push_dep_cc_issues` for rationale.
     for export in exports {
         let level = severity_to_codeclimate(severity);
         let path = cc_path(&export.path, root);
@@ -286,7 +532,6 @@ fn push_unused_member_issues<'a, I>(
 ) where
     I: IntoIterator<Item = &'a plow_core::results::UnusedMember>,
 {
-    // Map severity lazily; see `push_dep_cc_issues` for rationale.
     for member in members {
         let level = severity_to_codeclimate(severity);
         let path = cc_path(&member.path, root);
@@ -397,12 +642,8 @@ fn push_duplicate_export_issues(
         for loc in &dup.locations {
             let path = cc_path(&loc.path, root);
             let line_str = loc.line.to_string();
-            let fp = fingerprint_hash(&[
-                "plow/duplicate-export",
-                &path,
-                &line_str,
-                &dup.export_name,
-            ]);
+            let fp =
+                fingerprint_hash(&["plow/duplicate-export", &path, &line_str, &dup.export_name]);
             issues.push(cc_issue(
                 "plow/duplicate-export",
                 &format!("Export '{}' appears in multiple modules", dup.export_name),
@@ -486,9 +727,6 @@ fn push_re_export_cycle_issues(
             plow_core::results::ReExportCycleKind::SelfLoop => " (self-loop)",
             plow_core::results::ReExportCycleKind::MultiNode => "",
         };
-        // Include `kind_token` in the fingerprint so self-loops cannot
-        // keyspace-collide with future single-file multi-node shapes (the
-        // same rationale as the baseline `re_export_cycle_key`).
         let fp = fingerprint_hash(&["plow/re-export-cycle", kind_token, &chain_str]);
         issues.push(cc_issue(
             "plow/re-export-cycle",
@@ -524,6 +762,449 @@ fn push_boundary_violation_issues(
                 "Boundary violation: {} -> {} ({} -> {})",
                 path, to, v.from_zone, v.to_zone
             ),
+            level,
+            "Bug Risk",
+            &path,
+            line,
+            &fp,
+        ));
+    }
+}
+
+fn push_boundary_coverage_issues(
+    issues: &mut Vec<CodeClimateIssue>,
+    violations: &[plow_types::output_dead_code::BoundaryCoverageViolationFinding],
+    root: &Path,
+    severity: Severity,
+) {
+    if violations.is_empty() {
+        return;
+    }
+    let level = severity_to_codeclimate(severity);
+    for entry in violations {
+        let v = &entry.violation;
+        let path = cc_path(&v.path, root);
+        let fp = fingerprint_hash(&["plow/boundary-coverage", &path]);
+        let line = if v.line > 0 { Some(v.line) } else { None };
+        issues.push(cc_issue(
+            "plow/boundary-coverage",
+            &format!("Boundary coverage: {path} matches no configured zone"),
+            level,
+            "Bug Risk",
+            &path,
+            line,
+            &fp,
+        ));
+    }
+}
+
+fn push_boundary_call_issues(
+    issues: &mut Vec<CodeClimateIssue>,
+    violations: &[plow_types::output_dead_code::BoundaryCallViolationFinding],
+    root: &Path,
+    severity: Severity,
+) {
+    if violations.is_empty() {
+        return;
+    }
+    let level = severity_to_codeclimate(severity);
+    for entry in violations {
+        let v = &entry.violation;
+        let path = cc_path(&v.path, root);
+        let fp = fingerprint_hash(&["plow/boundary-call-violation", &path, &v.callee]);
+        let line = if v.line > 0 { Some(v.line) } else { None };
+        issues.push(cc_issue(
+            "plow/boundary-call-violation",
+            &format!(
+                "Boundary call: `{}` matches forbidden pattern `{}` in zone '{}'",
+                v.callee, v.pattern, v.zone
+            ),
+            level,
+            "Bug Risk",
+            &path,
+            line,
+            &fp,
+        ));
+    }
+}
+
+fn push_policy_violation_issues(
+    issues: &mut Vec<CodeClimateIssue>,
+    violations: &[plow_types::output_dead_code::PolicyViolationFinding],
+    root: &Path,
+) {
+    use plow_core::results::PolicyViolationSeverity;
+
+    for entry in violations {
+        let v = &entry.violation;
+        let path = cc_path(&v.path, root);
+        let rule = format!("{}/{}", v.pack, v.rule_id);
+        let fp = fingerprint_hash(&["plow/policy-violation", &path, &rule, &v.matched]);
+        let line = if v.line > 0 { Some(v.line) } else { None };
+        // Severity comes from the EFFECTIVE per-finding value, not the
+        // policy-violation master, so a severity: "error" rule under a warn
+        // master maps to blocker-level just like the exit-code gate.
+        let level = severity_to_codeclimate(match v.severity {
+            PolicyViolationSeverity::Error => Severity::Error,
+            PolicyViolationSeverity::Warn => Severity::Warn,
+        });
+        let message = match &v.message {
+            Some(message) => format!(
+                "Policy violation: `{}` is banned by `{rule}`. {message}",
+                v.matched
+            ),
+            None => format!("Policy violation: `{}` is banned by `{rule}`", v.matched),
+        };
+        issues.push(cc_issue(
+            "plow/policy-violation",
+            &message,
+            level,
+            "Bug Risk",
+            &path,
+            line,
+            &fp,
+        ));
+    }
+}
+
+fn push_invalid_client_export_issues(
+    issues: &mut Vec<CodeClimateIssue>,
+    findings: &[plow_types::output_dead_code::InvalidClientExportFinding],
+    root: &Path,
+    severity: Severity,
+) {
+    if findings.is_empty() {
+        return;
+    }
+    let level = severity_to_codeclimate(severity);
+    for entry in findings {
+        let e = &entry.export;
+        let path = cc_path(&e.path, root);
+        let fp = fingerprint_hash(&["plow/invalid-client-export", &path, &e.export_name]);
+        let line = if e.line > 0 { Some(e.line) } else { None };
+        let message = format!(
+            "Export `{}` is not allowed in a \"{}\" file (Next.js server-only / route-config name)",
+            e.export_name, e.directive
+        );
+        issues.push(cc_issue(
+            "plow/invalid-client-export",
+            &message,
+            level,
+            "Bug Risk",
+            &path,
+            line,
+            &fp,
+        ));
+    }
+}
+
+fn push_mixed_client_server_barrel_issues(
+    issues: &mut Vec<CodeClimateIssue>,
+    findings: &[plow_types::output_dead_code::MixedClientServerBarrelFinding],
+    root: &Path,
+    severity: Severity,
+) {
+    if findings.is_empty() {
+        return;
+    }
+    let level = severity_to_codeclimate(severity);
+    for entry in findings {
+        let b = &entry.barrel;
+        let path = cc_path(&b.path, root);
+        let fp = fingerprint_hash(&[
+            "plow/mixed-client-server-barrel",
+            &path,
+            &b.client_origin,
+            &b.server_origin,
+        ]);
+        let line = if b.line > 0 { Some(b.line) } else { None };
+        let message = format!(
+            "Barrel re-exports both a \"use client\" module (`{}`) and a server-only module (`{}`); one import drags the other's directive across the boundary",
+            b.client_origin, b.server_origin
+        );
+        issues.push(cc_issue(
+            "plow/mixed-client-server-barrel",
+            &message,
+            level,
+            "Bug Risk",
+            &path,
+            line,
+            &fp,
+        ));
+    }
+}
+
+fn push_misplaced_directive_issues(
+    issues: &mut Vec<CodeClimateIssue>,
+    findings: &[plow_types::output_dead_code::MisplacedDirectiveFinding],
+    root: &Path,
+    severity: Severity,
+) {
+    if findings.is_empty() {
+        return;
+    }
+    let level = severity_to_codeclimate(severity);
+    for entry in findings {
+        let d = &entry.directive_site;
+        let path = cc_path(&d.path, root);
+        let fp = fingerprint_hash(&[
+            "plow/misplaced-directive",
+            &path,
+            &d.line.to_string(),
+            &d.directive,
+        ]);
+        let line = if d.line > 0 { Some(d.line) } else { None };
+        let message = format!(
+            "Directive `\"{}\"` is not in the leading position, so the RSC bundler ignores it; move it to the top of the file",
+            d.directive
+        );
+        issues.push(cc_issue(
+            "plow/misplaced-directive",
+            &message,
+            level,
+            "Bug Risk",
+            &path,
+            line,
+            &fp,
+        ));
+    }
+}
+
+fn push_unprovided_inject_issues(
+    issues: &mut Vec<CodeClimateIssue>,
+    findings: &[plow_types::output_dead_code::UnprovidedInjectFinding],
+    root: &Path,
+    severity: Severity,
+) {
+    if findings.is_empty() {
+        return;
+    }
+    let level = severity_to_codeclimate(severity);
+    for entry in findings {
+        let i = &entry.inject;
+        let path = cc_path(&i.path, root);
+        let fp = fingerprint_hash(&[
+            "plow/unprovided-inject",
+            &path,
+            &i.line.to_string(),
+            &i.key_name,
+        ]);
+        let line = if i.line > 0 { Some(i.line) } else { None };
+        let message = format!(
+            "inject(`{}`) has no matching provide(`{}`) in this project; at runtime it returns undefined (provide the key or remove this inject)",
+            i.key_name, i.key_name
+        );
+        issues.push(cc_issue(
+            "plow/unprovided-inject",
+            &message,
+            level,
+            "Bug Risk",
+            &path,
+            line,
+            &fp,
+        ));
+    }
+}
+
+fn push_unrendered_component_issues(
+    issues: &mut Vec<CodeClimateIssue>,
+    findings: &[plow_types::output_dead_code::UnrenderedComponentFinding],
+    root: &Path,
+    severity: Severity,
+) {
+    if findings.is_empty() {
+        return;
+    }
+    let level = severity_to_codeclimate(severity);
+    for entry in findings {
+        let c = &entry.component;
+        let path = cc_path(&c.path, root);
+        let fp = fingerprint_hash(&[
+            "plow/unrendered-component",
+            &path,
+            &c.line.to_string(),
+            &c.component_name,
+        ]);
+        let line = if c.line > 0 { Some(c.line) } else { None };
+        let message = format!(
+            "component `{}` is reachable but rendered nowhere in this project (render it somewhere or remove it)",
+            c.component_name
+        );
+        issues.push(cc_issue(
+            "plow/unrendered-component",
+            &message,
+            level,
+            "Bug Risk",
+            &path,
+            line,
+            &fp,
+        ));
+    }
+}
+
+fn push_unused_component_prop_issues(
+    issues: &mut Vec<CodeClimateIssue>,
+    findings: &[plow_types::output_dead_code::UnusedComponentPropFinding],
+    root: &Path,
+    severity: Severity,
+) {
+    if findings.is_empty() {
+        return;
+    }
+    let level = severity_to_codeclimate(severity);
+    for entry in findings {
+        let p = &entry.prop;
+        let path = cc_path(&p.path, root);
+        let fp = fingerprint_hash(&[
+            "plow/unused-component-prop",
+            &path,
+            &p.line.to_string(),
+            &p.prop_name,
+        ]);
+        let line = if p.line > 0 { Some(p.line) } else { None };
+        let message = format!(
+            "prop `{}` is declared but referenced nowhere in component `{}` (remove it or use it)",
+            p.prop_name, p.component_name
+        );
+        issues.push(cc_issue(
+            "plow/unused-component-prop",
+            &message,
+            level,
+            "Bug Risk",
+            &path,
+            line,
+            &fp,
+        ));
+    }
+}
+
+fn push_unused_component_emit_issues(
+    issues: &mut Vec<CodeClimateIssue>,
+    findings: &[plow_types::output_dead_code::UnusedComponentEmitFinding],
+    root: &Path,
+    severity: Severity,
+) {
+    if findings.is_empty() {
+        return;
+    }
+    let level = severity_to_codeclimate(severity);
+    for entry in findings {
+        let e = &entry.emit;
+        let path = cc_path(&e.path, root);
+        let fp = fingerprint_hash(&[
+            "plow/unused-component-emit",
+            &path,
+            &e.line.to_string(),
+            &e.emit_name,
+        ]);
+        let line = if e.line > 0 { Some(e.line) } else { None };
+        let message = format!(
+            "emit `{}` is declared but emitted nowhere in component `{}` (remove it or emit it)",
+            e.emit_name, e.component_name
+        );
+        issues.push(cc_issue(
+            "plow/unused-component-emit",
+            &message,
+            level,
+            "Bug Risk",
+            &path,
+            line,
+            &fp,
+        ));
+    }
+}
+
+fn push_unused_server_action_issues(
+    issues: &mut Vec<CodeClimateIssue>,
+    findings: &[plow_types::output_dead_code::UnusedServerActionFinding],
+    root: &Path,
+    severity: Severity,
+) {
+    if findings.is_empty() {
+        return;
+    }
+    let level = severity_to_codeclimate(severity);
+    for entry in findings {
+        let a = &entry.action;
+        let path = cc_path(&a.path, root);
+        let fp = fingerprint_hash(&[
+            "plow/unused-server-action",
+            &path,
+            &a.line.to_string(),
+            &a.action_name,
+        ]);
+        let line = if a.line > 0 { Some(a.line) } else { None };
+        let message = format!(
+            "server action `{}` is exported from a \"use server\" file but no code in this project references it (wire it to a consumer or remove it)",
+            a.action_name
+        );
+        issues.push(cc_issue(
+            "plow/unused-server-action",
+            &message,
+            level,
+            "Bug Risk",
+            &path,
+            line,
+            &fp,
+        ));
+    }
+}
+
+fn push_route_collision_issues(
+    issues: &mut Vec<CodeClimateIssue>,
+    findings: &[plow_types::output_dead_code::RouteCollisionFinding],
+    root: &Path,
+    severity: Severity,
+) {
+    if findings.is_empty() {
+        return;
+    }
+    let level = severity_to_codeclimate(severity);
+    for entry in findings {
+        let c = &entry.collision;
+        let path = cc_path(&c.path, root);
+        let fp = fingerprint_hash(&["plow/route-collision", &path, &c.url]);
+        let line = if c.line > 0 { Some(c.line) } else { None };
+        let message = format!(
+            "Route file resolves to `{}`, also owned by {} other file(s); Next.js fails the build because a URL can have only one owner",
+            c.url,
+            c.conflicting_paths.len()
+        );
+        issues.push(cc_issue(
+            "plow/route-collision",
+            &message,
+            level,
+            "Bug Risk",
+            &path,
+            line,
+            &fp,
+        ));
+    }
+}
+
+fn push_dynamic_segment_name_conflict_issues(
+    issues: &mut Vec<CodeClimateIssue>,
+    findings: &[plow_types::output_dead_code::DynamicSegmentNameConflictFinding],
+    root: &Path,
+    severity: Severity,
+) {
+    if findings.is_empty() {
+        return;
+    }
+    let level = severity_to_codeclimate(severity);
+    for entry in findings {
+        let c = &entry.conflict;
+        let path = cc_path(&c.path, root);
+        let fp = fingerprint_hash(&["plow/dynamic-segment-name-conflict", &path, &c.position]);
+        let line = if c.line > 0 { Some(c.line) } else { None };
+        let message = format!(
+            "Dynamic segments at `{}` use different slug names ({}); Next.js requires one consistent name per dynamic path",
+            c.position,
+            c.conflicting_segments.join(", ")
+        );
+        issues.push(cc_issue(
+            "plow/dynamic-segment-name-conflict",
+            &message,
             level,
             "Bug Risk",
             &path,
@@ -780,6 +1461,10 @@ fn push_misconfigured_dependency_override_issues(
 /// variants serialized as kebab-case strings; serde_json cannot fail on
 /// these shapes.
 #[must_use]
+#[expect(
+    clippy::expect_used,
+    reason = "CodeClimateIssue contains only infallibly serializable fields"
+)]
 pub fn issues_to_value(issues: &[CodeClimateIssue]) -> serde_json::Value {
     serde_json::to_value(issues).expect("CodeClimateIssue serializes infallibly")
 }
@@ -791,168 +1476,309 @@ pub fn issues_to_value(issues: &[CodeClimateIssue]) -> serde_json::Value {
 /// per-issue shape against [`CodeClimateOutput`](
 /// crate::output_envelope::CodeClimateOutput).
 #[must_use]
-#[expect(
-    clippy::too_many_lines,
-    reason = "orchestration function: one push_<kind>_issues call per issue type, each one a flat 3-5 line block; splitting would just shuffle the same lines into helpers without aiding readability"
-)]
 pub fn build_codeclimate(
     results: &AnalysisResults,
     root: &Path,
     rules: &RulesConfig,
 ) -> Vec<CodeClimateIssue> {
-    let mut issues = Vec::new();
+    CodeClimateBuilder {
+        issues: Vec::new(),
+        results,
+        root,
+        rules,
+    }
+    .build()
+}
 
-    push_unused_file_issues(&mut issues, &results.unused_files, root, rules.unused_files);
-    push_unused_export_issues(
-        &mut issues,
-        results.unused_exports.iter().map(|e| &e.export),
-        root,
-        "plow/unused-export",
-        "Export",
-        "Re-export",
-        rules.unused_exports,
-    );
-    push_unused_export_issues(
-        &mut issues,
-        results.unused_types.iter().map(|e| &e.export),
-        root,
-        "plow/unused-type",
-        "Type export",
-        "Type re-export",
-        rules.unused_types,
-    );
-    push_private_type_leak_issues(
-        &mut issues,
-        &results.private_type_leaks,
-        root,
-        rules.private_type_leaks,
-    );
-    push_dep_cc_issues(
-        &mut issues,
-        results.unused_dependencies.iter().map(|f| &f.dep),
-        root,
-        "plow/unused-dependency",
-        "dependencies",
-        rules.unused_dependencies,
-    );
-    push_dep_cc_issues(
-        &mut issues,
-        results.unused_dev_dependencies.iter().map(|f| &f.dep),
-        root,
-        "plow/unused-dev-dependency",
-        "devDependencies",
-        rules.unused_dev_dependencies,
-    );
-    push_dep_cc_issues(
-        &mut issues,
-        results.unused_optional_dependencies.iter().map(|f| &f.dep),
-        root,
-        "plow/unused-optional-dependency",
-        "optionalDependencies",
-        rules.unused_optional_dependencies,
-    );
-    push_type_only_dep_issues(
-        &mut issues,
-        &results.type_only_dependencies,
-        root,
-        rules.type_only_dependencies,
-    );
-    push_test_only_dep_issues(
-        &mut issues,
-        &results.test_only_dependencies,
-        root,
-        rules.test_only_dependencies,
-    );
-    push_unused_member_issues(
-        &mut issues,
-        results.unused_enum_members.iter().map(|m| &m.member),
-        root,
-        "plow/unused-enum-member",
-        "Enum",
-        rules.unused_enum_members,
-    );
-    push_unused_member_issues(
-        &mut issues,
-        results.unused_class_members.iter().map(|m| &m.member),
-        root,
-        "plow/unused-class-member",
-        "Class",
-        rules.unused_class_members,
-    );
-    push_unresolved_import_issues(
-        &mut issues,
-        &results.unresolved_imports,
-        root,
-        rules.unresolved_imports,
-    );
-    push_unlisted_dep_issues(
-        &mut issues,
-        &results.unlisted_dependencies,
-        root,
-        rules.unlisted_dependencies,
-    );
-    push_duplicate_export_issues(
-        &mut issues,
-        &results.duplicate_exports,
-        root,
-        rules.duplicate_exports,
-    );
-    push_circular_dep_issues(
-        &mut issues,
-        &results.circular_dependencies,
-        root,
-        rules.circular_dependencies,
-    );
-    push_re_export_cycle_issues(
-        &mut issues,
-        &results.re_export_cycles,
-        root,
-        rules.re_export_cycle,
-    );
-    push_boundary_violation_issues(
-        &mut issues,
-        &results.boundary_violations,
-        root,
-        rules.boundary_violation,
-    );
-    push_stale_suppression_issues(
-        &mut issues,
-        &results.stale_suppressions,
-        root,
-        rules.stale_suppressions,
-    );
-    push_unused_catalog_entry_issues(
-        &mut issues,
-        &results.unused_catalog_entries,
-        root,
-        rules.unused_catalog_entries,
-    );
-    push_empty_catalog_group_issues(
-        &mut issues,
-        &results.empty_catalog_groups,
-        root,
-        rules.empty_catalog_groups,
-    );
-    push_unresolved_catalog_reference_issues(
-        &mut issues,
-        &results.unresolved_catalog_references,
-        root,
-        rules.unresolved_catalog_references,
-    );
-    push_unused_dependency_override_issues(
-        &mut issues,
-        &results.unused_dependency_overrides,
-        root,
-        rules.unused_dependency_overrides,
-    );
-    push_misconfigured_dependency_override_issues(
-        &mut issues,
-        &results.misconfigured_dependency_overrides,
-        root,
-        rules.misconfigured_dependency_overrides,
-    );
+struct CodeClimateBuilder<'a> {
+    issues: Vec<CodeClimateIssue>,
+    results: &'a AnalysisResults,
+    root: &'a Path,
+    rules: &'a RulesConfig,
+}
 
-    issues
+impl CodeClimateBuilder<'_> {
+    fn build(mut self) -> Vec<CodeClimateIssue> {
+        self.push_file_and_export_issues();
+        self.push_private_type_leak_issues();
+        self.push_package_dependency_issues();
+        self.push_type_test_dependency_issues();
+        self.push_member_issues();
+        self.push_import_and_duplicate_issues();
+        self.push_graph_issues();
+        self.push_boundary_issues();
+        self.push_suppression_and_catalog_issues();
+        self.push_override_issues();
+        self.issues
+    }
+
+    fn push_file_and_export_issues(&mut self) {
+        push_unused_file_issues(
+            &mut self.issues,
+            &self.results.unused_files,
+            self.root,
+            self.rules.unused_files,
+        );
+        push_unused_export_issues(
+            &mut self.issues,
+            self.results.unused_exports.iter().map(|e| &e.export),
+            self.root,
+            "plow/unused-export",
+            "Export",
+            "Re-export",
+            self.rules.unused_exports,
+        );
+        push_unused_export_issues(
+            &mut self.issues,
+            self.results.unused_types.iter().map(|e| &e.export),
+            self.root,
+            "plow/unused-type",
+            "Type export",
+            "Type re-export",
+            self.rules.unused_types,
+        );
+    }
+
+    fn push_private_type_leak_issues(&mut self) {
+        push_private_type_leak_issues(
+            &mut self.issues,
+            &self.results.private_type_leaks,
+            self.root,
+            self.rules.private_type_leaks,
+        );
+    }
+
+    fn push_package_dependency_issues(&mut self) {
+        push_dep_cc_issues(
+            &mut self.issues,
+            self.results.unused_dependencies.iter().map(|f| &f.dep),
+            self.root,
+            "plow/unused-dependency",
+            "dependencies",
+            self.rules.unused_dependencies,
+        );
+        push_dep_cc_issues(
+            &mut self.issues,
+            self.results.unused_dev_dependencies.iter().map(|f| &f.dep),
+            self.root,
+            "plow/unused-dev-dependency",
+            "devDependencies",
+            self.rules.unused_dev_dependencies,
+        );
+        push_dep_cc_issues(
+            &mut self.issues,
+            self.results
+                .unused_optional_dependencies
+                .iter()
+                .map(|f| &f.dep),
+            self.root,
+            "plow/unused-optional-dependency",
+            "optionalDependencies",
+            self.rules.unused_optional_dependencies,
+        );
+    }
+
+    fn push_type_test_dependency_issues(&mut self) {
+        push_type_only_dep_issues(
+            &mut self.issues,
+            &self.results.type_only_dependencies,
+            self.root,
+            self.rules.type_only_dependencies,
+        );
+        push_test_only_dep_issues(
+            &mut self.issues,
+            &self.results.test_only_dependencies,
+            self.root,
+            self.rules.test_only_dependencies,
+        );
+    }
+
+    fn push_member_issues(&mut self) {
+        push_unused_member_issues(
+            &mut self.issues,
+            self.results.unused_enum_members.iter().map(|m| &m.member),
+            self.root,
+            "plow/unused-enum-member",
+            "Enum",
+            self.rules.unused_enum_members,
+        );
+        push_unused_member_issues(
+            &mut self.issues,
+            self.results.unused_class_members.iter().map(|m| &m.member),
+            self.root,
+            "plow/unused-class-member",
+            "Class",
+            self.rules.unused_class_members,
+        );
+        push_unused_member_issues(
+            &mut self.issues,
+            self.results.unused_store_members.iter().map(|m| &m.member),
+            self.root,
+            "plow/unused-store-member",
+            "Store",
+            self.rules.unused_store_members,
+        );
+    }
+
+    fn push_import_and_duplicate_issues(&mut self) {
+        push_unresolved_import_issues(
+            &mut self.issues,
+            &self.results.unresolved_imports,
+            self.root,
+            self.rules.unresolved_imports,
+        );
+        push_unlisted_dep_issues(
+            &mut self.issues,
+            &self.results.unlisted_dependencies,
+            self.root,
+            self.rules.unlisted_dependencies,
+        );
+        push_duplicate_export_issues(
+            &mut self.issues,
+            &self.results.duplicate_exports,
+            self.root,
+            self.rules.duplicate_exports,
+        );
+    }
+
+    fn push_graph_issues(&mut self) {
+        push_circular_dep_issues(
+            &mut self.issues,
+            &self.results.circular_dependencies,
+            self.root,
+            self.rules.circular_dependencies,
+        );
+        push_re_export_cycle_issues(
+            &mut self.issues,
+            &self.results.re_export_cycles,
+            self.root,
+            self.rules.re_export_cycle,
+        );
+    }
+
+    fn push_boundary_issues(&mut self) {
+        push_boundary_violation_issues(
+            &mut self.issues,
+            &self.results.boundary_violations,
+            self.root,
+            self.rules.boundary_violation,
+        );
+        push_boundary_coverage_issues(
+            &mut self.issues,
+            &self.results.boundary_coverage_violations,
+            self.root,
+            self.rules.boundary_violation,
+        );
+        push_boundary_call_issues(
+            &mut self.issues,
+            &self.results.boundary_call_violations,
+            self.root,
+            self.rules.boundary_violation,
+        );
+        push_policy_violation_issues(&mut self.issues, &self.results.policy_violations, self.root);
+        push_invalid_client_export_issues(
+            &mut self.issues,
+            &self.results.invalid_client_exports,
+            self.root,
+            self.rules.invalid_client_export,
+        );
+        push_mixed_client_server_barrel_issues(
+            &mut self.issues,
+            &self.results.mixed_client_server_barrels,
+            self.root,
+            self.rules.mixed_client_server_barrel,
+        );
+        push_misplaced_directive_issues(
+            &mut self.issues,
+            &self.results.misplaced_directives,
+            self.root,
+            self.rules.misplaced_directive,
+        );
+        push_unprovided_inject_issues(
+            &mut self.issues,
+            &self.results.unprovided_injects,
+            self.root,
+            self.rules.unprovided_injects,
+        );
+        push_unrendered_component_issues(
+            &mut self.issues,
+            &self.results.unrendered_components,
+            self.root,
+            self.rules.unrendered_components,
+        );
+        push_unused_component_prop_issues(
+            &mut self.issues,
+            &self.results.unused_component_props,
+            self.root,
+            self.rules.unused_component_props,
+        );
+        push_unused_component_emit_issues(
+            &mut self.issues,
+            &self.results.unused_component_emits,
+            self.root,
+            self.rules.unused_component_emits,
+        );
+        push_unused_server_action_issues(
+            &mut self.issues,
+            &self.results.unused_server_actions,
+            self.root,
+            self.rules.unused_server_actions,
+        );
+        push_route_collision_issues(
+            &mut self.issues,
+            &self.results.route_collisions,
+            self.root,
+            self.rules.route_collision,
+        );
+        push_dynamic_segment_name_conflict_issues(
+            &mut self.issues,
+            &self.results.dynamic_segment_name_conflicts,
+            self.root,
+            self.rules.dynamic_segment_name_conflict,
+        );
+    }
+
+    fn push_suppression_and_catalog_issues(&mut self) {
+        push_stale_suppression_issues(
+            &mut self.issues,
+            &self.results.stale_suppressions,
+            self.root,
+            self.rules.stale_suppressions,
+        );
+        push_unused_catalog_entry_issues(
+            &mut self.issues,
+            &self.results.unused_catalog_entries,
+            self.root,
+            self.rules.unused_catalog_entries,
+        );
+        push_empty_catalog_group_issues(
+            &mut self.issues,
+            &self.results.empty_catalog_groups,
+            self.root,
+            self.rules.empty_catalog_groups,
+        );
+        push_unresolved_catalog_reference_issues(
+            &mut self.issues,
+            &self.results.unresolved_catalog_references,
+            self.root,
+            self.rules.unresolved_catalog_references,
+        );
+    }
+
+    fn push_override_issues(&mut self) {
+        push_unused_dependency_override_issues(
+            &mut self.issues,
+            &self.results.unused_dependency_overrides,
+            self.root,
+            self.rules.unused_dependency_overrides,
+        );
+        push_misconfigured_dependency_override_issues(
+            &mut self.issues,
+            &self.results.misconfigured_dependency_overrides,
+            self.root,
+            self.rules.misconfigured_dependency_overrides,
+        );
+    }
 }
 
 /// Print dead-code analysis results in CodeClimate format.
@@ -971,6 +1797,10 @@ pub(super) fn print_codeclimate(
 /// Calls `build_codeclimate` to produce the standard CodeClimate JSON array,
 /// then post-processes each entry to add `"owner": "@team"` by resolving the
 /// issue's location path through the `OwnershipResolver`.
+#[expect(
+    clippy::expect_used,
+    reason = "grouped CodeClimate entries are JSON objects created by issues_to_value"
+)]
 pub(super) fn print_grouped_codeclimate(
     results: &AnalysisResults,
     root: &Path,
@@ -999,193 +1829,40 @@ pub(super) fn print_grouped_codeclimate(
 
 /// Build CodeClimate JSON array from health/complexity analysis results.
 #[must_use]
-#[expect(
-    clippy::too_many_lines,
-    reason = "CRAP adds a fourth exceeded-threshold branch plus its description; splitting the dispatch table would fragment the mapping."
-)]
 pub fn build_health_codeclimate(report: &HealthReport, root: &Path) -> Vec<CodeClimateIssue> {
     let mut issues = Vec::new();
-
-    let cyc_t = report.summary.max_cyclomatic_threshold;
-    let cog_t = report.summary.max_cognitive_threshold;
-    let crap_t = report.summary.max_crap_threshold;
+    let ctx = HealthCodeClimateContext {
+        root,
+        cyc_t: report.summary.max_cyclomatic_threshold,
+        cog_t: report.summary.max_cognitive_threshold,
+        crap_t: report.summary.max_crap_threshold,
+    };
 
     for finding in &report.findings {
-        let path = cc_path(&finding.path, root);
-        let description = match finding.exceeded {
-            ExceededThreshold::Both => format!(
-                "'{}' has cyclomatic complexity {} (threshold: {}) and cognitive complexity {} (threshold: {})",
-                finding.name, finding.cyclomatic, cyc_t, finding.cognitive, cog_t
-            ),
-            ExceededThreshold::Cyclomatic => format!(
-                "'{}' has cyclomatic complexity {} (threshold: {})",
-                finding.name, finding.cyclomatic, cyc_t
-            ),
-            ExceededThreshold::Cognitive => format!(
-                "'{}' has cognitive complexity {} (threshold: {})",
-                finding.name, finding.cognitive, cog_t
-            ),
-            ExceededThreshold::Crap
-            | ExceededThreshold::CyclomaticCrap
-            | ExceededThreshold::CognitiveCrap
-            | ExceededThreshold::All => {
-                let crap = finding.crap.unwrap_or(0.0);
-                let coverage = finding
-                    .coverage_pct
-                    .map(|pct| format!(", coverage {pct:.0}%"))
-                    .unwrap_or_default();
-                format!(
-                    "'{}' has CRAP score {crap:.1} (threshold: {crap_t:.1}, cyclomatic {}{coverage})",
-                    finding.name, finding.cyclomatic,
-                )
-            }
-        };
-        let check_name = match finding.exceeded {
-            ExceededThreshold::Both => "plow/high-complexity",
-            ExceededThreshold::Cyclomatic => "plow/high-cyclomatic-complexity",
-            ExceededThreshold::Cognitive => "plow/high-cognitive-complexity",
-            ExceededThreshold::Crap
-            | ExceededThreshold::CyclomaticCrap
-            | ExceededThreshold::CognitiveCrap
-            | ExceededThreshold::All => "plow/high-crap-score",
-        };
-        // Map finding severity to CodeClimate severity levels
-        let severity = match finding.severity {
-            crate::health_types::FindingSeverity::Critical => CodeClimateSeverity::Critical,
-            crate::health_types::FindingSeverity::High => CodeClimateSeverity::Major,
-            crate::health_types::FindingSeverity::Moderate => CodeClimateSeverity::Minor,
-        };
-        let line_str = finding.line.to_string();
-        let fp = fingerprint_hash(&[check_name, &path, &line_str, &finding.name]);
-        issues.push(cc_issue(
-            check_name,
-            &description,
-            severity,
-            "Complexity",
-            &path,
-            Some(finding.line),
-            &fp,
-        ));
+        issues.push(ctx.complexity_issue(finding));
     }
 
-    // Note: `production.hot_paths` and `production.signals` are
-    // intentionally omitted from CodeClimate output. CodeClimate / GitLab
-    // Code Quality issues are actionable findings; the
-    // `hot-path-touched` signal is a PR-review heads-up and the
-    // `signals[]` array is a programmatic decomposition of the verdict.
-    // JSON consumers that need the full surface read those fields
-    // directly from the JSON output.
     if let Some(ref production) = report.runtime_coverage {
         for finding in &production.findings {
-            let path = cc_path(&finding.path, root);
-            let check_name = match finding.verdict {
-                crate::health_types::RuntimeCoverageVerdict::SafeToDelete => {
-                    "plow/runtime-safe-to-delete"
-                }
-                crate::health_types::RuntimeCoverageVerdict::ReviewRequired => {
-                    "plow/runtime-review-required"
-                }
-                crate::health_types::RuntimeCoverageVerdict::LowTraffic => {
-                    "plow/runtime-low-traffic"
-                }
-                crate::health_types::RuntimeCoverageVerdict::CoverageUnavailable => {
-                    "plow/runtime-coverage-unavailable"
-                }
-                crate::health_types::RuntimeCoverageVerdict::Active
-                | crate::health_types::RuntimeCoverageVerdict::Unknown => "plow/runtime-coverage",
-            };
-            let invocations_hint = finding.invocations.map_or_else(
-                || "untracked".to_owned(),
-                |hits| format!("{hits} invocations"),
-            );
-            let description = format!(
-                "'{}' runtime coverage verdict: {} ({})",
-                finding.function,
-                finding.verdict.human_label(),
-                invocations_hint,
-            );
-            // GitLab Code Quality renders MR inline annotations only for
-            // blocker/critical/major/minor. Any non-cold verdict collapses to
-            // "minor" — "info" is schema-valid but silently dropped from MR
-            // annotations.
-            let severity = match finding.verdict {
-                crate::health_types::RuntimeCoverageVerdict::SafeToDelete => {
-                    CodeClimateSeverity::Critical
-                }
-                crate::health_types::RuntimeCoverageVerdict::ReviewRequired => {
-                    CodeClimateSeverity::Major
-                }
-                _ => CodeClimateSeverity::Minor,
-            };
-            let fp = fingerprint_hash(&[
-                check_name,
-                &path,
-                &finding.line.to_string(),
-                &finding.function,
-            ]);
-            issues.push(cc_issue(
-                check_name,
-                &description,
-                severity,
-                // CodeClimate/GitLab Code Quality allows a fixed category set:
-                // Bug Risk | Clarity | Compatibility | Complexity | Duplication
-                // | Performance | Security | Style. Production-coverage
-                // findings are a dead-code signal, so use "Bug Risk" — same
-                // category used by static dead-code issues elsewhere.
-                "Bug Risk",
-                &path,
-                Some(finding.line),
-                &fp,
-            ));
+            issues.push(ctx.runtime_coverage_issue(finding));
+        }
+    }
+
+    if let Some(ref intelligence) = report.coverage_intelligence {
+        for finding in &intelligence.findings {
+            if let Some(issue) = ctx.coverage_intelligence_issue(finding) {
+                issues.push(issue);
+            }
         }
     }
 
     if let Some(ref gaps) = report.coverage_gaps {
         for item in &gaps.files {
-            let path = cc_path(&item.file.path, root);
-            let description = format!(
-                "File is runtime-reachable but has no test dependency path ({} value export{})",
-                item.file.value_export_count,
-                if item.file.value_export_count == 1 {
-                    ""
-                } else {
-                    "s"
-                },
-            );
-            let fp = fingerprint_hash(&["plow/untested-file", &path]);
-            issues.push(cc_issue(
-                "plow/untested-file",
-                &description,
-                CodeClimateSeverity::Minor,
-                "Coverage",
-                &path,
-                None,
-                &fp,
-            ));
+            issues.push(ctx.untested_file_issue(item));
         }
 
         for item in &gaps.exports {
-            let path = cc_path(&item.export.path, root);
-            let description = format!(
-                "Export '{}' is runtime-reachable but never referenced by test-reachable modules",
-                item.export.export_name
-            );
-            let line_str = item.export.line.to_string();
-            let fp = fingerprint_hash(&[
-                "plow/untested-export",
-                &path,
-                &line_str,
-                &item.export.export_name,
-            ]);
-            issues.push(cc_issue(
-                "plow/untested-export",
-                &description,
-                CodeClimateSeverity::Minor,
-                "Coverage",
-                &path,
-                Some(item.export.line),
-                &fp,
-            ));
+            issues.push(ctx.untested_export_issue(item));
         }
     }
 
@@ -1207,6 +1884,10 @@ pub(super) fn print_health_codeclimate(report: &HealthReport, root: &Path) -> Ex
 /// `OwnershipResolver`. Lets GitLab Code Quality and other CodeClimate
 /// consumers partition findings per team / package without re-parsing the
 /// project structure.
+#[expect(
+    clippy::expect_used,
+    reason = "grouped health CodeClimate entries are JSON objects created by issues_to_value"
+)]
 pub(super) fn print_grouped_health_codeclimate(
     report: &HealthReport,
     root: &Path,
@@ -1245,8 +1926,6 @@ pub fn build_duplication_codeclimate(
     let mut issues = Vec::new();
 
     for (i, group) in report.clone_groups.iter().enumerate() {
-        // Content-based fingerprint: hash token_count + line_count + first 64 chars of fragment
-        // This is stable across runs regardless of group ordering.
         let token_str = group.token_count.to_string();
         let line_count_str = group.line_count.to_string();
         let fragment_prefix: String = group
@@ -1301,6 +1980,10 @@ pub(super) fn print_duplication_codeclimate(report: &DuplicationReport, root: &P
 /// top-level `group` key. Lets GitLab Code Quality and other CodeClimate
 /// consumers partition findings per team / package / directory without
 /// re-parsing the project structure.
+#[expect(
+    clippy::expect_used,
+    reason = "grouped duplication CodeClimate entries are JSON objects created by issues_to_value"
+)]
 pub(super) fn print_grouped_duplication_codeclimate(
     report: &DuplicationReport,
     root: &Path,
@@ -1309,8 +1992,6 @@ pub(super) fn print_grouped_duplication_codeclimate(
     let issues = build_duplication_codeclimate(report, root);
     let mut value = issues_to_value(&issues);
 
-    // Build a flat lookup from each instance path -> primary owner. Every
-    // instance of a clone group inherits the group's largest-owner key.
     use rustc_hash::FxHashMap;
     let mut path_to_owner: FxHashMap<String, String> = FxHashMap::default();
     for group in &report.clone_groups {
@@ -1384,7 +2065,6 @@ mod tests {
         let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
         assert!(output.is_array());
         let arr = output.as_array().unwrap();
-        // Should have at least one issue per type
         assert!(!arr.is_empty());
     }
 
@@ -1422,12 +2102,10 @@ mod tests {
                 path: root.join("src/dead.ts"),
             }));
 
-        // Error severity -> major
         let rules = RulesConfig::default();
         let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
         assert_eq!(output[0]["severity"], "major");
 
-        // Warn severity -> minor
         let rules = RulesConfig {
             unused_files: Severity::Warn,
             ..RulesConfig::default()
@@ -1584,6 +2262,7 @@ mod tests {
                     length: 2,
                     line: 3,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             ));
@@ -1673,11 +2352,8 @@ mod tests {
             }));
         let rules = RulesConfig::default();
         let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
-        // Line 0 -> begin defaults to 1
         assert_eq!(output[0]["location"]["lines"]["begin"], 1);
     }
-
-    // ── fingerprint_hash tests ─────────────────────────────────────
 
     #[test]
     fn fingerprint_hash_different_inputs_differ() {
@@ -1695,7 +2371,6 @@ mod tests {
 
     #[test]
     fn fingerprint_hash_separator_prevents_collision() {
-        // "ab" + "c" should differ from "a" + "bc"
         let h1 = fingerprint_hash(&["ab", "c"]);
         let h2 = fingerprint_hash(&["a", "bc"]);
         assert_ne!(h1, h2);
@@ -1707,8 +2382,6 @@ mod tests {
         assert_eq!(h.len(), 16);
         assert!(h.chars().all(|c| c.is_ascii_hexdigit()));
     }
-
-    // ── severity_to_codeclimate ─────────────────────────────────────
 
     #[test]
     fn severity_error_maps_to_major() {
@@ -1737,7 +2410,7 @@ mod tests {
     /// rule short-circuit clears the vec, but the generic-iterator helpers
     /// in `codeclimate.rs` previously called `severity_to_codeclimate`
     /// before checking emptiness and panicked at `Severity::Off`).
-    /// `plow check --format codeclimate --production` on any project
+    /// `plow dead-code --format codeclimate --production` on any project
     /// with a `--production`-suppressed dep / export / member rule used to
     /// exit 101 with `entered unreachable code` at `ci/severity.rs:28`.
     /// This test exercises all three previously-vulnerable helpers
@@ -1757,13 +2430,9 @@ mod tests {
             unused_class_members: Severity::Off,
             ..RulesConfig::default()
         };
-        // Must not panic: empty iterators must short-circuit before the
-        // severity mapping runs.
         let issues = build_codeclimate(&results, &root, &rules);
         assert!(issues.is_empty());
     }
-
-    // ── health_severity ─────────────────────────────────────────────
 
     #[test]
     fn health_severity_zero_threshold_returns_minor() {
@@ -1851,6 +2520,95 @@ mod tests {
     }
 
     #[test]
+    fn health_codeclimate_includes_coverage_intelligence_issue() {
+        use crate::health_types::{
+            CoverageIntelligenceAction, CoverageIntelligenceConfidence,
+            CoverageIntelligenceEvidence, CoverageIntelligenceFinding,
+            CoverageIntelligenceMatchConfidence, CoverageIntelligenceRecommendation,
+            CoverageIntelligenceReport, CoverageIntelligenceSchemaVersion,
+            CoverageIntelligenceSignal, CoverageIntelligenceSummary, CoverageIntelligenceVerdict,
+            HealthReport, HealthSummary,
+        };
+
+        let root = PathBuf::from("/project");
+        let report = HealthReport {
+            summary: HealthSummary {
+                files_analyzed: 10,
+                functions_analyzed: 50,
+                ..Default::default()
+            },
+            coverage_intelligence: Some(CoverageIntelligenceReport {
+                schema_version: CoverageIntelligenceSchemaVersion::V1,
+                verdict: CoverageIntelligenceVerdict::HighConfidenceDelete,
+                summary: CoverageIntelligenceSummary {
+                    findings: 1,
+                    high_confidence_deletes: 1,
+                    ..Default::default()
+                },
+                findings: vec![CoverageIntelligenceFinding {
+                    id: "plow:coverage-intel:abc123".to_owned(),
+                    path: root.join("src/dead.ts"),
+                    identity: Some("deadPath".to_owned()),
+                    line: 9,
+                    verdict: CoverageIntelligenceVerdict::HighConfidenceDelete,
+                    signals: vec![CoverageIntelligenceSignal::RuntimeCold],
+                    recommendation: CoverageIntelligenceRecommendation::DeleteAfterConfirmingOwner,
+                    confidence: CoverageIntelligenceConfidence::High,
+                    related_ids: vec!["plow:prod:deadbeef".to_owned()],
+                    evidence: CoverageIntelligenceEvidence {
+                        match_confidence: CoverageIntelligenceMatchConfidence::Direct,
+                        ..Default::default()
+                    },
+                    actions: vec![CoverageIntelligenceAction {
+                        kind: "delete-after-confirming-owner".to_owned(),
+                        description: "Confirm ownership".to_owned(),
+                        auto_fixable: false,
+                    }],
+                }],
+            }),
+            ..Default::default()
+        };
+
+        let output = issues_to_value(&build_health_codeclimate(&report, &root));
+        let issues = output.as_array().unwrap();
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0]["check_name"], "plow/coverage-intelligence-delete");
+        assert!(!issues[0]["fingerprint"].as_str().unwrap().is_empty());
+        assert_eq!(issues[0]["location"]["path"], "src/dead.ts");
+        assert!(
+            issues[0]["description"]
+                .as_str()
+                .unwrap()
+                .contains("deadPath")
+        );
+    }
+
+    #[test]
+    fn health_codeclimate_skips_summary_only_coverage_intelligence() {
+        use crate::health_types::{
+            CoverageIntelligenceReport, CoverageIntelligenceSchemaVersion,
+            CoverageIntelligenceSummary, CoverageIntelligenceVerdict, HealthReport,
+        };
+
+        let root = PathBuf::from("/project");
+        let report = HealthReport {
+            coverage_intelligence: Some(CoverageIntelligenceReport {
+                schema_version: CoverageIntelligenceSchemaVersion::V1,
+                verdict: CoverageIntelligenceVerdict::Clean,
+                summary: CoverageIntelligenceSummary {
+                    skipped_ambiguous_matches: 2,
+                    ..Default::default()
+                },
+                findings: vec![],
+            }),
+            ..Default::default()
+        };
+
+        let issues = build_health_codeclimate(&report, &root);
+        assert!(issues.is_empty());
+    }
+
+    #[test]
     fn health_codeclimate_crap_only_uses_crap_check_name() {
         use crate::health_types::{
             ComplexityViolation, FindingSeverity, HealthReport, HealthSummary,
@@ -1875,6 +2633,9 @@ mod tests {
                     coverage_source: None,
                     inherited_from: None,
                     component_rollup: None,
+                    contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
                 }
                 .into(),
             ],

@@ -17,41 +17,36 @@ use oxc_span::{SourceType, Span};
 use crate::asset_url::normalize_asset_url;
 use crate::html::is_remote_url;
 use crate::sfc::SfcScript;
+use crate::source_map::ExtractionResult;
 use crate::visitor::ModuleInfoExtractor;
 use crate::{ImportInfo, ImportedName, ModuleInfo};
 use plow_types::discover::FileId;
 
 /// Regex to extract Astro frontmatter (content between `---` delimiters at file start).
-static ASTRO_FRONTMATTER_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r"(?s)\A\s*---[ \t]*\r?\n(?P<body>.*?\r?\n)---").expect("valid regex")
-});
+static ASTRO_FRONTMATTER_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r"(?s)\A\s*---[ \t]*\r?\n(?P<body>.*?\r?\n)---"));
 
 /// Regex matching `<script>` blocks in the Astro template body. Captures the
 /// attribute list and the body so callers can decide whether to follow `src=`
 /// or parse the inline body as TypeScript.
 static SCRIPT_BLOCK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(
+    crate::static_regex(
         r#"(?is)<script\b(?P<attrs>(?:[^>"']|"[^"]*"|'[^']*')*)>(?P<body>[\s\S]*?)</script>"#,
     )
-    .expect("valid regex")
 });
 
 /// Regex matching opening `<script>` tags in the Astro template body.
 static SCRIPT_OPEN_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r#"(?is)<script\b(?P<attrs>(?:[^>"']|"[^"]*"|'[^']*')*)>"#)
-        .expect("valid regex")
+    crate::static_regex(r#"(?is)<script\b(?P<attrs>(?:[^>"']|"[^"]*"|'[^']*')*)>"#)
 });
 
 /// Regex detecting and capturing a `src` attribute on a script tag.
-static SRC_ATTR_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r#"(?i)(?:^|\s)src\s*=\s*["'](?P<src>[^"']+)["']"#).expect("valid regex")
-});
+static SRC_ATTR_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r#"(?i)(?:^|\s)src\s*=\s*["'](?P<src>[^"']+)["']"#));
 
 /// Regex matching HTML comments for stripping before template scanning.
-/// Astro doesn't bundle scripts inside HTML comments, so we filter them out
-/// to avoid following references that the build never honours.
 static HTML_COMMENT_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"(?s)<!--.*?-->").expect("valid regex"));
+    LazyLock::new(|| crate::static_regex(r"(?s)<!--.*?-->"));
 
 /// Extract frontmatter from an Astro component.
 pub fn extract_astro_frontmatter(source: &str) -> Option<SfcScript> {
@@ -63,6 +58,7 @@ pub fn extract_astro_frontmatter(source: &str) -> Option<SfcScript> {
             is_jsx: false,
             byte_offset: body_match.map_or(0, |m| m.start()),
             src: None,
+            src_span: None,
             is_setup: false,
             is_context_module: false,
             generic_attr: None,
@@ -99,12 +95,14 @@ pub(crate) fn parse_astro_to_module(
         let parser_return = Parser::new(&allocator, &script.body, source_type).parse();
         let mut extractor = ModuleInfoExtractor::new();
         extractor.visit_program(&parser_return.program);
+        let extraction = ExtractionResult::contiguous(&script.body, script.byte_offset);
+        extractor.remap_spans_with(|span| extraction.remap_span(span));
         extractor
     } else {
         ModuleInfoExtractor::new()
     };
 
-    extend_imports_from_template(&mut extractor.imports, template);
+    extend_imports_from_template(&mut extractor.imports, template, template_offset);
 
     let mut info = extractor.into_module_info(file_id, content_hash, parsed_suppressions);
     info.line_offsets = line_offsets;
@@ -113,43 +111,69 @@ pub(crate) fn parse_astro_to_module(
 
 /// Append imports discovered in the Astro template body: `<script src="...">`
 /// references and ESM `import` statements inside inline `<script>` blocks.
-fn extend_imports_from_template(imports: &mut Vec<ImportInfo>, template: &str) {
+fn extend_imports_from_template(
+    imports: &mut Vec<ImportInfo>,
+    template: &str,
+    template_offset: usize,
+) {
     if template.is_empty() {
         return;
     }
 
-    let stripped = HTML_COMMENT_RE.replace_all(template, "");
+    let comment_ranges: Vec<(usize, usize)> = HTML_COMMENT_RE
+        .find_iter(template)
+        .map(|m| (m.start(), m.end()))
+        .collect();
 
-    // External script references (`<script src="..."></script>`). Astro only
-    // processes a `src` script when `src` is the tag's only attribute.
-    // Attributed scripts (`is:inline`, `type="module"`, `defer`, etc.) are
-    // rendered as authored and do not resolve imports relative to the `.astro`
-    // file, so they must not create reachability edges.
-    for cap in SCRIPT_OPEN_RE.captures_iter(&stripped) {
+    for cap in SCRIPT_OPEN_RE.captures_iter(template) {
+        let Some(open) = cap.get(0) else {
+            continue;
+        };
+        if comment_ranges
+            .iter()
+            .any(|&(start, end)| open.start() >= start && open.start() < end)
+        {
+            continue;
+        }
         let attrs = cap.name("attrs").map_or("", |m| m.as_str());
-        if let Some(raw) = processed_script_src(attrs) {
+        if let Some((raw, source_span)) = processed_script_src_with_span(attrs, cap.name("attrs")) {
+            let tag_span = Span::new(
+                (template_offset + open.start()) as u32,
+                (template_offset + open.end()) as u32,
+            );
             imports.push(ImportInfo {
                 source: normalize_asset_url(raw),
                 imported_name: ImportedName::SideEffect,
                 local_name: String::new(),
                 is_type_only: false,
                 from_style: false,
-                span: Span::default(),
-                source_span: Span::default(),
+                span: tag_span,
+                source_span: Span::new(
+                    template_offset as u32 + source_span.start,
+                    template_offset as u32 + source_span.end,
+                ),
             });
         }
     }
 
-    // Inline `<script>` blocks without attributes are Astro-processed
-    // TypeScript, so ES module imports referenced inside them contribute to
-    // the component's reachability set. Any attribute opts out of processing
-    // except for `src`, which is handled by the opening-tag scan above.
-    for cap in SCRIPT_BLOCK_RE.captures_iter(&stripped) {
+    for cap in SCRIPT_BLOCK_RE.captures_iter(template) {
+        let Some(open) = cap.get(0) else {
+            continue;
+        };
+        if comment_ranges
+            .iter()
+            .any(|&(start, end)| open.start() >= start && open.start() < end)
+        {
+            continue;
+        }
         let attrs = cap.name("attrs").map_or("", |m| m.as_str());
         if !attrs.trim().is_empty() {
             continue;
         }
-        let body = cap.name("body").map_or("", |m| m.as_str());
+        let Some(body_match) = cap.name("body") else {
+            continue;
+        };
+        let body = body_match.as_str();
         if body.trim().is_empty() {
             continue;
         }
@@ -158,13 +182,19 @@ fn extend_imports_from_template(imports: &mut Vec<ImportInfo>, template: &str) {
         let parser_return = Parser::new(&allocator, body, SourceType::ts()).parse();
         let mut inline_extractor = ModuleInfoExtractor::new();
         inline_extractor.visit_program(&parser_return.program);
+        let extraction = ExtractionResult::contiguous(body, template_offset + body_match.start());
+        inline_extractor.remap_spans_with(|span| extraction.remap_span(span));
         imports.append(&mut inline_extractor.imports);
     }
 }
 
-fn processed_script_src(attrs: &str) -> Option<&str> {
+fn processed_script_src_with_span<'a>(
+    attrs: &'a str,
+    attrs_match: Option<regex::Match<'_>>,
+) -> Option<(&'a str, Span)> {
     let cap = SRC_ATTR_RE.captures(attrs)?;
-    let src = cap.name("src")?.as_str().trim();
+    let src_match = cap.name("src")?;
+    let src = src_match.as_str().trim();
     if src.is_empty() || is_remote_url(src) {
         return None;
     }
@@ -172,20 +202,24 @@ fn processed_script_src(attrs: &str) -> Option<&str> {
     let without_src = SRC_ATTR_RE.replace(attrs, "");
     let extra_attrs = without_src.trim();
     let extra_attrs = extra_attrs.strip_suffix('/').unwrap_or(extra_attrs).trim();
-    if extra_attrs.is_empty() {
-        Some(src)
-    } else {
-        None
+    if !extra_attrs.is_empty() {
+        return None;
     }
+
+    let attrs_start = attrs_match.map_or(0, |m| m.start());
+    Some((
+        src,
+        Span::new(
+            (attrs_start + src_match.start()) as u32,
+            (attrs_start + src_match.end()) as u32,
+        ),
+    ))
 }
 
-// Astro tests exercise regex-based frontmatter extraction — no unsafe code,
-// no Miri-specific value. Oxc parser tests are additionally ~1000x slower.
+// Astro tests use regex-based frontmatter extraction.
 #[cfg(all(test, not(miri)))]
 mod tests {
     use super::*;
-
-    // ── is_astro_file ────────────────────────────────────────────
 
     #[test]
     fn is_astro_file_positive() {
@@ -206,8 +240,6 @@ mod tests {
     fn is_astro_file_rejects_mdx() {
         assert!(!is_astro_file(Path::new("post.mdx")));
     }
-
-    // ── extract_astro_frontmatter: basic extraction ──────────────
 
     #[test]
     fn extracts_frontmatter_body() {
@@ -240,8 +272,6 @@ mod tests {
         assert!(script.src.is_none());
     }
 
-    // ── No frontmatter ───────────────────────────────────────────
-
     #[test]
     fn no_frontmatter_returns_none() {
         let source = "<div>No frontmatter here</div>";
@@ -254,8 +284,6 @@ mod tests {
         assert!(extract_astro_frontmatter(source).is_none());
     }
 
-    // ── Empty frontmatter ────────────────────────────────────────
-
     #[test]
     fn empty_frontmatter() {
         let source = "---\n\n---\n<div />";
@@ -264,8 +292,6 @@ mod tests {
         let body = script.unwrap().body;
         assert!(body.trim().is_empty());
     }
-
-    // ── Multiple --- pairs: only first is extracted ──────────────
 
     #[test]
     fn only_first_frontmatter_pair() {
@@ -277,8 +303,6 @@ mod tests {
         assert!(!body.contains("second"));
     }
 
-    // ── Byte offset ──────────────────────────────────────────────
-
     #[test]
     fn byte_offset_points_to_body() {
         let source = "---\nconst x = 1;\n---\n<div />";
@@ -287,8 +311,6 @@ mod tests {
         assert!(source[offset..].starts_with("const x = 1;"));
     }
 
-    // ── Leading whitespace before --- ────────────────────────────
-
     #[test]
     fn leading_whitespace_before_frontmatter() {
         let source = "  \n---\nconst x = 1;\n---\n<div />";
@@ -296,8 +318,6 @@ mod tests {
         assert!(script.is_some());
         assert!(script.unwrap().body.contains("const x = 1;"));
     }
-
-    // ── Frontmatter with TypeScript syntax ───────────────────────
 
     #[test]
     fn frontmatter_with_type_annotations() {
@@ -309,8 +329,6 @@ mod tests {
         assert!(body.contains("Astro.props"));
     }
 
-    // ── Additional coverage ─────────────────────────────────────
-
     #[test]
     fn frontmatter_with_multiline_imports() {
         let source = "---\nimport {\n  Component,\n  Fragment\n} from 'react';\n---\n<Component />";
@@ -321,7 +339,6 @@ mod tests {
 
     #[test]
     fn frontmatter_with_crlf_line_endings() {
-        // Windows: git checkout converts LF to CRLF
         let source = "---\r\nexport const x = 1;\r\n---\r\n<div />";
         let script = extract_astro_frontmatter(source);
         assert!(script.is_some());
@@ -330,24 +347,18 @@ mod tests {
 
     #[test]
     fn frontmatter_not_at_start_returns_none() {
-        // --- not at the start of the file
         let source = "<div />\n---\nconst x = 1;\n---\n";
         assert!(extract_astro_frontmatter(source).is_none());
     }
 
     #[test]
     fn frontmatter_dashes_in_body_not_confused() {
-        // Triple dashes inside the frontmatter body (as part of a comment or string)
         let source = "---\nconst x = '---';\nconst y = 2;\n---\n<div />";
         let script = extract_astro_frontmatter(source);
         assert!(script.is_some());
-        // The body should end at the first --- after the opening, which is inside the string
-        // Actually the regex is non-greedy, so it finds the first `\n---`
         let body = script.unwrap().body;
         assert!(body.contains("const x = '---';"));
     }
-
-    // ── Full parse tests (Oxc parser ~1000x slower under Miri) ──
 
     #[test]
     fn parse_astro_to_module_no_frontmatter() {
@@ -393,8 +404,6 @@ mod tests {
         assert!(!is_astro_file(Path::new("Makefile")));
     }
 
-    // ── Template body: <script src="..."> references ───────────
-
     #[test]
     fn parse_astro_template_script_src_relative() {
         let source = "---\nconst x = 1;\n---\n<script src=\"./client.ts\"></script>";
@@ -413,8 +422,6 @@ mod tests {
 
     #[test]
     fn parse_astro_template_script_src_bare_normalized() {
-        // Bare names must be normalized so the resolver doesn't mistake them
-        // for npm packages, matching the convention used in `.html` files.
         let source = "---\n---\n<script src=\"client.ts\"></script>";
         let info = parse_astro_to_module(FileId(0), source, 0);
         assert_eq!(info.imports.len(), 1);
@@ -443,8 +450,6 @@ mod tests {
         assert!(info.imports.is_empty());
     }
 
-    // ── Template body: inline <script> imports ──────────────────
-
     #[test]
     fn parse_astro_template_inline_script_import() {
         let source = "---\n---\n<script>\n  import '../scripts/bar';\n</script>";
@@ -467,8 +472,6 @@ mod tests {
 
     #[test]
     fn parse_astro_template_inline_script_typescript_syntax() {
-        // Astro inline scripts are TypeScript by default, so type
-        // annotations must parse cleanly for the import to be extracted.
         let source = "---\n---\n<script>\n  import { foo } from '../utils';\n  const x: number = foo();\n</script>";
         let info = parse_astro_to_module(FileId(0), source, 0);
         assert_eq!(info.imports.len(), 1);
@@ -491,8 +494,6 @@ mod tests {
 
     #[test]
     fn parse_astro_template_skips_inline_body_when_src_present() {
-        // `<script src=...>foo</script>` is invalid HTML; Astro ignores any
-        // body when `src` is set, so we should not double-count.
         let source = "---\n---\n<script src=\"./client.ts\">import 'should-be-ignored';</script>";
         let info = parse_astro_to_module(FileId(0), source, 0);
         assert_eq!(info.imports.len(), 1);
@@ -501,7 +502,6 @@ mod tests {
 
     #[test]
     fn parse_astro_template_combined_src_and_inline() {
-        // Mirror of the issue #295 reproduction.
         let source = "---\nconst title = \"Hi\";\n---\n\
                       <html><body>\n\
                       <h1>{title}</h1>\n\
@@ -544,7 +544,6 @@ mod tests {
 
     #[test]
     fn parse_astro_template_no_frontmatter_with_script() {
-        // Script references work even without a frontmatter block.
         let source = "<html><body><script src=\"./client.ts\"></script></body></html>";
         let info = parse_astro_to_module(FileId(0), source, 0);
         assert_eq!(info.imports.len(), 1);
@@ -560,8 +559,6 @@ mod tests {
 
     #[test]
     fn parse_astro_template_does_not_double_count_frontmatter_imports() {
-        // The frontmatter import should be reported exactly once, not also
-        // as a template-side import.
         let source = "---\nimport Layout from '../Layout.astro';\n---\n<Layout />";
         let info = parse_astro_to_module(FileId(0), source, 0);
         assert_eq!(info.imports.len(), 1);

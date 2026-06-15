@@ -1,7 +1,7 @@
-# Fallow Duplication Accuracy Baseline
+# Plow Duplication Accuracy Baseline
 
 **Date:** 2026-03-18
-**Fallow version:** current main (commit HEAD)
+**Plow version:** current main (commit HEAD)
 **Corpus:** Custom curated JS/TS benchmark (`tests/benchmark-corpus/`)
 
 ## Methodology

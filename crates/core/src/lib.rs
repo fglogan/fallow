@@ -10,6 +10,16 @@
 //! patch releases; a subsequent minor will flip `publish = false` so the crate
 //! is no longer fetchable from crates.io.
 
+#![cfg_attr(not(test), deny(clippy::disallowed_methods))]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        reason = "tests use unwrap and expect to keep fixture setup concise"
+    )
+)]
+
 pub mod analyze;
 pub mod cache;
 pub mod changed_files;
@@ -26,10 +36,10 @@ pub mod plugins;
 pub(crate) mod progress;
 pub mod results;
 pub(crate) mod scripts;
+pub(crate) mod spawn;
 pub mod suppress;
 pub mod trace;
 
-// Re-export from plow-graph for backwards compatibility
 pub use plow_graph::graph;
 pub use plow_graph::project;
 pub use plow_graph::resolve;
@@ -122,13 +132,22 @@ fn credit_workspace_package_usage(
     }
 }
 
+fn credit_package_path_references(graph: &mut graph::ModuleGraph, modules: &[extract::ModuleInfo]) {
+    for module in modules {
+        for package_name in &module.package_path_references {
+            record_graph_package_usage(graph, package_name, module.file_id, false);
+        }
+    }
+}
+
 /// Result of the full analysis pipeline, including optional performance timings.
 pub struct AnalysisOutput {
     pub results: AnalysisResults,
     pub timings: Option<PipelineTimings>,
     pub graph: Option<graph::ModuleGraph>,
     /// Parsed modules from the pipeline, available when `retain_modules` is true.
-    /// Used by the combined command to share a single parse across dead-code and health.
+    /// Used by combined and LSP flows to share downstream module data.
+    /// Graph-only extraction payloads are released after graph construction.
     pub modules: Option<Vec<extract::ModuleInfo>>,
     /// Discovered files from the pipeline, available when `retain_modules` is true.
     pub files: Option<Vec<discover::DiscoveredFile>>,
@@ -157,12 +176,6 @@ fn update_cache(
     for module in modules {
         if let Some(file) = files.get(module.file_id.0 as usize) {
             let (mt, sz) = file_mtime_and_size(&file.path);
-            // If content hash matches, just refresh mtime/size if stale
-            // (e.g. `touch`ed file). Critically, preserve the existing
-            // `last_access_secs` instead of rebuilding the entry via
-            // `module_to_cached` (which would stamp the current epoch
-            // second and defeat the LRU). A metadata-only refresh is NOT
-            // a content change, so the entry's recency should not bump.
             if let Some(cached) = store.get_by_path_only(&file.path)
                 && cached.content_hash == module.content_hash
             {
@@ -273,13 +286,6 @@ fn warn_undeclared_workspaces(
         return;
     }
 
-    // Filter out paths that ALREADY carry a config-load-time diagnostic
-    // (typically `MalformedPackageJson` from issue #473). A directory whose
-    // package.json failed to parse appears "undeclared" from the analyze
-    // pipeline's perspective because `discover_workspaces` silently dropped
-    // it, but the user IS declaring it; the malformed-package-json warning
-    // already names the path and explains the fix, so re-flagging it as
-    // "undeclared" actively misleads.
     let existing = plow_config::workspace_diagnostics_for(root);
     let already_flagged: rustc_hash::FxHashSet<PathBuf> = existing
         .iter()
@@ -296,10 +302,6 @@ fn warn_undeclared_workspaces(
         return;
     }
 
-    // Fold the surviving undeclared diagnostics into the shared registry so
-    // they appear in `workspace_diagnostics[]` on the JSON envelope and in
-    // `plow list --workspaces`. Quiet mode still populates the registry
-    // (JSON consumers need the data) but skips the human warning.
     plow_config::append_workspace_diagnostics(root, undeclared.clone());
 
     if !quiet && let Some(message) = format_undeclared_workspace_warning(root, &undeclared) {
@@ -335,6 +337,26 @@ pub fn analyze_with_usages(config: &ResolvedConfig) -> Result<AnalysisResults, P
     Ok(output.results)
 }
 
+/// Run the full analysis pipeline with export usage collection and retained
+/// per-function complexity modules.
+///
+/// Used by the LSP when opt-in inline complexity code lenses are enabled so
+/// the editor keeps existing export reference lenses while also reading
+/// complexity data from the same parse.
+///
+/// # Errors
+///
+/// Returns an error if file discovery, parsing, or analysis fails.
+#[deprecated(
+    since = "2.90.0",
+    note = "plow_core is internal; use plow_cli::programmatic::detect_dead_code and `compute_complexity` instead. NOTE: this combined LSP-only typed surface is not exposed externally. See docs/plow-core-migration.md and ADR-008."
+)]
+pub fn analyze_with_usages_and_complexity(
+    config: &ResolvedConfig,
+) -> Result<AnalysisOutput, PlowError> {
+    analyze_full(config, false, true, true, true)
+}
+
 /// Run the full analysis pipeline with optional performance timings and graph retention.
 ///
 /// # Errors
@@ -342,7 +364,7 @@ pub fn analyze_with_usages(config: &ResolvedConfig) -> Result<AnalysisResults, P
 /// Returns an error if file discovery, parsing, or analysis fails.
 #[deprecated(
     since = "2.76.0",
-    note = "plow_core is internal; use plow_cli::programmatic::detect_dead_code instead. NOTE: trace timings are not exposed in the programmatic surface today; use `plow check --performance` for CLI-side timings. See docs/plow-core-migration.md and ADR-008."
+    note = "plow_core is internal; use plow_cli::programmatic::detect_dead_code instead. NOTE: trace timings are not exposed in the programmatic surface today; use `plow dead-code --performance` for CLI-side timings. See docs/plow-core-migration.md and ADR-008."
 )]
 pub fn analyze_with_trace(config: &ResolvedConfig) -> Result<AnalysisOutput, PlowError> {
     analyze_full(config, true, false, false, false)
@@ -385,12 +407,53 @@ pub fn analyze_retaining_modules(
     analyze_full(config, retain_graph, false, need_complexity, true)
 }
 
+fn new_analysis_progress(config: &ResolvedConfig) -> progress::AnalysisProgress {
+    let show_progress = !config.quiet
+        && std::io::IsTerminal::is_terminal(&std::io::stderr())
+        && matches!(
+            config.output,
+            plow_config::OutputFormat::Human
+                | plow_config::OutputFormat::Compact
+                | plow_config::OutputFormat::Markdown
+        );
+    progress::AnalysisProgress::new(show_progress)
+}
+
+fn warn_missing_node_modules(config: &ResolvedConfig) {
+    if config.root.join("node_modules").is_dir() {
+        return;
+    }
+
+    tracing::warn!(
+        "node_modules directory not found. Run `npm install` / `pnpm install` first for accurate results."
+    );
+}
+
+fn discover_analysis_workspaces(config: &ResolvedConfig) -> (Vec<plow_config::WorkspaceInfo>, f64) {
+    let t = Instant::now();
+    let workspaces = discover_workspaces(&config.root);
+    let workspaces_ms = t.elapsed().as_secs_f64() * 1000.0;
+    if !workspaces.is_empty() {
+        tracing::info!(count = workspaces.len(), "workspaces discovered");
+    }
+
+    warn_undeclared_workspaces(
+        &config.root,
+        &workspaces,
+        &config.ignore_patterns,
+        config.quiet,
+    );
+
+    (workspaces, workspaces_ms)
+}
+
 /// Run the analysis pipeline using pre-parsed modules, skipping the parsing stage.
 ///
 /// This avoids re-parsing files when the caller already has a `ParseResult` (e.g., from
 /// `plow_core::extract::parse_all_files`). Discovery, plugins, scripts, entry points,
 /// import resolution, graph construction, and dead code detection still run normally.
-/// The graph is always retained (needed for file scores).
+/// The graph is always retained (needed for file scores). Caller-owned modules
+/// are borrowed and are not compacted by this API.
 ///
 /// # Errors
 ///
@@ -410,42 +473,14 @@ pub fn analyze_with_parse_result(
     let _span = tracing::info_span!("plow_analyze_with_parse_result").entered();
     let pipeline_start = Instant::now();
 
-    let show_progress = !config.quiet
-        && std::io::IsTerminal::is_terminal(&std::io::stderr())
-        && matches!(
-            config.output,
-            plow_config::OutputFormat::Human
-                | plow_config::OutputFormat::Compact
-                | plow_config::OutputFormat::Markdown
-        );
-    let progress = progress::AnalysisProgress::new(show_progress);
+    let progress = new_analysis_progress(config);
+    warn_missing_node_modules(config);
 
-    if !config.root.join("node_modules").is_dir() {
-        tracing::warn!(
-            "node_modules directory not found. Run `npm install` / `pnpm install` first for accurate results."
-        );
-    }
-
-    // Discover workspaces
-    let t = Instant::now();
-    let workspaces_vec = discover_workspaces(&config.root);
-    let workspaces_ms = t.elapsed().as_secs_f64() * 1000.0;
-    if !workspaces_vec.is_empty() {
-        tracing::info!(count = workspaces_vec.len(), "workspaces discovered");
-    }
-
-    // Warn about directories with package.json not declared as workspaces
-    warn_undeclared_workspaces(
-        &config.root,
-        &workspaces_vec,
-        &config.ignore_patterns,
-        config.quiet,
-    );
+    let (workspaces_vec, workspaces_ms) = discover_analysis_workspaces(config);
     let root_pkg = load_root_package_json(config);
     let discovery_hidden_dir_scopes =
         discover::collect_hidden_dir_scopes(config, root_pkg.as_ref(), &workspaces_vec);
 
-    // Stage 1: Discover files (cheap — needed for file registry and resolution)
     let t = Instant::now();
     progress.set_stage("discovering files...");
     let discovered_files =
@@ -457,7 +492,6 @@ pub fn analyze_with_parse_result(
     let workspaces = project.workspaces();
     let workspace_pkgs = load_workspace_packages(workspaces);
 
-    // Stage 1.5: Run plugin system
     let t = Instant::now();
     progress.set_stage("detecting plugins...");
     let mut plugin_result = run_plugins(
@@ -466,10 +500,9 @@ pub fn analyze_with_parse_result(
         workspaces,
         root_pkg.as_ref(),
         &workspace_pkgs,
-    );
+    )?;
     let plugins_ms = t.elapsed().as_secs_f64() * 1000.0;
 
-    // Stage 1.6: Analyze package.json scripts
     let t = Instant::now();
     analyze_all_scripts(
         config,
@@ -480,9 +513,6 @@ pub fn analyze_with_parse_result(
     );
     let scripts_ms = t.elapsed().as_secs_f64() * 1000.0;
 
-    // Stage 2: SKIPPED — using pre-parsed modules from caller
-
-    // Stage 3: Discover entry points
     let t = Instant::now();
     let entry_points = discover_all_entry_points(
         config,
@@ -494,46 +524,18 @@ pub fn analyze_with_parse_result(
     );
     let entry_points_ms = t.elapsed().as_secs_f64() * 1000.0;
 
-    // Compute entry-point summary before the graph consumes the entry_points vec
     let ep_summary = summarize_entry_points(&entry_points.all);
 
-    // Stage 4: Resolve imports to file IDs
     let t = Instant::now();
     progress.set_stage("resolving imports...");
-    let mut resolved = resolve::resolve_all_imports(
-        modules,
-        files,
-        workspaces,
-        &plugin_result.active_plugins,
-        &plugin_result.path_aliases,
-        &plugin_result.auto_imports,
-        &plugin_result.scss_include_paths,
-        &plugin_result.static_dir_mappings,
-        &config.root,
-        &config.resolve.conditions,
-    );
-    external_style_usage::augment_external_style_package_usage(
-        &mut resolved,
-        config,
-        workspaces,
-        &plugin_result,
-    );
+    let resolved = resolve_analysis_imports(modules, files, workspaces, &plugin_result, config);
     let resolve_ms = t.elapsed().as_secs_f64() * 1000.0;
 
-    // Stage 5: Build module graph
     let t = Instant::now();
     progress.set_stage("building module graph...");
-    let mut graph = graph::ModuleGraph::build_with_reachability_roots(
-        &resolved,
-        &entry_points.all,
-        &entry_points.runtime,
-        &entry_points.test,
-        files,
-    );
-    credit_workspace_package_usage(&mut graph, &resolved, workspaces);
+    let graph = build_analysis_graph(&resolved, &entry_points, files, modules, workspaces);
     let graph_ms = t.elapsed().as_secs_f64() * 1000.0;
 
-    // Stage 6: Analyze for dead code
     let t = Instant::now();
     progress.set_stage("analyzing...");
     #[expect(
@@ -556,64 +558,31 @@ pub fn analyze_with_parse_result(
 
     let total_ms = pipeline_start.elapsed().as_secs_f64() * 1000.0;
 
-    tracing::debug!(
-        "\n┌─ Pipeline Profile (reuse) ─────────────────────\n\
-         │  discover files:   {:>8.1}ms  ({} files)\n\
-         │  workspaces:       {:>8.1}ms\n\
-         │  plugins:          {:>8.1}ms\n\
-         │  script analysis:  {:>8.1}ms\n\
-         │  parse/extract:    SKIPPED (reused {} modules)\n\
-         │  entry points:     {:>8.1}ms  ({} entries)\n\
-         │  resolve imports:  {:>8.1}ms\n\
-         │  build graph:      {:>8.1}ms\n\
-         │  analyze:          {:>8.1}ms\n\
-         │  ────────────────────────────────────────────\n\
-         │  TOTAL:            {:>8.1}ms\n\
-         └─────────────────────────────────────────────────",
+    let profile = PipelineProfile {
         discover_ms,
-        files.len(),
         workspaces_ms,
         plugins_ms,
         scripts_ms,
-        modules.len(),
+        parse_ms: 0.0,
+        cache_ms: 0.0,
         entry_points_ms,
-        entry_points.all.len(),
         resolve_ms,
         graph_ms,
         analyze_ms,
         total_ms,
-    );
-
-    let timings = Some(PipelineTimings {
-        discover_files_ms: discover_ms,
         file_count: files.len(),
-        workspaces_ms,
         workspace_count: workspaces.len(),
-        plugins_ms,
-        script_analysis_ms: scripts_ms,
-        parse_extract_ms: 0.0, // Skipped: modules were reused
-        parse_cpu_ms: 0.0,     // Skipped: modules were reused
         module_count: modules.len(),
+        entry_point_count: entry_points.all.len(),
         cache_hits: 0,
         cache_misses: 0,
-        cache_update_ms: 0.0,
-        entry_points_ms,
-        entry_point_count: entry_points.all.len(),
-        resolve_imports_ms: resolve_ms,
-        build_graph_ms: graph_ms,
-        analyze_ms,
-        duplication_ms: None,
-        total_ms,
-    });
+        parse_cpu_ms: 0.0,
+    };
+    trace_reused_pipeline_profile(&profile);
 
-    let file_hashes: rustc_hash::FxHashMap<std::path::PathBuf, u64> = modules
-        .iter()
-        .filter_map(|module| {
-            files
-                .get(module.file_id.0 as usize)
-                .map(|file| (file.path.clone(), module.content_hash))
-        })
-        .collect();
+    let timings = retained_pipeline_timings(true, &profile);
+
+    let file_hashes = collect_file_hashes(modules, files);
 
     Ok(AnalysisOutput {
         results: result,
@@ -626,14 +595,6 @@ pub fn analyze_with_parse_result(
     })
 }
 
-#[expect(
-    clippy::unnecessary_wraps,
-    reason = "Result kept for future error handling"
-)]
-#[expect(
-    clippy::too_many_lines,
-    reason = "main pipeline function; sequential phases are held together for clarity"
-)]
 fn analyze_full(
     config: &ResolvedConfig,
     retain: bool,
@@ -644,60 +605,25 @@ fn analyze_full(
     let _span = tracing::info_span!("plow_analyze").entered();
     let pipeline_start = Instant::now();
 
-    // Progress bars: enabled when not quiet, stderr is a terminal, and output is human-readable.
-    // Structured formats (JSON, SARIF) suppress spinners even on TTY — users piping structured
-    // output don't expect progress noise on stderr.
-    let show_progress = !config.quiet
-        && std::io::IsTerminal::is_terminal(&std::io::stderr())
-        && matches!(
-            config.output,
-            plow_config::OutputFormat::Human
-                | plow_config::OutputFormat::Compact
-                | plow_config::OutputFormat::Markdown
-        );
-    let progress = progress::AnalysisProgress::new(show_progress);
+    let progress = new_analysis_progress(config);
+    warn_missing_node_modules(config);
 
-    // Warn if node_modules is missing — resolution will be severely degraded
-    if !config.root.join("node_modules").is_dir() {
-        tracing::warn!(
-            "node_modules directory not found. Run `npm install` / `pnpm install` first for accurate results."
-        );
-    }
-
-    // Discover workspaces if in a monorepo
-    let t = Instant::now();
-    let workspaces_vec = discover_workspaces(&config.root);
-    let workspaces_ms = t.elapsed().as_secs_f64() * 1000.0;
-    if !workspaces_vec.is_empty() {
-        tracing::info!(count = workspaces_vec.len(), "workspaces discovered");
-    }
-
-    // Warn about directories with package.json not declared as workspaces
-    warn_undeclared_workspaces(
-        &config.root,
-        &workspaces_vec,
-        &config.ignore_patterns,
-        config.quiet,
-    );
+    let (workspaces_vec, workspaces_ms) = discover_analysis_workspaces(config);
     let root_pkg = load_root_package_json(config);
     let discovery_hidden_dir_scopes =
         discover::collect_hidden_dir_scopes(config, root_pkg.as_ref(), &workspaces_vec);
 
-    // Stage 1: Discover all source files
     let t = Instant::now();
     progress.set_stage("discovering files...");
     let discovered_files =
         discover::discover_files_with_additional_hidden_dirs(config, &discovery_hidden_dir_scopes);
     let discover_ms = t.elapsed().as_secs_f64() * 1000.0;
 
-    // Build ProjectState: owns the file registry with stable FileIds and workspace metadata.
-    // This is the foundation for cross-workspace resolution and future incremental analysis.
     let project = project::ProjectState::new(discovered_files, workspaces_vec);
     let files = project.files();
     let workspaces = project.workspaces();
     let workspace_pkgs = load_workspace_packages(workspaces);
 
-    // Stage 1.5: Run plugin system — parse config files, discover dynamic entries
     let t = Instant::now();
     progress.set_stage("detecting plugins...");
     let mut plugin_result = run_plugins(
@@ -706,10 +632,9 @@ fn analyze_full(
         workspaces,
         root_pkg.as_ref(),
         &workspace_pkgs,
-    );
+    )?;
     let plugins_ms = t.elapsed().as_secs_f64() * 1000.0;
 
-    // Stage 1.6: Analyze package.json scripts for binary usage and config file refs
     let t = Instant::now();
     analyze_all_scripts(
         config,
@@ -720,43 +645,17 @@ fn analyze_full(
     );
     let scripts_ms = t.elapsed().as_secs_f64() * 1000.0;
 
-    // Stage 2: Parse all files in parallel and extract imports/exports
     let t = Instant::now();
     progress.set_stage(&format!("parsing {} files...", files.len()));
-    let cache_max_size_bytes = resolve_cache_max_size_bytes(config);
-    let mut cache_store = if config.no_cache {
-        None
-    } else {
-        cache::CacheStore::load(
-            &config.cache_dir,
-            config.cache_config_hash,
-            cache_max_size_bytes,
-        )
-    };
+    let AnalysisParseOutput {
+        mut modules,
+        parse_ms,
+        cache_ms,
+        cache_hits,
+        cache_misses,
+        parse_cpu_ms,
+    } = parse_analysis_modules(config, files, need_complexity, t);
 
-    let parse_result = extract::parse_all_files(files, cache_store.as_ref(), need_complexity);
-    let modules = parse_result.modules;
-    let cache_hits = parse_result.cache_hits;
-    let cache_misses = parse_result.cache_misses;
-    let parse_cpu_ms = parse_result.parse_cpu_ms;
-    let parse_ms = t.elapsed().as_secs_f64() * 1000.0;
-
-    // Update cache with freshly parsed modules and refresh stale mtime/size entries.
-    let t = Instant::now();
-    if !config.no_cache {
-        let store = cache_store.get_or_insert_with(cache::CacheStore::new);
-        update_cache(store, &modules, files);
-        if let Err(e) = store.save(
-            &config.cache_dir,
-            config.cache_config_hash,
-            cache_max_size_bytes,
-        ) {
-            tracing::warn!("Failed to save cache: {e}");
-        }
-    }
-    let cache_ms = t.elapsed().as_secs_f64() * 1000.0;
-
-    // Stage 3: Discover entry points (static patterns + plugin-discovered patterns)
     let t = Instant::now();
     let entry_points = discover_all_entry_points(
         config,
@@ -768,46 +667,21 @@ fn analyze_full(
     );
     let entry_points_ms = t.elapsed().as_secs_f64() * 1000.0;
 
-    // Stage 4: Resolve imports to file IDs
     let t = Instant::now();
     progress.set_stage("resolving imports...");
-    let mut resolved = resolve::resolve_all_imports(
-        &modules,
-        files,
-        workspaces,
-        &plugin_result.active_plugins,
-        &plugin_result.path_aliases,
-        &plugin_result.auto_imports,
-        &plugin_result.scss_include_paths,
-        &plugin_result.static_dir_mappings,
-        &config.root,
-        &config.resolve.conditions,
-    );
-    external_style_usage::augment_external_style_package_usage(
-        &mut resolved,
-        config,
-        workspaces,
-        &plugin_result,
-    );
+    let resolved = resolve_analysis_imports(&modules, files, workspaces, &plugin_result, config);
     let resolve_ms = t.elapsed().as_secs_f64() * 1000.0;
 
-    // Stage 5: Build module graph
     let t = Instant::now();
     progress.set_stage("building module graph...");
-    let mut graph = graph::ModuleGraph::build_with_reachability_roots(
-        &resolved,
-        &entry_points.all,
-        &entry_points.runtime,
-        &entry_points.test,
-        files,
-    );
-    credit_workspace_package_usage(&mut graph, &resolved, workspaces);
+    let graph = build_analysis_graph(&resolved, &entry_points, files, &modules, workspaces);
+    for module in &mut modules {
+        module.release_resolution_payload();
+    }
     let graph_ms = t.elapsed().as_secs_f64() * 1000.0;
 
-    // Compute entry-point summary before the graph consumes the entry_points vec
     let ep_summary = summarize_entry_points(&entry_points.all);
 
-    // Stage 6: Analyze for dead code (with plugin context and workspace info)
     let t = Instant::now();
     progress.set_stage("analyzing...");
     #[expect(
@@ -830,6 +704,273 @@ fn analyze_full(
 
     let total_ms = pipeline_start.elapsed().as_secs_f64() * 1000.0;
 
+    let profile = PipelineProfile {
+        discover_ms,
+        workspaces_ms,
+        plugins_ms,
+        scripts_ms,
+        parse_ms,
+        cache_ms,
+        entry_points_ms,
+        resolve_ms,
+        graph_ms,
+        analyze_ms,
+        total_ms,
+        file_count: files.len(),
+        workspace_count: workspaces.len(),
+        module_count: modules.len(),
+        entry_point_count: entry_points.all.len(),
+        cache_hits,
+        cache_misses,
+        parse_cpu_ms,
+    };
+    trace_pipeline_profile(&profile);
+
+    let timings = retained_pipeline_timings(retain, &profile);
+
+    let file_hashes = collect_file_hashes(&modules, files);
+
+    Ok(AnalysisOutput {
+        results: result,
+        timings,
+        graph: if retain { Some(graph) } else { None },
+        modules: if retain_modules { Some(modules) } else { None },
+        files: if retain_modules {
+            Some(files.to_vec())
+        } else {
+            None
+        },
+        script_used_packages: plugin_result.script_used_packages,
+        file_hashes,
+    })
+}
+
+#[derive(Clone, Copy)]
+struct PipelineProfile {
+    discover_ms: f64,
+    workspaces_ms: f64,
+    plugins_ms: f64,
+    scripts_ms: f64,
+    parse_ms: f64,
+    cache_ms: f64,
+    entry_points_ms: f64,
+    resolve_ms: f64,
+    graph_ms: f64,
+    analyze_ms: f64,
+    total_ms: f64,
+    file_count: usize,
+    workspace_count: usize,
+    module_count: usize,
+    entry_point_count: usize,
+    cache_hits: usize,
+    cache_misses: usize,
+    parse_cpu_ms: f64,
+}
+
+struct AnalysisParseOutput {
+    modules: Vec<extract::ModuleInfo>,
+    parse_ms: f64,
+    cache_ms: f64,
+    cache_hits: usize,
+    cache_misses: usize,
+    parse_cpu_ms: f64,
+}
+
+fn parse_analysis_modules(
+    config: &ResolvedConfig,
+    files: &[discover::DiscoveredFile],
+    need_complexity: bool,
+    start: Instant,
+) -> AnalysisParseOutput {
+    let cache_max_size_bytes = resolve_cache_max_size_bytes(config);
+    let mut cache_store = if config.no_cache {
+        None
+    } else {
+        cache::CacheStore::load(
+            &config.cache_dir,
+            config.cache_config_hash,
+            cache_max_size_bytes,
+        )
+    };
+
+    let parse_result = extract::parse_all_files(files, cache_store.as_ref(), need_complexity);
+    let modules = parse_result.modules;
+    let parse_ms = start.elapsed().as_secs_f64() * 1000.0;
+    let cache_ms = update_parse_cache_if_enabled(
+        config,
+        &mut cache_store,
+        &modules,
+        files,
+        cache_max_size_bytes,
+    );
+
+    AnalysisParseOutput {
+        modules,
+        parse_ms,
+        cache_ms,
+        cache_hits: parse_result.cache_hits,
+        cache_misses: parse_result.cache_misses,
+        parse_cpu_ms: parse_result.parse_cpu_ms,
+    }
+}
+
+fn retained_pipeline_timings(retain: bool, profile: &PipelineProfile) -> Option<PipelineTimings> {
+    retain.then_some(PipelineTimings {
+        discover_files_ms: profile.discover_ms,
+        file_count: profile.file_count,
+        workspaces_ms: profile.workspaces_ms,
+        workspace_count: profile.workspace_count,
+        plugins_ms: profile.plugins_ms,
+        script_analysis_ms: profile.scripts_ms,
+        parse_extract_ms: profile.parse_ms,
+        parse_cpu_ms: profile.parse_cpu_ms,
+        module_count: profile.module_count,
+        cache_hits: profile.cache_hits,
+        cache_misses: profile.cache_misses,
+        cache_update_ms: profile.cache_ms,
+        entry_points_ms: profile.entry_points_ms,
+        entry_point_count: profile.entry_point_count,
+        resolve_imports_ms: profile.resolve_ms,
+        build_graph_ms: profile.graph_ms,
+        analyze_ms: profile.analyze_ms,
+        duplication_ms: None,
+        total_ms: profile.total_ms,
+    })
+}
+
+fn trace_reused_pipeline_profile(profile: &PipelineProfile) {
+    tracing::debug!(
+        "\n┌─ Pipeline Profile (reuse) ─────────────────────\n\
+         │  discover files:   {:>8.1}ms  ({} files)\n\
+         │  workspaces:       {:>8.1}ms\n\
+         │  plugins:          {:>8.1}ms\n\
+         │  script analysis:  {:>8.1}ms\n\
+         │  parse/extract:    SKIPPED (reused {} modules)\n\
+         │  entry points:     {:>8.1}ms  ({} entries)\n\
+         │  resolve imports:  {:>8.1}ms\n\
+         │  build graph:      {:>8.1}ms\n\
+         │  analyze:          {:>8.1}ms\n\
+         │  ────────────────────────────────────────────\n\
+         │  TOTAL:            {:>8.1}ms\n\
+         └─────────────────────────────────────────────────",
+        profile.discover_ms,
+        profile.file_count,
+        profile.workspaces_ms,
+        profile.plugins_ms,
+        profile.scripts_ms,
+        profile.module_count,
+        profile.entry_points_ms,
+        profile.entry_point_count,
+        profile.resolve_ms,
+        profile.graph_ms,
+        profile.analyze_ms,
+        profile.total_ms,
+    );
+}
+
+fn update_parse_cache_if_enabled(
+    config: &ResolvedConfig,
+    cache_store: &mut Option<cache::CacheStore>,
+    modules: &[extract::ModuleInfo],
+    files: &[discover::DiscoveredFile],
+    cache_max_size_bytes: usize,
+) -> f64 {
+    let t = Instant::now();
+    if !config.no_cache {
+        let store = cache_store.get_or_insert_with(cache::CacheStore::new);
+        update_cache(store, modules, files);
+        if let Err(error) = store.save(
+            &config.cache_dir,
+            config.cache_config_hash,
+            cache_max_size_bytes,
+        ) {
+            tracing::warn!("Failed to save cache: {error}");
+        }
+    }
+    t.elapsed().as_secs_f64() * 1000.0
+}
+
+fn resolve_analysis_imports(
+    modules: &[extract::ModuleInfo],
+    files: &[discover::DiscoveredFile],
+    workspaces: &[plow_config::WorkspaceInfo],
+    plugin_result: &plugins::AggregatedPluginResult,
+    config: &ResolvedConfig,
+) -> Vec<resolve::ResolvedModule> {
+    let mut resolved = resolve::resolve_all_imports(
+        modules,
+        files,
+        workspaces,
+        &plugin_result.active_plugins,
+        &plugin_result.path_aliases,
+        &plugin_result.auto_imports,
+        &plugin_result.scss_include_paths,
+        &plugin_result.static_dir_mappings,
+        &config.root,
+        &config.resolve.conditions,
+    );
+    external_style_usage::augment_external_style_package_usage(
+        &mut resolved,
+        config,
+        workspaces,
+        plugin_result,
+    );
+    resolved
+}
+
+fn build_analysis_graph(
+    resolved: &[resolve::ResolvedModule],
+    entry_points: &discover::CategorizedEntryPoints,
+    files: &[discover::DiscoveredFile],
+    modules: &[extract::ModuleInfo],
+    workspaces: &[plow_config::WorkspaceInfo],
+) -> graph::ModuleGraph {
+    let mut graph = graph::ModuleGraph::build_with_reachability_roots(
+        resolved,
+        &entry_points.all,
+        &entry_points.runtime,
+        &entry_points.test,
+        files,
+    );
+    credit_package_path_references(&mut graph, modules);
+    credit_workspace_package_usage(&mut graph, resolved, workspaces);
+    graph
+}
+
+fn collect_file_hashes(
+    modules: &[extract::ModuleInfo],
+    files: &[discover::DiscoveredFile],
+) -> rustc_hash::FxHashMap<std::path::PathBuf, u64> {
+    modules
+        .iter()
+        .filter_map(|module| {
+            files
+                .get(module.file_id.0 as usize)
+                .map(|file| (file.path.clone(), module.content_hash))
+        })
+        .collect()
+}
+
+fn trace_pipeline_profile(profile: &PipelineProfile) {
+    let PipelineProfile {
+        discover_ms,
+        workspaces_ms,
+        plugins_ms,
+        scripts_ms,
+        parse_ms,
+        cache_ms,
+        entry_points_ms,
+        resolve_ms,
+        graph_ms,
+        analyze_ms,
+        total_ms,
+        file_count,
+        module_count,
+        entry_point_count,
+        cache_hits,
+        cache_misses,
+        ..
+    } = *profile;
     let cache_summary = if cache_hits > 0 {
         format!(" ({cache_hits} cached, {cache_misses} parsed)")
     } else {
@@ -852,70 +993,21 @@ fn analyze_full(
          │  TOTAL:            {:>8.1}ms\n\
          └─────────────────────────────────────────────────",
         discover_ms,
-        files.len(),
+        file_count,
         workspaces_ms,
         plugins_ms,
         scripts_ms,
         parse_ms,
-        modules.len(),
+        module_count,
         cache_summary,
         cache_ms,
         entry_points_ms,
-        entry_points.all.len(),
+        entry_point_count,
         resolve_ms,
         graph_ms,
         analyze_ms,
         total_ms,
     );
-
-    let timings = if retain {
-        Some(PipelineTimings {
-            discover_files_ms: discover_ms,
-            file_count: files.len(),
-            workspaces_ms,
-            workspace_count: workspaces.len(),
-            plugins_ms,
-            script_analysis_ms: scripts_ms,
-            parse_extract_ms: parse_ms,
-            parse_cpu_ms,
-            module_count: modules.len(),
-            cache_hits,
-            cache_misses,
-            cache_update_ms: cache_ms,
-            entry_points_ms,
-            entry_point_count: entry_points.all.len(),
-            resolve_imports_ms: resolve_ms,
-            build_graph_ms: graph_ms,
-            analyze_ms,
-            duplication_ms: None,
-            total_ms,
-        })
-    } else {
-        None
-    };
-
-    let file_hashes: rustc_hash::FxHashMap<std::path::PathBuf, u64> = modules
-        .iter()
-        .filter_map(|module| {
-            files
-                .get(module.file_id.0 as usize)
-                .map(|file| (file.path.clone(), module.content_hash))
-        })
-        .collect();
-
-    Ok(AnalysisOutput {
-        results: result,
-        timings,
-        graph: if retain { Some(graph) } else { None },
-        modules: if retain_modules { Some(modules) } else { None },
-        files: if retain_modules {
-            Some(files.to_vec())
-        } else {
-            None
-        },
-        script_used_packages: plugin_result.script_used_packages,
-        file_hashes,
-    })
 }
 
 /// Analyze package.json scripts from root and all workspace packages.
@@ -946,9 +1038,6 @@ fn analyze_all_scripts(
     workspace_pkgs: &[LoadedWorkspacePackage<'_>],
     plugin_result: &mut plugins::AggregatedPluginResult,
 ) {
-    // Collect all dependency names to build the bin-name → package-name reverse map.
-    // This resolves binaries like "attw" to "@arethetypeswrong/cli" even without
-    // node_modules/.bin symlinks.
     let mut all_dep_names: Vec<String> = Vec::new();
     if let Some(pkg) = root_pkg {
         all_dep_names.extend(pkg.all_dependency_names());
@@ -958,9 +1047,19 @@ fn analyze_all_scripts(
     }
     all_dep_names.sort_unstable();
     all_dep_names.dedup();
+    let all_dep_set: FxHashSet<String> = all_dep_names.iter().cloned().collect();
+    let mut all_script_names: FxHashSet<String> = FxHashSet::default();
+    if let Some(pkg) = root_pkg
+        && let Some(ref pkg_scripts) = pkg.scripts
+    {
+        all_script_names.extend(pkg_scripts.keys().cloned());
+    }
+    for (_, ws_pkg) in workspace_pkgs {
+        if let Some(ref ws_scripts) = ws_pkg.scripts {
+            all_script_names.extend(ws_scripts.keys().cloned());
+        }
+    }
 
-    // Probe node_modules/ at project root and each workspace root so non-hoisted
-    // deps (pnpm strict, Yarn workspaces) are also discovered.
     let mut nm_roots: Vec<&std::path::Path> = Vec::new();
     if config.root.join("node_modules").is_dir() {
         nm_roots.push(&config.root);
@@ -980,7 +1079,14 @@ fn analyze_all_scripts(
         } else {
             pkg_scripts.clone()
         };
-        let script_analysis = scripts::analyze_scripts(&scripts_to_analyze, &config.root, &bin_map);
+        let script_names: FxHashSet<String> = pkg_scripts.keys().cloned().collect();
+        let script_analysis = scripts::analyze_scripts_with_dependency_context(
+            &scripts_to_analyze,
+            &config.root,
+            &bin_map,
+            &all_dep_set,
+            &script_names,
+        );
         plugin_result.script_used_packages = script_analysis.used_packages;
 
         for config_file in &script_analysis.config_files {
@@ -1014,7 +1120,14 @@ fn analyze_all_scripts(
                 } else {
                     ws_scripts.clone()
                 };
-                let ws_analysis = scripts::analyze_scripts(&scripts_to_analyze, &ws.root, &bin_map);
+                let script_names: FxHashSet<String> = ws_scripts.keys().cloned().collect();
+                let ws_analysis = scripts::analyze_scripts_with_dependency_context(
+                    &scripts_to_analyze,
+                    &ws.root,
+                    &bin_map,
+                    &all_dep_set,
+                    &script_names,
+                );
                 used_packages.extend(ws_analysis.used_packages);
 
                 let ws_prefix = ws
@@ -1043,13 +1156,8 @@ fn analyze_all_scripts(
         plugin_result.entry_patterns.extend(entry_patterns);
     }
 
-    // Scan CI config files for binary invocations and positional file references.
-    // Returns both packages used by CI tooling AND project-relative file paths
-    // referenced as command-line arguments (e.g., `node scripts/deploy.ts` in a
-    // GitHub Actions `run:` block) so the referenced files become reachable
-    // entry points. CI files always live at the project root, so file paths
-    // need no workspace-prefix transformation. See issue #195 (Case D).
-    let ci_analysis = scripts::ci::analyze_ci_files(&config.root, &bin_map);
+    let ci_analysis =
+        scripts::ci::analyze_ci_files(&config.root, &bin_map, &all_dep_set, &all_script_names);
     plugin_result
         .script_used_packages
         .extend(ci_analysis.used_packages);
@@ -1117,7 +1225,6 @@ fn discover_all_entry_points(
     let infra_entries = discover::discover_infrastructure_entry_points(&config.root);
     entry_points.extend_runtime(infra_entries);
 
-    // Add dynamically loaded files from config as entry points
     if !config.dynamically_loaded.is_empty() {
         let dynamic_entries = discover::discover_dynamically_loaded_entry_points(config, files);
         entry_points.extend_runtime(dynamic_entries);
@@ -1188,17 +1295,13 @@ fn append_workspace_package_file_asset_patterns(
 }
 
 /// Run plugins for root project and all workspace packages.
-#[expect(
-    clippy::too_many_lines,
-    reason = "plugin orchestration keeps root and workspace merging in one flow"
-)]
 fn run_plugins(
     config: &ResolvedConfig,
     files: &[discover::DiscoveredFile],
     workspaces: &[plow_config::WorkspaceInfo],
     root_pkg: Option<&PackageJson>,
     workspace_pkgs: &[LoadedWorkspacePackage<'_>],
-) -> plugins::AggregatedPluginResult {
+) -> Result<plugins::AggregatedPluginResult, PlowError> {
     let registry = plugins::PluginRegistry::new(config.external_plugins.clone());
     let file_paths: Vec<std::path::PathBuf> = files.iter().map(|f| f.path.clone()).collect();
     let root_config_search_roots = collect_config_search_roots(&config.root, &file_paths);
@@ -1207,23 +1310,28 @@ fn run_plugins(
         .map(std::path::PathBuf::as_path)
         .collect();
 
-    // Run plugins for root project (full run with external plugins, inline config, etc.)
-    let mut result = root_pkg.map_or_else(plugins::AggregatedPluginResult::default, |pkg| {
-        registry.run_with_search_roots(
-            pkg,
-            &config.root,
-            &file_paths,
-            &root_config_search_root_refs,
-            config.production,
-        )
-    });
+    let mut result = if let Some(pkg) = root_pkg {
+        registry
+            .try_run_with_search_roots(
+                pkg,
+                &config.root,
+                &file_paths,
+                &root_config_search_root_refs,
+                config.production,
+            )
+            .map_err(|errors| {
+                PlowError::config(plugins::registry::format_plugin_regex_errors(&errors))
+            })?
+    } else {
+        plugins::AggregatedPluginResult::default()
+    };
     if let Some(pkg) = root_pkg {
         append_package_file_asset_patterns(&mut result, "", pkg);
     }
 
     if workspaces.is_empty() {
         gate_auto_import_entry_patterns(&mut result, config, workspaces);
-        return result;
+        return Ok(result);
     }
 
     append_workspace_package_file_asset_patterns(&mut result, config, workspace_pkgs);
@@ -1231,18 +1339,14 @@ fn run_plugins(
     let root_active_plugins: rustc_hash::FxHashSet<&str> =
         result.active_plugins.iter().map(String::as_str).collect();
 
-    // Pre-compile config matchers once and bucket source files by workspace.
-    // Workspace config matching can then scan only files below that workspace
-    // instead of every project file for every active matcher.
     let precompiled_matchers = registry.precompile_config_matchers();
     let workspace_relative_files = bucket_files_by_workspace(workspace_pkgs, &file_paths);
 
-    // Run plugins for each workspace package in parallel, then merge results.
     let ws_results: Vec<_> = workspace_pkgs
         .par_iter()
         .zip(workspace_relative_files.par_iter())
         .filter_map(|((ws, ws_pkg), relative_files)| {
-            let ws_result = registry.run_workspace_fast(
+            let ws_result = match registry.try_run_workspace_fast(
                 ws_pkg,
                 &ws.root,
                 &config.root,
@@ -1250,7 +1354,10 @@ fn run_plugins(
                 relative_files,
                 &root_active_plugins,
                 config.production,
-            );
+            ) {
+                Ok(result) => result,
+                Err(errors) => return Some(Err(errors)),
+            };
             if ws_result.active_plugins.is_empty() {
                 return None;
             }
@@ -1260,148 +1367,38 @@ fn run_plugins(
                 .unwrap_or(&ws.root)
                 .to_string_lossy()
                 .into_owned();
-            Some((ws_result, ws_prefix))
+            Some(Ok((ws_result, ws_prefix)))
         })
-        .collect();
+        .collect::<Vec<_>>();
 
-    // Merge workspace results sequentially (deterministic order via par_iter index stability)
-    // Track seen names for O(1) dedup instead of O(n) Vec::contains
-    let mut seen_plugins: rustc_hash::FxHashSet<String> =
-        result.active_plugins.iter().cloned().collect();
-    let mut seen_prefixes: rustc_hash::FxHashSet<String> =
-        result.virtual_module_prefixes.iter().cloned().collect();
-    let mut seen_generated: rustc_hash::FxHashSet<String> =
-        result.generated_import_patterns.iter().cloned().collect();
-    let mut seen_generated_type_prefixes: rustc_hash::FxHashSet<String> = result
-        .generated_type_import_prefixes
-        .iter()
-        .cloned()
-        .collect();
-    let mut seen_suffixes: rustc_hash::FxHashSet<String> =
-        result.virtual_package_suffixes.iter().cloned().collect();
-
-    fn extend_unique(
-        target: &mut Vec<String>,
-        seen: &mut rustc_hash::FxHashSet<String>,
-        items: Vec<String>,
-    ) {
-        for item in items {
-            if seen.insert(item.clone()) {
-                target.push(item);
+    let mut regex_errors = Vec::new();
+    for ws_result in ws_results {
+        match ws_result {
+            Ok((mut ws_result, ws_prefix)) => {
+                ws_result.apply_workspace_prefix(&ws_prefix);
+                ws_result.config_patterns.clear();
+                ws_result.script_used_packages.clear();
+                result.merge_into(ws_result);
             }
+            Err(mut errors) => regex_errors.append(&mut errors),
         }
     }
-    for (ws_result, ws_prefix) in ws_results {
-        // Prefix helper: workspace-relative patterns need the workspace prefix
-        // to be matchable from the monorepo root. But patterns that are already
-        // project-root-relative (e.g., from angular.json which uses absolute paths
-        // like "apps/client/src/styles.css") should not be double-prefixed.
-        let prefix_if_needed = |pat: &str| -> String {
-            if pat.starts_with(ws_prefix.as_str()) || pat.starts_with('/') {
-                pat.to_string()
-            } else {
-                format!("{ws_prefix}/{pat}")
-            }
-        };
-
-        for (rule, pname) in &ws_result.entry_patterns {
-            result
-                .entry_patterns
-                .push((rule.prefixed(&ws_prefix), pname.clone()));
-        }
-        for (plugin_name, role) in ws_result.entry_point_roles {
-            result.entry_point_roles.entry(plugin_name).or_insert(role);
-        }
-        for (pat, pname) in &ws_result.always_used {
-            result
-                .always_used
-                .push((prefix_if_needed(pat), pname.clone()));
-        }
-        for (pat, pname) in &ws_result.discovered_always_used {
-            result
-                .discovered_always_used
-                .push((prefix_if_needed(pat), pname.clone()));
-        }
-        for (pat, pname) in &ws_result.fixture_patterns {
-            result
-                .fixture_patterns
-                .push((prefix_if_needed(pat), pname.clone()));
-        }
-        for rule in &ws_result.used_exports {
-            result.used_exports.push(rule.prefixed(&ws_prefix));
-        }
-        for rule in &ws_result.provided_dependencies {
-            result.provided_dependencies.push(rule.prefixed(&ws_prefix));
-        }
-        // Merge active plugin names (deduplicated via HashSet)
-        for plugin_name in ws_result.active_plugins {
-            if !seen_plugins.contains(&plugin_name) {
-                seen_plugins.insert(plugin_name.clone());
-                result.active_plugins.push(plugin_name);
-            }
-        }
-        // These don't need prefixing (absolute paths / package names)
-        result
-            .referenced_dependencies
-            .extend(ws_result.referenced_dependencies);
-        result.setup_files.extend(ws_result.setup_files);
-        result
-            .tooling_dependencies
-            .extend(ws_result.tooling_dependencies);
-        result
-            .static_dir_mappings
-            .extend(ws_result.static_dir_mappings);
-        // Virtual import boundaries — prefixes (e.g., Docusaurus `@theme/`),
-        // generated import patterns (e.g., SvelteKit `/$types`), generated type
-        // prefixes (e.g., React Router `./+types/`), and package-name suffixes
-        // (e.g., Vitest `/__mocks__`) — match against import specifiers or
-        // package names, never file paths, so no workspace prefix is applied.
-        extend_unique(
-            &mut result.virtual_module_prefixes,
-            &mut seen_prefixes,
-            ws_result.virtual_module_prefixes,
-        );
-        extend_unique(
-            &mut result.generated_import_patterns,
-            &mut seen_generated,
-            ws_result.generated_import_patterns,
-        );
-        extend_unique(
-            &mut result.generated_type_import_prefixes,
-            &mut seen_generated_type_prefixes,
-            ws_result.generated_type_import_prefixes,
-        );
-        extend_unique(
-            &mut result.virtual_package_suffixes,
-            &mut seen_suffixes,
-            ws_result.virtual_package_suffixes,
-        );
-        // Path aliases from workspace plugins (e.g., SvelteKit $lib/ → src/lib).
-        // Prefix the replacement directory so it resolves from the monorepo root.
-        for (prefix, replacement) in ws_result.path_aliases {
-            result
-                .path_aliases
-                .push((prefix, format!("{ws_prefix}/{replacement}")));
-        }
-        // Auto-import rules carry absolute `source` paths (built from the
-        // workspace package root), so they are already correct per-package and
-        // need no prefixing, just merging. See issue #704.
-        result.auto_imports.extend(ws_result.auto_imports);
+    if !regex_errors.is_empty() {
+        return Err(PlowError::config(
+            plugins::registry::format_plugin_regex_errors(&regex_errors),
+        ));
     }
 
     gate_auto_import_entry_patterns(&mut result, config, workspaces);
 
-    result
+    Ok(result)
 }
 
-/// When `autoImports` is enabled, drop the Nuxt component entry patterns so
-/// genuinely-unreferenced components are reported as `unused-file` (their
-/// reachability now comes from synthesized auto-import edges instead). Guarded by
-/// `config_declares_components`: if the root OR any workspace package's
-/// `nuxt.config` declares a `components:` key, the patterns are kept, because
-/// custom `prefix` / `pathPrefix` / `dirs` are not yet modeled and dropping the
-/// protection would risk false positives. Auto-import edge synthesis itself is
-/// unconditional; only this entry-pattern removal is flag-gated. See issue #704.
+/// When `autoImports` is enabled, drop the modeled Nuxt convention entry
+/// patterns so genuinely-unreferenced convention files are reported as
+/// `unused-file`. Component and script fallbacks have separate conservative
+/// config guards because custom `components:` and `imports:` settings affect
+/// different convention surfaces.
 fn gate_auto_import_entry_patterns(
     result: &mut plugins::AggregatedPluginResult,
     config: &ResolvedConfig,
@@ -1413,15 +1410,25 @@ fn gate_auto_import_entry_patterns(
     if !result.active_plugins.iter().any(|name| name == "nuxt") {
         return;
     }
-    if plugins::nuxt::config_declares_components(&config.root)
+    let components_custom = plugins::nuxt::config_declares_components(&config.root)
         || workspaces
             .iter()
-            .any(|ws| plugins::nuxt::config_declares_components(&ws.root))
-    {
-        return;
-    }
+            .any(|ws| plugins::nuxt::config_declares_components(&ws.root));
+    let imports_custom = plugins::nuxt::config_declares_imports(&config.root)
+        || workspaces
+            .iter()
+            .any(|ws| plugins::nuxt::config_declares_imports(&ws.root));
     result.entry_patterns.retain(|(rule, plugin)| {
-        !(plugin == "nuxt" && plugins::nuxt::is_component_entry_pattern(&rule.pattern))
+        if plugin != "nuxt" {
+            return true;
+        }
+        if !components_custom && plugins::nuxt::is_component_entry_pattern(&rule.pattern) {
+            return false;
+        }
+        if !imports_custom && plugins::nuxt::is_script_auto_import_entry_pattern(&rule.pattern) {
+            return false;
+        }
+        true
     });
 }
 
@@ -1500,8 +1507,7 @@ pub fn config_for_project(
 ) -> Result<(ResolvedConfig, Option<std::path::PathBuf>), PlowError> {
     let user_config = if let Some(path) = config_path {
         Some((
-            plow_config::PlowConfig::load(path)
-                .map_err(|e| PlowError::config(format!("{e:#}")))?,
+            plow_config::PlowConfig::load(path).map_err(|e| PlowError::config(format!("{e:#}")))?,
             path.to_path_buf(),
         ))
     } else {
@@ -1514,11 +1520,6 @@ pub fn config_for_project(
                 .production
                 .for_analysis(plow_config::ProductionAnalysis::DeadCode);
             config.production = dead_code_production.into();
-            // Issue #468: validate boundary zone references and root-prefix
-            // conflicts BEFORE resolve(). Mirrors the CLI's runtime_support
-            // wiring; LSP and programmatic embedders surface the same exit-2
-            // diagnostic via PlowError::config so editors / API consumers
-            // get a structured failure instead of analysis-time noise.
             config
                 .validate_resolved_boundaries(root)
                 .map_err(|errors| {
@@ -1529,6 +1530,14 @@ pub fn config_for_project(
                         .join("\n  - ");
                     PlowError::config(format!("invalid boundary configuration:\n  - {joined}"))
                 })?;
+            plow_config::load_rule_packs(root, &config.rule_packs).map_err(|errors| {
+                let joined = errors
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("\n  - ");
+                PlowError::config(format!("invalid rule pack:\n  - {joined}"))
+            })?;
             (
                 config.resolve(
                     root.to_path_buf(),
@@ -1725,16 +1734,6 @@ mod tests {
 
     #[test]
     fn warn_undeclared_workspaces_suppresses_paths_already_flagged_as_malformed() {
-        // Regression test for the load-bearing dedup in
-        // `warn_undeclared_workspaces`: when a declared workspace's
-        // package.json is malformed, the discovery pass drops the directory
-        // and stashes `MalformedPackageJson` in the registry. The later
-        // undeclared-workspace pass would otherwise re-flag the SAME
-        // directory as "undeclared" (because it never made it into the
-        // `declared` Vec), confusing users who think the workspace is not
-        // declared when it actually is, just typo'd. This test asserts the
-        // pre-existing MalformedPackageJson entry suppresses the duplicate
-        // undeclared warning.
         let dir = tempfile::tempdir().expect("create temp dir");
         let pkg_good = dir.path().join("packages").join("good");
         let pkg_bad = dir.path().join("packages").join("bad");
@@ -1748,9 +1747,6 @@ mod tests {
         std::fs::write(pkg_good.join("package.json"), r#"{"name": "good"}"#).unwrap();
         std::fs::write(pkg_bad.join("package.json"), r"{,").unwrap();
 
-        // Run discovery; in production `load_config_for_analysis` stashes
-        // the returned diagnostics into the registry, so this test mirrors
-        // that pattern by stashing manually.
         let (workspaces, diagnostics) = plow_config::discover_workspaces_with_diagnostics(
             dir.path(),
             &globset::GlobSet::empty(),
@@ -1759,9 +1755,6 @@ mod tests {
         assert_eq!(workspaces.len(), 1, "only the valid workspace discovers");
         plow_config::stash_workspace_diagnostics(dir.path(), diagnostics);
 
-        // Now run the undeclared pass via the public entry point. The
-        // registry should contain the MalformedPackageJson diagnostic but
-        // NOT an UndeclaredWorkspace for the same path.
         warn_undeclared_workspaces(dir.path(), &workspaces, &globset::GlobSet::empty(), false);
 
         let diagnostics = plow_config::workspace_diagnostics_for(dir.path());

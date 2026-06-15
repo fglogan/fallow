@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use super::common::fixture_path;
-use plow_config::{PlowConfig, OutputFormat, RulesConfig};
+use plow_config::{OutputFormat, PlowConfig, RulesConfig};
 
 fn external_plugin_config(root: &std::path::Path) -> plow_config::ResolvedConfig {
     PlowConfig {
@@ -25,6 +25,7 @@ fn external_plugin_config(root: &std::path::Path) -> plow_config::ResolvedConfig
         boundaries: plow_config::BoundaryConfig::default(),
         production: false.into(),
         plugins: vec![],
+        rule_packs: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
@@ -32,6 +33,7 @@ fn external_plugin_config(root: &std::path::Path) -> plow_config::ResolvedConfig
         codeowners: None,
         public_packages: vec![],
         flags: plow_config::FlagsConfig::default(),
+        security: plow_config::SecurityConfig::default(),
         fix: plow_config::FixConfig::default(),
         resolve: plow_config::ResolveConfig::default(),
         sealed: false,
@@ -61,19 +63,16 @@ fn external_plugin_entry_points_discovered() {
         })
         .collect();
 
-    // home.ts is a route file — external plugin marks src/routes/**/*.{ts,tsx} as entry points
     assert!(
         !unused_file_names.contains(&"home.ts".to_string()),
         "home.ts should be an entry point via external plugin, unused: {unused_file_names:?}"
     );
 
-    // setup.ts is always-used via external plugin
     assert!(
         !unused_file_names.contains(&"setup.ts".to_string()),
         "setup.ts should be always-used via external plugin, unused: {unused_file_names:?}"
     );
 
-    // orphan.ts is NOT covered by the plugin, should be unused
     assert!(
         unused_file_names.contains(&"orphan.ts".to_string()),
         "orphan.ts should be unused, found: {unused_file_names:?}"
@@ -87,18 +86,17 @@ fn plugin_entry_points_carry_correct_plugin_name() {
 
     let files = plow_core::discover::discover_files(&config);
 
-    // Run plugins to get aggregated result
     let pkg = plow_config::PackageJson::load(&root.join("package.json")).unwrap();
     let file_paths: Vec<PathBuf> = files.iter().map(|f| f.path.clone()).collect();
-    let registry = plow_core::plugins::PluginRegistry::new(
-        plow_config::discover_external_plugins(&root, &[]),
-    );
-    let plugin_result = registry.run(&pkg, &root, &file_paths);
+    let registry =
+        plow_core::plugins::PluginRegistry::new(plow_config::discover_external_plugins(&root, &[]));
+    let plugin_result = registry
+        .try_run(&pkg, &root, &file_paths)
+        .expect("external plugin registry should run");
 
     let entries =
         plow_core::discover::discover_plugin_entry_points(&plugin_result, &config, &files);
 
-    // External plugin "my-framework" should attribute entry points with its name
     let home_entry = entries
         .iter()
         .find(|ep| ep.path.ends_with("home.ts"))
@@ -112,7 +110,6 @@ fn plugin_entry_points_carry_correct_plugin_name() {
         home_entry.source
     );
 
-    // setup.ts is always-used via the external plugin
     let setup_entry = entries
         .iter()
         .find(|ep| ep.path.ends_with("setup.ts"))
@@ -139,7 +136,6 @@ fn external_plugin_used_exports_respected() {
         .map(|e| e.export.export_name.as_str())
         .collect();
 
-    // `default` and `loader` exports are marked as used by the plugin
     assert!(
         !unused_export_names.contains(&"default"),
         "default export should be used via external plugin used_exports"
@@ -149,7 +145,6 @@ fn external_plugin_used_exports_respected() {
         "loader export should be used via external plugin used_exports"
     );
 
-    // `unused` export in utils.ts (not an entry point) should be flagged
     assert!(
         unused_export_names.contains(&"unused"),
         "unused export in utils.ts should be flagged, found: {unused_export_names:?}"
@@ -168,7 +163,6 @@ fn external_plugin_tooling_dependencies_not_flagged() {
         .map(|d| d.dep.package_name.as_str())
         .collect();
 
-    // my-framework-cli is listed as tooling dependency in the external plugin
     assert!(
         !unused_dev_dep_names.contains(&"my-framework-cli"),
         "my-framework-cli should not be flagged (tooling dep), found: {unused_dev_dep_names:?}"
@@ -187,7 +181,9 @@ fn external_plugin_active_in_list() {
     let pkg = plow_config::PackageJson::load(&pkg_path).unwrap();
 
     let registry = plow_core::plugins::PluginRegistry::new(config.external_plugins);
-    let result = registry.run(&pkg, &root, &file_paths);
+    let result = registry
+        .try_run(&pkg, &root, &file_paths)
+        .expect("external plugin registry should run");
 
     assert!(
         result.active_plugins.contains(&"my-framework".to_string()),
@@ -215,7 +211,6 @@ fn external_plugin_config_patterns_always_used() {
         })
         .collect();
 
-    // my-framework.config.ts is matched by config_patterns, should be always-used
     assert!(
         !unused_file_names.contains(&"my-framework.config.ts".to_string()),
         "my-framework.config.ts should be always-used via config_patterns, unused: {unused_file_names:?}"

@@ -1,21 +1,33 @@
 // VS Code injects this module into the extension host at runtime.
 // plow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
-import { getChangedSince } from "./config.js";
+import { getChangedSince, getHealthStatusBar } from "./config.js";
+import { formatHealthStatusPart } from "./health-utils.js";
 import {
   buildParamsFromCli,
   buildStatusBarPartsFromLsp,
   buildStatusBarTooltipMarkdown,
-  getStatusBarSeverityKey,
   renderStatusBarText,
 } from "./statusBar-utils.js";
-import type { PlowCheckResult, PlowDupesResult } from "./types.js";
+import type { PlowCheckResult, PlowDupesResult, HealthOutput } from "./types.js";
 export type { AnalysisCompleteParams } from "./statusBar-utils.js";
 import type { AnalysisCompleteParams } from "./statusBar-utils.js";
 
 let statusBarItem: vscode.StatusBarItem | null = null;
 
+/**
+ * Last health score segment (e.g. `B (82)`), or null when health has not run or
+ * is disabled. Stored so the segment survives the CLI/LSP status-bar updates
+ * that fire independently of the lazy health spawn.
+ */
+let healthPart: string | null = null;
+
 const liveChangedSince = (): string | null => getChangedSince() || null;
+
+// Use `health:` (colon) so the score binds visually to its label and does not
+// read as another issue/duplication count in the ` | `-joined segment list
+// (e.g. `5 issues | 2.3% duplication | health: B (82)`) (#902).
+const healthSuffix = (): string => (healthPart ? ` | health: ${healthPart}` : "");
 
 export const createStatusBar = (): vscode.StatusBarItem => {
   statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
@@ -62,8 +74,10 @@ const applyTooltipAndSeverity = (params: AnalysisCompleteParams): void => {
     return;
   }
 
-  const severity = getStatusBarSeverityKey(params);
-  statusBarItem.backgroundColor = severity ? new vscode.ThemeColor(severity) : undefined;
+  // The main status bar item is intentionally left uncolored: a full-width
+  // red/yellow background for a poor health score is more distracting than
+  // informative, and the grade + issue counts in the text already convey it.
+  statusBarItem.backgroundColor = undefined;
 
   const tooltip = new vscode.MarkdownString(
     buildStatusBarTooltipMarkdown(params, getChangedSince() || null),
@@ -76,12 +90,37 @@ const applyTooltipAndSeverity = (params: AnalysisCompleteParams): void => {
   statusBarItem.tooltip = tooltip;
 };
 
+/**
+ * Most recent non-health status parts, cached so an out-of-band health update
+ * can re-render the full text (analysis parts plus the health segment) without
+ * a fresh analysis run.
+ */
+let lastBaseParts: string[] = [];
+
 const applyStatusBarText = (parts: string[]): void => {
   if (!statusBarItem) {
     return;
   }
-  const base = parts.length > 0 ? `$(search) Plow: ${parts.join(" | ")}` : "$(search) Plow";
+  lastBaseParts = parts;
+  const joined = parts.length > 0 ? `$(search) Plow: ${parts.join(" | ")}` : "$(search) Plow";
+  const base = `${joined}${healthSuffix()}`;
   statusBarItem.text = renderStatusBarText(base, liveChangedSince());
+};
+
+/**
+ * Update the cached health score segment shown in the status bar and re-render.
+ * Independent of the CLI/LSP analysis updates: the lazy health spawn calls this
+ * when it completes. A null report (or the `health.statusBar` setting off)
+ * clears the segment so the existing behavior is unchanged.
+ */
+export const updateStatusBarHealth = (report: HealthOutput | null): void => {
+  healthPart = getHealthStatusBar() ? formatHealthStatusPart(report) : null;
+  if (!statusBarItem) {
+    return;
+  }
+  // Re-render against the cached analysis parts so the health segment appends
+  // without clobbering the issue/duplication counts.
+  applyStatusBarText(lastBaseParts);
 };
 
 export const setStatusBarAnalyzing = (): void => {
@@ -104,4 +143,6 @@ export const disposeStatusBar = (): void => {
     statusBarItem.dispose();
     statusBarItem = null;
   }
+  healthPart = null;
+  lastBaseParts = [];
 };

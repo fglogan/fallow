@@ -1,4 +1,4 @@
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de::Error};
 
 /// Type alias for standard `HashMap` used in serde-deserialized structs.
 /// `rustc-hash` v2 does not have a `serde` feature, so fields deserialized
@@ -34,10 +34,54 @@ where
     })
 }
 
+fn deserialize_optional_string_lenient<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    Ok(match value {
+        Some(serde_json::Value::String(value)) if !value.trim().is_empty() => Some(value),
+        _ => None,
+    })
+}
+
+fn deserialize_optional_napi_config<'de, D>(deserializer: D) -> Result<Option<NapiConfig>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    match value {
+        Some(serde_json::Value::Object(map)) => {
+            serde_json::from_value(serde_json::Value::Object(map))
+                .map(Some)
+                .map_err(D::Error::custom)
+        }
+        _ => Ok(None),
+    }
+}
+
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct PeerDependencyMeta {
     #[serde(default)]
     pub optional: bool,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct NapiConfig {
+    #[serde(
+        default,
+        rename = "binaryName",
+        deserialize_with = "deserialize_optional_string_lenient"
+    )]
+    pub binary_name: Option<String>,
+    #[serde(
+        default,
+        rename = "packageName",
+        deserialize_with = "deserialize_optional_string_lenient"
+    )]
+    pub package_name: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_string_array_lenient")]
+    pub targets: Vec<String>,
 }
 
 /// Parsed package.json with fields relevant to plow.
@@ -79,8 +123,18 @@ pub struct PackageJson {
     pub optional_dependencies: Option<StdHashMap<String, String>>,
     #[serde(default)]
     pub scripts: Option<StdHashMap<String, String>>,
+    #[serde(default, deserialize_with = "deserialize_optional_napi_config")]
+    pub napi: Option<NapiConfig>,
     #[serde(default)]
     pub workspaces: Option<serde_json::Value>,
+    /// The `packageManager` field (e.g. `"pnpm@9.1.0"`), used to determine
+    /// the canonical package manager for the project.
+    #[serde(
+        default,
+        rename = "packageManager",
+        deserialize_with = "deserialize_optional_string_lenient"
+    )]
+    pub package_manager: Option<String>,
 }
 
 impl PackageJson {
@@ -92,12 +146,6 @@ impl PackageJson {
     pub fn load(path: &std::path::Path) -> Result<Self, String> {
         let content = std::fs::read_to_string(path)
             .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
-        // Strip UTF-8 BOM if present (common in Windows-authored
-        // package.json files, and a deliberate vite test fixture).
-        // `parse_tsconfig_references` already does the same; without this
-        // symmetric step, a BOM-prefixed package.json surfaces as a
-        // false-positive `malformed-package-json` diagnostic on workspaces
-        // that pnpm/npm/yarn happily install.
         let content = content.trim_start_matches('\u{FEFF}');
         serde_json::from_str(content)
             .map_err(|e| format!("Failed to parse {}: {}", path.display(), e))
@@ -191,7 +239,6 @@ impl PackageJson {
             entries.push(source.clone());
         }
 
-        // Handle browser field (string or object with path values)
         if let Some(browser) = &self.browser {
             match browser {
                 serde_json::Value::String(s) => entries.push(s.clone()),
@@ -208,7 +255,6 @@ impl PackageJson {
             }
         }
 
-        // Handle bin field (string or object)
         if let Some(bin) = &self.bin {
             match bin {
                 serde_json::Value::String(s) => entries.push(s.clone()),
@@ -223,7 +269,6 @@ impl PackageJson {
             }
         }
 
-        // Handle exports field (recursive)
         if let Some(exports) = &self.exports {
             extract_exports_entries(exports, &mut entries);
         }
@@ -281,7 +326,6 @@ fn extract_exports_subdirectories(exports: &serde_json::Value) -> Vec<String> {
     let mut dirs = rustc_hash::FxHashSet::default();
 
     for key in map.keys() {
-        // Keys are like "./compat", "./hooks/client", "."
         let stripped = key.strip_prefix("./").unwrap_or(key);
         if let Some(first_segment) = stripped.split('/').next()
             && !first_segment.is_empty()
@@ -403,6 +447,56 @@ mod tests {
     }
 
     #[test]
+    fn package_json_napi_config_preserves_current_string_fields() {
+        let pkg: PackageJson = serde_json::from_str(
+            r#"{
+                "napi": {
+                    "binaryName": "srcmap-codec",
+                    "packageName": "@srcmap/codec",
+                    "targets": [
+                        "aarch64-apple-darwin",
+                        "x86_64-unknown-linux-gnu"
+                    ]
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let napi = pkg.napi.expect("napi config");
+        assert_eq!(napi.binary_name.as_deref(), Some("srcmap-codec"));
+        assert_eq!(napi.package_name.as_deref(), Some("@srcmap/codec"));
+        assert_eq!(
+            napi.targets,
+            vec![
+                "aarch64-apple-darwin".to_string(),
+                "x86_64-unknown-linux-gnu".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn package_json_napi_config_ignores_unexpected_shapes() {
+        let pkg: PackageJson = serde_json::from_str(r#"{"napi": "enabled"}"#).unwrap();
+        assert!(pkg.napi.is_none());
+
+        let pkg: PackageJson = serde_json::from_str(
+            r#"{
+                "napi": {
+                    "binaryName": 42,
+                    "packageName": "",
+                    "targets": ["x86_64-apple-darwin", false, null]
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let napi = pkg.napi.expect("napi config");
+        assert!(napi.binary_name.is_none());
+        assert!(napi.package_name.is_none());
+        assert_eq!(napi.targets, vec!["x86_64-apple-darwin"]);
+    }
+
+    #[test]
     fn package_json_load_missing_file() {
         let result = PackageJson::load(std::path::Path::new("/nonexistent/package.json"));
         assert!(result.is_err());
@@ -475,7 +569,6 @@ mod tests {
         )
         .unwrap();
         let entries = pkg.entry_points();
-        // "not-a-relative-path" doesn't start with "./" so should be excluded
         assert!(entries.is_empty());
     }
 
@@ -518,7 +611,6 @@ mod tests {
         .unwrap();
         let entries = pkg.entry_points();
         assert!(entries.contains(&"./browser.js".to_string()));
-        // non-relative paths and false values should be excluded
         assert_eq!(entries.len(), 1);
     }
 
@@ -646,8 +738,6 @@ mod tests {
         assert!(entries.contains(&"./dist/browser.mjs".to_string()));
     }
 
-    // ── Peer dependency names ───────────────────────────────────────
-
     #[test]
     fn package_json_peer_deps_only() {
         let pkg: PackageJson =
@@ -658,7 +748,6 @@ mod tests {
         assert!(all.contains(&"react".to_string()));
         assert!(all.contains(&"react-dom".to_string()));
 
-        // No production or dev deps
         assert!(pkg.production_dependency_names().is_empty());
         assert!(pkg.dev_dependency_names().is_empty());
     }
@@ -675,8 +764,6 @@ mod tests {
         assert_eq!(pkg.required_peer_dependency_names(), vec!["react"]);
     }
 
-    // ── Optional dependencies ───────────────────────────────────────
-
     #[test]
     fn package_json_optional_deps_in_all_names() {
         let pkg: PackageJson =
@@ -685,11 +772,8 @@ mod tests {
         assert!(all.contains(&"fsevents".to_string()));
     }
 
-    // ── Browser field edge cases ────────────────────────────────────
-
     #[test]
     fn package_json_browser_array_ignored() {
-        // Browser field as array is not supported -- should not crash
         let pkg: PackageJson =
             serde_json::from_str(r#"{"browser": ["./a.js", "./b.js"]}"#).unwrap();
         let entries = pkg.entry_points();
@@ -706,17 +790,12 @@ mod tests {
         )
         .unwrap();
         let entries = pkg.entry_points();
-        // false is not a string, "crypto" is not relative
-        // only "./browser-local.js" starts with "./"
         assert_eq!(entries.len(), 1);
         assert!(entries.contains(&"./browser-local.js".to_string()));
     }
 
-    // ── Exports field edge cases ────────────────────────────────────
-
     #[test]
     fn package_json_exports_null_value() {
-        // Some packages use null for subpath exclusions
         let pkg: PackageJson =
             serde_json::from_str(r#"{"exports": {".": "./dist/index.js", "./internal": null}}"#)
                 .unwrap();
@@ -732,11 +811,8 @@ mod tests {
         assert!(entries.is_empty());
     }
 
-    // ── Workspace patterns edge cases ───────────────────────────────
-
     #[test]
     fn package_json_workspace_patterns_string_value_ignored() {
-        // workspaces as a string is not a valid format
         let pkg: PackageJson = serde_json::from_str(r#"{"workspaces": "packages/*"}"#).unwrap();
         let patterns = pkg.workspace_patterns();
         assert!(patterns.is_empty());
@@ -749,8 +825,6 @@ mod tests {
         let patterns = pkg.workspace_patterns();
         assert!(patterns.is_empty());
     }
-
-    // ── Load from invalid JSON ──────────────────────────────────────
 
     #[test]
     fn package_json_load_invalid_json() {
@@ -767,8 +841,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
-    // ── Bin field with non-string value ─────────────────────────────
-
     #[test]
     fn package_json_bin_object_non_string_values_skipped() {
         let pkg: PackageJson =
@@ -777,8 +849,6 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert!(entries.contains(&"./bin/cli.js".to_string()));
     }
-
-    // ── Default trait ───────────────────────────────────────────────
 
     #[test]
     fn package_json_default() {
@@ -789,8 +859,6 @@ mod tests {
         assert!(pkg.all_dependency_names().is_empty());
         assert!(pkg.workspace_patterns().is_empty());
     }
-
-    // ── Exports subdirectories ─────────────────────────────────────
 
     #[test]
     fn exports_subdirectories_preact_style() {
@@ -826,7 +894,6 @@ mod tests {
         )
         .unwrap();
         let dirs = pkg.exports_subdirectories();
-        // dist, build, lib are skipped
         assert_eq!(dirs, vec!["compat"]);
     }
 

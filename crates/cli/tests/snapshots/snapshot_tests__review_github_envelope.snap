@@ -4,12 +4,26 @@ expression: json_str
 ---
 {
   "event": "COMMENT",
-  "body": "### Plow dead-code report\n\n20 inline findings selected for GitHub review.\n\n<!-- plow-review -->\n\n<!-- plow-fingerprint:v2: b65b901fad56d7a5 -->",
+  "body": "### Plow dead-code report\n\n24 inline findings selected for GitHub review.\n\n<!-- plow-review -->\n\n<!-- plow-fingerprint:v2: b3d854677ac90ba1 -->",
   "summary": {
-    "body": "### Plow dead-code report\n\n20 inline findings selected for GitHub review.\n\n<!-- plow-review -->\n\n<!-- plow-fingerprint:v2: b65b901fad56d7a5 -->",
-    "fingerprint": "b65b901fad56d7a5"
+    "body": "### Plow dead-code report\n\n24 inline findings selected for GitHub review.\n\n<!-- plow-review -->\n\n<!-- plow-fingerprint:v2: b3d854677ac90ba1 -->",
+    "fingerprint": "b3d854677ac90ba1"
   },
   "comments": [
+    {
+      "path": "app/components/index.ts",
+      "line": 2,
+      "side": "RIGHT",
+      "body": "**warn** `plow/mixed-client-server-barrel`: Barrel re-exports both a \"use client\" module \\(\\`./Button\\`\\) and a server-only module \\(\\`./fetchUser\\`\\); one import drags the other's directive across the boundary\n\n<!-- plow-fingerprint:v2: a26a1cc5a4e57127 -->",
+      "fingerprint": "a26a1cc5a4e57127"
+    },
+    {
+      "path": "app/page.tsx",
+      "line": 3,
+      "side": "RIGHT",
+      "body": "**warn** `plow/invalid-client-export`: Export \\`metadata\\` is not allowed in a \"use client\" file \\(Next.js server-only / route-config name\\)\n\n<!-- plow-fingerprint:v2: 81283760fca75e0c -->",
+      "fingerprint": "81283760fca75e0c"
+    },
     {
       "path": "package.json",
       "line": 3,
@@ -130,6 +144,13 @@ expression: json_str
       "fingerprint": "dd4d62478ebd0dea"
     },
     {
+      "path": "src/stores/counter.ts",
+      "line": 24,
+      "side": "RIGHT",
+      "body": "**warn** `plow/unused-store-member`: Store member 'useCounterStore.legacyAction' is never referenced\n\n<!-- plow-fingerprint:v2: 1b6b9adec9797dbc -->",
+      "fingerprint": "1b6b9adec9797dbc"
+    },
+    {
       "path": "src/types.ts",
       "line": 5,
       "side": "RIGHT",
@@ -142,6 +163,13 @@ expression: json_str
       "side": "RIGHT",
       "body": "**error** `plow/duplicate-export`: Export 'Config' appears in multiple modules\n\n<!-- plow-fingerprint:v2: ec485b2f5051e03e -->",
       "fingerprint": "ec485b2f5051e03e"
+    },
+    {
+      "path": "src/useTheme.ts",
+      "line": 5,
+      "side": "RIGHT",
+      "body": "**warn** `plow/unprovided-inject`: inject\\(\\`THEME\\_KEY\\`\\) has no matching provide\\(\\`THEME\\_KEY\\`\\) in this project; at runtime it returns undefined \\(provide the key or remove this inject\\)\n\n<!-- plow-fingerprint:v2: 4e4a7216bbdc8cfa -->",
+      "fingerprint": "4e4a7216bbdc8cfa"
     },
     {
       "path": "src/utils.ts",

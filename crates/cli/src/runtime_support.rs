@@ -1,12 +1,39 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::sync::{LazyLock, Mutex};
+use std::sync::{LazyLock, Mutex, OnceLock};
 
-use plow_config::{PlowConfig, OutputFormat, ProductionAnalysis, ResolvedConfig};
+use plow_config::{
+    OutputFormat, PartialRulesConfig, PlowConfig, ProductionAnalysis, ResolvedConfig, RulesConfig,
+};
 use rustc_hash::FxHashSet;
 
 static CONFIG_LOADED_LOGGED: LazyLock<Mutex<FxHashSet<PathBuf>>> =
     LazyLock::new(|| Mutex::new(FxHashSet::default()));
+
+/// The `--max-file-size` global flag value, set once from `main()` after clap
+/// parse. `Some(Some(mb))` means the flag was passed; `Some(None)` / unset
+/// means it was not. Held in a `OnceLock` rather than threaded through the ten
+/// `load_config_for_analysis` callers (the skill-endorsed set-once-read-by-many
+/// pattern; avoids `set_var`, which is unsafe under edition 2024).
+static MAX_FILE_SIZE_OVERRIDE: OnceLock<Option<u32>> = OnceLock::new();
+
+/// Record the `--max-file-size` flag value (megabytes; `Some(0)` = unlimited).
+/// Called once from `main()` before dispatch. Subsequent calls are ignored.
+pub fn set_max_file_size_override(max_file_size_mb: Option<u32>) {
+    let _ = MAX_FILE_SIZE_OVERRIDE.set(max_file_size_mb);
+}
+
+/// Resolve the effective per-file size ceiling override (in megabytes): the
+/// `--max-file-size` flag wins, then `PLOW_MAX_FILE_SIZE`, else `None` (the
+/// built-in default applies). `Some(0)` from either source means unlimited.
+fn resolve_max_file_size_mb() -> Option<u32> {
+    if let Some(Some(mb)) = MAX_FILE_SIZE_OVERRIDE.get() {
+        return Some(*mb);
+    }
+    std::env::var("PLOW_MAX_FILE_SIZE")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u32>().ok())
+}
 
 /// Analysis types for --only/--skip selection.
 #[derive(Clone, PartialEq, Eq, clap::ValueEnum)]
@@ -105,7 +132,9 @@ fn log_config_loaded(path: &Path, output: OutputFormat, quiet: bool) {
 
 fn should_log_config_loaded(path: &Path) -> bool {
     let key = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    CONFIG_LOADED_LOGGED.lock().unwrap().insert(key)
+    CONFIG_LOADED_LOGGED
+        .lock()
+        .is_ok_and(|mut logged| logged.insert(key))
 }
 
 #[expect(clippy::ref_option, reason = "&Option matches clap's field type")]
@@ -169,6 +198,7 @@ pub fn load_config_for_analysis(
         }
     };
 
+    let loaded_user_config = user_config.is_some();
     let final_config = match user_config {
         Some(mut config) => {
             let production =
@@ -181,12 +211,8 @@ pub fn load_config_for_analysis(
             ..PlowConfig::default()
         },
     };
+    crate::telemetry::note_config_shape(config_shape_for(&final_config, loaded_user_config));
 
-    // Issue #463: validate user-supplied glob patterns on EXTERNAL plugin files
-    // loaded from `.plow/plugins/` / `plow-plugin-*` / config-listed paths.
-    // Inline `framework[]` blocks are already validated by `PlowConfig::load`.
-    // The external-plugin step runs here because plugins are root-dependent and
-    // `load` does not know the project root.
     if let Err(errors) =
         plow_config::discover_and_validate_external_plugins(root, &final_config.plugins)
     {
@@ -199,10 +225,6 @@ pub fn load_config_for_analysis(
         return Err(crate::error::emit_error(&msg, 2, output));
     }
 
-    // Issue #468: validate boundary zone references and root-prefix conflicts
-    // AFTER preset and auto-discover expansion. Mirrors the upstream
-    // `discover_and_validate_external_plugins` pattern: both checks need the
-    // project root, both surface every offending entry in one rendered run.
     if let Err(errors) = final_config.validate_resolved_boundaries(root) {
         let joined = errors
             .iter()
@@ -213,8 +235,20 @@ pub fn load_config_for_analysis(
         return Err(crate::error::emit_error(&msg, 2, output));
     }
 
+    // A pack that fails to load must fail the run: silently skipping policy
+    // is the exact failure mode rule packs document themselves as preventing.
+    if let Err(errors) = plow_config::load_rule_packs(root, &final_config.rule_packs) {
+        let joined = errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n  - ");
+        let msg = format!("invalid rule pack:\n  - {joined}");
+        return Err(crate::error::emit_error(&msg, 2, output));
+    }
+
     let cache_max_size_mb = resolve_cache_max_size_env();
-    let resolved = final_config.resolve(
+    let mut resolved = final_config.resolve(
         root.to_path_buf(),
         output,
         threads,
@@ -222,25 +256,20 @@ pub fn load_config_for_analysis(
         quiet,
         cache_max_size_mb,
     );
+    if let Some(mb) = resolve_max_file_size_mb() {
+        resolved.max_file_size_bytes = plow_config::resolve_max_file_size_bytes(Some(mb));
+    }
+    apply_cache_dir_env_override(root, &mut resolved, resolve_cache_dir_env());
+    crate::cache_notice::record_candidate(
+        root,
+        &resolved.cache_dir,
+        output,
+        quiet,
+        resolved.no_cache,
+    );
 
-    // Issue #473: discover workspaces here so any silent-fail in
-    // crates/config/src/workspace/ surfaces with a typed diagnostic (and a
-    // tracing::warn! per (root, kind, path)). A malformed ROOT package.json
-    // is unrecoverable; promote to exit 2 to match the boundary-validation
-    // exit-code policy above. The diagnostics that come back from this call
-    // stay in a process-wide registry keyed by canonical root so downstream
-    // renderers (check.rs, audit.rs, combined.rs, list.rs) can fold them
-    // into their JSON envelope and stderr summary without re-walking the
-    // workspace tree.
     match plow_config::discover_workspaces_with_diagnostics(root, &resolved.ignore_patterns) {
         Ok((_, diagnostics)) => {
-            // Stash diagnostics so downstream JSON-envelope builders
-            // (`report::json::build_json*`, audit, combined) and the analyze
-            // pipeline's later `find_undeclared_workspaces_with_ignores`
-            // pass can fold their results into the same registry without
-            // re-walking the workspace tree. The registry lives in
-            // `plow-config` so both crates can populate it without a
-            // cyclic dep.
             plow_config::stash_workspace_diagnostics(root, diagnostics.clone());
             if !diagnostics.is_empty() && matches!(output, OutputFormat::Human) && !quiet {
                 eprintln!(
@@ -257,6 +286,34 @@ pub fn load_config_for_analysis(
     }
 
     Ok(resolved)
+}
+
+fn config_shape_for(
+    config: &PlowConfig,
+    loaded_user_config: bool,
+) -> crate::telemetry::ConfigShape {
+    if !config.plugins.is_empty() || !config.framework.is_empty() {
+        return crate::telemetry::ConfigShape::PluginsEnabled;
+    }
+    if config.rules != RulesConfig::default()
+        || config
+            .overrides
+            .iter()
+            .any(|entry| partial_rules_config_has_values(&entry.rules))
+    {
+        return crate::telemetry::ConfigShape::CustomRules;
+    }
+    if loaded_user_config {
+        return crate::telemetry::ConfigShape::CustomConfig;
+    }
+    crate::telemetry::ConfigShape::Default
+}
+
+fn partial_rules_config_has_values(rules: &PartialRulesConfig) -> bool {
+    serde_json::to_value(rules)
+        .ok()
+        .and_then(|value| value.as_object().map(|object| !object.is_empty()))
+        .unwrap_or(false)
 }
 
 /// Read the workspace-discovery diagnostics produced by the most recent
@@ -280,6 +337,32 @@ fn resolve_cache_max_size_env() -> Option<u32> {
         .filter(|mb| *mb > 0)
 }
 
+/// Read `PLOW_CACHE_DIR` into an optional project-root-resolved cache path.
+/// Relative values use the same project-root base as `cache.dir`.
+fn resolve_cache_dir_env() -> Option<PathBuf> {
+    std::env::var_os("PLOW_CACHE_DIR")
+        .map(PathBuf::from)
+        .filter(|path| !path.as_os_str().is_empty())
+}
+
+fn resolve_cache_dir_value(root: &Path, path: PathBuf) -> PathBuf {
+    if path.is_absolute() {
+        path
+    } else {
+        root.join(path)
+    }
+}
+
+fn apply_cache_dir_env_override(
+    root: &Path,
+    resolved: &mut ResolvedConfig,
+    env_value: Option<PathBuf>,
+) {
+    if let Some(path) = env_value {
+        resolved.cache_dir = resolve_cache_dir_value(root, path);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -295,5 +378,44 @@ mod tests {
         assert!(should_log_config_loaded(&first));
         assert!(!should_log_config_loaded(&first));
         assert!(should_log_config_loaded(&second));
+    }
+
+    #[test]
+    fn cache_dir_env_value_resolves_relative_to_project_root() {
+        assert_eq!(
+            resolve_cache_dir_value(Path::new("/repo"), PathBuf::from(".cache/plow")),
+            PathBuf::from("/repo/.cache/plow")
+        );
+        assert_eq!(
+            resolve_cache_dir_value(Path::new("/repo"), PathBuf::from("/tmp/plow-cache")),
+            PathBuf::from("/tmp/plow-cache")
+        );
+    }
+
+    #[test]
+    fn cache_dir_env_value_wins_over_configured_cache_dir() {
+        let mut resolved = PlowConfig {
+            cache: plow_config::CacheConfig {
+                dir: Some(PathBuf::from(".cache/from-config")),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+        .resolve(
+            PathBuf::from("/repo"),
+            OutputFormat::Human,
+            1,
+            false,
+            true,
+            None,
+        );
+
+        apply_cache_dir_env_override(
+            Path::new("/repo"),
+            &mut resolved,
+            Some(PathBuf::from(".cache/from-env")),
+        );
+
+        assert_eq!(resolved.cache_dir, PathBuf::from("/repo/.cache/from-env"));
     }
 }

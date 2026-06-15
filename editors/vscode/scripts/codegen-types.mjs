@@ -375,7 +375,11 @@ const BARE_DEAD_CODE_UNION_ALIASES = [
   },
   {
     name: "UnusedMember",
-    parents: ["UnusedClassMemberFinding", "UnusedEnumMemberFinding"],
+    parents: [
+      "UnusedClassMemberFinding",
+      "UnusedEnumMemberFinding",
+      "UnusedStoreMemberFinding",
+    ],
   },
 ];
 
@@ -408,11 +412,11 @@ const BACKWARDS_COMPAT_ALIASES_HEADER = `
 //
 // Stability commitment: these aliases ship as part of plow's v2.x stable
 // surface. They are scheduled for removal alongside the kind-tagged
-// \`PlowOutput\` major bump (see https://github.com/plow-rs/plow/issues/413),
+// \`PlowOutput\` major bump (see https://github.com/fglogan/genesis-plow/issues/413),
 // with a one-minor-cycle deprecation window (\`@deprecated\` JSDoc +
 // CHANGELOG headline) preceding the removal. New code should prefer the
 // \`*Finding\` wrapper names. Full public-consumer policy:
-// https://github.com/plow-rs/plow/blob/main/docs/backwards-compatibility.md
+// https://github.com/fglogan/genesis-plow/blob/main/docs/backwards-compatibility.md
 //
 `;
 

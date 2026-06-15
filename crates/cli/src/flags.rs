@@ -5,7 +5,7 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use plow_config::{OutputFormat, ResolvedConfig};
-use plow_types::extract::{FlagUse, FlagUseKind, ModuleInfo};
+use plow_types::extract::{FlagUse, FlagUseKind, ModuleInfo, ParseResult};
 use plow_types::results::{FeatureFlag, FlagConfidence, FlagKind};
 
 use crate::error::emit_error;
@@ -82,13 +82,11 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
         Err(code) => return code,
     };
 
-    // Discover files
     let files = plow_core::discover::discover_files_with_plugin_scopes(&config);
     if files.is_empty() {
         return emit_error("no files discovered", 2, opts.output);
     }
 
-    // Parse all files (flag extraction happens automatically during parse)
     let cache_store = if config.no_cache {
         None
     } else {
@@ -100,10 +98,81 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
     };
     let parse_result = plow_core::extract::parse_all_files(&files, cache_store.as_ref(), false);
 
-    // Build file_id -> path lookup from discovered files
+    let mut flags = collect_flags_from_parse_result(&config, &files, &parse_result);
+
+    #[expect(
+        deprecated,
+        reason = "ADR-008 deprecates plow_core::analyze_with_parse_result and the feature_flags helpers externally; flags still uses the workspace path dependency"
+    )]
+    if let Ok(analysis_output) =
+        plow_core::analyze_with_parse_result(&config, &parse_result.modules)
+    {
+        plow_core::analyze::feature_flags::correlate_with_dead_code(
+            &mut flags,
+            &analysis_output.results,
+        );
+    }
+
+    if let Some(git_ref) = opts.changed_since
+        && let Some(changed) = crate::check::get_changed_files(opts.root, git_ref)
+    {
+        flags.retain(|f| changed.contains(&f.path));
+    }
+
+    let ws_scope = match crate::check::resolve_workspace_scope(
+        opts.root,
+        opts.workspace,
+        opts.changed_workspaces,
+        opts.output,
+    ) {
+        Ok(scope) => scope,
+        Err(code) => return code,
+    };
+    if let Some(ref ws_roots) = ws_scope {
+        flags.retain(|f| ws_roots.iter().any(|r| f.path.starts_with(r)));
+    }
+
+    flags.sort_by(|a, b| {
+        a.path
+            .cmp(&b.path)
+            .then(a.line.cmp(&b.line))
+            .then(a.flag_name.cmp(&b.flag_name))
+    });
+
+    if let Some(top) = opts.top {
+        flags.truncate(top);
+    }
+
+    let elapsed = start.elapsed();
+
+    if matches!(
+        opts.output,
+        OutputFormat::PrCommentGithub
+            | OutputFormat::PrCommentGitlab
+            | OutputFormat::ReviewGithub
+            | OutputFormat::ReviewGitlab
+            | OutputFormat::Badge
+    ) {
+        return emit_error(
+            "flags supports human, json, compact, sarif, markdown, and codeclimate output",
+            2,
+            opts.output,
+        );
+    }
+
+    let files_scanned = files.len();
+    print_flags_result(&flags, &config, opts, elapsed, files_scanned);
+
+    ExitCode::SUCCESS
+}
+
+fn collect_flags_from_parse_result(
+    config: &ResolvedConfig,
+    files: &[plow_core::discover::DiscoveredFile],
+    parse_result: &ParseResult,
+) -> Vec<FeatureFlag> {
     let file_paths: rustc_hash::FxHashMap<_, _> = files.iter().map(|f| (f.id, &f.path)).collect();
 
-    // Prepare user-configured flag patterns for supplementary extraction
     let extra_sdk: Vec<(String, usize, String)> = config
         .flags
         .sdk_patterns
@@ -120,132 +189,71 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
         || !config.flags.env_prefixes.is_empty()
         || config.flags.config_object_heuristics;
 
-    // Collect feature flags from parsed modules (built-in patterns from cache/parse)
-    let mut flags: Vec<FeatureFlag> = Vec::new();
+    let mut flags = Vec::new();
     for module in &parse_result.modules {
         let Some(path) = file_paths.get(&module.file_id) else {
             continue;
         };
 
-        // Built-in flag results from parse/cache
-        let file_suppressed = plow_core::suppress::is_file_suppressed(
-            &module.suppressions,
-            plow_core::suppress::IssueKind::FeatureFlag,
-        );
-        for flag_use in &module.flag_uses {
-            if file_suppressed
-                || plow_core::suppress::is_suppressed(
-                    &module.suppressions,
-                    flag_use.line,
-                    plow_core::suppress::IssueKind::FeatureFlag,
-                )
-            {
-                continue;
-            }
+        collect_builtin_flags(&mut flags, module, path);
+        if has_custom_config {
+            collect_custom_flags(&mut flags, config, module, path, &extra_sdk);
+        }
+    }
+    flags
+}
+
+fn collect_builtin_flags(flags: &mut Vec<FeatureFlag>, module: &ModuleInfo, path: &Path) {
+    let file_suppressed = plow_core::suppress::is_file_suppressed(
+        &module.suppressions,
+        plow_core::suppress::IssueKind::FeatureFlag,
+    );
+    for flag_use in &module.flag_uses {
+        if file_suppressed
+            || plow_core::suppress::is_suppressed(
+                &module.suppressions,
+                flag_use.line,
+                plow_core::suppress::IssueKind::FeatureFlag,
+            )
+        {
+            continue;
+        }
+        flags.push(flag_use_to_feature_flag(flag_use, module, path));
+    }
+}
+
+fn collect_custom_flags(
+    flags: &mut Vec<FeatureFlag>,
+    config: &ResolvedConfig,
+    module: &ModuleInfo,
+    path: &Path,
+    extra_sdk: &[(String, usize, String)],
+) {
+    let Ok(source) = std::fs::read_to_string(path) else {
+        return;
+    };
+
+    let custom_flags = plow_core::extract::flags::extract_flags_from_source(
+        &source,
+        path,
+        extra_sdk,
+        &config.flags.env_prefixes,
+        config.flags.config_object_heuristics,
+    );
+    for flag_use in &custom_flags {
+        let already_found = module.flag_uses.iter().any(|existing| {
+            existing.line == flag_use.line && existing.flag_name == flag_use.flag_name
+        });
+        if !already_found
+            && !plow_core::suppress::is_suppressed(
+                &module.suppressions,
+                flag_use.line,
+                plow_core::suppress::IssueKind::FeatureFlag,
+            )
+        {
             flags.push(flag_use_to_feature_flag(flag_use, module, path));
         }
-
-        // Supplementary extraction pass for user-configured patterns.
-        // Built-in patterns are already in module.flag_uses (cached).
-        // Custom SDK patterns, env prefixes, and config object heuristics
-        // require re-reading source because they weren't applied at parse time.
-        if has_custom_config && let Ok(source) = std::fs::read_to_string(path) {
-            let custom_flags = plow_core::extract::flags::extract_flags_from_source(
-                &source,
-                path,
-                &extra_sdk,
-                &config.flags.env_prefixes,
-                config.flags.config_object_heuristics,
-            );
-            // Only add flags not already found by built-in extraction (dedup by line+name)
-            for flag_use in &custom_flags {
-                let already_found = module.flag_uses.iter().any(|existing| {
-                    existing.line == flag_use.line && existing.flag_name == flag_use.flag_name
-                });
-                if !already_found
-                    && !plow_core::suppress::is_suppressed(
-                        &module.suppressions,
-                        flag_use.line,
-                        plow_core::suppress::IssueKind::FeatureFlag,
-                    )
-                {
-                    flags.push(flag_use_to_feature_flag(flag_use, module, path));
-                }
-            }
-        }
     }
-
-    // Run dead code analysis for cross-reference (flags guarding dead code).
-    // Uses pre-parsed modules to avoid re-parsing.
-    #[expect(
-        deprecated,
-        reason = "ADR-008 deprecates plow_core::analyze_with_parse_result and the feature_flags helpers externally; flags still uses the workspace path dependency"
-    )]
-    if let Ok(analysis_output) =
-        plow_core::analyze_with_parse_result(&config, &parse_result.modules)
-    {
-        plow_core::analyze::feature_flags::correlate_with_dead_code(
-            &mut flags,
-            &analysis_output.results,
-        );
-    }
-
-    // Filter to changed files if --changed-since is active
-    if let Some(git_ref) = opts.changed_since
-        && let Some(changed) = crate::check::get_changed_files(opts.root, git_ref)
-    {
-        flags.retain(|f| changed.contains(&f.path));
-    }
-
-    // Filter to workspace(s) if specified (either --workspace or --changed-workspaces)
-    let ws_scope = match crate::check::resolve_workspace_scope(
-        opts.root,
-        opts.workspace,
-        opts.changed_workspaces,
-        opts.output,
-    ) {
-        Ok(scope) => scope,
-        Err(code) => return code,
-    };
-    if let Some(ref ws_roots) = ws_scope {
-        flags.retain(|f| ws_roots.iter().any(|r| f.path.starts_with(r)));
-    }
-
-    // Sort for deterministic output
-    flags.sort_by(|a, b| {
-        a.path
-            .cmp(&b.path)
-            .then(a.line.cmp(&b.line))
-            .then(a.flag_name.cmp(&b.flag_name))
-    });
-
-    // Apply top N limit
-    if let Some(top) = opts.top {
-        flags.truncate(top);
-    }
-
-    let elapsed = start.elapsed();
-
-    // Badge format is health-only
-    if matches!(
-        opts.output,
-        OutputFormat::PrCommentGithub
-            | OutputFormat::PrCommentGitlab
-            | OutputFormat::ReviewGithub
-            | OutputFormat::ReviewGitlab
-            | OutputFormat::Badge
-    ) {
-        return emit_error(
-            "flags supports human, json, compact, sarif, markdown, and codeclimate output",
-            2,
-            opts.output,
-        );
-    }
-
-    // Render output
-    print_flags_result(&flags, &config, opts, elapsed);
-
-    ExitCode::SUCCESS
 }
 
 /// Print feature flag results in the requested format.
@@ -254,9 +262,10 @@ fn print_flags_result(
     config: &ResolvedConfig,
     opts: &FlagsOptions<'_>,
     elapsed: std::time::Duration,
+    files_scanned: usize,
 ) {
     match opts.output {
-        OutputFormat::Human => print_flags_human(flags, config, elapsed, opts.quiet),
+        OutputFormat::Human => print_flags_human(flags, config, elapsed, opts.quiet, files_scanned),
         OutputFormat::Json => print_flags_json(flags, config, elapsed, opts.explain),
         OutputFormat::Compact => print_flags_compact(flags, config),
         OutputFormat::Sarif => print_flags_sarif(flags, config),
@@ -309,12 +318,90 @@ fn print_file_path(display: &str) {
     }
 }
 
+/// When `plow flags` finds nothing, surface the configuration surface so the
+/// user can distinguish a true negative from "plow does not recognize my SDK
+/// yet". On full defaults the hint enumerates the built-in detectors (sourced
+/// from `plow_core::extract::flags`, never hardcoded) and points at the config
+/// knobs. When custom `flags.*` config is present, it collapses to a single
+/// terse acknowledgement so users who already found the surface are not nagged.
+/// All lines go to stderr, mirroring the empty-result line they follow.
+fn print_empty_flags_hint(config: &ResolvedConfig, files_scanned: usize) {
+    use colored::Colorize;
+
+    let custom_sdk = config.flags.sdk_patterns.len();
+    let custom_env = config.flags.env_prefixes.len();
+    let heuristics = config.flags.config_object_heuristics;
+    let has_custom = custom_sdk > 0 || custom_env > 0 || heuristics;
+
+    let files_label = if files_scanned == 1 { "file" } else { "files" };
+
+    if has_custom {
+        let mut parts: Vec<String> = Vec::new();
+        if custom_sdk > 0 {
+            parts.push(format!(
+                "{custom_sdk} custom SDK pattern{}",
+                if custom_sdk == 1 { "" } else { "s" }
+            ));
+        }
+        if custom_env > 0 {
+            parts.push(format!(
+                "{custom_env} custom env prefix{}",
+                if custom_env == 1 { "" } else { "es" }
+            ));
+        }
+        if heuristics {
+            parts.push("config-object heuristics enabled".to_string());
+        }
+        eprintln!(
+            "  {}",
+            format!(
+                "Scanned {files_scanned} {files_label} with your custom flag config: {}.",
+                parts.join(", ")
+            )
+            .dimmed()
+        );
+        return;
+    }
+
+    let env_prefixes = plow_core::extract::flags::builtin_env_prefixes()
+        .iter()
+        .map(|p| format!("{p}*"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let providers = plow_core::extract::flags::builtin_sdk_providers().join(", ");
+
+    eprintln!(
+        "  {}",
+        format!("Scanned {files_scanned} {files_label} for:").dimmed()
+    );
+    eprintln!(
+        "    {} Env prefixes: {}",
+        "\u{00b7}".dimmed(),
+        env_prefixes.dimmed()
+    );
+    eprintln!("    {} SDKs: {}", "\u{00b7}".dimmed(), providers.dimmed());
+    eprintln!(
+        "  {}",
+        "Using a different SDK (in-house, or one not listed)? Add it via `flags.sdkPatterns` in your config.".dimmed()
+    );
+    eprintln!(
+        "  {}",
+        "For property-access patterns (config.featureX), enable `flags.configObjectHeuristics`."
+            .dimmed()
+    );
+    eprintln!(
+        "  {}",
+        "Docs: https://docs.genesis-plow.dev/cli/flags#configuration".dimmed()
+    );
+}
+
 /// Human-readable output for `plow flags`.
 fn print_flags_human(
     flags: &[FeatureFlag],
     config: &ResolvedConfig,
     elapsed: std::time::Duration,
     quiet: bool,
+    files_scanned: usize,
 ) {
     use colored::Colorize;
 
@@ -325,17 +412,16 @@ fn print_flags_human(
                 "\u{2713}".green().bold(),
                 elapsed.as_secs_f64()
             );
+            print_empty_flags_hint(config, files_scanned);
         }
         return;
     }
 
-    // Separate flags guarding dead code (cross-reference) from inventory
     let dead_code_flags: Vec<&FeatureFlag> = flags
         .iter()
         .filter(|f| !f.guarded_dead_exports.is_empty())
         .collect();
 
-    // Cross-reference section first (the primary value)
     if !dead_code_flags.is_empty() {
         let label = format!("Flags guarding dead code ({})", dead_code_flags.len());
         println!("{} {}", "\u{25cf}".yellow(), label.yellow().bold());
@@ -372,7 +458,6 @@ fn print_flags_human(
         println!();
     }
 
-    // Full inventory section
     let mut by_file: Vec<(&std::path::Path, Vec<&FeatureFlag>)> = Vec::new();
     for flag in flags {
         if let Some(entry) = by_file.iter_mut().find(|(p, _)| *p == flag.path.as_path()) {
@@ -400,7 +485,6 @@ fn print_flags_human(
         }
     }
 
-    // Footer
     if !quiet {
         let elapsed_str = format!("{:.2}s", elapsed.as_secs_f64());
         eprintln!(
@@ -466,11 +550,15 @@ fn kind_label(flag: &FeatureFlag) -> &'static str {
 }
 
 /// SARIF output for `plow flags`.
+#[expect(
+    clippy::expect_used,
+    reason = "feature flag SARIF JSON is built from serializable literals"
+)]
 fn print_flags_sarif(flags: &[FeatureFlag], config: &ResolvedConfig) {
     let rules = vec![serde_json::json!({
         "id": "plow/feature-flag",
         "shortDescription": { "text": "Feature flag pattern detected" },
-        "helpUri": "https://docs.genesis-plow.dev/explanations/feature-flags",
+        "helpUri": "https://docs.genesis-plow.dev/cli/flags",
         "defaultConfiguration": { "level": "note" },
     })];
 
@@ -510,7 +598,7 @@ fn print_flags_sarif(flags: &[FeatureFlag], config: &ResolvedConfig) {
                 "driver": {
                     "name": "plow",
                     "version": env!("CARGO_PKG_VERSION"),
-                    "informationUri": "https://github.com/plow-rs/plow",
+                    "informationUri": "https://github.com/fglogan/genesis-plow",
                     "rules": rules,
                 }
             },
@@ -535,10 +623,8 @@ fn print_flags_markdown(flags: &[FeatureFlag], config: &ResolvedConfig) {
         return;
     }
 
-    // Summary heading
     println!("## Feature flags: {} found\n", flags.len());
 
-    // Cross-reference section first
     let dead_flags: Vec<&FeatureFlag> = flags
         .iter()
         .filter(|f| !f.guarded_dead_exports.is_empty())
@@ -560,7 +646,6 @@ fn print_flags_markdown(flags: &[FeatureFlag], config: &ResolvedConfig) {
         println!();
     }
 
-    // Full inventory
     println!("### Feature flags ({})\n", flags.len());
     println!("| File | Line | Flag | Kind |");
     println!("|------|------|------|------|");
@@ -580,11 +665,14 @@ fn print_flags_markdown(flags: &[FeatureFlag], config: &ResolvedConfig) {
 }
 
 /// CodeClimate output for `plow flags` (GitLab Code Quality).
+#[expect(
+    clippy::expect_used,
+    reason = "feature flag CodeClimate JSON is built from serializable literals"
+)]
 fn print_flags_codeclimate(flags: &[FeatureFlag], config: &ResolvedConfig) {
     let issues: Vec<serde_json::Value> = flags
         .iter()
         .map(|f| {
-            // Use crate::report::n for bracket encoding (Next.js dynamic routes)
             let path = crate::report::normalize_uri(&relative_path(f, &config.root));
             let mut description = format!(
                 "Feature flag '{}' detected ({})",
@@ -623,6 +711,10 @@ fn print_flags_codeclimate(flags: &[FeatureFlag], config: &ResolvedConfig) {
 }
 
 /// JSON output for `plow flags`.
+#[expect(
+    clippy::expect_used,
+    reason = "feature flag JSON output is built from serializable literals"
+)]
 fn print_flags_json(
     flags: &[FeatureFlag],
     config: &ResolvedConfig,
@@ -715,13 +807,221 @@ fn print_flags_json(
                     "medium": "Pattern match with some ambiguity",
                     "low": "Heuristic match (config objects), may produce false positives",
                 },
-                "docs": "https://docs.genesis-plow.dev/explanations/feature-flags",
+                "docs": "https://docs.genesis-plow.dev/cli/flags",
             }
         });
     }
+    crate::output_envelope::attach_telemetry_meta(&mut output);
 
     println!(
         "{}",
         serde_json::to_string_pretty(&output).expect("JSON serialization should not fail")
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    /// No explicit `--config`; static so the `&Option<PathBuf>` field borrows it.
+    const NO_CONFIG: Option<PathBuf> = None;
+
+    fn flags_fixture_root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/feature-flag-suppression")
+    }
+
+    fn flag(kind: FlagKind, name: &str, path: &str) -> FeatureFlag {
+        FeatureFlag {
+            path: PathBuf::from(path),
+            flag_name: name.to_owned(),
+            kind,
+            confidence: FlagConfidence::High,
+            line: 3,
+            col: 2,
+            guard_span_start: None,
+            guard_span_end: None,
+            sdk_name: None,
+            guard_line_start: None,
+            guard_line_end: None,
+            guarded_dead_exports: Vec::new(),
+        }
+    }
+
+    fn flags_opts(root: &Path, output: OutputFormat) -> FlagsOptions<'_> {
+        FlagsOptions {
+            root,
+            config_path: &NO_CONFIG,
+            output,
+            no_cache: true,
+            threads: 1,
+            quiet: true,
+            production: false,
+            workspace: None,
+            changed_workspaces: None,
+            changed_since: None,
+            explain: false,
+            top: None,
+        }
+    }
+
+    #[test]
+    fn fnv_fingerprint_is_deterministic_16_hex() {
+        let a = fnv_fingerprint(&["src/index.ts", "FEATURE_X", "3"]);
+        let b = fnv_fingerprint(&["src/index.ts", "FEATURE_X", "3"]);
+        assert_eq!(a, b);
+        assert_eq!(a.len(), 16);
+        assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
+        // Per-part separation means reordering parts changes the digest.
+        assert_ne!(a, fnv_fingerprint(&["FEATURE_X", "src/index.ts", "3"]));
+    }
+
+    #[test]
+    fn escape_backticks_escapes_only_backticks() {
+        assert_eq!(escape_backticks("a`b`c"), "a\\`b\\`c");
+        assert_eq!(escape_backticks("no ticks"), "no ticks");
+    }
+
+    #[test]
+    fn kind_label_covers_all_kinds() {
+        assert_eq!(
+            kind_label(&flag(FlagKind::EnvironmentVariable, "X", "a.ts")),
+            "environment variable"
+        );
+        assert_eq!(
+            kind_label(&flag(FlagKind::SdkCall, "X", "a.ts")),
+            "SDK call"
+        );
+        assert_eq!(
+            kind_label(&flag(FlagKind::ConfigObject, "X", "a.ts")),
+            "config object"
+        );
+    }
+
+    #[test]
+    fn relative_path_strips_root_and_normalizes_separators() {
+        let root = Path::new("/proj");
+        let f = flag(FlagKind::EnvironmentVariable, "X", "/proj/src/index.ts");
+        assert_eq!(relative_path(&f, root), "src/index.ts");
+        // A path outside the root is returned as-is (normalized).
+        let outside = flag(FlagKind::EnvironmentVariable, "X", "/other/file.ts");
+        assert_eq!(relative_path(&outside, root), "/other/file.ts");
+    }
+
+    #[test]
+    fn kind_tag_labels_sdk_with_and_without_name() {
+        colored::control::set_override(false);
+        let mut sdk = flag(FlagKind::SdkCall, "X", "a.ts");
+        sdk.sdk_name = Some("LaunchDarkly".to_owned());
+        assert_eq!(kind_tag(&sdk), "(SDK: LaunchDarkly)");
+        sdk.sdk_name = None;
+        assert_eq!(kind_tag(&sdk), "(SDK)");
+        assert_eq!(
+            kind_tag(&flag(FlagKind::EnvironmentVariable, "X", "a.ts")),
+            "(env)"
+        );
+        assert_eq!(
+            kind_tag(&flag(FlagKind::ConfigObject, "X", "a.ts")),
+            "(config, heuristic)"
+        );
+    }
+
+    #[test]
+    fn run_flags_renders_every_supported_format() {
+        colored::control::set_override(false);
+        let root = flags_fixture_root();
+        for output in [
+            OutputFormat::Human,
+            OutputFormat::Json,
+            OutputFormat::Compact,
+            OutputFormat::Sarif,
+            OutputFormat::Markdown,
+            OutputFormat::CodeClimate,
+        ] {
+            assert_eq!(
+                run_flags(&flags_opts(&root, output)),
+                ExitCode::SUCCESS,
+                "format {output:?} should render and exit 0"
+            );
+        }
+    }
+
+    #[test]
+    fn run_flags_with_explain_emits_json_meta() {
+        let root = flags_fixture_root();
+        let opts = FlagsOptions {
+            explain: true,
+            ..flags_opts(&root, OutputFormat::Json)
+        };
+        assert_eq!(run_flags(&opts), ExitCode::SUCCESS);
+    }
+
+    #[test]
+    fn run_flags_rejects_unsupported_format() {
+        let root = flags_fixture_root();
+        // Badge / PR-comment / review formats are not supported by `flags`.
+        assert_eq!(
+            run_flags(&flags_opts(&root, OutputFormat::Badge)),
+            ExitCode::from(2)
+        );
+    }
+
+    #[test]
+    fn run_flags_empty_default_config_surfaces_detectors_hint() {
+        colored::control::set_override(false);
+        let root =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/flags-none-default");
+        // Non-quiet so the built-in detectors hint renders on an empty result.
+        let opts = FlagsOptions {
+            quiet: false,
+            ..flags_opts(&root, OutputFormat::Human)
+        };
+        assert_eq!(run_flags(&opts), ExitCode::SUCCESS);
+    }
+
+    #[test]
+    fn run_flags_empty_custom_config_surfaces_terse_hint() {
+        colored::control::set_override(false);
+        let root =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/flags-none-custom");
+        let opts = FlagsOptions {
+            quiet: false,
+            ..flags_opts(&root, OutputFormat::Human)
+        };
+        assert_eq!(run_flags(&opts), ExitCode::SUCCESS);
+    }
+
+    #[test]
+    fn run_flags_renders_sdk_call_flag_across_formats() {
+        colored::control::set_override(false);
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"flags-sdk","main":"src/index.ts"}"#,
+        )
+        .unwrap();
+        // `variation('name', ...)` is a built-in LaunchDarkly SDK flag pattern,
+        // so the SDK-name branches of every renderer are exercised.
+        std::fs::write(
+            root.join("src/index.ts"),
+            "export function boot() {\n  if (variation('checkout-flag', false)) {\n    console.log('on');\n  }\n}\n",
+        )
+        .unwrap();
+        for output in [
+            OutputFormat::Human,
+            OutputFormat::Compact,
+            OutputFormat::Sarif,
+            OutputFormat::Markdown,
+            OutputFormat::CodeClimate,
+            OutputFormat::Json,
+        ] {
+            assert_eq!(
+                run_flags(&flags_opts(root, output)),
+                ExitCode::SUCCESS,
+                "SDK-flag render for {output:?} should exit 0"
+            );
+        }
+    }
 }

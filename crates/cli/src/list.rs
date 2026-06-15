@@ -2,6 +2,7 @@ use std::process::ExitCode;
 
 use plow_config::OutputFormat;
 
+use crate::output_envelope::{WorkspaceInfo, WorkspacesOutput};
 use crate::report::format_display_path;
 use crate::runtime_support::load_config;
 
@@ -20,11 +21,6 @@ pub struct ListOptions<'a> {
 }
 
 pub fn run_list(opts: &ListOptions<'_>) -> ExitCode {
-    // Thread the user-supplied `--format` through so config-load failures
-    // (including the boundary-validation gate in `runtime_support`) render
-    // as structured JSON when `--format json` is active. Previously hardcoded
-    // to `OutputFormat::Human`, which downgraded JSON callers to human-text
-    // errors on `list --boundaries --format json`. (Surfaced by review of #468.)
     let config = match load_config(
         opts.root,
         opts.config_path,
@@ -40,38 +36,11 @@ pub fn run_list(opts: &ListOptions<'_>) -> ExitCode {
 
     let show_all = should_show_all(opts);
 
-    // Run plugin detection when plugin output is requested or when entry-point
-    // discovery needs plugin-provided entry points.
-    let plugin_result = if opts.plugins || opts.entry_points || show_all {
-        let disc = plow_core::discover::discover_files_with_plugin_scopes(&config);
-        let file_paths: Vec<std::path::PathBuf> = disc.iter().map(|f| f.path.clone()).collect();
-        let registry = plow_core::plugins::PluginRegistry::new(config.external_plugins.clone());
-
-        let pkg_path = opts.root.join("package.json");
-        let mut result = plow_config::PackageJson::load(&pkg_path).map_or_else(
-            |_| plow_core::plugins::AggregatedPluginResult::default(),
-            |pkg| registry.run(&pkg, opts.root, &file_paths),
-        );
-
-        // Also run plugins for workspace packages
-        let workspaces = plow_config::discover_workspaces(opts.root);
-        for ws in &workspaces {
-            let ws_pkg_path = ws.root.join("package.json");
-            if let Ok(ws_pkg) = plow_config::PackageJson::load(&ws_pkg_path) {
-                let ws_result = registry.run(&ws_pkg, &ws.root, &file_paths);
-                for plugin_name in &ws_result.active_plugins {
-                    if !result.active_plugins.contains(plugin_name) {
-                        result.active_plugins.push(plugin_name.clone());
-                    }
-                }
-            }
-        }
-        Some(result)
-    } else {
-        None
+    let plugin_result = match collect_plugin_result(opts, &config, show_all) {
+        Ok(result) => result,
+        Err(code) => return code,
     };
 
-    // Discover files once if needed by files, entry_points, or boundaries
     let need_files = needs_file_discovery(opts.files, show_all, opts.entry_points, opts.boundaries);
     let discovered = if need_files {
         Some(plow_core::discover::discover_files_with_plugin_scopes(
@@ -81,106 +50,119 @@ pub fn run_list(opts: &ListOptions<'_>) -> ExitCode {
         None
     };
 
-    // Compute entry points once (shared by both JSON and human output branches)
-    let all_entry_points = if (opts.entry_points || show_all)
-        && let Some(ref disc) = discovered
-    {
-        let mut entries = plow_core::discover::discover_entry_points(&config, disc);
-        // Add workspace entry points
-        let workspaces = plow_config::discover_workspaces(opts.root);
-        for ws in &workspaces {
-            let ws_entries =
-                plow_core::discover::discover_workspace_entry_points(&ws.root, &config, disc);
-            entries.extend(ws_entries);
-        }
-        // Add plugin-discovered entry points
-        if let Some(ref pr) = plugin_result {
-            let plugin_entries =
-                plow_core::discover::discover_plugin_entry_points(pr, &config, disc);
-            entries.extend(plugin_entries);
-        }
-        Some(entries)
-    } else {
-        None
-    };
+    let all_entry_points = collect_list_entry_points(
+        opts,
+        &config,
+        show_all,
+        discovered.as_deref(),
+        plugin_result.as_ref(),
+    );
 
-    // Boundaries are opt-in to keep the default list view focused on files,
-    // plugins, and entry points.
     let boundary_data = if opts.boundaries {
         Some(compute_boundary_data(&config, discovered.as_deref()))
     } else {
         None
     };
 
-    // Workspaces and their discovery diagnostics. When opted-in (or under
-    // show-all), call the diagnostics-aware discovery so users see the cause
-    // of "plow doesn't see my package". A root package.json that fails to
-    // parse hard-exits with code 2 here, matching the validate-boundaries
-    // exit-code policy (issue #468). Also run the undeclared-workspace pass
-    // so the introspection command surfaces every diagnostic kind from the
-    // `WorkspaceDiagnosticKind` enum, not only the four config-load kinds
-    // that `discover_workspaces_with_diagnostics` produces.
-    let workspace_data = if opts.workspaces || show_all {
-        match plow_config::discover_workspaces_with_diagnostics(
-            opts.root,
-            &config.ignore_patterns,
-        ) {
-            Ok((workspaces, mut diagnostics)) => {
-                // Append undeclared-workspace diagnostics, suppressing any
-                // path already carrying a load-time diagnostic (typically
-                // MalformedPackageJson; that directory IS declared, just
-                // dropped for being malformed, so re-flagging it as
-                // "undeclared" would mislead).
-                let undeclared = plow_config::find_undeclared_workspaces_with_ignores(
-                    opts.root,
-                    &workspaces,
-                    &config.ignore_patterns,
-                );
-                let already_flagged: rustc_hash::FxHashSet<std::path::PathBuf> = diagnostics
-                    .iter()
-                    .map(|d| dunce::canonicalize(&d.path).unwrap_or_else(|_| d.path.clone()))
-                    .collect();
-                for diag in undeclared {
-                    let canonical =
-                        dunce::canonicalize(&diag.path).unwrap_or_else(|_| diag.path.clone());
-                    if !already_flagged.contains(&canonical) {
-                        diagnostics.push(diag);
-                    }
-                }
-                Some(WorkspaceData {
-                    workspaces,
-                    diagnostics,
-                })
-            }
-            Err(err) => {
-                return crate::error::emit_error(&err.to_string(), 2, opts.output);
-            }
-        }
-    } else {
-        None
+    let workspace_data = match collect_list_workspace_data(opts, &config, show_all) {
+        Ok(data) => data,
+        Err(code) => return code,
     };
 
     match opts.output {
-        OutputFormat::Json => print_list_json(
+        OutputFormat::Json => print_list_json(&ListJsonInput {
             opts,
             show_all,
-            plugin_result.as_ref(),
-            discovered.as_deref(),
-            all_entry_points.as_deref(),
-            boundary_data.as_ref(),
-            workspace_data.as_ref(),
-        ),
+            plugin_result: plugin_result.as_ref(),
+            discovered: discovered.as_deref(),
+            entry_points: all_entry_points.as_deref(),
+            boundary_data: boundary_data.as_ref(),
+            workspace_data: workspace_data.as_ref(),
+        }),
         _ => {
-            print_list_human(
+            print_list_human(&ListHumanInput {
                 opts,
                 show_all,
-                plugin_result.as_ref(),
-                discovered.as_deref(),
-                all_entry_points.as_deref(),
-                boundary_data.as_ref(),
-                workspace_data.as_ref(),
-            );
+                plugin_result: plugin_result.as_ref(),
+                discovered: discovered.as_deref(),
+                entry_points: all_entry_points.as_deref(),
+                boundary_data: boundary_data.as_ref(),
+                workspace_data: workspace_data.as_ref(),
+            });
             ExitCode::SUCCESS
+        }
+    }
+}
+
+fn collect_list_entry_points(
+    opts: &ListOptions<'_>,
+    config: &plow_config::ResolvedConfig,
+    show_all: bool,
+    discovered: Option<&[plow_types::discover::DiscoveredFile]>,
+    plugin_result: Option<&plow_core::plugins::AggregatedPluginResult>,
+) -> Option<Vec<plow_core::discover::EntryPoint>> {
+    if !(opts.entry_points || show_all) {
+        return None;
+    }
+    let disc = discovered?;
+    let mut entries = plow_core::discover::discover_entry_points(config, disc);
+    let workspaces = plow_config::discover_workspaces(opts.root);
+    for ws in &workspaces {
+        let ws_entries =
+            plow_core::discover::discover_workspace_entry_points(&ws.root, config, disc);
+        entries.extend(ws_entries);
+    }
+    if let Some(pr) = plugin_result {
+        let plugin_entries = plow_core::discover::discover_plugin_entry_points(pr, config, disc);
+        entries.extend(plugin_entries);
+    }
+    Some(entries)
+}
+
+fn collect_list_workspace_data(
+    opts: &ListOptions<'_>,
+    config: &plow_config::ResolvedConfig,
+    show_all: bool,
+) -> Result<Option<WorkspaceData>, ExitCode> {
+    if !(opts.workspaces || show_all) {
+        return Ok(None);
+    }
+    match plow_config::discover_workspaces_with_diagnostics(opts.root, &config.ignore_patterns) {
+        Ok((workspaces, mut diagnostics)) => {
+            append_undeclared_workspace_diagnostics(
+                opts.root,
+                config,
+                &workspaces,
+                &mut diagnostics,
+            );
+            Ok(Some(WorkspaceData {
+                workspaces,
+                diagnostics,
+            }))
+        }
+        Err(err) => Err(crate::error::emit_error(&err.to_string(), 2, opts.output)),
+    }
+}
+
+fn append_undeclared_workspace_diagnostics(
+    root: &std::path::Path,
+    config: &plow_config::ResolvedConfig,
+    workspaces: &[plow_config::WorkspaceInfo],
+    diagnostics: &mut Vec<plow_config::WorkspaceDiagnostic>,
+) {
+    let undeclared = plow_config::find_undeclared_workspaces_with_ignores(
+        root,
+        workspaces,
+        &config.ignore_patterns,
+    );
+    let already_flagged: rustc_hash::FxHashSet<std::path::PathBuf> = diagnostics
+        .iter()
+        .map(|d| dunce::canonicalize(&d.path).unwrap_or_else(|_| d.path.clone()))
+        .collect();
+    for diag in undeclared {
+        let canonical = dunce::canonicalize(&diag.path).unwrap_or_else(|_| diag.path.clone());
+        if !already_flagged.contains(&canonical) {
+            diagnostics.push(diag);
         }
     }
 }
@@ -206,18 +188,93 @@ const fn needs_file_discovery(
     files || show_all || entry_points || boundaries
 }
 
-// ── Output helpers ─────────────────────────────────────────────
+fn collect_plugin_result(
+    opts: &ListOptions<'_>,
+    config: &plow_config::ResolvedConfig,
+    show_all: bool,
+) -> Result<Option<plow_core::plugins::AggregatedPluginResult>, ExitCode> {
+    if !(opts.plugins || opts.entry_points || show_all) {
+        return Ok(None);
+    }
+    let disc = plow_core::discover::discover_files_with_plugin_scopes(config);
+    let file_paths: Vec<std::path::PathBuf> = disc.iter().map(|f| f.path.clone()).collect();
+    let registry = plow_core::plugins::PluginRegistry::new(config.external_plugins.clone());
+    let mut result = run_package_plugins(
+        &registry,
+        &opts.root.join("package.json"),
+        opts.root,
+        &file_paths,
+        opts.output,
+    )?
+    .unwrap_or_default();
+    merge_workspace_plugins(opts, &registry, &file_paths, &mut result)?;
+    Ok(Some(result))
+}
+
+fn run_package_plugins(
+    registry: &plow_core::plugins::PluginRegistry,
+    package_path: &std::path::Path,
+    root: &std::path::Path,
+    file_paths: &[std::path::PathBuf],
+    output: OutputFormat,
+) -> Result<Option<plow_core::plugins::AggregatedPluginResult>, ExitCode> {
+    let Ok(pkg) = plow_config::PackageJson::load(package_path) else {
+        return Ok(None);
+    };
+    registry
+        .try_run(&pkg, root, file_paths)
+        .map(Some)
+        .map_err(|errors| {
+            let message = plow_core::plugins::registry::format_plugin_regex_errors(&errors);
+            crate::error::emit_error(&message, 2, output)
+        })
+}
+
+fn merge_workspace_plugins(
+    opts: &ListOptions<'_>,
+    registry: &plow_core::plugins::PluginRegistry,
+    file_paths: &[std::path::PathBuf],
+    result: &mut plow_core::plugins::AggregatedPluginResult,
+) -> Result<(), ExitCode> {
+    for ws in &plow_config::discover_workspaces(opts.root) {
+        let Some(ws_result) = run_package_plugins(
+            registry,
+            &ws.root.join("package.json"),
+            &ws.root,
+            file_paths,
+            opts.output,
+        )?
+        else {
+            continue;
+        };
+        for plugin_name in &ws_result.active_plugins {
+            if !result.active_plugins.contains(plugin_name) {
+                result.active_plugins.push(plugin_name.clone());
+            }
+        }
+    }
+    Ok(())
+}
 
 /// Print list results as JSON and return the appropriate exit code.
-fn print_list_json(
-    opts: &ListOptions<'_>,
+struct ListJsonInput<'a> {
+    opts: &'a ListOptions<'a>,
     show_all: bool,
-    plugin_result: Option<&plow_core::plugins::AggregatedPluginResult>,
-    discovered: Option<&[plow_core::discover::DiscoveredFile]>,
-    entry_points: Option<&[plow_core::discover::EntryPoint]>,
-    boundary_data: Option<&BoundaryData>,
-    workspace_data: Option<&WorkspaceData>,
-) -> ExitCode {
+    plugin_result: Option<&'a plow_core::plugins::AggregatedPluginResult>,
+    discovered: Option<&'a [plow_core::discover::DiscoveredFile]>,
+    entry_points: Option<&'a [plow_core::discover::EntryPoint]>,
+    boundary_data: Option<&'a BoundaryData>,
+    workspace_data: Option<&'a WorkspaceData>,
+}
+
+fn print_list_json(input: &ListJsonInput<'_>) -> ExitCode {
+    let opts = input.opts;
+    let show_all = input.show_all;
+    let plugin_result = input.plugin_result;
+    let discovered = input.discovered;
+    let entry_points = input.entry_points;
+    let boundary_data = input.boundary_data;
+    let workspace_data = input.workspace_data;
     let mut result = serde_json::Map::new();
 
     if (opts.plugins || show_all)
@@ -234,10 +291,6 @@ fn print_list_json(
     if (opts.files || show_all)
         && let Some(disc) = discovered
     {
-        // Normalise to forward slashes on Windows so JSON consumers (CI
-        // glob filters, MCP agents, downstream pipelines) get the same
-        // path shape they get on POSIX. Mirrors the workspaces / nudge /
-        // rollup path normalisation that ships through `format_display_path`.
         let paths: Vec<serde_json::Value> = disc
             .iter()
             .map(|f| serde_json::json!(format_display_path(&f.path, opts.root)))
@@ -263,51 +316,31 @@ fn print_list_json(
         result.insert("entry_points".to_string(), serde_json::json!(eps));
     }
 
+    let has_boundaries = boundary_data.is_some();
     if let Some(bd) = boundary_data {
         result.insert("boundaries".to_string(), boundary_data_to_json(bd));
     }
 
+    let workspace_only =
+        opts.workspaces && !opts.plugins && !opts.files && !opts.entry_points && !opts.boundaries;
     if let Some(ws) = workspace_data {
-        let ws_json: Vec<serde_json::Value> = ws
-            .workspaces
-            .iter()
-            .map(|w| {
-                let relative = w.root.strip_prefix(opts.root).unwrap_or(&w.root);
-                serde_json::json!({
-                    "name": w.name,
-                    "path": relative.display().to_string().replace('\\', "/"),
-                    "is_internal_dependency": w.is_internal_dependency,
-                })
-            })
-            .collect();
-        // Diagnostics serialize through their `Serialize` impl which emits the
-        // absolute `PathBuf`. Relativise via `strip_root_prefix` so the
-        // `path` and the rendered `message` text both line up with the rest
-        // of plow's project-root-relative JSON convention. This mirrors
-        // what `build_json_with_config_fixable` (check / audit / combined)
-        // does for the same field.
+        let mut workspace_value = serde_json::to_value(workspace_data_to_output(opts.root, ws))
+            .unwrap_or(serde_json::Value::Null);
         let root_prefix = format!("{}/", opts.root.display());
-        let diag_json: Vec<serde_json::Value> = ws
-            .diagnostics
-            .iter()
-            .map(|d| {
-                let mut value = serde_json::to_value(d).unwrap_or(serde_json::Value::Null);
-                crate::report::strip_root_prefix(&mut value, &root_prefix);
-                value
-            })
-            .collect();
-        result.insert(
-            "workspace_count".to_string(),
-            serde_json::json!(ws_json.len()),
-        );
-        result.insert("workspaces".to_string(), serde_json::json!(ws_json));
-        result.insert(
-            "workspace_diagnostics".to_string(),
-            serde_json::json!(diag_json),
-        );
+        crate::report::strip_root_prefix(&mut workspace_value, &root_prefix);
+        if let serde_json::Value::Object(map) = workspace_value {
+            result.extend(map);
+        }
     }
 
-    match serde_json::to_string_pretty(&serde_json::Value::Object(result)) {
+    let mut output = serde_json::Value::Object(result);
+    if has_boundaries {
+        crate::output_envelope::apply_root_kind(&mut output, "list-boundaries");
+    } else if workspace_only {
+        crate::output_envelope::apply_root_kind(&mut output, "list-workspaces");
+    }
+
+    match serde_json::to_string_pretty(&output) {
         Ok(json) => {
             println!("{json}");
             ExitCode::SUCCESS
@@ -319,16 +352,45 @@ fn print_list_json(
     }
 }
 
+fn workspace_data_to_output(root: &std::path::Path, ws: &WorkspaceData) -> WorkspacesOutput {
+    let workspaces = ws
+        .workspaces
+        .iter()
+        .map(|w| {
+            let relative = w.root.strip_prefix(root).unwrap_or(&w.root);
+            WorkspaceInfo {
+                name: w.name.clone(),
+                path: relative.display().to_string().replace('\\', "/"),
+                is_internal_dependency: w.is_internal_dependency,
+            }
+        })
+        .collect::<Vec<_>>();
+    WorkspacesOutput {
+        workspace_count: workspaces.len(),
+        workspaces,
+        workspace_diagnostics: ws.diagnostics.clone(),
+    }
+}
+
 /// Print list results in human-readable format.
-fn print_list_human(
-    opts: &ListOptions<'_>,
+struct ListHumanInput<'a> {
+    opts: &'a ListOptions<'a>,
     show_all: bool,
-    plugin_result: Option<&plow_core::plugins::AggregatedPluginResult>,
-    discovered: Option<&[plow_core::discover::DiscoveredFile]>,
-    entry_points: Option<&[plow_core::discover::EntryPoint]>,
-    boundary_data: Option<&BoundaryData>,
-    workspace_data: Option<&WorkspaceData>,
-) {
+    plugin_result: Option<&'a plow_core::plugins::AggregatedPluginResult>,
+    discovered: Option<&'a [plow_core::discover::DiscoveredFile]>,
+    entry_points: Option<&'a [plow_core::discover::EntryPoint]>,
+    boundary_data: Option<&'a BoundaryData>,
+    workspace_data: Option<&'a WorkspaceData>,
+}
+
+fn print_list_human(input: &ListHumanInput<'_>) {
+    let opts = input.opts;
+    let show_all = input.show_all;
+    let plugin_result = input.plugin_result;
+    let discovered = input.discovered;
+    let entry_points = input.entry_points;
+    let boundary_data = input.boundary_data;
+    let workspace_data = input.workspace_data;
     if (opts.plugins || show_all)
         && let Some(pr) = plugin_result
     {
@@ -363,11 +425,6 @@ fn print_list_human(
     }
 
     if let Some(ws) = workspace_data {
-        // `opts.workspaces` true means the user typed `--workspaces` (or the
-        // `plow workspaces` alias). `show_all` means the section is
-        // implicit. The explicit case prints "No workspaces declared
-        // (single-package project)." instead of silence; the implicit case
-        // stays quiet on empty.
         print_workspace_data_human(opts.root, ws, opts.workspaces);
     }
 }
@@ -409,11 +466,6 @@ fn print_workspace_data_human(root: &std::path::Path, ws: &WorkspaceData, explic
             ws.diagnostics.len(),
             if ws.diagnostics.len() == 1 { "" } else { "s" }
         );
-        // Render the kebab-case kind ONLY in the JSON envelope; the human
-        // surface stays human ("Dropped workspace 'packages/bad': ...")
-        // because the message itself already names the diagnostic in
-        // user-facing prose. Consumers that need to dispatch on `kind` use
-        // `--format json`.
         for d in &ws.diagnostics {
             eprintln!("  - {}", d.message);
         }
@@ -427,8 +479,6 @@ struct WorkspaceData {
     workspaces: Vec<plow_config::WorkspaceInfo>,
     diagnostics: Vec<plow_config::WorkspaceDiagnostic>,
 }
-
-// ── Boundary listing helpers ───────────────────────────────────
 
 struct BoundaryData {
     zones: Vec<ZoneInfo>,
@@ -536,8 +586,6 @@ fn compute_boundary_data(
         })
         .collect();
 
-    // Index zones by name once for O(1) child file_count lookups; the
-    // per-child loop below would otherwise scan the zone list quadratically.
     let zone_count_by_name: rustc_hash::FxHashMap<&str, usize> = zones
         .iter()
         .map(|z| (z.name.as_str(), z.file_count))
@@ -585,10 +633,6 @@ fn compute_boundary_data(
 
 fn boundary_data_to_json(bd: &BoundaryData) -> serde_json::Value {
     if bd.is_empty {
-        // Mirror the configured-branch field set so consumers can read
-        // `zone_count` / `rule_count` / `logical_group_count` without
-        // first branching on `configured`. Keeps the schema symmetric:
-        // the count and the array are always present together.
         return serde_json::json!({
             "configured": false,
             "zone_count": 0,
@@ -648,12 +692,6 @@ fn logical_group_info_to_json(g: &LogicalGroupInfo) -> serde_json::Value {
     };
     let mut entry = serde_json::Map::new();
     entry.insert("name".to_string(), serde_json::json!(g.name));
-    // `children` and `auto_discover` are always emitted, even when empty:
-    // `status` discriminates "empty dir" vs "invalid path", and consumers
-    // (error renderers, agent tooling) need the authored paths to surface
-    // an actionable hint even when discovery turned up nothing. This
-    // intentionally deviates from the project's `skip_serializing_if =
-    // "Vec::is_empty"` convention.
     entry.insert("children".to_string(), serde_json::json!(g.children));
     entry.insert(
         "auto_discover".to_string(),
@@ -716,9 +754,6 @@ fn print_boundary_data_human(bd: &BoundaryData) {
     }
     eprintln!("Boundaries: {}", header_parts.join(", "));
 
-    // Guard each section symmetrically: a leading header with an empty
-    // body reads as "plow ran but the data is mysteriously absent". A
-    // missing section reads as "this category is not configured".
     if !bd.zones.is_empty() {
         eprintln!("\nZones:");
         for zone in &bd.zones {
@@ -745,11 +780,6 @@ fn print_boundary_data_human(bd: &BoundaryData) {
 
     if !bd.logical_groups.is_empty() {
         eprintln!("\nLogical groups:");
-        // Render non-`ok` groups first so misconfigured autoDiscover paths
-        // surface at the top of the section where they cannot be missed.
-        // JSON output stays in user-declaration order; only the human
-        // render reorders. Stable-sort preserves declaration order within
-        // each status bucket.
         let mut ordered: Vec<&LogicalGroupInfo> = bd.logical_groups.iter().collect();
         ordered.sort_by_key(|g| match g.status {
             plow_config::LogicalGroupStatus::InvalidPath => 0,
@@ -762,11 +792,6 @@ fn print_boundary_data_human(bd: &BoundaryData) {
                 plow_config::LogicalGroupStatus::Empty => " (empty)".to_owned(),
                 plow_config::LogicalGroupStatus::InvalidPath => " (invalid path)".to_owned(),
             };
-            // When a fallback zone exists the total `file_count` packs two
-            // numbers ("children + fallback"). Split them inline so the
-            // human reader can see the breakdown without cross-referencing
-            // `zones[]`. The JSON keeps only the aggregate per the
-            // single-edge-weight Sankey-renderer requirement.
             let file_count_render = if g.fallback_zone.is_some() {
                 format!(
                     "{} {} ({} children + {} fallback)",
@@ -806,8 +831,6 @@ fn pluralize(noun: &str, count: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ── should_show_all ─────────────────────────────────────────
 
     fn make_opts(
         entry_points: bool,
@@ -867,8 +890,6 @@ mod tests {
         assert!(!should_show_all(&make_opts(false, true, true, false)));
     }
 
-    // ── needs_file_discovery ────────────────────────────────────
-
     #[test]
     fn needs_discovery_when_files_requested() {
         assert!(needs_file_discovery(true, false, false, false));
@@ -891,11 +912,8 @@ mod tests {
 
     #[test]
     fn no_discovery_when_only_plugins() {
-        // plugins=true but show_all=false, files=false, entry_points=false, boundaries=false
         assert!(!needs_file_discovery(false, false, false, false));
     }
-
-    // ── ListOptions construction ────────────────────────────────
 
     #[test]
     fn list_options_default_flags() {
@@ -915,8 +933,6 @@ mod tests {
         ));
     }
 
-    // ── boundary_data_to_json (issue #373) ──────────────────────
-
     fn empty_boundary_data() -> BoundaryData {
         BoundaryData {
             zones: vec![],
@@ -930,19 +946,12 @@ mod tests {
     fn boundary_json_empty_includes_logical_groups_key() {
         let json = boundary_data_to_json(&empty_boundary_data());
         assert_eq!(json["configured"], false);
-        // Consumers grepping for the key must see it even when boundaries are
-        // not configured; otherwise the absence-of-key vs absence-of-groups
-        // distinction is ambiguous.
         assert!(json["logical_groups"].is_array());
         assert_eq!(json["logical_groups"].as_array().unwrap().len(), 0);
     }
 
     #[test]
     fn boundary_json_empty_branch_includes_all_count_fields() {
-        // Regression: previously the empty branch emitted arrays without
-        // their matching `*_count` siblings, so consumers had to first
-        // branch on `configured` before reading `zone_count`. Issue #373
-        // reviewer feedback: keep schema symmetric across both branches.
         let json = boundary_data_to_json(&empty_boundary_data());
         assert_eq!(json["zone_count"], 0);
         assert_eq!(json["rule_count"], 0);
@@ -1003,16 +1012,13 @@ mod tests {
         assert_eq!(g["name"], "features");
         assert_eq!(g["children"][0], "features/auth");
         assert_eq!(g["children"][1], "features/billing");
-        // Verbatim string preserved through the JSON layer.
         assert_eq!(g["auto_discover"][0], "./src/features/");
         assert_eq!(g["status"], "ok");
         assert_eq!(g["source_zone_index"], 1);
         assert_eq!(g["file_count"], 8);
         assert_eq!(g["authored_rule"]["allow"][0], "shared");
         assert_eq!(g["authored_rule"]["allow_type_only"][0], "types");
-        // fallback_zone omitted via skip_serializing_if when None.
         assert!(g.get("fallback_zone").is_none());
-        // Optional follow-up fields omitted on the common single-path case.
         assert!(g.get("merged_from").is_none());
         assert!(g.get("original_zone_root").is_none());
         assert!(g.get("child_source_indices").is_none());
@@ -1023,10 +1029,7 @@ mod tests {
         for (status, expected) in [
             (plow_config::LogicalGroupStatus::Ok, "ok"),
             (plow_config::LogicalGroupStatus::Empty, "empty"),
-            (
-                plow_config::LogicalGroupStatus::InvalidPath,
-                "invalid_path",
-            ),
+            (plow_config::LogicalGroupStatus::InvalidPath, "invalid_path"),
         ] {
             let bd = BoundaryData {
                 zones: vec![],
@@ -1080,8 +1083,6 @@ mod tests {
             is_empty: false,
         };
         let json = boundary_data_to_json(&bd);
-        // Bulletproof shape: the fallback zone cross-reference is present
-        // when the parent has both `patterns` and `autoDiscover`.
         assert_eq!(json["logical_groups"][0]["fallback_zone"], "features");
     }
 
@@ -1116,8 +1117,6 @@ mod tests {
         assert!(rule.get("allow_type_only").is_none());
     }
 
-    // ── follow-up field tests (panel post-impl pass) ────────────
-
     #[test]
     fn boundary_json_logical_group_merged_from_when_duplicates() {
         let bd = BoundaryData {
@@ -1142,8 +1141,6 @@ mod tests {
         };
         let json = boundary_data_to_json(&bd);
         let g = &json["logical_groups"][0];
-        // The JSON surfaces the duplicate-merge that tracing::warn! would
-        // otherwise hide from --format json consumers.
         assert_eq!(g["merged_from"][0], 0);
         assert_eq!(g["merged_from"][1], 3);
     }

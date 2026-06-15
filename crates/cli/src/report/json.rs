@@ -1,3 +1,4 @@
+use crate::report::sink::outln;
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::ExitCode;
@@ -12,15 +13,10 @@ use crate::explain;
 use crate::output_dupes::DupesReportPayload;
 use crate::output_envelope::{
     CheckGroupedEntry, CheckGroupedOutput, CheckOutput, DupesOutput, GroupByMode, HealthOutput,
+    PlowOutput, serialize_root_output,
 };
 use crate::report::grouping::{OwnershipResolver, ResultGroup};
 
-/// Flip the position-0 `add-to-config` `auto_fixable` flag on every
-/// `duplicate_exports` finding when the fix-applier is ready to write into
-/// the user's config. Mirrors the per-instance flips for
-/// `unused_catalog_entries` (handled inside `with_actions`). No-op when
-/// `config_fixable` is `false`, since the typed wrapper already constructs
-/// every finding with the conservative `auto_fixable: false` default.
 fn apply_config_fixable_to_duplicate_exports(results: &mut AnalysisResults, config_fixable: bool) {
     if !config_fixable {
         return;
@@ -30,15 +26,24 @@ fn apply_config_fixable_to_duplicate_exports(results: &mut AnalysisResults, conf
     }
 }
 
-pub(super) fn print_json(
-    results: &AnalysisResults,
-    root: &Path,
-    elapsed: Duration,
-    explain: bool,
-    regression: Option<&crate::regression::RegressionOutcome>,
-    baseline_matched: Option<(usize, usize)>,
-    config_fixable: bool,
-) -> ExitCode {
+pub(super) struct PrintJsonInput<'a> {
+    pub(super) results: &'a AnalysisResults,
+    pub(super) root: &'a Path,
+    pub(super) elapsed: Duration,
+    pub(super) explain: bool,
+    pub(super) regression: Option<&'a crate::regression::RegressionOutcome>,
+    pub(super) baseline_matched: Option<(usize, usize)>,
+    pub(super) config_fixable: bool,
+}
+
+pub(super) fn print_json(input: &PrintJsonInput<'_>) -> ExitCode {
+    let results = input.results;
+    let root = input.root;
+    let elapsed = input.elapsed;
+    let explain = input.explain;
+    let regression = input.regression;
+    let baseline_matched = input.baseline_matched;
+    let config_fixable = input.config_fixable;
     match build_json_with_config_fixable(results, root, elapsed, config_fixable) {
         Ok(mut output) => {
             if let Some(outcome) = regression
@@ -69,21 +74,25 @@ pub(super) fn print_json(
     }
 }
 
-/// Render grouped analysis results as a single JSON document.
-///
-/// Produces an envelope with `grouped_by` and `total_issues` at the top level,
-/// then a `groups` array where each element contains the group `key`,
-/// `total_issues`, and all the normal result fields with paths relativized.
 #[must_use]
-pub(super) fn print_grouped_json(
-    groups: &[ResultGroup],
-    original: &AnalysisResults,
-    root: &Path,
-    elapsed: Duration,
-    explain: bool,
-    resolver: &OwnershipResolver,
-    config_fixable: bool,
-) -> ExitCode {
+pub(super) struct PrintGroupedJsonInput<'a> {
+    pub(super) groups: &'a [ResultGroup],
+    pub(super) original: &'a AnalysisResults,
+    pub(super) root: &'a Path,
+    pub(super) elapsed: Duration,
+    pub(super) explain: bool,
+    pub(super) resolver: &'a OwnershipResolver,
+    pub(super) config_fixable: bool,
+}
+
+pub(super) fn print_grouped_json(input: &PrintGroupedJsonInput<'_>) -> ExitCode {
+    let groups = input.groups;
+    let original = input.original;
+    let root = input.root;
+    let elapsed = input.elapsed;
+    let explain = input.explain;
+    let resolver = input.resolver;
+    let config_fixable = input.config_fixable;
     let entries: Vec<CheckGroupedEntry> = groups
         .iter()
         .map(|group| {
@@ -106,9 +115,15 @@ pub(super) fn print_grouped_json(
         total_issues: original.total_issues(),
         groups: entries,
         meta: None,
+        next_steps: crate::report::suggestions::build_dead_code_next_steps(
+            original,
+            root,
+            crate::report::suggestions::setup_pointer_applicable(root),
+            crate::report::suggestions::due_impact_digest(root),
+        ),
     };
 
-    let mut output = match serde_json::to_value(&envelope) {
+    let mut output = match serialize_root_output(PlowOutput::CheckGrouped(envelope)) {
         Ok(value) => value,
         Err(e) => {
             eprintln!("Error: failed to serialize grouped results: {e}");
@@ -117,12 +132,6 @@ pub(super) fn print_grouped_json(
     };
 
     let root_prefix = format!("{}/", root.display());
-    // Strip per group separately. `duplicate_exports` per-instance
-    // `config_fixable` was layered into each group's `AnalysisResults`
-    // above, so the typed `actions` array on every finding already carries
-    // the correct `auto_fixable` bool. Only the suppression harmonizer
-    // still walks the per-group JSON tree to dedupe `// plow-ignore-next-line`
-    // anchors across same-path+line findings.
     if let Some(arr) = output.get_mut("groups").and_then(|v| v.as_array_mut()) {
         for entry in arr {
             strip_root_prefix(entry, &root_prefix);
@@ -137,25 +146,12 @@ pub(super) fn print_grouped_json(
     emit_json(&output, "JSON")
 }
 
-/// JSON output schema version as an integer (independent of tool version).
-///
-/// Bump this when the structure of the JSON output changes in a
-/// backwards-incompatible way (removing/renaming fields, changing types).
-/// Adding new fields is always backwards-compatible and does not require a bump.
 #[allow(
     clippy::redundant_pub_crate,
     reason = "used through report module re-export by combined.rs, audit.rs, flags.rs"
 )]
-pub(crate) const SCHEMA_VERSION: u32 = 6;
+pub(crate) const SCHEMA_VERSION: u32 = 7;
 
-/// Build the JSON output value for analysis results.
-///
-/// Metadata fields (`schema_version`, `version`, `elapsed_ms`, `total_issues`)
-/// appear first in the output for readability. Paths are made relative to `root`.
-///
-/// # Errors
-///
-/// Returns an error if the results cannot be serialized to JSON.
 #[allow(
     dead_code,
     reason = "used by the plow-cli library target for embedders, but dead in the binary target"
@@ -173,19 +169,45 @@ pub fn build_json(
     )
 }
 
-/// Build the JSON output value with an explicit config-action fixability signal.
-///
-/// Use this when the caller already knows how the config was loaded, including
-/// explicit `--config` paths that default discovery cannot see.
 pub fn build_json_with_config_fixable(
     results: &AnalysisResults,
     root: &Path,
     elapsed: Duration,
     config_fixable: bool,
 ) -> Result<serde_json::Value, serde_json::Error> {
+    let mut envelope = build_check_output(results, root, elapsed, config_fixable);
+    envelope.next_steps = crate::report::suggestions::build_dead_code_next_steps(
+        results,
+        root,
+        crate::report::suggestions::setup_pointer_applicable(root),
+        crate::report::suggestions::due_impact_digest(root),
+    );
+    let mut output = serialize_root_output(PlowOutput::Check(envelope))?;
+    postprocess_check_json(&mut output, root);
+    Ok(output)
+}
+
+pub fn build_check_json_payload_with_config_fixable(
+    results: &AnalysisResults,
+    root: &Path,
+    elapsed: Duration,
+    config_fixable: bool,
+) -> Result<serde_json::Value, serde_json::Error> {
+    let envelope = build_check_output(results, root, elapsed, config_fixable);
+    let mut output = serde_json::to_value(&envelope)?;
+    postprocess_check_json(&mut output, root);
+    Ok(output)
+}
+
+fn build_check_output(
+    results: &AnalysisResults,
+    root: &Path,
+    elapsed: Duration,
+    config_fixable: bool,
+) -> CheckOutput {
     let mut owned_results = results.clone();
     apply_config_fixable_to_duplicate_exports(&mut owned_results, config_fixable);
-    let envelope = CheckOutput {
+    CheckOutput {
         schema_version: SchemaVersion(SCHEMA_VERSION),
         version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
         elapsed_ms: ElapsedMs(elapsed.as_millis() as u64),
@@ -195,9 +217,6 @@ pub fn build_json_with_config_fixable(
             .as_ref()
             .map(|ep| EntryPoints {
                 total: ep.total,
-                // Replace spaces with underscores so downstream dashboards can
-                // drill into individual sources by stable keys (e.g.
-                // `package.json`, `next.js`, `config_entry`).
                 sources: ep
                     .by_source
                     .iter()
@@ -211,24 +230,20 @@ pub fn build_json_with_config_fixable(
         regression: None,
         meta: None,
         workspace_diagnostics: crate::runtime_support::workspace_diagnostics_for(root),
-    };
+        // Populated only at the standalone-command entry points; the combined
+        // and audit envelopes reuse this struct as a sub-block and aggregate
+        // their own `next_steps` at the top level, so it stays empty here.
+        next_steps: Vec::new(),
+    }
+}
 
-    let mut output = serde_json::to_value(&envelope)?;
+fn postprocess_check_json(output: &mut serde_json::Value, root: &Path) {
     let root_prefix = format!("{}/", root.display());
-    // strip_root_prefix runs on the already-serialized envelope where the
-    // typed `actions` arrays are already in place; the stripper skips
-    // non-path string values via the prefix check.
-    strip_root_prefix(&mut output, &root_prefix);
-    harmonize_multi_kind_suppress_line_actions(&mut output);
-    Ok(output)
+    strip_root_prefix(output, &root_prefix);
+    harmonize_multi_kind_suppress_line_actions(output);
 }
 
 /// Compute the per-category `CheckSummary` from analysis results.
-///
-/// The `unused_dependencies` field is the COMBINED count across regular,
-/// dev, and optional dependencies (the JSON layer has folded these three
-/// since the schema was first published; the per-section arrays still
-/// live at the top level of `CheckOutput`).
 fn build_check_summary(results: &AnalysisResults) -> CheckSummary {
     CheckSummary {
         total_issues: results.total_issues(),
@@ -241,6 +256,7 @@ fn build_check_summary(results: &AnalysisResults) -> CheckSummary {
             + results.unused_optional_dependencies.len(),
         unused_enum_members: results.unused_enum_members.len(),
         unused_class_members: results.unused_class_members.len(),
+        unused_store_members: results.unused_store_members.len(),
         unresolved_imports: results.unresolved_imports.len(),
         unlisted_dependencies: results.unlisted_dependencies.len(),
         duplicate_exports: results.duplicate_exports.len(),
@@ -249,12 +265,25 @@ fn build_check_summary(results: &AnalysisResults) -> CheckSummary {
         circular_dependencies: results.circular_dependencies.len(),
         re_export_cycles: results.re_export_cycles.len(),
         boundary_violations: results.boundary_violations.len(),
+        boundary_coverage_violations: results.boundary_coverage_violations.len(),
+        boundary_call_violations: results.boundary_call_violations.len(),
+        policy_violations: results.policy_violations.len(),
         stale_suppressions: results.stale_suppressions.len(),
         unused_catalog_entries: results.unused_catalog_entries.len(),
         empty_catalog_groups: results.empty_catalog_groups.len(),
         unresolved_catalog_references: results.unresolved_catalog_references.len(),
         unused_dependency_overrides: results.unused_dependency_overrides.len(),
         misconfigured_dependency_overrides: results.misconfigured_dependency_overrides.len(),
+        invalid_client_exports: results.invalid_client_exports.len(),
+        mixed_client_server_barrels: results.mixed_client_server_barrels.len(),
+        misplaced_directives: results.misplaced_directives.len(),
+        unprovided_injects: results.unprovided_injects.len(),
+        unrendered_components: results.unrendered_components.len(),
+        unused_component_props: results.unused_component_props.len(),
+        unused_component_emits: results.unused_component_emits.len(),
+        unused_server_actions: results.unused_server_actions.len(),
+        route_collisions: results.route_collisions.len(),
+        dynamic_segment_name_conflicts: results.dynamic_segment_name_conflicts.len(),
     }
 }
 
@@ -272,6 +301,10 @@ pub fn strip_root_prefix(value: &mut serde_json::Value, prefix: &str) {
                 let normalized_prefix = normalize_uri(prefix);
                 if let Some(rest) = normalized.strip_prefix(&normalized_prefix) {
                     *s = rest.to_string();
+                } else if let Some(stripped) =
+                    strip_embedded_root_prefixes(&normalized, &normalized_prefix)
+                {
+                    *s = stripped;
                 }
             }
         }
@@ -287,6 +320,41 @@ pub fn strip_root_prefix(value: &mut serde_json::Value, prefix: &str) {
         }
         _ => {}
     }
+}
+
+fn strip_embedded_root_prefixes(value: &str, prefix: &str) -> Option<String> {
+    let mut output = String::with_capacity(value.len());
+    let mut changed = false;
+    let mut last = 0;
+    let mut search_from = 0;
+
+    while let Some(offset) = value[search_from..].find(prefix) {
+        let index = search_from + offset;
+        let can_strip = index > 0
+            && value[..index]
+                .chars()
+                .next_back()
+                .is_some_and(is_embedded_path_boundary);
+
+        if can_strip {
+            output.push_str(&value[last..index]);
+            last = index + prefix.len();
+            changed = true;
+        }
+
+        search_from = index + prefix.len();
+    }
+
+    if changed {
+        output.push_str(&value[last..]);
+        Some(output)
+    } else {
+        None
+    }
+}
+
+fn is_embedded_path_boundary(c: char) -> bool {
+    c.is_whitespace() || matches!(c, '"' | '\'' | '`' | '(' | '[' | '{' | ':' | '=')
 }
 
 type SuppressAnchor = (String, u64);
@@ -421,25 +489,22 @@ fn suppression_kind_rank(kind: &str) -> usize {
         "private-type-leak" => 3,
         "unused-enum-member" => 4,
         "unused-class-member" => 5,
-        "unresolved-import" => 6,
-        "unlisted-dependency" => 7,
-        "duplicate-export" => 8,
-        "circular-dependency" => 9,
-        "re-export-cycle" => 10,
-        "boundary-violation" => 11,
-        "code-duplication" => 12,
-        "complexity" => 13,
+        "unused-store-member" => 6,
+        "unresolved-import" => 7,
+        "unlisted-dependency" => 8,
+        "duplicate-export" => 9,
+        "circular-dependency" => 10,
+        "re-export-cycle" => 11,
+        "boundary-violation" => 12,
+        "code-duplication" => 13,
+        "complexity" => 14,
+        "unprovided-inject" => 15,
+        "unrendered-component" => 16,
+        "unused-server-action" => 17,
         _ => usize::MAX,
     }
 }
 
-// ── Health action injection ─────────────────────────────────────
-
-/// Build a JSON representation of baseline deltas for the combined JSON envelope.
-///
-/// Accepts a total delta and an iterator of per-category entries to avoid
-/// coupling the report module (compiled in both lib and bin) to the
-/// binary-only `baseline` module.
 pub fn build_baseline_deltas_json<'a>(
     total_delta: i64,
     per_category: impl Iterator<Item = (&'a str, usize, usize, i64)>,
@@ -461,45 +526,21 @@ pub fn build_baseline_deltas_json<'a>(
     })
 }
 
-// Health JSON post-pass action injection has been fully retired.
-//
-// - Complexity findings carry their `actions` natively via the typed
-//   [`HealthFinding`](crate::health_types::HealthFinding) wrapper (PR B2
-//   of issue #384).
-// - Hotspots and refactoring targets carry their typed `actions` arrays
-//   via the [`HotspotFinding`](crate::health_types::HotspotFinding) and
-//   [`RefactoringTargetFinding`](crate::health_types::RefactoringTargetFinding)
-//   wrappers (PR B3 of issue #384).
-// - Coverage gaps flow through
-//   [`UntestedFileFinding`](crate::health_types::UntestedFileFinding) /
-//   [`UntestedExportFinding`](crate::health_types::UntestedExportFinding).
-// - Runtime coverage actions ship from the sidecar via serde directly.
-//
-// The `actions_meta` breadcrumb is set on the typed
-// [`HealthReport`](crate::health_types::HealthReport) at construction
-// time and flows through serde natively, so no post-pass walker is
-// needed for any health output anymore.
-
-// The dupes `actions` arrays are set on the typed `CloneGroupFinding`,
-// `CloneFamilyFinding`, and `AttributedCloneGroupFinding` wrappers in
-// `crate::output_dupes` at construction time and flow through serde
-// natively, so no post-pass walker is needed for any duplication output
-// anymore.
-
 /// Insert a `_meta` key into a JSON object value.
 fn insert_meta(output: &mut serde_json::Value, meta: serde_json::Value) {
     if let serde_json::Value::Object(map) = output {
+        let telemetry = map
+            .get("_meta")
+            .and_then(|existing| existing.get("telemetry"))
+            .cloned();
+        let mut meta = meta;
+        if let (Some(telemetry), Some(meta_map)) = (telemetry, meta.as_object_mut()) {
+            meta_map.insert("telemetry".to_string(), telemetry);
+        }
         map.insert("_meta".to_string(), meta);
     }
 }
 
-/// Build the JSON envelope + health payload shared by `print_health_json` and
-/// the CLI integration test suite. Exposed so snapshot tests can lock the
-/// on-the-wire shape without routing through stdout capture.
-///
-/// # Errors
-///
-/// Returns an error if the report cannot be serialized to JSON.
 pub fn build_health_json(
     report: &crate::health_types::HealthReport,
     root: &Path,
@@ -515,8 +556,14 @@ pub fn build_health_json(
         groups: None,
         meta: None,
         workspace_diagnostics: crate::runtime_support::workspace_diagnostics_for(root),
+        next_steps: crate::report::suggestions::build_health_next_steps(
+            report,
+            root,
+            crate::report::suggestions::setup_pointer_applicable(root),
+            crate::report::suggestions::due_impact_digest(root),
+        ),
     };
-    let mut output = serde_json::to_value(&envelope)?;
+    let mut output = serialize_root_output(PlowOutput::Health(envelope))?;
     let root_prefix = format!("{}/", root.display());
     strip_root_prefix(&mut output, &root_prefix);
     if explain {
@@ -540,26 +587,6 @@ pub(super) fn print_health_json(
     }
 }
 
-/// Build a grouped health JSON envelope when `--group-by` is active.
-///
-/// The envelope keeps the active run's `summary`, `vital_signs`, and
-/// `health_score` at the top level (so consumers that ignore grouping still
-/// see meaningful aggregates) and adds:
-///
-/// - `grouped_by`: the resolver mode (`"package"`, `"owner"`, etc.).
-/// - `groups`: one entry per resolver bucket. Each entry carries its own
-///   `vital_signs`, `health_score`, `findings`, `file_scores` sorted by
-///   risk-aware triage concern, `hotspots`, `large_functions`, `targets`, plus
-///   `key`, `owners` (section mode), and the per-group `files_analyzed` /
-///   `functions_above_threshold` counts.
-///
-/// Paths inside groups are relativised the same way as the project-level
-/// payload.
-///
-/// # Errors
-///
-/// Returns an error if either the project report or any group cannot be
-/// serialised to JSON.
 pub fn build_grouped_health_json(
     report: &crate::health_types::HealthReport,
     grouping: &crate::health_types::HealthGrouping,
@@ -568,27 +595,23 @@ pub fn build_grouped_health_json(
     explain: bool,
 ) -> Result<serde_json::Value, serde_json::Error> {
     let root_prefix = format!("{}/", root.display());
-    // Per-group sub-envelopes share the project-level suppression state:
-    // baseline-active and config-disabled apply uniformly, so each group's
-    // `actions` array honors the same opts AND each group emits its own
-    // `actions_meta` breadcrumb. The redundancy with the top-level breadcrumb
-    // is intentional: consumers that only walk the `groups` array (e.g.,
-    // per-team dashboards) still see the omission reason without needing to
-    // walk back up to the report root.
     let envelope = HealthOutput {
         schema_version: SchemaVersion(SCHEMA_VERSION),
         version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
         elapsed_ms: ElapsedMs(elapsed.as_millis() as u64),
         report: report.clone(),
         grouped_by: Some(group_by_mode_from_label(grouping.mode)),
-        // `groups` is serialised separately below so each entry can run
-        // through the path-stripping + actions injection passes (which only
-        // walk the top-level map).
         groups: None,
         meta: None,
         workspace_diagnostics: crate::runtime_support::workspace_diagnostics_for(root),
+        next_steps: crate::report::suggestions::build_health_next_steps(
+            report,
+            root,
+            crate::report::suggestions::setup_pointer_applicable(root),
+            crate::report::suggestions::due_impact_digest(root),
+        ),
     };
-    let mut output = serde_json::to_value(&envelope)?;
+    let mut output = serialize_root_output(PlowOutput::Health(envelope))?;
     strip_root_prefix(&mut output, &root_prefix);
 
     let group_values: Vec<serde_json::Value> = grouping
@@ -628,30 +651,32 @@ pub(super) fn print_grouped_health_json(
     }
 }
 
-/// Build the JSON envelope + duplication payload shared by `print_duplication_json`
-/// and the programmatic API surface.
-///
-/// # Errors
-///
-/// Returns an error if the report cannot be serialized to JSON.
 pub fn build_duplication_json(
     report: &DuplicationReport,
     root: &Path,
     elapsed: Duration,
     explain: bool,
 ) -> Result<serde_json::Value, serde_json::Error> {
+    let payload = DupesReportPayload::from_report(report);
+    let next_steps = crate::report::suggestions::build_dupes_next_steps(
+        &payload,
+        root,
+        crate::report::suggestions::setup_pointer_applicable(root),
+        crate::report::suggestions::due_impact_digest(root),
+    );
     let envelope = DupesOutput {
         schema_version: SchemaVersion(SCHEMA_VERSION),
         version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
         elapsed_ms: ElapsedMs(elapsed.as_millis() as u64),
-        report: DupesReportPayload::from_report(report),
+        report: payload,
         grouped_by: None,
         total_issues: None,
         groups: None,
         meta: None,
         workspace_diagnostics: crate::runtime_support::workspace_diagnostics_for(root),
+        next_steps,
     };
-    let mut output = serde_json::to_value(&envelope)?;
+    let mut output = serialize_root_output(PlowOutput::Dupes(envelope))?;
     let root_prefix = format!("{}/", root.display());
     strip_root_prefix(&mut output, &root_prefix);
 
@@ -677,26 +702,6 @@ pub(super) fn print_duplication_json(
     }
 }
 
-/// Build a grouped duplication JSON envelope when `--group-by` is active.
-///
-/// The envelope keeps the project-level duplication payload (`stats`,
-/// `clone_groups`, `clone_families`) at the top level so consumers that ignore
-/// grouping still see project-wide aggregates, and adds:
-///
-/// - `grouped_by`: the resolver mode (`"owner"`, `"directory"`, `"package"`,
-///   `"section"`).
-/// - `groups`: one entry per resolver bucket. Each entry carries its own
-///   per-group `stats` (dedup-aware, computed over the FULL group before
-///   `--top` truncation), `clone_groups` (each tagged with `primary_owner`
-///   and per-instance `owner`), and `clone_families`.
-///
-/// Paths inside groups are relativised the same way as the project-level
-/// payload via `strip_root_prefix`.
-///
-/// # Errors
-///
-/// Returns an error if either the project report or any group cannot be
-/// serialised to JSON.
 pub fn build_grouped_duplication_json(
     report: &DuplicationReport,
     grouping: &super::dupes_grouping::DuplicationGrouping,
@@ -705,26 +710,26 @@ pub fn build_grouped_duplication_json(
     explain: bool,
 ) -> Result<serde_json::Value, serde_json::Error> {
     let root_prefix = format!("{}/", root.display());
-    // Mirror the grouped check / health envelopes which expose `total_issues`
-    // so MCP and CI consumers can read the same key across commands. For
-    // dupes the count is total clone groups (sum is preserved across
-    // grouping; each clone group is attributed to exactly one bucket).
+    let payload = DupesReportPayload::from_report(report);
+    let next_steps = crate::report::suggestions::build_dupes_next_steps(
+        &payload,
+        root,
+        crate::report::suggestions::setup_pointer_applicable(root),
+        crate::report::suggestions::due_impact_digest(root),
+    );
     let envelope = DupesOutput {
         schema_version: SchemaVersion(SCHEMA_VERSION),
         version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
         elapsed_ms: ElapsedMs(elapsed.as_millis() as u64),
-        report: DupesReportPayload::from_report(report),
+        report: payload,
         grouped_by: Some(group_by_mode_from_label(grouping.mode)),
         total_issues: Some(report.clone_groups.len()),
-        // Per-group buckets are serialized separately below so each carries
-        // its own path-stripping; splice them in via the `Value` post-pass.
-        // Wrapper-level `actions[]` is already typed on each bucket's
-        // `clone_groups` / `clone_families`.
         groups: None,
         meta: None,
         workspace_diagnostics: crate::runtime_support::workspace_diagnostics_for(root),
+        next_steps,
     };
-    let mut output = serde_json::to_value(&envelope)?;
+    let mut output = serialize_root_output(PlowOutput::Dupes(envelope))?;
     strip_root_prefix(&mut output, &root_prefix);
 
     let group_values: Vec<serde_json::Value> = grouping
@@ -748,11 +753,6 @@ pub fn build_grouped_duplication_json(
     Ok(output)
 }
 
-/// Map a free-form grouping mode label (`"package"`, `"owner"`, ...) to the
-/// typed [`GroupByMode`] enum. Unknown labels fall through to
-/// [`GroupByMode::Owner`] because the upstream grouping pipeline only emits
-/// the four documented modes; the fallback exists to keep this helper
-/// infallible without piping a Result through every grouped envelope builder.
 fn group_by_mode_from_label(label: &str) -> GroupByMode {
     match label {
         "directory" => GroupByMode::Directory,
@@ -780,7 +780,7 @@ pub(super) fn print_grouped_duplication_json(
 
 pub(super) fn print_trace_json<T: serde::Serialize>(value: &T) {
     match serde_json::to_string_pretty(value) {
-        Ok(json) => println!("{json}"),
+        Ok(json) => outln!("{json}"),
         Err(e) => {
             eprintln!("Error: failed to serialize trace output: {e}");
             #[expect(
@@ -815,7 +815,8 @@ mod tests {
         let elapsed = Duration::from_millis(123);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
-        assert_eq!(output["schema_version"], 6);
+        assert_eq!(output["kind"], "dead-code");
+        assert_eq!(output["schema_version"], 7);
         assert!(output["version"].is_string());
         assert_eq!(output["elapsed_ms"], 123);
         assert_eq!(output["total_issues"], 0);
@@ -875,7 +876,7 @@ mod tests {
                     }),
                 },
                 findings: vec![RuntimeCoverageFinding {
-                    id: "fallow:prod:deadbeef".to_owned(),
+                    id: "plow:prod:deadbeef".to_owned(),
                     stable_id: None,
                     path: root.join("src/cold.ts"),
                     function: "coldPath".to_owned(),
@@ -900,7 +901,7 @@ mod tests {
                     source_hash: None,
                 }],
                 hot_paths: vec![RuntimeCoverageHotPath {
-                    id: "fallow:hot:cafebabe".to_owned(),
+                    id: "plow:hot:cafebabe".to_owned(),
                     stable_id: None,
                     path: root.join("src/hot.ts"),
                     function: "hotPath".to_owned(),
@@ -930,6 +931,7 @@ mod tests {
             groups: None,
             meta: None,
             workspace_diagnostics: Vec::new(),
+            next_steps: Vec::new(),
         };
         let mut output = serde_json::to_value(&envelope).expect("should serialize health envelope");
         strip_root_prefix(&mut output, "/project/");
@@ -953,7 +955,7 @@ mod tests {
         let finding = &output["runtime_coverage"]["findings"][0];
         assert_eq!(finding["path"], "src/cold.ts");
         assert_eq!(finding["verdict"], "review_required");
-        assert_eq!(finding["id"], "fallow:prod:deadbeef");
+        assert_eq!(finding["id"], "plow:prod:deadbeef");
         assert_eq!(finding["actions"][0]["type"], "review-deletion");
         let hot_path = &output["runtime_coverage"]["hot_paths"][0];
         assert_eq!(hot_path["path"], "src/hot.ts");
@@ -976,10 +978,11 @@ mod tests {
         let elapsed = Duration::from_millis(0);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
         let keys: Vec<&String> = output.as_object().unwrap().keys().collect();
-        assert_eq!(keys[0], "schema_version");
-        assert_eq!(keys[1], "version");
-        assert_eq!(keys[2], "elapsed_ms");
-        assert_eq!(keys[3], "total_issues");
+        assert_eq!(keys[0], "kind");
+        assert_eq!(keys[1], "schema_version");
+        assert_eq!(keys[2], "version");
+        assert_eq!(keys[3], "elapsed_ms");
+        assert_eq!(keys[4], "total_issues");
     }
 
     #[test]
@@ -1033,8 +1036,6 @@ mod tests {
         assert_eq!(reparsed, output);
     }
 
-    // ── Empty results ───────────────────────────────────────────────
-
     #[test]
     fn json_empty_results_produce_valid_structure() {
         let root = PathBuf::from("/project");
@@ -1075,8 +1076,6 @@ mod tests {
             serde_json::from_str(&json_str).expect("should parse back");
         assert_eq!(reparsed["total_issues"], 0);
     }
-
-    // ── Path stripping ──────────────────────────────────────────────
 
     #[test]
     fn json_paths_are_relative_to_root() {
@@ -1166,6 +1165,7 @@ mod tests {
                     length: 2,
                     line: 1,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             ));
@@ -1194,8 +1194,6 @@ mod tests {
         let path = output["unused_files"][0]["path"].as_str().unwrap();
         assert!(path.contains("/other/project/"));
     }
-
-    // ── Individual issue type field verification ────────────────────
 
     #[test]
     fn json_unused_file_contains_path() {
@@ -1495,10 +1493,6 @@ mod tests {
 
     #[test]
     fn duplicate_export_add_to_config_is_auto_fixable_when_create_fallback_allowed() {
-        // No config file exists, and the dir is NOT inside a monorepo
-        // subpackage, so `plow fix` can safely create one. The action
-        // must surface as auto_fixable: true (per the per-instance flip
-        // documented on AddToConfigAction).
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         let mut results = AnalysisResults::default();
@@ -1530,10 +1524,6 @@ mod tests {
 
     #[test]
     fn duplicate_export_add_to_config_is_not_auto_fixable_in_monorepo_subpackage() {
-        // A workspace marker above the invocation directory means
-        // `plow fix` would refuse to create a per-subpackage config.
-        // The action must surface as auto_fixable: false so agents and
-        // IDEs don't blindly pipe into `plow fix --yes`.
         let dir = tempfile::tempdir().unwrap();
         let workspace = dir.path();
         std::fs::write(
@@ -1607,6 +1597,7 @@ mod tests {
                     length: 3,
                     line: 5,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             ));
@@ -1619,8 +1610,6 @@ mod tests {
         let files = cycle["files"].as_array().unwrap();
         assert_eq!(files.len(), 3);
     }
-
-    // ── Re-export tagging ───────────────────────────────────────────
 
     #[test]
     fn json_re_export_flagged_correctly() {
@@ -1643,8 +1632,6 @@ mod tests {
         assert_eq!(output["unused_exports"][0]["is_re_export"], true);
     }
 
-    // ── Schema version stability ────────────────────────────────────
-
     #[test]
     fn json_schema_version_is_pinned() {
         let root = PathBuf::from("/project");
@@ -1653,10 +1640,8 @@ mod tests {
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["schema_version"], SCHEMA_VERSION);
-        assert_eq!(output["schema_version"], 6);
+        assert_eq!(output["schema_version"], 7);
     }
-
-    // ── Version string ──────────────────────────────────────────────
 
     #[test]
     fn json_version_matches_cargo_pkg_version() {
@@ -1667,8 +1652,6 @@ mod tests {
 
         assert_eq!(output["version"], env!("CARGO_PKG_VERSION"));
     }
-
-    // ── Elapsed time encoding ───────────────────────────────────────
 
     #[test]
     fn json_elapsed_ms_zero_duration() {
@@ -1693,14 +1676,11 @@ mod tests {
     fn json_elapsed_ms_sub_millisecond_truncated() {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
-        // 500 microseconds = 0 milliseconds (truncated)
         let elapsed = Duration::from_micros(500);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["elapsed_ms"], 0);
     }
-
-    // ── Multiple issues of same type ────────────────────────────────
 
     #[test]
     fn json_multiple_unused_files() {
@@ -1727,8 +1707,6 @@ mod tests {
         assert_eq!(output["unused_files"].as_array().unwrap().len(), 3);
         assert_eq!(output["total_issues"], 3);
     }
-
-    // ── strip_root_prefix unit tests ────────────────────────────────
 
     #[test]
     fn strip_root_prefix_on_string_value() {
@@ -1785,9 +1763,18 @@ mod tests {
     }
 
     #[test]
+    fn strip_root_prefix_rewrites_embedded_path_strings() {
+        let mut value =
+            serde_json::json!("Add \"/project/src/file.ts\" to boundaries.coverage.allowUnmatched");
+        strip_root_prefix(&mut value, "/project/");
+        assert_eq!(
+            value,
+            "Add \"src/file.ts\" to boundaries.coverage.allowUnmatched"
+        );
+    }
+
+    #[test]
     fn strip_root_prefix_handles_empty_string_after_strip() {
-        // Edge case: the string IS the prefix (without trailing content).
-        // This shouldn't happen in practice but should not panic.
         let mut value = serde_json::json!("/project/");
         strip_root_prefix(&mut value, "/project/");
         assert_eq!(value, "");
@@ -1809,8 +1796,6 @@ mod tests {
         assert_eq!(value["groups"][0]["instances"][1]["file"], "src/b.ts");
     }
 
-    // ── Full sample results round-trip ──────────────────────────────
-
     #[test]
     fn json_full_sample_results_total_issues_correct() {
         let root = PathBuf::from("/project");
@@ -1818,11 +1803,6 @@ mod tests {
         let elapsed = Duration::from_millis(100);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
-        // sample_results adds one of each issue type (12 total).
-        // unused_files + unused_exports + unused_types + unused_dependencies
-        // + unused_dev_dependencies + unused_enum_members + unused_class_members
-        // + unresolved_imports + unlisted_dependencies + duplicate_exports
-        // + type_only_dependencies + circular_dependencies
         assert_eq!(output["total_issues"], results.total_issues());
     }
 
@@ -1834,12 +1814,9 @@ mod tests {
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
         let json_str = serde_json::to_string(&output).expect("should stringify");
-        // The root prefix should be stripped from all paths.
         assert!(!json_str.contains("/project/src/"));
         assert!(!json_str.contains("/project/package.json"));
     }
-
-    // ── JSON output is deterministic ────────────────────────────────
 
     #[test]
     fn json_output_is_deterministic() {
@@ -1853,23 +1830,17 @@ mod tests {
         assert_eq!(output1, output2);
     }
 
-    // ── Metadata not overwritten by results fields ──────────────────
-
     #[test]
     fn json_results_fields_do_not_shadow_metadata() {
-        // Ensure that serialized results don't contain keys like "schema_version"
-        // that could overwrite the metadata fields we insert first.
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
         let elapsed = Duration::from_millis(99);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
-        // Metadata should reflect our explicit values, not anything from AnalysisResults.
-        assert_eq!(output["schema_version"], 6);
+        assert_eq!(output["kind"], "dead-code");
+        assert_eq!(output["schema_version"], 7);
         assert_eq!(output["elapsed_ms"], 99);
     }
-
-    // ── All 14 issue type arrays present ────────────────────────────
 
     #[test]
     fn json_all_issue_type_arrays_present_in_empty_results() {
@@ -1902,8 +1873,6 @@ mod tests {
         }
     }
 
-    // ── insert_meta ─────────────────────────────────────────────────
-
     #[test]
     fn insert_meta_adds_key_to_object() {
         let mut output = serde_json::json!({ "foo": 1 });
@@ -1917,7 +1886,6 @@ mod tests {
         let mut output = serde_json::json!([1, 2, 3]);
         let meta = serde_json::json!({ "docs": "https://example.com" });
         insert_meta(&mut output, meta);
-        // Should not panic or add anything
         assert!(output.is_array());
     }
 
@@ -1929,7 +1897,29 @@ mod tests {
         assert_eq!(output["_meta"], meta);
     }
 
-    // ── strip_root_prefix with null value ──
+    #[test]
+    fn insert_meta_preserves_existing_telemetry_meta() {
+        let mut output = serde_json::json!({
+            "_meta": {
+                "telemetry": {
+                    "analysis_run_id": "run_test123"
+                }
+            }
+        });
+        insert_meta(
+            &mut output,
+            serde_json::json!({ "docs": "https://example.com" }),
+        );
+
+        assert_eq!(
+            output["_meta"]["docs"].as_str(),
+            Some("https://example.com")
+        );
+        assert_eq!(
+            output["_meta"]["telemetry"]["analysis_run_id"].as_str(),
+            Some("run_test123")
+        );
+    }
 
     #[test]
     fn strip_root_prefix_null_unchanged() {
@@ -1938,16 +1928,12 @@ mod tests {
         assert!(value.is_null());
     }
 
-    // ── strip_root_prefix with empty string ──
-
     #[test]
     fn strip_root_prefix_empty_string() {
         let mut value = serde_json::json!("");
         strip_root_prefix(&mut value, "/project/");
         assert_eq!(value, "");
     }
-
-    // ── strip_root_prefix on mixed nested structure ──
 
     #[test]
     fn strip_root_prefix_mixed_types() {
@@ -1971,8 +1957,6 @@ mod tests {
         assert_eq!(value["nested"]["deep"]["path"], "c.ts");
     }
 
-    // ── JSON with explain meta for check ──
-
     #[test]
     fn json_check_meta_integrates_correctly() {
         let root = PathBuf::from("/project");
@@ -1984,8 +1968,6 @@ mod tests {
         assert!(output["_meta"]["docs"].is_string());
         assert!(output["_meta"]["rules"].is_object());
     }
-
-    // ── JSON unused member kind serialization ──
 
     #[test]
     fn json_unused_member_kind_serialized() {
@@ -2021,8 +2003,6 @@ mod tests {
         assert!(class_member["kind"].is_string());
     }
 
-    // ── Actions injection ──────────────────────────────────────────
-
     #[test]
     fn json_unused_export_has_actions() {
         let root = PathBuf::from("/project");
@@ -2043,16 +2023,42 @@ mod tests {
         let actions = output["unused_exports"][0]["actions"].as_array().unwrap();
         assert_eq!(actions.len(), 2);
 
-        // Fix action
         assert_eq!(actions[0]["type"], "remove-export");
         assert_eq!(actions[0]["auto_fixable"], true);
         assert!(actions[0].get("note").is_none());
 
-        // Suppress action
         assert_eq!(actions[1]["type"], "suppress-line");
         assert_eq!(
             actions[1]["comment"],
             "// plow-ignore-next-line unused-export"
+        );
+    }
+
+    #[test]
+    fn json_boundary_coverage_action_descriptions_use_relative_paths() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .boundary_coverage_violations
+            .push(BoundaryCoverageViolationFinding::with_actions(
+                BoundaryCoverageViolation {
+                    path: root.join("src/middleware/error.ts"),
+                    line: 1,
+                    col: 0,
+                },
+            ));
+
+        let output = build_json(&results, &root, Duration::ZERO).unwrap();
+        let action = &output["boundary_coverage_violations"][0]["actions"][1];
+
+        assert_eq!(
+            output["boundary_coverage_violations"][0]["path"],
+            "src/middleware/error.ts"
+        );
+        assert_eq!(action["value"], "src/middleware/error.ts");
+        assert_eq!(
+            action["description"],
+            "Add \"src/middleware/error.ts\" to boundaries.coverage.allowUnmatched in plow config"
         );
     }
 
@@ -2181,7 +2187,6 @@ mod tests {
         assert_eq!(actions[0]["type"], "remove-dependency");
         assert_eq!(actions[0]["auto_fixable"], true);
 
-        // Config suppress includes actual package name
         assert_eq!(actions[1]["type"], "add-to-config");
         assert_eq!(actions[1]["config_key"], "ignoreDependencies");
         assert_eq!(actions[1]["value"], "lodash");
@@ -2222,7 +2227,6 @@ mod tests {
         let results = AnalysisResults::default();
         let output = build_json(&results, &root, Duration::ZERO).unwrap();
 
-        // Empty arrays should remain empty
         assert!(output["unused_exports"].as_array().unwrap().is_empty());
         assert!(output["unused_files"].as_array().unwrap().is_empty());
     }
@@ -2262,8 +2266,6 @@ mod tests {
         }
     }
 
-    // ── Health actions injection ───────────────────────────────────
-
     /// Test helper: deserialize a JSON finding shape into a typed
     /// [`ComplexityViolation`], run [`HealthFinding::with_actions`] with
     /// the supplied thresholds, and return the resulting `actions` array
@@ -2278,10 +2280,6 @@ mod tests {
         max_crap_threshold: f64,
     ) -> Vec<serde_json::Value> {
         let mut value = finding_json;
-        // The CV struct skip-serializes `Option::None` fields, but the
-        // shorthand `serde_json::json!({})` test fixtures sometimes omit
-        // optional fields. Adapt missing defaults so deserialization
-        // succeeds for synthetic test inputs.
         if let Some(map) = value.as_object_mut() {
             map.entry("col".to_string())
                 .or_insert(serde_json::Value::from(0_u32));
@@ -2292,15 +2290,13 @@ mod tests {
             map.entry("severity".to_string())
                 .or_insert(serde_json::Value::String("moderate".to_string()));
         }
-        // ComplexityViolation derives Serialize only; for tests we
-        // reconstruct it field by field via a small helper that reads
-        // the JSON shape used by these tests.
         let violation = synthesize_complexity_violation(&value);
         let ctx = crate::health_types::HealthActionContext {
             opts,
             max_cyclomatic_threshold,
             max_cognitive_threshold,
             max_crap_threshold,
+            crap_refactor_band: 5,
         };
         let finding = crate::health_types::HealthFinding::with_actions(violation, &ctx);
         let serialized = serde_json::to_value(&finding).expect("serialize HealthFinding");
@@ -2388,6 +2384,9 @@ mod tests {
                         .ok()?,
                 })
             }),
+            contributions: Vec::new(),
+            effective_thresholds: None,
+            threshold_source: None,
         }
     }
 
@@ -2420,18 +2419,8 @@ mod tests {
                 .contains("processData")
         );
         assert_eq!(actions[1]["type"], "suppress-line");
-        assert_eq!(
-            actions[1]["comment"],
-            "// plow-ignore-next-line complexity"
-        );
+        assert_eq!(actions[1]["comment"], "// plow-ignore-next-line complexity");
     }
-
-    // Tests for the retired hotspot / target action post-pass now live in
-    // `crates/cli/src/health_types/finding.rs::hotspot_target_tests`
-    // alongside the typed `HotspotFinding` and `RefactoringTargetFinding`
-    // wrappers and the typed `build_hotspot_actions` /
-    // `build_refactoring_target_actions` helpers they exercise. The four
-    // direct `suggest_codeowners_pattern` tests moved alongside that helper.
 
     #[test]
     fn health_finding_suppress_has_placement() {
@@ -2476,10 +2465,7 @@ mod tests {
 
         let suppress = &actions[1];
         assert_eq!(suppress["type"], "suppress-file");
-        assert_eq!(
-            suppress["comment"],
-            "<!-- plow-ignore-file complexity -->"
-        );
+        assert_eq!(suppress["comment"], "<!-- plow-ignore-file complexity -->");
         assert_eq!(suppress["placement"], "top-of-template");
     }
 
@@ -2518,14 +2504,6 @@ mod tests {
         );
         assert_eq!(suppress["placement"], "above-angular-decorator");
     }
-
-    // Duplication action injection tests retired in #409: the wire shape
-    // now flows through typed wrappers in `crate::output_dupes`; the
-    // wrappers carry their own unit tests covering the same per-finding
-    // `actions[]` semantics (extract-shared / apply-suggestion /
-    // suppress-line position-0 invariants, issue #393 nested groups).
-
-    // ── Tier-aware health action emission ──────────────────────────
 
     /// Helper: build a health JSON envelope with a single CRAP-only finding.
     /// Default cognitive complexity is 12 (above the cognitive floor at the
@@ -2625,12 +2603,16 @@ mod tests {
             coverage_source: None,
             inherited_from: None,
             component_rollup: None,
+            contributions: Vec::new(),
+            effective_thresholds: None,
+            threshold_source: None,
         };
         let ctx = crate::health_types::HealthActionContext {
             opts: action_opts,
             max_cyclomatic_threshold,
             max_cognitive_threshold,
             max_crap_threshold,
+            crap_refactor_band: 5,
         };
         let finding = crate::health_types::HealthFinding::with_actions(violation, &ctx);
         let actions_meta = if action_opts.omit_suppress_line {
@@ -2688,9 +2670,6 @@ mod tests {
 
     #[test]
     fn crap_only_tier_high_emits_increase_coverage_when_full_coverage_can_clear_crap() {
-        // CC=20 at 70% coverage has CRAP 30.8, but at 100% coverage CRAP
-        // falls to 20.0, below the default max_crap_threshold=30. Coverage
-        // is therefore still a valid remediation even though tier=high.
         let output = crap_only_finding_envelope(Some("high"), 20, 30);
         let actions = output["findings"][0]["actions"].as_array().unwrap();
         assert!(
@@ -2709,9 +2688,6 @@ mod tests {
 
     #[test]
     fn crap_only_emits_refactor_when_full_coverage_cannot_clear_crap() {
-        // At 100% coverage CRAP bottoms out at CC. With CC=35 and a CRAP
-        // threshold of 30, tests alone can reduce risk but cannot clear the
-        // finding; the primary action should be complexity reduction.
         let output = crap_only_finding_envelope_with_max_crap(Some("high"), 35, 12, 50, 15, 30.0);
         let actions = output["findings"][0]["actions"].as_array().unwrap();
         assert!(
@@ -2730,8 +2706,6 @@ mod tests {
 
     #[test]
     fn crap_only_high_cc_appends_secondary_refactor() {
-        // CC=16 with threshold=20 => within SECONDARY_REFACTOR_BAND (5)
-        // of the threshold; refactor is a useful complement to coverage.
         let output = crap_only_finding_envelope(Some("none"), 16, 20);
         let actions = output["findings"][0]["actions"].as_array().unwrap();
         assert!(
@@ -2746,7 +2720,6 @@ mod tests {
 
     #[test]
     fn crap_only_far_below_threshold_no_secondary_refactor() {
-        // CC=6 with threshold=20 => far outside the band; refactor not added.
         let output = crap_only_finding_envelope(Some("none"), 6, 20);
         let actions = output["findings"][0]["actions"].as_array().unwrap();
         assert!(
@@ -2757,14 +2730,6 @@ mod tests {
 
     #[test]
     fn crap_only_near_threshold_low_cognitive_no_secondary_refactor() {
-        // Cognitive floor regression. Real-world example from vrs-portals:
-        // a flat type-tag dispatcher with CC=17 (within SECONDARY_REFACTOR_BAND
-        // of the default cyclomatic threshold of 20) but cognitive=2 (a single
-        // switch, no nesting). Suggesting "extract helpers, simplify branching"
-        // is wrong-target advice for declarative dispatchers; the cognitive
-        // floor at `max_cognitive_threshold / 2` (default 7) suppresses the
-        // secondary refactor in this case while still firing it for genuinely
-        // tangled functions (CC>=15 + cog>=8) where refactor would help.
         let output = crap_only_finding_envelope_with_cognitive(Some("none"), 17, 2, 20);
         let actions = output["findings"][0]["actions"].as_array().unwrap();
         assert!(
@@ -2779,11 +2744,6 @@ mod tests {
 
     #[test]
     fn crap_only_near_threshold_high_cognitive_emits_secondary_refactor() {
-        // Companion to the cognitive-floor regression: when cognitive is at or
-        // above the floor, the secondary refactor should still fire. CC=16
-        // and cognitive=10 (above default floor of 7) is the canonical
-        // "tangled but near-threshold" function that genuinely benefits from
-        // both coverage AND refactoring.
         let output = crap_only_finding_envelope_with_cognitive(Some("none"), 16, 10, 20);
         let actions = output["findings"][0]["actions"].as_array().unwrap();
         assert!(
@@ -2793,6 +2753,65 @@ mod tests {
         assert!(
             actions.iter().any(|a| a["type"] == "refactor-function"),
             "near-threshold CC with cognitive above floor must emit secondary refactor (got {actions:?})"
+        );
+    }
+
+    #[test]
+    fn crap_only_secondary_refactor_respects_configured_band() {
+        let violation = crate::health_types::ComplexityViolation {
+            path: std::path::PathBuf::from("src/risk.ts"),
+            name: "computeScore".to_string(),
+            line: 12,
+            col: 0,
+            cyclomatic: 14,
+            cognitive: 10,
+            line_count: 40,
+            param_count: 0,
+            exceeded: crate::health_types::ExceededThreshold::Crap,
+            severity: crate::health_types::FindingSeverity::Moderate,
+            crap: Some(35.5),
+            coverage_pct: None,
+            coverage_tier: Some(crate::health_types::CoverageTier::None),
+            coverage_source: None,
+            inherited_from: None,
+            component_rollup: None,
+            contributions: Vec::new(),
+            effective_thresholds: None,
+            threshold_source: None,
+        };
+        let narrow_ctx = crate::health_types::HealthActionContext {
+            opts: crate::health_types::HealthActionOptions::default(),
+            max_cyclomatic_threshold: 20,
+            max_cognitive_threshold: 15,
+            max_crap_threshold: 30.0,
+            crap_refactor_band: 5,
+        };
+        let wide_ctx = crate::health_types::HealthActionContext {
+            crap_refactor_band: 6,
+            ..narrow_ctx
+        };
+
+        let narrow_actions =
+            crate::health_types::build_health_finding_actions(&violation, &narrow_ctx);
+        let wide_actions = crate::health_types::build_health_finding_actions(&violation, &wide_ctx);
+
+        assert!(
+            !narrow_actions.iter().any(|a| {
+                matches!(
+                    a.kind,
+                    plow_types::output_health::HealthFindingActionType::RefactorFunction
+                )
+            }),
+            "default band should not refactor a CRAP-only finding 6 below max cyclomatic"
+        );
+        assert!(
+            wide_actions.iter().any(|a| {
+                matches!(
+                    a.kind,
+                    plow_types::output_health::HealthFindingActionType::RefactorFunction
+                )
+            }),
+            "configured wider band should emit the secondary refactor action"
         );
     }
 
@@ -2827,8 +2846,6 @@ mod tests {
             "non-CRAP findings must not emit increase-coverage"
         );
     }
-
-    // ── Suppress-line gating ──────────────────────────────────────
 
     #[test]
     fn suppress_line_omitted_when_baseline_active() {
@@ -2896,11 +2913,7 @@ mod tests {
     /// schema for validation.
     #[test]
     fn every_emitted_health_action_type_is_in_schema_enum() {
-        // Exercise every distinct emission path. The list mirrors the match
-        // in `build_crap_coverage_action` and the surrounding refactor/
-        // suppress-line emissions in `build_health_finding_actions`.
         let cases = [
-            // (exceeded, coverage_tier, cyclomatic, max_cyclomatic_threshold)
             ("crap", Some("none"), 6_u16, 20_u16),
             ("crap", Some("partial"), 6, 20),
             ("crap", Some("high"), 12, 20),
@@ -2940,11 +2953,6 @@ mod tests {
             }
         }
 
-        // Load the schema enum once. Phase 8 derives `HealthFindingActionType`
-        // from a Rust enum whose schemars derive produces `oneOf: [{const: ...},
-        // ...]` (one branch per variant) rather than a flat `enum: [...]`. We
-        // accept either form here so the drift guard tolerates a future
-        // schemars-version flip back to the flat shape.
         let schema_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("..")
             .join("..")

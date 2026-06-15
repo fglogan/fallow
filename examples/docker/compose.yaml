@@ -1,0 +1,10 @@
+# Plow is a one-shot CLI. Use `docker compose run --rm plow ...`.
+# Do not deploy it as an always-on service unless you override the command.
+services:
+  plow:
+    image: plow:local
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    user: "${UID:-1000}:${GID:-1000}"
+    restart: "no"

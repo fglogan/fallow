@@ -18,13 +18,19 @@ path = "src/main.rs"
 
 [dependencies]
 rmcp = { version = "1.7", features = ["transport-io"] }
+rquickjs = "0.12"
 tokio.workspace = true
 serde.workspace = true
 serde_json = { workspace = true, features = ["preserve_order"] }
 schemars.workspace = true
+tempfile.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
+# Test-only: drift tests assert the shared MCP tool manifest in plow-types
+# stays in sync with the live rmcp tool router. The shipped binary remains
+# free of plow-* workspace dependencies.
+plow-types.workspace = true
 regex.workspace = true
 
 [lints]

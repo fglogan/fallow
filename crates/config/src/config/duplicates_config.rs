@@ -100,12 +100,14 @@ pub struct DuplicatesConfig {
 
     /// Exclude ES `import` declarations from clone detection.
     ///
+    /// Defaults to `true`: token-identical sorted import blocks are a structural
+    /// property of well-formatted code, not copy-paste, so they should not
+    /// surface as clone groups. Set to `false` to count import blocks again.
     /// When enabled, all `import` statements (value imports, type imports, and
     /// side-effect imports) are stripped from the token stream before clone
-    /// detection. This reduces noise from sorted import blocks that naturally
-    /// look similar across files. Only affects ES `import` declarations;
-    /// CommonJS `require()` calls are not filtered.
-    #[serde(default)]
+    /// detection. Only affects ES `import` declarations; CommonJS `require()`
+    /// calls and `export ... from` re-export blocks are still counted.
+    #[serde(default = "default_true")]
     pub ignore_imports: bool,
 
     /// Fine-grained normalization overrides on top of the detection mode.
@@ -138,7 +140,7 @@ impl Default for DuplicatesConfig {
             ignore_defaults: true,
             skip_local: false,
             cross_language: false,
-            ignore_imports: false,
+            ignore_imports: true,
             normalization: NormalizationConfig::default(),
             min_corpus_size_for_shingle_filter: default_min_corpus_size_for_shingle_filter(),
             min_corpus_size_for_token_cache: default_min_corpus_size_for_token_cache(),
@@ -246,8 +248,6 @@ impl std::str::FromStr for DetectionMode {
 mod tests {
     use super::*;
 
-    // ── DuplicatesConfig defaults ────────────────────────────────────
-
     #[test]
     fn duplicates_config_defaults() {
         let config = DuplicatesConfig::default();
@@ -261,12 +261,10 @@ mod tests {
         assert!(config.ignore_defaults);
         assert!(!config.skip_local);
         assert!(!config.cross_language);
-        assert!(!config.ignore_imports);
+        assert!(config.ignore_imports);
         assert_eq!(config.min_corpus_size_for_shingle_filter, 1024);
         assert_eq!(config.min_corpus_size_for_token_cache, 5_000);
     }
-
-    // ── DetectionMode FromStr ────────────────────────────────────────
 
     #[test]
     fn detection_mode_from_str_all_variants() {
@@ -311,8 +309,6 @@ mod tests {
         assert!(err.contains("foobar"));
     }
 
-    // ── DetectionMode Display ────────────────────────────────────────
-
     #[test]
     fn detection_mode_display() {
         assert_eq!(DetectionMode::Strict.to_string(), "strict");
@@ -320,8 +316,6 @@ mod tests {
         assert_eq!(DetectionMode::Weak.to_string(), "weak");
         assert_eq!(DetectionMode::Semantic.to_string(), "semantic");
     }
-
-    // ── ResolvedNormalization::resolve ────────────────────────────────
 
     #[test]
     fn resolve_strict_mode_all_false() {
@@ -363,7 +357,6 @@ mod tests {
 
     #[test]
     fn resolve_override_forces_true() {
-        // Strict mode defaults to all false, but override forces ignore_identifiers to true
         let overrides = NormalizationConfig {
             ignore_identifiers: Some(true),
             ignore_string_values: None,
@@ -377,7 +370,6 @@ mod tests {
 
     #[test]
     fn resolve_override_forces_false() {
-        // Semantic mode defaults to all true, but override forces ignore_identifiers to false
         let overrides = NormalizationConfig {
             ignore_identifiers: Some(false),
             ignore_string_values: Some(false),
@@ -401,8 +393,6 @@ mod tests {
         assert!(!resolved.ignore_string_values); // overridden from true to false
         assert!(resolved.ignore_numeric_values);
     }
-
-    // ── DuplicatesConfig deserialization ──────────────────────────────
 
     #[test]
     fn duplicates_config_json_all_fields() {
@@ -453,6 +443,25 @@ mod tests {
     }
 
     #[test]
+    fn ignore_imports_defaults_true_when_field_omitted() {
+        // The field-level serde default is `default_true`, NOT `bool::default()`
+        // (which would be `false`). An empty duplicates object and a config that
+        // sets only an unrelated field must both leave `ignoreImports` at `true`.
+        let empty: DuplicatesConfig = serde_json::from_str("{}").unwrap();
+        assert!(empty.ignore_imports);
+        let partial: DuplicatesConfig = serde_json::from_str(r#"{"minLines": 8}"#).unwrap();
+        assert!(partial.ignore_imports);
+    }
+
+    #[test]
+    fn ignore_imports_false_opts_out() {
+        let json: DuplicatesConfig = serde_json::from_str(r#"{"ignoreImports": false}"#).unwrap();
+        assert!(!json.ignore_imports);
+        let toml_cfg: DuplicatesConfig = toml::from_str("ignoreImports = false").unwrap();
+        assert!(!toml_cfg.ignore_imports);
+    }
+
+    #[test]
     fn normalization_config_json_overrides() {
         let json = r#"{
             "ignoreIdentifiers": true,
@@ -463,8 +472,6 @@ mod tests {
         assert_eq!(config.ignore_string_values, Some(false));
         assert_eq!(config.ignore_numeric_values, None);
     }
-
-    // ── TOML deserialization ────────────────────────────────────────
 
     #[test]
     fn duplicates_config_toml_all_fields() {
@@ -511,8 +518,6 @@ ignoreNumericValues = false
         assert_eq!(config.min_lines, 5);
     }
 
-    // ── NormalizationConfig edge cases ──────────────────────────────
-
     #[test]
     fn normalization_config_default_all_none() {
         let config = NormalizationConfig::default();
@@ -529,14 +534,10 @@ ignoreNumericValues = false
         assert!(config.ignore_numeric_values.is_none());
     }
 
-    // ── DetectionMode default ───────────────────────────────────────
-
     #[test]
     fn detection_mode_default_is_mild() {
         assert_eq!(DetectionMode::default(), DetectionMode::Mild);
     }
-
-    // ── ResolvedNormalization equality ───────────────────────────────
 
     #[test]
     fn resolved_normalization_equality() {
@@ -560,8 +561,6 @@ ignoreNumericValues = false
         assert_ne!(a, c);
     }
 
-    // ── Detection mode JSON deserialization ──────────────────────────
-
     #[test]
     fn detection_mode_json_deserialization() {
         let strict: DetectionMode = serde_json::from_str(r#""strict""#).unwrap();
@@ -582,8 +581,6 @@ ignoreNumericValues = false
         let result: Result<DetectionMode, _> = serde_json::from_str(r#""aggressive""#);
         assert!(result.is_err());
     }
-
-    // ── Serialize roundtrip ─────────────────────────────────────────
 
     #[test]
     fn duplicates_config_json_roundtrip() {
@@ -626,8 +623,6 @@ ignoreNumericValues = false
         assert_eq!(restored.normalization.ignore_numeric_values, Some(false));
     }
 
-    // ── NormalizationConfig skip_serializing_if ─────────────────────
-
     #[test]
     fn normalization_none_fields_not_serialized() {
         let config = NormalizationConfig::default();
@@ -658,8 +653,6 @@ ignoreNumericValues = false
         assert!(!json.contains("ignoreStringValues"));
         assert!(json.contains("ignoreNumericValues"));
     }
-
-    // ── minOccurrences validation ───────────────────────────────────
 
     #[test]
     fn min_occurrences_accepts_two_or_more() {

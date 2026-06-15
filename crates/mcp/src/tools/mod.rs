@@ -2,13 +2,17 @@ mod analyze;
 mod audit;
 mod check_changed;
 mod check_runtime_coverage;
+mod code_mode;
 mod dupes;
 mod explain;
 mod fix;
 mod flags;
 mod health;
+mod impact;
+mod inspect_target;
 mod list_boundaries;
 mod project_info;
+mod security;
 mod trace;
 
 pub use analyze::build_analyze_args;
@@ -18,13 +22,17 @@ pub use check_runtime_coverage::{
     build_check_runtime_coverage_args, build_get_blast_radius_args,
     build_get_cleanup_candidates_args, build_get_hot_paths_args, build_get_importance_args,
 };
+pub use code_mode::execute_code_mode;
 pub use dupes::build_find_dupes_args;
 pub use explain::build_explain_args;
 pub use fix::{build_fix_apply_args, build_fix_preview_args};
 pub use flags::build_feature_flags_args;
 pub use health::build_health_args;
+pub use impact::{build_impact_all_args, build_impact_args};
+pub use inspect_target::inspect_target;
 pub use list_boundaries::build_list_boundaries_args;
 pub use project_info::build_project_info_args;
+pub use security::build_security_candidates_args;
 pub use trace::{
     build_trace_clone_args, build_trace_dependency_args, build_trace_export_args,
     build_trace_file_args,
@@ -41,11 +49,7 @@ use tokio::process::Command;
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
 
 /// Push a `--flag VALUE` pair onto `args` only when `value` is `Some(s)` and
-/// `s` is non-empty. MCP clients (especially LLM-driven ones) sometimes send
-/// `""` for unset path or string params instead of omitting the field; an
-/// empty string forwarded as `--flag ""` would either be rejected by clap or
-/// silently mean "current directory" depending on the flag, both of which are
-/// confusing failure modes.
+/// `s` is non-empty.
 fn push_str_flag(args: &mut Vec<String>, flag: &str, value: Option<&str>) {
     if let Some(s) = value
         && !s.is_empty()
@@ -111,12 +115,19 @@ pub const ISSUE_TYPE_FLAGS: &[(&str, &str)] = &[
     ("unused-deps", "--unused-deps"),
     ("unused-enum-members", "--unused-enum-members"),
     ("unused-class-members", "--unused-class-members"),
+    ("unused-store-members", "--unused-store-members"),
+    ("unprovided-injects", "--unprovided-injects"),
+    ("unrendered-components", "--unrendered-components"),
+    ("unused-component-props", "--unused-component-props"),
+    ("unused-component-emits", "--unused-component-emits"),
+    ("unused-server-actions", "--unused-server-actions"),
     ("unresolved-imports", "--unresolved-imports"),
     ("unlisted-deps", "--unlisted-deps"),
     ("duplicate-exports", "--duplicate-exports"),
     ("circular-deps", "--circular-deps"),
     ("re-export-cycles", "--re-export-cycles"),
     ("boundary-violations", "--boundary-violations"),
+    ("policy-violations", "--policy-violations"),
     ("stale-suppressions", "--stale-suppressions"),
     ("unused-catalog-entries", "--unused-catalog-entries"),
     ("empty-catalog-groups", "--empty-catalog-groups"),
@@ -141,17 +152,12 @@ pub const VALID_DUPES_MODES: &[&str] = &["strict", "mild", "weak", "semantic"];
 pub const VALID_AUDIT_GATES: &[&str] = &["new-only", "all"];
 
 /// Build a structured validation error body matching the shape `run_plow` emits
-/// for CLI-level errors: `{"error": true, "message": "...", "exit_code": 0}`.
-///
-/// Used by arg builders to reject invalid input before spawning plow. `exit_code`
-/// is `0` because no subprocess ran, disambiguating validation failures from CLI
-/// error exits (which use the real exit code). The returned string is compact JSON
-/// ready to be wrapped in `CallToolResult::error(vec![Content::text(body)])`.
+/// for CLI-level errors.
 pub fn validation_error_body(message: impl Into<String>) -> String {
     serde_json::json!({
         "error": true,
         "message": message.into(),
-        "exit_code": 0,
+        "exit_code": 2,
     })
     .to_string()
 }
@@ -168,44 +174,78 @@ fn timeout_duration() -> Duration {
 }
 
 /// Execute the plow CLI binary with the given arguments and return the result.
+///
+/// Untagged variant retained for the subprocess-behavior tests (timeouts, exit
+/// codes, signal handling); production tool dispatch goes through `run_tool` so
+/// the spawned CLI's telemetry is attributed to the `mcp` surface.
+#[cfg(test)]
 pub async fn run_plow(binary: &str, args: &[String]) -> Result<CallToolResult, McpError> {
-    run_plow_with_timeout(binary, args, timeout_duration()).await
+    spawn_plow(binary, args, timeout_duration(), None).await
 }
 
+/// Execute the plow CLI for a named MCP tool. Tags the spawned process so its
+/// telemetry event is attributed to the `mcp` integration surface and the
+/// specific tool, instead of looking like any other `cli_json` run. The CLI
+/// only reads these when telemetry is enabled; they carry no paths or
+/// identifiers, and the tool name is allowlist-validated CLI-side.
+pub async fn run_tool(
+    binary: &str,
+    tool: &'static str,
+    args: &[String],
+) -> Result<CallToolResult, McpError> {
+    spawn_plow(binary, args, timeout_duration(), Some(tool)).await
+}
+
+#[cfg(all(test, unix))]
 pub async fn run_plow_with_timeout(
     binary: &str,
     args: &[String],
     timeout: Duration,
 ) -> Result<CallToolResult, McpError> {
-    let output = tokio::time::timeout(
-        timeout,
-        Command::new(binary)
-            .args(args)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output(),
-    )
-    .await
-    .map_err(|_| {
-        McpError::internal_error(
-            format!(
-                "plow subprocess timed out after {}s. \
+    spawn_plow(binary, args, timeout, None).await
+}
+
+async fn spawn_plow(
+    binary: &str,
+    args: &[String],
+    timeout: Duration,
+    tool: Option<&'static str>,
+) -> Result<CallToolResult, McpError> {
+    let mut command = Command::new(binary);
+    command
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(tool) = tool {
+        // Re-tag the spawned CLI's telemetry event as the MCP surface + tool.
+        // The CLI inherits this process's env, so the existing telemetry path
+        // emits a single, correctly-attributed event (no second emit here).
+        command
+            .env("PLOW_INTEGRATION_SURFACE", "mcp")
+            .env("PLOW_MCP_TOOL", tool);
+    }
+    let output = tokio::time::timeout(timeout, command.output())
+        .await
+        .map_err(|_| {
+            McpError::internal_error(
+                format!(
+                    "plow subprocess timed out after {}s. \
                  Set PLOW_TIMEOUT_SECS to increase the limit.",
-                timeout.as_secs()
-            ),
-            None,
-        )
-    })?
-    .map_err(|e| {
-        McpError::internal_error(
-            format!(
-                "Failed to execute plow binary '{binary}': {e}. \
+                    timeout.as_secs()
+                ),
+                None,
+            )
+        })?
+        .map_err(|e| {
+            McpError::internal_error(
+                format!(
+                    "Failed to execute plow binary '{binary}': {e}. \
                  Ensure plow is installed and available in PATH, \
                  or set the PLOW_BIN environment variable."
-            ),
-            None,
-        )
-    })?;
+                ),
+                None,
+            )
+        })?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -213,7 +253,6 @@ pub async fn run_plow_with_timeout(
     if !output.status.success() {
         let exit_code = output.status.code().unwrap_or(-1);
 
-        // Exit code 1 = issues found (not an error for analysis tools)
         if exit_code == 1 {
             let text = if stdout.is_empty() {
                 "{}".to_string()
@@ -223,11 +262,6 @@ pub async fn run_plow_with_timeout(
             return Ok(CallToolResult::success(vec![Content::text(text)]));
         }
 
-        // Exit code 2+ = real error. The CLI emits structured JSON on stdout
-        // when --format json is active; prefer that over reconstructing from stderr.
-        // Invariant: stdout on error exit is either valid JSON or empty — never
-        // partial or non-JSON output. If a plugin/hook corrupts stdout, we fall
-        // through to the stderr reconstruction path below.
         if !stdout.is_empty() && serde_json::from_str::<serde_json::Value>(&stdout).is_ok() {
             return Ok(CallToolResult::error(vec![Content::text(
                 stdout.to_string(),
@@ -263,32 +297,49 @@ pub async fn run_plow_with_timeout(
 }
 
 /// Execute plow and ensure successful JSON responses have a top-level
-/// `warnings` array for agent-facing runtime context tools.
+/// `warnings` array for agent-facing runtime context tools. Untagged variant
+/// retained for tests; production goes through `run_tool_with_top_level_warnings`.
+#[cfg(all(test, unix))]
 pub async fn run_plow_with_top_level_warnings(
     binary: &str,
     args: &[String],
 ) -> Result<CallToolResult, McpError> {
-    let result = run_plow(binary, args).await?;
+    Ok(ensure_top_level_warnings(run_plow(binary, args).await?))
+}
+
+/// Tool-attributed variant of `run_plow_with_top_level_warnings` (see
+/// `run_tool`).
+pub async fn run_tool_with_top_level_warnings(
+    binary: &str,
+    tool: &'static str,
+    args: &[String],
+) -> Result<CallToolResult, McpError> {
+    Ok(ensure_top_level_warnings(
+        run_tool(binary, tool, args).await?,
+    ))
+}
+
+fn ensure_top_level_warnings(result: CallToolResult) -> CallToolResult {
     if result.is_error == Some(true) {
-        return Ok(result);
+        return result;
     }
 
     let Some(content) = result.content.first() else {
-        return Ok(result);
+        return result;
     };
     let RawContent::Text(text) = &content.raw else {
-        return Ok(result);
+        return result;
     };
     let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&text.text) else {
-        return Ok(result);
+        return result;
     };
     let Some(map) = value.as_object_mut() else {
-        return Ok(result);
+        return result;
     };
 
     map.entry("warnings".to_string())
         .or_insert_with(|| serde_json::Value::Array(Vec::new()));
 
     let text = serde_json::to_string_pretty(&value).unwrap_or_else(|_| text.text.clone());
-    Ok(CallToolResult::success(vec![Content::text(text)]))
+    CallToolResult::success(vec![Content::text(text)])
 }

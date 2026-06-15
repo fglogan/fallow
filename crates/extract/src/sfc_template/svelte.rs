@@ -12,36 +12,30 @@ use super::shared::{
 };
 
 static STYLE_BLOCK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r#"(?is)<style\b(?:[^>"']|"[^"]*"|'[^']*')*>(?P<body>[\s\S]*?)</style>"#)
-        .expect("valid regex")
+    crate::static_regex(r#"(?is)<style\b(?:[^>"']|"[^"]*"|'[^']*')*>(?P<body>[\s\S]*?)</style>"#)
 });
 
 static SCRIPT_BLOCK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r#"(?is)<script\b(?:[^>"']|"[^"]*"|'[^']*')*>(?P<body>[\s\S]*?)</script>"#)
-        .expect("valid regex")
+    crate::static_regex(r#"(?is)<script\b(?:[^>"']|"[^"]*"|'[^']*')*>(?P<body>[\s\S]*?)</script>"#)
 });
 
 static SVELTE_EACH_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(
+    crate::static_regex(
         r"(?is)^#each\s+(?P<iterable>.+?)\s+as\s+(?P<bindings>.+?)(?:\s*\((?P<key>.+)\))?$",
     )
-    .expect("valid regex")
 });
 
 static SVELTE_AWAIT_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"(?is)^#await\s+(?P<expr>.+)$").expect("valid regex"));
+    LazyLock::new(|| crate::static_regex(r"(?is)^#await\s+(?P<expr>.+)$"));
 
-static SVELTE_THEN_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r"(?is)^:then(?:\s+(?P<binding>.+))?$").expect("valid regex")
-});
+static SVELTE_THEN_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r"(?is)^:then(?:\s+(?P<binding>.+))?$"));
 
-static SVELTE_CATCH_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r"(?is)^:catch(?:\s+(?P<binding>.+))?$").expect("valid regex")
-});
+static SVELTE_CATCH_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r"(?is)^:catch(?:\s+(?P<binding>.+))?$"));
 
 static SVELTE_SNIPPET_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r"(?is)^#snippet\s+[A-Za-z_$][\w$]*\s*\((?P<params>.*)\)\s*$")
-        .expect("valid regex")
+    crate::static_regex(r"(?is)^#snippet\s+[A-Za-z_$][\w$]*\s*\((?P<params>.*)\)\s*$")
 });
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,10 +73,6 @@ pub(super) fn collect_template_usage_with_bound_targets(
     imported_bindings: &FxHashSet<String>,
     bound_targets: &FxHashMap<String, String>,
 ) -> TemplateUsage {
-    if imported_bindings.is_empty() && bound_targets.is_empty() {
-        return TemplateUsage::default();
-    }
-
     let markup = strip_non_template_content(source);
     if markup.is_empty() {
         return TemplateUsage::default();
@@ -104,6 +94,8 @@ pub(super) fn collect_template_usage_with_bound_targets(
                 };
                 apply_tag(
                     tag.trim(),
+                    index,
+                    next_index,
                     imported_bindings,
                     bound_targets,
                     &mut scopes,
@@ -161,12 +153,13 @@ fn strip_non_template_content(source: &str) -> String {
         merged.push((start, end));
     }
 
-    let mut visible = String::new();
+    let mut visible = String::with_capacity(source.len());
     let mut cursor = 0;
     for (start, end) in merged {
         if cursor < start {
             visible.push_str(&source[cursor..start]);
         }
+        visible.extend(std::iter::repeat_n(' ', end - start));
         cursor = end;
     }
     if cursor < source.len() {
@@ -175,12 +168,10 @@ fn strip_non_template_content(source: &str) -> String {
     visible
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "Svelte tag dispatch is inherently branchy; each tag kind is handled in-place for locality"
-)]
 fn apply_tag(
     tag: &str,
+    tag_start: usize,
+    tag_end: usize,
     imported_bindings: &FxHashSet<String>,
     bound_targets: &FxHashMap<String, String>,
     scopes: &mut Vec<SvelteScopeFrame>,
@@ -190,9 +181,41 @@ fn apply_tag(
         return;
     }
 
+    if apply_svelte_block_tag(tag, imported_bindings, bound_targets, scopes, usage) {
+        return;
+    }
+
+    if apply_svelte_expression_directive(
+        tag,
+        tag_start,
+        tag_end,
+        imported_bindings,
+        bound_targets,
+        scopes,
+        usage,
+    ) {
+        return;
+    }
+
+    merge_expression_usage_allow_dollar_refs_with_bound_targets(
+        usage,
+        tag,
+        imported_bindings,
+        bound_targets,
+        &current_locals(scopes),
+    );
+}
+
+fn apply_svelte_block_tag(
+    tag: &str,
+    imported_bindings: &FxHashSet<String>,
+    bound_targets: &FxHashMap<String, String>,
+    scopes: &mut Vec<SvelteScopeFrame>,
+    usage: &mut TemplateUsage,
+) -> bool {
     if let Some(rest) = tag.strip_prefix('/') {
         pop_scope(scopes, rest.trim());
-        return;
+        return true;
     }
 
     if let Some(expr) = tag.strip_prefix("#if") {
@@ -207,83 +230,27 @@ fn apply_tag(
             kind: SvelteBlockKind::If,
             locals: Vec::new(),
         });
-        return;
+        return true;
     }
 
     if let Some(captures) = SVELTE_EACH_RE.captures(tag) {
-        let iterable = captures.name("iterable").map_or("", |m| m.as_str()).trim();
-        let bindings = captures.name("bindings").map_or("", |m| m.as_str()).trim();
-        let each_locals = extract_pattern_binding_names(bindings);
-        let current = current_locals(scopes);
-        merge_expression_usage_allow_dollar_refs_with_bound_targets(
-            usage,
-            iterable,
-            imported_bindings,
-            bound_targets,
-            &current,
-        );
-        if let Some(key) = captures.name("key").map(|m| m.as_str().trim())
-            && !key.is_empty()
-        {
-            let mut key_locals = current;
-            key_locals.extend(each_locals.iter().cloned());
-            merge_expression_usage_allow_dollar_refs_with_bound_targets(
-                usage,
-                key,
-                imported_bindings,
-                bound_targets,
-                &key_locals,
-            );
-        }
-        scopes.push(SvelteScopeFrame {
-            kind: SvelteBlockKind::Each,
-            locals: each_locals,
-        });
-        return;
+        apply_each_tag(&captures, imported_bindings, bound_targets, scopes, usage);
+        return true;
     }
 
     if let Some(captures) = SVELTE_AWAIT_RE.captures(tag) {
-        let expr = captures.name("expr").map_or("", |m| m.as_str()).trim();
-        merge_expression_usage_allow_dollar_refs_with_bound_targets(
-            usage,
-            expr,
-            imported_bindings,
-            bound_targets,
-            &current_locals(scopes),
-        );
-        scopes.push(SvelteScopeFrame {
-            kind: SvelteBlockKind::Await,
-            locals: Vec::new(),
-        });
-        return;
+        apply_await_tag(&captures, imported_bindings, bound_targets, scopes, usage);
+        return true;
     }
 
     if let Some(captures) = SVELTE_THEN_RE.captures(tag) {
-        if let Some(frame) = scopes
-            .iter_mut()
-            .rev()
-            .find(|frame| matches!(frame.kind, SvelteBlockKind::Await))
-        {
-            frame.locals = captures
-                .name("binding")
-                .map(|m| extract_pattern_binding_names(m.as_str()))
-                .unwrap_or_default();
-        }
-        return;
+        update_await_branch_locals(&captures, scopes);
+        return true;
     }
 
     if let Some(captures) = SVELTE_CATCH_RE.captures(tag) {
-        if let Some(frame) = scopes
-            .iter_mut()
-            .rev()
-            .find(|frame| matches!(frame.kind, SvelteBlockKind::Await))
-        {
-            frame.locals = captures
-                .name("binding")
-                .map(|m| extract_pattern_binding_names(m.as_str()))
-                .unwrap_or_default();
-        }
-        return;
+        update_await_branch_locals(&captures, scopes);
+        return true;
     }
 
     if let Some(expr) = tag.strip_prefix("#key") {
@@ -298,7 +265,7 @@ fn apply_tag(
             kind: SvelteBlockKind::Key,
             locals: Vec::new(),
         });
-        return;
+        return true;
     }
 
     if let Some(captures) = SVELTE_SNIPPET_RE.captures(tag) {
@@ -307,21 +274,30 @@ fn apply_tag(
             kind: SvelteBlockKind::Snippet,
             locals: extract_pattern_binding_names(params),
         });
-        return;
+        return true;
     }
 
+    false
+}
+
+fn apply_svelte_expression_directive(
+    tag: &str,
+    tag_start: usize,
+    tag_end: usize,
+    imported_bindings: &FxHashSet<String>,
+    bound_targets: &FxHashMap<String, String>,
+    scopes: &mut [SvelteScopeFrame],
+    usage: &mut TemplateUsage,
+) -> bool {
     if let Some(expr) = tag.strip_prefix("@attach") {
-        merge_expression_usage_allow_dollar_refs_with_bound_targets(
-            usage,
-            expr.trim(),
-            imported_bindings,
-            bound_targets,
-            &current_locals(scopes),
-        );
-        return;
+        apply_expression_tag(expr, imported_bindings, bound_targets, scopes, usage);
+        return true;
     }
 
     if let Some(expr) = tag.strip_prefix("@html") {
+        if let Some(sink) = crate::template_usage::template_html_sink(expr, tag_start, tag_end) {
+            usage.security_sinks.push(sink);
+        }
         merge_expression_usage_allow_dollar_refs_with_bound_targets(
             usage,
             expr.trim(),
@@ -329,67 +305,140 @@ fn apply_tag(
             bound_targets,
             &current_locals(scopes),
         );
-        return;
+        return true;
     }
 
     if let Some(expr) = tag.strip_prefix("@render") {
-        merge_expression_usage_allow_dollar_refs_with_bound_targets(
-            usage,
-            expr.trim(),
-            imported_bindings,
-            bound_targets,
-            &current_locals(scopes),
-        );
-        return;
+        apply_expression_tag(expr, imported_bindings, bound_targets, scopes, usage);
+        return true;
     }
 
     if let Some(stmt) = tag.strip_prefix("@const") {
-        let locals = current_locals(scopes);
-        merge_statement_usage_allow_dollar_refs_with_bound_targets(
-            usage,
-            stmt.trim(),
-            imported_bindings,
-            bound_targets,
-            &locals,
-        );
-        if let Some(lhs) = stmt.split_once('=').map(|(lhs, _)| lhs.trim()) {
-            let new_bindings = extract_pattern_binding_names(lhs);
-            if let Some(frame) = scopes.last_mut() {
-                frame.locals.extend(new_bindings);
-            }
-        }
-        return;
+        apply_const_tag(stmt, imported_bindings, bound_targets, scopes, usage);
+        return true;
     }
 
     if let Some(expr) = tag.strip_prefix("@debug") {
-        merge_expression_usage_allow_dollar_refs_with_bound_targets(
-            usage,
-            expr.trim(),
-            imported_bindings,
-            bound_targets,
-            &current_locals(scopes),
-        );
-        return;
+        apply_expression_tag(expr, imported_bindings, bound_targets, scopes, usage);
+        return true;
     }
 
     if let Some(expr) = tag.strip_prefix(":else if") {
-        merge_expression_usage_allow_dollar_refs_with_bound_targets(
-            usage,
-            expr.trim(),
-            imported_bindings,
-            bound_targets,
-            &current_locals(scopes),
-        );
-        return;
+        apply_expression_tag(expr, imported_bindings, bound_targets, scopes, usage);
+        return true;
     }
 
     if tag.starts_with(":else") {
-        return;
+        return true;
     }
 
+    false
+}
+
+fn apply_each_tag(
+    captures: &regex::Captures<'_>,
+    imported_bindings: &FxHashSet<String>,
+    bound_targets: &FxHashMap<String, String>,
+    scopes: &mut Vec<SvelteScopeFrame>,
+    usage: &mut TemplateUsage,
+) {
+    let iterable = captures.name("iterable").map_or("", |m| m.as_str()).trim();
+    let bindings = captures.name("bindings").map_or("", |m| m.as_str()).trim();
+    let each_locals = extract_pattern_binding_names(bindings);
+    let current = current_locals(scopes);
     merge_expression_usage_allow_dollar_refs_with_bound_targets(
         usage,
-        tag,
+        iterable,
+        imported_bindings,
+        bound_targets,
+        &current,
+    );
+    if let Some(key) = captures.name("key").map(|m| m.as_str().trim())
+        && !key.is_empty()
+    {
+        let mut key_locals = current;
+        key_locals.extend(each_locals.iter().cloned());
+        merge_expression_usage_allow_dollar_refs_with_bound_targets(
+            usage,
+            key,
+            imported_bindings,
+            bound_targets,
+            &key_locals,
+        );
+    }
+    scopes.push(SvelteScopeFrame {
+        kind: SvelteBlockKind::Each,
+        locals: each_locals,
+    });
+}
+
+fn apply_await_tag(
+    captures: &regex::Captures<'_>,
+    imported_bindings: &FxHashSet<String>,
+    bound_targets: &FxHashMap<String, String>,
+    scopes: &mut Vec<SvelteScopeFrame>,
+    usage: &mut TemplateUsage,
+) {
+    let expr = captures.name("expr").map_or("", |m| m.as_str()).trim();
+    merge_expression_usage_allow_dollar_refs_with_bound_targets(
+        usage,
+        expr,
+        imported_bindings,
+        bound_targets,
+        &current_locals(scopes),
+    );
+    scopes.push(SvelteScopeFrame {
+        kind: SvelteBlockKind::Await,
+        locals: Vec::new(),
+    });
+}
+
+fn update_await_branch_locals(captures: &regex::Captures<'_>, scopes: &mut [SvelteScopeFrame]) {
+    if let Some(frame) = scopes
+        .iter_mut()
+        .rev()
+        .find(|frame| matches!(frame.kind, SvelteBlockKind::Await))
+    {
+        frame.locals = captures
+            .name("binding")
+            .map(|m| extract_pattern_binding_names(m.as_str()))
+            .unwrap_or_default();
+    }
+}
+
+fn apply_const_tag(
+    stmt: &str,
+    imported_bindings: &FxHashSet<String>,
+    bound_targets: &FxHashMap<String, String>,
+    scopes: &mut [SvelteScopeFrame],
+    usage: &mut TemplateUsage,
+) {
+    let locals = current_locals(scopes);
+    merge_statement_usage_allow_dollar_refs_with_bound_targets(
+        usage,
+        stmt.trim(),
+        imported_bindings,
+        bound_targets,
+        &locals,
+    );
+    if let Some(lhs) = stmt.split_once('=').map(|(lhs, _)| lhs.trim()) {
+        let new_bindings = extract_pattern_binding_names(lhs);
+        if let Some(frame) = scopes.last_mut() {
+            frame.locals.extend(new_bindings);
+        }
+    }
+}
+
+fn apply_expression_tag(
+    expr: &str,
+    imported_bindings: &FxHashSet<String>,
+    bound_targets: &FxHashMap<String, String>,
+    scopes: &[SvelteScopeFrame],
+    usage: &mut TemplateUsage,
+) {
+    merge_expression_usage_allow_dollar_refs_with_bound_targets(
+        usage,
+        expr.trim(),
         imported_bindings,
         bound_targets,
         &current_locals(scopes),
@@ -776,8 +825,6 @@ mod tests {
             &imported(&["item"]),
         );
 
-        // The `let:item` binding shadows the import, so it is not credited.
-        // `<Slot>` (no import) is captured as an auto-import candidate.
         assert!(usage.used_bindings.is_empty());
         assert!(usage.member_accesses.is_empty());
     }
@@ -789,13 +836,9 @@ mod tests {
             &imported(&["Item"]),
         );
 
-        // `let:Item` shadows the import; `<Item>` is the shadowed local so it is
-        // not credited or captured. `<Slot>` (no import) is captured.
         assert!(usage.used_bindings.is_empty());
         assert!(usage.member_accesses.is_empty());
     }
-
-    // --- Early returns ---
 
     #[test]
     fn empty_imported_bindings_returns_empty_usage() {
@@ -814,8 +857,6 @@ mod tests {
         assert!(usage.is_empty());
     }
 
-    // --- strip_non_template_content ---
-
     #[test]
     fn html_comments_are_stripped() {
         let usage = collect_template_usage(
@@ -829,8 +870,6 @@ mod tests {
 
     #[test]
     fn overlapping_ranges_are_merged_during_stripping() {
-        // The script and style blocks overlap conceptually with a comment
-        // that spans across them, testing the merge logic in strip_non_template_content
         let usage = collect_template_usage(
             "<script>let x;</script><!-- comment --><style>p{}</style><p>{fmt(v)}</p>",
             &imported(&["fmt"]),
@@ -838,8 +877,6 @@ mod tests {
 
         assert!(usage.used_bindings.contains("fmt"));
     }
-
-    // --- #key block ---
 
     #[test]
     fn key_block_marks_key_expression_used() {
@@ -851,8 +888,6 @@ mod tests {
         assert!(usage.used_bindings.contains("selectedId"));
         assert!(usage.used_bindings.contains("Child"));
     }
-
-    // --- #snippet block ---
 
     #[test]
     fn snippet_params_shadow_imported_names() {
@@ -876,35 +911,23 @@ mod tests {
 
     #[test]
     fn snippet_typed_params_do_not_stack_overflow() {
-        // Regression: `{ href, content }: Props` caused infinite recursion in
-        // `extract_pattern_binding_names` because the type annotation prevented
-        // `strip_wrapping` from matching, sending the input into a self-recursive
-        // comma-split path that never progressed.
         let usage = collect_template_usage(
             "{#snippet Link({ href, content }: Props)}<a {href}>{content}</a>{/snippet}",
             &imported(&["href", "content"]),
         );
 
-        // href and content are snippet-local bindings, so they shadow imports
         assert!(usage.is_empty());
     }
 
     #[test]
     fn snippet_tuple_typed_param_does_not_stack_overflow() {
-        // Regression for #172: `{#snippet foo(x: [number, number])}` overflowed
-        // the stack because the param string `x: [number, number]` reached the
-        // comma-split branch with all commas inside the tuple type, which kept
-        // recursing on the unchanged input.
         let usage = collect_template_usage(
             "{#snippet foo(x: [number, number])}{/snippet}",
             &imported(&["x"]),
         );
 
-        // x is a snippet-local binding, so it shadows the import
         assert!(usage.is_empty());
     }
-
-    // --- @html ---
 
     #[test]
     fn at_html_marks_expression_used() {
@@ -913,16 +936,12 @@ mod tests {
         assert!(usage.used_bindings.contains("sanitize"));
     }
 
-    // --- @render ---
-
     #[test]
     fn at_render_marks_expression_used() {
         let usage = collect_template_usage("{@render header()}", &imported(&["header"]));
 
         assert!(usage.used_bindings.contains("header"));
     }
-
-    // --- @attach ---
 
     #[test]
     fn at_attach_marks_expression_used() {
@@ -986,8 +1005,6 @@ mod tests {
         );
     }
 
-    // --- @const ---
-
     #[test]
     fn at_const_marks_rhs_expression_used() {
         let usage = collect_template_usage(
@@ -1000,19 +1017,13 @@ mod tests {
 
     #[test]
     fn at_const_shadows_subsequent_usages() {
-        // `myVal` is imported but @const declares a local `myVal`, shadowing
-        // subsequent references to it in the same scope
         let usage = collect_template_usage(
             "{#each items as item}{@const myVal = item.name}<p>{myVal}</p>{/each}",
             &imported(&["myVal"]),
         );
 
-        // The @const statement itself references `myVal` as the LHS assignment target,
-        // so it's marked as used, but subsequent {myVal} references are shadowed
         assert!(usage.used_bindings.contains("myVal"));
     }
-
-    // --- @debug ---
 
     #[test]
     fn at_debug_marks_expression_used() {
@@ -1020,8 +1031,6 @@ mod tests {
 
         assert!(usage.used_bindings.contains("count"));
     }
-
-    // --- :else if ---
 
     #[test]
     fn else_if_marks_condition_used() {
@@ -1033,8 +1042,6 @@ mod tests {
         assert!(usage.used_bindings.contains("isReady"));
     }
 
-    // --- :else ---
-
     #[test]
     fn else_branch_does_not_generate_usage() {
         let usage = collect_template_usage(
@@ -1044,8 +1051,6 @@ mod tests {
 
         assert!(usage.used_bindings.contains("fallback"));
     }
-
-    // --- #if block ---
 
     #[test]
     fn if_block_marks_condition_expression_used() {
@@ -1057,17 +1062,12 @@ mod tests {
         assert!(usage.used_bindings.contains("isVisible"));
     }
 
-    // --- closing block with unknown kind ---
-
     #[test]
     fn closing_unknown_block_kind_is_no_op() {
-        // {/unknownblock} should not crash or affect scopes
         let usage = collect_template_usage("{/unknownblock}<p>{fmt(x)}</p>", &imported(&["fmt"]));
 
         assert!(usage.used_bindings.contains("fmt"));
     }
-
-    // --- #each with key expression ---
 
     #[test]
     fn each_key_expression_marks_binding_used() {
@@ -1081,8 +1081,6 @@ mod tests {
 
     #[test]
     fn each_key_expression_has_access_to_each_locals() {
-        // The key expression can reference the `item` alias
-        // so `item` should be shadowed in the key context
         let usage = collect_template_usage(
             "{#each items as item (item.id)}<p>{item}</p>{/each}",
             &imported(&["item"]),
@@ -1090,8 +1088,6 @@ mod tests {
 
         assert!(usage.is_empty());
     }
-
-    // --- await with :catch ---
 
     #[test]
     fn catch_binding_shadows_import_name() {
@@ -1123,8 +1119,6 @@ mod tests {
         assert!(usage.used_bindings.contains("loadData"));
     }
 
-    // --- Markup tag branches ---
-
     #[test]
     fn html_doctype_and_processing_instructions_are_ignored() {
         let usage = collect_template_usage(
@@ -1137,7 +1131,6 @@ mod tests {
 
     #[test]
     fn void_html_tags_do_not_push_element_scope() {
-        // <input> is void; the closing </div> should pop the outer element scope, not fail
         let usage = collect_template_usage(
             "<div><input value={val} /><p>{handler(x)}</p></div>",
             &imported(&["val", "handler"]),
@@ -1154,11 +1147,8 @@ mod tests {
             &imported(&["item", "helper"]),
         );
 
-        // item is shadowed inside <div> by let:item, but helper is used outside
         assert!(usage.used_bindings.contains("helper"));
     }
-
-    // --- Directive directives ---
 
     #[test]
     fn animate_directive_marks_binding_used() {
@@ -1199,14 +1189,11 @@ mod tests {
         assert!(usage.used_bindings.contains("fade"));
     }
 
-    // --- Attribute value parsing ---
-
     #[test]
     fn unquoted_attribute_value_is_parsed() {
         let usage =
             collect_template_usage("<div data-value=hello>content</div>", &imported(&["hello"]));
 
-        // Unquoted attribute values are plain strings, not expressions
         assert!(usage.is_empty());
     }
 
@@ -1230,8 +1217,6 @@ mod tests {
         assert!(usage.used_bindings.contains("action"));
     }
 
-    // --- Expression in attribute value with surrounding text ---
-
     #[test]
     fn interpolated_attribute_value_marks_binding_used() {
         let usage = collect_template_usage(
@@ -1241,8 +1226,6 @@ mod tests {
 
         assert!(usage.used_bindings.contains("cls"));
     }
-
-    // --- Multiple expressions in a single text node ---
 
     #[test]
     fn multiple_curly_expressions_all_tracked() {
@@ -1255,8 +1238,6 @@ mod tests {
         assert!(usage.used_bindings.contains("second"));
     }
 
-    // --- Empty tag in curly braces ---
-
     #[test]
     fn empty_curly_braces_produce_no_usage() {
         let usage = collect_template_usage("{ }<p>{fmt(x)}</p>", &imported(&["fmt"]));
@@ -1264,16 +1245,12 @@ mod tests {
         assert!(usage.used_bindings.contains("fmt"));
     }
 
-    // --- Self-closing void tags ---
-
     #[test]
     fn self_closing_tag_does_not_push_scope() {
         let usage = collect_template_usage("<br /><p>{fmt(x)}</p>", &imported(&["fmt"]));
 
         assert!(usage.used_bindings.contains("fmt"));
     }
-
-    // --- Deeply nested scoping ---
 
     #[test]
     fn nested_each_and_if_scoping_works_correctly() {
@@ -1283,11 +1260,8 @@ mod tests {
         );
 
         assert!(usage.used_bindings.contains("format"));
-        // row is shadowed by the each binding
         assert!(!usage.used_bindings.contains("row"));
     }
-
-    // --- @const without equals (edge case) ---
 
     #[test]
     fn at_const_rhs_references_are_tracked() {
@@ -1299,17 +1273,12 @@ mod tests {
         assert!(usage.used_bindings.contains("compute"));
     }
 
-    // --- Closing tag without matching Element scope ---
-
     #[test]
     fn closing_tag_without_element_scope_is_safe() {
-        // </div> with no matching open scope should not crash
         let usage = collect_template_usage("</div><p>{fmt(x)}</p>", &imported(&["fmt"]));
 
         assert!(usage.used_bindings.contains("fmt"));
     }
-
-    // --- Snippet closing ---
 
     #[test]
     fn snippet_closing_pops_scope_correctly() {
@@ -1318,12 +1287,9 @@ mod tests {
             &imported(&["item", "outer"]),
         );
 
-        // item is shadowed inside snippet, outer is used outside
         assert!(!usage.used_bindings.contains("item"));
         assert!(usage.used_bindings.contains("outer"));
     }
-
-    // --- Key block closing ---
 
     #[test]
     fn key_block_closing_pops_scope() {
@@ -1337,16 +1303,12 @@ mod tests {
         assert!(usage.used_bindings.contains("helper"));
     }
 
-    // --- Plain expression fallthrough (no special prefix) ---
-
     #[test]
     fn plain_expression_without_prefix_is_tracked() {
         let usage = collect_template_usage("{count + 1}", &imported(&["count"]));
 
         assert!(usage.used_bindings.contains("count"));
     }
-
-    // --- Attribute with single-quoted value ---
 
     #[test]
     fn single_quoted_attribute_value_expressions_are_parsed() {

@@ -3,12 +3,14 @@ import * as fs from "node:fs";
 // plow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
 import {
+  type DiagnosticProviderShape,
   LanguageClient,
   LanguageClientOptions,
   ServerOptions,
+  State,
   TransportKind,
 } from "vscode-languageclient/node.js";
-import { Trace } from "vscode-languageserver-protocol";
+import { DocumentDiagnosticRequest, Trace } from "vscode-languageserver-protocol";
 import {
   getLspPath,
   getTraceLevel,
@@ -16,9 +18,22 @@ import {
   getIssueTypes,
   getChangedSince,
   getResolvedConfigPath,
+  getProductionOverride,
+  getDuplicationCrossLanguageOverride,
+  getDuplicationIgnoreImportsOverride,
+  getDuplicationMinLinesOverride,
+  getDuplicationMinOccurrencesOverride,
+  getDuplicationMinTokensOverride,
+  getDuplicationModeOverride,
+  getDuplicationSkipLocalOverride,
+  getDuplicationThresholdOverride,
+  getMutedDiagnosticCategories,
 } from "./config.js";
+import { showBinarySkewToastOnce } from "./binary-skew.js";
 import { findBinaryInPath, findLocalBinary } from "./binary-utils.js";
 import type { DiagnosticFilter } from "./diagnosticFilter.js";
+import type { AnalysisCompleteParams } from "./statusBar-utils.js";
+import type { DuplicationMode, IssueTypeConfig } from "./types.js";
 import {
   parseDiagnosticCategories,
   resetDiagnosticCategories,
@@ -28,16 +43,72 @@ import { downloadBinary, getBinaryVersion, getInstalledBinaryPath } from "./down
 
 let client: LanguageClient | null = null;
 
-const warnIfVersionMismatch = (binaryPath: string, outputChannel?: vscode.OutputChannel): void => {
+// Serializes restarts. Two config changes firing in quick succession would
+// otherwise each pass `stopClient`'s `if (!current)` guard and each spawn a
+// `startClient`, racing two server processes (and double-stopping one client).
+// Chaining every restart onto this queue makes them strictly sequential.
+let restartQueue: Promise<LanguageClient | null> = Promise.resolve(null);
+
+export interface LspInitializationOptions {
+  readonly issueTypes: IssueTypeConfig;
+  readonly changedSince: string;
+  readonly configPath: string;
+  /**
+   * Production-mode override forwarded so the LSP diagnostics match the
+   * CLI-driven sidebar. `true`/`false` force production on/off; `undefined`
+   * (the `"auto"` setting) is dropped by `JSON.stringify`, so the LSP sees no
+   * `production` key and defers to the project config (issue #1055).
+   */
+  readonly production: boolean | undefined;
+  readonly duplication: {
+    readonly mode: DuplicationMode | undefined;
+    readonly threshold: number | undefined;
+    readonly minTokens: number | undefined;
+    readonly minLines: number | undefined;
+    readonly minOccurrences: number | undefined;
+    readonly skipLocal: boolean | undefined;
+    readonly crossLanguage: boolean | undefined;
+    readonly ignoreImports: boolean | undefined;
+  };
+}
+
+export const createInitializationOptions = (): LspInitializationOptions => ({
+  issueTypes: getIssueTypes(),
+  changedSince: getChangedSince(),
+  configPath: getResolvedConfigPath(),
+  production: getProductionOverride(),
+  // `plow.health.inlineComplexity` is rendered by the extension's own
+  // ComplexityLensProvider (so the lens can toggle the per-line breakdown), so
+  // it is NOT forwarded to the LSP. The LSP complexity lens stays opt-in for
+  // other editors (Neovim/Zed/Helix) via their own initializationOptions; this
+  // avoids a double lens in VS Code without removing the editor-agnostic path.
+  duplication: {
+    mode: getDuplicationModeOverride(),
+    threshold: getDuplicationThresholdOverride(),
+    minTokens: getDuplicationMinTokensOverride(),
+    minLines: getDuplicationMinLinesOverride(),
+    minOccurrences: getDuplicationMinOccurrencesOverride(),
+    skipLocal: getDuplicationSkipLocalOverride(),
+    crossLanguage: getDuplicationCrossLanguageOverride(),
+    ignoreImports: getDuplicationIgnoreImportsOverride(),
+  },
+});
+
+const warnIfVersionMismatch = async (
+  binaryPath: string,
+  outputChannel?: vscode.OutputChannel,
+): Promise<void> => {
   const extensionVersion = vscode.extensions.getExtension("plow-rs.plow-vscode")?.packageJSON
     ?.version as string | undefined;
   if (!extensionVersion) return;
 
-  const binaryVersion = getBinaryVersion(binaryPath);
+  const binaryVersion = await getBinaryVersion(binaryPath);
   if (binaryVersion && binaryVersion !== extensionVersion) {
-    const msg = `Plow: binary in PATH is v${binaryVersion}, extension is v${extensionVersion}. Update the binary or remove it from PATH to use the bundled version.`;
+    const msg = `Plow: binary in PATH is v${binaryVersion}, extension is v${extensionVersion}. Update the binary or remove it from PATH to use the managed auto-download.`;
     outputChannel?.appendLine(msg);
-    void vscode.window.showWarningMessage(msg);
+    // Shared once-per-session guard so the LSP-skew and CLI-skew toasts (same
+    // root cause) don't stack into two dismissible warnings.
+    showBinarySkewToastOnce(msg);
   }
 };
 
@@ -67,12 +138,14 @@ const resolveBinaryPath = async (
   const inPath = findBinaryInPath("plow-lsp");
   if (inPath) {
     outputChannel?.appendLine(`Binary resolution: using system PATH: ${inPath}`);
-    warnIfVersionMismatch(inPath, outputChannel);
+    // Fire-and-forget: the skew toast must not block binary resolution on the
+    // up-to-5s `--version` spawn (the reason getBinaryVersion is async).
+    void warnIfVersionMismatch(inPath, outputChannel);
     return inPath;
   }
   outputChannel?.appendLine("Binary resolution: plow-lsp not found in PATH");
 
-  const installed = getInstalledBinaryPath(context, outputChannel);
+  const installed = await getInstalledBinaryPath(context, outputChannel);
   if (installed) {
     outputChannel?.appendLine(
       `Binary resolution: using previously downloaded binary: ${installed}`,
@@ -127,10 +200,73 @@ export const loadDiagnosticCategories = async (
   }
 };
 
+/** Custom request that asks plow-lsp to re-drive `workspace/diagnostic/refresh`. */
+const REFRESH_DIAGNOSTICS_METHOD = "plow/refreshDiagnostics";
+
+/**
+ * Force VS Code to re-pull `textDocument/diagnostic` for every open document
+ * by firing each open document's pull provider directly.
+ *
+ * This is the client-side fast path / fallback for older servers. It is gated
+ * per document by `getProvider(document)`, which matches the document against
+ * the pull registration's `documentSelector`; if that match returns nothing
+ * (selector skew, a provider registered without our selector, timing) the fire
+ * is silently a no-op and the un-hide does not re-render. `requestServerRefresh`
+ * covers that gap by routing through the server's `getAllProviders()` path.
+ *
+ * No-op when the pull feature is not registered (push-only server, or pull not
+ * yet initialized) or when no open document matches the plow selector.
+ */
+export const triggerPullDiagnosticRefresh = (lspClient: LanguageClient): void => {
+  const feature = lspClient.getFeature(DocumentDiagnosticRequest.method);
+  if (!feature) {
+    return;
+  }
+  // `getProvider(document)` returns the same provider instance for every
+  // matching document, and one `fire()` re-pulls all of them; dedupe so we
+  // fire each unique provider exactly once.
+  const fired = new Set<DiagnosticProviderShape>();
+  for (const document of vscode.workspace.textDocuments) {
+    if (document.uri.scheme !== "file") {
+      continue;
+    }
+    const provider = feature.getProvider(document);
+    if (provider && !fired.has(provider)) {
+      fired.add(provider);
+      provider.onDidChangeDiagnosticsEmitter.fire();
+    }
+  }
+};
+
+/**
+ * Ask plow-lsp to re-send `workspace/diagnostic/refresh`.
+ *
+ * The server handler fires EVERY registered pull provider via
+ * `getAllProviders()`, the same mechanism it uses after analysis and on
+ * `document open` (the latter is the close-and-reopen workaround users fall
+ * back to). Unlike the client-side `triggerPullDiagnosticRefresh`, this is not
+ * gated by a per-document `getProvider(document)` selector match, so it
+ * re-renders open-file squiggles reliably when a mute toggle is undone
+ * (discussion #287).
+ *
+ * Fire-and-forget: older plow-lsp binaries do not implement the request and
+ * reply `MethodNotFound`; the local re-pull above already ran, so the rejection
+ * is swallowed.
+ */
+export const requestServerDiagnosticRefresh = async (lspClient: LanguageClient): Promise<void> => {
+  try {
+    await lspClient.sendRequest(REFRESH_DIAGNOSTICS_METHOD);
+  } catch {
+    // Older server without the handler (MethodNotFound), or a client that is
+    // shutting down. The client-side re-pull is the fallback.
+  }
+};
+
 export const startClient = async (
   context: vscode.ExtensionContext,
   outputChannel: vscode.OutputChannel,
   diagnosticFilter?: DiagnosticFilter,
+  onAnalysisComplete?: (params: AnalysisCompleteParams) => void,
 ): Promise<LanguageClient | null> => {
   const binaryPath = await resolveBinaryPath(context, outputChannel);
   if (!binaryPath) {
@@ -160,11 +296,9 @@ export const startClient = async (
     ],
     outputChannel,
     traceOutputChannel: outputChannel,
-    initializationOptions: {
-      issueTypes: getIssueTypes(),
-      changedSince: getChangedSince(),
-      configPath: getResolvedConfigPath(),
-    },
+    initializationOptions: createInitializationOptions(),
+    // VS Code may receive plow diagnostics via push and LSP 3.17 pull. The
+    // middleware keeps diagnostic muting applied before VS Code stores either.
     middleware: diagnosticFilter
       ? {
           handleDiagnostics: (uri, diagnostics, next) =>
@@ -175,47 +309,134 @@ export const startClient = async (
       : undefined,
   };
 
-  client = new LanguageClient("plow", "Plow Language Server", serverOptions, clientOptions);
+  const nextClient = new LanguageClient(
+    "plow",
+    "Plow Language Server",
+    serverOptions,
+    clientOptions,
+  );
+  client = nextClient;
 
   if (traceLevel !== "off") {
-    void client.setTrace(traceLevel === "verbose" ? Trace.Verbose : Trace.Messages);
+    void nextClient.setTrace(traceLevel === "verbose" ? Trace.Verbose : Trace.Messages);
   }
 
   try {
-    await client.start();
+    await nextClient.start();
+    if (client !== nextClient) {
+      if (nextClient.state === State.Running) {
+        await nextClient.stop();
+      }
+      return null;
+    }
     outputChannel.appendLine("Plow language server started.");
-    await loadDiagnosticCategories(client, outputChannel);
+    await loadDiagnosticCategories(nextClient, outputChannel);
+    diagnosticFilter?.updateBaselineMutedCategories(getMutedDiagnosticCategories());
+    // Register the analysis-complete notification handler on THIS client, not
+    // once in activate(). A restart builds a fresh client, so a handler bound to
+    // the old client would silently stop firing after the first config-change
+    // restart and freeze the status bar. The disposable is bounded by the
+    // client's own lifetime (it is torn down when the client stops).
+    if (onAnalysisComplete) {
+      nextClient.onNotification("plow/analysisComplete", onAnalysisComplete);
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     outputChannel.appendLine(`Failed to start language server: ${message}`);
     void vscode.window.showErrorMessage(
       `Plow: failed to start language server. Check the output channel for details.`,
     );
-    client = null;
+    if (client === nextClient) {
+      client = null;
+    }
     return null;
   }
 
-  diagnosticFilter?.attachClient(client);
+  diagnosticFilter?.attachClient({
+    // Lazy getter: `LanguageClient.diagnostics` (the push collection) may not
+    // exist until the server pushes its first diagnostics, so read it on each
+    // refresh rather than snapshotting it here.
+    get diagnostics() {
+      return nextClient.diagnostics;
+    },
+    refreshPullDiagnostics: () => {
+      // Fire the local providers first (fast, covers older servers), then ask
+      // the server to re-drive `workspace/diagnostic/refresh` so the un-hide
+      // re-renders open files even when the per-document `getProvider` match
+      // above fired nothing (discussion #287).
+      triggerPullDiagnosticRefresh(nextClient);
+      void requestServerDiagnosticRefresh(nextClient);
+    },
+  });
 
-  return client;
+  return nextClient;
 };
 
-export const stopClient = async (): Promise<void> => {
-  if (client) {
-    await client.stop();
-    client = null;
+export const stopClient = async (outputChannel?: vscode.OutputChannel): Promise<void> => {
+  const current = client;
+  if (!current) {
+    return;
+  }
+
+  try {
+    if (current.state === State.Starting) {
+      // Wait for the in-flight start to settle before stopping: the library
+      // throws "Client is not running" if stop() is called while Starting.
+      // 10s (raised from 2s) covers a slow first parse on a large monorepo; a
+      // start hung past that is a bigger problem than a leaked process.
+      let disposable: vscode.Disposable | undefined;
+      try {
+        await Promise.race([
+          new Promise<void>((resolve) => {
+            disposable = current.onDidChangeState((event) => {
+              if (event.newState !== State.Starting) {
+                disposable?.dispose();
+                disposable = undefined;
+                resolve();
+              }
+            });
+          }),
+          new Promise<void>((resolve) => setTimeout(resolve, 10_000)),
+        ]);
+      } finally {
+        disposable?.dispose();
+      }
+    }
+
+    if (current.state === State.Running) {
+      await current.stop();
+    }
+  } catch (err) {
+    // The library's own shutdown can reject (e.g. "Stopping the server timed
+    // out") when the process already died but onConnectionClosed has not fired.
+    // Swallow it: an uncaught rejection here propagates through restartClient,
+    // skips the subsequent startClient, and leaves a stale non-null `client`
+    // (LSP permanently dead, silently). The finally below always clears it.
+    const message = err instanceof Error ? err.message : String(err);
+    outputChannel?.appendLine(`Plow: error stopping language server: ${message}`);
+  } finally {
+    if (client === current) {
+      client = null;
+    }
   }
 };
 
-export const restartClient = async (
+export const restartClient = (
   context: vscode.ExtensionContext,
   outputChannel: vscode.OutputChannel,
   diagnosticFilter?: DiagnosticFilter,
+  onAnalysisComplete?: (params: AnalysisCompleteParams) => void,
 ): Promise<LanguageClient | null> => {
-  // Detach BEFORE stop so a user toggle that fires during the gap can't
-  // call refresh() against a disposed DiagnosticCollection. startClient
-  // re-attaches once the new client is up.
-  diagnosticFilter?.detachClient();
-  await stopClient();
-  return startClient(context, outputChannel, diagnosticFilter);
+  const doRestart = async (): Promise<LanguageClient | null> => {
+    // Detach BEFORE stop so a user toggle that fires during the gap can't
+    // call refresh() against a disposed DiagnosticCollection. startClient
+    // re-attaches once the new client is up.
+    diagnosticFilter?.detachClient();
+    await stopClient(outputChannel);
+    return startClient(context, outputChannel, diagnosticFilter, onAnalysisComplete);
+  };
+  // Chain onto the queue on BOTH the fulfilled and rejected paths so a prior
+  // restart that somehow rejected cannot deadlock all future restarts.
+  restartQueue = restartQueue.then(doRestart, doRestart);
+  return restartQueue;
 };

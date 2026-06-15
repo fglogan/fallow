@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Test suite for fallow GitLab CI jq scripts and bash helpers
+# Test suite for plow GitLab CI jq scripts and bash helpers
 # Run: bash ci/tests/run.sh
 
 set -o pipefail
@@ -15,7 +15,7 @@ ERRORS=()
 # --- Helpers ---
 
 pass() { PASSED=$((PASSED + 1)); echo "  ✓ $1"; }
-fail() { FAILED=$((FAILED + 1)); ERRORS+=("$1: $2"); echo "  ✗ $1 — $2"; }
+fail() { FAILED=$((FAILED + 1)); ERRORS+=("$1: $2"); echo "  x $1: $2"; }
 
 assert_contains() {
   local output="$1" expected="$2" name="$3"
@@ -71,11 +71,13 @@ assert_valid_markdown() {
 echo ""
 echo "=== GitLab install path ==="
 
-gitlab_install_script() {
-  awk '
-    /# Validate and install fallow/ { seen=1; next }
+gitlab_before_script_block() {
+  local start="$1"
+  local end="$2"
+  awk -v start="$start" -v end="$end" '
+    index($0, start) { seen=1; next }
     seen && /^[[:space:]]*-[[:space:]]*\|[[:space:]]*$/ { in_block=1; next }
-    in_block && /# Prepare bash scripts/ { exit }
+    in_block && index($0, end) { exit }
     in_block {
       sub(/^      /, "")
       print
@@ -83,49 +85,62 @@ gitlab_install_script() {
   ' "$DIR/../gitlab-ci.yml"
 }
 
+gitlab_install_script() {
+  gitlab_before_script_block "# Validate and install plow" "# Prepare bash scripts"
+}
+
 GITLAB_INSTALL_SCRIPT="$(gitlab_install_script)"
+GITLAB_SCRIPT_PREP_SCRIPT="$(gitlab_before_script_block "# Prepare bash scripts for MR integration" "# Write the analysis script")"
+GITLAB_RUN_WRITER_SCRIPT="$(gitlab_before_script_block "# Write the analysis script" "  script:")"
 INSTALL_TMP=$(mktemp -d)
 trap 'rm -rf "$INSTALL_TMP"' EXIT
 mkdir -p "$INSTALL_TMP/pinned" "$INSTALL_TMP/range" "$INSTALL_TMP/unsafe" "$INSTALL_TMP/empty"
 
 cat > "$INSTALL_TMP/pinned/package.json" <<'JSON'
-{"devDependencies":{"fallow":"2.7.3"}}
+{"devDependencies":{"plow":"2.7.3"}}
 JSON
 cat > "$INSTALL_TMP/range/package.json" <<'JSON'
-{"dependencies":{"fallow":"^2.52.0"}}
+{"dependencies":{"plow":"^2.52.0"}}
 JSON
 cat > "$INSTALL_TMP/unsafe/package.json" <<'JSON'
-{"devDependencies":{"fallow":"workspace:*"}}
+{"devDependencies":{"plow":"workspace:*"}}
 JSON
 
 run_gitlab_install() {
   local root="$1"
   local version="$2"
-  FALLOW_ROOT="$root" FALLOW_VERSION="$version" FALLOW_INSTALL_DRY_RUN=true bash -eo pipefail -c "$GITLAB_INSTALL_SCRIPT" 2>&1
+  PLOW_ROOT="$root" PLOW_VERSION="$version" PLOW_INSTALL_DRY_RUN=true /bin/sh -c "$GITLAB_INSTALL_SCRIPT" 2>&1
 }
 
+assert_contains "$GITLAB_INSTALL_SCRIPT" "bash -eo pipefail <<'PLOW_INSTALL_EOF'" \
+  "install: wrapper invokes bash with pipefail"
+assert_contains "$GITLAB_SCRIPT_PREP_SCRIPT" "bash -eo pipefail <<'PLOW_SCRIPT_PREP_EOF'" \
+  "script prep: wrapper invokes bash with pipefail"
+assert_contains "$GITLAB_RUN_WRITER_SCRIPT" "bash -eo pipefail <<'PLOW_RUN_WRITER_EOF'" \
+  "run writer: wrapper invokes bash with pipefail"
+
 OUT=$(run_gitlab_install "$INSTALL_TMP/pinned" "")
-assert_contains "$OUT" "Using fallow version from" "install: reads package.json pin"
-assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow@2.7.3" "install: installs project pin"
+assert_contains "$OUT" "Using plow version from" "install: reads package.json pin"
+assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts plow@2.7.3" "install: installs project pin"
 
 OUT=$(run_gitlab_install "$INSTALL_TMP/range" "")
-assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow@^2.52.0" "install: supports package.json semver range"
+assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts plow@^2.52.0" "install: supports package.json semver range"
 
 OUT=$(run_gitlab_install "$INSTALL_TMP/pinned" "latest")
-assert_contains "$OUT" "Using fallow version from FALLOW_VERSION: latest" "install: explicit FALLOW_VERSION wins"
-assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow" "install: explicit latest installs latest"
+assert_contains "$OUT" "Using plow version from PLOW_VERSION: latest" "install: explicit PLOW_VERSION wins"
+assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts plow" "install: explicit latest installs latest"
 
 OUT=$(run_gitlab_install "$INSTALL_TMP/unsafe" "")
-assert_contains "$OUT" "Ignoring unsupported fallow package.json spec" "install: warns on unsupported package spec"
-assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow" "install: unsupported package spec falls back to latest"
+assert_contains "$OUT" "Ignoring unsupported plow package.json spec" "install: warns on unsupported package spec"
+assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts plow" "install: unsupported package spec falls back to latest"
 
 OUT=$(run_gitlab_install "$INSTALL_TMP/empty" "")
-assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow" "install: no package spec falls back to latest"
+assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts plow" "install: no package spec falls back to latest"
 
 OUT=$(run_gitlab_install "$INSTALL_TMP/empty" "2.0.0 - 2.5.0")
-assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow@2.0.0 - 2.5.0" "install: supports npm hyphen ranges"
+assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts plow@2.0.0 - 2.5.0" "install: supports npm hyphen ranges"
 
-OUT=$(run_gitlab_install "$INSTALL_TMP/empty" "file:../fallow")
+OUT=$(run_gitlab_install "$INSTALL_TMP/empty" "file:../plow")
 cmd_status=$?
 if [ "$cmd_status" -ne 0 ]; then
   pass "install: invalid file spec fails"
@@ -141,6 +156,130 @@ if [ "$cmd_status" -ne 0 ]; then
 else
   fail "install: rejects dash-prefixed extra args in spec" "expected non-zero exit"
 fi
+
+SCRIPT_PREP_TMP="$INSTALL_TMP/script-prep"
+mkdir -p "$SCRIPT_PREP_TMP/ci/scripts"
+printf '%s\n' '#!/usr/bin/env bash' 'echo comment' > "$SCRIPT_PREP_TMP/ci/scripts/comment.sh"
+printf '%s\n' '#!/usr/bin/env bash' 'echo review' > "$SCRIPT_PREP_TMP/ci/scripts/review.sh"
+rm -rf /tmp/plow-scripts
+OUT=$(cd "$SCRIPT_PREP_TMP" && PLOW_COMMENT=true PLOW_REVIEW=false /bin/sh -c "$GITLAB_SCRIPT_PREP_SCRIPT" 2>&1)
+cmd_status=$?
+if [ "$cmd_status" -eq 0 ]; then
+  pass "script prep: wrapped block runs under sh"
+else
+  fail "script prep: wrapped block runs under sh" "$OUT"
+fi
+if [ -x /tmp/plow-scripts/comment.sh ] && [ -x /tmp/plow-scripts/review.sh ]; then
+  pass "script prep: copies vendored scripts"
+else
+  fail "script prep: copies vendored scripts" "expected executable scripts in /tmp/plow-scripts"
+fi
+
+rm -f /tmp/plow-run.sh
+OUT=$(/bin/sh -c "$GITLAB_RUN_WRITER_SCRIPT" 2>&1)
+cmd_status=$?
+if [ "$cmd_status" -eq 0 ] && [ -x /tmp/plow-run.sh ]; then
+  pass "run writer: wrapped block runs under sh"
+else
+  fail "run writer: wrapped block runs under sh" "$OUT"
+fi
+if bash -n /tmp/plow-run.sh 2>/tmp/plow-run-syntax.err; then
+  pass "run writer: generated analysis script is valid bash"
+else
+  fail "run writer: generated analysis script is valid bash" "$(cat /tmp/plow-run-syntax.err)"
+fi
+RUNNER_TMP="$INSTALL_TMP/runner"
+mkdir -p "$RUNNER_TMP/bin" "$RUNNER_TMP/root"
+cat > "$RUNNER_TMP/bin/plow" <<'SH'
+#!/usr/bin/env bash
+printf '{"total_issues":0}\n'
+SH
+chmod +x "$RUNNER_TMP/bin/plow"
+OUT=$(cd "$RUNNER_TMP" && env \
+  PATH="$RUNNER_TMP/bin:$PATH" \
+  PLOW_COMMAND= \
+  PLOW_ROOT="$RUNNER_TMP/root" \
+  PLOW_CONFIG= \
+  PLOW_PRODUCTION= \
+  PLOW_PRODUCTION_DEAD_CODE= \
+  PLOW_PRODUCTION_HEALTH= \
+  PLOW_PRODUCTION_DUPES= \
+  PLOW_FAIL_ON_ISSUES=false \
+  PLOW_MIN_SEVERITY= \
+  PLOW_INCLUDE_ENTRY_EXPORTS=false \
+  PLOW_ARGS= \
+  PLOW_COMMENT=false \
+  PLOW_REVIEW=false \
+  PLOW_REVIEW_GUIDANCE=false \
+  PLOW_CODEQUALITY=false \
+  PLOW_MAX_COMMENTS=50 \
+  PLOW_COMMENT_ID= \
+  PLOW_SUMMARY_SCOPE=all \
+  PLOW_DIFF_FILTER=added \
+  PLOW_DIFF_FILE= \
+  PLOW_API_RETRIES=3 \
+  PLOW_API_RETRY_DELAY=2 \
+  PLOW_GITLAB_BASE_SHA= \
+  PLOW_GITLAB_START_SHA= \
+  PLOW_GITLAB_HEAD_SHA= \
+  PLOW_CHANGED_SINCE= \
+  PLOW_BASELINE= \
+  PLOW_SAVE_BASELINE= \
+  PLOW_WORKSPACE= \
+  PLOW_CHANGED_WORKSPACES= \
+  PLOW_ISSUE_TYPES= \
+  PLOW_FAIL_ON_REGRESSION=false \
+  PLOW_TOLERANCE=0 \
+  PLOW_REGRESSION_BASELINE= \
+  PLOW_SAVE_REGRESSION_BASELINE= \
+  PLOW_DUPES_MODE=mild \
+  PLOW_MIN_TOKENS= \
+  PLOW_MIN_LINES= \
+  PLOW_THRESHOLD= \
+  PLOW_SKIP_LOCAL=false \
+  PLOW_CROSS_LANGUAGE=false \
+  PLOW_IGNORE_IMPORTS=false \
+  PLOW_MAX_CYCLOMATIC= \
+  PLOW_MAX_COGNITIVE= \
+  PLOW_MAX_CRAP= \
+  PLOW_COVERAGE=coverage/coverage-final.json \
+  PLOW_PRODUCTION_COVERAGE= \
+  PLOW_COVERAGE_ROOT=/ci/workspace \
+  PLOW_MIN_INVOCATIONS_HOT= \
+  PLOW_MIN_OBSERVATION_VOLUME= \
+  PLOW_LOW_TRAFFIC_THRESHOLD= \
+  PLOW_TOP= \
+  PLOW_SORT= \
+  PLOW_SCORE=false \
+  PLOW_FILE_SCORES=false \
+  PLOW_HOTSPOTS=false \
+  PLOW_TARGETS=false \
+  PLOW_COMPLEXITY=false \
+  PLOW_SINCE= \
+  PLOW_MIN_COMMITS= \
+  PLOW_SAVE_SNAPSHOT= \
+  PLOW_TREND=false \
+  PLOW_AUDIT_GATE= \
+  PLOW_AUDIT_DEAD_CODE_BASELINE= \
+  PLOW_AUDIT_HEALTH_BASELINE= \
+  PLOW_AUDIT_DUPES_BASELINE= \
+  PLOW_SECURITY_GATE= \
+  PLOW_DRY_RUN=true \
+  PLOW_NO_CACHE=false \
+  PLOW_THREADS= \
+  PLOW_ONLY= \
+  PLOW_SKIP= \
+  PLOW_SCRIPTS_REF= \
+  bash /tmp/plow-run.sh 2>&1)
+cmd_status=$?
+if [ "$cmd_status" -eq 0 ] && [ -s "$RUNNER_TMP/plow-results.json" ]; then
+  pass "run writer: generated analysis script runs with empty extra args"
+else
+  fail "run writer: generated analysis script runs with empty extra args" "$OUT"
+fi
+ARGS=$(cat "$RUNNER_TMP/plow-analysis-args.sh")
+assert_contains "$ARGS" "--coverage coverage/coverage-final.json" "run writer: forwards coverage to default combined command"
+assert_contains "$ARGS" "--coverage-root /ci/workspace" "run writer: forwards coverage-root to default combined command"
 
 # =========================================================================
 # Behavioral parity between action/scripts/install.sh and ci/gitlab-ci.yml
@@ -160,15 +299,15 @@ ACTION_INSTALL_SH="$DIR/../../action/scripts/install.sh"
 parity_run_action() {
   local root="$1"
   local version="$2"
-  INPUT_ROOT="$root" FALLOW_VERSION="$version" FALLOW_INSTALL_DRY_RUN=true \
+  INPUT_ROOT="$root" PLOW_VERSION="$version" PLOW_INSTALL_DRY_RUN=true \
     bash "$ACTION_INSTALL_SH" 2>&1
 }
 
 parity_run_gitlab() {
   local root="$1"
   local version="$2"
-  FALLOW_ROOT="$root" FALLOW_VERSION="$version" FALLOW_INSTALL_DRY_RUN=true \
-    bash -eo pipefail -c "$GITLAB_INSTALL_SCRIPT" 2>&1
+  PLOW_ROOT="$root" PLOW_VERSION="$version" PLOW_INSTALL_DRY_RUN=true \
+    /bin/sh -c "$GITLAB_INSTALL_SCRIPT" 2>&1
 }
 
 extract_install_arg() {
@@ -202,13 +341,13 @@ assert_parity() {
 # Both must agree on the safe inputs.
 assert_parity "reads pinned package.json" "$INSTALL_TMP/pinned" ""
 assert_parity "reads semver range from package.json" "$INSTALL_TMP/range" ""
-assert_parity "explicit FALLOW_VERSION=latest wins" "$INSTALL_TMP/pinned" "latest"
+assert_parity "explicit PLOW_VERSION=latest wins" "$INSTALL_TMP/pinned" "latest"
 assert_parity "no spec falls back to latest" "$INSTALL_TMP/empty" ""
 assert_parity "explicit semver range is honoured" "$INSTALL_TMP/empty" "^2.52.0"
 assert_parity "explicit hyphen range is honoured" "$INSTALL_TMP/empty" "2.0.0 - 2.5.0"
 # And on every shape the validator must reject. If the two implementations
 # diverge here, one CI provider would silently accept an unsafe spec.
-assert_parity "rejects file: scheme" "$INSTALL_TMP/empty" "file:../fallow"
+assert_parity "rejects file: scheme" "$INSTALL_TMP/empty" "file:../plow"
 assert_parity "rejects npm: alias" "$INSTALL_TMP/empty" "npm:lodash@1.0.0"
 assert_parity "rejects git+ssh URL" "$INSTALL_TMP/empty" "git+ssh://x.example/y.git"
 assert_parity "rejects workspace: protocol" "$INSTALL_TMP/empty" "workspace:*"
@@ -229,7 +368,7 @@ assert_parity "unsupported package.json spec falls back" "$INSTALL_TMP/unsafe" "
 # edit lands in one wrapper but not the other, the two CI providers diverge
 # on whether they:
 #   1. Reject `--baseline` / `--save-baseline` when command=audit.
-#   2. Treat fallow's structured-error JSON envelope as fatal before the
+#   2. Treat plow's structured-error JSON envelope as fatal before the
 #      issue counter sees null fields and emits issues=0.
 # Asserting symmetric presence catches single-side edits without locking
 # down indentation or provider-specific env-var prefix differences.
@@ -241,9 +380,9 @@ ACTION_ANALYZE_SH="$DIR/../../action/scripts/analyze.sh"
 CI_TEMPLATE_YAML="$DIR/../gitlab-ci.yml"
 
 # Audit baseline rejection: both must check command=audit AND a non-empty
-# generic baseline / save-baseline before invoking fallow.
+# generic baseline / save-baseline before invoking plow.
 ACTION_HAS_AUDIT_BASELINE_TRAP=$(grep -cE 'INPUT_COMMAND.*=.*"audit".*INPUT_(SAVE_)?BASELINE' "$ACTION_ANALYZE_SH" 2>/dev/null || echo 0)
-CI_HAS_AUDIT_BASELINE_TRAP=$(grep -cE 'FALLOW_COMMAND.*=.*"audit".*FALLOW_(SAVE_)?BASELINE' "$CI_TEMPLATE_YAML" 2>/dev/null || echo 0)
+CI_HAS_AUDIT_BASELINE_TRAP=$(grep -cE 'PLOW_COMMAND.*=.*"audit".*PLOW_(SAVE_)?BASELINE' "$CI_TEMPLATE_YAML" 2>/dev/null || echo 0)
 if [ "$ACTION_HAS_AUDIT_BASELINE_TRAP" != "0" ] && [ "$CI_HAS_AUDIT_BASELINE_TRAP" != "0" ]; then
   pass "parity: both wrappers reject generic baseline on audit"
 elif [ "$ACTION_HAS_AUDIT_BASELINE_TRAP" = "0" ] && [ "$CI_HAS_AUDIT_BASELINE_TRAP" = "0" ]; then
@@ -256,15 +395,15 @@ fi
 # Both must point users at the audit-specific baseline inputs by name.
 assert_contains "$(cat "$ACTION_ANALYZE_SH")" "dead-code-baseline" \
   "parity: action error message names dead-code-baseline"
-assert_contains "$(cat "$CI_TEMPLATE_YAML")" "FALLOW_AUDIT_DEAD_CODE_BASELINE" \
-  "parity: gitlab error message names FALLOW_AUDIT_DEAD_CODE_BASELINE"
+assert_contains "$(cat "$CI_TEMPLATE_YAML")" "PLOW_AUDIT_DEAD_CODE_BASELINE" \
+  "parity: gitlab error message names PLOW_AUDIT_DEAD_CODE_BASELINE"
 
 # Structured-error trap: both must inspect `.error == true` in
-# fallow-results.json BEFORE any `// 0`-defaulted issue extraction.
-ACTION_HAS_ERROR_TRAP=$(grep -cE "jq -e.*\.error == true.*fallow-results\.json" "$ACTION_ANALYZE_SH" 2>/dev/null || echo 0)
-CI_HAS_ERROR_TRAP=$(grep -cE "jq -e.*\.error == true.*fallow-results\.json" "$CI_TEMPLATE_YAML" 2>/dev/null || echo 0)
+# plow-results.json BEFORE any `// 0`-defaulted issue extraction.
+ACTION_HAS_ERROR_TRAP=$(grep -cE "jq -e.*\.error == true.*plow-results\.json" "$ACTION_ANALYZE_SH" 2>/dev/null || echo 0)
+CI_HAS_ERROR_TRAP=$(grep -cE "jq -e.*\.error == true.*plow-results\.json" "$CI_TEMPLATE_YAML" 2>/dev/null || echo 0)
 if [ "$ACTION_HAS_ERROR_TRAP" != "0" ] && [ "$CI_HAS_ERROR_TRAP" != "0" ]; then
-  pass "parity: both wrappers trap structured fallow errors before issue extraction"
+  pass "parity: both wrappers trap structured plow errors before issue extraction"
 elif [ "$ACTION_HAS_ERROR_TRAP" = "0" ] && [ "$CI_HAS_ERROR_TRAP" = "0" ]; then
   pass "parity: neither wrapper has structured-error trap (consistent)"
 else
@@ -295,6 +434,24 @@ else
     "asymmetric: action=$ACTION_HAS_VERDICT_EXTRACT, gitlab=$CI_HAS_VERDICT_EXTRACT"
 fi
 
+# Security gate support must stay symmetric across the official wrappers.
+assert_contains "$(cat "$ACTION_ANALYZE_SH")" 'INPUT_COMMAND" in' \
+  "parity: action validates commands"
+assert_contains "$(cat "$ACTION_ANALYZE_SH")" "security-gate must be 'new' or 'newly-reachable'" \
+  "parity: action validates security gate values"
+assert_contains "$(cat "$ACTION_ANALYZE_SH")" 'INPUT_SECURITY_GATE' \
+  "parity: action wires security gate input"
+assert_contains "$(cat "$CI_TEMPLATE_YAML")" 'PLOW_COMMAND" in' \
+  "parity: gitlab validates commands"
+assert_contains "$(cat "$CI_TEMPLATE_YAML")" "PLOW_SECURITY_GATE must be 'new' or 'newly-reachable'" \
+  "parity: gitlab validates security gate values"
+assert_contains "$(cat "$CI_TEMPLATE_YAML")" 'PLOW_SECURITY_GATE' \
+  "parity: gitlab wires security gate variable"
+assert_contains "$(cat "$ACTION_ANALYZE_SH")" '.gate.new_count' \
+  "parity: action counts security gate new_count"
+assert_contains "$(cat "$CI_TEMPLATE_YAML")" '.gate.new_count' \
+  "parity: gitlab counts security gate new_count"
+
 # =========================================================================
 # GitLab-specific summary jq tests
 # =========================================================================
@@ -305,7 +462,7 @@ echo "=== GitLab Summary scripts ==="
 echo "  summary-check.jq (GitLab):"
 OUT=$(jq -r -f "$CI_JQ_DIR/summary-check.jq" "$FIXTURES/check.json" 2>&1)
 assert_valid_markdown "$OUT" "produces output"
-assert_contains "$OUT" "Fallow Analysis" "has title"
+assert_contains "$OUT" "Plow Analysis" "has title"
 assert_contains "$OUT" "issues" "mentions issues"
 assert_contains "$OUT" "Unused" "lists unused categories"
 assert_contains "$OUT" "Imported elsewhere" "shows dependency workspace context column"
@@ -315,6 +472,31 @@ assert_contains "$OUT" 'legacy' "shows empty catalog group name"
 assert_not_contains "$OUT" '!\[NOTE\]' "no GitHub callout NOTE"
 assert_not_contains "$OUT" '!\[WARNING\]' "no GitHub callout WARNING"
 assert_not_contains "$OUT" '!\[TIP\]' "no GitHub callout TIP"
+
+OUT_POLICY=$(jq '.policy_violations = [{"path": "src/app.ts", "line": 7, "col": 2, "pack": "team-policy", "rule_id": "no-moment", "kind": "banned-import", "matched": "moment", "severity": "error", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$CI_JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_POLICY" "Policy violations" "policy: shows summary row and section"
+assert_contains "$OUT_POLICY" "team-policy/no-moment" "policy: shows pack/rule identity"
+
+OUT_ICE=$(jq '.invalid_client_exports = [{"path": "src/app.ts", "line": 5, "col": 0, "export_name": "metadata", "directive": "use client", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$CI_JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_ICE" "Invalid client exports" "ice: shows summary row and section"
+assert_contains "$OUT_ICE" "metadata" "ice: shows export name in section"
+
+OUT_MCSB=$(jq '.mixed_client_server_barrels = [{"path": "src/index.ts", "line": 2, "col": 0, "client_origin": "./Button", "server_origin": "./fetchUser", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$CI_JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_MCSB" "Mixed client/server barrels" "mcsb: shows summary row and section"
+assert_contains "$OUT_MCSB" "./fetchUser" "mcsb: shows server origin in section"
+
+OUT_MD=$(jq '.misplaced_directives = [{"path": "src/widget.tsx", "line": 4, "col": 0, "directive": "use client", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$CI_JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_MD" "Misplaced directives" "md: shows summary row and section"
+assert_contains "$OUT_MD" "use client" "md: shows directive in section"
+
+# Directive column renders with the surrounding quotes from the `\"\(.directive)\"` template.
+# Asserting the export-cell + directive-cell pair so a quote-escaping regression is caught
+# (the bare "use client" string also appears in the section header text).
+assert_contains "$OUT_ICE" '`metadata` | `"use client"` |' "ice: directive column renders with surrounding quotes"
+# `"use server"` directive path (the section description mentions both, so a use-server-only
+# fixture proves the row template, not just the header text).
+OUT_MD_SERVER=$(jq '.misplaced_directives = [{"path": "src/action.ts", "line": 3, "col": 0, "directive": "use server", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$CI_JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_MD_SERVER" '`"use server"` |' "md: use-server directive renders in section row"
 
 OUT_CLEAN=$(jq -r -f "$CI_JQ_DIR/summary-check.jq" "$FIXTURES/check-clean.json" 2>&1)
 assert_contains "$OUT_CLEAN" "No issues found" "clean: shows no issues"
@@ -345,7 +527,7 @@ assert_contains "$OUT" "chart_with_upwards_trend" "delta: uses GitLab emoji (no 
 echo "  summary-health.jq (delta header without trend, GitLab):"
 assert_contains "$OUT_CLEAN" "Health: A (92.5)" "no-trend: shows absolute score"
 assert_not_contains "$OUT_CLEAN" "vs previous" "no-trend: no delta line"
-assert_contains "$OUT_CLEAN" "FALLOW_SAVE_SNAPSHOT" "no-trend: shows save-snapshot hint"
+assert_contains "$OUT_CLEAN" "PLOW_SAVE_SNAPSHOT" "no-trend: shows save-snapshot hint"
 
 echo "  summary-health.jq (no delta header without score, GitLab):"
 OUT_NO_SCORE=$(jq 'del(.health_score) | del(.health_trend)' "$FIXTURES/health.json" | jq -r -f "$CI_JQ_DIR/summary-health.jq" 2>&1)
@@ -374,7 +556,7 @@ OUT_AUDIT=$(jq -n --slurpfile h "$FIXTURES/health.json" --slurpfile c "$FIXTURES
   duplication: ($d[0] | .clone_groups |= map(. + {introduced: false}))
 }' | jq -r -f "$CI_JQ_DIR/summary-audit.jq" 2>&1)
 assert_valid_markdown "$OUT_AUDIT" "produces audit output"
-assert_contains "$OUT_AUDIT" "Fallow Audit" "audit: has title"
+assert_contains "$OUT_AUDIT" "Plow Audit" "audit: has title"
 assert_contains "$OUT_AUDIT" "Audit failed" "audit: shows failed verdict"
 assert_contains "$OUT_AUDIT" "Dead Code" "audit: has dead-code details"
 assert_contains "$OUT_AUDIT" "fetchFromApi" "audit: lists dead-code findings"
@@ -421,7 +603,7 @@ assert_not_contains "$OUT_AUDIT_NOMODEL" "Coverage model:" "audit: absent covera
 echo "  summary-combined.jq (GitLab):"
 OUT=$(jq -r -f "$CI_JQ_DIR/summary-combined.jq" "$FIXTURES/combined.json" 2>&1)
 assert_valid_markdown "$OUT" "produces output"
-assert_contains "$OUT" "Fallow" "has title"
+assert_contains "$OUT" "Plow" "has title"
 assert_contains "$OUT" "code issues" "mentions code issues"
 assert_contains "$OUT" "Maintainability" "shows vital signs"
 assert_not_contains "$OUT" '!\[NOTE\]' "no GitHub callout NOTE"
@@ -465,6 +647,13 @@ assert_not_contains "$OUT_SINGULAR_GL" "**1** health findings" "status-bar: no '
 # Complexity <details> summary pluralizes when functions_above_threshold == 1
 assert_contains "$OUT_SINGULAR_GL" "(1 function above threshold)" "complexity dropdown: singular function"
 assert_not_contains "$OUT_SINGULAR_GL" "(1 functions above threshold)" "complexity dropdown: no '1 functions' grammar"
+
+# RSC findings appear in the combined-mode Code issues breakdown table (not just
+# summary-check.jq standalone). All three RSC types injected into .check at once.
+OUT_RSC_GL=$(jq '.check.invalid_client_exports = [{"path": "src/app.tsx", "line": 5, "col": 0, "export_name": "metadata", "directive": "use client", "actions": []}] | .check.mixed_client_server_barrels = [{"path": "src/index.ts", "line": 2, "col": 0, "client_origin": "./Button", "server_origin": "./fetchUser", "actions": []}] | .check.misplaced_directives = [{"path": "src/widget.tsx", "line": 4, "col": 0, "directive": "use server", "actions": []}] | .check.total_issues = (.check.total_issues + 3)' "$FIXTURES/combined.json" | jq -r -f "$CI_JQ_DIR/summary-combined.jq" 2>&1)
+assert_contains "$OUT_RSC_GL" "| [Invalid client exports](" "combined: RSC invalid-client-exports row in breakdown"
+assert_contains "$OUT_RSC_GL" "| [Mixed client/server barrels](" "combined: RSC mixed-barrel row in breakdown"
+assert_contains "$OUT_RSC_GL" "| [Misplaced directives](" "combined: RSC misplaced-directives row in breakdown"
 
 # Worst-case truncation: 50 groups (paths differentiated per-group via `. as $g |`),
 # top-5 + overflow line, output stays under 65k chars.
@@ -526,10 +715,10 @@ echo "  summary-combined.jq (no scoped row when unfiltered, GitLab):"
 assert_not_contains "$OUT" "changed files" "unfiltered: no scoped maintainability row"
 
 echo "  summary-combined.jq (conditional tips, GitLab):"
-assert_contains "$OUT" "fallow fix --dry-run" "tip: shows fix tip when fixable issues present"
+assert_contains "$OUT" "plow fix --dry-run" "tip: shows fix tip when fixable issues present"
 assert_contains "$OUT" "@public" "tip: shows @public tip when unused exports present"
 OUT_NO_FIX=$(jq '.check.unused_exports = [] | .check.unused_dependencies = [] | .check.unused_enum_members = [] | .check.circular_dependencies = [{"files":["a.ts","b.ts"],"length":2}] | .check.total_issues = 1' "$FIXTURES/combined.json" | jq -r -f "$CI_JQ_DIR/summary-combined.jq" 2>&1)
-assert_not_contains "$OUT_NO_FIX" "fallow fix" "tip: no fix tip when no fixable issues"
+assert_not_contains "$OUT_NO_FIX" "plow fix" "tip: no fix tip when no fixable issues"
 assert_not_contains "$OUT_NO_FIX" "@public" "tip: no @public tip when no unused exports"
 
 echo "  summary-combined.jq (clean state, GitLab):"
@@ -549,7 +738,7 @@ assert_contains "$OUT" "chart_with_upwards_trend" "delta: uses GitLab emoji"
 echo "  summary-combined.jq (delta header without trend, GitLab):"
 assert_contains "$OUT_CLEAN" "Health: A (92.5)" "clean+score: shows absolute score"
 assert_not_contains "$OUT_CLEAN" "vs previous" "clean+score: no delta when no trend"
-assert_contains "$OUT_CLEAN" "FALLOW_SAVE_SNAPSHOT" "clean+score: shows save-snapshot hint"
+assert_contains "$OUT_CLEAN" "PLOW_SAVE_SNAPSHOT" "clean+score: shows save-snapshot hint"
 
 echo "  summary-combined.jq (no delta header without score, GitLab):"
 OUT_NO_SCORE=$(jq 'del(.health.health_score) | del(.health.health_trend)' "$FIXTURES/combined.json" | jq -r -f "$CI_JQ_DIR/summary-combined.jq" 2>&1)
@@ -583,7 +772,7 @@ OUT_CLEAN=$(jq -r -f "$SHARED_JQ_DIR/summary-dupes.jq" "$FIXTURES/dupes-clean.js
 assert_contains "$OUT_CLEAN" "No code duplication" "clean: no duplication"
 
 echo "  summary-fix.jq:"
-# summary-fix needs fix results — test with combined (may not have fix data)
+# summary-fix needs fix results, test with combined (may not have fix data)
 # Just verify it doesn't crash on missing data
 OUT=$(echo '{"fixes":[],"dry_run":true}' | jq -r -f "$SHARED_JQ_DIR/summary-fix.jq" 2>&1)
 assert_contains "$OUT" "No fixable issues" "empty fix: no fixable issues"
@@ -615,15 +804,16 @@ echo "=== GitLab CI YAML structure ==="
 CI_YAML="$DIR/../gitlab-ci.yml"
 
 echo "  gitlab-ci.yml:"
-assert_contains "$(cat "$CI_YAML")" "FALLOW_REVIEW" "has FALLOW_REVIEW variable"
-assert_contains "$(cat "$CI_YAML")" "FALLOW_REVIEW_GUIDANCE" "has FALLOW_REVIEW_GUIDANCE variable"
-assert_contains "$(cat "$CI_YAML")" "FALLOW_MAX_COMMENTS" "has FALLOW_MAX_COMMENTS variable"
-assert_contains "$(cat "$CI_YAML")" "FALLOW_COMMENT" "has FALLOW_COMMENT variable"
-assert_contains "$(cat "$CI_YAML")" "FALLOW_SUMMARY_SCOPE" "has FALLOW_SUMMARY_SCOPE variable"
-assert_contains "$(cat "$CI_YAML")" "FALLOW_CODEQUALITY" "has FALLOW_CODEQUALITY variable"
-assert_contains "$(cat "$CI_YAML")" "project_fallow_spec" "reads package.json fallow pin"
-assert_contains "$(cat "$CI_YAML")" "is_safe_version_spec" "validates fallow install spec"
-assert_contains "$(cat "$CI_YAML")" "FALLOW_INSTALL_DRY_RUN" "supports install dry-run testing"
+assert_contains "$(cat "$CI_YAML")" "PLOW_REVIEW" "has PLOW_REVIEW variable"
+assert_contains "$(cat "$CI_YAML")" "PLOW_REVIEW_GUIDANCE" "has PLOW_REVIEW_GUIDANCE variable"
+assert_contains "$(cat "$CI_YAML")" "PLOW_MAX_COMMENTS" "has PLOW_MAX_COMMENTS variable"
+assert_contains "$(cat "$CI_YAML")" "PLOW_COMMENT" "has PLOW_COMMENT variable"
+assert_contains "$(cat "$CI_YAML")" "PLOW_SUMMARY_SCOPE" "has PLOW_SUMMARY_SCOPE variable"
+assert_contains "$(cat "$CI_YAML")" "PLOW_CODEQUALITY" "has PLOW_CODEQUALITY variable"
+assert_contains "$(cat "$CI_YAML")" "PLOW_SECURITY_GATE" "has PLOW_SECURITY_GATE variable"
+assert_contains "$(cat "$CI_YAML")" "project_plow_spec" "reads package.json plow pin"
+assert_contains "$(cat "$CI_YAML")" "is_safe_version_spec" "validates plow install spec"
+assert_contains "$(cat "$CI_YAML")" "PLOW_INSTALL_DRY_RUN" "supports install dry-run testing"
 assert_contains "$(cat "$CI_YAML")" "GIT_STRATEGY" "overrides shared template git strategy"
 assert_contains "$(cat "$CI_YAML")" "GIT_DEPTH" "fetches full history for changed-since"
 assert_contains "$(cat "$CI_YAML")" "CI_MERGE_REQUEST_DIFF_BASE_SHA" "auto changed-since uses diff base SHA"
@@ -631,8 +821,8 @@ assert_contains "$(cat "$CI_YAML")" "comment.sh" "references comment.sh"
 assert_contains "$(cat "$CI_YAML")" "review.sh" "references review.sh"
 assert_contains "$(cat "$CI_YAML")" "gl-code-quality-report" "generates Code Quality report"
 assert_contains "$(cat "$CI_YAML")" 'type == "array"' "preserves valid Code Quality reports from nonzero audit exits"
-assert_contains "$(cat "$CI_YAML")" '.error == true' "fails on structured fallow error JSON"
-assert_contains "$(cat "$CI_YAML")" "does not support FALLOW_BASELINE/FALLOW_SAVE_BASELINE" "audit rejects generic baseline variables"
+assert_contains "$(cat "$CI_YAML")" '.error == true' "fails on structured plow error JSON"
+assert_contains "$(cat "$CI_YAML")" "does not support PLOW_BASELINE/PLOW_SAVE_BASELINE" "audit rejects generic baseline variables"
 assert_contains "$(cat "$CI_YAML")" "suggestion" "mentions suggestion blocks in docs"
 
 # =========================================================================
@@ -647,27 +837,27 @@ SCRIPTS_DIR="$DIR/../scripts"
 echo "  comment.sh:"
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "PRIVATE-TOKEN" "supports GITLAB_TOKEN"
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "CI_JOB_TOKEN is read-only" "explains CI_JOB_TOKEN write limitation"
-assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "fallow-results" "uses fallow-results marker"
+assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "plow-results" "uses plow-results marker"
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "PUT" "can update existing comment"
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "POST" "can create new comment"
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "curl_retry" "wraps GitLab API calls with retry"
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "rate limit response; retrying" "retries GitLab rate-limit responses"
-assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "Unsupported FALLOW_SUMMARY_SCOPE" "comment.sh warns on invalid summary scope"
+assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "Unsupported PLOW_SUMMARY_SCOPE" "comment.sh warns on invalid summary scope"
 
 echo "  review.sh:"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "review-gitlab" "renders typed GitLab review envelope"
-assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "fallow ci reconcile-review" "reconciles resolved discussions"
+assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "plow ci reconcile-review" "reconciles resolved discussions"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "--provider gitlab" "uses GitLab reconcile provider"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "discussions" "uses GitLab Discussions API"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "position" "posts with position for inline comments"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "suggestion" "adds suggestion blocks"
-assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "fallow-review" "uses fallow-review marker"
-assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "fallow-fingerprint" "deduplicates by typed fingerprint"
+assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "plow-review" "uses plow-review marker"
+assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "plow-fingerprint" "deduplicates by typed fingerprint"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "curl_retry" "wraps GitLab API calls with retry"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "rate limit response; retrying" "retries GitLab rate-limit responses"
 assert_not_contains "$(cat "$SCRIPTS_DIR/review.sh")" "merge-comments" "does not keep legacy jq merge fallback"
-assert_not_contains "$(cat "$SCRIPTS_DIR/review.sh")" "FALLOW_SHARED_JQ_DIR" "does not use shared jq fallback scripts"
-assert_not_contains "$(cat "$SCRIPTS_DIR/review.sh")" "FALLOW_SUMMARY_SCOPE" "review.sh does not consume summary scope"
+assert_not_contains "$(cat "$SCRIPTS_DIR/review.sh")" "PLOW_SHARED_JQ_DIR" "does not use shared jq fallback scripts"
+assert_not_contains "$(cat "$SCRIPTS_DIR/review.sh")" "PLOW_SUMMARY_SCOPE" "review.sh does not consume summary scope"
 
 # =========================================================================
 # Typed GitLab script integration tests
@@ -681,12 +871,12 @@ CI_TYPED_BIN="$CI_TYPED_WORK/bin"
 CI_TYPED_LOG="$CI_TYPED_WORK/mock.log"
 mkdir -p "$CI_TYPED_BIN"
 
-cat > "$CI_TYPED_BIN/fallow" <<'SH'
+cat > "$CI_TYPED_BIN/plow" <<'SH'
 #!/usr/bin/env bash
-printf 'fallow %s\n' "$*" >> "$MOCK_LOG"
-printf 'summary_scope=%s\n' "${FALLOW_SUMMARY_SCOPE:-}" >> "$MOCK_LOG"
+printf 'plow %s\n' "$*" >> "$MOCK_LOG"
+printf 'summary_scope=%s\n' "${PLOW_SUMMARY_SCOPE:-}" >> "$MOCK_LOG"
 if [ "${1:-}" = "ci" ]; then
-  printf '{"schema":"fallow-review-reconcile/v1","stale":[]}\n'
+  printf '{"schema":"plow-review-reconcile/v1","stale":[]}\n'
   exit 0
 fi
 format=""
@@ -700,17 +890,17 @@ for arg in "$@"; do
 done
 case "$format" in
   pr-comment-gitlab)
-    printf '<!-- fallow-id: fallow-results -->\n### Fallow smoke\n\nGenerated by fallow.\n'
+    printf '<!-- plow-id: plow-results -->\n### Plow smoke\n\nGenerated by plow.\n'
     ;;
   review-gitlab)
     if [ "${MOCK_ZERO_REVIEW:-}" = "1" ]; then
       cat <<'JSON'
-{"body":"### Fallow smoke\n\n<!-- fallow-review -->","comments":[],"meta":{"schema":"fallow-review-envelope/v1","provider":"gitlab"}}
+{"body":"### Plow smoke\n\n<!-- plow-review -->","comments":[],"meta":{"schema":"plow-review-envelope/v1","provider":"gitlab"}}
 JSON
       exit 0
     fi
     cat <<'JSON'
-{"body":"### Fallow smoke\n\n<!-- fallow-review -->","comments":[{"body":"**warn** `fallow/smoke`: smoke\n\n<!-- fallow-fingerprint: abc -->","position":{"base_sha":"base","start_sha":"start","head_sha":"head","position_type":"text","old_path":"src/a.ts","new_path":"src/a.ts","new_line":1},"fingerprint":"abc"}],"meta":{"schema":"fallow-review-envelope/v1","provider":"gitlab"}}
+{"body":"### Plow smoke\n\n<!-- plow-review -->","comments":[{"body":"**warn** `plow/smoke`: smoke\n\n<!-- plow-fingerprint: abc -->","position":{"base_sha":"base","start_sha":"start","head_sha":"head","position_type":"text","old_path":"src/a.ts","new_path":"src/a.ts","new_line":1},"fingerprint":"abc"}],"meta":{"schema":"plow-review-envelope/v1","provider":"gitlab"}}
 JSON
     ;;
   *)
@@ -718,7 +908,7 @@ JSON
     ;;
 esac
 SH
-chmod +x "$CI_TYPED_BIN/fallow"
+chmod +x "$CI_TYPED_BIN/plow"
 
 cat > "$CI_TYPED_BIN/curl" <<'SH'
 #!/usr/bin/env bash
@@ -730,7 +920,7 @@ done
 case "$last" in
   *"/notes?per_page=100")
     if [ "${MOCK_EXISTING_REVIEW:-}" = "1" ]; then
-      printf '[{"id":777,"body":"<!-- fallow-review -->"}]\n'
+      printf '[{"id":777,"body":"<!-- plow-review -->"}]\n'
     else
       printf '[]\n'
     fi
@@ -748,7 +938,7 @@ esac
 SH
 chmod +x "$CI_TYPED_BIN/curl"
 
-printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$CI_TYPED_WORK/fallow-analysis-args.sh"
+printf 'PLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$CI_TYPED_WORK/plow-analysis-args.sh"
 (
   cd "$CI_TYPED_WORK"
   PATH="$CI_TYPED_BIN:$PATH" \
@@ -757,8 +947,8 @@ printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$CI_TYPED_WORK
     CI_API_V4_URL="https://gitlab.example/api/v4" \
     CI_PROJECT_ID="18" \
     CI_MERGE_REQUEST_IID="123" \
-    FALLOW_COMMAND="check" \
-    FALLOW_SUMMARY_SCOPE="diff" \
+    PLOW_COMMAND="check" \
+    PLOW_SUMMARY_SCOPE="diff" \
     bash "$SCRIPTS_DIR/comment.sh" > /dev/null
   PATH="$CI_TYPED_BIN:$PATH" \
     MOCK_LOG="$CI_TYPED_LOG" \
@@ -767,8 +957,8 @@ printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$CI_TYPED_WORK
     CI_PROJECT_ID="18" \
     CI_MERGE_REQUEST_IID="123" \
     CI_COMMIT_SHA="abcdef1234567890" \
-    FALLOW_COMMAND="check" \
-    FALLOW_ROOT="." \
+    PLOW_COMMAND="check" \
+    PLOW_ROOT="." \
     MAX_COMMENTS="5" \
     bash "$SCRIPTS_DIR/review.sh" > /dev/null
   PATH="$CI_TYPED_BIN:$PATH" \
@@ -780,22 +970,22 @@ printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$CI_TYPED_WORK
     CI_PROJECT_ID="18" \
     CI_MERGE_REQUEST_IID="123" \
     CI_COMMIT_SHA="abcdef1234567890" \
-    FALLOW_COMMAND="check" \
-    FALLOW_ROOT="." \
+    PLOW_COMMAND="check" \
+    PLOW_ROOT="." \
     MAX_COMMENTS="5" \
     bash "$SCRIPTS_DIR/review.sh" > /dev/null
 )
 CI_TYPED_OUT=$(cat "$CI_TYPED_LOG")
 assert_contains "$CI_TYPED_OUT" "--format pr-comment-gitlab" "comment.sh invokes typed MR comment format"
 assert_contains "$CI_TYPED_OUT" "--format review-gitlab" "review.sh invokes typed GitLab review format"
-assert_contains "$CI_TYPED_OUT" "summary_scope=diff" "comment.sh passes FALLOW_SUMMARY_SCOPE to typed MR comment render"
+assert_contains "$CI_TYPED_OUT" "summary_scope=diff" "comment.sh passes PLOW_SUMMARY_SCOPE to typed MR comment render"
 CI_BLANK_SUMMARY_SCOPE_COUNT=$(printf '%s\n' "$CI_TYPED_OUT" | grep -c '^summary_scope=$' || true)
 if [ "$CI_BLANK_SUMMARY_SCOPE_COUNT" -ge 1 ]; then
-  pass "review.sh does not receive FALLOW_SUMMARY_SCOPE by default"
+  pass "review.sh does not receive PLOW_SUMMARY_SCOPE by default"
 else
-  fail "review.sh does not receive FALLOW_SUMMARY_SCOPE by default" "$CI_TYPED_OUT"
+  fail "review.sh does not receive PLOW_SUMMARY_SCOPE by default" "$CI_TYPED_OUT"
 fi
-assert_contains "$CI_TYPED_OUT" "fallow ci reconcile-review --provider gitlab" "review.sh invokes GitLab reconcile command"
+assert_contains "$CI_TYPED_OUT" "plow ci reconcile-review --provider gitlab" "review.sh invokes GitLab reconcile command"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "apply_errors" "review.sh checks reconcile apply errors"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "apply_hint" "review.sh emits reconcile apply hint"
 assert_contains "$CI_TYPED_OUT" "merge_requests/123/discussions" "review.sh posts discussion payload"
@@ -912,17 +1102,17 @@ CI_API_FAIL_BIN="$CI_API_FAIL_WORK/bin"
 mkdir -p "$CI_API_FAIL_BIN"
 SCRIPTS_DIR="$DIR/../scripts"
 
-# Shared fallow + curl mocks. The curl mock fails the /discussions paginate
+# Shared plow + curl mocks. The curl mock fails the /discussions paginate
 # call (review.sh multi-discussion dedup) AND the /notes paginate call
 # (comment.sh + review.sh summary-only dedup) when MOCK_PAGINATE_FAIL is
 # set. Other curl calls (MR diff_refs, POST to /discussions, etc.) succeed.
 
 write_ci_api_fail_mocks() {
-  cat > "$CI_API_FAIL_BIN/fallow" <<'SH'
+  cat > "$CI_API_FAIL_BIN/plow" <<'SH'
 #!/usr/bin/env bash
-printf 'fallow %s\n' "$*" >> "$MOCK_LOG"
+printf 'plow %s\n' "$*" >> "$MOCK_LOG"
 if [ "${1:-}" = "ci" ]; then
-  printf '{"schema":"fallow-review-reconcile/v1","stale":[]}\n'
+  printf '{"schema":"plow-review-reconcile/v1","stale":[]}\n'
   exit 0
 fi
 format=""
@@ -936,26 +1126,26 @@ done
 case "$format" in
   pr-comment-gitlab)
     cat <<'BODY'
-<!-- fallow-id: fallow-results -->
-### Fallow smoke
+<!-- plow-id: plow-results -->
+### Plow smoke
 
-Generated by fallow.
+Generated by plow.
 BODY
     ;;
   review-gitlab)
     if [ "${MOCK_ZERO_REVIEW:-}" = "1" ]; then
       cat <<'JSON'
-{"body":"### Fallow smoke\n\n<!-- fallow-review -->","comments":[],"meta":{"schema":"fallow-review-envelope/v1","provider":"gitlab"}}
+{"body":"### Plow smoke\n\n<!-- plow-review -->","comments":[],"meta":{"schema":"plow-review-envelope/v1","provider":"gitlab"}}
 JSON
     else
       cat <<'JSON'
-{"body":"### Fallow smoke\n\n<!-- fallow-review -->","comments":[{"body":"**warn** `fallow/smoke`: smoke\n\n<!-- fallow-fingerprint: abc -->","position":{"base_sha":"base","start_sha":"start","head_sha":"head","position_type":"text","old_path":"src/a.ts","new_path":"src/a.ts","new_line":1},"fingerprint":"abc"}],"meta":{"schema":"fallow-review-envelope/v1","provider":"gitlab"}}
+{"body":"### Plow smoke\n\n<!-- plow-review -->","comments":[{"body":"**warn** `plow/smoke`: smoke\n\n<!-- plow-fingerprint: abc -->","position":{"base_sha":"base","start_sha":"start","head_sha":"head","position_type":"text","old_path":"src/a.ts","new_path":"src/a.ts","new_line":1},"fingerprint":"abc"}],"meta":{"schema":"plow-review-envelope/v1","provider":"gitlab"}}
 JSON
     fi
     ;;
 esac
 SH
-  chmod +x "$CI_API_FAIL_BIN/fallow"
+  chmod +x "$CI_API_FAIL_BIN/plow"
 
   cat > "$CI_API_FAIL_BIN/curl" <<'SH'
 #!/usr/bin/env bash
@@ -1006,9 +1196,9 @@ ci_api_fail_review_run() {
   local stderr_var=$3
   local mock_zero=$4   # "1" for summary-only path
   write_ci_api_fail_mocks
-  printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$CI_API_FAIL_WORK/fallow-analysis-args.sh"
+  printf 'PLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$CI_API_FAIL_WORK/plow-analysis-args.sh"
   : > "$CI_API_FAIL_WORK/mock.log"
-  rm -f "$CI_API_FAIL_WORK/fallow-skip-reason.txt"
+  rm -f "$CI_API_FAIL_WORK/plow-skip-reason.txt"
   local _stderr _status
   _stderr=$(cd "$CI_API_FAIL_WORK" \
     && PATH="$CI_API_FAIL_BIN:$PATH" \
@@ -1020,11 +1210,11 @@ ci_api_fail_review_run() {
     CI_PROJECT_ID="18" \
     CI_MERGE_REQUEST_IID="123" \
     CI_COMMIT_SHA="abcdef1234567890" \
-    FALLOW_COMMAND="check" \
-    FALLOW_ROOT="." \
+    PLOW_COMMAND="check" \
+    PLOW_ROOT="." \
     MAX_COMMENTS="5" \
-    FALLOW_API_RETRIES=1 \
-    FALLOW_API_RETRY_DELAY=0 \
+    PLOW_API_RETRIES=1 \
+    PLOW_API_RETRY_DELAY=0 \
     bash "$SCRIPTS_DIR/review.sh" 2>&1 1>/dev/null)
   _status=$?
   printf -v "$exit_status_var" '%s' "$_status"
@@ -1036,11 +1226,11 @@ ci_api_fail_review_run "5xx" R7_STATUS R7_STDERR ""
 [ "$R7_STATUS" -eq 0 ] \
   && pass "review.sh: multi-discussion dedup-lookup 5xx failure exits 0" \
   || fail "review.sh: multi-discussion dedup-lookup 5xx failure exits 0" "got $R7_STATUS"
-if [ -f "$CI_API_FAIL_WORK/fallow-skip-reason.txt" ] && grep -q '^pagination_failure$' "$CI_API_FAIL_WORK/fallow-skip-reason.txt"; then
-  pass "review.sh: writes pagination_failure to fallow-skip-reason.txt on dedup-lookup failure"
+if [ -f "$CI_API_FAIL_WORK/plow-skip-reason.txt" ] && grep -q '^pagination_failure$' "$CI_API_FAIL_WORK/plow-skip-reason.txt"; then
+  pass "review.sh: writes pagination_failure to plow-skip-reason.txt on dedup-lookup failure"
 else
-  fail "review.sh: writes pagination_failure to fallow-skip-reason.txt on dedup-lookup failure" \
-    "got: $(cat "$CI_API_FAIL_WORK/fallow-skip-reason.txt" 2>/dev/null || echo absent)"
+  fail "review.sh: writes pagination_failure to plow-skip-reason.txt on dedup-lookup failure" \
+    "got: $(cat "$CI_API_FAIL_WORK/plow-skip-reason.txt" 2>/dev/null || echo absent)"
 fi
 assert_contains "$R7_STDERR" "skipping inline review to avoid duplicates" \
   "review.sh: warning surfaces dedup-lookup skip"
@@ -1053,7 +1243,7 @@ fi
 
 # Test 7b: review.sh summary-only path (MOCK_ZERO_REVIEW=1) posts anyway on
 # dedup-lookup failure (parity with action/scripts/review.sh summary-only).
-# Marker contract: fallow-dedup-lookup-failed.txt = true, fallow-skip-reason.txt
+# Marker contract: plow-dedup-lookup-failed.txt = true, plow-skip-reason.txt
 # stays = none because the post is not actually skipped.
 ci_api_fail_review_run "5xx" R7B_STATUS R7B_STDERR "1"
 [ "$R7B_STATUS" -eq 0 ] \
@@ -1061,17 +1251,17 @@ ci_api_fail_review_run "5xx" R7B_STATUS R7B_STDERR "1"
   || fail "review.sh: summary-only path exits 0 on dedup-lookup failure" "got $R7B_STATUS"
 assert_contains "$R7B_STDERR" "posting a new one (may duplicate)" \
   "review.sh: summary-only path warning explains duplicate-risk fallback"
-if [ -f "$CI_API_FAIL_WORK/fallow-dedup-lookup-failed.txt" ] && grep -q '^true$' "$CI_API_FAIL_WORK/fallow-dedup-lookup-failed.txt"; then
-  pass "review.sh: summary-only path writes true to fallow-dedup-lookup-failed.txt"
+if [ -f "$CI_API_FAIL_WORK/plow-dedup-lookup-failed.txt" ] && grep -q '^true$' "$CI_API_FAIL_WORK/plow-dedup-lookup-failed.txt"; then
+  pass "review.sh: summary-only path writes true to plow-dedup-lookup-failed.txt"
 else
-  fail "review.sh: summary-only path writes true to fallow-dedup-lookup-failed.txt" \
-    "got: $(cat "$CI_API_FAIL_WORK/fallow-dedup-lookup-failed.txt" 2>/dev/null || echo absent)"
+  fail "review.sh: summary-only path writes true to plow-dedup-lookup-failed.txt" \
+    "got: $(cat "$CI_API_FAIL_WORK/plow-dedup-lookup-failed.txt" 2>/dev/null || echo absent)"
 fi
-if [ -f "$CI_API_FAIL_WORK/fallow-skip-reason.txt" ] && grep -q '^none$' "$CI_API_FAIL_WORK/fallow-skip-reason.txt"; then
-  pass "review.sh: summary-only path does NOT flip fallow-skip-reason.txt"
+if [ -f "$CI_API_FAIL_WORK/plow-skip-reason.txt" ] && grep -q '^none$' "$CI_API_FAIL_WORK/plow-skip-reason.txt"; then
+  pass "review.sh: summary-only path does NOT flip plow-skip-reason.txt"
 else
-  fail "review.sh: summary-only path does NOT flip fallow-skip-reason.txt" \
-    "got: $(cat "$CI_API_FAIL_WORK/fallow-skip-reason.txt" 2>/dev/null || echo absent)"
+  fail "review.sh: summary-only path does NOT flip plow-skip-reason.txt" \
+    "got: $(cat "$CI_API_FAIL_WORK/plow-skip-reason.txt" 2>/dev/null || echo absent)"
 fi
 
 # Test 8: review.sh multi-discussion dedup, page-2 4xx -> exit 1
@@ -1113,7 +1303,7 @@ esac
 SH
 chmod +x "$CI_API_FAIL_BIN/curl"
 
-printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$CI_API_FAIL_WORK/fallow-analysis-args.sh"
+printf 'PLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$CI_API_FAIL_WORK/plow-analysis-args.sh"
 : > "$CI_API_FAIL_WORK/mock.log"
 R8B_STDERR=$(cd "$CI_API_FAIL_WORK" \
   && PATH="$CI_API_FAIL_BIN:$PATH" \
@@ -1121,8 +1311,8 @@ R8B_STDERR=$(cd "$CI_API_FAIL_WORK" \
   GITLAB_TOKEN=test \
   CI_API_V4_URL="https://gitlab.example/api/v4" \
   CI_PROJECT_ID=18 CI_MERGE_REQUEST_IID=123 CI_COMMIT_SHA=abcdef1234567890 \
-  FALLOW_COMMAND=check FALLOW_ROOT=. MAX_COMMENTS=5 \
-  FALLOW_API_RETRIES=1 FALLOW_API_RETRY_DELAY=0 \
+  PLOW_COMMAND=check PLOW_ROOT=. MAX_COMMENTS=5 \
+  PLOW_API_RETRIES=1 PLOW_API_RETRY_DELAY=0 \
   bash "$SCRIPTS_DIR/review.sh" 2>&1 1>/dev/null)
 R8B_STATUS=$?
 [ "$R8B_STATUS" -eq 0 ] \
@@ -1130,14 +1320,14 @@ R8B_STATUS=$?
   || fail "review.sh: retry-exhausted 429 exits 0 (transient, not auth error)" "got $R8B_STATUS"
 
 # Test 9b: comment.sh runs BEFORE review.sh in the default template. When
-# comment.sh writes `true` to fallow-dedup-lookup-failed.txt on a dedup
+# comment.sh writes `true` to plow-dedup-lookup-failed.txt on a dedup
 # failure, review.sh's init MUST preserve that value (not unconditionally
 # overwrite back to `false`). Otherwise the degraded-state signal is lost
 # whenever both post paths run.
 write_ci_api_fail_mocks
-printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$CI_API_FAIL_WORK/fallow-analysis-args.sh"
+printf 'PLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$CI_API_FAIL_WORK/plow-analysis-args.sh"
 : > "$CI_API_FAIL_WORK/mock.log"
-rm -f "$CI_API_FAIL_WORK/fallow-skip-reason.txt" "$CI_API_FAIL_WORK/fallow-dedup-lookup-failed.txt"
+rm -f "$CI_API_FAIL_WORK/plow-skip-reason.txt" "$CI_API_FAIL_WORK/plow-dedup-lookup-failed.txt"
 
 # Step A: run comment.sh with a 5xx on its dedup-lookup (writes true to the marker).
 (cd "$CI_API_FAIL_WORK" \
@@ -1147,8 +1337,8 @@ rm -f "$CI_API_FAIL_WORK/fallow-skip-reason.txt" "$CI_API_FAIL_WORK/fallow-dedup
   GITLAB_TOKEN=test \
   CI_API_V4_URL="https://gitlab.example/api/v4" \
   CI_PROJECT_ID=18 CI_MERGE_REQUEST_IID=123 \
-  FALLOW_COMMAND=check \
-  FALLOW_API_RETRIES=1 FALLOW_API_RETRY_DELAY=0 \
+  PLOW_COMMAND=check \
+  PLOW_API_RETRIES=1 PLOW_API_RETRY_DELAY=0 \
   bash "$SCRIPTS_DIR/comment.sh" >/dev/null 2>&1) || true
 
 # Step B: run review.sh against the SAME working dir with NO pagination failure
@@ -1160,22 +1350,22 @@ rm -f "$CI_API_FAIL_WORK/fallow-skip-reason.txt" "$CI_API_FAIL_WORK/fallow-dedup
   GITLAB_TOKEN=test \
   CI_API_V4_URL="https://gitlab.example/api/v4" \
   CI_PROJECT_ID=18 CI_MERGE_REQUEST_IID=123 CI_COMMIT_SHA=abcdef1234567890 \
-  FALLOW_COMMAND=check FALLOW_ROOT=. MAX_COMMENTS=5 \
-  FALLOW_API_RETRIES=1 FALLOW_API_RETRY_DELAY=0 \
+  PLOW_COMMAND=check PLOW_ROOT=. MAX_COMMENTS=5 \
+  PLOW_API_RETRIES=1 PLOW_API_RETRY_DELAY=0 \
   bash "$SCRIPTS_DIR/review.sh" >/dev/null 2>&1) || true
 
-if [ -f "$CI_API_FAIL_WORK/fallow-dedup-lookup-failed.txt" ] && grep -q '^true$' "$CI_API_FAIL_WORK/fallow-dedup-lookup-failed.txt"; then
+if [ -f "$CI_API_FAIL_WORK/plow-dedup-lookup-failed.txt" ] && grep -q '^true$' "$CI_API_FAIL_WORK/plow-dedup-lookup-failed.txt"; then
   pass "review.sh: preserves comment.sh's dedup_lookup_failed=true marker"
 else
   fail "review.sh: preserves comment.sh's dedup_lookup_failed=true marker" \
-    "got: $(cat "$CI_API_FAIL_WORK/fallow-dedup-lookup-failed.txt" 2>/dev/null || echo absent) (review.sh clobbered comment.sh's value)"
+    "got: $(cat "$CI_API_FAIL_WORK/plow-dedup-lookup-failed.txt" 2>/dev/null || echo absent) (review.sh clobbered comment.sh's value)"
 fi
 
 # Test 9: comment.sh summary-only path POSTs anyway on dedup-lookup failure
 write_ci_api_fail_mocks
-printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$CI_API_FAIL_WORK/fallow-analysis-args.sh"
+printf 'PLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$CI_API_FAIL_WORK/plow-analysis-args.sh"
 : > "$CI_API_FAIL_WORK/mock.log"
-rm -f "$CI_API_FAIL_WORK/fallow-skip-reason.txt"
+rm -f "$CI_API_FAIL_WORK/plow-skip-reason.txt"
 C9_STDERR=$(cd "$CI_API_FAIL_WORK" \
   && PATH="$CI_API_FAIL_BIN:$PATH" \
   MOCK_LOG="$CI_API_FAIL_WORK/mock.log" \
@@ -1184,24 +1374,24 @@ C9_STDERR=$(cd "$CI_API_FAIL_WORK" \
   CI_API_V4_URL="https://gitlab.example/api/v4" \
   CI_PROJECT_ID="18" \
   CI_MERGE_REQUEST_IID="123" \
-  FALLOW_COMMAND="check" \
-  FALLOW_API_RETRIES=1 \
-  FALLOW_API_RETRY_DELAY=0 \
+  PLOW_COMMAND="check" \
+  PLOW_API_RETRIES=1 \
+  PLOW_API_RETRY_DELAY=0 \
   bash "$SCRIPTS_DIR/comment.sh" 2>&1 1>/dev/null) || true
-if [ -f "$CI_API_FAIL_WORK/fallow-dedup-lookup-failed.txt" ] && grep -q '^true$' "$CI_API_FAIL_WORK/fallow-dedup-lookup-failed.txt"; then
-  pass "comment.sh: writes true to fallow-dedup-lookup-failed.txt on dedup-lookup failure"
+if [ -f "$CI_API_FAIL_WORK/plow-dedup-lookup-failed.txt" ] && grep -q '^true$' "$CI_API_FAIL_WORK/plow-dedup-lookup-failed.txt"; then
+  pass "comment.sh: writes true to plow-dedup-lookup-failed.txt on dedup-lookup failure"
 else
-  fail "comment.sh: writes true to fallow-dedup-lookup-failed.txt on dedup-lookup failure" \
-    "got: $(cat "$CI_API_FAIL_WORK/fallow-dedup-lookup-failed.txt" 2>/dev/null || echo absent)"
+  fail "comment.sh: writes true to plow-dedup-lookup-failed.txt on dedup-lookup failure" \
+    "got: $(cat "$CI_API_FAIL_WORK/plow-dedup-lookup-failed.txt" 2>/dev/null || echo absent)"
 fi
-# comment.sh always posts (potentially duplicating), so fallow-skip-reason.txt
+# comment.sh always posts (potentially duplicating), so plow-skip-reason.txt
 # stays `none`. Using `pagination_failure` here would mislead consumers gating
 # on the marker into thinking the summary was not posted.
-if [ -f "$CI_API_FAIL_WORK/fallow-skip-reason.txt" ] && grep -q '^none$' "$CI_API_FAIL_WORK/fallow-skip-reason.txt"; then
-  pass "comment.sh: does NOT flip fallow-skip-reason.txt on dedup-lookup failure"
+if [ -f "$CI_API_FAIL_WORK/plow-skip-reason.txt" ] && grep -q '^none$' "$CI_API_FAIL_WORK/plow-skip-reason.txt"; then
+  pass "comment.sh: does NOT flip plow-skip-reason.txt on dedup-lookup failure"
 else
-  fail "comment.sh: does NOT flip fallow-skip-reason.txt on dedup-lookup failure" \
-    "got: $(cat "$CI_API_FAIL_WORK/fallow-skip-reason.txt" 2>/dev/null || echo absent)"
+  fail "comment.sh: does NOT flip plow-skip-reason.txt on dedup-lookup failure" \
+    "got: $(cat "$CI_API_FAIL_WORK/plow-skip-reason.txt" 2>/dev/null || echo absent)"
 fi
 assert_contains "$C9_STDERR" "posting a new one (may duplicate)" \
   "comment.sh: warning explains duplicate-risk fallback"

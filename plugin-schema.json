@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "ExternalPluginDef",
-  "description": "A declarative plugin definition loaded from a standalone file or inline config.\n\nExternal plugins provide the same static pattern capabilities as built-in\nplugins (entry points, always-used files, used exports, tooling dependencies),\nbut are defined in standalone files or inline in the plow config rather than\ncompiled Rust code.\n\nThey cannot do AST-based config parsing (`resolve_config()`), but cover the\nvast majority of framework integration use cases.\n\nSupports JSONC, JSON, and TOML formats. All use camelCase field names.\n\n```json\n{\n  \"$schema\": \"https://raw.githubusercontent.com/plow-rs/plow/main/plugin-schema.json\",\n  \"name\": \"my-framework\",\n  \"enablers\": [\"my-framework\", \"@my-framework/core\"],\n  \"entryPoints\": [\"src/routes/**/*.{ts,tsx}\"],\n  \"configPatterns\": [\"my-framework.config.{ts,js}\"],\n  \"alwaysUsed\": [\"src/setup.ts\"],\n  \"toolingDependencies\": [\"my-framework-cli\"],\n  \"usedExports\": [\n    { \"pattern\": \"src/routes/**/*.{ts,tsx}\", \"exports\": [\"default\", \"loader\", \"action\"] }\n  ]\n}\n```",
+  "description": "A declarative plugin definition loaded from a standalone file or inline config.\n\nExternal plugins provide the same static pattern capabilities as built-in\nplugins (entry points, always-used files, used exports, tooling dependencies),\nbut are defined in standalone files or inline in the plow config rather than\ncompiled Rust code.\n\nThey cannot do AST-based config parsing (`resolve_config()`), but cover the\nvast majority of framework integration use cases.\n\nSupports JSONC, JSON, and TOML formats. All use camelCase field names.\n\n```json\n{\n  \"$schema\": \"https://raw.githubusercontent.com/fglogan/genesis-plow/main/plugin-schema.json\",\n  \"name\": \"my-framework\",\n  \"enablers\": [\"my-framework\", \"@my-framework/core\"],\n  \"entryPoints\": [\"src/routes/**/*.{ts,tsx}\"],\n  \"configPatterns\": [\"my-framework.config.{ts,js}\"],\n  \"alwaysUsed\": [\"src/setup.ts\"],\n  \"toolingDependencies\": [\"my-framework-cli\"],\n  \"usedExports\": [\n    { \"pattern\": \"src/routes/**/*.{ts,tsx}\", \"exports\": [\"default\", \"loader\", \"action\"] }\n  ]\n}\n```",
   "type": "object",
   "properties": {
     "name": {
@@ -207,10 +207,10 @@
       ]
     },
     "UsedClassMemberRule": {
-      "description": "A `usedClassMembers` entry from config or an external plugin.\n\nSupports either a plain member name (`\"agInit\"`) or a scoped rule that\nonly applies when a class matches specific `extends` / `implements`\nheritage clauses.",
+      "description": "A `usedClassMembers` entry from config or an external plugin.\n\nSupports either a plain member name or glob pattern (`\"agInit\"`,\n`\"enter*\"`) or a scoped rule that only applies when a class matches\nspecific `extends` / `implements` heritage clauses.",
       "anyOf": [
         {
-          "description": "Globally suppress this class member name for all classes.",
+          "description": "Globally suppress this class member name or glob pattern for all classes.",
           "type": "string"
         },
         {
@@ -238,7 +238,7 @@
           ]
         },
         "members": {
-          "description": "Member names that should be treated as framework-used.",
+          "description": "Member names or glob patterns that should be treated as framework-used.",
           "type": "array",
           "items": {
             "type": "string"

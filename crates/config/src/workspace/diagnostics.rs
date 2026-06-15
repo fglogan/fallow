@@ -1,10 +1,11 @@
-//! Workspace discovery diagnostics.
+//! Workspace and source-discovery diagnostics.
 //!
 //! Surfaces malformed `package.json`, unreachable glob matches, missing
-//! tsconfig references, and undeclared workspaces as typed
-//! [`WorkspaceDiagnostic`] values. Each diagnostic also emits a deduplicated
-//! `tracing::warn!` so users running plow with default tracing filters see
-//! the cause of "plow doesn't see my package."
+//! tsconfig references, undeclared workspaces, and source files skipped during
+//! source discovery as typed [`WorkspaceDiagnostic`] values. Each diagnostic
+//! also emits a deduplicated `tracing::warn!` so users running plow with
+//! default tracing filters see the cause of "plow doesn't see my package" or
+//! "plow ate all my memory."
 //!
 //! Repeated `GlobMatchedNoPackageJson` diagnostics are aggregated by glob
 //! pattern at emission time so a wide glob matching hundreds of package-less
@@ -59,6 +60,26 @@ pub enum WorkspaceDiagnosticKind {
     /// `tsconfig.json` lists a `references[].path` that does not point to an
     /// existing directory.
     TsconfigReferenceDirMissing,
+    /// A source file was skipped at discovery because it exceeds the configured
+    /// per-file size limit (`--max-file-size` / `PLOW_MAX_FILE_SIZE`, default
+    /// 5 MB). The file is never read, parsed, or analyzed, guarding against the
+    /// out-of-memory blowup a single multi-MB generated/vendored/bundled file
+    /// causes (issue #1086). Surfaced by source discovery, not workspace
+    /// discovery, but shares this channel so the skip is visible in
+    /// `workspace_diagnostics[]` on `plow dead-code / dupes / health` JSON.
+    SkippedLargeFile {
+        /// On-disk size of the skipped file in bytes.
+        size_bytes: u64,
+    },
+    /// A large JavaScript bundle was skipped at discovery because it appears to
+    /// be minified generated output. The file is never parsed or analyzed,
+    /// guarding against sub-limit bundles that can still create very large ASTs
+    /// and extraction payloads (issue #1086). Use `--max-file-size 0` when the
+    /// bundled file really should be analyzed.
+    SkippedMinifiedFile {
+        /// On-disk size of the skipped file in bytes.
+        size_bytes: u64,
+    },
 }
 
 impl WorkspaceDiagnosticKind {
@@ -71,8 +92,38 @@ impl WorkspaceDiagnosticKind {
             Self::GlobMatchedNoPackageJson { .. } => "glob-matched-no-package-json",
             Self::MalformedTsconfig { .. } => "malformed-tsconfig",
             Self::TsconfigReferenceDirMissing => "tsconfig-reference-dir-missing",
+            Self::SkippedLargeFile { .. } => "skipped-large-file",
+            Self::SkippedMinifiedFile { .. } => "skipped-minified-file",
         }
     }
+
+    /// Whether this diagnostic is produced by SOURCE discovery (the file walk in
+    /// `discover_files`) rather than WORKSPACE discovery (config load). Source-
+    /// discovery diagnostics are APPENDED to the registry after config load, so
+    /// [`stash_workspace_diagnostics`] must preserve them when it replaces the
+    /// workspace-discovery set, otherwise the per-analysis config re-loads in
+    /// combined-mode (`plow` with no subcommand re-loads config for check,
+    /// dupes, and health) wipe them before the JSON envelope is built (issue
+    /// #1086).
+    #[must_use]
+    pub const fn is_source_discovery(&self) -> bool {
+        matches!(
+            self,
+            Self::SkippedLargeFile { .. } | Self::SkippedMinifiedFile { .. }
+        )
+    }
+}
+
+/// Render a byte count as a megabyte figure with one decimal place for
+/// human-readable diagnostic messages (e.g. `12.3 MB`).
+#[must_use]
+fn format_size_mb(bytes: u64) -> String {
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "display-only size figure; precision loss past 2^53 bytes is irrelevant"
+    )]
+    let mb = bytes as f64 / (1024.0 * 1024.0);
+    format!("{mb:.1} MB")
 }
 
 /// A diagnostic about a workspace-discovery candidate.
@@ -130,9 +181,6 @@ fn normalise_payload_paths(root: &Path, kind: WorkspaceDiagnosticKind) -> Worksp
         let stripped = text
             .replace(&format!("{root_str}/"), "")
             .replace(&format!("{root_alt}/"), "");
-        // Also strip a stray Windows-style trailing-separator form just in case
-        // the diagnostic was constructed with a path whose `display()` keeps
-        // backslashes.
         stripped
             .replace(&format!("{root_str}\\"), "")
             .replace(&format!("{root_alt}\\"), "")
@@ -186,6 +234,20 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
         WorkspaceDiagnosticKind::TsconfigReferenceDirMissing => format!(
             "tsconfig.json references '{display}' but the directory does not exist. \
              Update or remove the reference, or restore the missing directory."
+        ),
+        WorkspaceDiagnosticKind::SkippedLargeFile { size_bytes } => format!(
+            "Skipped '{display}' ({size}): exceeds the max file size limit. \
+             Its imports and exports are not analyzed. Raise the limit with \
+             --max-file-size <MB> (or PLOW_MAX_FILE_SIZE), or add '{display}' \
+             to ignorePatterns.",
+            size = format_size_mb(*size_bytes)
+        ),
+        WorkspaceDiagnosticKind::SkippedMinifiedFile { size_bytes } => format!(
+            "Skipped '{display}' ({size}): appears to be minified generated JavaScript. \
+             Its imports and exports are not analyzed. Add '{display}' to ignorePatterns, \
+             rename it with a .min.js suffix, or use --max-file-size 0 if this file \
+             should be analyzed.",
+            size = format_size_mb(*size_bytes)
         ),
     }
 }
@@ -279,10 +341,6 @@ fn plan_warnings(root: &Path, diagnostics: &[WorkspaceDiagnostic]) -> Vec<Planne
 
     let mut plans: Vec<PlannedWarning> = Vec::new();
     let mut glob_groups: Vec<(&str, Vec<&WorkspaceDiagnostic>)> = Vec::new();
-    // `tsconfig.json` references[] entries pointing at missing directories are
-    // aggregated together: a single root tsconfig commonly lists every sibling
-    // package, and on a large monorepo the referenced source tree may not be
-    // checked out, producing dozens of distinct-but-repetitive lines.
     let mut tsconfig_ref_misses: Vec<&WorkspaceDiagnostic> = Vec::new();
     for diag in diagnostics {
         match &diag.kind {
@@ -312,8 +370,6 @@ fn plan_warnings(root: &Path, diagnostics: &[WorkspaceDiagnostic]) -> Vec<Planne
         });
     }
 
-    // A single missing reference keeps today's per-instance message; two or
-    // more collapse to one summary line naming a few of the missing paths.
     if let [only] = tsconfig_ref_misses.as_slice() {
         plans.push(per_instance(only));
     } else if !tsconfig_ref_misses.is_empty() {
@@ -342,17 +398,12 @@ fn plan_warnings(root: &Path, diagnostics: &[WorkspaceDiagnostic]) -> Vec<Planne
 /// only the stderr surface is bounded, so structured JSON consumers still see
 /// every diagnostic.
 pub(super) fn emit_diagnostics(root: &Path, diagnostics: &[WorkspaceDiagnostic]) {
-    // Capture every diagnostic before the dedupe gate so tests observe both
-    // calls on the same (root, kind, path) and see the constituents behind an
-    // aggregated glob warning.
     #[cfg(test)]
     for diag in diagnostics {
         capture_diag(diag);
     }
 
     for plan in plan_warnings(root, diagnostics) {
-        // On a poisoned mutex, `should_emit` returns true and we emit anyway:
-        // over-warning beats swallowing a typo.
         if should_emit(plan.dedupe_key) {
             tracing::warn!("plow: {}", plan.message);
         }
@@ -455,7 +506,7 @@ pub fn capture_workspace_warnings<F: FnOnce() -> R, R>(body: F) -> (R, Vec<Works
 /// [`super::discover_workspaces_with_diagnostics`] and (after config load
 /// completes) by the analysis pipeline's `find_undeclared_workspaces_*`
 /// pass. Consumers (`plow list --workspaces`, the JSON envelope on
-/// `plow check / dupes / health`) read via [`workspace_diagnostics_for`].
+/// `plow dead-code / dupes / health`) read via [`workspace_diagnostics_for`].
 ///
 /// Canonicalisation matches the dedupe-key canonicalisation in
 /// [`plan_warnings`]: two callers on the same physical root coalesce, and
@@ -463,16 +514,34 @@ pub fn capture_workspace_warnings<F: FnOnce() -> R, R>(body: F) -> (R, Vec<Works
 static WORKSPACE_DIAGNOSTICS: OnceLock<Mutex<FxHashMap<PathBuf, Vec<WorkspaceDiagnostic>>>> =
     OnceLock::new();
 
-/// Replace the workspace-discovery diagnostics for `root` with `diagnostics`.
+/// Replace the workspace-discovery diagnostics for `root` with `diagnostics`,
+/// PRESERVING any source-discovery diagnostics (see
+/// [`WorkspaceDiagnosticKind::is_source_discovery`]) already appended for the
+/// root.
 ///
 /// Called at config-load time after [`super::discover_workspaces_with_diagnostics`]
-/// completes; the analyze pipeline then APPENDS undeclared-workspace
-/// diagnostics via [`append_workspace_diagnostics`].
+/// completes; the analyze pipeline then APPENDS undeclared-workspace and
+/// source-discovery (`skipped-large-file`) diagnostics via
+/// [`append_workspace_diagnostics`]. The workspace-discovery set is authoritative
+/// and replaced wholesale (so a fixed `package.json` clears its stale diagnostic
+/// across watch-mode reruns), but source-discovery diagnostics are appended
+/// AFTER this stash, so combined-mode's per-analysis config re-loads would
+/// otherwise wipe a `skipped-large-file` entry that the first analysis's
+/// discovery already recorded (issue #1086).
 pub fn stash_workspace_diagnostics(root: &Path, diagnostics: Vec<WorkspaceDiagnostic>) {
     let canonical = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     let registry = WORKSPACE_DIAGNOSTICS.get_or_init(|| Mutex::new(FxHashMap::default()));
     if let Ok(mut map) = registry.lock() {
-        map.insert(canonical, diagnostics);
+        let mut combined = diagnostics;
+        if let Some(existing) = map.get(&canonical) {
+            combined.extend(
+                existing
+                    .iter()
+                    .filter(|d| d.kind.is_source_discovery())
+                    .cloned(),
+            );
+        }
+        map.insert(canonical, combined);
     }
 }
 
@@ -519,6 +588,30 @@ pub fn append_workspace_diagnostics(root: &Path, additions: Vec<WorkspaceDiagnos
     }
 }
 
+/// Remove all source-discovery diagnostics (see
+/// [`WorkspaceDiagnosticKind::is_source_discovery`]) for `root` from the
+/// registry, keeping the workspace-discovery set intact.
+///
+/// Called at the START of each source walk (`discover_files`) so a stale
+/// `skipped-large-file` entry from a previous analysis pass (e.g. a watch-mode
+/// rerun after the user raised `--max-file-size` or added the file to
+/// `ignorePatterns`) is dropped before the current walk re-appends only the
+/// files it actually skips. Pairs with the preserve in
+/// [`stash_workspace_diagnostics`]: clear keeps the set CURRENT across reruns,
+/// preserve keeps it ALIVE across combined-mode's per-analysis config re-loads
+/// (issue #1086).
+pub fn clear_source_discovery_diagnostics(root: &Path) {
+    let canonical = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let Some(registry) = WORKSPACE_DIAGNOSTICS.get() else {
+        return;
+    };
+    if let Ok(mut map) = registry.lock()
+        && let Some(existing) = map.get_mut(&canonical)
+    {
+        existing.retain(|d| !d.kind.is_source_discovery());
+    }
+}
+
 /// Read the workspace-discovery diagnostics produced by the most recent
 /// `stash_workspace_diagnostics` + any subsequent
 /// `append_workspace_diagnostics` calls for `root`. Returns an empty vector
@@ -544,10 +637,6 @@ pub fn workspace_diagnostics_for(root: &Path) -> Vec<WorkspaceDiagnostic> {
 /// caches.
 #[must_use]
 pub(super) fn is_skip_listed_dir(name: &str) -> bool {
-    // Dot-prefixed names (`.next`, `.turbo`, `.nuxt`, `.svelte-kit`, `.cache`)
-    // are caught by the `starts_with('.')` arm; do not duplicate them in the
-    // explicit list. The explicit list is reserved for non-dot conventional
-    // build / output / tooling directories that pnpm/npm/yarn also filter.
     name.starts_with('.') || matches!(name, "node_modules" | "build" | "dist" | "coverage")
 }
 
@@ -583,6 +672,154 @@ mod tests {
     }
 
     #[test]
+    fn skipped_large_file_diagnostic_id_and_message() {
+        let root = Path::new("/project");
+        let diag = WorkspaceDiagnostic::new(
+            root,
+            root.join("src/vendor/app.bundle.js"),
+            WorkspaceDiagnosticKind::SkippedLargeFile {
+                size_bytes: 6 * 1024 * 1024,
+            },
+        );
+        assert_eq!(diag.kind.id(), "skipped-large-file");
+        assert!(
+            diag.message.contains("src/vendor/app.bundle.js"),
+            "message names the project-relative path: {}",
+            diag.message
+        );
+        assert!(
+            diag.message.contains("6.0 MB"),
+            "message reports the size: {}",
+            diag.message
+        );
+        assert!(
+            diag.message.contains("--max-file-size"),
+            "message names the override flag: {}",
+            diag.message
+        );
+    }
+
+    #[test]
+    fn skipped_minified_file_diagnostic_id_and_message() {
+        let root = Path::new("/project");
+        let diag = WorkspaceDiagnostic::new(
+            root,
+            root.join("src/assets/index-abc123.js"),
+            WorkspaceDiagnosticKind::SkippedMinifiedFile {
+                size_bytes: 2 * 1024 * 1024,
+            },
+        );
+        assert_eq!(diag.kind.id(), "skipped-minified-file");
+        assert!(
+            diag.message.contains("src/assets/index-abc123.js"),
+            "message names the project-relative path: {}",
+            diag.message
+        );
+        assert!(
+            diag.message.contains("2.0 MB"),
+            "message reports the size: {}",
+            diag.message
+        );
+        assert!(
+            diag.message.contains("--max-file-size 0"),
+            "message names the opt-out: {}",
+            diag.message
+        );
+    }
+
+    #[test]
+    fn format_size_mb_one_decimal() {
+        assert_eq!(format_size_mb(0), "0.0 MB");
+        assert_eq!(format_size_mb(5 * 1024 * 1024), "5.0 MB");
+        assert_eq!(format_size_mb(1024 * 1024 + 512 * 1024), "1.5 MB");
+    }
+
+    #[test]
+    fn stash_preserves_appended_skipped_large_file_across_restash() {
+        // Unique synthetic root so the process-global registry does not collide
+        // with sibling tests.
+        let root = Path::new("/plow-test-1086-stash-preserve");
+        let undeclared = || {
+            WorkspaceDiagnostic::new(
+                root,
+                root.join("pkg"),
+                WorkspaceDiagnosticKind::UndeclaredWorkspace,
+            )
+        };
+        // First analysis loads config and stashes the workspace-discovery set.
+        stash_workspace_diagnostics(root, vec![undeclared()]);
+        // Its source discovery appends a skipped-large-file diagnostic.
+        append_workspace_diagnostics(
+            root,
+            vec![WorkspaceDiagnostic::new(
+                root,
+                root.join("vendor/big.js"),
+                WorkspaceDiagnosticKind::SkippedLargeFile {
+                    size_bytes: 9_999_999,
+                },
+            )],
+        );
+        // A sibling analysis (combined-mode dupes/health) re-loads config and
+        // re-stashes the same workspace-discovery set.
+        stash_workspace_diagnostics(root, vec![undeclared()]);
+
+        let after = workspace_diagnostics_for(root);
+        assert_eq!(
+            after
+                .iter()
+                .filter(|d| d.kind.is_source_discovery())
+                .count(),
+            1,
+            "skipped-large-file survives the combined-mode re-stash exactly once (#1086): {after:?}"
+        );
+        assert_eq!(
+            after
+                .iter()
+                .filter(|d| matches!(d.kind, WorkspaceDiagnosticKind::UndeclaredWorkspace))
+                .count(),
+            1,
+            "the workspace-discovery diagnostic is replaced, not duplicated"
+        );
+    }
+
+    #[test]
+    fn clear_source_discovery_drops_stale_skip_keeps_workspace_diag() {
+        let root = Path::new("/plow-test-1086-clear-stale");
+        stash_workspace_diagnostics(
+            root,
+            vec![WorkspaceDiagnostic::new(
+                root,
+                root.join("pkg"),
+                WorkspaceDiagnosticKind::UndeclaredWorkspace,
+            )],
+        );
+        append_workspace_diagnostics(
+            root,
+            vec![WorkspaceDiagnostic::new(
+                root,
+                root.join("vendor/big.js"),
+                WorkspaceDiagnosticKind::SkippedLargeFile {
+                    size_bytes: 9_999_999,
+                },
+            )],
+        );
+        // A later walk (the file is no longer skipped) clears the stale entry.
+        clear_source_discovery_diagnostics(root);
+
+        let after = workspace_diagnostics_for(root);
+        assert!(
+            !after.iter().any(|d| d.kind.is_source_discovery()),
+            "stale skipped-large-file is dropped on the next walk (#1086 watch-mode): {after:?}"
+        );
+        assert!(
+            after
+                .iter()
+                .any(|d| matches!(d.kind, WorkspaceDiagnosticKind::UndeclaredWorkspace)),
+            "the workspace-discovery diagnostic survives the source-discovery clear"
+        );
+    }
+
+    #[test]
     fn build_glob_group_message_caps_examples_and_summarises_tail() {
         let root = Path::new("/project");
         let paths = [
@@ -599,7 +836,6 @@ mod tests {
             message.starts_with("Glob 'playground/**' matched 5 directories with no package.json"),
             "count and pattern lead the message: {message}"
         );
-        // First three sorted examples are named; the rest summarised.
         assert!(
             message.contains(
                 "(e.g. playground/cli, playground/lib-types, playground/minify, and 2 more)"
@@ -612,7 +848,6 @@ mod tests {
             ),
             "next-step hint preserved: {message}"
         );
-        // Never names the truncated examples inline.
         assert!(
             !message.contains("playground/ssr"),
             "tail example not named: {message}"
@@ -692,7 +927,6 @@ mod tests {
         let plans = plan_warnings(root, std::slice::from_ref(&diag));
 
         assert_eq!(plans.len(), 1);
-        // Byte-identical to the per-instance message and key (no aggregation).
         assert_eq!(plans[0].message, diag.message);
         assert!(
             plans[0]

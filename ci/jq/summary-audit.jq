@@ -21,12 +21,16 @@ def dead_code_rows:
    [ (.dead_code.unused_optional_dependencies // [])[] | {kind:"Unused optionalDependency", location:path_line, item:("`\(.package_name)`"), introduced:.introduced} ] +
    [ (.dead_code.unused_enum_members // [])[] | {kind:"Unused enum member", location:path_line, item:("`\(.parent_name).\(.member_name)`"), introduced:.introduced} ] +
    [ (.dead_code.unused_class_members // [])[] | {kind:"Unused class member", location:path_line, item:("`\(.parent_name).\(.member_name)`"), introduced:.introduced} ] +
+   [ (.dead_code.unused_store_members // [])[] | {kind:"Unused store member", location:path_line, item:("`\(.parent_name).\(.member_name)`"), introduced:.introduced} ] +
    [ (.dead_code.unresolved_imports // [])[] | {kind:"Unresolved import", location:path_line, item:("`\(.specifier)`"), introduced:.introduced} ] +
    [ (.dead_code.unlisted_dependencies // [])[] | {kind:"Unlisted dependency", location:first_import_site, item:("`\(.package_name)`"), introduced:.introduced} ] +
    [ (.dead_code.duplicate_exports // [])[] | {kind:"Duplicate export", location:(.locations[:3] | map("`\(.path | rel_path):\(.line)`") | join(", ")), item:("`\(.export_name)`"), introduced:.introduced} ] +
    [ (.dead_code.circular_dependencies // [])[] | {kind:"Circular dependency", location:((.files // []) | map("`\(. | rel_path)`") | join(" -> ")), item:"cycle", introduced:.introduced} ] +
    [ (.dead_code.re_export_cycles // [])[] | {kind:"Re-export cycle", location:((.files // []) | map("`\(. | rel_path)`") | join(" <-> ")), item:(.kind // "cycle"), introduced:.introduced} ] +
    [ (.dead_code.boundary_violations // [])[] | {kind:"Boundary violation", location:("`\(.from_path | rel_path):\(.line)`"), item:("\(.from_zone) -> \(.to_zone)"), introduced:.introduced} ] +
+   [ (.dead_code.boundary_coverage_violations // [])[] | {kind:"Boundary coverage", location:("`\(.path | rel_path):\(.line)`"), item:"no matching zone", introduced:.introduced} ] +
+   [ (.dead_code.boundary_call_violations // [])[] | {kind:"Boundary call", location:("`\(.path | rel_path):\(.line)`"), item:("`\(.callee)` in \(.zone)"), introduced:.introduced} ] +
+   [ (.dead_code.policy_violations // [])[] | {kind:"Policy violation", location:("`\(.path | rel_path):\(.line)`"), item:("`\(.matched)` banned by \(.pack)/\(.rule_id)"), introduced:.introduced} ] +
    [ (.dead_code.type_only_dependencies // [])[] | {kind:"Type-only dependency", location:path_line, item:("`\(.package_name)`"), introduced:.introduced} ] +
    [ (.dead_code.test_only_dependencies // [])[] | {kind:"Test-only dependency", location:path_line, item:("`\(.package_name)`"), introduced:.introduced} ] +
    [ (.dead_code.stale_suppressions // [])[] | {kind:"Stale suppression", location:path_line, item:(.description // "suppression"), introduced:.introduced} ] +
@@ -60,7 +64,7 @@ dead_code_rows as $dead_rows |
 (.complexity.findings // []) as $complex_findings |
 duplication_rows as $dupe_rows |
 
-"## Fallow Audit\n\n" +
+"## Plow Audit\n\n" +
 "> \($verdict | verdict_label) · \(plural($files; "changed file")) · \($elapsed)ms\n\n" +
 "| Category | Findings | Introduced | Inherited |\n|:---------|---------:|-----------:|----------:|\n" +
 "| Dead code | \($dead) | \($attr.dead_code_introduced // 0) | \($attr.dead_code_inherited // 0) |\n" +

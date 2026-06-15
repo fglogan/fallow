@@ -1,9 +1,13 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "tests and benches use unwrap and expect to keep fixture setup concise"
+)]
+
 #[path = "common/mod.rs"]
 mod common;
 
-use common::{
-    fixture_path, parse_json, redact_all, run_plow, run_plow_combined, run_plow_in_root,
-};
+use common::{fixture_path, parse_json, redact_all, run_plow, run_plow_combined, run_plow_in_root};
 use std::path::Path;
 use tempfile::tempdir;
 
@@ -33,8 +37,6 @@ fn git(root: &Path, args: &[&str]) {
     let status = std::process::Command::new("git")
         .args(args)
         .current_dir(root)
-        // Isolate from parent git context (pre-push hook sets GIT_DIR to the main repo,
-        // which overrides current_dir and causes commits to leak into the real repo)
         .env_remove("GIT_DIR")
         .env_remove("GIT_WORK_TREE")
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
@@ -44,15 +46,8 @@ fn git(root: &Path, args: &[&str]) {
     assert!(status.success(), "git {args:?} should succeed");
 }
 
-// ---------------------------------------------------------------------------
-// JSON output structure
-// ---------------------------------------------------------------------------
-
 #[test]
 fn health_json_output_is_valid() {
-    // Disable the default CRAP gate (30.0) so the fixture's branchy untested
-    // function doesn't push the process to exit 1. This test only verifies
-    // shape, not findings.
     let output = run_plow(
         "health",
         "complexity-project",
@@ -61,6 +56,96 @@ fn health_json_output_is_valid() {
     assert_eq!(output.code, 0, "health should succeed");
     let json = parse_json(&output);
     assert!(json.is_object(), "health JSON output should be an object");
+}
+
+#[test]
+fn health_min_score_zero_exits_zero_with_findings() {
+    let plain = run_plow("health", "complexity-project", &["--quiet"]);
+    assert_eq!(plain.code, 1, "plain health should still fail on findings");
+
+    let gated = run_plow(
+        "health",
+        "complexity-project",
+        &["--min-score", "0", "--quiet"],
+    );
+    assert_eq!(
+        gated.code, 0,
+        "--min-score 0 must exit 0. stderr: {}",
+        gated.stderr
+    );
+}
+
+#[test]
+fn health_min_score_below_threshold_fails() {
+    let output = run_plow(
+        "health",
+        "complexity-project",
+        &["--min-score", "100", "--quiet"],
+    );
+    assert_eq!(
+        output.code, 1,
+        "--min-score 100 should fail the score gate. stderr: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn health_min_score_demotes_rendered_findings_with_informational_note() {
+    let output = run_plow(
+        "health",
+        "complexity-project",
+        &["--complexity", "--min-score", "0"],
+    );
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    assert!(
+        output
+            .stderr
+            .contains("Findings above are informational: --min-score gates on the score"),
+        "expected informational note in stderr, got: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn health_report_only_never_fails() {
+    let output = run_plow(
+        "health",
+        "complexity-project",
+        &["--report-only", "--quiet"],
+    );
+    assert_eq!(
+        output.code, 0,
+        "--report-only must exit 0 even with findings. stderr: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn health_report_only_rejects_gate_flags() {
+    let output = run_plow(
+        "health",
+        "complexity-project",
+        &[
+            "--report-only",
+            "--min-score",
+            "80",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(
+        output.code, 2,
+        "--report-only with --min-score should be rejected. stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["error"], serde_json::json!(true));
+    let message = json["message"].as_str().expect("message should be present");
+    assert!(
+        message.contains("--report-only cannot be combined with"),
+        "unexpected error message: {message}"
+    );
 }
 
 #[test]
@@ -190,10 +275,254 @@ fn health_json_has_findings() {
         &["--complexity", "--format", "json", "--quiet"],
     );
     let json = parse_json(&output);
-    // complexity-project has a function with cyclomatic > 10
     assert!(
         json.get("findings").is_some(),
         "health JSON should have findings key"
+    );
+}
+
+fn write_threshold_override_fixture(root: &Path, config: &str, source: &str) {
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"threshold-override-fixture","type":"module","main":"src/legacy.ts"}"#,
+    );
+    write_file(&root.join(".plowrc.json"), config);
+    write_file(&root.join("src/legacy.ts"), source);
+}
+
+fn complex_threshold_override_source() -> &'static str {
+    r"export function legacyFlow(input: number): number {
+  let score = 0;
+  if (input > 0) score += 1;
+  if (input > 1) score += 1;
+  if (input > 2) score += 1;
+  if (input > 3) score += 1;
+  if (input > 4) score += 1;
+  if (input > 5) score += 1;
+  return score;
+}
+"
+}
+
+#[test]
+fn health_threshold_override_uses_local_ceiling() {
+    let dir = tempdir().expect("create temp dir");
+    write_threshold_override_fixture(
+        dir.path(),
+        r#"{
+  "health": {
+    "thresholdOverrides": [
+      {
+        "files": ["src/legacy.ts"],
+        "functions": ["legacyFlow"],
+        "maxCyclomatic": 20,
+        "maxCognitive": 20,
+        "reason": "legacy migration"
+      }
+    ]
+  }
+}
+"#,
+        complex_threshold_override_source(),
+    );
+
+    let output = run_plow_in_root(
+        "health",
+        dir.path(),
+        &[
+            "--complexity",
+            "--max-cyclomatic",
+            "3",
+            "--max-cognitive",
+            "3",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let json = parse_json(&output);
+    assert!(
+        json["findings"].as_array().is_none_or(Vec::is_empty),
+        "override should suppress local finding: {}",
+        output.stdout
+    );
+    let states = json["threshold_overrides"]
+        .as_array()
+        .expect("threshold_overrides array");
+    let state = states.first().expect("active override state");
+    assert_eq!(state["status"].as_str(), Some("active"));
+    assert_eq!(state["function"].as_str(), Some("legacyFlow"));
+    assert_eq!(state["reason"].as_str(), Some("legacy migration"));
+}
+
+#[test]
+fn health_threshold_override_reports_stale_when_under_global_threshold() {
+    let dir = tempdir().expect("create temp dir");
+    write_threshold_override_fixture(
+        dir.path(),
+        r#"{
+  "health": {
+    "thresholdOverrides": [
+      { "files": ["src/legacy.ts"], "functions": ["legacyFlow"], "maxCyclomatic": 20 }
+    ]
+  }
+}
+"#,
+        "export function legacyFlow(input: number): number {\n  return input + 1;\n}\n",
+    );
+
+    let output = run_plow_in_root(
+        "health",
+        dir.path(),
+        &[
+            "--complexity",
+            "--max-cyclomatic",
+            "3",
+            "--max-cognitive",
+            "3",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let json = parse_json(&output);
+    let states = json["threshold_overrides"]
+        .as_array()
+        .expect("threshold_overrides array");
+    let state = states.first().expect("stale override state");
+    assert_eq!(state["status"].as_str(), Some("stale"));
+    assert_eq!(state["function"].as_str(), Some("legacyFlow"));
+}
+
+#[test]
+fn health_threshold_override_omits_no_match_state_for_scoped_run() {
+    let dir = tempdir().expect("create temp dir");
+    write_threshold_override_fixture(
+        dir.path(),
+        r#"{
+  "health": {
+    "thresholdOverrides": [
+      { "files": ["src/missing.ts"], "maxCyclomatic": 20 }
+    ]
+  }
+}
+"#,
+        complex_threshold_override_source(),
+    );
+    git(dir.path(), &["init"]);
+    git(dir.path(), &["config", "user.name", "Test User"]);
+    git(dir.path(), &["config", "user.email", "test@example.com"]);
+    git(dir.path(), &["add", "."]);
+    git(dir.path(), &["commit", "-m", "initial"]);
+
+    let output = run_plow_in_root(
+        "health",
+        dir.path(),
+        &[
+            "--complexity",
+            "--changed-since",
+            "HEAD",
+            "--max-cyclomatic",
+            "50",
+            "--max-cognitive",
+            "50",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let json = parse_json(&output);
+    assert!(
+        json["threshold_overrides"]
+            .as_array()
+            .is_none_or(Vec::is_empty),
+        "scoped run should not report no-match override state: {}",
+        output.stdout
+    );
+}
+
+#[test]
+fn health_complexity_breakdown_gates_and_reconstructs_contributions() {
+    // Without the flag, no `contributions` key is emitted on any finding.
+    let without = parse_json(&run_plow(
+        "health",
+        "complexity-project",
+        &[
+            "--complexity",
+            "--max-cyclomatic",
+            "1",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    ));
+    let findings = without
+        .get("findings")
+        .and_then(serde_json::Value::as_array)
+        .expect("findings array");
+    assert!(!findings.is_empty(), "fixture should produce findings");
+    for f in findings {
+        assert!(
+            f.get("contributions").is_none(),
+            "contributions must be omitted without --complexity-breakdown"
+        );
+    }
+
+    // With the flag, each finding carries a breakdown that reconstructs the
+    // aggregate metrics exactly (sum of weights, +1 for cyclomatic).
+    let with = parse_json(&run_plow(
+        "health",
+        "complexity-project",
+        &[
+            "--complexity",
+            "--complexity-breakdown",
+            "--max-cyclomatic",
+            "1",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    ));
+    let findings = with
+        .get("findings")
+        .and_then(serde_json::Value::as_array)
+        .expect("findings array");
+    let mut saw_contributions = false;
+    for f in findings {
+        let Some(contribs) = f.get("contributions").and_then(serde_json::Value::as_array) else {
+            continue;
+        };
+        saw_contributions = true;
+        let sum = |metric: &str| -> u64 {
+            contribs
+                .iter()
+                .filter(|c| c["metric"] == metric)
+                .map(|c| c["weight"].as_u64().unwrap_or(0))
+                .sum()
+        };
+        assert_eq!(
+            sum("cyclomatic") + 1,
+            f["cyclomatic"].as_u64().unwrap(),
+            "cyclomatic contributions reconstruct the aggregate"
+        );
+        assert_eq!(
+            sum("cognitive"),
+            f["cognitive"].as_u64().unwrap(),
+            "cognitive contributions reconstruct the aggregate"
+        );
+    }
+    assert!(
+        saw_contributions,
+        "at least one finding should carry contributions with the flag"
     );
 }
 
@@ -240,18 +569,9 @@ fn health_reports_angular_template_complexity() {
         .iter()
         .find(|action| action["type"] == "suppress-file")
         .unwrap_or_else(|| panic!("expected HTML suppress action, got: {actions:#?}"));
-    assert_eq!(
-        suppress["comment"],
-        "<!-- plow-ignore-file complexity -->"
-    );
+    assert_eq!(suppress["comment"], "<!-- plow-ignore-file complexity -->");
 }
 
-// Issue #234: synthetic `<component>` rollup finding sums the worst class
-// method's complexity with the template's, so an Angular component whose
-// class scores moderately and whose template scores moderately is ranked
-// as one heavy component-level finding rather than two scattered medium
-// ones. The per-function and per-`<template>` entries stay alongside the
-// rollup; the rollup is strictly additive.
 #[test]
 fn health_emits_component_rollup_for_angular_component() {
     let output = run_plow(
@@ -273,7 +593,6 @@ fn health_emits_component_rollup_for_angular_component() {
     let json = parse_json(&output);
     let findings = json["findings"].as_array().expect("findings array");
 
-    // Per-function class finding is still emitted (rollup is strictly additive).
     let class_fn = findings
         .iter()
         .find(|finding| {
@@ -286,7 +605,6 @@ fn health_emits_component_rollup_for_angular_component() {
     let class_cyc = class_fn["cyclomatic"].as_u64().expect("class cyclomatic");
     let class_cog = class_fn["cognitive"].as_u64().expect("class cognitive");
 
-    // Per-template synthetic finding is still emitted.
     let template = findings
         .iter()
         .find(|finding| {
@@ -301,7 +619,6 @@ fn health_emits_component_rollup_for_angular_component() {
         .expect("template cyclomatic");
     let template_cog = template["cognitive"].as_u64().expect("template cognitive");
 
-    // The new <component> rollup: cyc = class + template, cog = class + template.
     let rollup = findings
         .iter()
         .find(|finding| {
@@ -322,8 +639,6 @@ fn health_emits_component_rollup_for_angular_component() {
         "rollup cognitive must equal worst class cog + template cog"
     );
 
-    // Breakdown payload carries the pre-summation numbers so consumers can
-    // explain the score without re-deriving the link.
     let breakdown = rollup["component_rollup"]
         .as_object()
         .unwrap_or_else(|| panic!("expected component_rollup payload, got: {rollup:#?}"));
@@ -343,16 +658,11 @@ fn health_emits_component_rollup_for_angular_component() {
         template_path.ends_with("host-game.component.html"),
         "template_path must point at the .html template, got: {template_path:?}"
     );
-    // Stronger: the path must be project-relative, not absolute (regression
-    // guard for strip_root_prefix coverage of nested objects).
     assert!(
         !template_path.starts_with('/') && !template_path.contains("/var/folders/"),
         "template_path must be project-relative (no absolute prefix), got: {template_path:?}"
     );
 
-    // Suppression action sits above the worst class method so the same
-    // `// plow-ignore-next-line complexity` placement hides both the
-    // per-function finding and the rollup.
     let actions = rollup["actions"].as_array().expect("rollup actions array");
     let suppress = actions
         .iter()
@@ -365,26 +675,12 @@ fn health_emits_component_rollup_for_angular_component() {
     );
 }
 
-// Tier 1 of #186: synthetic <template> findings on Angular .html files
-// inherit their CRAP coverage signal from the owning .component.ts via the
-// inverse templateUrl edge. The score itself can match today's accidental
-// fallback when the .html stays test-reachable, so the regression target is
-// the new `coverage_source` discriminator and `inherited_from` provenance:
-// without the redirect, the template's per-function CRAP entry would carry
-// `coverage_source: "estimated"` (or absent under non-Istanbul paths) and
-// no `inherited_from`. With the redirect, it carries
-// `coverage_source: "estimated_component_inherited"` and points at the
-// component .ts. The integration_test asserts on both fields and on the
-// `coverage_tier` they imply.
 #[test]
 fn health_angular_template_crap_inherits_from_component_ts() {
     let dir = tempdir().unwrap();
     let fixture = fixture_path("angular-template-complexity");
     copy_dir_recursive(&fixture, dir.path());
 
-    // Replace package.json so jest activates (jest plugin gates `**/*.spec.ts`
-    // as Test entry points; without it the spec file we drop in below would
-    // not seed test reachability into the component .ts).
     write_file(
         &dir.path().join("package.json"),
         r#"{
@@ -400,11 +696,6 @@ fn health_angular_template_crap_inherits_from_component_ts() {
         }"#,
     );
 
-    // A spec that imports the component class makes PermissionsComponent
-    // test-reachable; the templateUrl SideEffect edge would normally cascade
-    // reachability to the .html too, so today's accidental fallback already
-    // produces `coverage_tier: "partial"` on the template. The fix's
-    // observable delta is the `coverage_source` / `inherited_from` pair.
     write_file(
         &dir.path().join("src/permissions.component.spec.ts"),
         "import { PermissionsComponent } from './permissions.component';\n\
@@ -414,9 +705,6 @@ fn health_angular_template_crap_inherits_from_component_ts() {
     );
 
     let component_ts = dir.path().join("src/permissions.component.ts");
-    // Istanbul coverage keyed on the .ts component, NOT the .html: the
-    // template path never matches Istanbul's fnMap, so the fix must walk
-    // the inverse templateUrl edge to find this entry.
     let coverage_path = dir.path().join("coverage/coverage-final.json");
     let mut coverage = serde_json::Map::new();
     coverage.insert(
@@ -447,12 +735,6 @@ fn health_angular_template_crap_inherits_from_component_ts() {
             "3",
             "--max-cognitive",
             "3",
-            // Keep --max-crap above the fixture's template cyclomatic (25)
-            // so full_coverage_can_clear_crap stays true and the inherited
-            // override emits an `increase-coverage` action with `target_path`
-            // pointing at the .ts owner. A more aggressive threshold would
-            // short-circuit to refactor-function and silently skip the
-            // action-ladder pivot half of the contract.
             "--max-crap",
             "30",
             "--format",
@@ -496,11 +778,6 @@ fn health_angular_template_crap_inherits_from_component_ts() {
         "<template> coverage_tier inherited from the tested component .ts must be partial or high, got: {tier:?}"
     );
 
-    // Action-ladder pivot: the inherited-coverage finding must emit an
-    // `increase-coverage` action whose `target_path` points at the .ts
-    // owner, not the .html template. Without this pivot, AI agents
-    // following the action description would scaffold tests against the
-    // structurally untestable .html path instead of the component file.
     let actions = template["actions"]
         .as_array()
         .expect("actions array present on health finding");
@@ -517,17 +794,6 @@ fn health_angular_template_crap_inherits_from_component_ts() {
     );
 }
 
-// Negative regression for tier 1 of #186: a plain `import "./tpl.html"` from
-// a non-Angular `.ts` file ALSO produces a SideEffect graph edge identical to
-// the one Angular emits for `@Component({ templateUrl })`. Without the
-// `has_angular_component_template_url` gate on the owner candidate, the
-// CRAP-inherit walker would credit the non-component owner and emit
-// `coverage_source: "estimated_component_inherited"` plus
-// `inherited_from: "src/main.ts"`, violating the documented contract that
-// inherited_from points at an Angular component .ts. This test reproduces
-// the bug shape (template-complex .html imported by a plain main.ts with no
-// @Component decorator) and asserts the discriminator stays `"estimated"`
-// (the standard fallback) and inherited_from stays absent.
 #[test]
 fn health_angular_template_inherit_rejects_non_component_owner() {
     let dir = tempdir().unwrap();
@@ -535,14 +801,10 @@ fn health_angular_template_inherit_rejects_non_component_owner() {
         &dir.path().join("package.json"),
         r#"{"name":"issue-186-negative","main":"src/main.ts"}"#,
     );
-    // main.ts imports the template purely as a side-effect URL; it carries
-    // no @Component decorator, so it is NOT a template owner.
     write_file(
         &dir.path().join("src/main.ts"),
         "import \"./template.html\";\nexport const tag = \"plain\";\n",
     );
-    // Same template shape the angular-template-complexity fixture uses so the
-    // template-complexity scanner produces a `<template>` finding.
     write_file(
         &dir.path().join("src/template.html"),
         "@if (user) {\n  @if (user.isAdmin) {\n    @for (item of user.permissions; track item.id) {\n      @switch (item.status) {\n        @case ('active') { <a/> }\n        @case ('pending') { <b/> }\n        @default { <c/> }\n      }\n    }\n  }\n}\n",
@@ -576,9 +838,6 @@ fn health_angular_template_inherit_rejects_non_component_owner() {
         })
         .unwrap_or_else(|| panic!("expected <template> finding, got: {findings:#?}"));
 
-    // The crucial assertion: a non-Angular `.ts` importer must NOT be
-    // credited as an inherit owner. The discriminator stays `estimated`
-    // and inherited_from stays absent.
     let source = template
         .get("coverage_source")
         .and_then(|v| v.as_str())
@@ -634,14 +893,11 @@ fn health_reports_angular_inline_template_complexity() {
         template["cognitive"].as_u64().unwrap_or_default() > 3,
         "inline template should exceed cognitive threshold: {template:#?}"
     );
-    // Anchored at the `@Component` decorator (line 16 of host-game.component.ts).
     assert_eq!(
         template["line"].as_u64(),
         Some(16),
         "inline template finding should anchor at the @Component decorator: {template:#?}"
     );
-    // The .ts host file uses TS-style suppression actions, not the HTML
-    // suppress-file action that external `templateUrl` files emit.
     let actions = template["actions"].as_array().expect("actions array");
     assert!(
         actions
@@ -791,10 +1047,6 @@ fn health_save_baseline_creates_parent_directory() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Exit code with threshold
-// ---------------------------------------------------------------------------
-
 #[test]
 fn health_exits_0_below_threshold() {
     let output = run_plow(
@@ -803,8 +1055,6 @@ fn health_exits_0_below_threshold() {
         &[
             "--max-cyclomatic",
             "50",
-            // Raise the CRAP gate out of the way so this test isolates the
-            // cyclomatic/cognitive behaviour under test.
             "--max-crap",
             "10000",
             "--complexity",
@@ -839,10 +1089,6 @@ fn health_exits_1_when_threshold_exceeded() {
         "health should exit 1 when complexity exceeds threshold"
     );
 }
-
-// ---------------------------------------------------------------------------
-// CRAP threshold (--max-crap)
-// ---------------------------------------------------------------------------
 
 /// With a high `--max-crap`, no function should trigger a CRAP finding and the
 /// summary's `max_crap_threshold` must reflect the CLI override.
@@ -913,10 +1159,6 @@ fn health_exits_1_when_crap_threshold_exceeded() {
         "at least one finding should carry a populated `crap` score when --max-crap triggered"
     );
 }
-
-// ---------------------------------------------------------------------------
-// Section flags
-// ---------------------------------------------------------------------------
 
 #[test]
 fn health_score_flag_shows_score() {
@@ -1503,7 +1745,6 @@ fn health_coverage_gaps_suppressed_file_excluded() {
     let root = dir.path();
     copy_dir_recursive(&fixture_path("coverage-gaps"), root);
 
-    // Add suppression comment to setup-only.ts
     write_file(
         &root.join("src/setup-only.ts"),
         r#"// plow-ignore-file coverage-gaps
@@ -1680,10 +1921,6 @@ export const shared = sharedGap();
 
 #[test]
 fn health_workspace_scopes_vital_signs_and_health_score() {
-    // Regression: --workspace scoped findings/file_scores correctly but left
-    // vital_signs and health_score at monorepo-wide values, masking a
-    // significant divergence between project- and workspace-level health.
-    // Issue #184.
     let dir = tempfile::tempdir().expect("create temp dir");
     let root = dir.path();
 
@@ -1699,7 +1936,6 @@ fn health_workspace_scopes_vital_signs_and_health_score() {
         &root.join(".plowrc.json"),
         r#"{"duplicates":{"min_tokens":10,"min_lines":3}}"#,
     );
-    // app: small, simple package
     write_file(
         &root.join("packages/app/package.json"),
         r#"{ "name": "app", "main": "src/index.ts" }"#,
@@ -1709,7 +1945,6 @@ fn health_workspace_scopes_vital_signs_and_health_score() {
         r"export const greet = (name: string): string => `hello ${name}`;
 ",
     );
-    // lib: a larger package (more files contribute to LOC / file count)
     write_file(
         &root.join("packages/lib/package.json"),
         r#"{ "name": "lib", "main": "src/index.ts" }"#,
@@ -1747,7 +1982,6 @@ export * from "./util_4";
         duplicated_lib_function,
     );
 
-    // `--score` forces hotspot analysis, which requires a git repo.
     git(root, &["init"]);
     git(root, &["config", "user.name", "Test User"]);
     git(root, &["config", "user.email", "test@example.com"]);
@@ -1844,9 +2078,6 @@ export * from "./util_4";
 
 #[test]
 fn health_group_by_package_emits_per_workspace_envelope() {
-    // Regression: --group-by package was accepted by `plow health` but the
-    // resolver was silently discarded; consumers got monorepo-wide output
-    // with no `grouped_by` or `groups` keys. Issue #184.
     let dir = tempfile::tempdir().expect("create temp dir");
     let root = dir.path();
 
@@ -1985,8 +2216,6 @@ fn health_group_by_package_emits_per_workspace_envelope() {
         "beta health score should include its duplicate-code penalty"
     );
 
-    // Top-level vital_signs / health_score remain monorepo-wide so consumers
-    // that ignore grouping still see the project headline.
     assert!(
         json["vital_signs"].is_object(),
         "top-level vital_signs must remain populated alongside groups"
@@ -1999,11 +2228,6 @@ fn health_group_by_package_emits_per_workspace_envelope() {
 
 #[test]
 fn health_group_by_package_tags_sarif_results_with_group() {
-    // Regression: ship per-finding `properties.group` on SARIF (and the
-    // top-level `group` field on CodeClimate) so CI surfaces like GitHub
-    // Code Scanning and GitLab Code Quality can partition findings per
-    // workspace package without dropping out of the SARIF/CodeClimate
-    // pipeline. Companion to the JSON envelope work in #184.
     let dir = tempfile::tempdir().expect("create temp dir");
     let root = dir.path();
 
@@ -2019,7 +2243,6 @@ fn health_group_by_package_tags_sarif_results_with_group() {
         &root.join("packages/alpha/package.json"),
         r#"{ "name": "alpha", "main": "src/index.ts" }"#,
     );
-    // Functions branchy enough to exceed the very-low cyclomatic threshold below.
     write_file(
         &root.join("packages/alpha/src/index.ts"),
         r"export const branchy = (n: number): number => {
@@ -2120,11 +2343,6 @@ fn health_group_by_package_tags_sarif_results_with_group() {
 
 #[test]
 fn health_group_by_non_monorepo_emits_single_json_error() {
-    // Regression: panel review caught that `--group-by package --format json`
-    // on a non-monorepo emitted TWO top-level JSON objects (the hotspot-needs-git
-    // error + the group-by-needs-monorepo error), producing invalid JSON for any
-    // pipeline doing `jq .`. Resolver validation now runs upfront so misconfig
-    // fails before the rest of the pipeline.
     let dir = tempfile::tempdir().expect("create temp dir");
     let root = dir.path();
 
@@ -2144,7 +2362,6 @@ fn health_group_by_non_monorepo_emits_single_json_error() {
         "non-monorepo --group-by package should fail"
     );
 
-    // Critical: stdout must be exactly ONE JSON object, parseable by `jq .`.
     let parsed: serde_json::Value =
         serde_json::from_str(&output.stdout).expect("stdout should be a single valid JSON object");
     assert_eq!(parsed["error"], serde_json::json!(true));
@@ -2228,14 +2445,8 @@ fn health_coverage_gaps_changed_since_scopes_results() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Human output snapshot
-// ---------------------------------------------------------------------------
-
 #[test]
 fn health_human_output_snapshot() {
-    // Use --max-cyclomatic 10 so the 14-branch classify() function exceeds the threshold
-    // and produces actual output to snapshot (default threshold of 20 would show nothing)
     let output = run_plow(
         "health",
         "complexity-project",
@@ -2246,15 +2457,8 @@ fn health_human_output_snapshot() {
     insta::assert_snapshot!("health_human_complexity", redacted);
 }
 
-// ---------------------------------------------------------------------------
-// Plugin-scoped hidden directory traversal
-// ---------------------------------------------------------------------------
-
 #[test]
 fn health_file_scores_include_plugin_scoped_hidden_dirs_for_react_router() {
-    // `plow health --file-scores` must analyze React Router's `.client` /
-    // `.server` convention folders; otherwise its file-level metrics ignore a
-    // real chunk of the project.
     let output = run_plow(
         "health",
         "react-router-conventions",
@@ -2282,10 +2486,6 @@ fn health_file_scores_include_plugin_scoped_hidden_dirs_for_react_router() {
         "expected app/.client/analytics.ts in file_scores: {scored_paths:?}"
     );
 }
-
-// ---------------------------------------------------------------------------
-// Combined-mode --score / --trend human rendering (issue #557)
-// ---------------------------------------------------------------------------
 
 /// Count occurrences of a literal substring in `haystack`.
 fn count_occurrences(haystack: &str, needle: &str) -> usize {
@@ -2381,5 +2581,138 @@ fn health_min_score_gate_fails_below_threshold() {
         output.code, 0,
         "plow health --score --min-score 100 should fail the gate: stdout={}\nstderr={}",
         output.stdout, output.stderr
+    );
+}
+
+#[test]
+fn health_churn_file_powers_hotspots_and_ownership_without_git() {
+    let dir = tempdir().unwrap();
+    write_file(
+        &dir.path().join("package.json"),
+        r#"{"name":"churn-import","type":"module"}"#,
+    );
+    // A genuinely complex function so the file can rank as a hotspot.
+    write_file(
+        &dir.path().join("src/hot.ts"),
+        r#"export function classify(n: number, mode: string): string {
+  let out = "";
+  if (mode === "a") { if (n > 10) out = "big"; else if (n > 5) out = "mid"; else out = "small"; }
+  else if (mode === "b") { for (let i = 0; i < n; i++) { if (i % 2 === 0) out += "x"; else out += "y"; } }
+  else if (mode === "c") { switch (n) { case 1: out = "one"; break; case 2: out = "two"; break; default: out = "z"; } }
+  else { out = n > 0 ? (n > 100 ? "huge" : "pos") : "neg"; }
+  return out;
+}
+"#,
+    );
+
+    // Timestamps relative to now so the recency window stays valid as the
+    // calendar moves (no hardcoded absolute dates).
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let day = 86_400;
+    let churn = serde_json::json!({
+        "schema": "plow-churn/v1",
+        "events": [
+            { "path": "src/hot.ts", "timestamp": now - day, "author": "alice@corp", "added": 40, "deleted": 12 },
+            { "path": "src/hot.ts", "timestamp": now - 2 * day, "author": "alice@corp", "added": 20, "deleted": 5 },
+            { "path": "src/hot.ts", "timestamp": now - 4 * day, "author": "alice@corp", "added": 10, "deleted": 3 },
+            { "path": "src/hot.ts", "timestamp": now - 3 * day, "author": "bob@corp", "added": 15, "deleted": 8 }
+        ]
+    });
+    write_file(
+        &dir.path().join("churn.json"),
+        &serde_json::to_string(&churn).unwrap(),
+    );
+
+    // Imported churn powers hotspots on a directory with NO .git.
+    let output = run_plow_in_root(
+        "health",
+        dir.path(),
+        &[
+            "--hotspots",
+            "--ownership",
+            "--churn-file",
+            "churn.json",
+            "--format",
+            "json",
+        ],
+    );
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let json = parse_json(&output);
+    let hotspots = json["hotspots"].as_array().expect("hotspots array");
+    assert!(
+        !hotspots.is_empty(),
+        "imported churn should produce hotspots: {}",
+        output.stdout
+    );
+    assert!(
+        hotspots[0]["path"]
+            .as_str()
+            .unwrap()
+            .replace('\\', "/")
+            .ends_with("src/hot.ts"),
+        "top hotspot should be hot.ts: {}",
+        output.stdout
+    );
+    // Header reflects the imported window, not a git "--since" duration.
+    assert_eq!(
+        json["hotspot_summary"]["since"].as_str(),
+        Some("imported churn")
+    );
+    // Ownership / bus-factor derives from the imported authors.
+    let ownership = &hotspots[0]["ownership"];
+    assert_eq!(ownership["bus_factor"].as_u64(), Some(1));
+    assert_eq!(ownership["contributor_count"].as_u64(), Some(2));
+
+    // Neuter check: WITHOUT --churn-file the same non-git dir skips hotspots,
+    // proving the imported data (not git) is what lit them up.
+    let no_churn = run_plow_in_root(
+        "health",
+        dir.path(),
+        &["--hotspots", "--ownership", "--format", "json"],
+    );
+    assert_eq!(no_churn.code, 0, "stderr: {}", no_churn.stderr);
+    let no_churn_json = parse_json(&no_churn);
+    let absent_or_empty = no_churn_json
+        .get("hotspots")
+        .and_then(|v| v.as_array())
+        .is_none_or(|a| a.is_empty());
+    assert!(
+        absent_or_empty,
+        "no git + no churn-file should skip hotspots: {}",
+        no_churn.stdout
+    );
+
+    // A malformed churn file is a hard error (exit 2), not a silent skip.
+    write_file(
+        &dir.path().join("bad.json"),
+        r#"{ "schema": "nope", "events": [] }"#,
+    );
+    let bad = run_plow_in_root(
+        "health",
+        dir.path(),
+        &["--hotspots", "--churn-file", "bad.json", "--format", "json"],
+    );
+    assert_eq!(
+        bad.code, 2,
+        "malformed churn file should exit 2: stdout={} stderr={}",
+        bad.stdout, bad.stderr
+    );
+    assert_eq!(parse_json(&bad)["error"].as_bool(), Some(true));
+
+    // Inert: with no churn-consuming section (--score only), the same malformed
+    // file is never validated, so it does not fail the run. The gate is
+    // validate-iff-consume.
+    let inert = run_plow_in_root(
+        "health",
+        dir.path(),
+        &["--score", "--churn-file", "bad.json", "--format", "json"],
+    );
+    assert_eq!(
+        inert.code, 0,
+        "churn-file is inert without a churn-consuming section: stdout={} stderr={}",
+        inert.stdout, inert.stderr
     );
 }

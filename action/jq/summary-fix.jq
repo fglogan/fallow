@@ -9,9 +9,9 @@
 ((.skipped_low_confidence_exports // 0) | tonumber) as $low_confidence |
 
 if $fix_attempts == 0 and $content_changed == 0 and $mixed_eol == 0 and $low_confidence == 0 then
-  "## Fallow — Auto-fix\n\nNo fixable issues found."
+  "## Plow — Auto-fix\n\nNo fixable issues found."
 else
-  "## Fallow — Auto-fix\n\n" +
+  "## Plow — Auto-fix\n\n" +
   (if .dry_run then "**Dry run**: would apply" else "Applied" end) +
   " **\($fix_attempts) fixes**" +
   (if .dry_run then "" else " (\(.total_fixed) succeeded)" end) +

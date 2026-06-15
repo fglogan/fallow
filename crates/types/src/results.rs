@@ -4,15 +4,24 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::extract::MemberKind;
+use crate::extract::{
+    MemberKind, SecurityControlKind, SecurityUrlShape, SkippedSecurityCalleeExpressionKind,
+    SkippedSecurityCalleeReason,
+};
+use crate::output::IssueAction;
 use crate::output_dead_code::{
-    BoundaryViolationFinding, CircularDependencyFinding, DuplicateExportFinding,
-    EmptyCatalogGroupFinding, MisconfiguredDependencyOverrideFinding, PrivateTypeLeakFinding,
-    ReExportCycleFinding, TestOnlyDependencyFinding, TypeOnlyDependencyFinding,
-    UnlistedDependencyFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
-    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedDependencyFinding,
-    UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
-    UnusedExportFinding, UnusedFileFinding, UnusedOptionalDependencyFinding, UnusedTypeFinding,
+    BoundaryCallViolationFinding, BoundaryCoverageViolationFinding, BoundaryViolationFinding,
+    CircularDependencyFinding, DuplicateExportFinding, DynamicSegmentNameConflictFinding,
+    EmptyCatalogGroupFinding, InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding,
+    MisplacedDirectiveFinding, MixedClientServerBarrelFinding, PolicyViolationFinding,
+    PrivateTypeLeakFinding, ReExportCycleFinding, RouteCollisionFinding, TestOnlyDependencyFinding,
+    TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
+    UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
+    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentEmitFinding,
+    UnusedComponentPropFinding, UnusedDependencyFinding, UnusedDependencyOverrideFinding,
+    UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
+    UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
+    UnusedTypeFinding,
 };
 use crate::serde_path;
 use crate::suppress::{IssueKind, closest_known_kind_name};
@@ -96,6 +105,14 @@ pub struct AnalysisResults {
     /// `auto_fixable: false` default to reflect dependency-injection
     /// patterns.
     pub unused_class_members: Vec<UnusedClassMemberFinding>,
+    /// Store members (Pinia `state` / `getters` / `actions` key, or a
+    /// setup-store returned key) declared but never accessed by any consumer
+    /// project-wide. Wrapped in [`UnusedStoreMemberFinding`]: same inner
+    /// [`UnusedMember`] struct as `unused_class_members`, with a
+    /// store-targeted fix description. Cross-graph: the store binding is
+    /// imported (the module is reachable) yet a specific member is dead.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unused_store_members: Vec<UnusedStoreMemberFinding>,
     /// Import specifiers that could not be resolved. Wrapped in
     /// [`UnresolvedImportFinding`] so each entry carries a typed `actions`
     /// array natively.
@@ -133,6 +150,22 @@ pub struct AnalysisResults {
     /// array natively.
     #[serde(default)]
     pub boundary_violations: Vec<BoundaryViolationFinding>,
+    /// Files that matched no architecture boundary zone while
+    /// `boundaries.coverage.requireAllFiles` was enabled.
+    #[serde(default)]
+    pub boundary_coverage_violations: Vec<BoundaryCoverageViolationFinding>,
+    /// Calls from zoned files to callees forbidden for that zone via
+    /// `boundaries.calls.forbidden`. Wrapped in
+    /// [`BoundaryCallViolationFinding`] so each entry carries a typed
+    /// `actions` array natively.
+    #[serde(default)]
+    pub boundary_call_violations: Vec<BoundaryCallViolationFinding>,
+    /// Banned calls and banned imports matched by declarative rule packs
+    /// (`rulePacks` config). Wrapped in [`PolicyViolationFinding`] so each
+    /// entry carries a typed `actions` array natively. Each finding carries
+    /// its effective per-rule severity.
+    #[serde(default)]
+    pub policy_violations: Vec<PolicyViolationFinding>,
     /// Suppression comments or JSDoc tags that no longer match any issue.
     #[serde(default)]
     pub stale_suppressions: Vec<StaleSuppression>,
@@ -170,15 +203,113 @@ pub struct AnalysisResults {
     /// error. Wrapped in [`MisconfiguredDependencyOverrideFinding`].
     #[serde(default)]
     pub misconfigured_dependency_overrides: Vec<MisconfiguredDependencyOverrideFinding>,
+    /// `"use client"` files that export a Next.js server-only / route-segment
+    /// config name (e.g. `metadata`, `revalidate`, `GET`). Next.js rejects this
+    /// at build time. Wrapped in [`InvalidClientExportFinding`] so each entry
+    /// carries a typed `actions` array natively. Default severity is `warn`.
+    #[serde(default)]
+    pub invalid_client_exports: Vec<InvalidClientExportFinding>,
+    /// Barrel files that re-export BOTH a `"use client"` origin module AND a
+    /// server-only origin module (the Next.js App Router footgun). Wrapped in
+    /// [`MixedClientServerBarrelFinding`] so each entry carries a typed
+    /// `actions` array natively. Default severity is `warn`.
+    #[serde(default)]
+    pub mixed_client_server_barrels: Vec<MixedClientServerBarrelFinding>,
+    /// `"use client"` / `"use server"` directives written as expression
+    /// statements after a non-directive statement, so the RSC bundler parses
+    /// them as ordinary strings and silently ignores them. Wrapped in
+    /// [`MisplacedDirectiveFinding`] so each entry carries a typed `actions`
+    /// array natively. Default severity is `warn`.
+    #[serde(default)]
+    pub misplaced_directives: Vec<MisplacedDirectiveFinding>,
+    /// Vue `inject(KEY)` / Svelte `getContext(KEY)` calls whose symbol KEY is
+    /// provided nowhere in the project (the injected-never-provided dead-half).
+    /// Wrapped in [`UnprovidedInjectFinding`] so each entry carries a typed
+    /// `actions` array natively. Default severity is `warn`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unprovided_injects: Vec<UnprovidedInjectFinding>,
+    /// Vue/Svelte single-file components that are reachable but rendered nowhere
+    /// (the imported-but-never-rendered dead-half). Wrapped in
+    /// [`UnrenderedComponentFinding`] so each entry carries a typed `actions`
+    /// array natively. Default severity is `warn`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unrendered_components: Vec<UnrenderedComponentFinding>,
+    /// Next.js App Router route files that resolve to the same URL within one
+    /// app-root (a guaranteed `next build` failure). Wrapped in
+    /// [`RouteCollisionFinding`] so each entry carries a typed `actions` array
+    /// natively. One finding per colliding file. Default severity is `warn`.
+    #[serde(default)]
+    pub route_collisions: Vec<RouteCollisionFinding>,
+    /// Sibling Next.js dynamic route segments at one tree position using
+    /// different param spellings (a dev / runtime error; `next build` does NOT
+    /// catch it). Wrapped in [`DynamicSegmentNameConflictFinding`] so each entry
+    /// carries a typed `actions` array natively. Default severity is `warn`.
+    #[serde(default)]
+    pub dynamic_segment_name_conflicts: Vec<DynamicSegmentNameConflictFinding>,
+    /// Vue `<script setup>` `defineProps` props referenced nowhere in their own
+    /// SFC (neither `<script>` nor `<template>`). Wrapped in
+    /// [`UnusedComponentPropFinding`] so each entry carries a typed `actions`
+    /// array natively. Default severity is `warn`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unused_component_props: Vec<UnusedComponentPropFinding>,
+    /// Vue `<script setup>` `defineEmits` events emitted nowhere in their own SFC
+    /// (no `emit('<name>')` call). Wrapped in [`UnusedComponentEmitFinding`] so
+    /// each entry carries a typed `actions` array natively. Default severity is
+    /// `warn`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unused_component_emits: Vec<UnusedComponentEmitFinding>,
+    /// Next.js Server Actions (exports of `"use server"` files) that no code in
+    /// the project references. Reclassified out of `unused_exports` for
+    /// `"use server"` files. Wrapped in [`UnusedServerActionFinding`] so each
+    /// entry carries a typed `actions` array natively. Default severity is
+    /// `warn`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unused_server_actions: Vec<UnusedServerActionFinding>,
     /// Number of suppression entries that matched an issue during analysis.
     /// Human output uses this for the suppression footer; it is skipped in
     /// machine output to avoid changing the public JSON issue contract.
     #[serde(skip)]
     pub suppression_count: usize,
+    /// Suppression comments present in analyzed files this run (every present
+    /// marker, all kinds, not only consumed ones). Internal: read in-process by
+    /// `plow impact` to distinguish a genuinely resolved finding from one
+    /// silenced by a `plow-ignore`. Skipped during serialization, like
+    /// [`Self::suppression_count`], so the public JSON output contract is
+    /// unchanged.
+    #[serde(skip)]
+    pub active_suppressions: Vec<ActiveSuppression>,
     /// Detected feature flag patterns. Advisory output, not included in issue counts.
     /// Skipped during default serialization: injected separately in JSON output when enabled.
     #[serde(skip)]
     pub feature_flags: Vec<FeatureFlag>,
+    /// Local security candidates (e.g. `client-server-leak`). CANDIDATES for
+    /// downstream agent verification, NOT verified vulnerabilities. Off by
+    /// default; populated only when the corresponding `security_*` rule is
+    /// enabled (forced on by `plow security`). Excluded from `total_issues`
+    /// and skipped during serialization so they never surface under bare
+    /// `plow` or the `audit` gate; the `plow security` command reads this
+    /// field and emits its own envelope. Mirrors [`Self::feature_flags`].
+    #[serde(skip)]
+    pub security_findings: Vec<SecurityFinding>,
+    /// In-band blind-spot count: number of `"use client"` files whose transitive
+    /// import cone contains a dynamic `import()` the reachability BFS cannot
+    /// follow. Surfaced by `plow security` so a leak hidden behind an
+    /// unresolved edge is never silently reported as "clean". Skipped during
+    /// serialization like [`Self::security_findings`].
+    #[serde(skip)]
+    pub security_unresolved_edge_files: usize,
+    /// In-band blind-spot count: number of sink-shaped nodes the catalogue
+    /// detector could not flatten to a static callee path (dynamic dispatch,
+    /// computed members, aliased bindings). Surfaced by `plow security` so an
+    /// empty catalogue result with a non-zero count is not reported as "clean".
+    /// Skipped during serialization like [`Self::security_findings`].
+    #[serde(skip)]
+    pub security_unresolved_callee_sites: usize,
+    /// Location samples for sink-shaped nodes the catalogue detector could not
+    /// flatten to a static callee path. Skipped during default serialization;
+    /// `plow security` summarizes this metadata in its own envelope.
+    #[serde(skip)]
+    pub security_unresolved_callee_diagnostics: Vec<SecurityUnresolvedCalleeDiagnostic>,
     /// Usage counts for all exports across the project. Used by the LSP for Code Lens.
     /// Not included in issue counts -- this is metadata, not an issue type.
     /// Skipped during serialization: this is internal LSP data, not part of the JSON output schema.
@@ -233,6 +364,7 @@ impl AnalysisResults {
             + self.unused_optional_dependencies.len()
             + self.unused_enum_members.len()
             + self.unused_class_members.len()
+            + self.unused_store_members.len()
             + self.unresolved_imports.len()
             + self.unlisted_dependencies.len()
             + self.duplicate_exports.len()
@@ -241,12 +373,25 @@ impl AnalysisResults {
             + self.circular_dependencies.len()
             + self.re_export_cycles.len()
             + self.boundary_violations.len()
+            + self.boundary_coverage_violations.len()
+            + self.boundary_call_violations.len()
+            + self.policy_violations.len()
             + self.stale_suppressions.len()
             + self.unused_catalog_entries.len()
             + self.empty_catalog_groups.len()
             + self.unresolved_catalog_references.len()
             + self.unused_dependency_overrides.len()
             + self.misconfigured_dependency_overrides.len()
+            + self.invalid_client_exports.len()
+            + self.mixed_client_server_barrels.len()
+            + self.misplaced_directives.len()
+            + self.unprovided_injects.len()
+            + self.unrendered_components.len()
+            + self.route_collisions.len()
+            + self.dynamic_segment_name_conflicts.len()
+            + self.unused_component_props.len()
+            + self.unused_component_emits.len()
+            + self.unused_server_actions.len()
     }
 
     /// Whether any issues were found.
@@ -255,17 +400,143 @@ impl AnalysisResults {
         self.total_issues() > 0
     }
 
+    /// Merge `other` into `self`, taking the union of every field.
+    ///
+    /// This is the single canonical way to combine two [`AnalysisResults`]
+    /// (the LSP merges per-project-root results through it). The method
+    /// exhaustively destructures `Self`, so adding a field to the struct
+    /// becomes a compile error here instead of a silently-dropped field. See
+    /// issue #444.
+    ///
+    /// Every `Vec` field is appended (callers dedup downstream where needed,
+    /// e.g. the LSP's identity-keyed `dedup_results`). `suppression_count`
+    /// sums; `entry_point_summary` keeps `self`'s value when present and
+    /// otherwise adopts `other`'s.
+    pub fn merge_into(&mut self, other: Self) {
+        let Self {
+            unused_files,
+            unused_exports,
+            unused_types,
+            private_type_leaks,
+            unused_dependencies,
+            unused_dev_dependencies,
+            unused_optional_dependencies,
+            unused_enum_members,
+            unused_class_members,
+            unused_store_members,
+            unresolved_imports,
+            unlisted_dependencies,
+            duplicate_exports,
+            type_only_dependencies,
+            test_only_dependencies,
+            circular_dependencies,
+            re_export_cycles,
+            boundary_violations,
+            boundary_coverage_violations,
+            boundary_call_violations,
+            policy_violations,
+            stale_suppressions,
+            unused_catalog_entries,
+            empty_catalog_groups,
+            unresolved_catalog_references,
+            unused_dependency_overrides,
+            misconfigured_dependency_overrides,
+            invalid_client_exports,
+            mixed_client_server_barrels,
+            misplaced_directives,
+            unprovided_injects,
+            unrendered_components,
+            route_collisions,
+            dynamic_segment_name_conflicts,
+            unused_component_props,
+            unused_component_emits,
+            unused_server_actions,
+            suppression_count,
+            active_suppressions,
+            feature_flags,
+            security_findings,
+            security_unresolved_edge_files,
+            security_unresolved_callee_sites,
+            security_unresolved_callee_diagnostics,
+            export_usages,
+            entry_point_summary,
+        } = other;
+
+        self.unused_files.extend(unused_files);
+        self.unused_exports.extend(unused_exports);
+        self.unused_types.extend(unused_types);
+        self.private_type_leaks.extend(private_type_leaks);
+        self.unused_dependencies.extend(unused_dependencies);
+        self.unused_dev_dependencies.extend(unused_dev_dependencies);
+        self.unused_optional_dependencies
+            .extend(unused_optional_dependencies);
+        self.unused_enum_members.extend(unused_enum_members);
+        self.unused_class_members.extend(unused_class_members);
+        self.unused_store_members.extend(unused_store_members);
+        self.unresolved_imports.extend(unresolved_imports);
+        self.unlisted_dependencies.extend(unlisted_dependencies);
+        self.duplicate_exports.extend(duplicate_exports);
+        self.type_only_dependencies.extend(type_only_dependencies);
+        self.test_only_dependencies.extend(test_only_dependencies);
+        self.circular_dependencies.extend(circular_dependencies);
+        self.re_export_cycles.extend(re_export_cycles);
+        self.boundary_violations.extend(boundary_violations);
+        self.boundary_coverage_violations
+            .extend(boundary_coverage_violations);
+        self.boundary_call_violations
+            .extend(boundary_call_violations);
+        self.policy_violations.extend(policy_violations);
+        self.stale_suppressions.extend(stale_suppressions);
+        self.unused_catalog_entries.extend(unused_catalog_entries);
+        self.empty_catalog_groups.extend(empty_catalog_groups);
+        self.unresolved_catalog_references
+            .extend(unresolved_catalog_references);
+        self.unused_dependency_overrides
+            .extend(unused_dependency_overrides);
+        self.misconfigured_dependency_overrides
+            .extend(misconfigured_dependency_overrides);
+        self.invalid_client_exports.extend(invalid_client_exports);
+        self.mixed_client_server_barrels
+            .extend(mixed_client_server_barrels);
+        self.misplaced_directives.extend(misplaced_directives);
+        self.unprovided_injects.extend(unprovided_injects);
+        self.unrendered_components.extend(unrendered_components);
+        self.route_collisions.extend(route_collisions);
+        self.dynamic_segment_name_conflicts
+            .extend(dynamic_segment_name_conflicts);
+        self.unused_component_props.extend(unused_component_props);
+        self.unused_component_emits.extend(unused_component_emits);
+        self.unused_server_actions.extend(unused_server_actions);
+        self.feature_flags.extend(feature_flags);
+        self.security_findings.extend(security_findings);
+        self.security_unresolved_edge_files += security_unresolved_edge_files;
+        self.security_unresolved_callee_sites += security_unresolved_callee_sites;
+        self.security_unresolved_callee_diagnostics
+            .extend(security_unresolved_callee_diagnostics);
+        self.export_usages.extend(export_usages);
+        self.active_suppressions.extend(active_suppressions);
+        self.suppression_count += suppression_count;
+        if self.entry_point_summary.is_none() {
+            self.entry_point_summary = entry_point_summary;
+        }
+    }
+
     /// Sort all result arrays for deterministic output ordering.
     ///
     /// Parallel collection (rayon, `FxHashMap` iteration) does not guarantee
     /// insertion order, so the same project can produce different orderings
     /// across runs. This method canonicalises every result list by sorting on
     /// (path, line, col, name) so that JSON/SARIF/human output is stable.
-    #[expect(
-        clippy::too_many_lines,
-        reason = "one short sort_by per result array; splitting would add indirection without clarity"
-    )]
     pub fn sort(&mut self) {
+        self.sort_core_findings();
+        self.sort_dependency_findings();
+        self.sort_graph_findings();
+        self.sort_catalog_findings();
+        self.sort_metadata_findings();
+        self.sort_export_usages();
+    }
+
+    fn sort_core_findings(&mut self) {
         self.unused_files
             .sort_by(|a, b| a.file.path.cmp(&b.file.path));
 
@@ -336,6 +607,15 @@ impl AnalysisResults {
                 .then(a.member.member_name.cmp(&b.member.member_name))
         });
 
+        self.unused_store_members.sort_by(|a, b| {
+            a.member
+                .path
+                .cmp(&b.member.path)
+                .then(a.member.line.cmp(&b.member.line))
+                .then(a.member.parent_name.cmp(&b.member.parent_name))
+                .then(a.member.member_name.cmp(&b.member.member_name))
+        });
+
         self.unresolved_imports.sort_by(|a, b| {
             a.import
                 .path
@@ -345,6 +625,91 @@ impl AnalysisResults {
                 .then(a.import.specifier.cmp(&b.import.specifier))
         });
 
+        self.invalid_client_exports.sort_by(|a, b| {
+            a.export
+                .path
+                .cmp(&b.export.path)
+                .then(a.export.line.cmp(&b.export.line))
+                .then(a.export.export_name.cmp(&b.export.export_name))
+        });
+
+        self.mixed_client_server_barrels.sort_by(|a, b| {
+            a.barrel
+                .path
+                .cmp(&b.barrel.path)
+                .then(a.barrel.line.cmp(&b.barrel.line))
+                .then(a.barrel.client_origin.cmp(&b.barrel.client_origin))
+                .then(a.barrel.server_origin.cmp(&b.barrel.server_origin))
+        });
+
+        self.misplaced_directives.sort_by(|a, b| {
+            a.directive_site
+                .path
+                .cmp(&b.directive_site.path)
+                .then(a.directive_site.line.cmp(&b.directive_site.line))
+                .then(a.directive_site.col.cmp(&b.directive_site.col))
+                .then(a.directive_site.directive.cmp(&b.directive_site.directive))
+        });
+
+        self.unprovided_injects.sort_by(|a, b| {
+            a.inject
+                .path
+                .cmp(&b.inject.path)
+                .then(a.inject.line.cmp(&b.inject.line))
+                .then(a.inject.col.cmp(&b.inject.col))
+                .then(a.inject.key_name.cmp(&b.inject.key_name))
+        });
+
+        self.unrendered_components.sort_by(|a, b| {
+            a.component
+                .path
+                .cmp(&b.component.path)
+                .then(a.component.line.cmp(&b.component.line))
+                .then(a.component.col.cmp(&b.component.col))
+                .then(a.component.component_name.cmp(&b.component.component_name))
+        });
+
+        self.route_collisions.sort_by(|a, b| {
+            a.collision
+                .path
+                .cmp(&b.collision.path)
+                .then(a.collision.url.cmp(&b.collision.url))
+        });
+
+        self.dynamic_segment_name_conflicts.sort_by(|a, b| {
+            a.conflict
+                .path
+                .cmp(&b.conflict.path)
+                .then(a.conflict.position.cmp(&b.conflict.position))
+        });
+
+        self.unused_component_props.sort_by(|a, b| {
+            a.prop
+                .path
+                .cmp(&b.prop.path)
+                .then(a.prop.line.cmp(&b.prop.line))
+                .then(a.prop.prop_name.cmp(&b.prop.prop_name))
+        });
+
+        self.unused_component_emits.sort_by(|a, b| {
+            a.emit
+                .path
+                .cmp(&b.emit.path)
+                .then(a.emit.line.cmp(&b.emit.line))
+                .then(a.emit.emit_name.cmp(&b.emit.emit_name))
+        });
+
+        self.unused_server_actions.sort_by(|a, b| {
+            a.action
+                .path
+                .cmp(&b.action.path)
+                .then(a.action.line.cmp(&b.action.line))
+                .then(a.action.col.cmp(&b.action.col))
+                .then(a.action.action_name.cmp(&b.action.action_name))
+        });
+    }
+
+    fn sort_dependency_findings(&mut self) {
         self.unlisted_dependencies
             .sort_by(|a, b| a.dep.package_name.cmp(&b.dep.package_name));
         for dep in &mut self.unlisted_dependencies {
@@ -376,7 +741,9 @@ impl AnalysisResults {
                 .then(a.dep.line.cmp(&b.dep.line))
                 .then(a.dep.package_name.cmp(&b.dep.package_name))
         });
+    }
 
+    fn sort_graph_findings(&mut self) {
         self.circular_dependencies.sort_by(|a, b| {
             a.cycle
                 .files
@@ -396,6 +763,34 @@ impl AnalysisResults {
                 .then(a.violation.to_path.cmp(&b.violation.to_path))
         });
 
+        self.boundary_coverage_violations.sort_by(|a, b| {
+            a.violation
+                .path
+                .cmp(&b.violation.path)
+                .then(a.violation.line.cmp(&b.violation.line))
+                .then(a.violation.col.cmp(&b.violation.col))
+        });
+
+        self.boundary_call_violations.sort_by(|a, b| {
+            a.violation
+                .path
+                .cmp(&b.violation.path)
+                .then(a.violation.line.cmp(&b.violation.line))
+                .then(a.violation.col.cmp(&b.violation.col))
+                .then(a.violation.callee.cmp(&b.violation.callee))
+        });
+
+        self.policy_violations.sort_by(|a, b| {
+            a.violation
+                .path
+                .cmp(&b.violation.path)
+                .then(a.violation.line.cmp(&b.violation.line))
+                .then(a.violation.col.cmp(&b.violation.col))
+                .then(a.violation.rule_id.cmp(&b.violation.rule_id))
+        });
+    }
+
+    fn sort_catalog_findings(&mut self) {
         self.stale_suppressions.sort_by(|a, b| {
             a.path
                 .cmp(&b.path)
@@ -455,7 +850,9 @@ impl AnalysisResults {
                 .then(a.entry.line.cmp(&b.entry.line))
                 .then(a.entry.raw_key.cmp(&b.entry.raw_key))
         });
+    }
 
+    fn sort_metadata_findings(&mut self) {
         self.misconfigured_dependency_overrides.sort_by(|a, b| {
             a.entry
                 .path
@@ -471,6 +868,17 @@ impl AnalysisResults {
                 .then(a.flag_name.cmp(&b.flag_name))
         });
 
+        self.security_unresolved_callee_diagnostics.sort_by(|a, b| {
+            a.path
+                .cmp(&b.path)
+                .then(a.line.cmp(&b.line))
+                .then(a.col.cmp(&b.col))
+                .then(a.reason.cmp(&b.reason))
+                .then(a.expression_kind.cmp(&b.expression_kind))
+        });
+    }
+
+    fn sort_export_usages(&mut self) {
         for usage in &mut self.export_usages {
             usage.reference_locations.sort_by(|a, b| {
                 a.path
@@ -544,6 +952,239 @@ pub struct PrivateTypeLeak {
     pub col: u32,
     /// Byte offset of the type reference.
     pub span_start: u32,
+}
+
+/// A `"use client"` file that exports a Next.js server-only / route-segment
+/// config name. Next.js rejects this combination at build time; plow catches
+/// it statically before the build runs.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct InvalidClientExport {
+    /// File carrying the `"use client"` directive and the illegal export.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// Name of the server-only / route-config export that is illegal in a
+    /// client file (e.g. `metadata`, `generateMetadata`, `revalidate`, `GET`).
+    pub export_name: String,
+    /// The file-level directive that makes the export illegal. Always
+    /// `"use client"` today; carried so the message can name it verbatim.
+    pub directive: String,
+    /// 1-based line number of the export.
+    pub line: u32,
+    /// 0-based byte column offset of the export.
+    pub col: u32,
+}
+
+/// A barrel file that re-exports BOTH a `"use client"` origin module AND a
+/// server-only origin module. Importing one name from such a barrel drags the
+/// other's directive context across the React Server Components boundary (the
+/// Next.js App Router footgun); plow catches it statically.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MixedClientServerBarrel {
+    /// The barrel file re-exporting both a client and a server-only origin.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// The `"use client"` origin's relative path or specifier as written in the
+    /// barrel's offending re-export.
+    pub client_origin: String,
+    /// The server-only origin's relative path or specifier as written in the
+    /// barrel's offending re-export.
+    pub server_origin: String,
+    /// 1-based line number of the barrel's first offending re-export.
+    pub line: u32,
+    /// 0-based byte column offset of the barrel's first offending re-export.
+    pub col: u32,
+}
+
+/// A `"use client"` / `"use server"` directive written as an expression
+/// statement after a non-directive statement (an import, a const). The RSC
+/// bundler only honors a directive in the leading prologue, so once any
+/// statement precedes it the string is parsed as an ordinary expression and
+/// silently ignored: the intended client/server boundary never takes effect.
+/// The fix is to move the directive to the very top of the file.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MisplacedDirective {
+    /// The file carrying the misplaced directive.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// The directive string as written, either `"use client"` or
+    /// `"use server"` (without the surrounding quotes).
+    pub directive: String,
+    /// 1-based line number of the misplaced directive statement.
+    pub line: u32,
+    /// 0-based byte column offset of the misplaced directive statement.
+    pub col: u32,
+}
+
+/// A Vue `inject(KEY)` or Svelte `getContext(KEY)` whose symbol KEY is
+/// `provide`/`setContext`'d nowhere in the analyzed project. The key is a
+/// symbol with cross-file identity, so an unmatched key is a real dead-half DI
+/// link: at runtime the inject returns `undefined`, surfaced only at render.
+/// The fix is binary: provide the key somewhere, or remove the dead inject.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnprovidedInject {
+    /// The file carrying the orphan inject / getContext call.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// The injected key identifier as written at the call site.
+    pub key_name: String,
+    /// Which framework's DI API this came from: `"vue"` or `"svelte"`.
+    pub framework: String,
+    /// 1-based line number of the inject / getContext call.
+    pub line: u32,
+    /// 0-based byte column offset of the inject / getContext call.
+    pub col: u32,
+}
+
+/// A Next.js Server Action (an export of a `"use server"` file) that no code in
+/// the analyzed project references: no import-and-call, no `action={fn}` JSX
+/// binding, no `<form action={fn}>`. This is the cross-graph "declared but zero
+/// consumers" direction, reclassified out of `unused-export` for `"use server"`
+/// files so the finding carries the action-specific signal. It does NOT mean the
+/// endpoint is unreachable: Next still registers the action id, so it stays
+/// POST-able. It means no project code calls it (likely forgotten / dead, and a
+/// candidate for removal to shrink surface area).
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedServerAction {
+    /// The `"use server"` file that exports the unreferenced action.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// The exported action name as written, or `"default"` for a default export.
+    pub action_name: String,
+    /// 1-based line number of the export.
+    pub line: u32,
+    /// 0-based byte column offset of the export.
+    pub col: u32,
+}
+
+/// A Vue/Svelte single-file component (the default export of a `.vue`/`.svelte`
+/// file) that is reachable in the module graph but rendered NOWHERE in the
+/// project: no `<Tag>`, no `:is`/`this=` binding, no `components`/`app.component`
+/// registration, no `h()`/auto-import use, and no script value-read. It survives
+/// `unused-file` (a barrel re-export keeps it reachable) and `unused-export`
+/// (the re-export counts as a use), yet no file actually instantiates it.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnrenderedComponent {
+    /// The component file that is reachable but rendered nowhere.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// The component name (the `.vue`/`.svelte` file stem, PascalCase).
+    pub component_name: String,
+    /// Which framework this component belongs to: `"vue"` or `"svelte"`.
+    pub framework: String,
+    /// A barrel/file that re-exports this component, kept for the remediation
+    /// trace ("reachable via X, rendered nowhere"). Absolute in memory,
+    /// serialized workspace-relative (like `path`); `None` when not determinable.
+    #[serde(
+        serialize_with = "serde_path::serialize_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub reachable_via: Option<PathBuf>,
+    /// 1-based line number of the component (the file head; SFCs have no explicit
+    /// default-export statement).
+    pub line: u32,
+    /// 0-based byte column offset.
+    pub col: u32,
+}
+
+/// A Vue `<script setup>` `defineProps` declared prop that is referenced NOWHERE
+/// inside its own single-file component (neither `<script>` nor `<template>`).
+/// Single-file finding, zero-FP doctrine: the whole file abstains on any
+/// fallthrough / expose / model / unharvestable-type signal.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedComponentProp {
+    /// The `.vue` SFC declaring the unused prop.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// The component name (the `.vue` file stem).
+    pub component_name: String,
+    /// The declared prop name that is never referenced.
+    pub prop_name: String,
+    /// 1-based line number of the prop declaration.
+    pub line: u32,
+    /// 0-based byte column offset of the prop declaration.
+    pub col: u32,
+}
+
+/// A Vue `<script setup>` `defineEmits` declared event that is EMITTED nowhere
+/// inside its own single-file component (no `emit('<name>')` call). Single-file
+/// finding, zero-FP doctrine: the whole file abstains on any
+/// unharvestable / dynamic-emit / whole-object-use / `defineModel` signal.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedComponentEmit {
+    /// The `.vue` SFC declaring the unused emit.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// The component name (the `.vue` file stem).
+    pub component_name: String,
+    /// The declared emit event name that is never emitted.
+    pub emit_name: String,
+    /// 1-based line number of the emit declaration.
+    pub line: u32,
+    /// 0-based byte column offset of the emit declaration.
+    pub col: u32,
+}
+
+/// Two or more Next.js App Router route files that resolve to the SAME URL
+/// within one app-root. Next.js fails the build ("You cannot have two parallel
+/// pages that resolve to the same path"); plow catches it statically and
+/// names every colliding file at once. One finding is emitted per colliding
+/// file; `conflicting_paths` lists the sibling files that share the URL.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct RouteCollision {
+    /// This colliding route file (a `page` or `route` leaf).
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// The URL pathname this file resolves to within its app-root, after
+    /// stripping route groups `(x)` and parallel-slot `@slot` prefixes (e.g.
+    /// `/about`, `/api/health`, `/blog/:slug`).
+    pub url: String,
+    /// The other route files that resolve to the same URL within the same
+    /// app-root. Path-sorted for stable output / fingerprints.
+    #[serde(serialize_with = "serde_path::serialize_vec")]
+    pub conflicting_paths: Vec<PathBuf>,
+    /// 1-based line number (file-level finding, always 1).
+    pub line: u32,
+    /// 0-based byte column offset (file-level finding, always 0).
+    pub col: u32,
+}
+
+/// Two or more sibling dynamic route segments at the SAME App Router tree
+/// position using different param spellings (`[id]` vs `[slug]`, or `[...x]`
+/// vs `[[...x]]`). Next.js throws "You cannot use different slug names for the
+/// same dynamic path" at dev / production RUNTIME when the position is hit;
+/// `next build` does NOT catch it, so plow's static catch surfaces a route
+/// that would otherwise pass CI and crash at request time. One finding is
+/// emitted per involved file.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct DynamicSegmentNameConflict {
+    /// This route file living under one of the conflicting dynamic segments.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// The tree position (parent URL after group/slot normalization) where the
+    /// dynamic segments conflict, e.g. `/shop` for `/shop/[id]` vs
+    /// `/shop/[slug]`. The app-root prefix is stripped.
+    pub position: String,
+    /// The distinct conflicting dynamic-segment spellings at this position, as
+    /// written (e.g. `["[id]", "[slug]"]`). Sorted for stable output.
+    pub conflicting_segments: Vec<String>,
+    /// The other route files at the same position under a conflicting dynamic
+    /// segment. Path-sorted for stable output / fingerprints.
+    #[serde(serialize_with = "serde_path::serialize_vec")]
+    pub conflicting_paths: Vec<PathBuf>,
+    /// 1-based line number (file-level finding, always 1).
+    pub line: u32,
+    /// 0-based byte column offset (file-level finding, always 0).
+    pub col: u32,
 }
 
 /// A dependency that is listed in package.json but never imported.
@@ -696,6 +1337,555 @@ pub struct TypeOnlyDependency {
     pub line: u32,
 }
 
+/// The kind of security candidate. Findings are CANDIDATES for downstream agent
+/// verification, NOT verified vulnerabilities.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum SecurityFindingKind {
+    /// A `"use client"` file transitively imports a module that reads a
+    /// non-public `process.env` secret (graph-structural; bespoke, not catalogue).
+    ClientServerLeak,
+    /// A syntactic sink site matched against the data-driven catalogue
+    /// (`security_matchers.toml`). Serializes `"tainted-sink"`; the CWE class is
+    /// carried in `category` + `cwe`. ONE variant covers all catalogue categories.
+    TaintedSink,
+}
+
+/// The role a hop plays in a security finding's structural import trace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum TraceHopRole {
+    /// The `"use client"` boundary file the finding is anchored on.
+    ClientBoundary,
+    /// A module that reads an untrusted input source such as request data,
+    /// where the candidate's sink argument actually traces back to that read in
+    /// the same statement (arg-level, the strong intra-module association).
+    UntrustedSource,
+    /// A module that merely CONTAINS an untrusted-input source somewhere and is
+    /// import-reachable to the sink module (module-level, issue #885). This is a
+    /// reachability signal, NOT a proven value path: the specific source value
+    /// is not shown to reach the sink argument. Labeled distinctly from
+    /// `UntrustedSource` so a consumer never reads a module-level hop as a
+    /// value-flow proof.
+    ModuleSource,
+    /// An intermediate module on the transitive import path.
+    Intermediate,
+    /// The module that reads the secret.
+    SecretSource,
+    /// The syntactic sink site of a catalogue-driven `tainted-sink` candidate
+    /// (the single hop the `tainted_sink` detector emits). Distinct from
+    /// `SecretSource`, which is specific to the `client-server-leak` rule.
+    Sink,
+}
+
+/// One hop in a security finding's structural trace. Stored as an absolute path
+/// internally; JSON serialization strips the project root via
+/// `serde_path::serialize`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct TraceHop {
+    /// File on this hop of the import chain.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// 1-based line number. Import-chain hops point at the import site; the
+    /// terminal secret-source hop points at the source module when extraction
+    /// does not carry a more precise member-access span.
+    pub line: u32,
+    /// 0-based byte column offset.
+    pub col: u32,
+    /// Role of this hop in the chain.
+    pub role: TraceHopRole,
+}
+
+/// How strongly the untrusted-source signal is associated with the sink, a
+/// structured discriminator so a consumer can tier candidates without parsing
+/// the human `evidence` prose. Present only when
+/// [`SecurityReachability::reachable_from_untrusted_source`] is true. Neither
+/// value proves exploitability; both are ranking signals (issue #885 doctrine:
+/// rank, never gate).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum TaintConfidence {
+    /// The sink's argument traces back to a known untrusted-source read in the
+    /// SAME statement / module (the intra-module back-trace, issue #859). The
+    /// strong, high-value candidate: a specific source expression is implicated.
+    ArgLevel,
+    /// The sink merely lives in a module that is import-reachable from a module
+    /// containing an untrusted source (issue #885). The weak candidate: only the
+    /// module is implicated, not a specific value path to the sink argument.
+    ModuleLevel,
+}
+
+/// Graph-derived reachability ranking signal for a security candidate. Computed
+/// from the existing module graph after detection, never proven exploitable.
+/// Used to surface candidates that sit on a request/runtime-reachable surface,
+/// receive same-module source evidence, or are import-reachable from an
+/// untrusted-source module above isolated helpers or scripts.
+///
+/// This is a relative-ordering signal, NOT a `confidence` or `signal_strength`
+/// score: plow does not prove the path is exploitable.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecurityReachability {
+    /// Whether the anchor module is reachable from a runtime/application entry
+    /// point (route handlers, server entry, framework runtime roots), the
+    /// closest graph proxy for an external/request input surface. Code reachable
+    /// only from test entry points does not count.
+    pub reachable_from_entry: bool,
+    /// Whether the anchor module is reachable over value imports from a module
+    /// that reads a known untrusted input source. Module-level only: this does
+    /// not prove a specific source value reaches the sink argument.
+    #[serde(default)]
+    pub reachable_from_untrusted_source: bool,
+    /// Structured tier of the untrusted-source association: `arg-level` when the
+    /// sink argument traces to a same-module source read (strong), `module-level`
+    /// when only the module is import-reachable from a source (weak). Present
+    /// exactly when `reachable_from_untrusted_source` is true, so a consumer can
+    /// separate strong from weak candidates from this field alone without parsing
+    /// the `evidence` string. Not an exploitability proof.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub taint_confidence: Option<TaintConfidence>,
+    /// Number of value-import hops from the untrusted-source module to the sink
+    /// module when `reachable_from_untrusted_source` is true.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub untrusted_source_hop_count: Option<u32>,
+    /// Module-level import path from the untrusted-source module to the sink
+    /// anchor. Empty when no source module reaches this candidate. The path is a
+    /// ranking explanation, not a value-flow proof.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub untrusted_source_trace: Vec<TraceHop>,
+    /// Number of distinct modules that transitively depend on the anchor module
+    /// (fan-in via the graph's reverse-dependency index). A higher value means a
+    /// wider surface: more call sites could route untrusted input into the sink.
+    pub blast_radius: u32,
+    /// Whether the anchor module participates in an architecture-boundary
+    /// violation found in the same run (as the importing or imported file).
+    /// Optional pairing: a candidate that also crosses a declared boundary is a
+    /// stronger review target.
+    pub crosses_boundary: bool,
+}
+
+/// Dead-code cross-link attached to a security candidate when plow's dead-code
+/// pass reports the same anchor as removable code.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecurityDeadCodeContext {
+    /// Dead-code issue kind that matched the security candidate.
+    pub kind: SecurityDeadCodeKind,
+    /// Unused export name when `kind` is `unused-export`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub export_name: Option<String>,
+    /// Dead-code finding line when available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+    /// Agent-facing guidance for deciding between deletion and hardening.
+    pub guidance: String,
+}
+
+/// Dead-code issue kind linked to a security candidate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum SecurityDeadCodeKind {
+    /// The candidate's anchor file is also reported as an unused file.
+    UnusedFile,
+    /// The candidate's anchor sits on an unused export declaration.
+    UnusedExport,
+}
+
+/// Internal row for a security sink-shaped callee that extraction could not
+/// flatten to a static catalogue path.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecurityUnresolvedCalleeDiagnostic {
+    /// File containing the skipped callee. Absolute internally.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// 1-based line of the skipped callee.
+    pub line: u32,
+    /// 0-based byte column of the skipped callee.
+    pub col: u32,
+    /// Why the callee could not be flattened.
+    pub reason: SkippedSecurityCalleeReason,
+    /// Compact syntax shape of the skipped callee.
+    pub expression_kind: SkippedSecurityCalleeExpressionKind,
+}
+
+/// The sink slot of a [`SecurityCandidate`]: a self-contained description of the
+/// matched sink site. Echoes the finding's own span (`path`/`line`/`col`) plus
+/// the catalogue `category`/`cwe` and the captured `callee`, so an agent can act
+/// on `candidate.sink` in isolation (e.g. after fanning a finding out to a
+/// sub-agent) without reading the parent finding.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecurityCandidateSink {
+    /// File of the sink site. Absolute internally; JSON strips the project root
+    /// via `serde_path::serialize`.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// 1-based line of the sink site.
+    pub line: u32,
+    /// 0-based byte column of the sink site.
+    pub col: u32,
+    /// Catalogue category id of the sink (e.g. `"dangerous-html"`). For
+    /// `client-server-leak` this is `None` for the secret-leak finding, and
+    /// `Some("server-only-import")` when a `"use client"` cone reaches
+    /// server-only code.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    /// CWE number declared by the catalogue entry. `None` for
+    /// `client-server-leak`; never fabricated beyond the catalogue's value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwe: Option<u32>,
+    /// The sink callee (the dangerous function or member path, e.g.
+    /// `"el.innerHTML"`, `"child_process.exec"`) captured by the catalogue match.
+    /// `None` for `client-server-leak` and matches that name no callee.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub callee: Option<String>,
+    /// URL construction shape for SSRF and open-redirect style candidates when
+    /// plow can classify whether the origin is fixed or dynamic. Absent for
+    /// non-URL sinks and unclassified URL expressions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url_shape: Option<SecurityUrlShape>,
+}
+
+/// A declared architecture-zone crossing, recovered by correlating a finding's
+/// anchor against the run's architecture-boundary violations.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecurityZoneCrossing {
+    /// Zone the importing side belongs to.
+    pub from: String,
+    /// Zone the imported side belongs to.
+    pub to: String,
+}
+
+/// The boundary slot of a [`SecurityCandidate`]: which structural boundaries the
+/// candidate's flow crosses. A flow that crosses a client/server or module
+/// boundary is a stronger review target than a self-contained one; the boundary
+/// is plow's structural signal over a pure source-sink match.
+///
+/// Two further boundary kinds are RESERVED for a follow-up and are deliberately
+/// absent here rather than emitted as always-false: `export_visibility` (is the
+/// sink on a publicly-exported symbol?) and a package boundary (does the flow
+/// cross an npm-package edge?). Both need new graph derivation that does not
+/// exist today; emitting them as `false` would misreport "we checked and it does
+/// not cross" when plow has not checked at all.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecurityCandidateBoundary {
+    /// Whether the finding crosses a client/server boundary (a `"use client"`
+    /// file appears in the trace). True only for `client-server-leak` today;
+    /// `tainted-sink` candidates carry no client/server marker.
+    pub client_server: bool,
+    /// Whether an untrusted source reaches the sink across one or more
+    /// value-import (module) hops. Derived from the reachability hop count.
+    pub cross_module: bool,
+    /// The architecture-zone crossing when the anchor participates in a declared
+    /// boundary-rule violation in the same run. `None` when it crosses no
+    /// declared zone boundary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub architecture_zone: Option<SecurityZoneCrossing>,
+}
+
+/// Network-destination context for a `secret-to-network` candidate (#890): where
+/// the secret-bearing network call sends its data. Present only on
+/// network-category candidates. A consuming agent uses it to triage exfil
+/// (dynamic / untrusted destination) from intended auth (a literal provider
+/// host) without re-reading source.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecurityNetworkContext {
+    /// The network call's destination as a static URL string literal, or absent
+    /// when the destination is DYNAMIC (not a literal). A dynamic destination is
+    /// the higher-signal exfil case; a literal provider host is usually intended
+    /// auth.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub destination: Option<String>,
+}
+
+/// An agent-actionable candidate record on a [`SecurityFinding`]. plow fills
+/// `source_kind`, `sink`, and `boundary`. The exploitability IMPACT is
+/// deliberately NOT a field: `severity` on the parent finding is only a
+/// review-priority tier, while deciding exploitability remains the consuming
+/// agent's job. A perpetually-null `impact` key would only train consumers to
+/// ignore it. The agent reads this record, then writes its own impact verdict
+/// downstream.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecurityCandidate {
+    /// The kind of untrusted input that reaches the sink, as a stable catalogue
+    /// source id (`"http-request-input"`, `"process-env"`, `"process-argv"`,
+    /// `"message-event-data"`, `"location-input"`, ...). `None`/absent when no
+    /// untrusted source was matched (always `None` for `client-server-leak`).
+    /// This is an OPEN string set, driven by the data-driven source catalogue; a
+    /// consumer should treat an unknown id as "untrusted source of unknown kind"
+    /// and never drop the candidate on that basis.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_kind: Option<String>,
+    /// The sink the candidate fires on, self-contained so the record is
+    /// actionable without reading the parent finding.
+    pub sink: SecurityCandidateSink,
+    /// The structural boundary the flow crosses.
+    pub boundary: SecurityCandidateBoundary,
+    /// Network-destination context, present only on `secret-to-network` (#890)
+    /// candidates: the host the secret-bearing call targets, so an agent can
+    /// triage exfil from intended auth. Absent for every other category.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network: Option<SecurityNetworkContext>,
+}
+
+/// One endpoint (source or sink node) of a [`SecurityTaintFlow`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct TaintEndpoint {
+    /// File of the endpoint. Absolute internally; JSON strips the project root.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// 1-based line of the endpoint.
+    pub line: u32,
+    /// 0-based byte column of the endpoint.
+    pub col: u32,
+}
+
+/// Compact taint-flow path shape. The ordered per-hop trace is NOT duplicated
+/// here: it lives on [`SecurityReachability::untrusted_source_trace`]. This
+/// carries only the flow's structural summary (intra-module flow plus the
+/// cross-module hop count) so consumers do not parse two copies of the hops.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct TaintPath {
+    /// Whether the source and sink sit in the same module (no import hop between
+    /// them); the source-to-sink association is intra-module.
+    pub intra_module: bool,
+    /// Number of value-import hops from the untrusted-source module to the sink
+    /// module. Zero for an intra-module flow.
+    pub cross_module_hops: u32,
+}
+
+/// A source-to-sink taint-flow triple, emitted only when an untrusted source is
+/// import-reachable to the sink (`reachability.reachable_from_untrusted_source`).
+/// The `{ source, sink, path }` shape matches the model agent SAST tooling
+/// expects (cf. Semgrep `taint_source` / `taint_sink`, SARIF `threadFlows`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecurityTaintFlow {
+    /// The untrusted-source endpoint (first hop of the reachability trace).
+    pub source: TaintEndpoint,
+    /// The sink endpoint (terminal hop of the reachability trace / the anchor).
+    pub sink: TaintEndpoint,
+    /// Compact flow shape: same-module flag plus module hop count. The full
+    /// ordered path is `reachability.untrusted_source_trace`.
+    pub path: TaintPath,
+}
+
+/// Runtime coverage state for the function enclosing a security sink.
+/// This is production-observation evidence, not an exploitability verdict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum SecurityRuntimeState {
+    /// The sink sits inside a runtime hot path.
+    RuntimeHot,
+    /// The sink sits inside a tracked function with zero production invocations.
+    RuntimeCold,
+    /// The sink sits inside a tracked function the runtime layer marked as safe
+    /// to delete because it was never executed.
+    NeverExecuted,
+    /// The sink sits inside a function that executed, but below the low-traffic
+    /// threshold.
+    LowTraffic,
+    /// Runtime coverage could not classify the enclosing function.
+    CoverageUnavailable,
+    /// A static enclosing function was found, but the runtime report carried no
+    /// matching evidence for it.
+    RuntimeUnknown,
+}
+
+/// Runtime coverage context attached to a security candidate when
+/// `plow security --runtime-coverage` is supplied.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecurityRuntimeContext {
+    /// Runtime state for the enclosing function.
+    pub state: SecurityRuntimeState,
+    /// Enclosing function name from static extraction.
+    pub function: String,
+    /// 1-based line where the enclosing function starts.
+    pub line: u32,
+    /// Observed invocation count when the runtime report provides it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invocations: Option<u64>,
+    /// Runtime coverage stable function id, when available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stable_id: Option<String>,
+    /// Short candidate-framed explanation of the runtime evidence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<String>,
+}
+
+/// Verification-priority tier for a security candidate. This is ranking, not an
+/// exploitability verdict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "lowercase")]
+pub enum SecuritySeverity {
+    /// Highest-priority candidate based on reachability, boundary, or runtime-hot signals.
+    High,
+    /// Candidate has source-reachability evidence but no high-priority signal.
+    Medium,
+    /// Candidate has no source-reachability or boundary signal.
+    Low,
+}
+
+/// Defensive control found on an attack-surface path.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecurityDefensiveControl {
+    /// Control family.
+    pub kind: SecurityControlKind,
+    /// File of the control site. Absolute internally; JSON strips the project root.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// 1-based line of the control site.
+    pub line: u32,
+    /// 0-based byte column of the control site.
+    pub col: u32,
+    /// Flattened callee path or a stable synthetic guard name.
+    pub callee: String,
+}
+
+/// Agent-facing defensive-boundary verification context for one surface path.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecurityDefensiveBoundary {
+    /// Known controls detected along this path.
+    pub controls: Vec<SecurityDefensiveControl>,
+    /// Verification question for the consuming agent. It is a prompt, not a
+    /// missing-guard verdict.
+    pub verification_prompt: String,
+}
+
+/// One untrusted entry to reachable sink path for `plow security --surface`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecurityAttackSurfaceEntry {
+    /// The untrusted-source endpoint.
+    pub source: TaintEndpoint,
+    /// The reachable sink endpoint and catalogue metadata.
+    pub sink: SecurityCandidateSink,
+    /// Ordered source to sink path. Same shape as the reachability trace so
+    /// consumers can reuse existing path handling.
+    pub path: Vec<TraceHop>,
+    /// Defensive-boundary context detected on this path.
+    pub defensive_boundary: SecurityDefensiveBoundary,
+}
+
+/// A local security CANDIDATE for downstream agent verification, NOT a verified
+/// vulnerability. Emitted only by `plow security`, never under bare `plow`
+/// or the `audit` gate. There is deliberately no `confidence` or
+/// `signal_strength` field: plow does not prove exploitability, so the trace
+/// (its hops and length) is the only honest signal.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecurityFinding {
+    /// Stable per-finding correlation id, identical across runs for the same
+    /// rule + anchor path + line. An autonomous agent that triaged this
+    /// candidate on a prior run uses it to correlate the candidate after a
+    /// rebase. Equal to the SARIF `partialFingerprints` value for the same
+    /// finding (one shared helper computes both).
+    pub finding_id: String,
+    /// The rule that produced this candidate.
+    pub kind: SecurityFindingKind,
+    /// The catalogue category id (e.g. `"dangerous-html"`). `Some` for
+    /// `TaintedSink`. For `ClientServerLeak` this is `None` for the secret-leak
+    /// finding, and `Some("server-only-import")` when a `"use client"` cone
+    /// reaches server-only code.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    /// The CWE number declared by the matched catalogue entry. `None` for
+    /// `ClientServerLeak`; never fabricated beyond the catalogue's value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwe: Option<u32>,
+    /// File the finding is anchored on (the client boundary). Absolute
+    /// internally; JSON strips the project root via `serde_path::serialize`.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// 1-based line number of the anchor.
+    pub line: u32,
+    /// 0-based byte column offset of the anchor.
+    pub col: u32,
+    /// Agent/human-readable evidence (e.g. the named env var the chain reaches).
+    pub evidence: String,
+    /// Whether the sink argument was associated with a known untrusted source by
+    /// the intra-module source-to-sink back-trace (issue #859): a local binding
+    /// referenced in the argument was sourced from a catalogue source path
+    /// (`req.query`, `process.argv`, message-event `data`, etc.). `true` ranks
+    /// the candidate higher and annotates the evidence; `false` does NOT
+    /// suppress the finding (the association is conservative, never a proof, and
+    /// plow prefers false-negatives over false-positives). Always `false` for
+    /// `ClientServerLeak`. Skipped from JSON when `false` for output stability.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub source_backed: bool,
+    /// Internal cross-pass carrier (NEVER serialized): the (1-based line, 0-based
+    /// col) of the arg-level source read, resolved by the detector when
+    /// `source_backed` is true and a concrete read span was captured. The ranking
+    /// pass uses it to anchor the taint trace's source node at the real read
+    /// instead of the module import line. `None` for module-level findings and
+    /// for arg-level findings with no concrete read span (synthetic
+    /// framework-param / helper-return sources), where the trace falls back to
+    /// the sink site.
+    #[serde(skip)]
+    pub source_read: Option<(u32, u32)>,
+    /// Verification-priority tier derived from existing reachability, boundary,
+    /// source-backed, and runtime signals. Candidate-only: this does not prove
+    /// exploitability and does not change gates.
+    pub severity: SecuritySeverity,
+    /// Structural import-hop trace from the client boundary to the secret source.
+    /// The hop count is the uncalibrated signal; plow does not prove the path
+    /// is exploitable.
+    pub trace: Vec<TraceHop>,
+    /// Machine-actionable next steps. Always emitted (possibly empty for
+    /// forward-compat). For security candidates this is a single file-level
+    /// suppress hint (`auto_fixable: false`); there is no auto-fix because
+    /// verification is the agent's job, not plow's.
+    pub actions: Vec<IssueAction>,
+    /// Dead-code cross-link when the same sink candidate sits in code plow also
+    /// reports as removable. Agents should verify the dead-code finding and delete
+    /// the code instead of hardening the sink when deletion is safe.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dead_code: Option<SecurityDeadCodeContext>,
+    /// Graph-derived reachability ranking signal (issues #860 and #885). `None`
+    /// until the post-detection ranking pass fills it; additive on the wire
+    /// (skipped when absent). Drives the order findings are emitted in:
+    /// runtime-reachable candidates sort first, followed by source-backed and
+    /// source-reachable candidates, then wider blast radius.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reachability: Option<SecurityReachability>,
+    /// Agent-actionable candidate record: the untrusted input kind, the sink,
+    /// and the boundary the flow crosses. plow fills these three slots; the
+    /// exploitability verdict is the agent's job and is not a field here. Always
+    /// present.
+    pub candidate: SecurityCandidate,
+    /// Source-to-sink taint-flow triple, present only when an untrusted source
+    /// is import-reachable to this sink. Absent (skipped) otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub taint_flow: Option<SecurityTaintFlow>,
+    /// Production runtime coverage context for the function enclosing this
+    /// security sink. Present only when `plow security --runtime-coverage`
+    /// runs and the candidate is a `tainted-sink`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<SecurityRuntimeContext>,
+    /// Internal projection used by `plow security --surface`. The CLI strips
+    /// this from per-finding JSON and promotes it to the top-level
+    /// `attack_surface` field only when requested.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attack_surface: Option<SecurityAttackSurfaceEntry>,
+}
+
 /// A pnpm catalog entry declared in pnpm-workspace.yaml that no workspace package
 /// references via the `catalog:` protocol.
 ///
@@ -744,7 +1934,7 @@ pub struct EmptyCatalogGroup {
 ///
 /// `pnpm install` errors at install time with `ERR_PNPM_CATALOG_ENTRY_NOT_FOUND_FOR_CATALOG_PROTOCOL`
 /// when this happens. plow surfaces it statically so the failure is caught at
-/// `plow check` time, before any install.
+/// `plow dead-code` time, before any install.
 ///
 /// The default catalog (bare `catalog:` references the top-level `catalog:` map)
 /// uses `catalog_name: "default"`. Named catalogs (`catalog:react17`) use the
@@ -927,6 +2117,30 @@ pub struct TestOnlyDependency {
     pub line: u32,
 }
 
+/// One import hop in a circular dependency: the file containing the import
+/// and where that import statement sits.
+///
+/// `edges[i]` is the import IN `path` (the hop SOURCE, equal to the cycle's
+/// `files[i]`) that points to the NEXT file in the cycle
+/// (`files[(i + 1) % files.len()]`); the target is not repeated here to keep
+/// the wire compact. Enables a per-file diagnostic squiggly anchored under
+/// the offending import rather than a single squiggly on the first file.
+///
+/// `col` is a 0-based BYTE column, matching the cycle's top-level `col`;
+/// converting it to a UTF-16 code-unit column for LSP clients is a tracked
+/// follow-up shared with the existing field.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CircularDependencyEdge {
+    /// The file containing the import (the hop SOURCE; equal to `files[i]`).
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// 1-based line number of the import statement pointing to the next file.
+    pub line: u32,
+    /// 0-based byte column offset of the import statement.
+    pub col: u32,
+}
+
 /// A circular dependency chain detected in the module graph.
 ///
 /// The `line` and `col` fields carry `#[serde(default)]` so callers reading
@@ -937,6 +2151,13 @@ pub struct TestOnlyDependency {
 /// schema; the explicit `extend("required" = ...)` override here keeps the
 /// schema's `required` array honest about what the JSON output actually
 /// contains.
+///
+/// `edges` is deliberately kept OUT of the `required` extend: it is
+/// `#[serde(default)]` (so historical baseline JSON without it still
+/// deserializes) and the output layer always emits it, but listing it in
+/// `required` would make pre-upgrade JSON fail validation against the new
+/// schema. It is a normal additive field: always present in current output,
+/// optional for backward compatibility.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "schema", schemars(extend("required" = ["files", "length", "line", "col"])))]
@@ -952,6 +2173,14 @@ pub struct CircularDependency {
     /// 0-based byte column offset of the import that starts the cycle.
     #[serde(default)]
     pub col: u32,
+    /// Per-file import anchors, one entry per hop in cycle order: `edges[i]`
+    /// is the import in `files[i]` pointing to `files[(i + 1) % len]`. Always
+    /// the same length as `files`. Drives the per-file LSP diagnostic
+    /// squiggly. `#[serde(default)]` so pre-`edges` baselines deserialize;
+    /// always emitted on output but intentionally not in the schema's
+    /// `required` set (see the struct doc).
+    #[serde(default)]
+    pub edges: Vec<CircularDependencyEdge>,
     /// Whether this cycle crosses workspace package boundaries.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub is_cross_package: bool,
@@ -1009,6 +2238,100 @@ pub struct BoundaryViolation {
     pub line: u32,
     /// 0-based byte column offset of the import statement.
     pub col: u32,
+}
+
+/// A source file that does not match any configured architecture boundary zone.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct BoundaryCoverageViolation {
+    /// The unmatched source file.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// 1-based line number used for diagnostics.
+    pub line: u32,
+    /// 0-based byte column offset used for diagnostics.
+    pub col: u32,
+}
+
+/// A call from a zoned file to a callee forbidden for that zone via
+/// `boundaries.calls.forbidden`. One finding is reported per unique callee
+/// path per file (first occurrence wins).
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct BoundaryCallViolation {
+    /// The zoned source file making the forbidden call.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// 1-based line number of the call site.
+    pub line: u32,
+    /// 0-based byte column offset of the call site.
+    pub col: u32,
+    /// The zone the calling file is classified into.
+    pub zone: String,
+    /// The callee path as written at the call site (e.g. `cp.exec`).
+    pub callee: String,
+    /// The configured pattern that matched (e.g. `child_process.*`), so
+    /// consumers can see both the written path and the rule that fired.
+    pub pattern: String,
+}
+
+/// Which rule-pack rule kind produced a [`PolicyViolation`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum PolicyRuleKind {
+    /// A call site matched a `banned-call` rule's callee patterns.
+    BannedCall,
+    /// An import or re-export specifier matched a `banned-import` rule.
+    BannedImport,
+}
+
+/// Effective severity of a single [`PolicyViolation`]. Per-rule `severity`
+/// overrides the `rules."policy-violation"` master; `off` rules emit nothing,
+/// so only `error` and `warn` appear on the wire. The exit-code gate inspects
+/// this per-finding value, not the master severity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "lowercase")]
+pub enum PolicyViolationSeverity {
+    /// Fails CI (non-zero exit code).
+    Error,
+    /// Reported without failing CI.
+    Warn,
+}
+
+/// A banned call or banned import matched by a declarative rule pack
+/// (`rulePacks` config). Banned-call findings report one entry per unique
+/// callee path per file (first occurrence wins, matching
+/// `boundary_call_violations`); banned-import findings anchor at each
+/// matching import or re-export declaration.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PolicyViolation {
+    /// The source file containing the banned call or import.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// 1-based line number of the call site or import declaration.
+    pub line: u32,
+    /// 0-based byte column offset of the call site or import declaration.
+    pub col: u32,
+    /// Name of the rule pack that declared the matching rule.
+    pub pack: String,
+    /// Id of the matching rule inside the pack. `pack` plus `rule_id` is the
+    /// finding's policy identity.
+    pub rule_id: String,
+    /// Which rule kind matched.
+    pub kind: PolicyRuleKind,
+    /// What matched: the written callee path for `banned-call` (e.g.
+    /// `cp.exec`), or the raw import specifier for `banned-import` (e.g.
+    /// `moment/locale/nl`).
+    pub matched: String,
+    /// Effective severity for this finding (per-rule `severity`, else the
+    /// `rules."policy-violation"` master).
+    pub severity: PolicyViolationSeverity,
+    /// The rule's author-provided message, when set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
 }
 
 /// The origin of a stale suppression: inline comment or JSDoc tag.
@@ -1184,6 +2507,31 @@ impl StaleSuppression {
             }
         }
     }
+}
+
+/// A suppression comment present in an analyzed file this run.
+///
+/// This is the "active-suppression state" the Plow Impact value report needs
+/// to tell a genuinely resolved finding (the code was fixed) from one merely
+/// silenced by a newly-added `plow-ignore`. It captures every PRESENT marker,
+/// not only the ones a detector consumed: complexity and code-duplication
+/// suppressions are consumed in the CLI layer rather than the core suppression
+/// context, so presence is the single uniform signal that covers all impact
+/// categories. A present-but-stale marker is harmless because impact keys on a
+/// suppression that newly appeared between two recorded runs. It is internal:
+/// never serialized into the public JSON output schema (the field on
+/// [`AnalysisResults`] is `#[serde(skip)]`), only read in-process by
+/// `plow impact`.
+#[derive(Debug, Clone)]
+pub struct ActiveSuppression {
+    /// Absolute path to the file carrying the suppression comment.
+    pub path: PathBuf,
+    /// The suppressed issue kind in kebab-case (e.g. `"unused-export"`), or
+    /// `None` for a blanket marker that suppresses every kind on its target.
+    pub kind: Option<String>,
+    /// Whether this is a `plow-ignore-file` (file-level) marker rather than a
+    /// `plow-ignore-next-line` marker.
+    pub is_file_level: bool,
 }
 
 /// The detection method used to identify a feature flag.
@@ -1451,6 +2799,7 @@ mod tests {
                     length: 2,
                     line: 3,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             )],
@@ -1977,6 +3326,7 @@ mod tests {
                     length: 2,
                     line: 1,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             ));
@@ -1987,6 +3337,7 @@ mod tests {
                     length: 2,
                     line: 1,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: true,
                 },
             ));
@@ -2174,6 +3525,7 @@ mod tests {
             length: 2,
             line: 1,
             col: 0,
+            edges: Vec::new(),
             is_cross_package: false,
         };
         let json = serde_json::to_value(&cd).unwrap();
@@ -2188,6 +3540,7 @@ mod tests {
             length: 2,
             line: 1,
             col: 0,
+            edges: Vec::new(),
             is_cross_package: true,
         };
         let json = serde_json::to_value(&cd).unwrap();

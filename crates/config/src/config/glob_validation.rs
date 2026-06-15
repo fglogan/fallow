@@ -2,8 +2,9 @@
 //!
 //! Plow accepts filesystem glob patterns in several config fields (`entry`,
 //! `ignorePatterns`, `dynamicallyLoaded`, `duplicates.ignore`, `health.ignore`,
-//! `boundaries.zones[].patterns`, `overrides[].files`, `ignoreExports[].file`,
-//! `ignoreCatalogReferences[].consumer`). All of these are matched against
+//! `health.thresholdOverrides[].files`, `boundaries.zones[].patterns`,
+//! `overrides[].files`, `ignoreExports[].file`, `ignoreCatalogReferences[].consumer`).
+//! All of these are matched against
 //! project-root-relative file paths. The matcher cannot reach outside the
 //! project root by construction, but a malicious config can still slip in
 //! absolute paths or `..` traversal segments that silently no-op today and
@@ -65,10 +66,6 @@ impl fmt::Display for GlobValidationError {
                 pattern,
                 source,
             } => {
-                // `globset::Error`'s Display re-quotes the pattern, so strip
-                // the `error parsing glob '...': ` prefix to avoid showing
-                // the pattern twice. The kind tail (e.g. "unclosed character
-                // class; missing ']'") is the actionable bit.
                 let source_msg = source.to_string();
                 let tail = source_msg
                     .find("': ")
@@ -265,10 +262,6 @@ mod tests {
 
     #[test]
     fn bracket_character_class_accepted() {
-        // Library authors use bracket character classes for PascalCase
-        // component file globs (`[A-Z]*.tsx`). Make sure the validator
-        // doesn't confuse a legitimate `[A-Z]` opening with an unclosed
-        // class. See user-panel review (Aisha's case).
         assert!(compile_user_glob("[A-Z]*.tsx", "entry").is_ok());
         assert!(compile_user_glob("src/**/[A-Z]*.{ts,tsx}", "ignoreExports[].file").is_ok());
         assert!(compile_user_glob("**/[0-9][0-9]*.md", "entry").is_ok());
@@ -279,7 +272,6 @@ mod tests {
         assert!(validate_user_path("../escape", "boundaries.zones[].root").is_err());
         assert!(validate_user_path("/abs/dir", "boundaries.zones[].root").is_err());
         assert!(validate_user_path("packages/ui", "boundaries.zones[].root").is_ok());
-        // Non-glob paths skip syntax check, so `[abc]` is fine as a literal name.
         assert!(validate_user_path("[brackets-literal]/dir", "boundaries.zones[].root").is_ok());
     }
 
@@ -356,15 +348,12 @@ mod tests {
 
     #[test]
     fn double_dot_filename_accepted() {
-        // `..` is a path-segment marker; `foo..bar` is a regular filename
-        // (extension separator) and must NOT be flagged.
         assert!(compile_user_glob("foo..bar", "entry").is_ok());
         assert!(compile_user_glob("src/file.with..dots.ts", "entry").is_ok());
     }
 
     #[test]
     fn current_dir_dot_accepted() {
-        // `./` is a no-op prefix; `Component::CurDir`, not `ParentDir`.
         assert!(compile_user_glob("./src/**", "entry").is_ok());
     }
 
@@ -374,17 +363,12 @@ mod tests {
         assert!(matches!(err, GlobValidationError::InvalidSyntax { .. }));
         let msg = err.to_string();
         assert!(msg.contains("entry"), "msg: {msg}");
-        // Pattern appears once (inside `'[invalid'`), not twice.
         assert_eq!(msg.matches("[invalid").count(), 1, "msg: {msg}");
         assert!(msg.contains("unclosed character class"), "msg: {msg}");
     }
 
     #[test]
     fn empty_pattern_accepted_as_globset_handles_it() {
-        // globset accepts the empty pattern (matches the empty string); we
-        // pass it through rather than special-casing here. The downstream
-        // matcher will never see an empty relative path so the practical
-        // effect is a no-op.
         assert!(compile_user_glob("", "entry").is_ok());
     }
 

@@ -1,7 +1,7 @@
 use rustc_hash::FxHashMap;
 
-use tower_lsp::lsp_types::{
-    Diagnostic, DiagnosticSeverity, DiagnosticTag, NumberOrString, Position, Range, Url,
+use ls_types::{
+    Diagnostic, DiagnosticSeverity, DiagnosticTag, NumberOrString, Position, Range, Uri,
 };
 
 use plow_core::results::AnalysisResults;
@@ -13,7 +13,7 @@ use super::{FIRST_LINE_RANGE, doc_link};
     reason = "identifier lengths are bounded by source size"
 )]
 pub fn push_export_diagnostics(
-    map: &mut FxHashMap<Url, Vec<Diagnostic>>,
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
 ) {
     let exports_iter = results.unused_exports.iter().map(|f| &f.export);
@@ -33,7 +33,7 @@ pub fn push_export_diagnostics(
         ),
     ] {
         for export in exports {
-            if let Ok(uri) = Url::from_file_path(&export.path) {
+            if let Some(uri) = Uri::from_file_path(&export.path) {
                 let line = export.line.saturating_sub(1);
                 map.entry(uri).or_default().push(Diagnostic {
                     range: Range {
@@ -59,7 +59,7 @@ pub fn push_export_diagnostics(
     }
 
     for leak in &results.private_type_leaks {
-        if let Ok(uri) = Url::from_file_path(&leak.leak.path) {
+        if let Some(uri) = Uri::from_file_path(&leak.leak.path) {
             let line = leak.leak.line.saturating_sub(1);
             map.entry(uri).or_default().push(Diagnostic {
                 range: Range {
@@ -86,9 +86,9 @@ pub fn push_export_diagnostics(
     }
 }
 
-pub fn push_file_diagnostics(map: &mut FxHashMap<Url, Vec<Diagnostic>>, results: &AnalysisResults) {
+pub fn push_file_diagnostics(map: &mut FxHashMap<Uri, Vec<Diagnostic>>, results: &AnalysisResults) {
     for file in &results.unused_files {
-        if let Ok(uri) = Url::from_file_path(&file.file.path) {
+        if let Some(uri) = Uri::from_file_path(&file.file.path) {
             map.entry(uri).or_default().push(Diagnostic {
                 range: FIRST_LINE_RANGE,
                 severity: Some(DiagnosticSeverity::WARNING),
@@ -108,11 +108,11 @@ pub fn push_file_diagnostics(map: &mut FxHashMap<Url, Vec<Diagnostic>>, results:
     reason = "specifier lengths are bounded by source size"
 )]
 pub fn push_import_diagnostics(
-    map: &mut FxHashMap<Url, Vec<Diagnostic>>,
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
 ) {
     for import in &results.unresolved_imports {
-        if let Ok(uri) = Url::from_file_path(&import.import.path) {
+        if let Some(uri) = Uri::from_file_path(&import.import.path) {
             let line = import.import.line.saturating_sub(1);
             map.entry(uri).or_default().push(Diagnostic {
                 range: Range {
@@ -122,7 +122,6 @@ pub fn push_import_diagnostics(
                     },
                     end: Position {
                         line,
-                        // +2 accounts for the surrounding quotes on the string literal
                         character: import.import.specifier_col
                             + import.import.specifier.len() as u32
                             + 2,
@@ -140,12 +139,11 @@ pub fn push_import_diagnostics(
 }
 
 pub fn push_dep_diagnostics(
-    map: &mut FxHashMap<Url, Vec<Diagnostic>>,
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
-    package_json_uri: Option<&Url>,
+    package_json_uri: Option<&Uri>,
     root: &std::path::Path,
 ) {
-    // Unused deps: dependencies, devDependencies, optionalDependencies
     type DepIter<'a> = Box<dyn Iterator<Item = &'a plow_core::results::UnusedDependency> + 'a>;
     let groups: [(DepIter<'_>, &str, &str, &str); 3] = [
         (
@@ -169,7 +167,7 @@ pub fn push_dep_diagnostics(
     ];
     for (deps, code, anchor, msg_prefix) in groups {
         for dep in deps {
-            if let Ok(dep_uri) = Url::from_file_path(&dep.path) {
+            if let Some(dep_uri) = Uri::from_file_path(&dep.path) {
                 let line = dep.line.saturating_sub(1);
                 map.entry(dep_uri).or_default().push(Diagnostic {
                     range: Range {
@@ -190,7 +188,6 @@ pub fn push_dep_diagnostics(
         }
     }
 
-    // Unlisted deps still use root package.json
     if let Some(uri) = package_json_uri {
         for dep in &results.unlisted_dependencies {
             map.entry(uri.clone()).or_default().push(Diagnostic {
@@ -208,18 +205,25 @@ pub fn push_dep_diagnostics(
         }
     }
 
-    // Type-only dependencies: could be moved to devDependencies
+    push_type_only_dependency_diagnostics(map, results);
+    push_test_only_dependency_diagnostics(map, results);
+    push_unused_catalog_entry_diagnostics(map, results, root);
+
+    push_empty_catalog_group_diagnostics(map, results, root);
+
+    push_unresolved_catalog_reference_diagnostics(map, results);
+    push_dependency_override_diagnostics(map, results);
+}
+
+fn push_type_only_dependency_diagnostics(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+) {
     for dep in &results.type_only_dependencies {
-        if let Ok(dep_uri) = Url::from_file_path(&dep.dep.path) {
+        if let Some(dep_uri) = Uri::from_file_path(&dep.dep.path) {
             let line = dep.dep.line.saturating_sub(1);
             map.entry(dep_uri).or_default().push(Diagnostic {
-                range: Range {
-                    start: Position { line, character: 0 },
-                    end: Position {
-                        line,
-                        character: u32::MAX,
-                    },
-                },
+                range: full_line_range(line),
                 severity: Some(DiagnosticSeverity::INFORMATION),
                 source: Some("plow".to_string()),
                 code: Some(NumberOrString::String("type-only-dependency".to_string())),
@@ -232,19 +236,17 @@ pub fn push_dep_diagnostics(
             });
         }
     }
+}
 
-    // Test-only dependencies: could be moved to devDependencies
+fn push_test_only_dependency_diagnostics(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+) {
     for dep in &results.test_only_dependencies {
-        if let Ok(dep_uri) = Url::from_file_path(&dep.dep.path) {
+        if let Some(dep_uri) = Uri::from_file_path(&dep.dep.path) {
             let line = dep.dep.line.saturating_sub(1);
             map.entry(dep_uri).or_default().push(Diagnostic {
-                range: Range {
-                    start: Position { line, character: 0 },
-                    end: Position {
-                        line,
-                        character: u32::MAX,
-                    },
-                },
+                range: full_line_range(line),
                 severity: Some(DiagnosticSeverity::INFORMATION),
                 source: Some("plow".to_string()),
                 code: Some(NumberOrString::String("test-only-dependency".to_string())),
@@ -257,57 +259,62 @@ pub fn push_dep_diagnostics(
             });
         }
     }
+}
 
-    // Unused pnpm catalog entries in pnpm-workspace.yaml.
-    // entry.path is project-root-relative; Url::from_file_path requires an
-    // absolute path, so join against the analyzer root before constructing.
+fn push_unused_catalog_entry_diagnostics(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+    root: &std::path::Path,
+) {
     for entry in &results.unused_catalog_entries {
         let entry = &entry.entry;
-        if let Ok(entry_uri) = Url::from_file_path(root.join(&entry.path)) {
+        if let Some(entry_uri) = Uri::from_file_path(root.join(&entry.path)) {
             let line = entry.line.saturating_sub(1);
-            let message = if entry.catalog_name == "default" {
-                format!(
-                    "Unused catalog entry: '{}' is not referenced by any workspace package",
-                    entry.entry_name
-                )
-            } else {
-                format!(
-                    "Unused catalog entry: '{}' in catalog '{}' is not referenced by any workspace package",
-                    entry.entry_name, entry.catalog_name
-                )
-            };
             map.entry(entry_uri).or_default().push(Diagnostic {
-                range: Range {
-                    start: Position { line, character: 0 },
-                    end: Position {
-                        line,
-                        character: u32::MAX,
-                    },
-                },
+                range: full_line_range(line),
                 severity: Some(DiagnosticSeverity::WARNING),
                 source: Some("plow".to_string()),
                 code: Some(NumberOrString::String("unused-catalog-entry".to_string())),
                 code_description: doc_link("unused-catalog-entries"),
-                message,
+                message: unused_catalog_entry_message(entry),
                 ..Default::default()
             });
         }
     }
+}
 
-    push_empty_catalog_group_diagnostics(map, results, root);
+fn unused_catalog_entry_message(entry: &plow_core::results::UnusedCatalogEntry) -> String {
+    if entry.catalog_name == "default" {
+        format!(
+            "Unused catalog entry: '{}' is not referenced by any workspace package",
+            entry.entry_name
+        )
+    } else {
+        format!(
+            "Unused catalog entry: '{}' in catalog '{}' is not referenced by any workspace package",
+            entry.entry_name, entry.catalog_name
+        )
+    }
+}
 
-    push_unresolved_catalog_reference_diagnostics(map, results);
-    push_dependency_override_diagnostics(map, results);
+fn full_line_range(line: u32) -> Range {
+    Range {
+        start: Position { line, character: 0 },
+        end: Position {
+            line,
+            character: u32::MAX,
+        },
+    }
 }
 
 fn push_empty_catalog_group_diagnostics(
-    map: &mut FxHashMap<Url, Vec<Diagnostic>>,
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
     root: &std::path::Path,
 ) {
     for group in &results.empty_catalog_groups {
         let group = &group.group;
-        let Ok(uri) = Url::from_file_path(root.join(&group.path)) else {
+        let Some(uri) = Uri::from_file_path(root.join(&group.path)) else {
             continue;
         };
         let line = group.line.saturating_sub(1);
@@ -335,15 +342,15 @@ fn push_empty_catalog_group_diagnostics(
 /// Emit one `ERROR`-severity diagnostic per unresolved-catalog-reference
 /// finding. The finding's `path` is stored as an absolute filesystem path
 /// (matching the existing convention for path-anchored findings), so
-/// `Url::from_file_path` can be called directly.
+/// `Uri::from_file_path` can be called directly.
 fn push_unresolved_catalog_reference_diagnostics(
-    map: &mut FxHashMap<Url, Vec<Diagnostic>>,
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
 ) {
     use std::fmt::Write as _;
     for finding in &results.unresolved_catalog_references {
         let finding = &finding.reference;
-        let Ok(uri) = Url::from_file_path(&finding.path) else {
+        let Some(uri) = Uri::from_file_path(&finding.path) else {
             continue;
         };
         let line = finding.line.saturating_sub(1);
@@ -386,17 +393,17 @@ fn push_unresolved_catalog_reference_diagnostics(
 /// Emit diagnostics for unused and misconfigured pnpm dependency-override
 /// findings. Both finding types carry an absolute `path` (matching the
 /// `UnresolvedCatalogReference` convention so `--changed-since` and per-file
-/// overrides.rules can compare directly). `Url::from_file_path` accepts the
+/// overrides.rules can compare directly). `Uri::from_file_path` accepts the
 /// path as-is. Severity matches the default rule severity: unused =
 /// `WARNING`, misconfigured = `ERROR` (pnpm refuses to install).
 fn push_dependency_override_diagnostics(
-    map: &mut FxHashMap<Url, Vec<Diagnostic>>,
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
 ) {
     use std::fmt::Write as _;
     for finding in &results.unused_dependency_overrides {
         let finding = &finding.entry;
-        let Ok(uri) = Url::from_file_path(&finding.path) else {
+        let Some(uri) = Uri::from_file_path(&finding.path) else {
             continue;
         };
         let line = finding.line.saturating_sub(1);
@@ -427,7 +434,7 @@ fn push_dependency_override_diagnostics(
     }
     for finding in &results.misconfigured_dependency_overrides {
         let finding = &finding.entry;
-        let Ok(uri) = Url::from_file_path(&finding.path) else {
+        let Some(uri) = Uri::from_file_path(&finding.path) else {
             continue;
         };
         let line = finding.line.saturating_sub(1);
@@ -462,11 +469,12 @@ fn push_dependency_override_diagnostics(
     reason = "member name lengths are bounded by source size"
 )]
 pub fn push_member_diagnostics(
-    map: &mut FxHashMap<Url, Vec<Diagnostic>>,
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
 ) {
     let enum_iter = results.unused_enum_members.iter().map(|f| &f.member);
     let class_iter = results.unused_class_members.iter().map(|f| &f.member);
+    let store_iter = results.unused_store_members.iter().map(|f| &f.member);
     for (members, code, anchor, kind_label) in [
         (
             Box::new(enum_iter) as Box<dyn Iterator<Item = &plow_core::results::UnusedMember>>,
@@ -480,9 +488,15 @@ pub fn push_member_diagnostics(
             "unused-class-members",
             "Class member",
         ),
+        (
+            Box::new(store_iter) as Box<dyn Iterator<Item = &plow_core::results::UnusedMember>>,
+            "unused-store-member",
+            "unused-store-members",
+            "Store member",
+        ),
     ] {
         for member in members {
-            if let Ok(uri) = Url::from_file_path(&member.path) {
+            if let Some(uri) = Uri::from_file_path(&member.path) {
                 let line = member.line.saturating_sub(1);
                 map.entry(uri).or_default().push(Diagnostic {
                     range: Range {
@@ -509,12 +523,142 @@ pub fn push_member_diagnostics(
             }
         }
     }
+
+    for finding in &results.unrendered_components {
+        let c = &finding.component;
+        if let Some(uri) = Uri::from_file_path(&c.path) {
+            let line = c.line.saturating_sub(1);
+            map.entry(uri).or_default().push(Diagnostic {
+                range: Range {
+                    start: Position {
+                        line,
+                        character: c.col,
+                    },
+                    end: Position {
+                        line,
+                        character: c.col + c.component_name.len() as u32,
+                    },
+                },
+                severity: Some(DiagnosticSeverity::HINT),
+                source: Some("plow".to_string()),
+                code: Some(NumberOrString::String("unrendered-component".to_string())),
+                code_description: doc_link("unrendered-components"),
+                message: format!(
+                    "Component '{}' is reachable but rendered nowhere in this project",
+                    c.component_name
+                ),
+                tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+                ..Default::default()
+            });
+        }
+    }
+
+    for finding in &results.unused_component_props {
+        let p = &finding.prop;
+        if let Some(uri) = Uri::from_file_path(&p.path) {
+            let line = p.line.saturating_sub(1);
+            map.entry(uri).or_default().push(Diagnostic {
+                range: Range {
+                    start: Position {
+                        line,
+                        character: p.col,
+                    },
+                    end: Position {
+                        line,
+                        character: p.col + p.prop_name.len() as u32,
+                    },
+                },
+                severity: Some(DiagnosticSeverity::HINT),
+                source: Some("plow".to_string()),
+                code: Some(NumberOrString::String("unused-component-prop".to_string())),
+                code_description: doc_link("unused-component-props"),
+                message: format!(
+                    "Prop '{}' is declared but referenced nowhere in this component",
+                    p.prop_name
+                ),
+                tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+                ..Default::default()
+            });
+        }
+    }
+
+    for finding in &results.unused_component_emits {
+        let e = &finding.emit;
+        if let Some(uri) = Uri::from_file_path(&e.path) {
+            let line = e.line.saturating_sub(1);
+            map.entry(uri).or_default().push(Diagnostic {
+                range: Range {
+                    start: Position {
+                        line,
+                        character: e.col,
+                    },
+                    end: Position {
+                        line,
+                        character: e.col + e.emit_name.len() as u32,
+                    },
+                },
+                severity: Some(DiagnosticSeverity::HINT),
+                source: Some("plow".to_string()),
+                code: Some(NumberOrString::String("unused-component-emit".to_string())),
+                code_description: doc_link("unused-component-emits"),
+                message: format!(
+                    "Emit '{}' is declared but emitted nowhere in this component",
+                    e.emit_name
+                ),
+                tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+                ..Default::default()
+            });
+        }
+    }
+
+    push_unused_server_action_diagnostics(map, results);
+}
+
+/// Push HINT diagnostics for unused Next.js server actions (exports of a
+/// `"use server"` file referenced by no code in the project).
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "action name lengths are bounded by source size"
+)]
+fn push_unused_server_action_diagnostics(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+) {
+    for finding in &results.unused_server_actions {
+        let a = &finding.action;
+        if let Some(uri) = Uri::from_file_path(&a.path) {
+            let line = a.line.saturating_sub(1);
+            map.entry(uri).or_default().push(Diagnostic {
+                range: Range {
+                    start: Position {
+                        line,
+                        character: a.col,
+                    },
+                    end: Position {
+                        line,
+                        character: a.col + a.action_name.len() as u32,
+                    },
+                },
+                severity: Some(DiagnosticSeverity::HINT),
+                source: Some("plow".to_string()),
+                code: Some(NumberOrString::String("unused-server-action".to_string())),
+                code_description: doc_link("unused-server-actions"),
+                message: format!(
+                    "Server action '{}' is exported from a \"use server\" file but no code in this project references it",
+                    a.action_name
+                ),
+                tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+                ..Default::default()
+            });
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
+    use ls_types::{DiagnosticSeverity, DiagnosticTag, NumberOrString, Uri};
     use plow_core::duplicates::{DuplicationReport, DuplicationStats};
     use plow_core::extract::MemberKind;
     use plow_core::results::{
@@ -526,9 +670,8 @@ mod tests {
         UnusedClassMemberFinding, UnusedDependency, UnusedDependencyFinding,
         UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExport, UnusedExportFinding,
         UnusedFile, UnusedFileFinding, UnusedMember, UnusedOptionalDependencyFinding,
-        UnusedTypeFinding,
+        UnusedStoreMemberFinding, UnusedTypeFinding,
     };
-    use tower_lsp::lsp_types::{DiagnosticSeverity, DiagnosticTag, NumberOrString, Url};
 
     use crate::diagnostics::{FIRST_LINE_RANGE, build_diagnostics};
 
@@ -583,7 +726,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(root.join("src/utils.ts")).unwrap();
+        let uri = Uri::from_file_path(root.join("src/utils.ts")).unwrap();
         let file_diags = diags.get(&uri).expect("should have diagnostics for file");
         assert_eq!(file_diags.len(), 1);
 
@@ -595,10 +738,8 @@ mod tests {
             Some(NumberOrString::String("unused-export".to_string()))
         );
         assert_eq!(d.source, Some("plow".to_string()));
-        // Line is 1-based in results, 0-based in LSP
         assert_eq!(d.range.start.line, 4);
         assert_eq!(d.range.start.character, 7);
-        // End character = col + export_name.len()
         assert_eq!(d.range.end.character, 7 + "helper".len() as u32);
         assert_eq!(d.tags, Some(vec![DiagnosticTag::UNNECESSARY]));
     }
@@ -622,7 +763,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(root.join("src/types.ts")).unwrap();
+        let uri = Uri::from_file_path(root.join("src/types.ts")).unwrap();
         let file_diags = &diags[&uri];
         assert_eq!(file_diags.len(), 1);
 
@@ -648,7 +789,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(root.join("src/dead.ts")).unwrap();
+        let uri = Uri::from_file_path(root.join("src/dead.ts")).unwrap();
         let file_diags = &diags[&uri];
         assert_eq!(file_diags.len(), 1);
 
@@ -670,8 +811,6 @@ mod tests {
     fn unresolved_import_produces_error_diagnostic() {
         let root = test_root();
         let mut results = AnalysisResults::default();
-        // import { foo } from './missing-module'
-        //                     ^--- specifier_col = 20 (quote position)
         results
             .unresolved_imports
             .push(UnresolvedImportFinding::with_actions(UnresolvedImport {
@@ -685,7 +824,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(root.join("src/app.ts")).unwrap();
+        let uri = Uri::from_file_path(root.join("src/app.ts")).unwrap();
         let file_diags = &diags[&uri];
         assert_eq!(file_diags.len(), 1);
 
@@ -693,7 +832,6 @@ mod tests {
         assert_eq!(d.severity, Some(DiagnosticSeverity::ERROR));
         assert_eq!(d.message, "Cannot find module './missing-module'");
         assert_eq!(d.range.start.line, 2); // 1-based -> 0-based
-        // Range covers the specifier string literal including quotes
         assert_eq!(d.range.start.character, 20);
         assert_eq!(
             d.range.end.character,
@@ -718,7 +856,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(root.join("package.json")).unwrap();
+        let uri = Uri::from_file_path(root.join("package.json")).unwrap();
         let file_diags = &diags[&uri];
         assert_eq!(file_diags.len(), 1);
 
@@ -745,7 +883,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(root.join("package.json")).unwrap();
+        let uri = Uri::from_file_path(root.join("package.json")).unwrap();
         let file_diags = &diags[&uri];
         assert_eq!(file_diags.len(), 1);
 
@@ -774,7 +912,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(root.join("package.json")).unwrap();
+        let uri = Uri::from_file_path(root.join("package.json")).unwrap();
         let file_diags = &diags[&uri];
         assert_eq!(file_diags.len(), 1);
 
@@ -806,7 +944,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(root.join("src/enums.ts")).unwrap();
+        let uri = Uri::from_file_path(root.join("src/enums.ts")).unwrap();
         let file_diags = &diags[&uri];
         assert_eq!(file_diags.len(), 1);
 
@@ -840,7 +978,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(root.join("src/service.ts")).unwrap();
+        let uri = Uri::from_file_path(root.join("src/service.ts")).unwrap();
         let file_diags = &diags[&uri];
         assert_eq!(file_diags.len(), 1);
 
@@ -850,6 +988,37 @@ mod tests {
         assert_eq!(
             d.code,
             Some(NumberOrString::String("unused-class-member".to_string()))
+        );
+    }
+
+    #[test]
+    fn unused_store_member_produces_hint() {
+        let root = test_root();
+        let mut results = AnalysisResults::default();
+        results
+            .unused_store_members
+            .push(UnusedStoreMemberFinding::with_actions(UnusedMember {
+                path: root.join("src/store.ts"),
+                parent_name: "useStore".to_string(),
+                member_name: "reset".to_string(),
+                kind: MemberKind::StoreMember,
+                line: 20,
+                col: 4,
+            }));
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, &root);
+
+        let uri = Uri::from_file_path(root.join("src/store.ts")).unwrap();
+        let file_diags = &diags[&uri];
+        assert_eq!(file_diags.len(), 1);
+
+        let d = &file_diags[0];
+        assert_eq!(d.severity, Some(DiagnosticSeverity::HINT));
+        assert_eq!(d.message, "Store member 'useStore.reset' is unused");
+        assert_eq!(
+            d.code,
+            Some(NumberOrString::String("unused-store-member".to_string()))
         );
     }
 
@@ -872,7 +1041,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(root.join("package.json")).unwrap();
+        let uri = Uri::from_file_path(root.join("package.json")).unwrap();
         let file_diags = &diags[&uri];
         assert_eq!(file_diags.len(), 1);
 
@@ -907,7 +1076,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(root.join("package.json")).unwrap();
+        let uri = Uri::from_file_path(root.join("package.json")).unwrap();
         let file_diags = &diags[&uri];
         assert_eq!(file_diags.len(), 1);
 
@@ -942,7 +1111,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(root.join("package.json")).unwrap();
+        let uri = Uri::from_file_path(root.join("package.json")).unwrap();
         let file_diags = &diags[&uri];
         assert_eq!(file_diags.len(), 1);
 
@@ -963,7 +1132,6 @@ mod tests {
     #[test]
     fn line_conversion_saturates_at_zero() {
         let root = test_root();
-        // Line 0 in results (unusual) should become 0 in LSP, not underflow
         let mut results = AnalysisResults::default();
         results
             .unused_exports
@@ -980,17 +1148,13 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(root.join("src/edge.ts")).unwrap();
+        let uri = Uri::from_file_path(root.join("src/edge.ts")).unwrap();
         let d = &diags[&uri][0];
         assert_eq!(d.range.start.line, 0);
     }
 
     #[test]
     fn unused_catalog_entry_produces_warning_diagnostic() {
-        // Catalog entries store project-root-relative paths. The diagnostic
-        // must build its URI by joining against the analyzer root, otherwise
-        // Url::from_file_path silently fails on the relative path and no
-        // squiggle ever lands on pnpm-workspace.yaml.
         let root = test_root();
         let mut results = AnalysisResults::default();
         results
@@ -1008,7 +1172,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(root.join("pnpm-workspace.yaml")).unwrap();
+        let uri = Uri::from_file_path(root.join("pnpm-workspace.yaml")).unwrap();
         let file_diags = diags
             .get(&uri)
             .expect("catalog diagnostic should be keyed by the absolute YAML URI");
@@ -1022,7 +1186,6 @@ mod tests {
         );
         assert_eq!(d.source, Some("plow".to_string()));
         assert!(d.message.contains("is-even"));
-        // Line is 1-based in results, 0-based in LSP
         assert_eq!(d.range.start.line, 5);
     }
 
@@ -1045,7 +1208,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(root.join("pnpm-workspace.yaml")).unwrap();
+        let uri = Uri::from_file_path(root.join("pnpm-workspace.yaml")).unwrap();
         let d = &diags[&uri][0];
         assert!(d.message.contains("react-dom"));
         assert!(
@@ -1070,7 +1233,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(root.join("pnpm-workspace.yaml")).unwrap();
+        let uri = Uri::from_file_path(root.join("pnpm-workspace.yaml")).unwrap();
         let file_diags = diags
             .get(&uri)
             .expect("empty catalog diagnostic should be keyed by the absolute YAML URI");
@@ -1090,10 +1253,6 @@ mod tests {
 
     #[test]
     fn unresolved_catalog_reference_produces_error_diagnostic_with_absolute_uri() {
-        // `UnresolvedCatalogReference.path` is stored as an absolute filesystem
-        // path (matching the convention used by every other path-anchored
-        // finding type), so the LSP can pass it directly into
-        // `Url::from_file_path` without joining against any root.
         let root = test_root();
         let abs_path = root.join("packages/app/package.json");
         let mut results = AnalysisResults::default();
@@ -1110,7 +1269,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(&abs_path).unwrap();
+        let uri = Uri::from_file_path(&abs_path).unwrap();
         let file_diags = diags
             .get(&uri)
             .expect("unresolved-catalog-reference diagnostic must be keyed by absolute URI");
@@ -1126,7 +1285,6 @@ mod tests {
         assert!(d.message.contains("old-react"));
         assert!(d.message.contains("react17"));
         assert!(d.message.contains("available in: react18"));
-        // Line 14 (1-based) -> LSP line 13 (0-based)
         assert_eq!(d.range.start.line, 13);
     }
 
@@ -1148,7 +1306,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(&abs_path).unwrap();
+        let uri = Uri::from_file_path(&abs_path).unwrap();
         let d = &diags[&uri][0];
         assert!(
             d.message.contains("the default catalog"),
@@ -1163,10 +1321,6 @@ mod tests {
 
     #[test]
     fn unused_dependency_override_produces_warning_diagnostic_with_absolute_uri() {
-        // Override findings store project-root-relative paths (same convention
-        // as UnusedCatalogEntry), so the diagnostic emitter must root.join
-        // before calling Url::from_file_path. Asserting the key exists in the
-        // map under the absolute URI proves the join happened.
         use plow_core::results::{
             DependencyOverrideSource, UnusedDependencyOverride, UnusedDependencyOverrideFinding,
         };
@@ -1193,7 +1347,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(&yaml_path).unwrap();
+        let uri = Uri::from_file_path(&yaml_path).unwrap();
         let file_diags = diags
             .get(&uri)
             .expect("unused-dependency-override diagnostic must key by absolute URI");
@@ -1241,7 +1395,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(&json_path).unwrap();
+        let uri = Uri::from_file_path(&json_path).unwrap();
         let d = &diags[&uri][0];
         assert_eq!(d.severity, Some(DiagnosticSeverity::ERROR));
         assert_eq!(

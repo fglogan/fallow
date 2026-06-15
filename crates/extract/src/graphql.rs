@@ -11,9 +11,8 @@ use oxc_span::Span;
 use crate::{ImportInfo, ImportedName, ModuleInfo};
 use plow_types::discover::FileId;
 
-static GRAPHQL_IMPORT_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r#"(?m)^[ \t]*#\s*import\s+["']([^"'\r\n]+)["']"#).expect("valid regex")
-});
+static GRAPHQL_IMPORT_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r#"(?m)^[ \t]*#\s*import\s+["']([^"'\r\n]+)["']"#));
 
 pub(crate) fn is_graphql_file(path: &Path) -> bool {
     path.extension()
@@ -82,6 +81,7 @@ pub(crate) fn parse_graphql_to_module(
         dynamic_imports: Vec::new(),
         dynamic_import_patterns: Vec::new(),
         require_calls: Vec::new(),
+        package_path_references: Vec::new(),
         member_accesses: Vec::new(),
         whole_object_uses: Vec::new(),
         has_cjs_exports: false,
@@ -96,11 +96,35 @@ pub(crate) fn parse_graphql_to_module(
         complexity: Vec::new(),
         flag_uses: Vec::new(),
         class_heritage: Vec::new(),
+        injection_tokens: Vec::new(),
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        referenced_import_bindings: Vec::new(),
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     }
 }
 

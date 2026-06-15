@@ -1,3 +1,9 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "tests and benches use unwrap and expect to keep fixture setup concise"
+)]
+
 #[path = "common/mod.rs"]
 mod common;
 
@@ -6,16 +12,8 @@ use common::{
     run_plow_raw,
 };
 
-// ---------------------------------------------------------------------------
-// Exit code semantics
-// ---------------------------------------------------------------------------
-
-// check always exits 1 when error-severity issues exist (default severity = error).
-// --fail-on-issues additionally promotes warn-severity rules to error.
-
 #[test]
 fn check_with_issues_exits_1() {
-    // basic-project has issues with default error severity → exit 1
     let output = run_plow("check", "basic-project", &["--format", "json", "--quiet"]);
     assert_eq!(
         output.code, 1,
@@ -25,8 +23,6 @@ fn check_with_issues_exits_1() {
 
 #[test]
 fn check_warn_severity_exits_0_without_fail_flag() {
-    // config-file-project has rules.unused-files = "warn" in .plowrc.json
-    // With only warn-severity rules, should exit 0
     let output = run_plow(
         "check",
         "config-file-project",
@@ -36,7 +32,6 @@ fn check_warn_severity_exits_0_without_fail_flag() {
         output.code, 0,
         "check with only warn-severity issues should exit 0 without --fail-on-issues"
     );
-    // Verify issues were actually found (not just "no issues at all")
     let json = parse_json(&output);
     assert!(
         json["total_issues"].as_u64().unwrap_or(0) > 0,
@@ -46,7 +41,6 @@ fn check_warn_severity_exits_0_without_fail_flag() {
 
 #[test]
 fn check_warn_severity_exits_1_with_fail_on_issues() {
-    // --fail-on-issues promotes warns to errors
     let output = run_plow(
         "check",
         "config-file-project",
@@ -69,10 +63,6 @@ fn check_ci_flag_implies_fail_on_issues() {
     let output = run_plow("check", "basic-project", &["--ci", "--format", "json"]);
     assert_eq!(output.code, 1, "--ci should imply --fail-on-issues");
 }
-
-// ---------------------------------------------------------------------------
-// Format switching
-// ---------------------------------------------------------------------------
 
 #[test]
 fn check_json_format_produces_valid_json() {
@@ -164,6 +154,13 @@ fn combined_parallel_output_is_deterministic() {
         match value {
             serde_json::Value::Object(map) => {
                 map.remove("elapsed_ms");
+                if let Some(telemetry) = map
+                    .get_mut("_meta")
+                    .and_then(|meta| meta.get_mut("telemetry"))
+                    .and_then(|telemetry| telemetry.as_object_mut())
+                {
+                    telemetry.remove("analysis_run_id");
+                }
                 for v in map.values_mut() {
                     normalize(v);
                 }
@@ -281,10 +278,6 @@ fn check_gitlab_codequality_alias_is_array() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Issue type filtering
-// ---------------------------------------------------------------------------
-
 #[test]
 fn check_unused_files_filter_limits_output() {
     let output = run_plow(
@@ -342,10 +335,6 @@ fn check_unused_deps_filter() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// JSON structure validation
-// ---------------------------------------------------------------------------
-
 #[test]
 fn check_json_has_total_issues() {
     let output = run_plow("check", "basic-project", &["--format", "json", "--quiet"]);
@@ -370,10 +359,6 @@ fn check_json_has_version_and_elapsed() {
         "JSON should have elapsed_ms"
     );
 }
-
-// ---------------------------------------------------------------------------
-// Error handling
-// ---------------------------------------------------------------------------
 
 #[test]
 fn check_invalid_root_exits_2() {
@@ -404,14 +389,6 @@ fn check_json_error_format() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Human output snapshots (Phase 6)
-// ---------------------------------------------------------------------------
-
-// NOTE: full human output snapshot (all issue types combined) is not snapshotted
-// because FxHashMap iteration order makes dependency listing non-deterministic.
-// Individual issue-type snapshots below are stable.
-
 #[test]
 fn check_human_output_unused_files_only() {
     let output = run_plow("check", "basic-project", &["--unused-files", "--quiet"]);
@@ -428,10 +405,6 @@ fn check_human_output_unused_exports_only() {
     insta::assert_snapshot!("check_human_unused_exports_only", redacted);
 }
 
-// ---------------------------------------------------------------------------
-// --include-entry-exports: global flag + config-file support (issue #249)
-// ---------------------------------------------------------------------------
-
 fn combined_check_unused_export_names(json: &serde_json::Value) -> Vec<String> {
     json["check"]["unused_exports"]
         .as_array()
@@ -445,8 +418,6 @@ fn combined_check_unused_export_names(json: &serde_json::Value) -> Vec<String> {
 
 #[test]
 fn include_entry_exports_works_in_combined_mode() {
-    // Issue #249: `plow --include-entry-exports` (combined mode, no subcommand)
-    // previously failed clap parsing because the flag was only on `dead-code`.
     let output = run_plow_combined(
         "entry-export-validation",
         &["--include-entry-exports", "--format", "json", "--quiet"],
@@ -467,8 +438,6 @@ fn include_entry_exports_works_in_combined_mode() {
 
 #[test]
 fn include_entry_exports_via_config_file_in_combined_mode() {
-    // Enhancement from issue #249: `includeEntryExports: true` in `.plowrc.json`
-    // should flow through to combined mode without needing the CLI flag.
     let output = run_plow_combined(
         "entry-export-validation-config",
         &["--format", "json", "--quiet"],
@@ -481,7 +450,6 @@ fn include_entry_exports_via_config_file_in_combined_mode() {
     );
 }
 
-// NOTE: unused-deps human snapshot skipped — dependency iteration order is non-deterministic
 #[test]
 fn check_human_output_unused_deps_has_content() {
     let output = run_plow("check", "basic-project", &["--unused-deps", "--quiet"]);

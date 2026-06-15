@@ -3,12 +3,13 @@ source: crates/cli/tests/snapshot_tests.rs
 expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"CARGO_PKG_VERSION\")),\n\"\\\"version\\\": \\\"[VERSION]\\\"\",)"
 ---
 {
-  "schema_version": 6,
+  "kind": "dead-code",
+  "schema_version": 7,
   "version": "[VERSION]",
   "elapsed_ms": 42,
-  "total_issues": 21,
+  "total_issues": 25,
   "summary": {
-    "total_issues": 21,
+    "total_issues": 25,
     "unused_files": 1,
     "unused_exports": 1,
     "unused_types": 1,
@@ -16,6 +17,12 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
     "unused_dependencies": 3,
     "unused_enum_members": 1,
     "unused_class_members": 1,
+    "unused_store_members": 1,
+    "unprovided_injects": 1,
+    "unrendered_components": 0,
+    "unused_component_props": 0,
+    "unused_component_emits": 0,
+    "unused_server_actions": 0,
     "unresolved_imports": 1,
     "unlisted_dependencies": 1,
     "duplicate_exports": 1,
@@ -24,12 +31,20 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
     "circular_dependencies": 1,
     "re_export_cycles": 1,
     "boundary_violations": 0,
+    "boundary_coverage_violations": 0,
+    "boundary_call_violations": 0,
+    "policy_violations": 0,
     "stale_suppressions": 0,
     "unused_catalog_entries": 2,
     "empty_catalog_groups": 1,
     "unresolved_catalog_references": 1,
     "unused_dependency_overrides": 1,
-    "misconfigured_dependency_overrides": 1
+    "misconfigured_dependency_overrides": 1,
+    "invalid_client_exports": 1,
+    "mixed_client_server_barrels": 1,
+    "misplaced_directives": 0,
+    "route_collisions": 0,
+    "dynamic_segment_name_conflicts": 0
   },
   "unused_files": [
     {
@@ -117,7 +132,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "description": "Add \"lodash\" to ignoreDependencies in plow config",
           "config_key": "ignoreDependencies",
           "value": "lodash",
-          "value_schema": "https://raw.githubusercontent.com/plow-rs/plow/main/schema.json#/properties/ignoreDependencies/items"
+          "value_schema": "https://raw.githubusercontent.com/fglogan/genesis-plow/main/schema.json#/properties/ignoreDependencies/items"
         }
       ]
     }
@@ -140,7 +155,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "description": "Add \"jest\" to ignoreDependencies in plow config",
           "config_key": "ignoreDependencies",
           "value": "jest",
-          "value_schema": "https://raw.githubusercontent.com/plow-rs/plow/main/schema.json#/properties/ignoreDependencies/items"
+          "value_schema": "https://raw.githubusercontent.com/fglogan/genesis-plow/main/schema.json#/properties/ignoreDependencies/items"
         }
       ]
     }
@@ -163,7 +178,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "description": "Add \"fsevents\" to ignoreDependencies in plow config",
           "config_key": "ignoreDependencies",
           "value": "fsevents",
-          "value_schema": "https://raw.githubusercontent.com/plow-rs/plow/main/schema.json#/properties/ignoreDependencies/items"
+          "value_schema": "https://raw.githubusercontent.com/fglogan/genesis-plow/main/schema.json#/properties/ignoreDependencies/items"
         }
       ]
     }
@@ -215,6 +230,24 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
       ]
     }
   ],
+  "unused_store_members": [
+    {
+      "path": "src/stores/counter.ts",
+      "parent_name": "useCounterStore",
+      "member_name": "legacyAction",
+      "kind": "store_member",
+      "line": 24,
+      "col": 2,
+      "actions": [
+        {
+          "type": "suppress-line",
+          "auto_fixable": false,
+          "description": "Suppress with an inline comment above the line",
+          "comment": "// plow-ignore-next-line unused-store-member"
+        }
+      ]
+    }
+  ],
   "unresolved_imports": [
     {
       "path": "src/app.ts",
@@ -235,7 +268,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "description": "Add \"./missing-module\" to ignoreUnresolvedImports in plow config",
           "config_key": "ignoreUnresolvedImports",
           "value": "./missing-module",
-          "value_schema": "https://raw.githubusercontent.com/plow-rs/plow/main/schema.json#/properties/ignoreUnresolvedImports/items"
+          "value_schema": "https://raw.githubusercontent.com/fglogan/genesis-plow/main/schema.json#/properties/ignoreUnresolvedImports/items"
         },
         {
           "type": "suppress-line",
@@ -269,7 +302,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "description": "Add \"chalk\" to ignoreDependencies in plow config",
           "config_key": "ignoreDependencies",
           "value": "chalk",
-          "value_schema": "https://raw.githubusercontent.com/plow-rs/plow/main/schema.json#/properties/ignoreDependencies/items"
+          "value_schema": "https://raw.githubusercontent.com/fglogan/genesis-plow/main/schema.json#/properties/ignoreDependencies/items"
         }
       ]
     }
@@ -309,7 +342,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
               ]
             }
           ],
-          "value_schema": "https://raw.githubusercontent.com/plow-rs/plow/main/schema.json#/properties/ignoreExports"
+          "value_schema": "https://raw.githubusercontent.com/fglogan/genesis-plow/main/schema.json#/properties/ignoreExports"
         },
         {
           "type": "remove-duplicate",
@@ -345,7 +378,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "description": "Add \"zod\" to ignoreDependencies in plow config",
           "config_key": "ignoreDependencies",
           "value": "zod",
-          "value_schema": "https://raw.githubusercontent.com/plow-rs/plow/main/schema.json#/properties/ignoreDependencies/items"
+          "value_schema": "https://raw.githubusercontent.com/fglogan/genesis-plow/main/schema.json#/properties/ignoreDependencies/items"
         }
       ]
     }
@@ -368,7 +401,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "description": "Add \"msw\" to ignoreDependencies in plow config",
           "config_key": "ignoreDependencies",
           "value": "msw",
-          "value_schema": "https://raw.githubusercontent.com/plow-rs/plow/main/schema.json#/properties/ignoreDependencies/items"
+          "value_schema": "https://raw.githubusercontent.com/fglogan/genesis-plow/main/schema.json#/properties/ignoreDependencies/items"
         }
       ]
     }
@@ -382,6 +415,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
       "length": 2,
       "line": 3,
       "col": 0,
+      "edges": [],
       "actions": [
         {
           "type": "refactor-cycle",
@@ -422,6 +456,9 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
     }
   ],
   "boundary_violations": [],
+  "boundary_coverage_violations": [],
+  "boundary_call_violations": [],
+  "policy_violations": [],
   "stale_suppressions": [],
   "unused_catalog_entries": [
     {
@@ -524,7 +561,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
             "catalog": "react17",
             "consumer": "packages/app/package.json"
           },
-          "value_schema": "https://raw.githubusercontent.com/plow-rs/plow/main/schema.json#/properties/ignoreCatalogReferences/items"
+          "value_schema": "https://raw.githubusercontent.com/fglogan/genesis-plow/main/schema.json#/properties/ignoreCatalogReferences/items"
         }
       ]
     }
@@ -554,7 +591,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
             "package": "axios",
             "source": "pnpm-workspace.yaml"
           },
-          "value_schema": "https://raw.githubusercontent.com/plow-rs/plow/main/schema.json#/properties/ignoreDependencyOverrides/items"
+          "value_schema": "https://raw.githubusercontent.com/fglogan/genesis-plow/main/schema.json#/properties/ignoreDependencyOverrides/items"
         }
       ]
     }
@@ -583,9 +620,82 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
             "package": "@types/react@<<18",
             "source": "package.json"
           },
-          "value_schema": "https://raw.githubusercontent.com/plow-rs/plow/main/schema.json#/properties/ignoreDependencyOverrides/items"
+          "value_schema": "https://raw.githubusercontent.com/fglogan/genesis-plow/main/schema.json#/properties/ignoreDependencyOverrides/items"
         }
       ]
+    }
+  ],
+  "invalid_client_exports": [
+    {
+      "path": "app/page.tsx",
+      "export_name": "metadata",
+      "directive": "use client",
+      "line": 3,
+      "col": 0,
+      "actions": [
+        {
+          "type": "move-to-server-module",
+          "auto_fixable": false,
+          "description": "Move the server-only export to a non-client module and import it from there",
+          "note": "A \"use client\" file cannot export a Next.js server-only or route-config name; Next.js rejects it at build time"
+        },
+        {
+          "type": "suppress-line",
+          "auto_fixable": false,
+          "description": "Suppress with an inline comment above the line",
+          "comment": "// plow-ignore-next-line invalid-client-export"
+        }
+      ]
+    }
+  ],
+  "mixed_client_server_barrels": [
+    {
+      "path": "app/components/index.ts",
+      "client_origin": "./Button",
+      "server_origin": "./fetchUser",
+      "line": 2,
+      "col": 0,
+      "actions": [
+        {
+          "type": "split-mixed-barrel",
+          "auto_fixable": false,
+          "description": "Split the barrel so client and server-only modules are re-exported from separate files",
+          "note": "Importing one name from this barrel drags the other's directive across the client/server boundary"
+        },
+        {
+          "type": "suppress-line",
+          "auto_fixable": false,
+          "description": "Suppress with an inline comment above the line",
+          "comment": "// plow-ignore-next-line mixed-client-server-barrel"
+        }
+      ]
+    }
+  ],
+  "misplaced_directives": [],
+  "unprovided_injects": [
+    {
+      "path": "src/useTheme.ts",
+      "key_name": "THEME_KEY",
+      "framework": "vue",
+      "line": 5,
+      "col": 2,
+      "actions": [
+        {
+          "type": "suppress-line",
+          "auto_fixable": false,
+          "description": "Suppress with an inline comment above the line",
+          "comment": "// plow-ignore-next-line unprovided-inject"
+        }
+      ]
+    }
+  ],
+  "route_collisions": [],
+  "dynamic_segment_name_conflicts": [],
+  "next_steps": [
+    {
+      "id": "trace-unused-export",
+      "command": "plow dead-code --trace src/utils.ts:helperFn",
+      "reason": "verify an export is truly unused before deleting"
     }
   ]
 }

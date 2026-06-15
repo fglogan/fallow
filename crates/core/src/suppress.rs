@@ -1,18 +1,27 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use plow_config::{ResolvedConfig, RulesConfig, Severity};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
-// Re-export types from plow-types
-pub use plow_types::suppress::{IssueKind, Suppression, UnknownSuppressionKind};
+pub use plow_types::suppress::{
+    IssueKind, PolicyRuleSuppression, Suppression, UnknownSuppressionKind, issue_kind_to_kebab,
+};
 
-// Re-export parsing functions from plow-extract
 pub use plow_extract::suppress::parse_suppressions_from_source;
 
 use crate::discover::FileId;
 use crate::extract::ModuleInfo;
 use crate::graph::ModuleGraph;
-use crate::results::{StaleSuppression, SuppressionOrigin};
+use crate::results::{ActiveSuppression, StaleSuppression, SuppressionOrigin};
+
+/// Convert an [`IssueKind`] to its canonical kebab-case wire string.
+///
+/// Single source of truth for the kind-to-string mapping, shared by stale
+/// detection and active-suppression capture so the two never drift.
+#[must_use]
+pub fn kind_to_kebab(kind: IssueKind) -> &'static str {
+    issue_kind_to_kebab(kind)
+}
 
 /// Map an `IssueKind` to its corresponding severity in `RulesConfig`.
 ///
@@ -32,6 +41,8 @@ fn severity_for_kind(rules: &RulesConfig, kind: IssueKind) -> Severity {
         IssueKind::UnusedDevDependency => rules.unused_dev_dependencies,
         IssueKind::UnusedEnumMember => rules.unused_enum_members,
         IssueKind::UnusedClassMember => rules.unused_class_members,
+        IssueKind::UnusedStoreMember => rules.unused_store_members,
+        IssueKind::UnprovidedInject => rules.unprovided_injects,
         IssueKind::UnresolvedImport => rules.unresolved_imports,
         IssueKind::UnlistedDependency => rules.unlisted_dependencies,
         IssueKind::DuplicateExport => rules.duplicate_exports,
@@ -48,7 +59,18 @@ fn severity_for_kind(rules: &RulesConfig, kind: IssueKind) -> Severity {
         IssueKind::UnresolvedCatalogReference => rules.unresolved_catalog_references,
         IssueKind::UnusedDependencyOverride => rules.unused_dependency_overrides,
         IssueKind::MisconfiguredDependencyOverride => rules.misconfigured_dependency_overrides,
-        // No corresponding rule. Short-circuited earlier via `NON_CORE_KINDS`.
+        IssueKind::SecurityClientServerLeak => rules.security_client_server_leak,
+        IssueKind::SecuritySink => rules.security_sink,
+        IssueKind::PolicyViolation => rules.policy_violation,
+        IssueKind::InvalidClientExport => rules.invalid_client_export,
+        IssueKind::MixedClientServerBarrel => rules.mixed_client_server_barrel,
+        IssueKind::MisplacedDirective => rules.misplaced_directive,
+        IssueKind::RouteCollision => rules.route_collision,
+        IssueKind::DynamicSegmentNameConflict => rules.dynamic_segment_name_conflict,
+        IssueKind::UnrenderedComponent => rules.unrendered_components,
+        IssueKind::UnusedComponentProp => rules.unused_component_props,
+        IssueKind::UnusedComponentEmit => rules.unused_component_emits,
+        IssueKind::UnusedServerAction => rules.unused_server_actions,
         IssueKind::Complexity | IssueKind::CodeDuplication => Severity::Error,
     }
 }
@@ -59,12 +81,10 @@ fn severity_for_kind(rules: &RulesConfig, kind: IssueKind) -> Severity {
 /// consumed by core detectors). Without this exclusion, these suppressions
 /// would always appear stale since no core detector checks them.
 const NON_CORE_KINDS: &[IssueKind] = &[
-    // CLI-side: checked in health/flags/dupes commands, not in find_dead_code_full
     IssueKind::Complexity,
     IssueKind::CoverageGaps,
     IssueKind::FeatureFlag,
     IssueKind::CodeDuplication,
-    // Dep-level: not file-scoped, suppression path is via config ignoreDependencies
     IssueKind::UnusedDependency,
     IssueKind::UnusedDevDependency,
     IssueKind::UnlistedDependency,
@@ -75,9 +95,6 @@ const NON_CORE_KINDS: &[IssueKind] = &[
     IssueKind::UnresolvedCatalogReference,
     IssueKind::UnusedDependencyOverride,
     IssueKind::MisconfiguredDependencyOverride,
-    // Meta: stale-suppression itself is never consumed by any detector,
-    // so a `// plow-ignore-next-line stale-suppression` comment would
-    // always appear stale. Exclude to prevent recursive confusion.
     IssueKind::StaleSuppression,
 ];
 
@@ -174,12 +191,7 @@ impl<'a> SuppressionContext<'a> {
             return false;
         };
         for (i, s) in supps.iter().enumerate() {
-            let matched = if s.line == 0 {
-                s.kind.is_none() || s.kind == Some(kind)
-            } else {
-                s.line == line && (s.kind.is_none() || s.kind == Some(kind))
-            };
-            if matched {
+            if s.matches_issue_kind(line, kind) {
                 used[i].store(true, Ordering::Relaxed);
                 return true;
             }
@@ -198,7 +210,31 @@ impl<'a> SuppressionContext<'a> {
             return false;
         };
         for (i, s) in supps.iter().enumerate() {
-            if s.line == 0 && (s.kind.is_none() || s.kind == Some(kind)) {
+            if s.line == 0 && s.matches_issue_kind(0, kind) {
+                used[i].store(true, Ordering::Relaxed);
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Check if a policy finding at a given line should be suppressed.
+    #[must_use]
+    pub fn is_policy_suppressed(
+        &self,
+        file_id: FileId,
+        line: u32,
+        pack: &str,
+        rule_id: &str,
+    ) -> bool {
+        let Some(supps) = self.by_file.get(&file_id) else {
+            return false;
+        };
+        let Some(used) = self.used.get(&file_id) else {
+            return false;
+        };
+        for (i, s) in supps.iter().enumerate() {
+            if s.matches_policy_rule(line, pack, rule_id) {
                 used[i].store(true, Ordering::Relaxed);
                 return true;
             }
@@ -237,12 +273,11 @@ impl<'a> SuppressionContext<'a> {
         config: &ResolvedConfig,
     ) -> Vec<StaleSuppression> {
         let mut stale = Vec::new();
+        let mut warned_unknown_policy_targets: FxHashSet<(String, String)> = FxHashSet::default();
 
         for (&file_id, supps) in &self.by_file {
             let used = &self.used[&file_id];
             let path = &graph.modules[file_id.0 as usize].path;
-            // Resolve rules once per file so per-file `overrides.rules`
-            // apply uniformly to all suppressions in this module.
             let file_rules = config.resolve_rules_for_path(path);
 
             for (i, s) in supps.iter().enumerate() {
@@ -250,61 +285,41 @@ impl<'a> SuppressionContext<'a> {
                     continue;
                 }
 
-                // Skip suppression kinds that are only checked in the CLI layer.
-                // These were never presented to the core detectors, so they
-                // appear unconsumed, but are not actually stale.
-                if let Some(kind) = s.kind
+                if let Some(kind) = s.issue_kind_target()
                     && NON_CORE_KINDS.contains(&kind)
                 {
                     continue;
                 }
 
-                // Skip suppressions whose target kind is disabled in the
-                // resolved rules for this file. Blanket suppressions
-                // (`s.kind == None`) are never skipped on this basis: the
-                // marker is not anchored to any specific dormant kind, so
-                // "nothing matched" still means genuinely stale.
-                if let Some(kind) = s.kind
+                if let Some(kind) = s.issue_kind_target()
                     && severity_for_kind(&file_rules, kind) == Severity::Off
                 {
                     continue;
                 }
 
-                let is_file_level = s.line == 0;
-                let issue_kind_str = s.kind.map(|k| {
-                    // Convert back to the kebab-case string for output
-                    match k {
-                        IssueKind::UnusedFile => "unused-file",
-                        IssueKind::UnusedExport => "unused-export",
-                        IssueKind::UnusedType => "unused-type",
-                        IssueKind::PrivateTypeLeak => "private-type-leak",
-                        IssueKind::UnusedDependency => "unused-dependency",
-                        IssueKind::UnusedDevDependency => "unused-dev-dependency",
-                        IssueKind::UnusedEnumMember => "unused-enum-member",
-                        IssueKind::UnusedClassMember => "unused-class-member",
-                        IssueKind::UnresolvedImport => "unresolved-import",
-                        IssueKind::UnlistedDependency => "unlisted-dependency",
-                        IssueKind::DuplicateExport => "duplicate-export",
-                        IssueKind::CodeDuplication => "code-duplication",
-                        IssueKind::CircularDependency => "circular-dependency",
-                        IssueKind::ReExportCycle => "re-export-cycle",
-                        IssueKind::TypeOnlyDependency => "type-only-dependency",
-                        IssueKind::TestOnlyDependency => "test-only-dependency",
-                        IssueKind::BoundaryViolation => "boundary-violation",
-                        IssueKind::CoverageGaps => "coverage-gaps",
-                        IssueKind::FeatureFlag => "feature-flag",
-                        IssueKind::Complexity => "complexity",
-                        IssueKind::StaleSuppression => "stale-suppression",
-                        IssueKind::PnpmCatalogEntry => "unused-catalog-entry",
-                        IssueKind::EmptyCatalogGroup => "empty-catalog-group",
-                        IssueKind::UnresolvedCatalogReference => "unresolved-catalog-reference",
-                        IssueKind::UnusedDependencyOverride => "unused-dependency-override",
-                        IssueKind::MisconfiguredDependencyOverride => {
-                            "misconfigured-dependency-override"
+                if let Some(target) = s.policy_rule_target() {
+                    if file_rules.policy_violation == Severity::Off
+                        || policy_rule_is_disabled(config, target)
+                    {
+                        continue;
+                    }
+
+                    if !policy_rule_exists(config, target) {
+                        let token = target.token();
+                        let key = (path.to_string_lossy().to_string(), token.clone());
+                        if warned_unknown_policy_targets.insert(key) {
+                            tracing::warn!(
+                                "{}:{}: suppression '{}' names no loaded rule-pack rule",
+                                path.display(),
+                                s.comment_line,
+                                token
+                            );
                         }
                     }
-                    .to_string()
-                });
+                }
+
+                let is_file_level = s.line == 0;
+                let issue_kind_str = s.target_token();
 
                 stale.push(StaleSuppression {
                     path: path.clone(),
@@ -319,10 +334,6 @@ impl<'a> SuppressionContext<'a> {
             }
         }
 
-        // Surface every unknown suppression token (typo, obsolete kind name, kind
-        // renamed in a newer plow release) as a stale suppression. Without
-        // this, the entire marker would be silently discarded and the user
-        // would never learn the suppression was rejected. See issue #449.
         for (&file_id, unknowns) in &self.unknown_kinds {
             let path = &graph.modules[file_id.0 as usize].path;
             for u in *unknowns {
@@ -341,6 +352,41 @@ impl<'a> SuppressionContext<'a> {
 
         stale
     }
+
+    /// Collect every suppression comment present in the analyzed files this run,
+    /// keyed by file path and kind.
+    ///
+    /// This is the "active-suppression state" the Plow Impact value report
+    /// needs (issue: v1.5 attribution): to tell a genuinely resolved finding
+    /// (code removed) from one merely silenced by a newly-added `plow-ignore`,
+    /// impact records which suppressions are in play each run and looks for ones
+    /// that newly appeared covering a disappeared finding's kind.
+    ///
+    /// Unlike [`Self::find_stale`], this returns ALL present suppressions
+    /// regardless of whether a core detector consumed them, and across every
+    /// kind (dead-code, complexity, code-duplication, ...). Impact only needs to
+    /// know a suppression for `(file, kind)` exists; a present-but-stale entry is
+    /// harmless because impact's discriminator keys on a suppression that newly
+    /// appeared between two recorded runs, and a finding silenced by a present
+    /// suppression was never reported (so it never enters the resolved tally).
+    /// Complexity and code-duplication suppressions are consumed in the CLI
+    /// layer rather than through this context, so capturing presence here is the
+    /// single uniform mechanism that covers all three impact categories.
+    #[must_use]
+    pub fn all_suppressions(&self, graph: &ModuleGraph) -> Vec<ActiveSuppression> {
+        let mut active = Vec::new();
+        for (&file_id, supps) in &self.by_file {
+            let path = &graph.modules[file_id.0 as usize].path;
+            for s in *supps {
+                active.push(ActiveSuppression {
+                    path: path.clone(),
+                    kind: s.target_token(),
+                    is_file_level: s.line == 0,
+                });
+            }
+        }
+        active
+    }
 }
 
 /// Check if a specific issue at a given line should be suppressed.
@@ -349,14 +395,9 @@ impl<'a> SuppressionContext<'a> {
 /// (e.g., CLI health/flags commands) that don't need tracking.
 #[must_use]
 pub fn is_suppressed(suppressions: &[Suppression], line: u32, kind: IssueKind) -> bool {
-    suppressions.iter().any(|s| {
-        // File-wide suppression
-        if s.line == 0 {
-            return s.kind.is_none() || s.kind == Some(kind);
-        }
-        // Line-specific suppression
-        s.line == line && (s.kind.is_none() || s.kind == Some(kind))
-    })
+    suppressions
+        .iter()
+        .any(|s| s.matches_issue_kind(line, kind))
 }
 
 /// Check if the entire file is suppressed (for issue types that don't have line numbers).
@@ -366,7 +407,23 @@ pub fn is_suppressed(suppressions: &[Suppression], line: u32, kind: IssueKind) -
 pub fn is_file_suppressed(suppressions: &[Suppression], kind: IssueKind) -> bool {
     suppressions
         .iter()
-        .any(|s| s.line == 0 && (s.kind.is_none() || s.kind == Some(kind)))
+        .any(|s| s.line == 0 && s.matches_issue_kind(0, kind))
+}
+
+fn policy_rule_exists(config: &ResolvedConfig, target: &PolicyRuleSuppression) -> bool {
+    config.rule_packs.iter().any(|pack| {
+        pack.name == target.pack && pack.rules.iter().any(|rule| rule.id == target.rule_id)
+    })
+}
+
+fn policy_rule_is_disabled(config: &ResolvedConfig, target: &PolicyRuleSuppression) -> bool {
+    config.rule_packs.iter().any(|pack| {
+        pack.name == target.pack
+            && pack
+                .rules
+                .iter()
+                .any(|rule| rule.id == target.rule_id && rule.severity == Some(Severity::Off))
+    })
 }
 
 #[cfg(test)]
@@ -399,7 +456,6 @@ mod tests {
             severity_for_kind(&rules, IssueKind::BoundaryViolation),
             Severity::Off
         );
-        // PrivateTypeLeak defaults to Off across the project.
         assert_eq!(
             severity_for_kind(&rules, IssueKind::PrivateTypeLeak),
             Severity::Off
@@ -478,6 +534,20 @@ mod tests {
             IssueKind::UnusedDependencyOverride,
             IssueKind::MisconfiguredDependencyOverride,
             IssueKind::ReExportCycle,
+            IssueKind::SecurityClientServerLeak,
+            IssueKind::SecuritySink,
+            IssueKind::PolicyViolation,
+            IssueKind::InvalidClientExport,
+            IssueKind::MixedClientServerBarrel,
+            IssueKind::MisplacedDirective,
+            IssueKind::UnusedStoreMember,
+            IssueKind::UnprovidedInject,
+            IssueKind::RouteCollision,
+            IssueKind::DynamicSegmentNameConflict,
+            IssueKind::UnrenderedComponent,
+            IssueKind::UnusedComponentProp,
+            IssueKind::UnusedComponentEmit,
+            IssueKind::UnusedServerAction,
         ] {
             assert_eq!(
                 IssueKind::from_discriminant(kind.to_discriminant()),
@@ -485,7 +555,7 @@ mod tests {
             );
         }
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(27), None);
+        assert_eq!(IssueKind::from_discriminant(41), None);
     }
 
     #[test]
@@ -494,7 +564,7 @@ mod tests {
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 0);
-        assert!(suppressions[0].kind.is_none());
+        assert!(suppressions[0].issue_kind_target().is_none());
     }
 
     #[test]
@@ -503,17 +573,19 @@ mod tests {
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 0);
-        assert_eq!(suppressions[0].kind, Some(IssueKind::UnusedExport));
+        assert_eq!(
+            suppressions[0].issue_kind_target(),
+            Some(IssueKind::UnusedExport)
+        );
     }
 
     #[test]
     fn parse_next_line_suppression() {
-        let source =
-            "import { x } from './x';\n// plow-ignore-next-line\nexport const foo = 1;\n";
+        let source = "import { x } from './x';\n// plow-ignore-next-line\nexport const foo = 1;\n";
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 3); // suppresses line 3 (the export)
-        assert!(suppressions[0].kind.is_none());
+        assert!(suppressions[0].issue_kind_target().is_none());
     }
 
     #[test]
@@ -522,61 +594,45 @@ mod tests {
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 2);
-        assert_eq!(suppressions[0].kind, Some(IssueKind::UnusedExport));
+        assert_eq!(
+            suppressions[0].issue_kind_target(),
+            Some(IssueKind::UnusedExport)
+        );
     }
 
     #[test]
     fn parse_unknown_kind_surfaces_as_unknown() {
         let source = "// plow-ignore-next-line typo-kind\nexport const foo = 1;\n";
         let parsed = parse_suppressions_from_source(source);
-        // No known kinds on the marker, so no suppression is recorded.
         assert!(parsed.suppressions.is_empty());
-        // The unknown token is preserved for downstream stale-suppression
-        // reporting (see issue #449).
         assert_eq!(parsed.unknown_kinds.len(), 1);
         assert_eq!(parsed.unknown_kinds[0].token, "typo-kind");
     }
 
     #[test]
     fn is_suppressed_file_wide() {
-        let suppressions = vec![Suppression {
-            line: 0,
-            comment_line: 1,
-            kind: None,
-        }];
+        let suppressions = vec![Suppression::all(0, 1)];
         assert!(is_suppressed(&suppressions, 5, IssueKind::UnusedExport));
         assert!(is_suppressed(&suppressions, 10, IssueKind::UnusedFile));
     }
 
     #[test]
     fn is_suppressed_file_wide_specific_kind() {
-        let suppressions = vec![Suppression {
-            line: 0,
-            comment_line: 1,
-            kind: Some(IssueKind::UnusedExport),
-        }];
+        let suppressions = vec![Suppression::issue(0, 1, IssueKind::UnusedExport)];
         assert!(is_suppressed(&suppressions, 5, IssueKind::UnusedExport));
         assert!(!is_suppressed(&suppressions, 5, IssueKind::UnusedType));
     }
 
     #[test]
     fn is_suppressed_line_specific() {
-        let suppressions = vec![Suppression {
-            line: 5,
-            comment_line: 4,
-            kind: None,
-        }];
+        let suppressions = vec![Suppression::all(5, 4)];
         assert!(is_suppressed(&suppressions, 5, IssueKind::UnusedExport));
         assert!(!is_suppressed(&suppressions, 6, IssueKind::UnusedExport));
     }
 
     #[test]
     fn is_suppressed_line_and_kind() {
-        let suppressions = vec![Suppression {
-            line: 5,
-            comment_line: 4,
-            kind: Some(IssueKind::UnusedExport),
-        }];
+        let suppressions = vec![Suppression::issue(5, 4, IssueKind::UnusedExport)];
         assert!(is_suppressed(&suppressions, 5, IssueKind::UnusedExport));
         assert!(!is_suppressed(&suppressions, 5, IssueKind::UnusedType));
         assert!(!is_suppressed(&suppressions, 6, IssueKind::UnusedExport));
@@ -589,36 +645,23 @@ mod tests {
 
     #[test]
     fn is_file_suppressed_works() {
-        let suppressions = vec![Suppression {
-            line: 0,
-            comment_line: 1,
-            kind: None,
-        }];
+        let suppressions = vec![Suppression::all(0, 1)];
         assert!(is_file_suppressed(&suppressions, IssueKind::UnusedFile));
 
-        let suppressions = vec![Suppression {
-            line: 0,
-            comment_line: 1,
-            kind: Some(IssueKind::UnusedFile),
-        }];
+        let suppressions = vec![Suppression::issue(0, 1, IssueKind::UnusedFile)];
         assert!(is_file_suppressed(&suppressions, IssueKind::UnusedFile));
         assert!(!is_file_suppressed(&suppressions, IssueKind::UnusedExport));
 
-        // Line-specific suppression should not count as file-wide
-        let suppressions = vec![Suppression {
-            line: 5,
-            comment_line: 4,
-            kind: None,
-        }];
+        let suppressions = vec![Suppression::all(5, 4)];
         assert!(!is_file_suppressed(&suppressions, IssueKind::UnusedFile));
     }
 
     #[test]
     fn parse_oxc_comments() {
-        use plow_extract::suppress::parse_suppressions;
         use oxc_allocator::Allocator;
         use oxc_parser::Parser;
         use oxc_span::SourceType;
+        use plow_extract::suppress::parse_suppressions;
 
         let source = "// plow-ignore-file\n// plow-ignore-next-line unused-export\nexport const foo = 1;\nexport const bar = 2;\n";
         let allocator = Allocator::default();
@@ -627,13 +670,14 @@ mod tests {
         let suppressions = parse_suppressions(&parser_return.program.comments, source).suppressions;
         assert_eq!(suppressions.len(), 2);
 
-        // File-wide suppression
         assert_eq!(suppressions[0].line, 0);
-        assert!(suppressions[0].kind.is_none());
+        assert!(suppressions[0].issue_kind_target().is_none());
 
-        // Next-line suppression with kind
         assert_eq!(suppressions[1].line, 3); // suppresses line 3 (export const foo)
-        assert_eq!(suppressions[1].kind, Some(IssueKind::UnusedExport));
+        assert_eq!(
+            suppressions[1].issue_kind_target(),
+            Some(IssueKind::UnusedExport)
+        );
     }
 
     #[test]
@@ -642,22 +686,14 @@ mod tests {
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 0);
-        assert!(suppressions[0].kind.is_none());
+        assert!(suppressions[0].issue_kind_target().is_none());
     }
 
     #[test]
     fn is_suppressed_multiple_suppressions_different_kinds() {
         let suppressions = vec![
-            Suppression {
-                line: 5,
-                comment_line: 4,
-                kind: Some(IssueKind::UnusedExport),
-            },
-            Suppression {
-                line: 5,
-                comment_line: 4,
-                kind: Some(IssueKind::UnusedType),
-            },
+            Suppression::issue(5, 4, IssueKind::UnusedExport),
+            Suppression::issue(5, 4, IssueKind::UnusedType),
         ];
         assert!(is_suppressed(&suppressions, 5, IssueKind::UnusedExport));
         assert!(is_suppressed(&suppressions, 5, IssueKind::UnusedType));
@@ -667,33 +703,19 @@ mod tests {
     #[test]
     fn is_suppressed_file_wide_blanket_and_specific_coexist() {
         let suppressions = vec![
-            Suppression {
-                line: 0,
-                comment_line: 1,
-                kind: Some(IssueKind::UnusedExport),
-            },
-            Suppression {
-                line: 5,
-                comment_line: 4,
-                kind: None, // blanket suppress on line 5
-            },
+            Suppression::issue(0, 1, IssueKind::UnusedExport),
+            Suppression::all(5, 4),
         ];
-        // File-wide suppression only covers UnusedExport
         assert!(is_suppressed(&suppressions, 10, IssueKind::UnusedExport));
         assert!(!is_suppressed(&suppressions, 10, IssueKind::UnusedType));
 
-        // Line 5 blanket suppression covers everything on line 5
         assert!(is_suppressed(&suppressions, 5, IssueKind::UnusedType));
         assert!(is_suppressed(&suppressions, 5, IssueKind::UnusedExport));
     }
 
     #[test]
     fn is_file_suppressed_blanket_suppresses_all_kinds() {
-        let suppressions = vec![Suppression {
-            line: 0,
-            comment_line: 1,
-            kind: None, // blanket file-wide
-        }];
+        let suppressions = vec![Suppression::all(0, 1)];
         assert!(is_file_suppressed(&suppressions, IssueKind::UnusedFile));
         assert!(is_file_suppressed(&suppressions, IssueKind::UnusedExport));
         assert!(is_file_suppressed(&suppressions, IssueKind::UnusedType));
@@ -713,14 +735,26 @@ mod tests {
     }
 
     #[test]
+    fn scoped_policy_suppression_does_not_match_generic_policy_kind() {
+        let suppressions = vec![Suppression::policy_rule(5, 4, "team-policy", "no-fs")];
+        assert!(!is_suppressed(&suppressions, 5, IssueKind::PolicyViolation));
+    }
+
+    #[test]
     fn parse_multiple_next_line_suppressions() {
         let source = "// plow-ignore-next-line unused-export\nexport const foo = 1;\n// plow-ignore-next-line unused-type\nexport type Bar = string;\n";
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 2);
         assert_eq!(suppressions[0].line, 2);
-        assert_eq!(suppressions[0].kind, Some(IssueKind::UnusedExport));
+        assert_eq!(
+            suppressions[0].issue_kind_target(),
+            Some(IssueKind::UnusedExport)
+        );
         assert_eq!(suppressions[1].line, 4);
-        assert_eq!(suppressions[1].kind, Some(IssueKind::UnusedType));
+        assert_eq!(
+            suppressions[1].issue_kind_target(),
+            Some(IssueKind::UnusedType)
+        );
     }
 
     #[test]
@@ -729,7 +763,10 @@ mod tests {
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 0);
-        assert_eq!(suppressions[0].kind, Some(IssueKind::CodeDuplication));
+        assert_eq!(
+            suppressions[0].issue_kind_target(),
+            Some(IssueKind::CodeDuplication)
+        );
     }
 
     #[test]
@@ -738,7 +775,10 @@ mod tests {
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 0);
-        assert_eq!(suppressions[0].kind, Some(IssueKind::CircularDependency));
+        assert_eq!(
+            suppressions[0].issue_kind_target(),
+            Some(IssueKind::CircularDependency)
+        );
     }
 
     /// Every `IssueKind` must be explicitly placed in either `NON_CORE_KINDS`
@@ -748,20 +788,25 @@ mod tests {
     /// being classified, preventing silent false-positive stale reports.
     #[test]
     fn all_issue_kinds_classified_for_stale_detection() {
-        // Kinds checked by core detectors via SuppressionContext
         let core_kinds = [
             IssueKind::UnusedFile,
             IssueKind::UnusedExport,
             IssueKind::UnusedType,
             IssueKind::UnusedEnumMember,
             IssueKind::UnusedClassMember,
+            IssueKind::UnusedStoreMember,
+            IssueKind::UnprovidedInject,
             IssueKind::UnresolvedImport,
             IssueKind::DuplicateExport,
             IssueKind::CircularDependency,
             IssueKind::BoundaryViolation,
+            IssueKind::InvalidClientExport,
+            IssueKind::RouteCollision,
+            IssueKind::DynamicSegmentNameConflict,
+            IssueKind::UnrenderedComponent,
+            IssueKind::UnusedServerAction,
         ];
 
-        // All variants that exist
         let all_kinds = [
             IssueKind::UnusedFile,
             IssueKind::UnusedExport,
@@ -770,6 +815,8 @@ mod tests {
             IssueKind::UnusedDevDependency,
             IssueKind::UnusedEnumMember,
             IssueKind::UnusedClassMember,
+            IssueKind::UnusedStoreMember,
+            IssueKind::UnprovidedInject,
             IssueKind::UnresolvedImport,
             IssueKind::UnlistedDependency,
             IssueKind::DuplicateExport,
@@ -787,6 +834,11 @@ mod tests {
             IssueKind::UnresolvedCatalogReference,
             IssueKind::UnusedDependencyOverride,
             IssueKind::MisconfiguredDependencyOverride,
+            IssueKind::InvalidClientExport,
+            IssueKind::RouteCollision,
+            IssueKind::DynamicSegmentNameConflict,
+            IssueKind::UnrenderedComponent,
+            IssueKind::UnusedServerAction,
         ];
 
         for kind in all_kinds {

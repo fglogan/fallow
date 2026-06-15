@@ -1,8 +1,8 @@
-# Filter fallow results to only include issues in changed files.
+# Filter plow results to only include issues in changed files.
 # Usage: jq --argjson changed '["src/a.ts","src/b.ts"]' -f filter-changed.jq results.json
 #
 # Handles single-command output (check, dupes, health) and combined output.
-# Paths in $changed must be relative to the project root (matching fallow JSON paths).
+# Paths in $changed must be relative to the project root (matching plow JSON paths).
 
 def in_changed: . as $path | $changed | any(. == $path);
 
@@ -17,6 +17,7 @@ def filter_check:
   (if .private_type_leaks   then .private_type_leaks   |= map(select(.path | in_changed))      else . end) |
   (if .unused_enum_members  then .unused_enum_members  |= map(select(.path | in_changed))      else . end) |
   (if .unused_class_members then .unused_class_members |= map(select(.path | in_changed))      else . end) |
+  (if .unused_store_members then .unused_store_members |= map(select(.path | in_changed))      else . end) |
   (if .unresolved_imports   then .unresolved_imports   |= map(select(.path | in_changed))      else . end) |
   (if .unlisted_dependencies then
     .unlisted_dependencies |= map(select(.imported_from | any(.path | in_changed)))
@@ -33,6 +34,15 @@ def filter_check:
   (if .boundary_violations then
     .boundary_violations |= map(select(.from_path | in_changed))
   else . end) |
+  (if .boundary_coverage_violations then
+    .boundary_coverage_violations |= map(select(.path | in_changed))
+  else . end) |
+  (if .boundary_call_violations then
+    .boundary_call_violations |= map(select(.path | in_changed))
+  else . end) |
+  (if .policy_violations then
+    .policy_violations |= map(select(.path | in_changed))
+  else . end) |
   (if .stale_suppressions then
     .stale_suppressions |= map(select(.path | in_changed))
   else . end) |
@@ -48,6 +58,21 @@ def filter_check:
   (if .misconfigured_dependency_overrides then
     .misconfigured_dependency_overrides |= map(select(.path | in_changed))
   else . end) |
+  (if .invalid_client_exports then
+    .invalid_client_exports |= map(select(.path | in_changed))
+  else . end) |
+  (if .mixed_client_server_barrels then
+    .mixed_client_server_barrels |= map(select(.path | in_changed))
+  else . end) |
+  (if .misplaced_directives then
+    .misplaced_directives |= map(select(.path | in_changed))
+  else . end) |
+  (if .route_collisions then
+    .route_collisions |= map(select(.path | in_changed))
+  else . end) |
+  (if .dynamic_segment_name_conflicts then
+    .dynamic_segment_name_conflicts |= map(select(.path | in_changed))
+  else . end) |
   # Recalculate total_issues from filtered arrays
   (if .total_issues != null then
     .total_issues = (
@@ -60,19 +85,28 @@ def filter_check:
       (.unused_optional_dependencies // [] | length) +
       (.unused_enum_members // [] | length) +
       (.unused_class_members // [] | length) +
+      (.unused_store_members // [] | length) +
       (.unresolved_imports // [] | length) +
       (.unlisted_dependencies // [] | length) +
       (.duplicate_exports // [] | length) +
       (.circular_dependencies // [] | length) +
       (.re_export_cycles // [] | length) +
       (.boundary_violations // [] | length) +
+      (.boundary_coverage_violations // [] | length) +
+      (.boundary_call_violations // [] | length) +
+      (.policy_violations // [] | length) +
       (.type_only_dependencies // [] | length) +
       (.stale_suppressions // [] | length) +
       (.unused_catalog_entries // [] | length) +
       (.empty_catalog_groups // [] | length) +
       (.unresolved_catalog_references // [] | length) +
       (.unused_dependency_overrides // [] | length) +
-      (.misconfigured_dependency_overrides // [] | length)
+      (.misconfigured_dependency_overrides // [] | length) +
+      (.invalid_client_exports // [] | length) +
+      (.mixed_client_server_barrels // [] | length) +
+      (.misplaced_directives // [] | length) +
+      (.route_collisions // [] | length) +
+      (.dynamic_segment_name_conflicts // [] | length)
     )
   else . end);
 

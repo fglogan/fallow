@@ -1,11 +1,11 @@
 {
   "name": "@plow-cli/darwin-x64",
-  "version": "2.84.0",
+  "version": "2.96.0",
   "description": "Plow CLI binary for macOS x64 (Intel)",
-  "license": "MIT",
+  "license": "LicenseRef-Tempext-Commercial",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/plow-rs/plow.git"
+    "url": "git+https://github.com/fglogan/genesis-plow.git"
   },
   "os": [
     "darwin"

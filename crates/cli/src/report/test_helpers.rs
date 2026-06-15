@@ -4,10 +4,12 @@ use plow_core::extract::MemberKind;
 use plow_core::results::*;
 use plow_types::output_dead_code::{
     BoundaryViolationFinding, CircularDependencyFinding, TestOnlyDependencyFinding,
-    TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnresolvedImportFinding,
-    UnusedClassMemberFinding, UnusedDependencyFinding, UnusedDevDependencyFinding,
-    UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
-    UnusedOptionalDependencyFinding, UnusedTypeFinding,
+    TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
+    UnrenderedComponentFinding, UnresolvedImportFinding, UnusedClassMemberFinding,
+    UnusedComponentEmitFinding, UnusedComponentPropFinding, UnusedDependencyFinding,
+    UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
+    UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
+    UnusedTypeFinding,
 };
 
 /// Build an `AnalysisResults` populated with one issue of every type.
@@ -88,6 +90,15 @@ pub fn sample_results(root: &Path) -> AnalysisResults {
             line: 42,
             col: 4,
         }));
+    r.unused_store_members
+        .push(UnusedStoreMemberFinding::with_actions(UnusedMember {
+            path: root.join("src/store.ts"),
+            parent_name: "useStore".to_string(),
+            member_name: "legacyAction".to_string(),
+            kind: MemberKind::StoreMember,
+            line: 24,
+            col: 2,
+        }));
     r.unresolved_imports
         .push(UnresolvedImportFinding::with_actions(UnresolvedImport {
             path: root.join("src/app.ts"),
@@ -146,6 +157,7 @@ pub fn sample_results(root: &Path) -> AnalysisResults {
                 length: 2,
                 line: 3,
                 col: 0,
+                edges: Vec::new(),
                 is_cross_package: false,
             },
         ));
@@ -159,6 +171,54 @@ pub fn sample_results(root: &Path) -> AnalysisResults {
             line: 2,
             col: 0,
         }));
+    r.unprovided_injects
+        .push(UnprovidedInjectFinding::with_actions(UnprovidedInject {
+            path: root.join("src/useTheme.ts"),
+            key_name: "THEME_KEY".to_string(),
+            framework: "vue".to_string(),
+            line: 5,
+            col: 2,
+        }));
+    r.unrendered_components
+        .push(UnrenderedComponentFinding::with_actions(
+            UnrenderedComponent {
+                path: root.join("src/components/Orphan.vue"),
+                component_name: "Orphan".to_string(),
+                framework: "vue".to_string(),
+                reachable_via: Some(root.join("src/components/index.ts")),
+                line: 1,
+                col: 0,
+            },
+        ));
+    r.unused_component_props
+        .push(UnusedComponentPropFinding::with_actions(
+            UnusedComponentProp {
+                path: root.join("src/components/Widget.vue"),
+                component_name: "Widget".to_string(),
+                prop_name: "unusedSize".to_string(),
+                line: 4,
+                col: 2,
+            },
+        ));
+    r.unused_component_emits
+        .push(UnusedComponentEmitFinding::with_actions(
+            UnusedComponentEmit {
+                path: root.join("src/components/Widget.vue"),
+                component_name: "Widget".to_string(),
+                emit_name: "unusedClose".to_string(),
+                line: 5,
+                col: 2,
+            },
+        ));
+    r.unused_server_actions
+        .push(UnusedServerActionFinding::with_actions(
+            UnusedServerAction {
+                path: root.join("src/app/actions.ts"),
+                action_name: "submitForm".to_string(),
+                line: 3,
+                col: 0,
+            },
+        ));
     r.stale_suppressions.push(StaleSuppression {
         path: root.join("src/utils.ts"),
         line: 5,

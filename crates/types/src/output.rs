@@ -180,6 +180,28 @@ pub enum FixActionType {
     /// Fix a misconfigured dependency override entry (unparsable key or empty
     /// value).
     FixDependencyOverride,
+    /// Replace a banned call or banned import flagged by a rule-pack rule
+    /// (manual; the rule's message usually names the sanctioned alternative).
+    ResolvePolicyViolation,
+    /// Move a server-only export out of a `"use client"` file into a
+    /// non-client module (manual; used by invalid-client-export findings).
+    MoveToServerModule,
+    /// Split a barrel that re-exports both client and server-only modules
+    /// into separate client and server barrels (manual; used by
+    /// mixed-client-server-barrel findings).
+    SplitMixedBarrel,
+    /// Hoist a misplaced `"use client"` / `"use server"` directive to the
+    /// leading prologue of the file (manual; used by misplaced-directive
+    /// findings).
+    HoistDirective,
+    /// Resolve a Next.js App Router route collision by moving or merging one of
+    /// the files that own the same URL (manual; suppressing a guaranteed build
+    /// error is never the right fix, so this is the primary action).
+    ResolveRouteCollision,
+    /// Resolve a Next.js dynamic-segment name conflict by renaming the dynamic
+    /// segments at the conflicting position to a single consistent slug name
+    /// (manual).
+    ResolveDynamicSegmentNameConflict,
 }
 
 /// Inline-comment suppression for a single finding line.
@@ -336,4 +358,46 @@ pub struct IgnoreExportsRule {
     pub file: String,
     /// Names of exports inside `file` to silently treat as used.
     pub exports: Vec<String>,
+}
+
+/// A read-only follow-up command plow surfaces from the current findings,
+/// emitted as the top-level `next_steps` array on each command's JSON envelope.
+///
+/// `next_steps` exists to point agents and humans sideways to plow's adjacent
+/// verification capabilities (trace, complexity breakdown, audit, workspace
+/// scoping) that telemetry shows agents rarely discover, because they act on the
+/// output in front of them rather than on reference docs.
+///
+/// ## Two hard contracts
+///
+/// 1. **Read-only.** A `next_step` NEVER suggests `plow fix` or any mutating
+///    command. Plow surfaces evidence and verification paths; deciding and
+///    applying the remediation is the agent's job.
+/// 2. **Runnable, placeholder-free.** `command` is always runnable as-is. It
+///    never contains an angle-bracket placeholder (`<...>`); finding-derived
+///    values are filled in from a real, deterministically-selected finding, and
+///    any environment- or user-specific value that cannot be made concrete lives
+///    in `reason` instead. An agent can copy `command` and run it without edits.
+///
+/// Both contracts are enforced by unit tests in
+/// `crates/cli/src/report/suggestions.rs`.
+///
+/// Note: a SEPARATE, unrelated `next_steps` field exists on the
+/// `coverage setup` envelope (`CoverageSetupOutput.next_steps`) as a plain
+/// `Vec<String>` of human onboarding steps. Consumers that read multiple
+/// envelope kinds must route on the envelope's `kind` before interpreting a
+/// `next_steps` field: on analysis envelopes it is `Vec<NextStep>` objects, on
+/// `coverage setup` it is `Vec<String>`.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct NextStep {
+    /// Stable kebab-case key for machine dispatch and de-duplication
+    /// (for example `"trace-unused-export"`). Identity is stable across runs;
+    /// the `command` and `reason` strings may vary with the findings.
+    pub id: String,
+    /// A runnable, read-only command string. Placeholder-free by contract.
+    pub command: String,
+    /// One short phrase explaining why this helps. Carries any value that
+    /// cannot be made concrete in `command`.
+    pub reason: String,
 }

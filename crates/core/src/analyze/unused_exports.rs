@@ -7,7 +7,7 @@ use plow_config::{CompiledIgnoreExportRule, ResolvedConfig};
 use plow_types::extract::{ExportInfo, ExportName, ModuleInfo};
 
 use crate::discover::FileId;
-use crate::graph::{ModuleGraph, ModuleNode};
+use crate::graph::{ExportSymbol, ModuleGraph, ModuleNode};
 use crate::results::{
     DuplicateExport, DuplicateLocation, ExportUsage, PrivateTypeLeak, ReferenceLocation,
     StaleSuppression, SuppressionOrigin, UnusedExport,
@@ -18,6 +18,20 @@ use super::{LineOffsetsMap, byte_offset_to_line_col, read_source};
 
 /// Pre-compiled glob matchers for plugin/framework used_exports rules.
 type PluginMatchers<'a> = Vec<CompiledUsedExportRule<'a>>;
+
+const TANSTACK_ROUTER_PLUGIN_NAME: &str = "tanstack-router";
+
+type UnusedExportModuleResult = (Vec<UnusedExport>, Vec<UnusedExport>, Vec<StaleSuppression>);
+
+struct UnusedExportModuleContext<'a> {
+    graph: &'a ModuleGraph,
+    config: &'a ResolvedConfig,
+    ignore_matchers: &'a [CompiledIgnoreExportRule],
+    plugin_matchers: &'a PluginMatchers<'a>,
+    module_info_by_id: Option<&'a FxHashMap<FileId, &'a ModuleInfo>>,
+    suppressions: &'a SuppressionContext<'a>,
+    line_offsets_by_file: &'a LineOffsetsMap<'a>,
+}
 
 /// Compile plugin-discovered used_exports rules (includes framework preset rules).
 fn compile_plugin_matchers(
@@ -30,6 +44,30 @@ fn compile_plugin_matchers(
         .iter()
         .filter_map(compile_used_export_rule)
         .collect()
+}
+
+/// Compile TanStack route contract export rules for duplicate-export filtering.
+fn compile_tanstack_duplicate_export_matchers(
+    plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
+) -> PluginMatchers<'_> {
+    let Some(pr) = plugin_result else {
+        return Vec::new();
+    };
+    pr.used_exports
+        .iter()
+        .filter(|rule| rule.plugin_name == TANSTACK_ROUTER_PLUGIN_NAME)
+        .filter_map(compile_used_export_rule)
+        .collect()
+}
+
+fn is_tanstack_router_active(
+    plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
+) -> bool {
+    plugin_result.is_some_and(|pr| {
+        pr.active_plugins
+            .iter()
+            .any(|plugin| plugin == TANSTACK_ROUTER_PLUGIN_NAME)
+    })
 }
 
 struct CompiledUsedExportRule<'a> {
@@ -56,13 +94,6 @@ fn compile_used_export_rule(
 }
 
 /// Check whether a module should be skipped for unused-export analysis.
-///
-/// Skips entry points that do not have framework/plugin `used_exports` handling,
-/// CJS-only modules, Svelte files (whose `export let` declarations are component
-/// props), and fully-unreachable modules where every export has zero references
-/// (those are already caught by `find_unused_files`). Unreachable modules with
-/// *some* referenced exports are NOT skipped — their individually unused exports
-/// would otherwise slip through both detectors.
 fn should_skip_module(
     module: &ModuleNode,
     has_plugin_used_exports: bool,
@@ -72,22 +103,16 @@ fn should_skip_module(
         return true;
     }
     if !module.is_reachable() {
-        // Completely unreachable with no references at all → caught by find_unused_files
         return module.exports.iter().all(|e| e.references.is_empty());
     }
-    // CJS modules with module.exports but no named exports: hard to track individually
     if module.has_cjs_exports() && module.exports.is_empty() {
         return true;
     }
-    // Svelte `export let`/`export const` are component props consumed by the runtime;
-    // unreachable Svelte files are still caught by `find_unused_files`.
     module.path.extension().is_some_and(|ext| ext == "svelte")
 }
 
 /// Pick up the subset of ignore + plugin matchers whose globs match this module's
-/// project-relative path. Skips the path-string allocation entirely when both
-/// matcher lists are empty (the common case when the user has no `ignoreExports`
-/// config and no plugin contributed framework rules).
+/// project-relative path.
 fn matchers_for_module<'a>(
     module_path: &std::path::Path,
     config_root: &std::path::Path,
@@ -112,7 +137,7 @@ fn matchers_for_module<'a>(
     (mi, mp)
 }
 
-/// Check whether an export name is covered by config ignore rules or plugin/framework rules.
+/// Check whether an export name is covered by config ignore rules or plugin rules.
 fn is_export_ignored(
     export_name: &str,
     matching_ignore: &[&[String]],
@@ -141,6 +166,38 @@ fn is_js_like_source(path: &std::path::Path) -> bool {
                 ext,
                 "js" | "jsx" | "mjs" | "cjs" | "ts" | "tsx" | "mts" | "cts"
             )
+        })
+}
+
+fn has_route_path_segment(module_path: &std::path::Path, config_root: &std::path::Path) -> bool {
+    let relative_path = module_path.strip_prefix(config_root).unwrap_or(module_path);
+    relative_path
+        .to_string_lossy()
+        .replace('\\', "/")
+        .split('/')
+        .any(|segment| segment == "routes")
+}
+
+fn is_route_tree_generated_file(path: &std::path::Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.starts_with("routeTree.gen."))
+}
+
+fn is_route_referenced_by_tanstack_generated_tree(
+    export_name: &str,
+    export: &ExportSymbol,
+    module: &ModuleNode,
+    graph: &ModuleGraph,
+    config_root: &std::path::Path,
+) -> bool {
+    export_name == "Route"
+        && has_route_path_segment(&module.path, config_root)
+        && export.references.iter().any(|reference| {
+            graph
+                .modules
+                .get(reference.from_file.0 as usize)
+                .is_some_and(|from| is_route_tree_generated_file(&from.path))
         })
 }
 
@@ -201,9 +258,7 @@ fn is_inside_export_specifier(
         )
 }
 
-/// Pick up the subset of ignore matchers (config `ignoreExports`) whose globs match
-/// this module's project-relative path. Used by `find_duplicate_exports` so a file
-/// matched by `ignoreExports` does not contribute to any duplicate-export grouping.
+/// Pick up the subset of ignore matchers whose globs match this module's path.
 fn ignore_matchers_for_module<'a>(
     module_path: &std::path::Path,
     config_root: &std::path::Path,
@@ -219,6 +274,42 @@ fn ignore_matchers_for_module<'a>(
         .filter(|rule| rule.matcher.is_match(file_str.as_ref()))
         .map(|rule| rule.exports.as_slice())
         .collect()
+}
+
+fn export_has_reachable_reference(
+    graph: &ModuleGraph,
+    module: &ModuleNode,
+    export: &ExportSymbol,
+) -> bool {
+    if module.is_reachable() {
+        return !export.references.is_empty();
+    }
+    export.references.iter().any(|r| {
+        graph.modules.get(r.from_file.0 as usize).is_some_and(|m| {
+            debug_assert_eq!(
+                m.file_id, r.from_file,
+                "ModuleGraph::modules FileId-as-index invariant broken"
+            );
+            m.is_reachable()
+        })
+    })
+}
+
+fn stale_expected_unused_suppression(
+    module: &ModuleNode,
+    export: &ExportSymbol,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+) -> StaleSuppression {
+    let (line, col) =
+        byte_offset_to_line_col(line_offsets_by_file, module.file_id, export.span.start);
+    StaleSuppression {
+        path: module.path.clone(),
+        line,
+        col,
+        origin: SuppressionOrigin::JsdocTag {
+            export_name: export.name.to_string(),
+        },
+    }
 }
 
 /// Find exports that are never imported by other files.
@@ -247,169 +338,20 @@ pub fn find_unused_exports(
             None
         };
 
-    let module_results: Vec<(Vec<UnusedExport>, Vec<UnusedExport>, Vec<StaleSuppression>)> = graph
+    let module_context = UnusedExportModuleContext {
+        graph,
+        config,
+        ignore_matchers,
+        plugin_matchers: &plugin_matchers,
+        module_info_by_id: module_info_by_id.as_ref(),
+        suppressions,
+        line_offsets_by_file,
+    };
+
+    let module_results: Vec<UnusedExportModuleResult> = graph
         .modules
         .par_iter()
-        .map(|module| {
-            let mut unused_exports = Vec::new();
-            let mut unused_types = Vec::new();
-            let mut stale_expected_unused = Vec::new();
-
-            // Fast path: modules with no exports can be skipped before any of the
-            // per-module setup (path strip + matcher filter + re_export_names build).
-            // Reachable+entry-point modules with empty exports would fall through
-            // `should_skip_module` anyway; CJS-only modules are caught there too.
-            if module.exports.is_empty() && !module.has_cjs_exports() {
-                return (unused_exports, unused_types, stale_expected_unused);
-            }
-
-            let (matching_ignore, matching_plugin) = matchers_for_module(
-                &module.path,
-                &config.root,
-                ignore_matchers,
-                &plugin_matchers,
-            );
-
-            if should_skip_module(
-                module,
-                !matching_plugin.is_empty(),
-                config.include_entry_exports,
-            ) {
-                return (unused_exports, unused_types, stale_expected_unused);
-            }
-
-            let same_file_used_exports = if let Some(module_info_by_id) = &module_info_by_id {
-                module_info_by_id
-                    .get(&module.file_id)
-                    .map_or_else(FxHashSet::default, |info| {
-                        collect_exports_used_in_file(info, &module.path)
-                    })
-            } else {
-                FxHashSet::default()
-            };
-
-            // Namespace imports are now handled with member-access narrowing in graph.rs:
-            // only specific accessed members get references populated. No blanket skip needed.
-
-            // Pre-compute the set of re-exported names for O(1) is_re_export lookups
-            // inside the export loop. Barrel files synthesize one ExportSymbol per
-            // ReExportEdge, so the naive iter().any() check would be O(N²).
-            let re_export_names: FxHashSet<&str> = module
-                .re_exports
-                .iter()
-                .map(|re| re.exported_name.as_str())
-                .collect();
-
-            for export in &module.exports {
-                // For unreachable modules, only references from reachable files count —
-                // references from other unreachable modules don't save an export.
-                let has_cross_file_ref = if module.is_reachable() {
-                    !export.references.is_empty()
-                } else {
-                    export.references.iter().any(|r| {
-                        graph.modules.get(r.from_file.0 as usize).is_some_and(|m| {
-                            debug_assert_eq!(
-                                m.file_id, r.from_file,
-                                "ModuleGraph::modules FileId-as-index invariant broken"
-                            );
-                            m.is_reachable()
-                        })
-                    })
-                };
-                // Treat side-effect-registered exports (Lit @customElement,
-                // customElements.define) as referenced even when no other file
-                // imports them by name. The class is alive at runtime via the
-                // registration call inside its own module.
-                let is_referenced =
-                    has_cross_file_ref || (module.is_reachable() && export.is_side_effect_used);
-                // Handle @expected-unused: if the export IS used (has references from
-                // reachable modules), report as stale. If it's NOT used, suppress it
-                // silently (the tag is working as intended). Note: re-exports through
-                // barrel files DO count as references here, since the reference list
-                // is already filtered to reachable modules above.
-                if matches!(
-                    export.visibility,
-                    plow_types::extract::VisibilityTag::ExpectedUnused
-                ) {
-                    if is_referenced {
-                        let (line, col) = byte_offset_to_line_col(
-                            line_offsets_by_file,
-                            module.file_id,
-                            export.span.start,
-                        );
-                        stale_expected_unused.push(StaleSuppression {
-                            path: module.path.clone(),
-                            line,
-                            col,
-                            origin: SuppressionOrigin::JsdocTag {
-                                export_name: export.name.to_string(),
-                            },
-                        });
-                    }
-                    continue;
-                }
-
-                // Other visibility tags (@public, @internal, @alpha, @beta) permanently suppress
-                if export.visibility.suppresses_unused() || is_referenced {
-                    continue;
-                }
-
-                let export_str = export.name.to_string();
-
-                if config
-                    .ignore_exports_used_in_file
-                    .suppresses(export.is_type_only)
-                    && same_file_used_exports.contains(export_str.as_str())
-                {
-                    continue;
-                }
-
-                if is_export_ignored(&export_str, &matching_ignore, &matching_plugin) {
-                    continue;
-                }
-
-                let (line, col) = byte_offset_to_line_col(
-                    line_offsets_by_file,
-                    module.file_id,
-                    export.span.start,
-                );
-
-                // Detect re-exports semantically by looking up the export name in the
-                // module's re_exports set, rather than relying on a span sentinel.
-                // This catches both synthesized re-exports (which still use Span::default()
-                // for narrowing/star cases) and real re-exports (which carry the visitor's
-                // span for accurate line-number reporting).
-                let is_re_export = re_export_names.contains(export_str.as_str());
-
-                // Check inline suppression
-                let issue_kind = if export.is_type_only {
-                    IssueKind::UnusedType
-                } else {
-                    IssueKind::UnusedExport
-                };
-                if suppressions.is_suppressed(module.file_id, line, issue_kind) {
-                    continue;
-                }
-
-                let unused = UnusedExport {
-                    path: module.path.clone(),
-                    export_name: export_str,
-                    is_type_only: export.is_type_only,
-                    line,
-                    col,
-                    span_start: export.span.start,
-                    is_re_export,
-                };
-
-                if export.is_type_only {
-                    unused_types.push(unused);
-                } else {
-                    unused_exports.push(unused);
-                }
-            }
-
-            (unused_exports, unused_types, stale_expected_unused)
-        })
+        .map(|module| find_unused_exports_for_module(module, &module_context))
         .collect();
 
     for (exports, types, stale_expected) in module_results {
@@ -419,6 +361,148 @@ pub fn find_unused_exports(
     }
 
     (unused_exports, unused_types, stale_expected_unused)
+}
+
+fn find_unused_exports_for_module(
+    module: &ModuleNode,
+    ctx: &UnusedExportModuleContext<'_>,
+) -> UnusedExportModuleResult {
+    let mut unused_exports = Vec::new();
+    let mut unused_types = Vec::new();
+    let mut stale_expected_unused = Vec::new();
+
+    if module.exports.is_empty() && !module.has_cjs_exports() {
+        return (unused_exports, unused_types, stale_expected_unused);
+    }
+
+    let (matching_ignore, matching_plugin) = matchers_for_module(
+        &module.path,
+        &ctx.config.root,
+        ctx.ignore_matchers,
+        ctx.plugin_matchers,
+    );
+    if should_skip_module(
+        module,
+        !matching_plugin.is_empty(),
+        ctx.config.include_entry_exports,
+    ) {
+        return (unused_exports, unused_types, stale_expected_unused);
+    }
+
+    let same_file_used_exports = same_file_used_exports(module, ctx);
+    let re_export_names: FxHashSet<&str> = module
+        .re_exports
+        .iter()
+        .map(|re| re.exported_name.as_str())
+        .collect();
+
+    for export in &module.exports {
+        if let Some(unused) = unused_export_for_module(
+            module,
+            export,
+            ctx,
+            &same_file_used_exports,
+            &re_export_names,
+            &matching_ignore,
+            &matching_plugin,
+            &mut stale_expected_unused,
+        ) {
+            if export.is_type_only {
+                unused_types.push(unused);
+            } else {
+                unused_exports.push(unused);
+            }
+        }
+    }
+
+    (unused_exports, unused_types, stale_expected_unused)
+}
+
+fn same_file_used_exports(
+    module: &ModuleNode,
+    ctx: &UnusedExportModuleContext<'_>,
+) -> FxHashSet<String> {
+    ctx.module_info_by_id
+        .map_or_else(FxHashSet::default, |by_id| {
+            by_id
+                .get(&module.file_id)
+                .map_or_else(FxHashSet::default, |info| {
+                    collect_exports_used_in_file(info, &module.path)
+                })
+        })
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "checks one export against module context, same-file usage, matched rules, and stale-suppression output"
+)]
+fn unused_export_for_module(
+    module: &ModuleNode,
+    export: &ExportSymbol,
+    ctx: &UnusedExportModuleContext<'_>,
+    same_file_used_exports: &FxHashSet<String>,
+    re_export_names: &FxHashSet<&str>,
+    matching_ignore: &[&[String]],
+    matching_plugin: &[&[&str]],
+    stale_expected_unused: &mut Vec<StaleSuppression>,
+) -> Option<UnusedExport> {
+    let has_cross_file_ref = export_has_reachable_reference(ctx.graph, module, export);
+    let is_referenced = has_cross_file_ref || (module.is_reachable() && export.is_side_effect_used);
+    if matches!(
+        export.visibility,
+        plow_types::extract::VisibilityTag::ExpectedUnused
+    ) {
+        if is_referenced {
+            stale_expected_unused.push(stale_expected_unused_suppression(
+                module,
+                export,
+                ctx.line_offsets_by_file,
+            ));
+        }
+        return None;
+    }
+
+    if export.visibility.suppresses_unused() || is_referenced {
+        return None;
+    }
+
+    let export_str = export.name.to_string();
+    if ctx
+        .config
+        .ignore_exports_used_in_file
+        .suppresses(export.is_type_only)
+        && same_file_used_exports.contains(export_str.as_str())
+    {
+        return None;
+    }
+    if is_export_ignored(&export_str, matching_ignore, matching_plugin) {
+        return None;
+    }
+
+    let (line, col) =
+        byte_offset_to_line_col(ctx.line_offsets_by_file, module.file_id, export.span.start);
+    let issue_kind = if export.is_type_only {
+        IssueKind::UnusedType
+    } else {
+        IssueKind::UnusedExport
+    };
+    if ctx
+        .suppressions
+        .is_suppressed(module.file_id, line, issue_kind)
+    {
+        return None;
+    }
+
+    let is_re_export = re_export_names.contains(export_str.as_str());
+    Some(UnusedExport {
+        path: module.path.clone(),
+        export_name: export_str,
+        is_type_only: export.is_type_only,
+        line,
+        col,
+        span_start: export.span.start,
+        is_re_export,
+    })
 }
 
 /// Remove exported type findings when the type is only exported to support
@@ -482,21 +566,8 @@ fn is_storybook_file(path: &std::path::Path) -> bool {
         })
 }
 
-/// File-path globs for framework routing conventions where authors share a
-/// per-file private type across multiple exports (e.g., `Page` + `generateMetadata`
-/// both annotated `Props`). Skipping these mirrors the Storybook treatment:
-/// the type IS technically leaked, but the framework convention forces it,
-/// so flagging every route file produces noise without actionable findings.
-///
-/// Patterns match against the project-relative path. Covers Next.js App
-/// Router and Pages Router (with `src/` variants), Remix, TanStack Router,
-/// Gatsby, and Expo Router special files. Vue and Svelte SFCs are silently
-/// below the rule's reach already (the visitor doesn't surface their
-/// `defineProps<T>()` macros as TS type references), so SvelteKit and Nuxt
-/// do not need entries here.
+/// File-path globs for framework routing conventions where per-file private types are shared across exports.
 const ROUTE_CONVENTION_PATTERNS: &[&str] = &[
-    // Next.js App Router (and `src/app` variant). Patterns prefixed with `**/`
-    // so they match in monorepo subpackages too (e.g. `packages/web/src/app/...`).
     "**/app/**/page.{ts,tsx,js,jsx}",
     "**/app/**/layout.{ts,tsx,js,jsx}",
     "**/app/**/template.{ts,tsx,js,jsx}",
@@ -509,7 +580,6 @@ const ROUTE_CONVENTION_PATTERNS: &[&str] = &[
     "**/app/**/forbidden.{ts,tsx,js,jsx}",
     "**/app/**/unauthorized.{ts,tsx,js,jsx}",
     "**/app/global-not-found.{ts,tsx,js,jsx}",
-    // Next.js App Router top-level convention files (no nested segments).
     "**/app/page.{ts,tsx,js,jsx}",
     "**/app/layout.{ts,tsx,js,jsx}",
     "**/app/template.{ts,tsx,js,jsx}",
@@ -519,7 +589,6 @@ const ROUTE_CONVENTION_PATTERNS: &[&str] = &[
     "**/app/route.{ts,tsx,js,jsx}",
     "**/app/default.{ts,tsx,js,jsx}",
     "**/app/global-error.{ts,tsx,js,jsx}",
-    // Next.js App Router metadata files.
     "**/app/**/opengraph-image.{ts,tsx,js,jsx}",
     "**/app/**/twitter-image.{ts,tsx,js,jsx}",
     "**/app/**/icon.{ts,tsx,js,jsx}",
@@ -527,43 +596,25 @@ const ROUTE_CONVENTION_PATTERNS: &[&str] = &[
     "**/app/**/manifest.{ts,tsx,js,jsx}",
     "**/app/**/sitemap.{ts,tsx,js,jsx}",
     "**/app/**/robots.{ts,tsx,js,jsx}",
-    // Next.js Pages Router (every file is a route by definition). The `**/`
-    // prefix lets monorepo subpackages match (e.g., `apps/web/pages/about.tsx`),
-    // which over-skips any non-framework directory named `pages/`
-    // (e.g., `components/pages/Home.tsx`). Acceptable tradeoff: the leak rule's
-    // false-positive rate on Next.js routes (~62 per real project) is the
-    // dominant signal; component directories named `pages/` are uncommon and
-    // their leaks are still caught by other rules.
     "**/pages/**/*.{ts,tsx,js,jsx}",
-    // Gatsby templates (Gatsby uses `src/templates/`; pages are already covered
-    // by `**/pages/`). Scoped under `src/` so generic `templates/` directories
-    // (email, code-gen, Handlebars partials) keep `private-type-leak` coverage.
     "**/src/templates/**/*.{ts,tsx,js,jsx}",
-    // Remix v2 flat routes and folder-route entries. Subtrees under
-    // `app/routes/<segment>/` are NOT skipped wholesale: Remix users commonly
-    // co-locate non-route helpers there where private type leaks are still
-    // actionable.
     "**/routes/*.{ts,tsx,js,jsx}",
     "**/routes/**/route.{ts,tsx,js,jsx}",
     "**/routes/**/_layout.{ts,tsx,js,jsx}",
     "**/routes/**/_index.{ts,tsx,js,jsx}",
     "**/routes/**/index.{ts,tsx,js,jsx}",
-    // TanStack Router root file.
     "**/routes/**/__root.{ts,tsx,js,jsx}",
-    // Expo Router special files. Regular Expo route files reuse Next.js
-    // convention names (`page`, `layout`) and are already covered above.
     "**/app/**/_layout.{ts,tsx,js,jsx}",
     "**/app/**/+*.{ts,tsx,js,jsx}",
 ];
 
+#[expect(
+    clippy::expect_used,
+    reason = "route convention globs are hard-coded and covered by entry point tests"
+)]
 fn build_route_convention_globset() -> globset::GlobSet {
     let mut builder = globset::GlobSetBuilder::new();
     for pattern in ROUTE_CONVENTION_PATTERNS {
-        // `literal_separator(true)` matches the project-wide convention so a
-        // single `*` segment cannot cross `/`. Without this,
-        // `**/routes/*.{ts,tsx,...}` would also match `app/routes/utils/format.ts`,
-        // breaking the "subtrees not skipped wholesale" guarantee for Remix
-        // co-located helpers.
         let glob = globset::GlobBuilder::new(pattern)
             .literal_separator(true)
             .build()
@@ -577,8 +628,6 @@ fn build_route_convention_globset() -> globset::GlobSet {
 
 fn is_route_convention_file(absolute_path: &std::path::Path, root: &std::path::Path) -> bool {
     let relative = absolute_path.strip_prefix(root).unwrap_or(absolute_path);
-    // Normalize separators so the forward-slash patterns match on Windows where
-    // `Path::strip_prefix` preserves backslashes.
     let normalized = relative.to_string_lossy().replace('\\', "/");
     ROUTE_CONVENTION_GLOBSET.is_match(normalized.as_str())
 }
@@ -684,7 +733,6 @@ fn collect_dynamic_reexport_sources(
                 continue;
             };
 
-            // Only count as a re-export when the wrapper exports the same shape.
             let matches_export = match &dynamic_import.info.imported_name {
                 ImportedName::Named(name) => wrapper_exports
                     .iter()
@@ -710,10 +758,97 @@ fn collect_dynamic_reexport_sources(
     }
 }
 
+/// An export name occurrence in a single module, collected before deduplication.
+struct ExportEntry {
+    module_idx: usize,
+    path: std::path::PathBuf,
+    file_id: FileId,
+    span_start: u32,
+    is_type_only: bool,
+}
+
+/// Partition `entries` into connected components where two entries are connected
+/// when they share at least one common importer in `graph`, or one directly
+/// imports the other.
+///
+/// Returns index sets into `entries`; each inner vec is one component.
+/// Singleton components (no shared importer with any sibling) are included so
+/// the caller can drop them as unrelated leaf modules.
+fn partition_by_common_importer(entries: &[ExportEntry], graph: &ModuleGraph) -> Vec<Vec<usize>> {
+    let n = entries.len();
+
+    // Union-Find with path compression.
+    let mut parent: Vec<usize> = (0..n).collect();
+
+    fn find(parent: &mut [usize], mut x: usize) -> usize {
+        while parent[x] != x {
+            parent[x] = parent[parent[x]];
+            x = parent[x];
+        }
+        x
+    }
+
+    fn union(parent: &mut [usize], a: usize, b: usize) {
+        let ra = find(parent, a);
+        let rb = find(parent, b);
+        if ra != rb {
+            parent[ra] = rb;
+        }
+    }
+
+    // Build importer -> [entry index] map so we can union all entries that share
+    // a common importer.
+    let mut importer_to_entries: FxHashMap<FileId, Vec<usize>> = FxHashMap::default();
+    for (i, entry) in entries.iter().enumerate() {
+        let idx = entry.file_id.0 as usize;
+        if idx >= graph.reverse_deps.len() {
+            continue;
+        }
+        for &importer in &graph.reverse_deps[idx] {
+            importer_to_entries.entry(importer).or_default().push(i);
+        }
+    }
+
+    // Union all entries that share a common importer.
+    for members in importer_to_entries.values() {
+        if let Some((&first, rest)) = members.split_first() {
+            for &other in rest {
+                union(&mut parent, first, other);
+            }
+        }
+    }
+
+    // Also union entries where one directly imports the other (i.e. the importer
+    // itself is a member of the duplicate set).
+    let entry_file_ids: FxHashSet<FileId> = entries.iter().map(|e| e.file_id).collect();
+    for (i, entry) in entries.iter().enumerate() {
+        let idx = entry.file_id.0 as usize;
+        if idx >= graph.reverse_deps.len() {
+            continue;
+        }
+        for &importer in &graph.reverse_deps[idx] {
+            if entry_file_ids.contains(&importer)
+                && let Some(j) = entries.iter().position(|e| e.file_id == importer)
+            {
+                union(&mut parent, i, j);
+            }
+        }
+    }
+
+    // Group entry indices by their union-find root.
+    let mut components: FxHashMap<usize, Vec<usize>> = FxHashMap::default();
+    for i in 0..n {
+        let root = find(&mut parent, i);
+        components.entry(root).or_default().push(i);
+    }
+
+    components.into_values().collect()
+}
+
 /// Find exports that appear with the same name in multiple files (potential duplicates).
 ///
 /// Barrel re-exports (files that only re-export from other modules via `export { X } from './source'`)
-/// are excluded — having an index.ts re-export the same name as the source module is the normal
+/// are excluded. Having an index.ts re-export the same name as the source module is the normal
 /// barrel file pattern, not a true duplicate.
 ///
 /// `resolved_modules` is the set of modules with their resolved dynamic imports.
@@ -730,11 +865,28 @@ pub fn find_duplicate_exports(
     line_offsets_by_file: &LineOffsetsMap<'_>,
     resolved_modules: &[crate::resolve::ResolvedModule],
 ) -> Vec<DuplicateExport> {
-    let ignore_matchers = config.compiled_ignore_exports.as_slice();
+    find_duplicate_exports_with_plugins(
+        graph,
+        config,
+        suppressions,
+        line_offsets_by_file,
+        None,
+        resolved_modules,
+    )
+}
 
-    // Build a set of re-export relationships: (re-exporting module idx) -> set of (source module idx).
-    // Module idx and `file_id.0 as usize` are interchangeable; see the
-    // invariant doc on `ModuleGraph::modules`.
+pub(super) fn find_duplicate_exports_with_plugins(
+    graph: &ModuleGraph,
+    config: &ResolvedConfig,
+    suppressions: &SuppressionContext<'_>,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+    plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
+    resolved_modules: &[crate::resolve::ResolvedModule],
+) -> Vec<DuplicateExport> {
+    let ignore_matchers = config.compiled_ignore_exports.as_slice();
+    let tanstack_duplicate_matchers = compile_tanstack_duplicate_export_matchers(plugin_result);
+    let has_tanstack_router = is_tanstack_router_active(plugin_result);
+
     let mut re_export_sources: FxHashMap<usize, FxHashSet<usize>> = FxHashMap::default();
     for (idx, module) in graph.modules.iter().enumerate() {
         debug_assert_eq!(
@@ -749,23 +901,7 @@ pub fn find_duplicate_exports(
         }
     }
 
-    // Extend re_export_sources with dynamic imports that act as re-exports.
-    //
-    // The Next.js `dynamic(() => import('./Foo').then(m => m.Foo))` idiom is
-    // semantically equivalent to `export { Foo } from './Foo'`. We treat module
-    // A as dynamically re-exporting from module S when A has a resolved dynamic
-    // import targeting `InternalModule(S)` AND A also exports the name being
-    // imported. The export-side check guards against false negatives where a
-    // module dynamically imports something but does not actually re-export it.
     collect_dynamic_reexport_sources(resolved_modules, graph, &mut re_export_sources);
-
-    struct ExportEntry {
-        module_idx: usize,
-        path: std::path::PathBuf,
-        file_id: FileId,
-        span_start: u32,
-        is_type_only: bool,
-    }
 
     let mut export_locations: FxHashMap<String, Vec<ExportEntry>> = FxHashMap::default();
 
@@ -774,30 +910,39 @@ pub fn find_duplicate_exports(
             continue;
         }
 
-        // Skip files with file-wide duplicate-export suppression
         if suppressions.is_file_suppressed(module.file_id, IssueKind::DuplicateExport) {
             continue;
         }
 
-        // Honor config `ignoreExports`: a file matched with `"*"` is excluded from
-        // grouping entirely; a name list excludes only those names. This is the
-        // documented escape hatch for shadcn / Radix / bits-ui component barrels
-        // where many `components/ui/<name>/index.ts` files intentionally export
-        // the same short names (Root, Content, Trigger).
         let matching_ignore =
             ignore_matchers_for_module(&module.path, &config.root, ignore_matchers);
+        let (_, matching_tanstack_contracts) = matchers_for_module(
+            &module.path,
+            &config.root,
+            &[],
+            &tanstack_duplicate_matchers,
+        );
 
         for export in &module.exports {
             if matches!(export.name, crate::extract::ExportName::Default) {
-                continue; // Skip default exports
+                continue;
             }
-            // Skip synthetic re-export entries (span 0..0): these are generated by
-            // graph construction for re-exports, not real local declarations
             if export.span.start == 0 && export.span.end == 0 {
                 continue;
             }
             let name = export.name.to_string();
-            if is_export_ignored(&name, &matching_ignore, &[]) {
+            if is_export_ignored(&name, &matching_ignore, &matching_tanstack_contracts) {
+                continue;
+            }
+            if has_tanstack_router
+                && is_route_referenced_by_tanstack_generated_tree(
+                    &name,
+                    export,
+                    module,
+                    graph,
+                    &config.root,
+                )
+            {
                 continue;
             }
             export_locations.entry(name).or_default().push(ExportEntry {
@@ -810,8 +955,6 @@ pub fn find_duplicate_exports(
         }
     }
 
-    // Filter: only keep truly independent duplicates (not re-export chains)
-    // Sort by export name for deterministic output order
     let mut sorted_locations: Vec<_> = export_locations.into_iter().collect();
     sorted_locations.sort_by(|a, b| a.0.cmp(&b.0));
 
@@ -822,114 +965,86 @@ pub fn find_duplicate_exports(
                 return None;
             }
 
-            // TypeScript declaration merging: a value export (`export const X`) and
-            // a type export (`export type X`) sharing the same name are distinct in
-            // TS's value/type namespace split. This is idiomatic with Zod, Prisma,
-            // class+interface merging, etc. Skip groups that mix value and type exports.
-            let has_value = locations.iter().any(|e| !e.is_type_only);
-            let has_type = locations.iter().any(|e| e.is_type_only);
-            if has_value && has_type {
-                // Deduplicate within each namespace: keep only value-only or type-only
-                // entries and check if either namespace alone has duplicates.
-                let value_modules: FxHashSet<usize> = locations
-                    .iter()
-                    .filter(|e| !e.is_type_only)
-                    .map(|e| e.module_idx)
-                    .collect();
-                let type_modules: FxHashSet<usize> = locations
-                    .iter()
-                    .filter(|e| e.is_type_only)
-                    .map(|e| e.module_idx)
-                    .collect();
-                // If neither namespace alone has cross-file duplicates, skip entirely
-                if value_modules.len() <= 1 && type_modules.len() <= 1 {
-                    return None;
-                }
-            }
-
-            // Remove entries where one module re-exports from another in the set.
-            // For each pair (A, B), if A re-exports from B or B re-exports from A,
-            // they are part of the same export chain, not true duplicates.
+            // Strip re-export chain members: a module that re-exports from another
+            // group member is not an independent origin.
             let module_indices: FxHashSet<usize> = locations.iter().map(|e| e.module_idx).collect();
-            let (independent_file_ids, independent): (Vec<FileId>, Vec<DuplicateLocation>) =
-                locations
-                    .into_iter()
-                    .filter(|e| {
-                        let sources = re_export_sources.get(&e.module_idx);
-                        let has_source_in_set = sources
-                            .is_some_and(|s| s.iter().any(|src| module_indices.contains(src)));
-                        !has_source_in_set
-                    })
-                    .map(|e| {
-                        let (line, col) =
-                            byte_offset_to_line_col(line_offsets_by_file, e.file_id, e.span_start);
-                        (
-                            e.file_id,
-                            DuplicateLocation {
-                                path: e.path,
-                                line,
-                                col,
-                            },
-                        )
-                    })
-                    .unzip();
+            let independent_entries: Vec<ExportEntry> = locations
+                .into_iter()
+                .filter(|e| {
+                    let sources = re_export_sources.get(&e.module_idx);
+                    let has_source_in_set =
+                        sources.is_some_and(|s| s.iter().any(|src| module_indices.contains(src)));
+                    !has_source_in_set
+                })
+                .collect();
 
-            if independent.len() <= 1 {
+            if independent_entries.len() <= 1 {
                 return None;
             }
 
-            // Filter: only report duplicates where at least two files share a common
-            // importer in the module graph. Unrelated leaf files (e.g., SvelteKit route
-            // modules in different directories) that happen to export the same name
-            // are not actionable duplicates since they can never be confused at an
-            // import site.
-            let has_shared_importer = has_common_importer(&independent_file_ids, graph);
-            if has_shared_importer {
-                Some(DuplicateExport {
-                    export_name: name,
-                    locations: independent,
-                })
-            } else {
-                None
+            // Partition independent entries into connected components where two
+            // entries are connected when they share a common importer. This prevents
+            // a cross-package member (e.g. a backend `class Label` that no frontend
+            // module imports) from inflating `value_modules` and defeating the
+            // value+type self-suppression check that should apply only to the
+            // frontend component.
+            let components = partition_by_common_importer(&independent_entries, graph);
+
+            // Collect locations from all components that represent a genuine duplicate.
+            let mut surviving_locations: Vec<DuplicateLocation> = Vec::new();
+            for component_indices in components {
+                if component_indices.len() <= 1 {
+                    // A singleton component shares no importer with any sibling;
+                    // it is an unrelated leaf and must be dropped.
+                    continue;
+                }
+
+                // Value+type self-suppression: a single value export paired with a
+                // single type export in the same importer-connected component is the
+                // TypeScript pattern of re-declaring a runtime value alongside its
+                // type alias, not a genuine duplicate.
+                let comp_has_value = component_indices
+                    .iter()
+                    .any(|&i| !independent_entries[i].is_type_only);
+                let comp_has_type = component_indices
+                    .iter()
+                    .any(|&i| independent_entries[i].is_type_only);
+                if comp_has_value && comp_has_type {
+                    let value_count = component_indices
+                        .iter()
+                        .filter(|&&i| !independent_entries[i].is_type_only)
+                        .count();
+                    let type_count = component_indices
+                        .iter()
+                        .filter(|&&i| independent_entries[i].is_type_only)
+                        .count();
+                    if value_count <= 1 && type_count <= 1 {
+                        continue;
+                    }
+                }
+
+                for i in component_indices {
+                    let e = &independent_entries[i];
+                    let (line, col) =
+                        byte_offset_to_line_col(line_offsets_by_file, e.file_id, e.span_start);
+                    surviving_locations.push(DuplicateLocation {
+                        path: e.path.clone(),
+                        line,
+                        col,
+                    });
+                }
             }
+
+            if surviving_locations.len() <= 1 {
+                return None;
+            }
+
+            Some(DuplicateExport {
+                export_name: name,
+                locations: surviving_locations,
+            })
         })
         .collect()
-}
-
-/// Check if any two files in the duplicate set share a common importer.
-///
-/// Two files "share a common importer" if there exists a third file that imports
-/// from both. This filters out false positives from unrelated leaf modules (e.g.,
-/// SvelteKit route files in different directories) that coincidentally export the
-/// same name but are never imported together.
-fn has_common_importer(file_ids: &[FileId], graph: &ModuleGraph) -> bool {
-    if file_ids.len() <= 1 {
-        return false;
-    }
-
-    let duplicate_files: FxHashSet<FileId> = file_ids.iter().copied().collect();
-    let mut importer_owner: FxHashMap<FileId, FileId> = FxHashMap::default();
-
-    for &file_id in file_ids {
-        let idx = file_id.0 as usize;
-        if idx >= graph.reverse_deps.len() {
-            continue;
-        }
-
-        for &importer in &graph.reverse_deps[idx] {
-            // One duplicate file importing another is also actionable.
-            if duplicate_files.contains(&importer) {
-                return true;
-            }
-            if let Some(previous_file) = importer_owner.insert(importer, file_id)
-                && previous_file != file_id
-            {
-                return true;
-            }
-        }
-    }
-
-    false
 }
 
 /// Collect usage counts for all exports in the module graph.
@@ -944,28 +1059,20 @@ pub fn collect_export_usages(
 ) -> Vec<ExportUsage> {
     let mut usages = Vec::new();
 
-    // Build FileId -> path index for resolving reference locations
     let file_paths: FxHashMap<FileId, &std::path::Path> = graph
         .modules
         .iter()
         .map(|m| (m.file_id, m.path.as_path()))
         .collect();
 
-    // Fallback source + line-offset cache for reference locations not in the line offsets map.
-    // Only populated when a referencing file's line offsets are unavailable.
-    // Caches both source and computed offsets to avoid redundant recomputation.
     let mut source_cache: FxHashMap<FileId, (String, Vec<u32>)> = FxHashMap::default();
 
     for module in &graph.modules {
-        // Skip unreachable modules — no point showing Code Lens for files
-        // that aren't reachable from any entry point
         if !module.is_reachable() {
             continue;
         }
 
         for export in &module.exports {
-            // Skip synthetic re-export entries (span 0..0) — these are generated
-            // by graph construction, not real local declarations in the source
             if export.span.start == 0 && export.span.end == 0 {
                 continue;
             }
@@ -973,17 +1080,14 @@ pub fn collect_export_usages(
             let (line, col) =
                 byte_offset_to_line_col(line_offsets_by_file, module.file_id, export.span.start);
 
-            // Resolve reference locations for Code Lens navigation
             let reference_locations: Vec<ReferenceLocation> = export
                 .references
                 .iter()
                 .filter_map(|r| {
-                    // Skip references with no span (e.g. from dynamic import patterns)
                     if r.import_span.start == 0 && r.import_span.end == 0 {
                         return None;
                     }
                     let ref_path = file_paths.get(&r.from_file)?;
-                    // Use pre-computed line offsets when available, fall back to disk read
                     let (ref_line, ref_col) = if line_offsets_by_file.contains_key(&r.from_file) {
                         byte_offset_to_line_col(
                             line_offsets_by_file,
@@ -1129,8 +1233,6 @@ mod tests {
         }
     }
 
-    // ---- find_duplicate_exports tests ----
-
     #[test]
     fn duplicate_exports_empty_graph() {
         let graph = build_graph(&[]);
@@ -1164,7 +1266,6 @@ mod tests {
         graph.modules[1].exports = vec![make_export("helper", 10, 20)];
         graph.modules[2].set_reachable(true);
         graph.modules[2].exports = vec![make_export("helper", 10, 20)];
-        // entry.ts imports both a.ts and b.ts — they share a common importer
         graph.reverse_deps[1] = vec![FileId(0)];
         graph.reverse_deps[2] = vec![FileId(0)];
         let suppressions = SuppressionContext::empty();
@@ -1237,7 +1338,6 @@ mod tests {
         ]);
         graph.modules[1].set_reachable(true);
         graph.modules[1].exports = vec![make_export("helper", 10, 20)];
-        // Module 2 stays unreachable
         graph.modules[2].exports = vec![make_export("helper", 10, 20)];
         let suppressions = SuppressionContext::empty();
         let config = test_config();
@@ -1296,11 +1396,7 @@ mod tests {
         graph.modules[2].set_reachable(true);
         graph.modules[2].exports = vec![make_export("helper", 10, 20)];
 
-        let supp = vec![Suppression {
-            line: 0,
-            comment_line: 1,
-            kind: Some(IssueKind::DuplicateExport),
-        }];
+        let supp = vec![Suppression::issue(0, 1, IssueKind::DuplicateExport)];
         let mut supp_map: FxHashMap<FileId, &[Suppression]> = FxHashMap::default();
         supp_map.insert(FileId(2), &supp);
         let suppressions = SuppressionContext::from_map(supp_map);
@@ -1323,7 +1419,6 @@ mod tests {
             graph.modules[i].set_reachable(true);
             graph.modules[i].exports = vec![make_export("sharedFn", 10, 20)];
         }
-        // entry.ts imports all three — they share a common importer
         graph.reverse_deps[1] = vec![FileId(0)];
         graph.reverse_deps[2] = vec![FileId(0)];
         graph.reverse_deps[3] = vec![FileId(0)];
@@ -1338,8 +1433,6 @@ mod tests {
 
     #[test]
     fn duplicate_exports_unrelated_leaf_files_not_flagged() {
-        // Two route files exporting the same name but with no common importer
-        // (e.g., SvelteKit routes in different directories)
         let mut graph = build_graph(&[
             ("/src/entry.ts", true),
             ("/src/routes/foo/page.ts", false),
@@ -1349,8 +1442,6 @@ mod tests {
         graph.modules[1].exports = vec![make_export("Area", 10, 20)];
         graph.modules[2].set_reachable(true);
         graph.modules[2].exports = vec![make_export("Area", 10, 20)];
-        // No shared importer: each is imported by a different parent
-        // (or not imported at all — just reachable via framework routing)
         let suppressions = SuppressionContext::empty();
         let config = test_config();
         let result =
@@ -1363,7 +1454,6 @@ mod tests {
 
     #[test]
     fn duplicate_exports_direct_import_still_flagged() {
-        // Two files where one imports the other — they are connected
         let mut graph = build_graph(&[
             ("/src/entry.ts", true),
             ("/src/a.ts", false),
@@ -1373,7 +1463,6 @@ mod tests {
         graph.modules[1].exports = vec![make_export("helper", 10, 20)];
         graph.modules[2].set_reachable(true);
         graph.modules[2].exports = vec![make_export("helper", 10, 20)];
-        // a.ts imports b.ts directly
         graph.reverse_deps[2] = vec![FileId(1)];
         let suppressions = SuppressionContext::empty();
         let config = test_config();
@@ -1406,13 +1495,11 @@ mod tests {
 
     #[test]
     fn duplicate_exports_value_type_merging_not_flagged() {
-        // `export const Status = z.enum([...])` + `export type Status = z.infer<typeof Status>`
-        // in the same file is TypeScript declaration merging, not a duplicate.
         let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/schema.ts", false)]);
         graph.modules[1].set_reachable(true);
         graph.modules[1].exports = vec![
-            make_export("Status", 10, 20),      // value export
-            make_type_export("Status", 50, 60), // type export
+            make_export("Status", 10, 20),
+            make_type_export("Status", 50, 60),
         ];
         graph.reverse_deps[1] = vec![FileId(0)];
         let suppressions = SuppressionContext::empty();
@@ -1427,8 +1514,6 @@ mod tests {
 
     #[test]
     fn duplicate_exports_value_type_cross_file_not_flagged() {
-        // File A exports `const Status` and file B exports `type Status`.
-        // These are in different TS namespaces and should not be flagged.
         let mut graph = build_graph(&[
             ("/src/entry.ts", true),
             ("/src/a.ts", false),
@@ -1452,7 +1537,6 @@ mod tests {
 
     #[test]
     fn duplicate_exports_same_namespace_still_flagged() {
-        // Two files both export `const helper` (both value exports) — this IS a duplicate.
         let mut graph = build_graph(&[
             ("/src/entry.ts", true),
             ("/src/a.ts", false),
@@ -1475,10 +1559,115 @@ mod tests {
         );
     }
 
-    // ---- Next.js dynamic() re-export tests ----
+    /// Regression test for issue #848.
+    ///
+    /// Setup:
+    ///   module 1 (backend): `class Label` (value) -- no shared importer with frontend
+    ///   module 2 (frontend value): `function Label` (value)
+    ///   module 3 (frontend type): `export type Label` (type)
+    ///   module 4 (frontend consumer): imports from both module 2 and module 3
+    ///
+    /// Before the fix, `value_modules` contained both module 1 and module 2, so
+    /// `.len() > 1` defeated the self-suppression check and a false duplicate was
+    /// reported. After the fix the group is partitioned: module 1 is a singleton
+    /// (dropped), and the {module 2, module 3} pair self-suppresses via value+type.
+    #[test]
+    fn duplicate_exports_cross_package_backend_does_not_defeat_value_type_suppression() {
+        // Files: 0=backend-entry, 1=frontend-entry, 2=backend Label, 3=frontend Label value,
+        // 4=frontend Label type, 5=frontend consumer
+        let mut graph = build_graph(&[
+            ("/src/backend/entry.ts", true),
+            ("/src/frontend/entry.ts", true),
+            ("/src/backend/label.ts", false),
+            ("/src/frontend/label.ts", false),
+            ("/src/frontend/label.types.ts", false),
+            ("/src/frontend/consumer.ts", false),
+        ]);
+        // Reachable non-entry modules
+        graph.modules[2].set_reachable(true);
+        graph.modules[3].set_reachable(true);
+        graph.modules[4].set_reachable(true);
+        graph.modules[5].set_reachable(true);
 
-    /// Build a `ResolvedModule` shell for use in dynamic-import test fixtures.
-    /// All side-channel fields default to empty.
+        // Backend: value export `Label`
+        graph.modules[2].exports = vec![make_export("Label", 10, 20)];
+        // Frontend value: `function Label`
+        graph.modules[3].exports = vec![make_export("Label", 10, 20)];
+        // Frontend type: `export type Label`
+        graph.modules[4].exports = vec![make_type_export("Label", 10, 20)];
+
+        // Backend label is imported only by the backend entry (FileId 0).
+        graph.reverse_deps[2] = vec![FileId(0)];
+        // Frontend consumer (FileId 5) imports from both the frontend value and type.
+        graph.reverse_deps[3] = vec![FileId(5)];
+        graph.reverse_deps[4] = vec![FileId(5)];
+        // Frontend consumer is imported by the frontend entry.
+        graph.reverse_deps[5] = vec![FileId(1)];
+
+        let suppressions = SuppressionContext::empty();
+        let config = test_config();
+        let result =
+            find_duplicate_exports(&graph, &config, &suppressions, &FxHashMap::default(), &[]);
+        assert!(
+            result.is_empty(),
+            "backend `class Label` shares no importer with the frontend value+type pair; \
+            the frontend pair must self-suppress, so no duplicate should be reported, \
+            but got: {result:?}",
+        );
+    }
+
+    /// Companion to the regression test: two value modules that DO share a common
+    /// importer must still be reported as genuine duplicates even when an unrelated
+    /// third module with the same name (but no shared importer) exists.
+    #[test]
+    fn duplicate_exports_genuine_value_duplicate_still_flagged_despite_unrelated_backend() {
+        // Files: 0=entry, 1=backend Label (no shared importer), 2=frontend-a Label,
+        // 3=frontend-b Label, 4=shared consumer of frontend-a and frontend-b
+        let mut graph = build_graph(&[
+            ("/src/entry.ts", true),
+            ("/src/backend/label.ts", false),
+            ("/src/frontend/a.ts", false),
+            ("/src/frontend/b.ts", false),
+            ("/src/frontend/consumer.ts", false),
+        ]);
+        graph.modules[1].set_reachable(true);
+        graph.modules[2].set_reachable(true);
+        graph.modules[3].set_reachable(true);
+        graph.modules[4].set_reachable(true);
+
+        // All three export a value `Label`.
+        graph.modules[1].exports = vec![make_export("Label", 10, 20)];
+        graph.modules[2].exports = vec![make_export("Label", 10, 20)];
+        graph.modules[3].exports = vec![make_export("Label", 10, 20)];
+
+        // Backend is only imported by the entry (no connection to frontend).
+        graph.reverse_deps[1] = vec![FileId(0)];
+        // Frontend consumer imports from both frontend-a and frontend-b.
+        graph.reverse_deps[2] = vec![FileId(4)];
+        graph.reverse_deps[3] = vec![FileId(4)];
+        // Frontend consumer is imported by entry.
+        graph.reverse_deps[4] = vec![FileId(0)];
+
+        let suppressions = SuppressionContext::empty();
+        let config = test_config();
+        let result =
+            find_duplicate_exports(&graph, &config, &suppressions, &FxHashMap::default(), &[]);
+        assert_eq!(
+            result.len(),
+            1,
+            "frontend-a and frontend-b share a common importer and both export a value \
+            `Label`, so a genuine duplicate must be reported even though an unrelated \
+            backend module also exports `Label`"
+        );
+        assert_eq!(result[0].export_name, "Label");
+        // The finding must include only the two connected frontend locations, not backend.
+        assert_eq!(
+            result[0].locations.len(),
+            2,
+            "only the two connected frontend locations should be in the finding"
+        );
+    }
+
     fn make_resolved_module(file_id: u32, path: &str) -> crate::resolve::ResolvedModule {
         crate::resolve::ResolvedModule {
             file_id: FileId(file_id),
@@ -1499,7 +1688,6 @@ mod tests {
         }
     }
 
-    /// Build a resolved dynamic import `target_id` of the given import shape.
     fn dynamic_import_to(
         target_id: u32,
         imported_name: crate::extract::ImportedName,
@@ -1520,8 +1708,6 @@ mod tests {
 
     #[test]
     fn dynamic_import_then_member_not_flagged_as_duplicate() {
-        // Foo-lazy.tsx exports `Foo` via `dynamic(() => import('./Foo').then(m => m.Foo))`.
-        // The lazy wrapper is semantically a re-export — must NOT be flagged.
         use crate::extract::ImportedName;
 
         let mut graph = build_graph(&[
@@ -1558,8 +1744,6 @@ mod tests {
 
     #[test]
     fn dynamic_import_without_then_default_not_flagged_as_duplicate() {
-        // `dynamic(() => import('./Foo'))` (default-import variant).
-        // Both modules have a default export so the wrapper is a real re-export.
         use crate::extract::{ExportName, ImportedName, VisibilityTag};
         use crate::graph::ExportSymbol;
 
@@ -1606,9 +1790,6 @@ mod tests {
 
     #[test]
     fn dynamic_import_named_without_matching_export_still_flagged() {
-        // Wrapper has a Named dynamic import of "Foo" but does NOT export "Foo".
-        // It exports "Bar". The duplicate-export detector should still flag the
-        // unrelated "Foo" duplication between the source and a third module.
         use crate::extract::ImportedName;
 
         let mut graph = build_graph(&[
@@ -1627,7 +1808,6 @@ mod tests {
         graph.reverse_deps[2] = vec![FileId(0)];
         graph.reverse_deps[3] = vec![FileId(0)];
 
-        // Wrapper dynamically imports "Foo" from Foo.tsx but exports only "Bar".
         let mut wrapper = make_resolved_module(3, "/src/wrapper.tsx");
         wrapper.resolved_dynamic_imports =
             vec![dynamic_import_to(1, ImportedName::Named("Foo".to_string()))];
@@ -1656,10 +1836,6 @@ mod tests {
 
     #[test]
     fn dynamic_import_default_without_default_export_still_flagged() {
-        // Wrapper has a Default dynamic import targeting source, but does not
-        // have a Default export of its own — only a Named "helper". The
-        // dynamic import is for some other purpose, not re-export. Both modules
-        // exporting "helper" must still be flagged as a duplicate.
         use crate::extract::ImportedName;
 
         let mut graph = build_graph(&[
@@ -1674,8 +1850,6 @@ mod tests {
         graph.reverse_deps[1] = vec![FileId(0)];
         graph.reverse_deps[2] = vec![FileId(0)];
 
-        // Wrapper dynamically imports source.ts as Default, but exports only
-        // a Named "helper" — the dynamic import is not re-exporting anything.
         let mut wrapper = make_resolved_module(2, "/src/wrapper.ts");
         wrapper.resolved_dynamic_imports = vec![dynamic_import_to(1, ImportedName::Default)];
 
@@ -1699,9 +1873,6 @@ mod tests {
 
     #[test]
     fn duplicate_without_dynamic_link_still_flagged() {
-        // Two modules both export "helper" with no dynamic-import link between
-        // them. Pre-existing duplicate-export behaviour must hold even when
-        // resolved_modules is supplied.
         let mut graph = build_graph(&[
             ("/src/entry.ts", true),
             ("/src/a.ts", false),
@@ -1733,14 +1904,6 @@ mod tests {
 
     #[test]
     fn dynamic_import_named_mismatched_with_wrapper_export_still_flagged() {
-        // Wrapper(2) exports `Foo` AND dynamically imports `Bar` from source(1).
-        // Source(1) also exports `Foo`. The wrapper's dynamic import name `Bar`
-        // does NOT match its own export `Foo`, so the matches_export check must
-        // reject the edge: otherwise the (source, wrapper) `Foo` duplicate
-        // would be silently suppressed.
-        //
-        // Regression-strength for the Named branch of matches_export: removing
-        // the matches_export check makes this test fail.
         use crate::extract::ImportedName;
 
         let mut graph = build_graph(&[
@@ -1779,10 +1942,6 @@ mod tests {
 
     #[test]
     fn duplicate_exports_skipped_when_ignore_exports_matches_with_wildcard() {
-        // shadcn / Radix / bits-ui pattern: multiple `components/ui/<name>/index.ts`
-        // barrels intentionally export the same short names (Root, Content).
-        // Configuring `ignoreExports: [{ file: "**/ui/**", exports: ["*"] }]`
-        // must exclude both files from the duplicate-export grouping.
         let mut graph = build_graph(&[
             ("/src/entry.ts", true),
             ("/src/ui/dialog/index.ts", false),
@@ -1812,8 +1971,6 @@ mod tests {
 
     #[test]
     fn duplicate_exports_skipped_when_ignore_exports_lists_specific_names() {
-        // Named ignoreExports must suppress only the listed names; other duplicates
-        // across the same files still surface.
         let mut graph = build_graph(&[
             ("/src/entry.ts", true),
             ("/src/ui/dialog/index.ts", false),
@@ -1844,10 +2001,6 @@ mod tests {
         );
     }
 
-    // ---- find_unused_exports tests (exercises ResolvedConfig.compiled_ignore_exports, compile_plugin_matchers,
-    //       should_skip_module, is_export_ignored) ----
-
-    /// Helper: build a config with ignore_exports rules.
     fn test_config_with_ignore_exports(
         rules: Vec<plow_config::IgnoreExportRule>,
     ) -> ResolvedConfig {
@@ -1866,7 +2019,6 @@ mod tests {
         )
     }
 
-    /// Helper: build a minimal AggregatedPluginResult with used_exports.
     fn make_plugin_result(
         used_exports: Vec<(String, Vec<String>)>,
     ) -> crate::plugins::AggregatedPluginResult {
@@ -1887,6 +2039,7 @@ mod tests {
             scss_include_paths: vec![],
             entry_point_roles: FxHashMap::default(),
             referenced_dependencies: vec![],
+            package_referenced_dependencies: vec![],
             discovered_always_used: vec![],
             setup_files: vec![],
             tooling_dependencies: vec![],
@@ -1915,8 +2068,6 @@ mod tests {
             members: vec![],
         }
     }
-
-    // -- find_unused_exports: basic behavior --
 
     #[test]
     fn unused_exports_empty_graph() {
@@ -2037,15 +2188,12 @@ mod tests {
         assert_eq!(types[0].export_name, "MyType");
     }
 
-    // -- should_skip_module: unreachable --
-
     #[test]
     fn unused_exports_skips_unreachable_module() {
         let mut graph = build_graph(&[
             ("/tmp/test/src/entry.ts", true),
             ("/tmp/test/src/dead.ts", false),
         ]);
-        // Module stays unreachable (default)
         graph.modules[1].exports = vec![make_export("orphan", 10, 20)];
         let config = test_config();
         let suppressions = SuppressionContext::empty();
@@ -2060,8 +2208,6 @@ mod tests {
         assert!(exports.is_empty());
         assert!(types.is_empty());
     }
-
-    // -- should_skip_module: entry point --
 
     #[test]
     fn unused_exports_skips_entry_point() {
@@ -2112,8 +2258,6 @@ mod tests {
         assert!(types.is_empty());
     }
 
-    // -- should_skip_module: CJS-only --
-
     #[test]
     fn unused_exports_skips_cjs_only_module() {
         let mut graph = build_graph(&[
@@ -2122,7 +2266,6 @@ mod tests {
         ]);
         graph.modules[1].set_reachable(true);
         graph.modules[1].set_cjs_exports(true);
-        // No named exports, only module.exports
         graph.modules[1].exports = vec![];
         let config = test_config();
         let suppressions = SuppressionContext::empty();
@@ -2161,8 +2304,6 @@ mod tests {
         assert_eq!(exports[0].export_name, "namedFn");
     }
 
-    // -- should_skip_module: Svelte files --
-
     #[test]
     fn unused_exports_skips_svelte_files() {
         let mut graph = build_graph(&[
@@ -2184,8 +2325,6 @@ mod tests {
         assert!(exports.is_empty());
         assert!(types.is_empty());
     }
-
-    // -- should_skip_module: module passes all checks --
 
     #[test]
     fn unused_exports_reports_reachable_non_entry_non_cjs_non_svelte() {
@@ -2210,8 +2349,6 @@ mod tests {
         assert_eq!(exports[0].export_name, "helper");
     }
 
-    // -- compiled_ignore_exports: empty config --
-
     #[test]
     fn unused_exports_empty_ignore_config() {
         let mut graph = build_graph(&[
@@ -2220,7 +2357,7 @@ mod tests {
         ]);
         graph.modules[1].set_reachable(true);
         graph.modules[1].exports = vec![make_export("foo", 10, 20)];
-        let config = test_config(); // no ignore_exports rules
+        let config = test_config();
         let suppressions = SuppressionContext::empty();
         let (exports, _, _stale) = find_unused_exports(
             &graph,
@@ -2236,8 +2373,6 @@ mod tests {
             "no ignore rules, export should be reported"
         );
     }
-
-    // -- compiled_ignore_exports: multiple patterns --
 
     #[test]
     fn unused_exports_ignore_multiple_patterns() {
@@ -2276,22 +2411,14 @@ mod tests {
         );
     }
 
-    // -- compiled_ignore_exports: invalid glob is rejected at config load --
-
     #[test]
     #[should_panic(expected = "validated at config load time")]
     fn unused_exports_panics_on_unvalidated_invalid_ignore_glob() {
-        // Per issue #463, ignoreExports[].file is validated by
-        // PlowConfig::load before reaching resolve(). A test that
-        // constructs a config in-code with an invalid pattern has skipped
-        // that validation; resolve() asserts the invariant by panicking.
         let _ = test_config_with_ignore_exports(vec![plow_config::IgnoreExportRule {
             file: "[invalid".to_string(),
             exports: vec!["*".to_string()],
         }]);
     }
-
-    // -- is_export_ignored: config wildcard match --
 
     #[test]
     fn unused_exports_ignore_wildcard_matches_all() {
@@ -2320,8 +2447,6 @@ mod tests {
             "wildcard * should ignore all exports in matching file"
         );
     }
-
-    // -- is_export_ignored: config specific name match --
 
     #[test]
     fn unused_exports_ignore_specific_name_only() {
@@ -2352,8 +2477,6 @@ mod tests {
         assert_eq!(exports[0].export_name, "reported");
     }
 
-    // -- is_export_ignored: no match --
-
     #[test]
     fn unused_exports_ignore_rule_wrong_file_no_effect() {
         let mut graph = build_graph(&[
@@ -2383,8 +2506,6 @@ mod tests {
         );
     }
 
-    // -- compile_plugin_matchers: no plugin result --
-
     #[test]
     fn unused_exports_no_plugin_result() {
         let mut graph = build_graph(&[
@@ -2409,8 +2530,6 @@ mod tests {
             "None plugin_result means no plugin matchers"
         );
     }
-
-    // -- compile_plugin_matchers: plugin with empty used_exports --
 
     #[test]
     fn unused_exports_plugin_no_used_exports() {
@@ -2437,8 +2556,6 @@ mod tests {
             "plugin with no used_exports should not suppress"
         );
     }
-
-    // -- compile_plugin_matchers / is_export_ignored: plugin used_exports match --
 
     #[test]
     fn unused_exports_plugin_used_exports_suppresses() {
@@ -2468,8 +2585,6 @@ mod tests {
         assert_eq!(exports.len(), 1);
         assert_eq!(exports[0].export_name, "unusedHelper");
     }
-
-    // -- is_export_ignored: matching both config and plugin --
 
     #[test]
     fn unused_exports_both_config_and_plugin_ignore() {
@@ -2503,8 +2618,6 @@ mod tests {
         );
     }
 
-    // -- compile_plugin_matchers: invalid plugin glob handled gracefully --
-
     #[test]
     fn unused_exports_invalid_plugin_glob_skipped() {
         let mut graph = build_graph(&[
@@ -2516,7 +2629,6 @@ mod tests {
         let config = test_config();
         let suppressions = SuppressionContext::empty();
         let pr = make_plugin_result(vec![("[invalid".to_string(), vec!["foo".to_string()])]);
-        // Should not panic
         let (exports, _, _stale) = find_unused_exports(
             &graph,
             &[],
@@ -2528,8 +2640,6 @@ mod tests {
         assert_eq!(exports.len(), 1, "invalid plugin glob should be skipped");
     }
 
-    // -- find_unused_exports: re-export semantic detection --
-
     #[test]
     fn unused_exports_marks_re_export_semantically() {
         let mut graph = build_graph(&[
@@ -2538,9 +2648,6 @@ mod tests {
         ]);
         graph.modules[1].set_reachable(true);
         graph.modules[1].exports = vec![make_export("reexported", 100, 120)];
-        // The export must have a matching ReExportEdge for the unused-export
-        // detector to classify it as a re-export. This mirrors how the graph
-        // builder synthesizes ExportSymbol entries from ReExportInfo.
         graph.modules[1].re_exports = vec![ReExportEdge {
             source_file: FileId(0),
             imported_name: "reexported".to_string(),
@@ -2563,12 +2670,8 @@ mod tests {
             exports[0].is_re_export,
             "export with matching ReExportEdge should be flagged as re-export"
         );
-        // span_start carries the original byte offset (100), not the (0,0) sentinel
-        // — confirms that the re-export reporting uses the visitor's real span.
         assert_eq!(exports[0].span_start, 100);
     }
-
-    // ---- collect_export_usages tests ----
 
     #[test]
     fn collect_usages_empty_graph() {
@@ -2625,19 +2728,13 @@ mod tests {
         assert!(names.contains("beta"));
     }
 
-    // -- unreachable module with mixed references (blindspot fix) --
-
     #[test]
     fn unused_exports_checks_unreachable_module_with_mixed_references() {
-        // Unreachable module with 2 exports:
-        // - "usedByUnreachable" referenced by another unreachable module (should still be flagged)
-        // - "totallyUnused" referenced by nobody (should be flagged)
         let mut graph = build_graph(&[
             ("/tmp/test/src/entry.ts", true),
             ("/tmp/test/src/helpers.ts", false),
             ("/tmp/test/src/setup.ts", false),
         ]);
-        // helpers.ts is unreachable, has one export referenced by setup.ts (also unreachable)
         graph.modules[1].exports = vec![
             ExportSymbol {
                 name: ExportName::Named("usedByUnreachable".to_string()),
@@ -2646,7 +2743,7 @@ mod tests {
                 visibility: VisibilityTag::None,
                 span: Span::new(10, 30),
                 references: vec![SymbolReference {
-                    from_file: FileId(2), // setup.ts — also unreachable
+                    from_file: FileId(2),
                     kind: crate::graph::ReferenceKind::NamedImport,
                     import_span: Span::new(0, 10),
                 }],
@@ -2654,7 +2751,6 @@ mod tests {
             },
             make_export("totallyUnused", 40, 55),
         ];
-        // setup.ts is also unreachable
         graph.modules[2].exports = vec![];
 
         let config = test_config();
@@ -2667,7 +2763,6 @@ mod tests {
             &suppressions,
             &FxHashMap::default(),
         );
-        // Both exports should be flagged: the unreachable-to-unreachable reference doesn't count
         let names: FxHashSet<&str> = exports.iter().map(|e| e.export_name.as_str()).collect();
         assert!(
             names.contains("usedByUnreachable"),
@@ -2683,13 +2778,10 @@ mod tests {
 
     #[test]
     fn unused_exports_skips_export_referenced_by_reachable() {
-        // Unreachable module with 1 export referenced by a REACHABLE module.
-        // The export should NOT be flagged as unused.
         let mut graph = build_graph(&[
             ("/tmp/test/src/entry.ts", true),
             ("/tmp/test/src/helpers.ts", false),
         ]);
-        // helpers.ts is unreachable but has an export referenced by entry.ts (reachable)
         graph.modules[1].exports = vec![ExportSymbol {
             name: ExportName::Named("usedByReachable".to_string()),
             is_type_only: false,
@@ -2697,7 +2789,7 @@ mod tests {
             visibility: VisibilityTag::None,
             span: Span::new(10, 28),
             references: vec![SymbolReference {
-                from_file: FileId(0), // entry.ts — reachable (entry point)
+                from_file: FileId(0),
                 kind: crate::graph::ReferenceKind::NamedImport,
                 import_span: Span::new(0, 10),
             }],
@@ -2720,8 +2812,6 @@ mod tests {
         );
         assert!(types.is_empty());
     }
-
-    // -- VisibilityTag suppression --
 
     #[test]
     fn unused_exports_skips_internal_visibility() {
@@ -2822,11 +2912,8 @@ mod tests {
         assert!(types.is_empty());
     }
 
-    // -- include_entry_exports --
-
     #[test]
     fn unused_exports_include_entry_exports_flag() {
-        // With include_entry_exports = false (default), entry point exports are skipped
         let mut graph = build_graph(&[("/tmp/test/src/entry.ts", true)]);
         graph.modules[0].exports = vec![make_export("main", 10, 20)];
 
@@ -2846,7 +2933,6 @@ mod tests {
             "entry export should be skipped when include_entry_exports is false"
         );
 
-        // With include_entry_exports = true, entry point exports ARE checked
         let mut config_on = test_config();
         config_on.include_entry_exports = true;
         let (exports_on, _, _stale) = find_unused_exports(

@@ -6,8 +6,8 @@
 //! `crates/cli/src/health/coverage.rs` prevents this binary from shipping in
 //! release builds.
 //!
-//! Reads a `fallow_cov_protocol::Request` from stdin and emits a
-//! `fallow_cov_protocol::Response` on stdout (or exits with a specific code)
+//! Reads a `plow_cov_protocol::Request` from stdin and emits a
+//! `plow_cov_protocol::Response` on stdout (or exits with a specific code)
 //! based on the `PLOW_STUB_MODE` env var:
 //!
 //! - unset / `"ok"`: clean response, exit 0
@@ -17,6 +17,7 @@
 //! - `"malformed-stdout"`: writes non-JSON bytes, exit 0
 //! - `"empty-stdout"`: writes nothing, exit 0
 //! - `"enforce-license-gate"`: mirrors the paid-shape sidecar gate for tests
+//! - `"security-hot"`: response with `src/sink.ts::render` as a hot path
 //! - `"capture-quality-short"`: clean response with a short-window
 //!   `capture_quality` (`lazy_parse_warning = true`), exit 0
 //! - `"capture-quality-long"`: clean response with a long-window
@@ -30,14 +31,11 @@
 use std::io::{Read, Write};
 use std::process::ExitCode;
 
-use fallow_cov_protocol::{
-    CaptureQuality, PROTOCOL_VERSION, ReportVerdict, Request, Response, Summary,
+use plow_cov_protocol::{
+    CaptureQuality, HotPath, PROTOCOL_VERSION, ReportVerdict, Request, Response, Summary,
 };
 
 fn main() -> ExitCode {
-    // Drain stdin so the parent CLI's writer does not get EPIPE on close.
-    // Parsing the Request is best-effort; the stub does not depend on its
-    // contents, but consuming the bytes matters.
     let mut buf = Vec::new();
     let _ = std::io::stdin().read_to_end(&mut buf);
     let parsed: Option<Request> = serde_json::from_slice(&buf).ok();
@@ -64,6 +62,7 @@ fn main() -> ExitCode {
                 untracked_ratio_percent: 3.1,
             }),
         ),
+        "security-hot" => emit_security_hot_response(),
         "malformed-stdout" => emit_bytes(b"definitely not JSON\n"),
         "empty-stdout" => ExitCode::SUCCESS,
         "enforce-license-gate" => enforce_license_gate(parsed),
@@ -96,6 +95,54 @@ fn enforce_license_gate(request: Option<Request>) -> ExitCode {
         return ExitCode::from(3);
     }
     emit_clean_response(PROTOCOL_VERSION, None)
+}
+
+fn emit_security_hot_response() -> ExitCode {
+    let hot_path: HotPath = match serde_json::from_value(serde_json::json!({
+        "id": "plow:hot:test",
+        "file": "src/sink.ts",
+        "function": "render",
+        "line": 2,
+        "end_line": 4,
+        "invocations": 250,
+        "percentile": 100,
+        "identity": null,
+    })) {
+        Ok(hot_path) => hot_path,
+        Err(err) => {
+            eprintln!("stub sidecar: failed to build hot path: {err}");
+            return ExitCode::from(6);
+        }
+    };
+    let response = Response {
+        protocol_version: PROTOCOL_VERSION.to_owned(),
+        verdict: ReportVerdict::HotPathTouched,
+        summary: Summary {
+            functions_tracked: 1,
+            functions_hit: 1,
+            functions_unhit: 0,
+            functions_untracked: 0,
+            coverage_percent: 100.0,
+            trace_count: 250,
+            period_days: 7,
+            deployments_seen: 1,
+            capture_quality: None,
+        },
+        findings: Vec::new(),
+        hot_paths: vec![hot_path],
+        blast_radius: Vec::new(),
+        importance: Vec::new(),
+        watermark: None,
+        errors: Vec::new(),
+        warnings: Vec::new(),
+    };
+    match serde_json::to_vec(&response) {
+        Ok(bytes) => emit_bytes(&bytes),
+        Err(err) => {
+            eprintln!("stub sidecar: failed to serialize response: {err}");
+            ExitCode::from(6)
+        }
+    }
 }
 
 fn emit_clean_response(

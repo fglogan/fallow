@@ -1,3 +1,4 @@
+use crate::report::sink::outln;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -9,12 +10,12 @@ use plow_core::results::{
     TestOnlyDependencyFinding, TypeOnlyDependency, TypeOnlyDependencyFinding,
     UnusedClassMemberFinding, UnusedDependency, UnusedDependencyFinding,
     UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExport, UnusedExportFinding,
-    UnusedMember, UnusedOptionalDependencyFinding, UnusedTypeFinding,
+    UnusedMember, UnusedOptionalDependencyFinding, UnusedStoreMemberFinding, UnusedTypeFinding,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::{
-    MAX_FLAT_ITEMS, build_grouped_by_file, build_section_header, format_path,
+    GroupedByFileInput, MAX_FLAT_ITEMS, build_grouped_by_file, build_section_header, format_path,
     print_explain_tip_if_tty, push_section_footer_rollup, push_section_footer_with_count,
 };
 use crate::report::grouping::OwnershipResolver;
@@ -149,7 +150,6 @@ fn insert_test_src_split<T>(lines: &mut Vec<String>, items: &[T], get_path: impl
         .filter(|item| is_test_path(get_path(item)))
         .count();
     let src_count = items.len() - test_count;
-    // Only show when there's a meaningful split (both > 0 and test is >=30%)
     if test_count == 0 || src_count == 0 {
         return;
     }
@@ -161,7 +161,6 @@ fn insert_test_src_split<T>(lines: &mut Vec<String>, items: &[T], get_path: impl
         "  {}",
         format!("{src_count} in src, {test_count} in test directories").dimmed()
     );
-    // Insert before the trailing blank line (if present)
     if lines.last().is_some_and(String::is_empty) {
         let pos = lines.len() - 1;
         lines.insert(pos, annotation);
@@ -170,67 +169,74 @@ fn insert_test_src_split<T>(lines: &mut Vec<String>, items: &[T], get_path: impl
     }
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "human renderer entrypoint mirrors ReportContext fields without allocating a wrapper"
-)]
-pub(in crate::report) fn print_human(
-    results: &AnalysisResults,
-    root: &Path,
-    rules: &RulesConfig,
-    elapsed: Duration,
-    quiet: bool,
-    top: Option<usize>,
-    show_explain_tip: bool,
-    explain: bool,
-) {
-    if !quiet {
+pub(in crate::report) struct PrintHumanInput<'a> {
+    pub results: &'a AnalysisResults,
+    pub root: &'a Path,
+    pub rules: &'a RulesConfig,
+    pub elapsed: Duration,
+    pub quiet: bool,
+    pub top: Option<usize>,
+    pub show_explain_tip: bool,
+    pub explain: bool,
+}
+
+pub(in crate::report) fn print_human(input: &PrintHumanInput<'_>) {
+    if !input.quiet {
         eprintln!();
-        // Config quality signal: warn when findings are dominated by one directory
-        emit_config_quality_signal(results, root);
+        emit_config_quality_signal(input.results, input.root);
     }
 
-    let total = results.total_issues();
-    print_explain_tip_if_tty(show_explain_tip && total > 0, quiet);
+    let total = input.results.total_issues();
+    print_explain_tip_if_tty(input.show_explain_tip && total > 0, input.quiet);
 
-    // Human output always includes section footers with doc links.
-    for line in build_human_lines_with_explain(results, root, rules, top, explain) {
-        println!("{line}");
+    for line in build_human_lines_with_explain(
+        input.results,
+        input.root,
+        input.rules,
+        input.top,
+        input.explain,
+    ) {
+        outln!("{line}");
     }
 
-    if !quiet {
+    if !input.quiet {
         if total == 0 {
             eprintln!(
                 "{}",
-                format!("\u{2713} No issues found ({:.2}s)", elapsed.as_secs_f64())
-                    .green()
-                    .bold()
+                format!(
+                    "\u{2713} No issues found ({:.2}s)",
+                    input.elapsed.as_secs_f64()
+                )
+                .green()
+                .bold()
             );
         } else {
-            // Compute suppressed counts so the footer reflects visible items
-            let unused_file_set: FxHashSet<&std::path::Path> = results
+            let unused_file_set: FxHashSet<&std::path::Path> = input
+                .results
                 .unused_files
                 .iter()
                 .map(|f| f.file.path.as_path())
                 .collect();
-            let suppressed_exports = results
+            let suppressed_exports = input
+                .results
                 .unused_exports
                 .iter()
                 .filter(|e| unused_file_set.contains(e.export.path.as_path()))
                 .count();
-            let suppressed_types = results
+            let suppressed_types = input
+                .results
                 .unused_types
                 .iter()
                 .filter(|e| unused_file_set.contains(e.export.path.as_path()))
                 .count();
-            let summary = build_summary_footer(results, suppressed_exports, suppressed_types);
+            let summary = build_summary_footer(input.results, suppressed_exports, suppressed_types);
             eprintln!(
                 "{}",
-                format!("\u{2717} {summary} ({:.2}s)", elapsed.as_secs_f64())
+                format!("\u{2717} {summary} ({:.2}s)", input.elapsed.as_secs_f64())
                     .red()
                     .bold()
             );
-            print_suppression_footer(results);
+            print_suppression_footer(input.results);
         }
     }
 }
@@ -298,6 +304,7 @@ fn build_human_lines_with_explain(
         total_issues,
     );
     build_structure_section(&mut lines, results, root, rules, total_issues);
+    build_policy_section(&mut lines, results, root, rules, total_issues);
     build_maintenance_section(&mut lines, results, root, rules, total_issues);
 
     if explain {
@@ -341,6 +348,7 @@ fn check_explain_for_header(line: &str) -> Option<&'static crate::explain::RuleD
         ),
         ("Unused enum members", "plow/unused-enum-member"),
         ("Unused class members", "plow/unused-class-member"),
+        ("Unused store members", "plow/unused-store-member"),
         ("Unresolved imports", "plow/unresolved-import"),
         ("Unlisted dependencies", "plow/unlisted-dependency"),
         ("Duplicate exports", "plow/duplicate-export"),
@@ -362,6 +370,14 @@ fn check_explain_for_header(line: &str) -> Option<&'static crate::explain::RuleD
             "Misconfigured dependency overrides",
             "plow/misconfigured-dependency-override",
         ),
+        ("Invalid client exports", "plow/invalid-client-export"),
+        (
+            "Mixed client/server barrels",
+            "plow/mixed-client-server-barrel",
+        ),
+        ("Unprovided injects", "plow/unprovided-inject"),
+        ("Unrendered components", "plow/unrendered-component"),
+        ("Misplaced directives", "plow/misplaced-directive"),
     ];
     let (_, rule_id) = mappings
         .iter()
@@ -626,7 +642,8 @@ fn build_unused_code_section(
         || !filtered_types.is_empty()
         || !results.private_type_leaks.is_empty()
         || !results.unused_enum_members.is_empty()
-        || !results.unused_class_members.is_empty();
+        || !results.unused_class_members.is_empty()
+        || !results.unused_store_members.is_empty();
     if !has_unused_code {
         return;
     }
@@ -650,63 +667,74 @@ fn build_unused_code_section(
     }
     insert_test_src_split(lines, &results.unused_files, |f| &f.file.path);
 
-    build_human_grouped_section(
+    build_human_grouped_section(GroupedSectionInput {
         lines,
-        &filtered_exports,
-        "Unused exports",
-        severity_to_level(rules.unused_exports),
+        items: &filtered_exports,
+        title: "Unused exports",
+        level: severity_to_level(rules.unused_exports),
         root,
-        max_grouped_files,
-        |e| e.export.path.as_path(),
-        &|e: &UnusedExportFinding| format_unused_export(&e.export),
-    );
+        max_files: max_grouped_files,
+        get_path: |e| e.export.path.as_path(),
+        format_detail: &|e: &UnusedExportFinding| format_unused_export(&e.export),
+    });
     push_suppressed_count_note(lines, suppressed_exports);
     insert_test_src_split(lines, &filtered_exports, |e| &e.export.path);
 
-    build_human_grouped_section(
+    build_human_grouped_section(GroupedSectionInput {
         lines,
-        &filtered_types,
-        "Unused type exports",
-        severity_to_level(rules.unused_types),
+        items: &filtered_types,
+        title: "Unused type exports",
+        level: severity_to_level(rules.unused_types),
         root,
-        max_grouped_files,
-        |e| e.export.path.as_path(),
-        &|e: &UnusedTypeFinding| format_unused_export(&e.export),
-    );
+        max_files: max_grouped_files,
+        get_path: |e| e.export.path.as_path(),
+        format_detail: &|e: &UnusedTypeFinding| format_unused_export(&e.export),
+    });
     push_suppressed_count_note(lines, suppressed_types);
 
-    build_human_grouped_section(
+    build_human_grouped_section(GroupedSectionInput {
         lines,
-        &results.private_type_leaks,
-        "Private type leaks",
-        severity_to_level(rules.private_type_leaks),
+        items: &results.private_type_leaks,
+        title: "Private type leaks",
+        level: severity_to_level(rules.private_type_leaks),
         root,
-        max_grouped_files,
-        |e| e.leak.path.as_path(),
-        &format_private_type_leak,
-    );
+        max_files: max_grouped_files,
+        get_path: |e| e.leak.path.as_path(),
+        format_detail: &format_private_type_leak,
+    });
 
-    build_human_grouped_section(
+    build_human_grouped_section(GroupedSectionInput {
         lines,
-        &results.unused_enum_members,
-        "Unused enum members",
-        severity_to_level(rules.unused_enum_members),
+        items: &results.unused_enum_members,
+        title: "Unused enum members",
+        level: severity_to_level(rules.unused_enum_members),
         root,
-        max_grouped_files,
-        |m| m.member.path.as_path(),
-        &|m: &UnusedEnumMemberFinding| format_unused_member(&m.member),
-    );
+        max_files: max_grouped_files,
+        get_path: |m| m.member.path.as_path(),
+        format_detail: &|m: &UnusedEnumMemberFinding| format_unused_member(&m.member),
+    });
 
-    build_human_grouped_section(
+    build_human_grouped_section(GroupedSectionInput {
         lines,
-        &results.unused_class_members,
-        "Unused class members",
-        severity_to_level(rules.unused_class_members),
+        items: &results.unused_class_members,
+        title: "Unused class members",
+        level: severity_to_level(rules.unused_class_members),
         root,
-        max_grouped_files,
-        |m| m.member.path.as_path(),
-        &|m: &UnusedClassMemberFinding| format_unused_member(&m.member),
-    );
+        max_files: max_grouped_files,
+        get_path: |m| m.member.path.as_path(),
+        format_detail: &|m: &UnusedClassMemberFinding| format_unused_member(&m.member),
+    });
+
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.unused_store_members,
+        title: "Unused store members",
+        level: severity_to_level(rules.unused_store_members),
+        root,
+        max_files: max_grouped_files,
+        get_path: |m| m.member.path.as_path(),
+        format_detail: &|m: &UnusedStoreMemberFinding| format_unused_member(&m.member),
+    });
 }
 
 fn build_dependencies_section(
@@ -718,7 +746,27 @@ fn build_dependencies_section(
     max_grouped_files: usize,
     total_issues: usize,
 ) {
-    let has_dependencies = !results.unused_dependencies.is_empty()
+    if !has_dependency_findings(results) {
+        return;
+    }
+    push_category_header(lines, "Dependencies");
+
+    push_package_dependency_sections(lines, results, root, rules, max_items, total_issues);
+    push_import_dependency_sections(
+        lines,
+        results,
+        root,
+        rules,
+        max_items,
+        max_grouped_files,
+        total_issues,
+    );
+    push_catalog_dependency_sections(lines, results, root, rules, max_items, total_issues);
+    push_dependency_override_sections(lines, results, root, rules, max_items, total_issues);
+}
+
+fn has_dependency_findings(results: &AnalysisResults) -> bool {
+    !results.unused_dependencies.is_empty()
         || !results.unused_dev_dependencies.is_empty()
         || !results.unused_optional_dependencies.is_empty()
         || !results.unresolved_imports.is_empty()
@@ -729,12 +777,17 @@ fn build_dependencies_section(
         || !results.empty_catalog_groups.is_empty()
         || !results.unresolved_catalog_references.is_empty()
         || !results.unused_dependency_overrides.is_empty()
-        || !results.misconfigured_dependency_overrides.is_empty();
-    if !has_dependencies {
-        return;
-    }
-    push_category_header(lines, "Dependencies");
+        || !results.misconfigured_dependency_overrides.is_empty()
+}
 
+fn push_package_dependency_sections(
+    lines: &mut Vec<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    rules: &RulesConfig,
+    max_items: usize,
+    total_issues: usize,
+) {
     push_human_pkg_dep_section(
         lines,
         &results.unused_dependencies,
@@ -762,22 +815,33 @@ fn build_dependencies_section(
         total_issues,
         root,
     );
-    build_human_grouped_section(
+}
+
+fn push_import_dependency_sections(
+    lines: &mut Vec<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    rules: &RulesConfig,
+    max_items: usize,
+    max_grouped_files: usize,
+    total_issues: usize,
+) {
+    build_human_grouped_section(GroupedSectionInput {
         lines,
-        &results.unresolved_imports,
-        "Unresolved imports",
-        severity_to_level(rules.unresolved_imports),
+        items: &results.unresolved_imports,
+        title: "Unresolved imports",
+        level: severity_to_level(rules.unresolved_imports),
         root,
-        max_grouped_files,
-        |i| i.import.path.as_path(),
-        &|i| {
+        max_files: max_grouped_files,
+        get_path: |i| i.import.path.as_path(),
+        format_detail: &|i| {
             format!(
                 "{} {}",
                 format!(":{}", i.import.line).dimmed(),
                 i.import.specifier.bold()
             )
         },
-    );
+    });
     build_human_section_ex(
         lines,
         &results.unlisted_dependencies,
@@ -805,6 +869,16 @@ fn build_dependencies_section(
         total_issues,
         root,
     );
+}
+
+fn push_catalog_dependency_sections(
+    lines: &mut Vec<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    rules: &RulesConfig,
+    max_items: usize,
+    total_issues: usize,
+) {
     push_unused_catalog_entries_section(
         lines,
         &results.unused_catalog_entries,
@@ -829,6 +903,16 @@ fn build_dependencies_section(
         total_issues,
         root,
     );
+}
+
+fn push_dependency_override_sections(
+    lines: &mut Vec<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    rules: &RulesConfig,
+    max_items: usize,
+    total_issues: usize,
+) {
     push_unused_dependency_overrides_section(
         lines,
         &results.unused_dependency_overrides,
@@ -1004,9 +1088,6 @@ fn push_unresolved_catalog_references_section(
                 )
             };
             out.push(detail_line);
-            // When exactly one alternative catalog declares the package, the
-            // fix is unambiguous; surface the concrete switch as a third line
-            // so a human reading CI output can apply it without thinking.
             if finding.available_in_catalogs.len() == 1 {
                 let target = &finding.available_in_catalogs[0];
                 out.push(format!(
@@ -1128,7 +1209,9 @@ fn build_structure_section(
     let has_structure = !results.duplicate_exports.is_empty()
         || !results.circular_dependencies.is_empty()
         || !results.re_export_cycles.is_empty()
-        || !results.boundary_violations.is_empty();
+        || !results.boundary_violations.is_empty()
+        || !results.boundary_coverage_violations.is_empty()
+        || !results.boundary_call_violations.is_empty();
     if !has_structure {
         return;
     }
@@ -1162,6 +1245,373 @@ fn build_structure_section(
         root,
         total_issues,
     );
+    build_boundary_coverage_violations_section(
+        lines,
+        &results.boundary_coverage_violations,
+        severity_to_level(rules.boundary_violation),
+        root,
+        total_issues,
+    );
+    build_boundary_call_violations_section(
+        lines,
+        &results.boundary_call_violations,
+        severity_to_level(rules.boundary_violation),
+        root,
+        total_issues,
+    );
+}
+
+/// Build the Policy category (rule-pack findings). Separate from Structure
+/// because policy is user-authored project rules, not architecture analysis.
+fn build_policy_section(
+    lines: &mut Vec<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    rules: &RulesConfig,
+    total_issues: usize,
+) {
+    if results.policy_violations.is_empty()
+        && results.invalid_client_exports.is_empty()
+        && results.mixed_client_server_barrels.is_empty()
+        && results.misplaced_directives.is_empty()
+        && results.unprovided_injects.is_empty()
+        && results.unrendered_components.is_empty()
+        && results.unused_component_props.is_empty()
+        && results.unused_component_emits.is_empty()
+        && results.unused_server_actions.is_empty()
+        && results.route_collisions.is_empty()
+        && results.dynamic_segment_name_conflicts.is_empty()
+    {
+        return;
+    }
+    push_category_header(lines, "Policy");
+    build_policy_violations_section(lines, &results.policy_violations, root, total_issues);
+
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.invalid_client_exports,
+        title: "Invalid client exports",
+        level: severity_to_level(rules.invalid_client_export),
+        root,
+        max_files: MAX_FLAT_ITEMS,
+        get_path: |e: &plow_types::output_dead_code::InvalidClientExportFinding| {
+            e.export.path.as_path()
+        },
+        format_detail: &format_invalid_client_export,
+    });
+
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.mixed_client_server_barrels,
+        title: "Mixed client/server barrels",
+        level: severity_to_level(rules.mixed_client_server_barrel),
+        root,
+        max_files: MAX_FLAT_ITEMS,
+        get_path: |b: &plow_types::output_dead_code::MixedClientServerBarrelFinding| {
+            b.barrel.path.as_path()
+        },
+        format_detail: &format_mixed_client_server_barrel,
+    });
+
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.misplaced_directives,
+        title: "Misplaced directives",
+        level: severity_to_level(rules.misplaced_directive),
+        root,
+        max_files: MAX_FLAT_ITEMS,
+        get_path: |d: &plow_types::output_dead_code::MisplacedDirectiveFinding| {
+            d.directive_site.path.as_path()
+        },
+        format_detail: &format_misplaced_directive,
+    });
+
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.unprovided_injects,
+        title: "Unprovided injects",
+        level: severity_to_level(rules.unprovided_injects),
+        root,
+        max_files: MAX_FLAT_ITEMS,
+        get_path: |i: &plow_types::output_dead_code::UnprovidedInjectFinding| {
+            i.inject.path.as_path()
+        },
+        format_detail: &format_unprovided_inject,
+    });
+
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.unrendered_components,
+        title: "Unrendered components",
+        level: severity_to_level(rules.unrendered_components),
+        root,
+        max_files: MAX_FLAT_ITEMS,
+        get_path: |c: &plow_types::output_dead_code::UnrenderedComponentFinding| {
+            c.component.path.as_path()
+        },
+        format_detail: &format_unrendered_component,
+    });
+
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.unused_component_props,
+        title: "Unused component props",
+        level: severity_to_level(rules.unused_component_props),
+        root,
+        max_files: MAX_FLAT_ITEMS,
+        get_path: |p: &plow_types::output_dead_code::UnusedComponentPropFinding| {
+            p.prop.path.as_path()
+        },
+        format_detail: &format_unused_component_prop,
+    });
+
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.unused_component_emits,
+        title: "Unused component emits",
+        level: severity_to_level(rules.unused_component_emits),
+        root,
+        max_files: MAX_FLAT_ITEMS,
+        get_path: |e: &plow_types::output_dead_code::UnusedComponentEmitFinding| {
+            e.emit.path.as_path()
+        },
+        format_detail: &format_unused_component_emit,
+    });
+
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.unused_server_actions,
+        title: "Unused server actions",
+        level: severity_to_level(rules.unused_server_actions),
+        root,
+        max_files: MAX_FLAT_ITEMS,
+        get_path: |a: &plow_types::output_dead_code::UnusedServerActionFinding| {
+            a.action.path.as_path()
+        },
+        format_detail: &format_unused_server_action,
+    });
+
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.route_collisions,
+        title: "Route collisions",
+        level: severity_to_level(rules.route_collision),
+        root,
+        max_files: MAX_FLAT_ITEMS,
+        get_path: |c: &plow_types::output_dead_code::RouteCollisionFinding| {
+            c.collision.path.as_path()
+        },
+        format_detail: &format_route_collision,
+    });
+
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.dynamic_segment_name_conflicts,
+        title: "Dynamic segment conflicts",
+        level: severity_to_level(rules.dynamic_segment_name_conflict),
+        root,
+        max_files: MAX_FLAT_ITEMS,
+        get_path: |c: &plow_types::output_dead_code::DynamicSegmentNameConflictFinding| {
+            c.conflict.path.as_path()
+        },
+        format_detail: &format_dynamic_segment_name_conflict,
+    });
+}
+
+fn format_invalid_client_export(
+    entry: &plow_types::output_dead_code::InvalidClientExportFinding,
+) -> String {
+    let e = &entry.export;
+    format!(
+        "{} {} {}",
+        format!(":{}", e.line).dimmed(),
+        e.export_name.bold(),
+        format!("(from \"{}\")", e.directive).dimmed(),
+    )
+}
+
+fn format_mixed_client_server_barrel(
+    entry: &plow_types::output_dead_code::MixedClientServerBarrelFinding,
+) -> String {
+    let b = &entry.barrel;
+    format!(
+        "{} {}",
+        format!(":{}", b.line).dimmed(),
+        format!(
+            "re-exports client \"{}\" and server-only \"{}\"",
+            b.client_origin, b.server_origin
+        )
+        .dimmed(),
+    )
+}
+
+fn format_misplaced_directive(
+    entry: &plow_types::output_dead_code::MisplacedDirectiveFinding,
+) -> String {
+    let d = &entry.directive_site;
+    format!(
+        "{} {}",
+        format!(":{}", d.line).dimmed(),
+        format!(
+            "\"{}\" is not in the leading position and is ignored",
+            d.directive
+        )
+        .dimmed(),
+    )
+}
+
+fn format_unprovided_inject(
+    entry: &plow_types::output_dead_code::UnprovidedInjectFinding,
+) -> String {
+    let i = &entry.inject;
+    format!(
+        "{} {} {}",
+        format!(":{}", i.line).dimmed(),
+        i.key_name.bold(),
+        format!(
+            "has no matching provide({}) in this project; at runtime it returns undefined (provide the key or remove this inject)",
+            i.key_name
+        )
+        .dimmed(),
+    )
+}
+
+fn format_unrendered_component(
+    entry: &plow_types::output_dead_code::UnrenderedComponentFinding,
+) -> String {
+    let c = &entry.component;
+    format!(
+        "{} {} {}",
+        format!(":{}", c.line).dimmed(),
+        c.component_name.bold(),
+        "is reachable but rendered nowhere in this project (render it somewhere or remove it)"
+            .dimmed(),
+    )
+}
+
+fn format_unused_component_prop(
+    entry: &plow_types::output_dead_code::UnusedComponentPropFinding,
+) -> String {
+    let p = &entry.prop;
+    format!(
+        "{} {} {}",
+        format!(":{}", p.line).dimmed(),
+        p.prop_name.bold(),
+        "is declared but referenced nowhere in this component (remove it or use it)".dimmed(),
+    )
+}
+
+fn format_unused_component_emit(
+    entry: &plow_types::output_dead_code::UnusedComponentEmitFinding,
+) -> String {
+    let e = &entry.emit;
+    format!(
+        "{} {} {}",
+        format!(":{}", e.line).dimmed(),
+        e.emit_name.bold(),
+        "is declared but emitted nowhere in this component (remove it or emit it)".dimmed(),
+    )
+}
+
+fn format_unused_server_action(
+    entry: &plow_types::output_dead_code::UnusedServerActionFinding,
+) -> String {
+    let a = &entry.action;
+    format!(
+        "{} {} {}",
+        format!(":{}", a.line).dimmed(),
+        a.action_name.bold(),
+        "is exported from a \"use server\" file but no code in this project references it".dimmed(),
+    )
+}
+
+fn format_route_collision(entry: &plow_types::output_dead_code::RouteCollisionFinding) -> String {
+    let c = &entry.collision;
+    let others = c.conflicting_paths.len();
+    let plural = if others == 1 { "" } else { "s" };
+    format!(
+        "{}",
+        format!(
+            "resolves to {} (shared with {others} other route file{plural}; route groups and \
+             slots do not change the URL)",
+            c.url
+        )
+        .dimmed(),
+    )
+}
+
+fn format_dynamic_segment_name_conflict(
+    entry: &plow_types::output_dead_code::DynamicSegmentNameConflictFinding,
+) -> String {
+    let c = &entry.conflict;
+    format!(
+        "{}",
+        format!(
+            "crashes at runtime: different slug names ({}) at the same dynamic path {}; \
+             next build passes but the route fails on its first request (rename to one \
+             consistent slug)",
+            c.conflicting_segments.join(" vs "),
+            c.position
+        )
+        .dimmed(),
+    )
+}
+
+/// Build the rule-pack policy-violation section. The header level reflects
+/// the EFFECTIVE per-finding severities (error when any finding is error),
+/// because rule-level `severity` overrides the `policy-violation` master.
+fn build_policy_violations_section(
+    lines: &mut Vec<String>,
+    items: &[plow_types::output_dead_code::PolicyViolationFinding],
+    root: &Path,
+    total_issues: usize,
+) {
+    use plow_types::results::PolicyViolationSeverity;
+
+    if items.is_empty() {
+        return;
+    }
+    let level = if items
+        .iter()
+        .any(|f| f.violation.severity == PolicyViolationSeverity::Error)
+    {
+        Level::Error
+    } else {
+        Level::Warn
+    };
+    let title = "Policy violations";
+    lines.push(build_section_header(title, items.len(), level));
+
+    let shown = items.len().min(MAX_FLAT_ITEMS);
+    for entry in &items[..shown] {
+        let v = &entry.violation;
+        let path = relative_path(&v.path, root).display().to_string();
+        let detail = match &v.message {
+            Some(message) => format!("banned by `{}/{}`: {message}", v.pack, v.rule_id),
+            None => format!("banned by `{}/{}`", v.pack, v.rule_id),
+        };
+        lines.push(format!(
+            "  {}:{} {} {}",
+            path,
+            v.line,
+            v.matched,
+            detail.dimmed(),
+        ));
+    }
+    if items.len() > MAX_FLAT_ITEMS {
+        let remaining = items.len() - MAX_FLAT_ITEMS;
+        lines.push(format!(
+            "  {}",
+            truncation_hint(remaining, total_issues).dimmed()
+        ));
+    }
+    lines.push(format!(
+        "  {}",
+        "suppress: // plow-ignore-next-line policy-violation:<pack>/<rule-id> (or policy-violation for every rule-pack rule)"
+            .dimmed()
+    ));
+    push_section_footer_with_count(lines, title, items.len());
+    lines.push(String::new());
 }
 
 fn build_maintenance_section(
@@ -1203,12 +1653,10 @@ fn build_dir_rollup_section(
     let level = severity_to_level(rules.unused_files);
     lines.push(build_section_header(title, unused_files.len(), level));
 
-    // Group by first directory component (root-level files go under "(project root)")
     let mut dir_counts: Vec<(String, usize, bool)> = Vec::new();
     let mut dir_map: FxHashMap<String, usize> = FxHashMap::default();
     for f in unused_files {
         let rel = relative_path(&f.file.path, root);
-        // Detect root-level files: only one path component means no parent directory
         let (dir, is_dir) = if rel.components().count() <= 1 {
             ("(project root)".to_string(), false)
         } else {
@@ -1229,8 +1677,6 @@ fn build_dir_rollup_section(
     }
     dir_counts.sort_by_key(|b| std::cmp::Reverse(b.1));
 
-    // Second-level rollup: when one directory holds >80% of files, expand it
-    // into two-level sub-directories (e.g. `packages/react-query/`) for clarity.
     let total = unused_files.len();
     let dominant = dir_counts
         .iter()
@@ -1260,7 +1706,6 @@ fn build_dir_rollup_section(
             }
         }
         sub_counts.sort_by_key(|b| std::cmp::Reverse(b.1));
-        // Combine: sub-entries for the dominant dir + remaining first-level entries
         let mut combined = sub_counts;
         for entry in &dir_counts {
             if entry.0 != *dom_dir {
@@ -1283,7 +1728,6 @@ fn build_dir_rollup_section(
     }
     if display_entries.len() > MAX_FLAT_ITEMS {
         let remaining = display_entries.len() - MAX_FLAT_ITEMS;
-        // Use directory-specific wording and scoping hint when total issues are high
         let hint = if remaining > SCOPING_HINT_THRESHOLD || total_issues > SCOPING_HINT_THRESHOLD {
             format!(
                 "... and {remaining} more director{} \u{2014} try --workspace <name> or --changed-since main to scope",
@@ -1337,33 +1781,49 @@ fn build_human_section_ex<T>(
 /// Files are sorted by item count descending. Shows `(N exports)` next to each
 /// file header. Truncates to `max_files` files and `MAX_ITEMS_PER_FILE`
 /// items per file.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "section renderer needs all display parameters"
-)]
-fn build_human_grouped_section<'a, T>(
-    lines: &mut Vec<String>,
+struct GroupedSectionInput<'a, T, P, F>
+where
+    P: Fn(&'a T) -> &'a Path,
+    F: Fn(&T) -> String,
+{
+    lines: &'a mut Vec<String>,
     items: &'a [T],
-    title: &str,
+    title: &'a str,
     level: Level,
-    root: &Path,
+    root: &'a Path,
     max_files: usize,
-    get_path: impl Fn(&'a T) -> &'a Path,
-    format_detail: &impl Fn(&T) -> String,
-) {
+    get_path: P,
+    format_detail: &'a F,
+}
+
+fn build_human_grouped_section<'a, T, P, F>(input: GroupedSectionInput<'a, T, P, F>)
+where
+    P: Fn(&'a T) -> &'a Path,
+    F: Fn(&T) -> String,
+{
+    let GroupedSectionInput {
+        lines,
+        items,
+        title,
+        level,
+        root,
+        max_files,
+        get_path,
+        format_detail,
+    } = input;
     if items.is_empty() {
         return;
     }
     lines.push(build_section_header(title, items.len(), level));
-    build_grouped_by_file(
+    build_grouped_by_file(GroupedByFileInput {
         lines,
         items,
         root,
         get_path,
         format_detail,
         max_files,
-        MAX_ITEMS_PER_FILE,
-    );
+        max_items_per_file: MAX_ITEMS_PER_FILE,
+    });
     push_section_footer_with_count(lines, title, items.len());
     lines.push(String::new());
 }
@@ -1382,7 +1842,6 @@ fn build_duplicate_exports_section(
     let title = "Duplicate exports";
     lines.push(build_section_header(title, items.len(), level));
 
-    // Group by sorted file-pair key
     let mut pair_groups: Vec<(String, String, Vec<&str>)> = Vec::new();
     let mut pair_map: rustc_hash::FxHashMap<(String, String), usize> =
         rustc_hash::FxHashMap::default();
@@ -1400,7 +1859,6 @@ fn build_duplicate_exports_section(
         paths.sort();
         paths.dedup();
 
-        // For multi-file duplicates, pair the first two
         let key = (paths[0].clone(), paths.get(1).cloned().unwrap_or_default());
         if let Some(&group_idx) = pair_map.get(&key) {
             pair_groups[group_idx].2.push(&dup.export_name);
@@ -1414,7 +1872,6 @@ fn build_duplicate_exports_section(
         }
     }
 
-    // Sort by count descending
     pair_groups.sort_by_key(|b| std::cmp::Reverse(b.2.len()));
 
     let shown = pair_groups.len().min(MAX_FLAT_ITEMS);
@@ -1432,7 +1889,6 @@ fn build_duplicate_exports_section(
             display.join(", ")
         };
 
-        // Vertical layout: file_a on line 1, <-> file_b on line 2, exports on line 3
         let elided_b = elide_common_prefix(file_a, file_b);
         lines.push(format!("  {}", format_path(file_a)));
         lines.push(format!(
@@ -1456,9 +1912,6 @@ fn build_duplicate_exports_section(
     }
     if should_show_namespace_barrel_hint(items) {
         if truncation_emitted {
-            // Keep the truncation hint and the namespace-barrel hint visually
-            // distinct; without this blank line both render as one block of
-            // dim text and read as a single run-on note.
             lines.push(String::new());
         }
         lines.push(format!("  {}", NAMESPACE_BARREL_HINT.dimmed()));
@@ -1481,7 +1934,6 @@ fn build_circular_deps_section(
     let title = "Circular dependencies";
     lines.push(build_section_header(title, items.len(), level));
 
-    // Group cycles by their first file (hub)
     let mut hub_groups: Vec<(String, Vec<&plow_core::results::CircularDependency>)> = Vec::new();
     let mut hub_map: rustc_hash::FxHashMap<String, usize> = rustc_hash::FxHashMap::default();
 
@@ -1500,7 +1952,6 @@ fn build_circular_deps_section(
         }
     }
 
-    // Sort by cycle count descending, alphabetical tiebreaker
     hub_groups.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then_with(|| a.0.cmp(&b.0)));
 
     let shown = hub_groups.len().min(MAX_FLAT_ITEMS);
@@ -1519,17 +1970,14 @@ fn build_circular_deps_section(
                 .map(|p| relative_path(p, root).display().to_string())
                 .collect();
 
-            // Build chain: elide common prefix with hub, add closing return to hub
             let mut chain_parts: Vec<String> = Vec::new();
             for path in &rel_paths[1..] {
                 let elided = elide_common_prefix(hub_path, path);
                 chain_parts.push(format_path(elided));
             }
-            // Close the cycle back to hub filename
             let (_, hub_filename) = split_dir_filename(hub_path);
             chain_parts.push(hub_filename.bold().to_string());
 
-            // When every file in the cycle is a .d.ts, tag it as type-only
             let type_only_tag = if cycle
                 .files
                 .iter()
@@ -1678,6 +2126,89 @@ fn build_boundary_violations_section(
     lines.push(String::new());
 }
 
+/// Build boundary coverage section for files matched by no zone.
+fn build_boundary_coverage_violations_section(
+    lines: &mut Vec<String>,
+    items: &[plow_types::output_dead_code::BoundaryCoverageViolationFinding],
+    level: Level,
+    root: &Path,
+    total_issues: usize,
+) {
+    if items.is_empty() {
+        return;
+    }
+    let title = "Boundary coverage";
+    lines.push(build_section_header(title, items.len(), level));
+
+    let shown = items.len().min(MAX_FLAT_ITEMS);
+    for entry in &items[..shown] {
+        let v = &entry.violation;
+        let path = relative_path(&v.path, root).display().to_string();
+        lines.push(format!(
+            "  {}:{} {}",
+            path,
+            v.line,
+            "no matching boundary zone".dimmed(),
+        ));
+    }
+    if items.len() > MAX_FLAT_ITEMS {
+        let remaining = items.len() - MAX_FLAT_ITEMS;
+        lines.push(format!(
+            "  {}",
+            truncation_hint(remaining, total_issues).dimmed()
+        ));
+    }
+    push_section_footer_with_count(lines, title, items.len());
+    lines.push(String::new());
+}
+
+/// Build the forbidden-call section. Renders the written callee path next to
+/// the matched pattern and the zone, so users learn the segment-aware
+/// matching rule from the output itself.
+fn build_boundary_call_violations_section(
+    lines: &mut Vec<String>,
+    items: &[plow_types::output_dead_code::BoundaryCallViolationFinding],
+    level: Level,
+    root: &Path,
+    total_issues: usize,
+) {
+    if items.is_empty() {
+        return;
+    }
+    let title = "Boundary calls";
+    lines.push(build_section_header(title, items.len(), level));
+
+    let shown = items.len().min(MAX_FLAT_ITEMS);
+    for entry in &items[..shown] {
+        let v = &entry.violation;
+        let path = relative_path(&v.path, root).display().to_string();
+        lines.push(format!(
+            "  {}:{} {} {}",
+            path,
+            v.line,
+            v.callee,
+            format!("matches forbidden `{}` in zone '{}'", v.pattern, v.zone).dimmed(),
+        ));
+    }
+    if items.len() > MAX_FLAT_ITEMS {
+        let remaining = items.len() - MAX_FLAT_ITEMS;
+        lines.push(format!(
+            "  {}",
+            truncation_hint(remaining, total_issues).dimmed()
+        ));
+    }
+    // The rule id is boundary-call-violation but the suppression token is the
+    // boundary FAMILY token, so spell it out; users would otherwise derive the
+    // wrong token by analogy with every finding where rule id and token align.
+    lines.push(format!(
+        "  {}",
+        "suppress: // plow-ignore-next-line boundary-violation (one token covers all boundary findings)"
+            .dimmed()
+    ));
+    push_section_footer_with_count(lines, title, items.len());
+    lines.push(String::new());
+}
+
 fn build_stale_suppressions_section(
     lines: &mut Vec<String>,
     items: &[plow_core::results::StaleSuppression],
@@ -1748,6 +2279,9 @@ fn collect_matching_rules(
     for m in &results.unused_class_members {
         check(&m.member.path);
     }
+    for m in &results.unused_store_members {
+        check(&m.member.path);
+    }
     for u in &results.unresolved_imports {
         check(&u.import.path);
     }
@@ -1758,6 +2292,45 @@ fn collect_matching_rules(
     }
     for b in &results.boundary_violations {
         check(&b.violation.from_path);
+    }
+    for b in &results.boundary_coverage_violations {
+        check(&b.violation.path);
+    }
+    for b in &results.boundary_call_violations {
+        check(&b.violation.path);
+    }
+    for v in &results.policy_violations {
+        check(&v.violation.path);
+    }
+    for e in &results.invalid_client_exports {
+        check(&e.export.path);
+    }
+    for b in &results.mixed_client_server_barrels {
+        check(&b.barrel.path);
+    }
+    for d in &results.misplaced_directives {
+        check(&d.directive_site.path);
+    }
+    for i in &results.unprovided_injects {
+        check(&i.inject.path);
+    }
+    for c in &results.unrendered_components {
+        check(&c.component.path);
+    }
+    for p in &results.unused_component_props {
+        check(&p.prop.path);
+    }
+    for e in &results.unused_component_emits {
+        check(&e.emit.path);
+    }
+    for a in &results.unused_server_actions {
+        check(&a.action.path);
+    }
+    for c in &results.route_collisions {
+        check(&c.collision.path);
+    }
+    for c in &results.dynamic_segment_name_conflicts {
+        check(&c.conflict.path);
     }
     for s in &results.stale_suppressions {
         check(&s.path);
@@ -1774,20 +2347,28 @@ fn collect_matching_rules(
 /// Each group gets a colored header with its key and issue count, followed by
 /// the same section output that `print_human` produces. Unowned groups get
 /// an advisory footer. Doc URL footers are deduplicated across groups.
-pub(in crate::report) fn print_grouped_human(
-    groups: &[crate::report::grouping::ResultGroup],
-    root: &Path,
-    rules: &RulesConfig,
-    elapsed: Duration,
-    quiet: bool,
-    resolver: Option<&OwnershipResolver>,
-    explain: bool,
-) {
+pub(in crate::report) struct PrintGroupedHumanInput<'a> {
+    pub(in crate::report) groups: &'a [crate::report::grouping::ResultGroup],
+    pub(in crate::report) root: &'a Path,
+    pub(in crate::report) rules: &'a RulesConfig,
+    pub(in crate::report) elapsed: Duration,
+    pub(in crate::report) quiet: bool,
+    pub(in crate::report) resolver: Option<&'a OwnershipResolver>,
+    pub(in crate::report) explain: bool,
+}
+
+pub(in crate::report) fn print_grouped_human(input: &PrintGroupedHumanInput<'_>) {
+    let groups = input.groups;
+    let root = input.root;
+    let rules = input.rules;
+    let elapsed = input.elapsed;
+    let quiet = input.quiet;
+    let resolver = input.resolver;
+    let explain = input.explain;
     if !quiet {
         eprintln!();
     }
 
-    // ── Summary line: groups sorted by issue count descending ───────
     let mut group_counts: Vec<(&str, usize)> = groups
         .iter()
         .map(|g| (g.key.as_str(), g.results.total_issues()))
@@ -1806,8 +2387,8 @@ pub(in crate::report) fn print_grouped_human(
             plural(group_counts.len()),
             summary_parts.join(" \u{00b7} ")
         );
-        println!("{}", summary.dimmed());
-        println!();
+        outln!("{}", summary.dimmed());
+        outln!();
     }
 
     let mut grand_total: usize = 0;
@@ -1820,7 +2401,6 @@ pub(in crate::report) fn print_grouped_human(
         }
         grand_total += total;
 
-        // Group header: bold cyan key with issue count and per-type breakdown
         let issue_word = if total == 1 { "issue" } else { "issues" };
         let breakdown = build_summary_footer(&group.results, 0, 0);
         let header_text = if breakdown.is_empty() {
@@ -1829,7 +2409,6 @@ pub(in crate::report) fn print_grouped_human(
             format!("{} ({total} {issue_word}: {breakdown})", group.key)
         };
 
-        // Optionally append matching CODEOWNERS rules for Owner mode
         let header_text = match resolver {
             Some(r @ OwnershipResolver::Owner(_)) => {
                 let matched = collect_matching_rules(&group.results, root, r);
@@ -1842,23 +2421,20 @@ pub(in crate::report) fn print_grouped_human(
             _ => header_text,
         };
 
-        println!("{}", header_text.cyan().bold());
+        outln!("{}", header_text.cyan().bold());
 
-        // Section-mode: list the section's default owners under the heading
-        // so human output mirrors the `owners` metadata emitted in JSON.
         if let Some(ref owners) = group.owners
             && !owners.is_empty()
         {
-            println!("  {} {}", "owners:".dimmed(), owners.join(" ").dimmed());
+            outln!("  {} {}", "owners:".dimmed(), owners.join(" ").dimmed());
         }
 
-        // Build lines and dedup doc URL footers across groups
         let lines = build_human_lines_with_explain(&group.results, root, rules, None, explain);
         for line in &lines {
             if line.contains("docs.genesis-plow.dev") && !seen_footers.insert(line.clone()) {
                 continue;
             }
-            println!("{line}");
+            outln!("{line}");
         }
 
         if group.key == crate::codeowners::UNOWNED_LABEL {
@@ -1925,7 +2501,6 @@ fn emit_config_quality_signal(results: &AnalysisResults, root: &Path) {
     if let Some((dominant_dir, count)) = dir_counts.iter().max_by_key(|(_, c)| **c) {
         let pct = (*count as f64 / total as f64) * 100.0;
         if pct > 80.0 {
-            // Source-heavy directories get different advice than test/example dirs
             let is_source_dir =
                 matches!(dominant_dir.as_str(), "packages" | "src" | "lib" | "apps");
             let advice = if is_source_dir {
@@ -1961,10 +2536,8 @@ fn build_summary_footer(
     let mut add = |count: usize, label: &str| {
         if count > 0 {
             let display_label = if count == 1 && label.ends_with("ies") {
-                // Singularize -ies plurals: "dependencies" → "dependency"
                 format!("{}y", &label[..label.len() - 3])
             } else if count == 1 && label.ends_with('s') {
-                // Singularize simple plurals: "enum members" → "enum member"
                 label[..label.len() - 1].to_string()
             } else {
                 label.to_string()
@@ -1997,9 +2570,9 @@ fn build_summary_footer(
     );
     add(results.unused_enum_members.len(), "enum members");
     add(results.unused_class_members.len(), "class members");
+    add(results.unused_store_members.len(), "store members");
     add(results.unresolved_imports.len(), "unresolved imports");
     add(results.unlisted_dependencies.len(), "unlisted dependencies");
-    // Count unique file-pairs (consistent with the section renderer's grouping)
     {
         let mut pair_set = rustc_hash::FxHashSet::default();
         for dup in &results.duplicate_exports {
@@ -2027,6 +2600,17 @@ fn build_summary_footer(
     add(results.circular_dependencies.len(), "circular dependencies");
     add(results.re_export_cycles.len(), "re-export cycles");
     add(results.boundary_violations.len(), "violations");
+    add(results.unprovided_injects.len(), "unprovided injects");
+    add(results.unrendered_components.len(), "unrendered components");
+    add(
+        results.unused_component_props.len(),
+        "unused component props",
+    );
+    add(
+        results.unused_component_emits.len(),
+        "unused component emits",
+    );
+    add(results.unused_server_actions.len(), "unused server actions");
     add(results.stale_suppressions.len(), "stale suppressions");
 
     parts.join(" \u{00b7} ")
@@ -2054,11 +2638,27 @@ pub(in crate::report) fn print_check_summary(
     }
 
     if heading {
-        println!("{}", "Dead Code Summary".bold());
-        println!();
+        print_check_summary_heading();
     }
 
-    let categories: &[(&str, usize, Level)] = &[
+    print_check_summary_rows(&check_summary_categories(results, rules));
+    print_check_summary_total(total);
+
+    if !quiet {
+        print_check_summary_failure(total, elapsed);
+    }
+}
+
+fn print_check_summary_heading() {
+    outln!("{}", "Dead Code Summary".bold());
+    outln!();
+}
+
+fn check_summary_categories(
+    results: &AnalysisResults,
+    rules: &RulesConfig,
+) -> Vec<(&'static str, usize, Level)> {
+    vec![
         (
             "Unused files",
             results.unused_files.len(),
@@ -2105,6 +2705,11 @@ pub(in crate::report) fn print_check_summary(
             severity_to_level(rules.unused_class_members),
         ),
         (
+            "Unused store members",
+            results.unused_store_members.len(),
+            severity_to_level(rules.unused_store_members),
+        ),
+        (
             "Unresolved imports",
             results.unresolved_imports.len(),
             severity_to_level(rules.unresolved_imports),
@@ -2145,37 +2750,68 @@ pub(in crate::report) fn print_check_summary(
             severity_to_level(rules.boundary_violation),
         ),
         (
+            "Unprovided injects",
+            results.unprovided_injects.len(),
+            severity_to_level(rules.unprovided_injects),
+        ),
+        (
+            "Unrendered components",
+            results.unrendered_components.len(),
+            severity_to_level(rules.unrendered_components),
+        ),
+        (
+            "Unused component props",
+            results.unused_component_props.len(),
+            severity_to_level(rules.unused_component_props),
+        ),
+        (
+            "Unused component emits",
+            results.unused_component_emits.len(),
+            severity_to_level(rules.unused_component_emits),
+        ),
+        (
+            "Unused server actions",
+            results.unused_server_actions.len(),
+            severity_to_level(rules.unused_server_actions),
+        ),
+        (
             "Stale suppressions",
             results.stale_suppressions.len(),
             severity_to_level(rules.stale_suppressions),
         ),
-    ];
+    ]
+}
 
+fn print_check_summary_rows(categories: &[(&str, usize, Level)]) {
     for (name, count, level) in categories {
-        if *count == 0 {
-            continue;
+        if *count > 0 {
+            outln!("  {}  {name}", colored_summary_count(*count, *level));
         }
-        let count_str = format!("{count:>6}");
-        let colored = match level {
-            Level::Error => count_str.red().bold().to_string(),
-            Level::Warn => count_str.yellow().to_string(),
-            Level::Info => count_str.dimmed().to_string(),
-        };
-        println!("  {colored}  {name}");
     }
+}
 
-    println!();
+fn colored_summary_count(count: usize, level: Level) -> String {
+    let count_str = format!("{count:>6}");
+    match level {
+        Level::Error => count_str.red().bold().to_string(),
+        Level::Warn => count_str.yellow().to_string(),
+        Level::Info => count_str.dimmed().to_string(),
+    }
+}
+
+fn print_check_summary_total(total: usize) {
+    outln!();
     let total_str = format!("{total:>6}");
-    println!("  {}  {}", total_str.bold(), "Total".bold());
+    outln!("  {}  {}", total_str.bold(), "Total".bold());
+}
 
-    if !quiet {
-        eprintln!(
-            "{}",
-            format!("\u{2717} {total} issues ({:.2}s)", elapsed.as_secs_f64())
-                .red()
-                .bold()
-        );
-    }
+fn print_check_summary_failure(total: usize, elapsed: Duration) {
+    eprintln!(
+        "{}",
+        format!("\u{2717} {total} issues ({:.2}s)", elapsed.as_secs_f64())
+            .red()
+            .bold()
+    );
 }
 
 #[cfg(test)]
@@ -2192,8 +2828,6 @@ mod tests {
         crate::report::test_helpers::sample_results(root)
     }
 
-    // ── Empty results ──
-
     #[test]
     fn empty_results_produce_no_lines() {
         let root = PathBuf::from("/project");
@@ -2203,7 +2837,36 @@ mod tests {
         assert!(lines.is_empty());
     }
 
-    // ── Section headers contain title and count ──
+    #[test]
+    fn collect_matching_rules_routes_mixed_client_server_barrels() {
+        // A file whose ONLY finding is a mixed-client-server-barrel must still
+        // surface its CODEOWNERS rule in the `--group-by owner` "matched by"
+        // header. Reverting the `mixed_client_server_barrels` loop in
+        // `collect_matching_rules` makes this assertion fail (empty rules),
+        // pinning the fix that was previously missing alongside the sibling
+        // invalid-client-export / misplaced-directive loops.
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .mixed_client_server_barrels
+            .push(MixedClientServerBarrelFinding::with_actions(
+                MixedClientServerBarrel {
+                    path: root.join("src/index.ts"),
+                    client_origin: "./Button".to_string(),
+                    server_origin: "./fetchUser".to_string(),
+                    line: 2,
+                    col: 0,
+                },
+            ));
+        let resolver = OwnershipResolver::Owner(
+            crate::codeowners::CodeOwners::parse("/src/ @frontend\n").unwrap(),
+        );
+        let matched = collect_matching_rules(&results, &root, &resolver);
+        assert!(
+            matched.iter().any(|r| r.contains("src")),
+            "mixed-barrel path must route through the ownership resolver, got: {matched:?}"
+        );
+    }
 
     #[test]
     fn section_headers_contain_title_and_count() {
@@ -2228,8 +2891,6 @@ mod tests {
         assert!(text.contains("Circular dependencies (1)"));
     }
 
-    // ── Multiple items show correct counts ──
-
     #[test]
     fn section_header_shows_correct_count_for_multiple_items() {
         let root = PathBuf::from("/project");
@@ -2247,7 +2908,88 @@ mod tests {
         assert!(text.contains("Unused files (5)"));
     }
 
-    // ── Unused files display relative paths ──
+    #[test]
+    fn boundary_coverage_alone_renders_structure_section() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .boundary_coverage_violations
+            .push(BoundaryCoverageViolationFinding::with_actions(
+                BoundaryCoverageViolation {
+                    path: root.join("src/middleware/error.ts"),
+                    line: 1,
+                    col: 0,
+                },
+            ));
+
+        let lines = build_human_lines(&results, &root, &RulesConfig::default(), None);
+        let text = plain(&lines);
+
+        assert!(text.contains("Structure"));
+        assert!(text.contains("Boundary coverage (1)"));
+        assert!(text.contains("src/middleware/error.ts:1"));
+    }
+
+    #[test]
+    fn boundary_calls_alone_render_structure_section() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .boundary_call_violations
+            .push(BoundaryCallViolationFinding::with_actions(
+                BoundaryCallViolation {
+                    path: root.join("src/domain/policy.ts"),
+                    line: 5,
+                    col: 2,
+                    zone: "domain".to_string(),
+                    callee: "execSync".to_string(),
+                    pattern: "child_process.*".to_string(),
+                },
+            ));
+
+        let lines = build_human_lines(&results, &root, &RulesConfig::default(), None);
+        let text = plain(&lines);
+
+        assert!(text.contains("Structure"));
+        assert!(text.contains("Boundary calls (1)"));
+        assert!(text.contains("src/domain/policy.ts:5"));
+        assert!(text.contains("execSync"));
+        assert!(text.contains("child_process.*"));
+        assert!(text.contains("zone 'domain'"));
+        // The rule id is boundary-call-violation but the working token is the
+        // family token; the section must teach the literal token.
+        assert!(text.contains("// plow-ignore-next-line boundary-violation"));
+    }
+
+    #[test]
+    fn policy_violations_render_policy_section_with_message() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .policy_violations
+            .push(PolicyViolationFinding::with_actions(PolicyViolation {
+                path: root.join("src/app.ts"),
+                line: 7,
+                col: 2,
+                pack: "team-policy".to_string(),
+                rule_id: "no-moment".to_string(),
+                kind: plow_types::results::PolicyRuleKind::BannedImport,
+                matched: "moment/locale/nl".to_string(),
+                severity: plow_types::results::PolicyViolationSeverity::Error,
+                message: Some("Use date-fns.".to_string()),
+            }));
+
+        let lines = build_human_lines(&results, &root, &RulesConfig::default(), None);
+        let text = plain(&lines);
+
+        assert!(text.contains("Policy"));
+        assert!(text.contains("Policy violations (1)"));
+        assert!(text.contains("src/app.ts:7"));
+        assert!(text.contains("moment/locale/nl"));
+        assert!(text.contains("team-policy/no-moment"));
+        assert!(text.contains("Use date-fns."));
+        assert!(text.contains("plow-ignore-next-line policy-violation:<pack>/<rule-id>"));
+    }
 
     #[test]
     fn unused_files_show_relative_paths() {
@@ -2265,7 +3007,29 @@ mod tests {
         assert!(!text.contains("/project/"));
     }
 
-    // ── Unused exports show file grouping, line, and name ──
+    #[test]
+    fn unused_files_show_src_test_split_when_mixed() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        for path in [
+            "src/dead-a.ts",
+            "src/dead-b.ts",
+            "tests/dead-a.test.ts",
+            "tests/dead-b.test.ts",
+            "__fixtures__/dead-fixture.ts",
+        ] {
+            results
+                .unused_files
+                .push(UnusedFileFinding::with_actions(UnusedFile {
+                    path: root.join(path),
+                }));
+        }
+        let rules = RulesConfig::default();
+        let lines = build_human_lines(&results, &root, &rules, None);
+        let text = plain(&lines);
+
+        assert!(text.contains("2 in src, 3 in test directories"));
+    }
 
     #[test]
     fn unused_exports_grouped_by_file_with_line_and_name() {
@@ -2297,16 +3061,11 @@ mod tests {
         let lines = build_human_lines(&results, &root, &rules, None);
         let text = plain(&lines);
 
-        // Count of 2 in header
         assert!(text.contains("Unused exports (2)"));
-        // File path appears as group header
         assert!(text.contains("src/utils.ts"));
-        // Both export names appear
         assert!(text.contains(":10 helperFn"));
         assert!(text.contains(":25 anotherFn"));
     }
-
-    // ── Re-exports are tagged ──
 
     #[test]
     fn re_exports_are_tagged() {
@@ -2350,8 +3109,6 @@ mod tests {
         assert!(!text.contains("(re-export)"));
     }
 
-    // ── Unused members show parent.member format ──
-
     #[test]
     fn unused_enum_members_show_parent_dot_member() {
         let root = PathBuf::from("/project");
@@ -2394,8 +3151,6 @@ mod tests {
         assert!(text.contains(":99"));
     }
 
-    // ── Dependencies display ──
-
     #[test]
     fn unused_deps_at_root_show_package_name_only() {
         let root = PathBuf::from("/project");
@@ -2413,7 +3168,6 @@ mod tests {
         let lines = build_human_lines(&results, &root, &rules, None);
         let text = plain(&lines);
         assert!(text.contains("lodash"));
-        // Should NOT show "(package.json)" for root deps
         assert!(!text.contains("(package.json)"));
     }
 
@@ -2478,8 +3232,6 @@ mod tests {
         assert!(!text.contains("(package.json; imported in packages/consumer)"));
     }
 
-    // ── Unresolved imports show specifier ──
-
     #[test]
     fn unresolved_imports_show_specifier_and_line() {
         let root = PathBuf::from("/project");
@@ -2500,8 +3252,6 @@ mod tests {
         assert!(text.contains(":7"));
         assert!(text.contains("@org/missing-pkg"));
     }
-
-    // ── Namespace-barrel hint helpers ──
 
     fn make_dup(name: &str, paths: &[&str]) -> DuplicateExportFinding {
         DuplicateExportFinding::with_actions(DuplicateExport {
@@ -2528,7 +3278,6 @@ mod tests {
         assert!(is_namespace_barrel_location(Path::new("src/x/index.mjs")));
         assert!(is_namespace_barrel_location(Path::new("src/x/index.cjs")));
         assert!(is_namespace_barrel_location(Path::new("src/x/index.jsx")));
-        // Case-insensitive on the extension only.
         assert!(is_namespace_barrel_location(Path::new(
             "components/ui/button/index.TS"
         )));
@@ -2542,11 +3291,9 @@ mod tests {
         assert!(!is_namespace_barrel_location(Path::new(
             "components/ui/button/Button.ts"
         )));
-        // basename must be exactly `index`; uppercase `Index` does not match.
         assert!(!is_namespace_barrel_location(Path::new(
             "components/ui/button/Index.ts"
         )));
-        // Unsupported extensions.
         assert!(!is_namespace_barrel_location(Path::new(
             "components/ui/button/index.svelte"
         )));
@@ -2599,7 +3346,6 @@ mod tests {
 
     #[test]
     fn namespace_barrel_hint_does_not_fire_below_findings_floor() {
-        // 2 of 2 findings match the barrel shape, but the floor is 3 findings.
         let items = vec![
             make_dup(
                 "Root",
@@ -2627,9 +3373,6 @@ mod tests {
 
     #[test]
     fn namespace_barrel_hint_skips_single_location_findings_when_computing_ratio() {
-        // Single-location findings are filtered out of the human render and
-        // should not affect the ratio. Three barrel-shaped renderable findings
-        // alongside a single-location finding still satisfy the gate.
         let items = vec![
             make_dup(
                 "Root",
@@ -2674,7 +3417,6 @@ mod tests {
     fn duplicate_exports_section_omits_hint_when_gate_fails() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        // Only one finding -> below floor.
         results.duplicate_exports.push(make_dup(
             "Sym",
             &[
@@ -2690,8 +3432,6 @@ mod tests {
             "hint must not fire below the 3-finding floor: {text}"
         );
     }
-
-    // ── Duplicate exports show locations ──
 
     #[test]
     fn duplicate_exports_show_name_and_locations() {
@@ -2719,11 +3459,8 @@ mod tests {
         let text = plain(&lines);
         assert!(text.contains("Config"));
         assert!(text.contains("src/config.ts"));
-        // file_b shown with common prefix elided
         assert!(text.contains("types.ts"));
     }
-
-    // ── Circular dependencies show cycle with arrow ──
 
     #[test]
     fn circular_dependencies_show_cycle_with_arrow_and_repeat() {
@@ -2741,26 +3478,23 @@ mod tests {
                     length: 3,
                     line: 1,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             ));
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);
         let text = plain(&lines);
-        // Hub file shown first, chain with elided paths and arrows
         assert!(text.contains("a.ts"));
         assert!(text.contains("b.ts"));
         assert!(text.contains("c.ts"));
         assert!(text.contains("\u{2192}"));
     }
 
-    // ── Empty sections are omitted ──
-
     #[test]
     fn empty_sections_are_omitted() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        // Only add unused files, no other issues
         results
             .unused_files
             .push(UnusedFileFinding::with_actions(UnusedFile {
@@ -2775,11 +3509,8 @@ mod tests {
         assert!(!text.contains("Unresolved imports"));
     }
 
-    // ── Severity levels affect section header indicator ──
-
     #[test]
     fn section_header_uses_bullet_indicator() {
-        // The section header always contains the bullet character
         let header = build_section_header("Test section", 3, Level::Error);
         let text = strip_ansi(&header);
         assert!(text.contains("\u{25cf}"));
@@ -2788,7 +3519,6 @@ mod tests {
 
     #[test]
     fn section_header_formats_for_all_levels() {
-        // Verify all three levels produce valid headers (not panicking, contain the title)
         for level in [Level::Error, Level::Warn, Level::Info] {
             let header = build_section_header("Items", 7, level);
             let text = strip_ansi(&header);
@@ -2799,13 +3529,10 @@ mod tests {
         }
     }
 
-    // ── Grouped sections sort by file path ──
-
     #[test]
     fn grouped_exports_from_different_files_sorted_by_path() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        // Add exports in non-alphabetical order
         results
             .unused_exports
             .push(UnusedExportFinding::with_actions(UnusedExport {
@@ -2831,13 +3558,10 @@ mod tests {
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);
         let text = plain(&lines);
-        // a-file should appear before z-file in output
         let a_pos = text.find("src/a-file.ts").unwrap();
         let z_pos = text.find("src/z-file.ts").unwrap();
         assert!(a_pos < z_pos, "Files should be sorted alphabetically");
     }
-
-    // ── File grouping deduplicates file headers ──
 
     #[test]
     fn grouped_items_from_same_file_share_one_file_header() {
@@ -2859,18 +3583,12 @@ mod tests {
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);
         let text = plain(&lines);
-        // "src/utils.ts" should appear exactly once as a group header
         let count = text.matches("src/utils.ts").count();
         assert_eq!(count, 1, "File header should appear once, found {count}");
     }
 
-    // ── Severity affects which sections appear ──
-
     #[test]
     fn off_severity_still_shows_section_when_items_present() {
-        // When severity is Off, the items are normally filtered before reaching
-        // the reporter. But if items ARE present, the section should still render
-        // (with Info-level styling).
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
         results
@@ -2887,8 +3605,6 @@ mod tests {
         assert!(text.contains("Unused files (1)"));
     }
 
-    // ── Deeply nested paths display correctly ──
-
     #[test]
     fn deeply_nested_paths_display_correctly() {
         let root = PathBuf::from("/project");
@@ -2904,8 +3620,6 @@ mod tests {
         assert!(text.contains("packages/ui/src/components/forms/inputs/TextInput.tsx"));
     }
 
-    // ── All section types produce output when populated ──
-
     #[test]
     fn all_issue_types_produce_output_lines() {
         let root = PathBuf::from("/project");
@@ -2913,7 +3627,6 @@ mod tests {
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);
         let text = plain(&lines);
-        // Every populated section must produce a header with a count
         assert!(text.contains("Unused files (1)"));
         assert!(text.contains("Unused exports (1)"));
         assert!(text.contains("Unused type exports (1)"));
@@ -2931,8 +3644,6 @@ mod tests {
         ));
         assert!(text.contains("Circular dependencies (1)"));
     }
-
-    // ── Sections end with empty line separator ──
 
     #[test]
     fn each_section_ends_with_empty_line_separator() {
@@ -2954,16 +3665,12 @@ mod tests {
             }));
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);
-        // Category headers + issue sections each add an empty line separator.
-        // Unused Code header + unused_files + Dependencies header + unused_deps = 4 empty lines.
         let empty_count = lines.iter().filter(|l| l.is_empty()).count();
         assert_eq!(
             empty_count, 4,
             "Expected 4 empty separators (2 category headers + 2 sections), got {empty_count}"
         );
     }
-
-    // ── Type-only dependencies section has specific title ──
 
     #[test]
     fn type_only_deps_section_title_includes_suggestion() {
@@ -2984,8 +3691,6 @@ mod tests {
         assert!(text.contains("Type-only dependencies (consider moving to devDependencies)"));
     }
 
-    // ── Warn severity renders with correct indicator for section header ──
-
     #[test]
     fn warn_severity_produces_header_with_bullet() {
         let root = PathBuf::from("/project");
@@ -2999,17 +3704,12 @@ mod tests {
                     line: 8,
                 },
             ));
-        // type_only_dependencies defaults to Warn
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);
         let text = plain(&lines);
-        // Verify the section appears with the correct title (the styling differs
-        // between Warn and Error, but the structural content is the same)
         assert!(text.contains("\u{25cf}"));
         assert!(text.contains("Type-only dependencies"));
     }
-
-    // ── Unlisted dependencies show package name ──
 
     #[test]
     fn unlisted_deps_show_package_name() {
@@ -3029,13 +3729,10 @@ mod tests {
         assert!(text.contains("@scope/unknown-pkg"));
     }
 
-    // ── Hub-grouped circular deps ──
-
     #[test]
     fn circular_deps_grouped_by_hub() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        // Two cycles sharing the same hub file
         results
             .circular_dependencies
             .push(CircularDependencyFinding::with_actions(
@@ -3044,6 +3741,7 @@ mod tests {
                     length: 2,
                     line: 1,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             ));
@@ -3055,26 +3753,22 @@ mod tests {
                     length: 2,
                     line: 5,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             ));
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);
         let text = plain(&lines);
-        // Should show "(2 cycles)" for the hub
         assert!(text.contains("(2 cycles)"));
-        // Hub file appears once
         assert_eq!(text.matches("hub.ts").count(), 3); // header + 2 chain endings
     }
-
-    // ── Summary footer ──
 
     #[test]
     fn summary_footer_uses_short_labels() {
         let root = PathBuf::from("/project");
         let results = sample_results(&root);
         let footer = build_summary_footer(&results, 0, 0);
-        // Should use short labels, not "unused file" etc.
         assert!(footer.contains("1 file"));
         assert!(footer.contains("1 export"));
         assert!(footer.contains("1 circular"));
@@ -3085,7 +3779,6 @@ mod tests {
     fn summary_footer_singularizes_pre_pluralized_labels_for_count_1() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        // Add exactly 1 of each pre-pluralized category
         results.unused_enum_members.push(
             plow_core::results::UnusedEnumMemberFinding::with_actions(UnusedMember {
                 path: root.join("src/types.ts"),
@@ -3107,7 +3800,6 @@ mod tests {
             }),
         );
         let footer = build_summary_footer(&results, 0, 0);
-        // Pre-pluralized labels should be singularized for count=1
         assert!(
             footer.contains("1 enum member"),
             "Expected '1 enum member' but got: {footer}"
@@ -3126,8 +3818,6 @@ mod tests {
         );
     }
 
-    // ── Section footers with docs links ──
-
     #[test]
     fn section_footer_contains_docs_link() {
         let root = PathBuf::from("/project");
@@ -3140,12 +3830,9 @@ mod tests {
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);
         let text = plain(&lines);
-        // Human output always includes section footers with doc links
         assert!(text.contains("docs.genesis-plow.dev/explanations/dead-code"));
         assert!(text.contains("Files not reachable from any entry point"));
     }
-
-    // ── Truncation tests ──
 
     #[test]
     fn flat_section_truncates_at_max() {
@@ -3168,7 +3855,6 @@ mod tests {
     fn grouped_section_truncates_files() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        // 15 files with 1 export each
         for i in 0..15 {
             results
                 .unused_exports
@@ -3188,8 +3874,6 @@ mod tests {
         assert!(text.contains("... and 5 more in 5 files"));
     }
 
-    // ── --top flag limits items shown ──
-
     #[test]
     fn top_flag_limits_unused_files_shown() {
         let root = PathBuf::from("/project");
@@ -3205,10 +3889,8 @@ mod tests {
         let lines = build_human_lines(&results, &root, &rules, Some(2));
         let text = plain(&lines);
 
-        // Header still shows the full count
         assert!(text.contains("Unused files (5)"));
 
-        // Only 2 of the 5 files should be listed
         let file_lines: Vec<&str> = text
             .lines()
             .filter(|l| l.contains("src/dead") && l.contains(".ts"))
@@ -3220,7 +3902,6 @@ mod tests {
             file_lines.len()
         );
 
-        // Truncation hint for the remaining 3
         assert!(
             text.contains("... and 3 more"),
             "Expected truncation hint, got:\n{text}"

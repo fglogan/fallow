@@ -6,7 +6,7 @@ pub(super) use rustc_hash::{FxHashMap, FxHashSet};
 
 #[allow(unused_imports, reason = "shared re-export for sibling test modules")]
 pub(super) use plow_config::{
-    BoundaryConfig, PlowConfig, OutputFormat, PackageJson, ResolvedConfig, WorkspaceInfo,
+    BoundaryConfig, OutputFormat, PackageJson, PlowConfig, ResolvedConfig, WorkspaceInfo,
 };
 #[allow(unused_imports, reason = "shared re-export for sibling test modules")]
 pub(super) use plow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
@@ -31,8 +31,6 @@ pub(super) use super::super::{
     find_unlisted_dependencies, find_unresolved_imports, find_unused_dependencies,
     is_package_listed_for_file, should_skip_dependency,
 };
-
-// ---- Integration test helpers ----
 
 /// Build a minimal ResolvedConfig for testing.
 pub(super) fn test_config(root: PathBuf) -> ResolvedConfig {

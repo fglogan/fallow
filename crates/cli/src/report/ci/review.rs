@@ -4,13 +4,15 @@ use serde_json::Value;
 
 use super::diff_filter::DiffIndex;
 use super::fingerprint::{composite_fingerprint, summary_fingerprint};
-use super::pr_comment::{CiIssue, Provider, command_title, escape_md};
+use super::pr_comment::{
+    CiIssue, Provider, command_title, escape_md, issues_from_codeclimate_issues,
+};
 use super::severity;
 use crate::output_envelope::{
-    GitHubReviewComment, GitHubReviewSide, GitLabReviewComment, GitLabReviewPosition,
-    GitLabReviewPositionType, ReviewCheckConclusion, ReviewComment, ReviewEnvelopeEvent,
-    ReviewEnvelopeMeta, ReviewEnvelopeOutput, ReviewEnvelopeSchema, ReviewEnvelopeSummary,
-    ReviewProvider, default_marker_regex, default_marker_regex_flags,
+    CodeClimateIssue, GitHubReviewComment, GitHubReviewSide, GitLabReviewComment,
+    GitLabReviewPosition, GitLabReviewPositionType, ReviewCheckConclusion, ReviewComment,
+    ReviewEnvelopeEvent, ReviewEnvelopeMeta, ReviewEnvelopeOutput, ReviewEnvelopeSchema,
+    ReviewEnvelopeSummary, ReviewProvider, default_marker_regex, default_marker_regex_flags,
 };
 use crate::report::emit_json;
 
@@ -81,16 +83,11 @@ pub fn render_review_envelope_with_diff(
         .flatten();
     let include_guidance = review_guidance_enabled();
 
-    // Step 1: group consecutive same-(path, line) issues. Input is already
-    // sorted by `(path, line, fingerprint)` (see `pr_comment::issues_from_codeclimate`).
-    let merged_groups = group_by_path_line(issues);
+    let grouped = group_by_path_line(issues, max);
 
-    // Step 2: cap to PLOW_MAX_COMMENTS at the post-merge group count.
-    // A run that produces 50 comments where 10 collapse into 1 still gets
-    // 40 comments emitted, not 50 minus 9.
-    let comments: Vec<ReviewComment> = merged_groups
+    let comments: Vec<ReviewComment> = grouped
+        .groups
         .iter()
-        .take(max)
         .map(|group| {
             render_merged_comment(
                 provider,
@@ -101,6 +98,23 @@ pub fn render_review_envelope_with_diff(
             )
         })
         .collect();
+    let body_truncated = comments.iter().any(review_comment_truncated);
+    if body_truncated {
+        crate::telemetry::note_report_truncation(
+            true,
+            crate::telemetry::TruncationReason::SizeLimit,
+        );
+    } else if grouped.truncated {
+        crate::telemetry::note_report_truncation(
+            true,
+            crate::telemetry::TruncationReason::CommentLimit,
+        );
+    } else {
+        crate::telemetry::note_report_truncation(
+            false,
+            crate::telemetry::TruncationReason::Unknown,
+        );
+    }
 
     let summary_text = format!(
         "### Plow {}\n\n{} inline finding{} selected for {} review.\n\n<!-- plow-review -->",
@@ -152,9 +166,35 @@ pub fn print_review_envelope(command: &str, provider: Provider, codeclimate: &Va
     let issues = super::diff_filter::filter_issues_from_env(
         super::pr_comment::issues_from_codeclimate(codeclimate),
     );
-    let envelope = render_review_envelope(command, provider, &issues);
-    let value =
-        serde_json::to_value(&envelope).expect("ReviewEnvelopeOutput serializes infallibly");
+    print_review_envelope_from_ci_issues(command, provider, &issues)
+}
+
+#[must_use]
+pub fn print_review_envelope_from_codeclimate_issues(
+    command: &str,
+    provider: Provider,
+    codeclimate: &[CodeClimateIssue],
+) -> ExitCode {
+    let issues =
+        super::diff_filter::filter_issues_from_env(issues_from_codeclimate_issues(codeclimate));
+    print_review_envelope_from_ci_issues(command, provider, &issues)
+}
+
+#[must_use]
+#[expect(
+    clippy::expect_used,
+    reason = "review envelope contains only infallibly serializable fields"
+)]
+fn print_review_envelope_from_ci_issues(
+    command: &str,
+    provider: Provider,
+    issues: &[CiIssue],
+) -> ExitCode {
+    let envelope = render_review_envelope(command, provider, issues);
+    let value = crate::output_envelope::serialize_root_output(
+        crate::output_envelope::PlowOutput::ReviewEnvelope(envelope),
+    )
+    .expect("ReviewEnvelopeOutput serializes infallibly");
     emit_json(&value, "review envelope")
 }
 
@@ -199,10 +239,22 @@ fn env_truthy(value: &str) -> bool {
     )
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct GroupedReviewIssues<'a> {
+    groups: Vec<Vec<&'a CiIssue>>,
+    truncated: bool,
+}
+
 /// Group consecutive same-(path, line) issues. Input is already sorted by
 /// `(path, line, fingerprint)` so a single linear pass collects runs.
-fn group_by_path_line(issues: &[CiIssue]) -> Vec<Vec<&CiIssue>> {
-    let mut groups: Vec<Vec<&CiIssue>> = Vec::new();
+fn group_by_path_line(issues: &[CiIssue], max_groups: usize) -> GroupedReviewIssues<'_> {
+    if max_groups == 0 {
+        return GroupedReviewIssues {
+            groups: Vec::new(),
+            truncated: !issues.is_empty(),
+        };
+    }
+    let mut groups: Vec<Vec<&CiIssue>> = Vec::with_capacity(max_groups.min(issues.len()));
     let mut current: Vec<&CiIssue> = Vec::new();
     let mut current_key: Option<(&str, u64)> = None;
     for issue in issues {
@@ -210,15 +262,31 @@ fn group_by_path_line(issues: &[CiIssue]) -> Vec<Vec<&CiIssue>> {
         if Some(key) != current_key {
             if !current.is_empty() {
                 groups.push(std::mem::take(&mut current));
+                if groups.len() == max_groups {
+                    return GroupedReviewIssues {
+                        groups,
+                        truncated: true,
+                    };
+                }
             }
             current_key = Some(key);
         }
         current.push(issue);
     }
-    if !current.is_empty() {
+    if !current.is_empty() && groups.len() < max_groups {
         groups.push(current);
     }
-    groups
+    GroupedReviewIssues {
+        groups,
+        truncated: false,
+    }
+}
+
+fn review_comment_truncated(comment: &ReviewComment) -> bool {
+    match comment {
+        ReviewComment::GitHub(comment) => comment.truncated,
+        ReviewComment::GitLab(comment) => comment.truncated,
+    }
 }
 
 /// Render one comment from a group of 1+ issues that share the same
@@ -229,6 +297,7 @@ fn group_by_path_line(issues: &[CiIssue]) -> Vec<Vec<&CiIssue>> {
 /// fingerprints. The composite identity shifts whenever the set of
 /// constituents changes, so consumers' skip-if-fingerprint-exists logic
 /// correctly re-posts on content change.
+#[expect(clippy::expect_used, reason = "formatting into String is infallible")]
 fn render_merged_comment(
     provider: Provider,
     group: &[&CiIssue],
@@ -245,8 +314,6 @@ fn render_merged_comment(
         composite_fingerprint(&constituents)
     };
 
-    // Build the rendered body content WITHOUT the trailing marker so the
-    // truncation logic can preserve the marker at the tail under cap.
     use std::fmt::Write as _;
     let mut content = String::new();
     for (index, issue) in group.iter().enumerate() {
@@ -274,16 +341,8 @@ fn render_merged_comment(
     let (body, truncated) = cap_body_with_marker(&content, &marker_line);
 
     match provider {
-        // Plow findings point at the current file state. GitHub deletion-side
-        // review comments are intentionally not modeled in this envelope yet.
         Provider::Github => ReviewComment::GitHub(GitHubReviewComment {
             path: representative.path.clone(),
-            // `CiIssue.line` is `u64` for legacy reasons but every callsite
-            // populates it from a `u32` line number (`begin_line: Option<u32>`
-            // in `cc_issue`); the typed envelope locks the wire to `u32`.
-            // Follow-up: narrow `CiIssue.line` to `u32` at construction time
-            // in `pr_comment.rs::issues_from_codeclimate` so this cast goes
-            // away entirely (out of scope for the #384 ladder migration).
             line: u32::try_from(representative.line).unwrap_or(u32::MAX),
             side: GitHubReviewSide::Right,
             body,
@@ -291,12 +350,6 @@ fn render_merged_comment(
             truncated,
         }),
         Provider::Gitlab => {
-            // Issue #528: GitLab's position API requires `old_path` to hold
-            // the base-side filename for renamed files. Without this, an
-            // inline comment on a renamed file fails to anchor and is
-            // rejected at POST time. Falls back to the head-side path when
-            // the diff index has no rename pair recorded (the common case:
-            // edits, additions, deletions).
             let new_path = representative.path.clone();
             let old_path = diff_index
                 .and_then(|di| di.old_path_for(&new_path))
@@ -308,8 +361,6 @@ fn render_merged_comment(
                 position_type: GitLabReviewPositionType::Text,
                 old_path,
                 new_path,
-                // Same `u64 -> u32` narrowing as the GitHub branch above;
-                // see the follow-up note there.
                 new_line: u32::try_from(representative.line).unwrap_or(u32::MAX),
             };
             ReviewComment::GitLab(GitLabReviewComment {
@@ -346,11 +397,6 @@ fn cap_body_with_marker(content: &str, marker_line: &str) -> (String, bool) {
         out.push_str(marker_line);
         return (out, false);
     }
-    // Reserve space for the marker + truncation breadcrumb, then walk back
-    // from the budget to the nearest UTF-8 boundary. `MAX - reserved` may
-    // underflow on absurdly large markers, but the marker is bounded by
-    // `MARKER_PREFIX_V2` (28 bytes) + fingerprint kind prefix + 16 hex chars
-    // + suffix (4 bytes), well under 100 bytes; saturating_sub is defensive.
     let reserved = marker_line.len() + TRUNCATION_SUFFIX.len();
     let budget = MAX_COMMENT_BODY_BYTES.saturating_sub(reserved);
     let mut cut = budget.min(content.len());
@@ -578,22 +624,11 @@ mod tests {
         let env = to_value(&render_review_envelope("check", Provider::Github, &issues));
         let regex = env["marker_regex"].as_str().expect("marker_regex present");
         assert_eq!(regex, MARKER_REGEX_V2);
-        // Pinned to exactly 16 hex chars (single hash form, optionally with
-        // a kind prefix like `merged:`).
         assert!(regex.contains("[0-9a-f]{16}"));
-        // Anchored start-of-line + end-of-line. Consumers pass the flags
-        // field as the second arg to their regex engine so `^` / `$`
-        // match at line boundaries.
         assert!(regex.starts_with('^'));
         assert!(regex.ends_with("\\s*$"));
-        // No `(?m)` baked into the pattern; JavaScript RegExp rejects
-        // standalone inline flag groups with `Invalid group`.
         assert!(!regex.contains("(?m)"));
-        // Capture group 1 is the fingerprint. Optional kind prefix:
-        // `(?:[a-z]+:)?` lets `merged:<hex>` or bare `<hex>` match in the
-        // same group.
         assert!(regex.contains("((?:[a-z]+:)?[0-9a-f]{16})"));
-        // Flags field carries "m" so anchored `^` / `$` work per-line.
         let flags = env["marker_regex_flags"]
             .as_str()
             .expect("marker_regex_flags present");
@@ -608,7 +643,6 @@ mod tests {
         let summary_fp = env["summary"]["fingerprint"].as_str().expect("fingerprint");
         assert_eq!(summary_fp.len(), 16);
         assert!(summary_fp.chars().all(|c| c.is_ascii_hexdigit()));
-        // The fingerprint should appear inside the body's marker.
         let body_str = env["body"].as_str().unwrap();
         let marker_line = format!("{MARKER_PREFIX_V2}{summary_fp}{MARKER_SUFFIX_V2}");
         assert!(
@@ -633,9 +667,7 @@ mod tests {
             fp.starts_with("merged:"),
             "merged comment fingerprint must start with merged:, got {fp}"
         );
-        // 7 chars prefix + 16 hex = 23 total.
         assert_eq!(fp.len(), 23);
-        // Body carries both finding paragraphs and ONE marker.
         let body = merged["body"].as_str().unwrap();
         assert!(body.contains("plow/unused-export"));
         assert!(body.contains("plow/duplicate-export"));
@@ -644,11 +676,41 @@ mod tests {
             1,
             "merged body must carry exactly one fingerprint marker"
         );
-        // Constituent fingerprints are NOT emitted on the wire; the
-        // composite hash is the only identity signal.
         assert!(
             merged.get("constituent_fingerprints").is_none(),
             "v2 hashed-composite design does not emit constituent_fingerprints"
+        );
+    }
+
+    #[test]
+    fn group_by_path_line_respects_max_groups_without_splitting_same_line_findings() {
+        let a = issue("plow/unused-export", "minor", "src/foo.ts", 42, "fp_a");
+        let b = issue("plow/duplicate-export", "minor", "src/foo.ts", 42, "fp_b");
+        let c = issue("plow/unused-type", "minor", "src/z.ts", 7, "fp_c");
+        let issues = vec![a, b, c];
+
+        let max_zero = group_by_path_line(&issues, 0);
+        assert!(max_zero.groups.is_empty());
+        assert!(max_zero.truncated);
+
+        let max_one = group_by_path_line(&issues, 1);
+        assert_eq!(max_one.groups.len(), 1);
+        assert!(max_one.truncated);
+        assert_eq!(max_one.groups[0].len(), 2);
+        assert_eq!(max_one.groups[0][0].path, "src/foo.ts");
+        assert_eq!(max_one.groups[0][0].line, 42);
+
+        let max_two = group_by_path_line(&issues, 2);
+        assert_eq!(max_two.groups.len(), 2);
+        assert!(!max_two.truncated);
+        assert_eq!(max_two.groups[0].len(), 2);
+        assert_eq!(max_two.groups[1].len(), 1);
+        assert_eq!(
+            max_two.groups[0]
+                .iter()
+                .map(|issue| issue.fingerprint.as_str())
+                .collect::<Vec<_>>(),
+            ["fp_a", "fp_b"]
         );
     }
 
@@ -676,9 +738,6 @@ mod tests {
 
     #[test]
     fn composite_fingerprint_shifts_when_constituents_change() {
-        // Hashed-composite identity changes when constituents change, so
-        // the bundled wrappers' skip-if-fingerprint-exists logic correctly
-        // re-posts on content change. Idempotent on equal input.
         let a = issue("plow/unused-export", "minor", "src/foo.ts", 42, "fp_a");
         let b = issue("plow/duplicate-export", "minor", "src/foo.ts", 42, "fp_b");
         let c = issue("plow/unused-type", "minor", "src/foo.ts", 42, "fp_c");
@@ -737,7 +796,6 @@ rename to src/new.ts
 
     #[test]
     fn oversized_body_truncates_at_char_boundary_and_preserves_marker() {
-        // Synthesize an issue whose description blows past the body cap.
         let huge_desc = "x".repeat(MAX_COMMENT_BODY_BYTES * 2);
         let issue = CiIssue {
             rule_id: "plow/unused-export".into(),
@@ -760,18 +818,13 @@ rename to src/new.ts
             "body len {} must not exceed cap {MAX_COMMENT_BODY_BYTES}",
             body.len()
         );
-        // The marker must survive truncation at the tail.
         assert!(
             body.contains("plow-fingerprint:v2:"),
             "marker must be preserved under truncation"
         );
-        // Both the machine-detectable HTML marker and the human blockquote
-        // breadcrumb appear.
         assert!(body.contains("<!-- plow-truncated -->"));
         assert!(body.contains("> Body truncated by plow."));
-        // Typed boolean is set so consumers don't have to string-match.
         assert_eq!(comment["truncated"], true);
-        // Body bytes are valid UTF-8 (char-boundary truncation).
         assert!(std::str::from_utf8(body.as_bytes()).is_ok());
     }
 
@@ -801,8 +854,6 @@ rename to src/new.ts
 
     #[test]
     fn multibyte_body_truncates_at_char_boundary() {
-        // Each Japanese char is 3 bytes in UTF-8. A byte-boundary truncation
-        // anywhere inside one would produce invalid UTF-8.
         let huge_desc: String = "あ".repeat(MAX_COMMENT_BODY_BYTES);
         let issue = CiIssue {
             rule_id: "plow/unused-export".into(),
@@ -820,10 +871,6 @@ rename to src/new.ts
             false,
         ));
         let body = comment["body"].as_str().unwrap();
-        // Cargo will fail to deserialize the snapshot if `body` is not
-        // valid UTF-8 (serde_json::Value::String requires it), so this
-        // assertion is somewhat tautological -- but the explicit decode
-        // pins the contract.
         assert!(std::str::from_utf8(body.as_bytes()).is_ok());
         assert!(body.len() <= MAX_COMMENT_BODY_BYTES);
         assert_eq!(comment["truncated"], true);

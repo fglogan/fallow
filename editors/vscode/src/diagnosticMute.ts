@@ -63,8 +63,12 @@ const summaryText = (filter: DiagnosticFilter): string => {
 /** A LanguageStatusItem in the right gutter that surfaces mute state.
  *  Severity is `Warning` whenever anything is muted, otherwise the item is
  *  hidden. Click opens the manage-mutes QuickPick. A secondary command
- *  clears all mutes in one click. */
-const createLanguageStatus = (filter: DiagnosticFilter): vscode.LanguageStatusItem => {
+ *  clears all mutes in one click.
+ *
+ *  Returns a composite disposable that tears down both the status item and the
+ *  `filter.onDidChange` subscription, so a re-create does not leak listeners
+ *  (and disposal no longer relies on LIFO ordering of the status item). */
+const createLanguageStatus = (filter: DiagnosticFilter): vscode.Disposable => {
   const selector = PLOW_LANGUAGES.map((language) => ({
     scheme: "file",
     language,
@@ -72,7 +76,7 @@ const createLanguageStatus = (filter: DiagnosticFilter): vscode.LanguageStatusIt
   const item = vscode.languages.createLanguageStatusItem(STATUS_ITEM_ID, []);
   item.name = "Plow Mute";
   item.accessibilityInformation = {
-    label: "Plow diagnostic mute status",
+    label: "Plow hidden findings status",
     role: "button",
   };
 
@@ -92,13 +96,18 @@ const createLanguageStatus = (filter: DiagnosticFilter): vscode.LanguageStatusIt
     item.command = {
       command: "plow.manageDiagnosticMutes",
       title: "Manage",
-      tooltip: "Manage Plow diagnostic mutes",
+      tooltip: "Manage Plow hidden findings",
     };
   };
 
   apply();
-  filter.onDidChange(apply);
-  return item;
+  const subscription = filter.onDidChange(apply);
+  return {
+    dispose: () => {
+      subscription.dispose();
+      item.dispose();
+    },
+  };
 };
 
 interface ManagePickItem extends vscode.QuickPickItem {
@@ -108,17 +117,17 @@ interface ManagePickItem extends vscode.QuickPickItem {
 const TITLE_BUTTONS = {
   toggleAll: {
     iconPath: new vscode.ThemeIcon("eye-closed"),
-    tooltip: "Toggle mute for ALL Plow findings",
+    tooltip: "Hide or show all Plow findings",
   },
   clearAll: {
     iconPath: new vscode.ThemeIcon("clear-all"),
-    tooltip: "Show all Plow findings (clear all mutes)",
+    tooltip: "Show all Plow findings (clear all)",
   },
 } as const;
 
 const showManageQuickPick = async (filter: DiagnosticFilter): Promise<void> => {
   const pick = vscode.window.createQuickPick<ManagePickItem>();
-  pick.title = "Plow: manage diagnostic mutes (CI is unaffected)";
+  pick.title = "Plow: manage hidden findings (CI is unaffected)";
   pick.placeholder = "Check categories to hide them in the editor. Press Enter to apply.";
   pick.canSelectMany = true;
   pick.matchOnDetail = true;
@@ -127,7 +136,7 @@ const showManageQuickPick = async (filter: DiagnosticFilter): Promise<void> => {
   const globalItem: ManagePickItem = {
     label: "$(eye-closed) All Plow Findings",
     description: filter.isMutedAll() ? "currently hidden" : "currently visible",
-    detail: "Global editor-only mute. Use the title buttons to toggle or clear it.",
+    detail: "Hides all findings in the editor only. Use the title buttons to toggle or clear it.",
     code: null,
     picked: filter.isMutedAll(),
     alwaysShow: filter.isMutedAll(),
@@ -138,7 +147,15 @@ const showManageQuickPick = async (filter: DiagnosticFilter): Promise<void> => {
       label,
       description: code,
       code,
-      picked: filter.isMutedAll() || filter.isCategoryMuted(code),
+      // Reflect the genuine per-category mute state, NOT `isMutedAll()`. When
+      // hide-all is on, auto-checking every category made unchecking the global
+      // "All Findings" row re-mute each category individually on accept (the
+      // `else` branch applies `setMutedCategories(selected)`), so the user who
+      // unchecked it to reveal findings stayed fully hidden. mute-all is a
+      // separate flag the filter tracks independently, so per-category rows show
+      // their own state and unchecking the global row reveals what is actually
+      // hidden underneath.
+      picked: filter.isCategoryMuted(code),
     })),
   ];
   pick.items = items;
@@ -161,10 +178,9 @@ const showManageQuickPick = async (filter: DiagnosticFilter): Promise<void> => {
       if (globalSelected) {
         filter.setMutedAll(true);
       } else {
-        if (filter.isMutedAll()) {
-          filter.setMutedAll(false);
-        }
-        filter.setMutedCategories(selected);
+        // Turn off mute-all AND apply the category selection in one cycle, so a
+        // single accept does not fire two persisted writes and two LSP re-pulls.
+        filter.applyMuteSelection(false, selected);
       }
       pick.hide();
     });
@@ -210,12 +226,12 @@ class PlowMuteCodeActions implements vscode.CodeActionProvider {
       seen.add(code);
       const label = labelFor(code);
       const action = new vscode.CodeAction(
-        `Mute Plow ${label.toLowerCase()} findings in this workspace`,
+        `Hide Plow ${label.toLowerCase()} findings in this workspace`,
         CODE_ACTION_KIND,
       );
       action.command = {
         command: "plow.muteDiagnosticCategory",
-        title: "Mute Plow category",
+        title: "Hide Plow category",
         arguments: [code],
       };
       action.diagnostics = [diag];
@@ -229,8 +245,7 @@ export const registerDiagnosticMuteUi = (
   context: vscode.ExtensionContext,
   filter: DiagnosticFilter,
 ): void => {
-  const statusItem = createLanguageStatus(filter);
-  context.subscriptions.push(statusItem);
+  context.subscriptions.push(createLanguageStatus(filter));
 
   context.subscriptions.push(filter.onDidChange(() => updateContextKey(filter)));
   updateContextKey(filter);
@@ -246,7 +261,7 @@ export const registerDiagnosticMuteUi = (
       const nowMuted = filter.toggleCategory(DUPLICATE_CODE);
       void vscode.window.setStatusBarMessage(
         nowMuted
-          ? "Plow: muted code-duplication findings (CI is unaffected)"
+          ? "Plow: hiding code-duplication findings (CI is unaffected)"
           : "Plow: showing code-duplication findings",
         4000,
       );
@@ -257,7 +272,9 @@ export const registerDiagnosticMuteUi = (
     vscode.commands.registerCommand("plow.toggleAllDiagnostics", () => {
       const nowMuted = filter.toggleMutedAll();
       void vscode.window.setStatusBarMessage(
-        nowMuted ? "Plow: muted all findings (CI is unaffected)" : "Plow: showing all findings",
+        nowMuted
+          ? "Plow: hiding all findings (CI is unaffected)"
+          : "Plow: showing all findings",
         4000,
       );
     }),

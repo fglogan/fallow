@@ -1,6 +1,7 @@
 use plow_config::{
-    BoundaryConfig, BoundaryPreset, BoundaryRule, BoundaryZone, DuplicatesConfig, PlowConfig,
-    FlagsConfig, HealthConfig, OutputFormat, ResolveConfig, RulesConfig, Severity,
+    BoundaryCallsConfig, BoundaryConfig, BoundaryCoverageConfig, BoundaryPreset, BoundaryRule,
+    BoundaryZone, DuplicatesConfig, FlagsConfig, HealthConfig, OutputFormat, PlowConfig,
+    ResolveConfig, RulesConfig, Severity,
 };
 
 use super::common::fixture_path;
@@ -41,6 +42,7 @@ fn create_boundary_config_with_entry(
         boundaries,
         production: false.into(),
         plugins: vec![],
+        rule_packs: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
@@ -48,6 +50,7 @@ fn create_boundary_config_with_entry(
         codeowners: None,
         public_packages: vec![],
         flags: FlagsConfig::default(),
+        security: plow_config::SecurityConfig::default(),
         fix: plow_config::FixConfig::default(),
         resolve: ResolveConfig::default(),
         sealed: false,
@@ -62,6 +65,8 @@ fn create_boundary_config_with_entry(
 fn detects_boundary_violation() {
     let root = fixture_path("boundary-violations");
     let boundaries = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
         preset: None,
         zones: vec![
             BoundaryZone {
@@ -99,7 +104,6 @@ fn detects_boundary_violation() {
     let config = create_boundary_config(root, boundaries);
     let results = plow_core::analyze(&config).expect("analysis should succeed");
 
-    // Should find exactly 1 boundary violation: ui/App.ts -> db/query.ts
     assert_eq!(
         results.boundary_violations.len(),
         1,
@@ -140,7 +144,6 @@ fn no_violations_when_boundaries_disabled() {
     let config = super::common::create_config(root);
     let results = plow_core::analyze(&config).expect("analysis should succeed");
 
-    // Default config has no boundaries configured, so no violations
     assert!(
         results.boundary_violations.is_empty(),
         "no boundary violations expected with default config"
@@ -148,9 +151,180 @@ fn no_violations_when_boundaries_disabled() {
 }
 
 #[test]
+fn reports_unmatched_files_when_boundary_coverage_is_required() {
+    let root = fixture_path("boundary-violations");
+    let boundaries = BoundaryConfig {
+        zones: vec![BoundaryZone {
+            name: "ui".to_string(),
+            patterns: vec!["src/ui/**".to_string()],
+            auto_discover: vec![],
+            root: None,
+        }],
+        coverage: BoundaryCoverageConfig {
+            require_all_files: true,
+            allow_unmatched: vec![],
+        },
+        ..BoundaryConfig::default()
+    };
+    let config = create_boundary_config(root, boundaries);
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
+
+    let paths = results
+        .boundary_coverage_violations
+        .iter()
+        .map(|v| v.violation.path.to_string_lossy().replace('\\', "/"))
+        .collect::<Vec<_>>();
+    assert!(
+        paths.iter().any(|p| p.ends_with("src/generated/client.ts")),
+        "expected generated client to be reported as unmatched, got {paths:?}"
+    );
+}
+
+#[test]
+fn allow_unmatched_excludes_boundary_coverage_findings() {
+    let root = fixture_path("boundary-violations");
+    let boundaries = BoundaryConfig {
+        zones: vec![BoundaryZone {
+            name: "ui".to_string(),
+            patterns: vec!["src/ui/**".to_string()],
+            auto_discover: vec![],
+            root: None,
+        }],
+        coverage: BoundaryCoverageConfig {
+            require_all_files: true,
+            allow_unmatched: vec!["src/generated/**".to_string(), "src/db/**".to_string()],
+        },
+        ..BoundaryConfig::default()
+    };
+    let config = create_boundary_config(root, boundaries);
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results.boundary_coverage_violations.iter().all(|v| !v
+            .violation
+            .path
+            .to_string_lossy()
+            .replace('\\', "/")
+            .ends_with("src/generated/client.ts")),
+        "allowUnmatched should suppress generated client coverage findings"
+    );
+}
+
+fn calls_boundaries(forbidden: Vec<plow_config::ForbiddenCallRule>) -> BoundaryConfig {
+    BoundaryConfig {
+        zones: vec![
+            BoundaryZone {
+                name: "domain".to_string(),
+                patterns: vec!["src/domain/**".to_string()],
+                auto_discover: vec![],
+                root: None,
+            },
+            BoundaryZone {
+                name: "ui".to_string(),
+                patterns: vec!["src/ui/**".to_string()],
+                auto_discover: vec![],
+                root: None,
+            },
+        ],
+        calls: BoundaryCallsConfig { forbidden },
+        ..BoundaryConfig::default()
+    }
+}
+
+fn forbid_call(from: &str, callee: &str) -> plow_config::ForbiddenCallRule {
+    plow_config::ForbiddenCallRule {
+        from: from.to_string(),
+        callee: plow_config::ForbiddenCallee::Single(callee.to_string()),
+    }
+}
+
+#[test]
+fn reports_forbidden_calls_from_zoned_files() {
+    let root = fixture_path("boundary-violations");
+    let boundaries = calls_boundaries(vec![
+        forbid_call("domain", "child_process.*"),
+        forbid_call("domain", "console.*"),
+    ]);
+    let config = create_boundary_config_with_entry(root, boundaries, "src/**/*.ts");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
+
+    let entries: Vec<(String, String, String, String)> = results
+        .boundary_call_violations
+        .iter()
+        .map(|v| {
+            (
+                v.violation.path.to_string_lossy().replace('\\', "/"),
+                v.violation.zone.clone(),
+                v.violation.callee.clone(),
+                v.violation.pattern.clone(),
+            )
+        })
+        .collect();
+
+    assert!(
+        entries.iter().any(|(path, zone, callee, pattern)| {
+            path.ends_with("src/domain/policy.ts")
+                && zone == "domain"
+                && callee == "execSync"
+                && pattern == "child_process.*"
+        }),
+        "expected the named-import execSync call to canonicalize and fire, got {entries:?}"
+    );
+    assert!(
+        entries.iter().any(|(path, zone, callee, pattern)| {
+            path.ends_with("src/domain/policy.ts")
+                && zone == "domain"
+                && callee == "console.log"
+                && pattern == "console.*"
+        }),
+        "expected the global console.log call to fire on the written path, got {entries:?}"
+    );
+    assert!(
+        entries
+            .iter()
+            .all(|(path, _, _, _)| !path.ends_with("src/ui/App.ts")),
+        "ui zone has no forbidden-call rule, so its console.log must stay quiet: {entries:?}"
+    );
+    assert!(
+        entries
+            .iter()
+            .all(|(path, _, _, _)| !path.ends_with("src/domain/suppressed.ts")),
+        "file-level boundary-violation suppression must be consumed: {entries:?}"
+    );
+    assert!(
+        entries
+            .iter()
+            .all(|(path, _, _, _)| !path.ends_with("src/domain/alias-suppressed.ts")),
+        "the rule-id-shaped `boundary-call-violation` token must suppress as a \
+         boundary-family alias, not silently no-op: {entries:?}"
+    );
+    assert!(
+        results.stale_suppressions.iter().all(|s| !s
+            .path
+            .to_string_lossy()
+            .replace('\\', "/")
+            .ends_with("src/domain/alias-suppressed.ts")),
+        "the alias token is a recognized, consumed suppression, so it must not \
+         surface as stale or unknown: {:?}",
+        results.stale_suppressions
+    );
+}
+
+#[test]
+fn no_forbidden_call_findings_without_calls_config() {
+    let root = fixture_path("boundary-violations");
+    let boundaries = calls_boundaries(vec![]);
+    let config = create_boundary_config_with_entry(root, boundaries, "src/**/*.ts");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
+    assert!(results.boundary_call_violations.is_empty());
+}
+
+#[test]
 fn no_violations_when_rule_is_off() {
     let root = fixture_path("boundary-violations");
     let boundaries = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
         preset: None,
         zones: vec![
             BoundaryZone {
@@ -196,6 +370,7 @@ fn no_violations_when_rule_is_off() {
         boundaries,
         production: false.into(),
         plugins: vec![],
+        rule_packs: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
@@ -203,6 +378,7 @@ fn no_violations_when_rule_is_off() {
         codeowners: None,
         public_packages: vec![],
         flags: FlagsConfig::default(),
+        security: plow_config::SecurityConfig::default(),
         fix: plow_config::FixConfig::default(),
         resolve: ResolveConfig::default(),
         sealed: false,
@@ -223,12 +399,12 @@ fn no_violations_when_rule_is_off() {
 fn preset_detects_boundary_violation() {
     let root = fixture_path("boundary-preset");
     let boundaries = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
         preset: Some(BoundaryPreset::Hexagonal),
         zones: vec![],
         rules: vec![],
     };
-    // Use explicit entry point matching the preset fixture (not the shared helper
-    // which hardcodes src/ui/App.ts for the boundary-violations fixture).
     let config = PlowConfig {
         schema: None,
         extends: vec![],
@@ -253,6 +429,7 @@ fn preset_detects_boundary_violation() {
         boundaries,
         production: false.into(),
         plugins: vec![],
+        rule_packs: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
@@ -260,6 +437,7 @@ fn preset_detects_boundary_violation() {
         codeowners: None,
         public_packages: vec![],
         flags: FlagsConfig::default(),
+        security: plow_config::SecurityConfig::default(),
         fix: plow_config::FixConfig::default(),
         resolve: ResolveConfig::default(),
         sealed: false,
@@ -270,8 +448,6 @@ fn preset_detects_boundary_violation() {
     .resolve(root, OutputFormat::Human, 4, true, true, None);
     let results = plow_core::analyze(&config).expect("analysis should succeed");
 
-    // adapters/http.ts imports domain/user.ts directly — that's a violation
-    // (adapters may only import from ports)
     assert_eq!(
         results.boundary_violations.len(),
         1,
@@ -298,6 +474,8 @@ fn preset_detects_boundary_violation() {
 fn root_field_classifies_per_subtree() {
     let root = fixture_path("boundary-root");
     let boundaries = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
         preset: None,
         zones: vec![
             BoundaryZone {
@@ -350,6 +528,7 @@ fn root_field_classifies_per_subtree() {
         boundaries,
         production: false.into(),
         plugins: vec![],
+        rule_packs: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
@@ -357,6 +536,7 @@ fn root_field_classifies_per_subtree() {
         codeowners: None,
         public_packages: vec![],
         flags: FlagsConfig::default(),
+        security: plow_config::SecurityConfig::default(),
         fix: plow_config::FixConfig::default(),
         resolve: ResolveConfig::default(),
         sealed: false,
@@ -367,9 +547,6 @@ fn root_field_classifies_per_subtree() {
     .resolve(root, OutputFormat::Human, 4, true, true, None);
     let results = plow_core::analyze(&config).expect("analysis should succeed");
 
-    // Same flat pattern `src/**` is disambiguated by `root`: ui matches
-    // packages/app/src/login.tsx, domain matches packages/core/src/order.ts.
-    // The deny rule on "ui" fires on the cross-zone import.
     assert_eq!(
         results.boundary_violations.len(),
         1,
@@ -412,15 +589,11 @@ fn root_field_classifies_per_subtree() {
 
 #[test]
 fn root_field_genuinely_disambiguates_flat_patterns() {
-    // Without `root`, the flat patterns `src/**` would match BOTH files
-    // and the first zone (`ui`) would steal both. With `root` the two
-    // zones partition the subtrees correctly.
     let root = fixture_path("boundary-root");
 
-    // Without root: flat `packages/*/src/**` collapses to a single zone
-    // because "ui" matches first for both files. No violation possible
-    // since the importer and target end up in the same zone.
     let flat_boundaries = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
         preset: None,
         zones: vec![BoundaryZone {
             name: "ui".to_string(),
@@ -458,6 +631,7 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
         boundaries: flat_boundaries,
         production: false.into(),
         plugins: vec![],
+        rule_packs: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
@@ -465,6 +639,7 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
         codeowners: None,
         public_packages: vec![],
         flags: FlagsConfig::default(),
+        security: plow_config::SecurityConfig::default(),
         fix: plow_config::FixConfig::default(),
         resolve: ResolveConfig::default(),
         sealed: false,
@@ -479,8 +654,9 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
         "without root, both files share the same zone so self-imports are allowed"
     );
 
-    // With root: same internal pattern `src/**` partitions cleanly.
     let scoped_boundaries = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
         preset: None,
         zones: vec![
             BoundaryZone {
@@ -526,6 +702,7 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
         boundaries: scoped_boundaries,
         production: false.into(),
         plugins: vec![],
+        rule_packs: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
@@ -533,6 +710,7 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
         codeowners: None,
         public_packages: vec![],
         flags: FlagsConfig::default(),
+        security: plow_config::SecurityConfig::default(),
         fix: plow_config::FixConfig::default(),
         resolve: ResolveConfig::default(),
         sealed: false,
@@ -556,6 +734,8 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
 fn auto_discover_isolates_child_boundary_zones() {
     let root = fixture_path("boundary-auto-discover");
     let boundaries = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
         preset: None,
         zones: vec![
             BoundaryZone {
@@ -631,6 +811,8 @@ fn auto_discover_isolates_child_boundary_zones() {
 fn bulletproof_preset_detects_violation() {
     let root = fixture_path("boundary-bulletproof");
     let boundaries = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
         preset: Some(BoundaryPreset::Bulletproof),
         zones: vec![],
         rules: vec![],
@@ -659,6 +841,7 @@ fn bulletproof_preset_detects_violation() {
         boundaries,
         production: false.into(),
         plugins: vec![],
+        rule_packs: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
@@ -666,6 +849,7 @@ fn bulletproof_preset_detects_violation() {
         codeowners: None,
         public_packages: vec![],
         flags: FlagsConfig::default(),
+        security: plow_config::SecurityConfig::default(),
         fix: plow_config::FixConfig::default(),
         resolve: ResolveConfig::default(),
         sealed: false,
@@ -676,8 +860,6 @@ fn bulletproof_preset_detects_violation() {
     .resolve(root, OutputFormat::Human, 4, true, true, None);
     let results = plow_core::analyze(&config).expect("analysis should succeed");
 
-    // features/auth/login.ts imports from app/page.ts — features zone cannot
-    // import from app zone (only shared and server are allowed).
     assert_eq!(
         results.boundary_violations.len(),
         1,
@@ -733,6 +915,8 @@ fn bulletproof_preset_detects_violation() {
 fn bulletproof_top_level_features_file_is_strict_without_barrel_false_positive() {
     let root = fixture_path("boundary-bulletproof-toplevel");
     let boundaries = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
         preset: Some(BoundaryPreset::Bulletproof),
         zones: vec![],
         rules: vec![],
@@ -761,6 +945,7 @@ fn bulletproof_top_level_features_file_is_strict_without_barrel_false_positive()
         boundaries,
         production: false.into(),
         plugins: vec![],
+        rule_packs: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
@@ -768,6 +953,7 @@ fn bulletproof_top_level_features_file_is_strict_without_barrel_false_positive()
         codeowners: None,
         public_packages: vec![],
         flags: FlagsConfig::default(),
+        security: plow_config::SecurityConfig::default(),
         fix: plow_config::FixConfig::default(),
         resolve: ResolveConfig::default(),
         sealed: false,
@@ -819,8 +1005,6 @@ fn bulletproof_top_level_features_file_is_strict_without_barrel_false_positive()
     );
 }
 
-// ── allowTypeOnly escape hatch (issue #365) ─────────────────────────
-
 /// Build a ui/db/shared boundary config for the boundary-type-only
 /// fixture. `allow_type_only_db` is the list of zones the `ui` rule
 /// admits type-only imports from. Both `ui` and `db` already allow
@@ -828,6 +1012,8 @@ fn bulletproof_top_level_features_file_is_strict_without_barrel_false_positive()
 /// shared/utils.ts importers).
 fn type_only_boundaries(allow_type_only_db: Vec<String>) -> BoundaryConfig {
     BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
         preset: None,
         zones: vec![
             BoundaryZone {
@@ -894,13 +1080,6 @@ fn allow_type_only_admits_whole_decl_inline_and_namespace_type_imports() {
 
     let from_paths = collect_violation_from_paths(&results, &root);
 
-    // value.ts: plain value import -> violation
-    // mixed.ts: mixed specifiers (at least one value) -> violation
-    // side_effect.ts: side-effect import -> violation
-    // sibling_imports.ts: type-only AND value import to the same target,
-    //   edge is mixed -> violation
-    // type_only.ts, inline_type.ts, namespace_type.ts, type_reexport.ts:
-    //   all-type-only -> allowed (re-export edges carry is_type_only too).
     let expected: std::collections::BTreeSet<String> = [
         "src/ui/value.ts",
         "src/ui/mixed.ts",
@@ -920,14 +1099,6 @@ fn allow_type_only_admits_whole_decl_inline_and_namespace_type_imports() {
 
 #[test]
 fn mixed_edge_violation_anchors_on_the_value_import_line_not_the_type_only_one() {
-    // sibling_imports.ts has two import statements to ../db/runtime:
-    //   `import type { Query } from '../db/runtime';`  (type-only)
-    //   `import { runQuery } from '../db/runtime';`    (value)
-    // Plow groups these into ONE edge with two ImportedSymbols.
-    // The boundary violation must anchor on the runtime import line so
-    // that a `// plow-ignore-next-line` placed above the runtime import
-    // works AND the user is pointed at the line that carries the real
-    // runtime dependency, not the (erased) type-only one.
     let root = fixture_path("boundary-type-only");
     let boundaries = type_only_boundaries(vec!["db".to_string()]);
     let config = create_boundary_config_with_entry(root.clone(), boundaries, "src/ui/App.ts");
@@ -945,8 +1116,6 @@ fn mixed_edge_violation_anchors_on_the_value_import_line_not_the_type_only_one()
         })
         .expect("sibling_imports.ts must produce a violation");
 
-    // Read the fixture and find the value-import line number dynamically;
-    // this is robust against future header-comment edits to the file.
     let source = std::fs::read_to_string(root.join("src/ui/sibling_imports.ts"))
         .expect("fixture must exist");
     let value_line = source
@@ -979,7 +1148,6 @@ fn empty_allow_type_only_flags_every_cross_zone_import() {
 
     let from_paths = collect_violation_from_paths(&results, &root);
 
-    // With empty allowTypeOnly, every ui -> db importer fires.
     let expected: std::collections::BTreeSet<String> = [
         "src/ui/type_only.ts",
         "src/ui/inline_type.ts",
@@ -1004,14 +1172,12 @@ fn empty_allow_type_only_flags_every_cross_zone_import() {
 #[test]
 fn allow_type_only_with_unlisted_zone_does_not_admit_db_imports() {
     let root = fixture_path("boundary-type-only");
-    // allowTypeOnly references some other zone, not db.
     let boundaries = type_only_boundaries(vec!["sandbox".to_string()]);
     let config = create_boundary_config_with_entry(root.clone(), boundaries, "src/ui/App.ts");
     let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let from_paths = collect_violation_from_paths(&results, &root);
 
-    // db is not in allowTypeOnly, so every ui -> db importer fires.
     let expected: std::collections::BTreeSet<String> = [
         "src/ui/type_only.ts",
         "src/ui/inline_type.ts",
@@ -1034,10 +1200,6 @@ fn allow_type_only_with_unlisted_zone_does_not_admit_db_imports() {
 
 #[test]
 fn allow_type_only_admits_type_only_re_exports() {
-    // Re-exports flow through boundary edges (`build.rs` adds them as
-    // SideEffect symbols carrying the re-export's `is_type_only` flag).
-    // A type-only re-export is therefore as erased at compile time as a
-    // direct `import type`, and allowTypeOnly admits it the same way.
     let root = fixture_path("boundary-type-only");
     let boundaries = type_only_boundaries(vec!["db".to_string()]);
     let config = create_boundary_config_with_entry(root.clone(), boundaries, "src/ui/App.ts");

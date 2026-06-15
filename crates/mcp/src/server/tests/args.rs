@@ -4,13 +4,14 @@ use crate::tools::{
     build_check_changed_args, build_check_runtime_coverage_args, build_explain_args,
     build_feature_flags_args, build_find_dupes_args, build_fix_apply_args, build_fix_preview_args,
     build_get_blast_radius_args, build_get_cleanup_candidates_args, build_get_hot_paths_args,
-    build_get_importance_args, build_health_args, build_list_boundaries_args,
-    build_project_info_args, build_trace_clone_args, build_trace_dependency_args,
-    build_trace_export_args, build_trace_file_args,
+    build_get_importance_args, build_health_args, build_impact_all_args, build_impact_args,
+    build_list_boundaries_args, build_project_info_args, build_security_candidates_args,
+    build_trace_clone_args, build_trace_dependency_args, build_trace_export_args,
+    build_trace_file_args,
 };
 
 /// Parse a validation error body into its `message` field. Arg builders emit
-/// structured JSON (`{"error": true, "message": "...", "exit_code": 0}`) so the
+/// structured JSON (`{"error": true, "message": "...", "exit_code": 2}`) so the
 /// handler can forward it verbatim to MCP clients; tests decode it here.
 fn parse_validation_message(err: &str) -> String {
     let v: serde_json::Value = serde_json::from_str(err)
@@ -22,8 +23,8 @@ fn parse_validation_message(err: &str) -> String {
     );
     assert_eq!(
         v["exit_code"].as_i64(),
-        Some(0),
-        "expected exit_code=0 in {err}"
+        Some(2),
+        "expected exit_code=2 in {err}"
     );
     v["message"]
         .as_str()
@@ -48,8 +49,6 @@ fn check_runtime_coverage(coverage: &str) -> CheckRuntimeCoverageParams {
         group_by: None,
     }
 }
-
-// ── Helper: minimal CheckChangedParams ────────────────────────────
 
 fn check_changed(since: &str) -> CheckChangedParams {
     CheckChangedParams {
@@ -80,8 +79,6 @@ fn explain_args_emit_json_quiet() {
         ["explain", "unused-export", "--format", "json", "--quiet"]
     );
 }
-
-// ── Argument building: analyze ────────────────────────────────────
 
 #[test]
 fn analyze_args_minimal_produces_base_args() {
@@ -261,8 +258,6 @@ fn analyze_args_empty_issue_types_vec_produces_no_flags() {
     );
 }
 
-// ── Argument building: check_changed ──────────────────────────────
-
 #[test]
 fn check_changed_args_includes_since_ref() {
     let args = build_check_changed_args(check_changed("main"));
@@ -340,7 +335,186 @@ fn check_changed_args_with_commit_sha() {
     assert!(args.contains(&"abc123def456".to_string()));
 }
 
-// ── Argument building: find_dupes ─────────────────────────────────
+#[test]
+fn security_candidates_args_minimal() {
+    let args = build_security_candidates_args(&SecurityCandidatesParams::default()).unwrap();
+    assert_eq!(args, ["security", "--format", "json", "--quiet"]);
+}
+
+#[test]
+fn security_candidates_args_with_scope_and_performance_options() {
+    let params = SecurityCandidatesParams {
+        root: Some("/repo".to_string()),
+        config: Some("plow.toml".to_string()),
+        workspace: Some("apps/web".to_string()),
+        changed_since: Some("origin/main".to_string()),
+        paths: None,
+        changed_workspaces: None,
+        surface: None,
+        gate: None,
+        no_cache: Some(true),
+        threads: Some(4),
+    };
+    let args = build_security_candidates_args(&params).unwrap();
+    assert_eq!(
+        args,
+        [
+            "security",
+            "--format",
+            "json",
+            "--quiet",
+            "--root",
+            "/repo",
+            "--config",
+            "plow.toml",
+            "--no-cache",
+            "--threads",
+            "4",
+            "--workspace",
+            "apps/web",
+            "--changed-since",
+            "origin/main",
+        ]
+    );
+}
+
+#[test]
+fn security_candidates_args_support_surface_inventory() {
+    let params = SecurityCandidatesParams {
+        surface: Some(true),
+        ..Default::default()
+    };
+    let args = build_security_candidates_args(&params).unwrap();
+    assert_eq!(
+        args,
+        ["security", "--format", "json", "--quiet", "--surface"]
+    );
+}
+
+#[test]
+fn security_candidates_args_support_paths() {
+    let params = SecurityCandidatesParams {
+        paths: Some(vec![
+            "src/app.tsx".to_string(),
+            "src/lib/secret.ts".to_string(),
+        ]),
+        ..Default::default()
+    };
+    let args = build_security_candidates_args(&params).unwrap();
+    assert_eq!(
+        args,
+        [
+            "security",
+            "--format",
+            "json",
+            "--quiet",
+            "--file",
+            "src/app.tsx",
+            "--file",
+            "src/lib/secret.ts",
+        ]
+    );
+}
+
+#[test]
+fn security_candidates_args_reject_blank_paths() {
+    let params = SecurityCandidatesParams {
+        paths: Some(vec!["src/app.tsx".to_string(), "  ".to_string()]),
+        ..Default::default()
+    };
+    let err = build_security_candidates_args(&params).unwrap_err();
+    let msg = parse_validation_message(&err);
+    assert!(msg.contains("paths entries must not be empty"));
+}
+
+#[test]
+fn security_candidates_args_support_changed_workspaces() {
+    let params = SecurityCandidatesParams {
+        changed_workspaces: Some("origin/main".to_string()),
+        ..Default::default()
+    };
+    let args = build_security_candidates_args(&params).unwrap();
+    assert!(
+        args.windows(2)
+            .any(|w| w == ["--changed-workspaces", "origin/main"])
+    );
+}
+
+#[test]
+fn security_candidates_args_support_newly_reachable_gate() {
+    let params = SecurityCandidatesParams {
+        changed_since: Some("origin/main".to_string()),
+        gate: Some("newly-reachable".to_string()),
+        ..Default::default()
+    };
+    let args = build_security_candidates_args(&params).unwrap();
+    assert!(
+        args.windows(2).any(|w| w == ["--gate", "newly-reachable"]),
+        "expected --gate newly-reachable, got {args:?}"
+    );
+}
+
+#[test]
+fn security_candidates_args_reject_invalid_gate() {
+    let params = SecurityCandidatesParams {
+        gate: Some("all".to_string()),
+        ..Default::default()
+    };
+    let err = build_security_candidates_args(&params).unwrap_err();
+    let msg = parse_validation_message(&err);
+    assert!(msg.contains("Invalid gate 'all'"));
+}
+
+#[test]
+fn security_candidates_args_reject_newly_reachable_without_changed_since() {
+    let params = SecurityCandidatesParams {
+        gate: Some("newly-reachable".to_string()),
+        ..Default::default()
+    };
+    let err = build_security_candidates_args(&params).unwrap_err();
+    let msg = parse_validation_message(&err);
+    assert!(msg.contains("requires changed_since"));
+}
+
+#[test]
+fn security_candidates_args_reject_workspace_with_changed_workspaces() {
+    let params = SecurityCandidatesParams {
+        workspace: Some("apps/web".to_string()),
+        changed_workspaces: Some("origin/main".to_string()),
+        ..Default::default()
+    };
+    let err = build_security_candidates_args(&params).unwrap_err();
+    let msg = parse_validation_message(&err);
+    assert!(msg.contains("workspace and changed_workspaces are mutually exclusive"));
+}
+
+#[test]
+fn security_candidates_args_do_not_expose_ci_or_write_surfaces() {
+    let params = SecurityCandidatesParams {
+        root: Some("/repo".to_string()),
+        changed_since: Some("origin/main".to_string()),
+        ..Default::default()
+    };
+    let args = build_security_candidates_args(&params).unwrap();
+    for forbidden in [
+        "--ci",
+        "--fail-on-issues",
+        "--sarif-file",
+        "--summary",
+        "--baseline",
+        "--save-baseline",
+        "--fail-on-regression",
+        "--regression-baseline",
+        "--save-regression-baseline",
+        "--diff-file",
+        "--diff-stdin",
+    ] {
+        assert!(
+            !args.iter().any(|arg| arg == forbidden),
+            "security_candidates must not emit {forbidden}, got {args:?}"
+        );
+    }
+}
 
 #[test]
 fn find_dupes_args_minimal() {
@@ -502,8 +676,6 @@ fn find_dupes_args_min_occurrences_rejects_one() {
     assert!(msg.contains("(got 1)"), "{msg}");
 }
 
-// ── Argument building: fix_preview vs fix_apply ───────────────────
-
 #[test]
 fn fix_preview_args_include_dry_run() {
     let args = build_fix_preview_args(&FixParams::default());
@@ -592,9 +764,6 @@ fn fix_apply_args_with_all_options() {
 
 #[test]
 fn fix_preview_args_no_create_config_in_isolation() {
-    // Verify --no-create-config is emitted in isolation, independent of
-    // other params. Sentinel test against a future refactor accidentally
-    // gating the flag emission on workspace/production presence.
     let params = FixParams {
         no_create_config: Some(true),
         ..FixParams::default()
@@ -635,8 +804,6 @@ fn fix_apply_args_no_create_config_in_isolation() {
 
 #[test]
 fn fix_preview_args_no_create_config_false_omits_flag() {
-    // Some(false) and None must both omit the flag (default behavior is
-    // create-fallback ON).
     for value in [None, Some(false)] {
         let params = FixParams {
             no_create_config: value,
@@ -649,8 +816,6 @@ fn fix_preview_args_no_create_config_false_omits_flag() {
         );
     }
 }
-
-// ── Argument building: project_info ───────────────────────────────
 
 #[test]
 fn project_info_args_minimal() {
@@ -692,8 +857,6 @@ fn project_info_args_with_all_options() {
         ]
     );
 }
-
-// ── Argument building: trace tools ───────────────────────────────
 
 #[test]
 fn trace_export_args_minimal() {
@@ -784,8 +947,9 @@ fn trace_dependency_args_minimal() {
 #[test]
 fn trace_clone_args_with_all_options() {
     let args = build_trace_clone_args(&TraceCloneParams {
-        file: "src/original.ts".to_string(),
-        line: 12,
+        file: Some("src/original.ts".to_string()),
+        fingerprint: None,
+        line: Some(12),
         root: Some("/repo".to_string()),
         config: Some("plow.toml".to_string()),
         workspace: Some("packages/ui".to_string()),
@@ -835,10 +999,74 @@ fn trace_clone_args_with_all_options() {
 }
 
 #[test]
+fn trace_clone_args_by_fingerprint() {
+    let args = build_trace_clone_args(&TraceCloneParams {
+        fingerprint: Some("dup:7f3a2c1e".to_string()),
+        ..Default::default()
+    })
+    .expect("fingerprint-only is a valid addressing form");
+    assert_eq!(
+        args,
+        vec![
+            "dupes".to_string(),
+            "--format".to_string(),
+            "json".to_string(),
+            "--quiet".to_string(),
+            "--trace".to_string(),
+            "dup:7f3a2c1e".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn trace_clone_args_ignore_imports_false_emits_opt_out() {
+    let args = build_trace_clone_args(&TraceCloneParams {
+        fingerprint: Some("dup:7f3a2c1e".to_string()),
+        ignore_imports: Some(false),
+        ..Default::default()
+    })
+    .expect("fingerprint-only is a valid addressing form");
+    assert!(args.contains(&"--no-ignore-imports".to_string()));
+    assert!(!args.contains(&"--ignore-imports".to_string()));
+}
+
+#[test]
+fn trace_clone_args_ignore_imports_none_emits_neither() {
+    let args = build_trace_clone_args(&TraceCloneParams {
+        fingerprint: Some("dup:7f3a2c1e".to_string()),
+        ignore_imports: None,
+        ..Default::default()
+    })
+    .expect("fingerprint-only is a valid addressing form");
+    assert!(!args.contains(&"--ignore-imports".to_string()));
+    assert!(!args.contains(&"--no-ignore-imports".to_string()));
+}
+
+#[test]
+fn trace_clone_args_both_addressing_forms_is_error() {
+    let err = build_trace_clone_args(&TraceCloneParams {
+        file: Some("src/original.ts".to_string()),
+        line: Some(12),
+        fingerprint: Some("dup:7f3a2c1e".to_string()),
+        ..Default::default()
+    })
+    .expect_err("file+line and fingerprint together must be rejected");
+    assert!(err.contains("not both"), "unexpected error: {err}");
+}
+
+#[test]
+fn trace_clone_args_no_addressing_form_is_error() {
+    let err = build_trace_clone_args(&TraceCloneParams::default())
+        .expect_err("neither file+line nor fingerprint must be rejected");
+    assert!(err.contains("fingerprint"), "unexpected error: {err}");
+}
+
+#[test]
 fn trace_clone_args_invalid_mode_returns_error() {
     let err = build_trace_clone_args(&TraceCloneParams {
-        file: "src/original.ts".to_string(),
-        line: 2,
+        file: Some("src/original.ts".to_string()),
+        fingerprint: None,
+        line: Some(2),
         root: None,
         config: None,
         workspace: None,
@@ -925,8 +1153,9 @@ fn trace_args_reject_blank_required_values() {
 #[test]
 fn trace_clone_args_reject_zero_line() {
     let err = build_trace_clone_args(&TraceCloneParams {
-        file: "src/original.ts".to_string(),
-        line: 0,
+        file: Some("src/original.ts".to_string()),
+        fingerprint: None,
+        line: Some(0),
         root: None,
         config: None,
         workspace: None,
@@ -951,8 +1180,9 @@ fn trace_clone_args_reject_zero_line() {
 #[test]
 fn trace_clone_args_min_occurrences_forwards_flag() {
     let args = build_trace_clone_args(&TraceCloneParams {
-        file: "src/original.ts".to_string(),
-        line: 42,
+        file: Some("src/original.ts".to_string()),
+        fingerprint: None,
+        line: Some(42),
         root: None,
         config: None,
         workspace: None,
@@ -977,8 +1207,9 @@ fn trace_clone_args_min_occurrences_forwards_flag() {
 #[test]
 fn trace_clone_args_min_occurrences_rejects_one() {
     let err = build_trace_clone_args(&TraceCloneParams {
-        file: "src/original.ts".to_string(),
-        line: 42,
+        file: Some("src/original.ts".to_string()),
+        fingerprint: None,
+        line: Some(42),
         root: None,
         config: None,
         workspace: None,
@@ -998,17 +1229,13 @@ fn trace_clone_args_min_occurrences_rejects_one() {
     assert!(msg.contains("min_occurrences must be at least 2"), "{msg}");
 }
 
-// ── Validation error body shape ──────────────────────────────────
-
 #[test]
 fn validation_errors_use_structured_json_body() {
-    // Every arg-builder validation failure must emit the same JSON shape that
-    // `run_plow` uses for CLI error exits, so MCP clients can decode one shape
-    // for both error sources. `exit_code` is 0 on validation paths (no subprocess).
     let errors = [
         build_trace_clone_args(&TraceCloneParams {
-            file: "src/original.ts".to_string(),
-            line: 0,
+            file: Some("src/original.ts".to_string()),
+            fingerprint: None,
+            line: Some(0),
             root: None,
             config: None,
             workspace: None,
@@ -1062,8 +1289,8 @@ fn validation_errors_use_structured_json_body() {
         );
         assert_eq!(
             v["exit_code"],
-            serde_json::Value::from(0),
-            "exit_code=0 in {body}"
+            serde_json::Value::from(2),
+            "exit_code=2 in {body}"
         );
         assert!(v["message"].is_string(), "message is a string in {body}");
         assert!(
@@ -1072,8 +1299,6 @@ fn validation_errors_use_structured_json_body() {
         );
     }
 }
-
-// ── Argument building: health ─────────────────────────────────────
 
 #[test]
 fn health_args_minimal() {
@@ -1093,6 +1318,7 @@ fn health_args_with_all_options() {
         sort: Some("cognitive".to_string()),
         changed_since: Some("develop".to_string()),
         complexity: Some(true),
+        complexity_breakdown: Some(true),
         file_scores: Some(true),
         hotspots: Some(true),
         targets: None,
@@ -1101,6 +1327,7 @@ fn health_args_with_all_options() {
         min_score: None,
         since: Some("6m".to_string()),
         min_commits: Some(5),
+        churn_file: None,
         workspace: Some("packages/ui".to_string()),
         production: Some(true),
         save_snapshot: None,
@@ -1154,6 +1381,7 @@ fn health_args_with_all_options() {
             "--changed-since",
             "develop",
             "--complexity",
+            "--complexity-breakdown",
             "--file-scores",
             "--hotspots",
             "--coverage-gaps",
@@ -1241,15 +1469,72 @@ fn health_args_max_crap_integer_value() {
         ..Default::default()
     };
     let args = build_health_args(&params);
-    // Integer-valued floats render without a trailing ".0", keeping CLI
-    // surface area stable for agents comparing args literally.
     assert!(
         args.windows(2).any(|w| w == ["--max-crap", "30"]),
         "expected --max-crap 30 (no trailing zero), got {args:?}"
     );
 }
 
-// ── All tools produce --format json --quiet ───────────────────────
+#[test]
+fn impact_args_minimal() {
+    let args = build_impact_args(&ImpactParams::default());
+    assert_eq!(args, ["impact", "--format", "json", "--quiet"]);
+}
+
+#[test]
+fn impact_args_with_root() {
+    let args = build_impact_args(&ImpactParams {
+        root: Some("/some/project".to_string()),
+    });
+    assert_eq!(
+        args,
+        [
+            "impact",
+            "--format",
+            "json",
+            "--quiet",
+            "--root",
+            "/some/project"
+        ]
+    );
+}
+
+#[test]
+fn impact_args_empty_root_dropped() {
+    let args = build_impact_args(&ImpactParams {
+        root: Some(String::new()),
+    });
+    assert_eq!(args, ["impact", "--format", "json", "--quiet"]);
+}
+
+#[test]
+fn impact_all_args_minimal() {
+    let args = build_impact_all_args(&ImpactAllParams::default());
+    assert_eq!(args, ["impact", "--all", "--format", "json", "--quiet"]);
+}
+
+#[test]
+fn impact_all_args_with_sort_and_limit() {
+    let args = build_impact_all_args(&ImpactAllParams {
+        sort: Some("resolved".to_string()),
+        limit: Some(5),
+    });
+    assert_eq!(
+        args,
+        [
+            "impact", "--all", "--format", "json", "--quiet", "--sort", "resolved", "--limit", "5"
+        ]
+    );
+}
+
+#[test]
+fn impact_all_args_empty_sort_dropped() {
+    let args = build_impact_all_args(&ImpactAllParams {
+        sort: Some(String::new()),
+        limit: None,
+    });
+    assert_eq!(args, ["impact", "--all", "--format", "json", "--quiet"]);
+}
 
 #[test]
 fn all_arg_builders_include_format_json_and_quiet() {
@@ -1291,8 +1576,9 @@ fn all_arg_builders_include_format_json_and_quiet() {
     })
     .unwrap();
     let trace_clone = build_trace_clone_args(&TraceCloneParams {
-        file: "src/original.ts".to_string(),
-        line: 2,
+        file: Some("src/original.ts".to_string()),
+        fingerprint: None,
+        line: Some(2),
         root: None,
         config: None,
         workspace: None,
@@ -1314,6 +1600,8 @@ fn all_arg_builders_include_format_json_and_quiet() {
     let feature_flags = build_feature_flags_args(&FeatureFlagsParams::default());
     let check_runtime_coverage =
         build_check_runtime_coverage_args(&check_runtime_coverage("./coverage"));
+    let impact = build_impact_args(&ImpactParams::default());
+    let impact_all = build_impact_all_args(&ImpactAllParams::default());
 
     for (name, args) in [
         ("analyze", &analyze),
@@ -1331,6 +1619,8 @@ fn all_arg_builders_include_format_json_and_quiet() {
         ("list_boundaries", &list_boundaries),
         ("feature_flags", &feature_flags),
         ("check_runtime_coverage", &check_runtime_coverage),
+        ("impact", &impact),
+        ("impact_all", &impact_all),
     ] {
         assert!(
             args.contains(&"--format".to_string()),
@@ -1343,8 +1633,6 @@ fn all_arg_builders_include_format_json_and_quiet() {
         );
     }
 }
-
-// ── Correct subcommand for each tool ──────────────────────────────
 
 #[test]
 fn each_tool_uses_correct_subcommand() {
@@ -1364,6 +1652,10 @@ fn each_tool_uses_correct_subcommand() {
         "list"
     );
     assert_eq!(build_health_args(&HealthParams::default())[0], "health");
+    assert_eq!(build_impact_args(&ImpactParams::default())[0], "impact");
+    let impact_all = build_impact_all_args(&ImpactAllParams::default());
+    assert_eq!(impact_all[0], "impact");
+    assert_eq!(impact_all[1], "--all");
     assert_eq!(
         build_list_boundaries_args(&ListBoundariesParams::default())[0],
         "list"
@@ -1414,8 +1706,9 @@ fn each_tool_uses_correct_subcommand() {
     );
     assert_eq!(
         build_trace_clone_args(&TraceCloneParams {
-            file: "src/original.ts".to_string(),
-            line: 2,
+            file: Some("src/original.ts".to_string()),
+            fingerprint: None,
+            line: Some(2),
             root: None,
             config: None,
             workspace: None,
@@ -1439,8 +1732,6 @@ fn each_tool_uses_correct_subcommand() {
     );
 }
 
-// ── Argument building: check_runtime_coverage ─────────────────
-
 #[test]
 fn check_runtime_coverage_minimal_emits_coverage_flag() {
     let args = build_check_runtime_coverage_args(&check_runtime_coverage("./coverage"));
@@ -1448,7 +1739,6 @@ fn check_runtime_coverage_minimal_emits_coverage_flag() {
     assert!(args.contains(&"--runtime-coverage".to_string()));
     let idx = args.iter().position(|a| a == "--runtime-coverage").unwrap();
     assert_eq!(args[idx + 1], "./coverage");
-    // Minimal params should NOT emit the tuning flags.
     assert!(!args.contains(&"--min-invocations-hot".to_string()));
     assert!(!args.contains(&"--min-observation-volume".to_string()));
     assert!(!args.contains(&"--low-traffic-threshold".to_string()));
@@ -1521,8 +1811,6 @@ fn runtime_context_split_tools_share_runtime_coverage_pipeline() {
     assert_eq!(build_get_importance_args(&params), expected);
     assert_eq!(build_get_cleanup_candidates_args(&params), expected);
 }
-
-// ── Explain flag presence ────────────────────────────────────────
 
 #[test]
 fn tools_with_explain_include_flag() {
@@ -1615,8 +1903,9 @@ fn trace_tools_do_not_include_explain() {
     })
     .unwrap();
     let clone = build_trace_clone_args(&TraceCloneParams {
-        file: "src/original.ts".to_string(),
-        line: 2,
+        file: Some("src/original.ts".to_string()),
+        fingerprint: None,
+        line: Some(2),
         root: None,
         config: None,
         workspace: None,
@@ -1645,8 +1934,6 @@ fn trace_tools_do_not_include_explain() {
         );
     }
 }
-
-// ── Global flags: no_cache boolean false is omitted ───────────────
 
 #[test]
 fn no_cache_false_is_omitted_across_all_tools() {
@@ -1725,8 +2012,6 @@ fn no_cache_false_is_omitted_across_all_tools() {
     });
     assert!(!feature_flags.contains(&"--no-cache".to_string()));
 }
-
-// ── Argument building: audit ─────────────────────────────────────
 
 #[test]
 fn audit_args_minimal_produces_base_args() {
@@ -1955,8 +2240,6 @@ fn audit_args_without_baselines_does_not_emit_flags() {
     assert!(!args.iter().any(|a| a == "--dupes-baseline"));
 }
 
-// ── Argument building: list_boundaries ──────────────────────────
-
 #[test]
 fn list_boundaries_args_minimal() {
     let args = build_list_boundaries_args(&ListBoundariesParams::default());
@@ -1994,8 +2277,6 @@ fn list_boundaries_args_all_options() {
     );
 }
 
-// ── Argument building: find_dupes changed_since ─────────────────
-
 #[test]
 fn find_dupes_args_changed_since() {
     let params = FindDupesParams {
@@ -2006,8 +2287,6 @@ fn find_dupes_args_changed_since() {
     assert!(args.contains(&"--changed-since".to_string()));
     assert!(args.contains(&"feature/branch".to_string()));
 }
-
-// ── Argument building: analyze boundary_violations ──────────────
 
 #[test]
 fn analyze_args_boundary_violations() {
@@ -2026,7 +2305,6 @@ fn analyze_args_boundary_violations_false_is_omitted() {
         ..Default::default()
     };
     let args = build_analyze_args(&params).unwrap();
-    // boundary_violations=false should not add the flag
     assert_eq!(
         args.iter()
             .filter(|a| *a == "--boundary-violations")
@@ -2037,8 +2315,6 @@ fn analyze_args_boundary_violations_false_is_omitted() {
 
 #[test]
 fn analyze_args_boundary_violations_deduped_with_issue_types() {
-    // When both boundary_violations=true AND issue_types includes "boundary-violations",
-    // the flag must appear exactly once — clap rejects duplicate boolean flags.
     let params = AnalyzeParams {
         boundary_violations: Some(true),
         issue_types: Some(vec!["boundary-violations".to_string()]),
@@ -2057,7 +2333,6 @@ fn analyze_args_boundary_violations_deduped_with_issue_types() {
 
 #[test]
 fn analyze_args_boundary_violations_emitted_when_not_in_issue_types() {
-    // boundary_violations=true with other issue_types (not boundary-violations) should still emit the flag
     let params = AnalyzeParams {
         boundary_violations: Some(true),
         issue_types: Some(vec!["unused-files".to_string()]),
@@ -2067,8 +2342,6 @@ fn analyze_args_boundary_violations_emitted_when_not_in_issue_types() {
     assert!(args.contains(&"--boundary-violations".to_string()));
     assert!(args.contains(&"--unused-files".to_string()));
 }
-
-// ── Argument building: project_info section flags ───────────────
 
 #[test]
 fn project_info_args_section_flags() {
@@ -2101,8 +2374,6 @@ fn project_info_args_section_flags_false_are_omitted() {
     assert!(!args.contains(&"--plugins".to_string()));
     assert!(!args.contains(&"--boundaries".to_string()));
 }
-
-// ── Argument building: feature_flags ────────────────────────────
 
 #[test]
 fn feature_flags_args_minimal_produces_base_args() {

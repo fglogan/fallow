@@ -1,10 +1,8 @@
 use std::fs;
 
-use plow_config::{PlowConfig, OutputFormat, RulesConfig};
+use plow_config::{OutputFormat, PlowConfig, RulesConfig};
 
 use super::common::{create_config, fixture_path};
-
-// ── Vitest __mocks__ virtual specifiers ───────────────────────
 
 #[test]
 fn vitest_mocks_specifiers_not_flagged_as_unlisted_dep() {
@@ -24,14 +22,8 @@ fn vitest_mocks_specifiers_not_flagged_as_unlisted_dep() {
     );
 }
 
-// ── Vitest __mocks__ virtual specifiers in monorepo workspace ─────
-
 #[test]
 fn vitest_mocks_scoped_specifiers_not_flagged_in_workspace_monorepo() {
-    // Vitest is only in apps/mrv/package.json (workspace), not root package.json.
-    // The virtual_package_suffixes contributed by VitestPlugin must be merged from
-    // the workspace plugin result into the root aggregated result, otherwise
-    // @scope/__mocks__ specifiers are still flagged as unlisted dependencies.
     let root = fixture_path("vitest-mocks-workspace");
     let config = create_config(root);
     let results = plow_core::analyze(&config).expect("analysis should succeed");
@@ -53,8 +45,6 @@ fn vitest_mocks_scoped_specifiers_not_flagged_in_workspace_monorepo() {
         );
     }
 }
-
-// ── Unlisted dependencies integration ──────────────────────────
 
 #[test]
 fn unlisted_dependencies_detected() {
@@ -104,8 +94,6 @@ fn unlisted_re_export_dependency_reports_re_export_line() {
     assert_eq!(finding.dep.imported_from.len(), 1);
     assert_eq!(finding.dep.imported_from[0].line, 2);
 }
-
-// ── Unresolved imports integration ─────────────────────────────
 
 #[test]
 fn unresolved_imports_detected() {
@@ -203,8 +191,6 @@ export const main = () => [Icon, metadata, generated, local];
     );
 }
 
-// ── Unused devDependencies ─────────────────────────────────────
-
 #[test]
 fn unused_dev_dependency_detected() {
     let root = fixture_path("unused-dev-deps");
@@ -223,8 +209,6 @@ fn unused_dev_dependency_detected() {
     );
 }
 
-// ── Unused optionalDependencies ───────────────────────────────
-
 #[test]
 fn unused_optional_dependency_detected() {
     let root = fixture_path("optional-deps");
@@ -240,6 +224,192 @@ fn unused_optional_dependency_detected() {
     assert!(
         unused_optional_dep_names.contains(&"unused-optional-pkg"),
         "unused-optional-pkg should be detected as unused optional dependency, found: {unused_optional_dep_names:?}"
+    );
+}
+
+#[test]
+fn napi_rs_optional_prebuild_dependencies_are_not_reported() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let root = tmp.path();
+    fs::create_dir_all(root.join("src")).expect("create src dir");
+    fs::write(
+        root.join("package.json"),
+        r#"{
+  "name": "@srcmap/codec",
+  "main": "src/index.ts",
+  "optionalDependencies": {
+    "@srcmap/codec-darwin-arm64": "1.0.0",
+    "@srcmap/codec-linux-x64-gnu": "1.0.0",
+    "unused-optional-pkg": "1.0.0"
+  },
+  "napi": {
+    "binaryName": "srcmap-codec",
+    "targets": [
+      "aarch64-apple-darwin",
+      "x86_64-unknown-linux-gnu"
+    ]
+  }
+}"#,
+    )
+    .expect("write package.json");
+    fs::write(root.join("src/index.ts"), "export const value = 1;\n").expect("write source");
+
+    let config = create_config(root.to_path_buf());
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
+    let unused_optional_dep_names: Vec<&str> = results
+        .unused_optional_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+
+    assert!(
+        !unused_optional_dep_names.contains(&"@srcmap/codec-darwin-arm64"),
+        "generated napi-rs optional package should be credited, found: {unused_optional_dep_names:?}"
+    );
+    assert!(
+        !unused_optional_dep_names.contains(&"@srcmap/codec-linux-x64-gnu"),
+        "generated napi-rs optional package should be credited, found: {unused_optional_dep_names:?}"
+    );
+    assert!(
+        unused_optional_dep_names.contains(&"unused-optional-pkg"),
+        "unrelated optional package should still be reported, found: {unused_optional_dep_names:?}"
+    );
+}
+
+#[test]
+fn napi_rs_optional_prebuild_dependencies_are_not_reported_in_workspaces() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let root = tmp.path();
+    let package_root = root.join("packages/native");
+    fs::create_dir_all(package_root.join("src")).expect("create workspace package");
+    fs::write(
+        root.join("package.json"),
+        r#"{
+  "private": true,
+  "workspaces": ["packages/*"]
+}"#,
+    )
+    .expect("write root package.json");
+    fs::write(
+        package_root.join("package.json"),
+        r#"{
+  "name": "@oxc-coverage-instrument/binding",
+  "main": "src/index.ts",
+  "optionalDependencies": {
+    "@oxc-coverage-instrument/binding-win32-arm64-msvc": "1.0.0",
+    "@oxc-coverage-instrument/binding-wasm32-wasi": "1.0.0",
+    "@oxc-coverage-instrument/binding-wasm32-wasi-singlethreaded": "1.0.0",
+    "unused-optional-pkg": "1.0.0"
+  },
+  "napi": {
+    "packageName": "@oxc-coverage-instrument/binding",
+    "binaryName": "coverage-instrument",
+    "targets": [
+      "aarch64-pc-windows-msvc",
+      "wasm32-wasip1",
+      "wasm32-wasip1-threads"
+    ]
+  }
+}"#,
+    )
+    .expect("write workspace package.json");
+    fs::write(
+        package_root.join("src/index.ts"),
+        "export const value = 1;\n",
+    )
+    .expect("write source");
+
+    let config = create_config(root.to_path_buf());
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
+    let unused_optional_dep_names: Vec<&str> = results
+        .unused_optional_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+
+    for generated in [
+        "@oxc-coverage-instrument/binding-win32-arm64-msvc",
+        "@oxc-coverage-instrument/binding-wasm32-wasi",
+        "@oxc-coverage-instrument/binding-wasm32-wasi-singlethreaded",
+    ] {
+        assert!(
+            !unused_optional_dep_names.contains(&generated),
+            "generated napi-rs optional package should be credited in a workspace, found: {unused_optional_dep_names:?}"
+        );
+    }
+    assert!(
+        unused_optional_dep_names.contains(&"unused-optional-pkg"),
+        "unrelated workspace optional package should still be reported, found: {unused_optional_dep_names:?}"
+    );
+}
+
+#[test]
+fn napi_rs_optional_prebuild_credits_are_workspace_scoped() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let root = tmp.path();
+    let native_root = root.join("packages/native");
+    let other_root = root.join("packages/other");
+    fs::create_dir_all(native_root.join("src")).expect("create native workspace package");
+    fs::create_dir_all(other_root.join("src")).expect("create other workspace package");
+    fs::write(
+        root.join("package.json"),
+        r#"{
+  "private": true,
+  "workspaces": ["packages/*"]
+}"#,
+    )
+    .expect("write root package.json");
+    fs::write(
+        native_root.join("package.json"),
+        r#"{
+  "name": "native",
+  "main": "src/index.ts",
+  "optionalDependencies": {
+    "native-linux-x64-gnu": "1.0.0"
+  },
+  "napi": {
+    "targets": ["x86_64-unknown-linux-gnu"]
+  }
+}"#,
+    )
+    .expect("write native package.json");
+    fs::write(
+        native_root.join("src/index.ts"),
+        "export const value = 1;\n",
+    )
+    .expect("write native source");
+    fs::write(
+        other_root.join("package.json"),
+        r#"{
+  "name": "other",
+  "main": "src/index.ts",
+  "optionalDependencies": {
+    "native-linux-x64-gnu": "1.0.0"
+  }
+}"#,
+    )
+    .expect("write other package.json");
+    fs::write(other_root.join("src/index.ts"), "export const value = 1;\n")
+        .expect("write other source");
+
+    let config = create_config(root.to_path_buf());
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results.unused_optional_dependencies.iter().any(|dep| {
+            dep.dep.package_name == "native-linux-x64-gnu"
+                && dep.dep.path.ends_with("packages/other/package.json")
+        }),
+        "same-named optional dependency in a non-napi workspace should still be reported, found: {:?}",
+        results.unused_optional_dependencies
+    );
+    assert!(
+        !results.unused_optional_dependencies.iter().any(|dep| {
+            dep.dep.package_name == "native-linux-x64-gnu"
+                && dep.dep.path.ends_with("packages/native/package.json")
+        }),
+        "napi-generated optional dependency should be credited only in its declaring workspace, found: {:?}",
+        results.unused_optional_dependencies
     );
 }
 
@@ -284,8 +454,6 @@ fn unused_workspace_dependency_reports_other_workspace_usage() {
         unlisted.dep.imported_from[0].path.display()
     );
 }
-
-// ── Peer dependencies ─────────────────────────────────────────
 
 #[test]
 fn peer_dependency_of_used_installed_package_is_not_unused() {
@@ -394,15 +562,12 @@ fn peer_dependency_of_parent_installed_package_is_not_unused() {
     );
 }
 
-// ── Package.json `imports` field (#subpath imports) ─────────
-
 #[test]
 fn subpath_imports_resolve_correctly() {
     let root = fixture_path("subpath-imports");
     let config = create_config(root);
     let results = plow_core::analyze(&config).expect("analysis should succeed");
 
-    // #utils and #components/Button should resolve — no unresolved imports
     assert!(
         results.unresolved_imports.is_empty(),
         "# imports should resolve via package.json imports field, got unresolved: {:?}",
@@ -413,7 +578,6 @@ fn subpath_imports_resolve_correctly() {
             .collect::<Vec<_>>()
     );
 
-    // #utils and #components/Button should not be unlisted deps
     assert!(
         results.unlisted_dependencies.is_empty(),
         "# imports should not be reported as unlisted deps, got: {:?}",
@@ -424,7 +588,6 @@ fn subpath_imports_resolve_correctly() {
             .collect::<Vec<_>>()
     );
 
-    // The `unused` export in utils/index.ts should still be detected
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
@@ -557,6 +720,97 @@ fn package_imports_external_targets_credit_dependency_usage() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn issue_1008_pnpm_workspace_dependency_imported_from_subpackage_root() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let monorepo = tmp.path();
+    let consumer = monorepo.join("packages/consumer");
+    let shared = monorepo.join("packages/shared");
+
+    std::fs::create_dir_all(consumer.join("src")).expect("create consumer src");
+    std::fs::create_dir_all(consumer.join("node_modules/@mre")).expect("create consumer scope");
+    std::fs::create_dir_all(shared.join("src")).expect("create shared src");
+
+    std::fs::write(
+        monorepo.join("package.json"),
+        r#"{
+  "name": "issue-1008-root",
+  "private": true,
+  "workspaces": ["packages/*"]
+}"#,
+    )
+    .expect("write root package.json");
+    std::fs::write(
+        monorepo.join("pnpm-workspace.yaml"),
+        "packages:\n  - packages/*\n",
+    )
+    .expect("write pnpm workspace");
+    std::fs::write(
+        consumer.join("package.json"),
+        r#"{
+  "name": "@mre/consumer",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@mre/shared": "workspace:*",
+    "left-pad": "1.3.0"
+  }
+}"#,
+    )
+    .expect("write consumer package.json");
+    std::fs::write(
+        shared.join("package.json"),
+        r#"{
+  "name": "@mre/shared",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}"#,
+    )
+    .expect("write shared package.json");
+    std::fs::write(
+        consumer.join("src/index.ts"),
+        "import { formatPayload } from '@mre/shared';\nexport const value = formatPayload('ok');\n",
+    )
+    .expect("write consumer source");
+    std::fs::write(
+        shared.join("src/index.ts"),
+        "export const formatPayload = (value: string): string => value;\n",
+    )
+    .expect("write shared source");
+    std::os::unix::fs::symlink("../../../shared", consumer.join("node_modules/@mre/shared"))
+        .expect("symlink workspace package");
+
+    let config = create_config(consumer);
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
+    let unused_dep_names: Vec<&str> = results
+        .unused_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    assert!(
+        !unused_dep_names.contains(&"@mre/shared"),
+        "imported workspace dependency should be credited through pnpm symlink: {unused_dep_names:?}"
+    );
+    assert!(
+        unused_dep_names.contains(&"left-pad"),
+        "unrelated dependency should still be reported unused: {unused_dep_names:?}"
+    );
+
+    let unresolved_specifiers: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|u| u.import.specifier.as_str())
+        .collect();
+    assert!(
+        !unresolved_specifiers.contains(&"@mre/shared"),
+        "workspace dependency import should not become unresolved: {unresolved_specifiers:?}"
+    );
+}
+
 #[test]
 fn package_imports_array_fallback_resolves_reachable_target() {
     let tmp = tempfile::tempdir().expect("create temp dir");
@@ -651,14 +905,8 @@ fn package_exports_array_fallback_resolves_self_package_source() {
     );
 }
 
-// ── Issue #124: ignorePatterns applied to workspace package.json discovery ──
-
 #[test]
 fn ignore_patterns_applied_to_workspace_package_json_for_unused_deps() {
-    // Issue #124: when `.plowrc.json` excludes `**/dist/**`, plow must also
-    // skip `packages/*/dist/package.json` (build artifacts from ng-packagr, tsc,
-    // Rollup, etc.) during unused-dependency scanning. Without the fix, every
-    // dep listed in the build-artifact package.json is reported as unused.
     let root = fixture_path("ignore-patterns-workspace-package-json");
     let config = PlowConfig {
         schema: None,
@@ -681,6 +929,7 @@ fn ignore_patterns_applied_to_workspace_package_json_for_unused_deps() {
         boundaries: plow_config::BoundaryConfig::default(),
         production: false.into(),
         plugins: vec![],
+        rule_packs: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
@@ -688,6 +937,7 @@ fn ignore_patterns_applied_to_workspace_package_json_for_unused_deps() {
         codeowners: None,
         public_packages: vec![],
         flags: plow_config::FlagsConfig::default(),
+        security: plow_config::SecurityConfig::default(),
         fix: plow_config::FixConfig::default(),
         resolve: plow_config::ResolveConfig::default(),
         sealed: false,
@@ -699,8 +949,6 @@ fn ignore_patterns_applied_to_workspace_package_json_for_unused_deps() {
 
     let results = plow_core::analyze(&config).expect("analysis should succeed");
 
-    // Every unused-dep finding whose path leads through a `dist/` directory is
-    // a false positive — that package.json should have been ignored entirely.
     let dist_findings: Vec<String> = results
         .unused_dependencies
         .iter()
@@ -717,9 +965,6 @@ fn ignore_patterns_applied_to_workspace_package_json_for_unused_deps() {
         "deps from dist/package.json must not be reported when dist/ is ignored: {dist_findings:?}"
     );
 
-    // `is-odd` is only declared in `packages/my-lib/package.json` and never
-    // imported — it should still be reported. This guards against a regression
-    // where the ignore check accidentally skips real workspace package.json files.
     let reported: Vec<&str> = results
         .unused_dependencies
         .iter()

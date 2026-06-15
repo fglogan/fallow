@@ -6,16 +6,19 @@ import type {
   ProvideDiagnosticSignature,
   vsdiag,
 } from "vscode-languageclient/node.js";
+import type { DiagnosticSeveritySetting } from "./types.js";
 
 const STATE_KEY = "plow.diagnosticFilter.v1";
 const PLOW_SOURCE = "plow";
 
 /**
  * Cap the per-URI cache so a workspace-wide LSP publish on a 50k-file
- * monorepo doesn't grow the heap forever. plow-lsp publishes diagnostics
- * for every diagnosed file, not just open editors, and `onDidCloseTextDocument`
- * never fires for files that were never opened. When the cap is hit we evict
- * the oldest entry (insertion order, the first key in the Map).
+ * monorepo doesn't grow the heap forever. The cache holds only PUSH-delivered
+ * diagnostics (`handleDiagnostics`); plow-lsp pushes diagnostics for every
+ * diagnosed unopened file, not just open editors, and `onDidCloseTextDocument`
+ * never fires for files that were never opened. (Pull results are not cached;
+ * see `provideDiagnostics`.) When the cap is hit we evict the oldest entry
+ * (insertion order, the first key in the Map).
  */
 const MAX_CACHE_ENTRIES = 5000;
 
@@ -42,6 +45,8 @@ export const DIAGNOSTIC_CATEGORIES: ReadonlyArray<DiagnosticCategory> = [
   },
   { code: "unused-enum-member", label: "Unused Enum Members" },
   { code: "unused-class-member", label: "Unused Class Members" },
+  { code: "unused-store-member", label: "Unused Store Members" },
+  { code: "unprovided-inject", label: "Unprovided Injects" },
   { code: "unresolved-import", label: "Unresolved Imports" },
   { code: "unlisted-dependency", label: "Unlisted Dependencies" },
   { code: "duplicate-export", label: "Duplicate Exports" },
@@ -111,11 +116,26 @@ export const getDiagnosticCategories = (): ReadonlyArray<DiagnosticCategory> =>
 interface PersistedState {
   readonly mutedAll?: boolean;
   readonly mutedCategories?: ReadonlyArray<string>;
+  readonly localMutedCategories?: ReadonlyArray<string>;
+  readonly localVisibleCategories?: ReadonlyArray<string>;
 }
 
 interface FilterClient {
   readonly diagnostics?: vscode.DiagnosticCollection;
+  /**
+   * Force VS Code to re-pull `textDocument/diagnostic` for every open
+   * document. The push re-publish in `refresh()` only reaches diagnostics the
+   * server PUSHES (unopened files such as `package.json`); open documents
+   * arrive via the LSP 3.17 pull path and are owned by vscode-languageclient's
+   * internal pull collection, which `client.diagnostics.set` cannot touch. A
+   * mute toggle changes only the client-side filter (no server round-trip), so
+   * without an explicit re-pull the new filter state never reaches open-file
+   * squiggles until the next edit. Absent for push-only clients.
+   */
+  readonly refreshPullDiagnostics?: () => void;
 }
+
+type DiagnosticSeverityGetter = () => DiagnosticSeveritySetting;
 
 /** LSP diagnostics get tagged with `source: "plow"` (see
  *  `crates/lsp/src/diagnostics/*.rs`). Anything else flows through
@@ -142,14 +162,47 @@ export const diagnosticCode = (d: vscode.Diagnostic): string | null => {
   return null;
 };
 
+export const severityToDiagnosticSeverity = (
+  severity: DiagnosticSeveritySetting,
+): vscode.DiagnosticSeverity => {
+  switch (severity) {
+    case "hint":
+      return vscode.DiagnosticSeverity.Hint;
+    case "information":
+      return vscode.DiagnosticSeverity.Information;
+    case "warning":
+      return vscode.DiagnosticSeverity.Warning;
+  }
+};
+
+const withRenderedSeverity = (
+  d: vscode.Diagnostic,
+  severity: vscode.DiagnosticSeverity,
+): vscode.Diagnostic => {
+  if (!isPlowDiagnostic(d) || d.severity === severity) {
+    return d;
+  }
+  return { ...d, severity };
+};
+
 interface DiagnosticFilterStateChange {
   readonly mutedAll: boolean;
   readonly mutedCategories: ReadonlySet<string>;
 }
 
+/** Coerce a persisted value to a string array, tolerating a corrupt or
+ *  hand-edited `workspaceState` entry (a non-array, or an array with non-string
+ *  members). Without this a bad value (e.g. a number where an array is expected)
+ *  throws in the constructor and disables the whole extension for that
+ *  workspace. */
+const asStringArray = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+
 export class DiagnosticFilter {
   private mutedAll = false;
-  private mutedCategories = new Set<string>();
+  private baselineMutedCategories = new Set<string>();
+  private localMutedCategories = new Set<string>();
+  private localVisibleCategories = new Set<string>();
   private readonly cache = new Map<string, vscode.Diagnostic[]>();
   private client: FilterClient | null = null;
   private persistQueue: Promise<void> = Promise.resolve();
@@ -157,12 +210,18 @@ export class DiagnosticFilter {
 
   public readonly onDidChange = this.emitter.event;
 
-  public constructor(private readonly memento: vscode.Memento) {
+  public constructor(
+    private readonly memento: vscode.Memento,
+    private readonly getSeverity: DiagnosticSeverityGetter = () => "warning",
+    baselineMutedCategories: ReadonlySet<string> = new Set(),
+  ) {
+    this.baselineMutedCategories = new Set(baselineMutedCategories);
     const persisted = memento.get<PersistedState>(STATE_KEY);
-    if (persisted) {
+    if (persisted && typeof persisted === "object") {
       this.mutedAll = persisted.mutedAll === true;
-      const list = persisted.mutedCategories ?? [];
-      this.mutedCategories = new Set(list);
+      const localMuted = asStringArray(persisted.localMutedCategories ?? persisted.mutedCategories);
+      this.localMutedCategories = new Set(localMuted);
+      this.localVisibleCategories = new Set(asStringArray(persisted.localVisibleCategories));
     }
   }
 
@@ -180,20 +239,40 @@ export class DiagnosticFilter {
     this.emitter.dispose();
   }
 
+  /** Await any in-flight persisted-state write. `dispose()` is synchronous (the
+   *  VS Code Disposable contract), so it cannot await the persist queue; the
+   *  extension's async `deactivate()` calls this so the last mute toggle is not
+   *  dropped when the window closes mid-write. */
+  public async flushPersist(): Promise<void> {
+    await this.persistQueue;
+  }
+
   public isMutedAll(): boolean {
     return this.mutedAll;
   }
 
   public isCategoryMuted(code: string): boolean {
-    return this.mutedCategories.has(code);
+    return this.effectiveMutedCategories().has(code);
   }
 
   public anythingMuted(): boolean {
-    return this.mutedAll || this.mutedCategories.size > 0;
+    return this.mutedAll || this.effectiveMutedCategories().size > 0;
   }
 
   public mutedCategoriesSnapshot(): ReadonlySet<string> {
-    return new Set(this.mutedCategories);
+    return this.effectiveMutedCategories();
+  }
+
+  public updateBaselineMutedCategories(codes: ReadonlySet<string>): void {
+    const next = new Set(codes);
+    if (setsEqual(this.baselineMutedCategories, next)) {
+      return;
+    }
+    this.baselineMutedCategories = next;
+    this.pruneVisibleOverrides();
+    this.persist();
+    this.refresh();
+    this.emitChange();
   }
 
   public setMutedAll(value: boolean): void {
@@ -212,14 +291,20 @@ export class DiagnosticFilter {
   }
 
   public setCategoryMuted(code: string, value: boolean): void {
-    const had = this.mutedCategories.has(code);
+    const had = this.isCategoryMuted(code);
     if (value === had) {
       return;
     }
     if (value) {
-      this.mutedCategories.add(code);
+      this.localVisibleCategories.delete(code);
+      if (!this.baselineMutedCategories.has(code)) {
+        this.localMutedCategories.add(code);
+      }
     } else {
-      this.mutedCategories.delete(code);
+      this.localMutedCategories.delete(code);
+      if (this.baselineMutedCategories.has(code)) {
+        this.localVisibleCategories.add(code);
+      }
     }
     this.persist();
     this.refresh();
@@ -227,27 +312,66 @@ export class DiagnosticFilter {
   }
 
   public setMutedCategories(codes: ReadonlySet<string>): void {
-    let changed = this.mutedCategories.size !== codes.size;
-    if (!changed) {
-      for (const code of codes) {
-        if (!this.mutedCategories.has(code)) {
-          changed = true;
-          break;
-        }
+    const nextLocalMuted = new Set<string>();
+    const nextLocalVisible = new Set<string>();
+    for (const code of codes) {
+      if (!this.baselineMutedCategories.has(code)) {
+        nextLocalMuted.add(code);
       }
     }
+    for (const code of this.baselineMutedCategories) {
+      if (!codes.has(code)) {
+        nextLocalVisible.add(code);
+      }
+    }
+    const changed =
+      !setsEqual(this.localMutedCategories, nextLocalMuted) ||
+      !setsEqual(this.localVisibleCategories, nextLocalVisible);
     if (!changed) {
       return;
     }
 
-    this.mutedCategories = new Set(codes);
+    this.localMutedCategories = nextLocalMuted;
+    this.localVisibleCategories = nextLocalVisible;
+    this.persist();
+    this.refresh();
+    this.emitChange();
+  }
+
+  /** Apply the global mute-all flag AND an explicit category set in ONE
+   *  persist/refresh/emit cycle. The Manage quick pick otherwise called
+   *  setMutedAll then setMutedCategories for a single accept, firing two
+   *  persisted writes and two refreshes (two LSP re-pulls) per user action. */
+  public applyMuteSelection(mutedAll: boolean, codes: ReadonlySet<string>): void {
+    const nextLocalMuted = new Set<string>();
+    const nextLocalVisible = new Set<string>();
+    for (const code of codes) {
+      if (!this.baselineMutedCategories.has(code)) {
+        nextLocalMuted.add(code);
+      }
+    }
+    for (const code of this.baselineMutedCategories) {
+      if (!codes.has(code)) {
+        nextLocalVisible.add(code);
+      }
+    }
+    const changed =
+      this.mutedAll !== mutedAll ||
+      !setsEqual(this.localMutedCategories, nextLocalMuted) ||
+      !setsEqual(this.localVisibleCategories, nextLocalVisible);
+    if (!changed) {
+      return;
+    }
+    this.mutedAll = mutedAll;
+    this.localMutedCategories = nextLocalMuted;
+    this.localVisibleCategories = nextLocalVisible;
     this.persist();
     this.refresh();
     this.emitChange();
   }
 
   public toggleCategory(code: string): boolean {
-    const next = !this.mutedCategories.has(code);
+    const next = !this.isCategoryMuted(code);
     this.setCategoryMuted(code, next);
     return next;
   }
@@ -257,7 +381,8 @@ export class DiagnosticFilter {
       return;
     }
     this.mutedAll = false;
-    this.mutedCategories.clear();
+    this.localMutedCategories.clear();
+    this.localVisibleCategories = new Set(this.baselineMutedCategories);
     this.persist();
     this.refresh();
     this.emitChange();
@@ -270,22 +395,23 @@ export class DiagnosticFilter {
   }
 
   public applyFilter(diagnostics: ReadonlyArray<vscode.Diagnostic>): vscode.Diagnostic[] {
-    if (!this.anythingMuted()) {
-      return diagnostics.slice();
-    }
-    return diagnostics.filter((d) => {
-      if (!isPlowDiagnostic(d)) {
-        return true;
-      }
-      if (this.mutedAll) {
-        return false;
-      }
-      const code = diagnosticCode(d);
-      if (code === null) {
-        return true;
-      }
-      return !this.mutedCategories.has(code);
-    });
+    const renderedSeverity = severityToDiagnosticSeverity(this.getSeverity());
+    const filtered = this.anythingMuted()
+      ? diagnostics.filter((d) => {
+          if (!isPlowDiagnostic(d)) {
+            return true;
+          }
+          if (this.mutedAll) {
+            return false;
+          }
+          const code = diagnosticCode(d);
+          if (code === null) {
+            return true;
+          }
+          return !this.isCategoryMuted(code);
+        })
+      : diagnostics;
+    return filtered.map((d) => withRenderedSeverity(d, renderedSeverity));
   }
 
   /** Push-mode middleware: intercepts `textDocument/publishDiagnostics`. */
@@ -302,7 +428,18 @@ export class DiagnosticFilter {
 
   /** Pull-mode middleware: intercepts `textDocument/diagnostic`. The LSP
    *  advertises `diagnostic_provider` in `build_server_capabilities()`, so
-   *  strict 3.17 clients (and a future VSCode pull flip) hit this path. */
+   *  VS Code and strict 3.17 clients can hit this path.
+   *
+   *  Pull results are deliberately NOT cached. The pull path re-fetches from
+   *  the server on every re-pull (a mute toggle triggers one via
+   *  `refreshPullDiagnostics`), so a cached copy is never read back. Worse, the
+   *  pull provider owns its OWN `DiagnosticCollection` (named after the server's
+   *  diagnostic `identifier`), which is DISTINCT from the push collection
+   *  (`client.diagnostics`) that `refresh()` re-publishes into. Caching an
+   *  open-file pull result would let `refresh()` write it into the push
+   *  collection too, rendering every open-file squiggle TWICE after a toggle.
+   *  Only PUSH-delivered diagnostics (`handleDiagnostics`, for unopened files
+   *  such as `package.json`) belong in the cache. */
   public async provideDiagnostics(
     document: vscode.TextDocument | vscode.Uri,
     previousResultId: string | undefined,
@@ -316,30 +453,32 @@ export class DiagnosticFilter {
     if (result.kind !== "full") {
       return result;
     }
-    // `document` is `TextDocument | Uri`. TextDocument exposes `.uri`;
-    // a bare Uri does not. Structural detection works for both real and
-    // mocked Uri objects (mocks aren't `instanceof vscode.Uri`).
-    const uri =
-      "uri" in document && document.uri !== undefined ? document.uri : (document as vscode.Uri);
-    const key = uri.toString();
-    this.evictIfFull(key);
-    this.cache.set(key, result.items.slice());
     return { ...result, items: this.applyFilter(result.items) };
   }
 
-  /** Re-apply current filter to all cached diagnostics via the client's
-   *  collection. Called on toggle change so squiggles update instantly
-   *  without an LSP restart or re-analysis. Snapshots entries first to
-   *  future-proof against async creep in callers. */
+  /** Re-apply the current filter so squiggles update instantly on a toggle
+   *  change without an LSP restart or re-analysis. Two delivery paths need
+   *  refreshing: the PUSH collection (re-published in place from the cache,
+   *  covering unopened-file diagnostics such as `package.json`), and the PULL
+   *  path (open documents), which is owned by vscode-languageclient and can
+   *  only be updated by asking the client to re-pull. Snapshots entries first
+   *  to future-proof against async creep in callers. */
   public refresh(): void {
-    const collection = this.client?.diagnostics;
-    if (!collection) {
+    const client = this.client;
+    if (!client) {
       return;
     }
-    const entries = Array.from(this.cache.entries());
-    for (const [uriStr, diagnostics] of entries) {
-      collection.set(vscode.Uri.parse(uriStr), this.applyFilter(diagnostics));
+    const collection = client.diagnostics;
+    if (collection) {
+      const entries = Array.from(this.cache.entries());
+      for (const [uriStr, diagnostics] of entries) {
+        collection.set(vscode.Uri.parse(uriStr), this.applyFilter(diagnostics));
+      }
     }
+    // Re-pull open documents so the new filter state reaches pull-mode
+    // (open-file) squiggles immediately, not just on the next edit. Without
+    // this, undoing "hide all findings" leaves open files stuck hidden.
+    client.refreshPullDiagnostics?.();
   }
 
   /** Drop the oldest cache entry when at capacity, unless the URI we're
@@ -358,9 +497,12 @@ export class DiagnosticFilter {
   }
 
   private persist(): void {
+    const effectiveMutedCategories = Array.from(this.effectiveMutedCategories());
     const payload: PersistedState = {
       mutedAll: this.mutedAll,
-      mutedCategories: Array.from(this.mutedCategories),
+      mutedCategories: effectiveMutedCategories,
+      localMutedCategories: Array.from(this.localMutedCategories),
+      localVisibleCategories: Array.from(this.localVisibleCategories),
     };
     this.persistQueue = this.persistQueue.then(
       () => Promise.resolve(this.memento.update(STATE_KEY, payload)),
@@ -374,4 +516,35 @@ export class DiagnosticFilter {
       mutedCategories: this.mutedCategoriesSnapshot(),
     });
   }
+
+  private effectiveMutedCategories(): Set<string> {
+    const result = new Set(this.baselineMutedCategories);
+    for (const code of this.localMutedCategories) {
+      result.add(code);
+    }
+    for (const code of this.localVisibleCategories) {
+      result.delete(code);
+    }
+    return result;
+  }
+
+  private pruneVisibleOverrides(): void {
+    for (const code of Array.from(this.localVisibleCategories)) {
+      if (!this.baselineMutedCategories.has(code)) {
+        this.localVisibleCategories.delete(code);
+      }
+    }
+  }
 }
+
+const setsEqual = (left: ReadonlySet<string>, right: ReadonlySet<string>): boolean => {
+  if (left.size !== right.size) {
+    return false;
+  }
+  for (const value of left) {
+    if (!right.has(value)) {
+      return false;
+    }
+  }
+  return true;
+};

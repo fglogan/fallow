@@ -3,12 +3,32 @@ source: crates/cli/tests/snapshot_tests.rs
 expression: json_str
 ---
 {
-  "body": "### Plow dead-code report\n\n20 inline findings selected for GitLab review.\n\n<!-- plow-review -->\n\n<!-- plow-fingerprint:v2: cfe228d4e40949fd -->",
+  "body": "### Plow dead-code report\n\n24 inline findings selected for GitLab review.\n\n<!-- plow-review -->\n\n<!-- plow-fingerprint:v2: f1e01912f6349509 -->",
   "summary": {
-    "body": "### Plow dead-code report\n\n20 inline findings selected for GitLab review.\n\n<!-- plow-review -->\n\n<!-- plow-fingerprint:v2: cfe228d4e40949fd -->",
-    "fingerprint": "cfe228d4e40949fd"
+    "body": "### Plow dead-code report\n\n24 inline findings selected for GitLab review.\n\n<!-- plow-review -->\n\n<!-- plow-fingerprint:v2: f1e01912f6349509 -->",
+    "fingerprint": "f1e01912f6349509"
   },
   "comments": [
+    {
+      "body": "**warn** `plow/mixed-client-server-barrel`: Barrel re-exports both a \"use client\" module \\(\\`./Button\\`\\) and a server-only module \\(\\`./fetchUser\\`\\); one import drags the other's directive across the boundary\n\n<!-- plow-fingerprint:v2: a26a1cc5a4e57127 -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "app/components/index.ts",
+        "new_path": "app/components/index.ts",
+        "new_line": 2
+      },
+      "fingerprint": "a26a1cc5a4e57127"
+    },
+    {
+      "body": "**warn** `plow/invalid-client-export`: Export \\`metadata\\` is not allowed in a \"use client\" file \\(Next.js server-only / route-config name\\)\n\n<!-- plow-fingerprint:v2: 81283760fca75e0c -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "app/page.tsx",
+        "new_path": "app/page.tsx",
+        "new_line": 3
+      },
+      "fingerprint": "81283760fca75e0c"
+    },
     {
       "body": "**error** `plow/misconfigured-dependency-override`: Override \\`@types/react@\\<\\<18\\` -\\> \\`18.0.0\\` is malformed: override key cannot be parsed\n\n<!-- plow-fingerprint:v2: 6c6967f2a0a29fc8 -->",
       "position": {
@@ -180,6 +200,16 @@ expression: json_str
       "fingerprint": "dd4d62478ebd0dea"
     },
     {
+      "body": "**warn** `plow/unused-store-member`: Store member 'useCounterStore.legacyAction' is never referenced\n\n<!-- plow-fingerprint:v2: 1b6b9adec9797dbc -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "src/stores/counter.ts",
+        "new_path": "src/stores/counter.ts",
+        "new_line": 24
+      },
+      "fingerprint": "1b6b9adec9797dbc"
+    },
+    {
       "body": "**error** `plow/unused-type`: Type export 'OldType' is never imported by other modules\n\n<!-- plow-fingerprint:v2: 08e7c60812746b38 -->",
       "position": {
         "position_type": "text",
@@ -198,6 +228,16 @@ expression: json_str
         "new_line": 30
       },
       "fingerprint": "ec485b2f5051e03e"
+    },
+    {
+      "body": "**warn** `plow/unprovided-inject`: inject\\(\\`THEME\\_KEY\\`\\) has no matching provide\\(\\`THEME\\_KEY\\`\\) in this project; at runtime it returns undefined \\(provide the key or remove this inject\\)\n\n<!-- plow-fingerprint:v2: 4e4a7216bbdc8cfa -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "src/useTheme.ts",
+        "new_path": "src/useTheme.ts",
+        "new_line": 5
+      },
+      "fingerprint": "4e4a7216bbdc8cfa"
     },
     {
       "body": "**error** `plow/unused-export`: Export 'helperFn' is never imported by other modules\n\n<!-- plow-fingerprint:v2: 6b7fb5f6ae546edb -->",

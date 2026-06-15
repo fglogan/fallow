@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use super::PackageJson;
 use super::diagnostics::{
     WorkspaceDiagnostic, WorkspaceDiagnosticKind, is_ignored_workspace_dir, is_skip_listed_dir,
 };
@@ -49,11 +50,9 @@ pub(super) fn parse_tsconfig_references_with_diagnostics(
 ) -> Vec<PathBuf> {
     let tsconfig_path = root.join("tsconfig.json");
     let Ok(content) = std::fs::read_to_string(&tsconfig_path) else {
-        // Missing tsconfig is not an error. Many JS-only projects have none.
         return Vec::new();
     };
 
-    // Strip UTF-8 BOM if present (common in Windows-authored tsconfig files)
     let content = content.trim_start_matches('\u{FEFF}');
 
     let value: serde_json::Value = match crate::jsonc::parse_to_value(content) {
@@ -80,8 +79,6 @@ pub(super) fn parse_tsconfig_references_with_diagnostics(
         let Some(raw_path) = r.get("path").and_then(|p| p.as_str()) else {
             continue;
         };
-        // strip_prefix removes exactly one leading "./" (unlike trim_start_matches
-        // which would strip repeatedly).
         let cleaned = raw_path.strip_prefix("./").unwrap_or(raw_path);
         let candidate = root.join(cleaned);
         if candidate.is_dir() {
@@ -89,20 +86,10 @@ pub(super) fn parse_tsconfig_references_with_diagnostics(
             continue;
         }
 
-        // File references are valid per the TypeScript Project References
-        // spec (the `path` may target a config file directly), but they
-        // cannot host a `package.json`, so they are not workspace
-        // candidates. The TypeScript plugin in
-        // `core::plugins::typescript::parse_tsconfig_references` already
-        // follows them; skip silently here to avoid a misleading
-        // "directory does not exist" diagnostic.
         if candidate.is_file() {
             continue;
         }
 
-        // Reference points to a missing path. Filter through ignore_patterns
-        // so paths the user already excluded do not trigger a redundant
-        // diagnostic.
         let relative = candidate
             .strip_prefix(root)
             .unwrap_or(candidate.as_path())
@@ -161,7 +148,6 @@ pub(super) fn strip_trailing_commas(input: &str) -> String {
         if in_string {
             result.push(b);
             if b == b'\\' && i + 1 < len {
-                // Push escaped character and skip it
                 i += 1;
                 result.push(bytes[i]);
             } else if b == b'"' {
@@ -179,13 +165,11 @@ pub(super) fn strip_trailing_commas(input: &str) -> String {
         }
 
         if b == b',' {
-            // Look ahead past whitespace for ] or }
             let mut j = i + 1;
             while j < len && bytes[j].is_ascii_whitespace() {
                 j += 1;
             }
             if j < len && (bytes[j] == b']' || bytes[j] == b'}') {
-                // Skip the trailing comma
                 i += 1;
                 continue;
             }
@@ -195,8 +179,6 @@ pub(super) fn strip_trailing_commas(input: &str) -> String {
         i += 1;
     }
 
-    // We only removed ASCII commas and preserved all other bytes unchanged,
-    // so the result is valid UTF-8 if the input was. Use from_utf8 to be safe.
     String::from_utf8(result).unwrap_or_else(|_| input.to_string())
 }
 
@@ -252,10 +234,6 @@ pub(super) fn expand_workspace_glob_with_diagnostics(
     ignore_patterns: &globset::GlobSet,
     diagnostics: &mut Vec<WorkspaceDiagnostic>,
 ) -> Vec<(PathBuf, PathBuf)> {
-    // For patterns with `**`, use a manual walk that prunes node_modules
-    // during traversal. The glob crate walks into node_modules before
-    // filtering, which is catastrophic with pnpm's deep symlink trees
-    // (50,000+ entries for `packages/**/*` in starlight).
     if expanded_pattern.contains("**") {
         return expand_recursive_workspace_pattern(
             root,
@@ -287,7 +265,35 @@ pub(super) fn expand_workspace_glob_with_diagnostics(
                     }
                     continue;
                 }
-                maybe_emit_glob_no_pkg_diag(root, raw_pattern, &path, ignore_patterns, diagnostics);
+                // The glob matched a bare intermediate directory with no
+                // package.json (e.g. `packages/themes` for `packages/*`, where the
+                // real package lives at `packages/themes/<pkg>`). Descend one level
+                // and recover any child that is itself a named package, so a file
+                // under it is attributed to its own manifest instead of falling
+                // back to the project root. See issue #842.
+                let recovered = recover_nested_packages(&path, canonical_root, ignore_patterns);
+                if recovered.is_empty() {
+                    maybe_emit_glob_no_pkg_diag(
+                        root,
+                        raw_pattern,
+                        &path,
+                        ignore_patterns,
+                        diagnostics,
+                    );
+                } else {
+                    // The user's glob is one level too shallow: it named the bare
+                    // grouping directory, not the package below it. Recovery keeps
+                    // the deep package discovered, but nudge the user toward the
+                    // glob the package manager itself would need.
+                    tracing::debug!(
+                        "workspace glob '{raw_pattern}' matched '{}' which has no package.json; \
+                         recovered {} nested package(s) one level down. Consider '{raw_pattern}/*' \
+                         so npm/pnpm/yarn resolve them as workspace members too.",
+                        path.display(),
+                        recovered.len()
+                    );
+                    results.extend(recovered);
+                }
             }
             results
         }
@@ -296,6 +302,73 @@ pub(super) fn expand_workspace_glob_with_diagnostics(
             Vec::new()
         }
     }
+}
+
+/// Descend one level into a glob-matched directory that has no `package.json`
+/// of its own and recover any immediate child that is a real, named package.
+///
+/// This handles the common `packages/<group>/<pkg>` layout where the root
+/// declares a one-level glob like `packages/*`: the glob matches the bare
+/// grouping directory (`packages/themes`), which has no manifest, so the deeper
+/// real package (`packages/themes/my-theme`) is never discovered and every file
+/// beneath it is misattributed to the project root, producing false
+/// `unlisted-dependencies`. See issue #842.
+///
+/// Recovery is conservative to avoid sweeping in non-packages: children are
+/// skipped when their leaf name is in the conventional skip list (build output,
+/// caches, hidden dirs) or `node_modules`, when their project-root-relative path
+/// matches the user's `ignore_patterns` (so a path the user excluded via
+/// `ignorePatterns` is a reliable opt-out and is never recovered), and a child
+/// is only registered when its `package.json` loads AND declares a `name` (so
+/// fixtures, build artifacts, and `__mocks__` manifests without a name are not
+/// treated as workspaces). Descends exactly one level: deeper
+/// `packages/<group>/<sub>/<pkg>` layouts are intentionally out of scope and
+/// should use a recursive (`**`) glob. Returns `(path, canonical_path)` pairs in
+/// the same shape as the glob expander.
+fn recover_nested_packages(
+    path: &Path,
+    canonical_root: &Path,
+    ignore_patterns: &globset::GlobSet,
+) -> Vec<(PathBuf, PathBuf)> {
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return Vec::new();
+    };
+    let mut recovered = Vec::new();
+    for entry in entries.filter_map(Result::ok) {
+        let child = entry.path();
+        if !child.is_dir() {
+            continue;
+        }
+        let leaf = entry.file_name();
+        let leaf = leaf.to_string_lossy();
+        if leaf == "node_modules" || is_skip_listed_dir(&leaf) {
+            continue;
+        }
+        let Some(cp) = dunce::canonicalize(&child)
+            .ok()
+            .filter(|cp| cp.starts_with(canonical_root))
+        else {
+            continue;
+        };
+        // Honor the user's `ignorePatterns`: a recovered child the user already
+        // excluded must not be registered as a workspace (mirrors the
+        // suppression contract on the normal no-package-json glob path).
+        let relative = cp.strip_prefix(canonical_root).unwrap_or(cp.as_path());
+        if is_ignored_workspace_dir(relative, ignore_patterns) {
+            continue;
+        }
+        let pkg_path = child.join("package.json");
+        // Gate on a real, named package so fixtures / build output / mock
+        // manifests under the grouping directory are not registered.
+        let Ok(pkg) = PackageJson::load(&pkg_path) else {
+            continue;
+        };
+        if pkg.name.is_none() {
+            continue;
+        }
+        recovered.push((child, cp));
+    }
+    recovered
 }
 
 /// Emit a `glob-matched-no-package-json` diagnostic if the path is neither
@@ -360,7 +433,6 @@ fn expand_recursive_workspace_pattern(
         return Vec::new();
     };
 
-    // Extract the base directory before the first `*` to avoid scanning from root
     let base_dir = match expanded_pattern.find('*') {
         Some(idx) => root.join(&expanded_pattern[..idx]),
         None => root.join(expanded_pattern),
@@ -409,11 +481,9 @@ fn walk_workspace_dirs(
             continue;
         }
         let name = entry.file_name();
-        // Prune node_modules and hidden directories during traversal
         if name == "node_modules" || name == ".git" {
             continue;
         }
-        // Check if this directory matches the pattern.
         if matcher.matches_path(&path) {
             if path.join("package.json").exists() {
                 if let Ok(cp) = dunce::canonicalize(&path)
@@ -425,7 +495,6 @@ fn walk_workspace_dirs(
                 maybe_emit_glob_no_pkg_diag(root, raw_pattern, &path, ignore_patterns, diagnostics);
             }
         }
-        // Continue recursing into subdirectories
         walk_workspace_dirs(
             root,
             &path,
@@ -441,10 +510,6 @@ fn walk_workspace_dirs(
 
 /// Parse pnpm-workspace.yaml to extract package patterns.
 pub(super) fn parse_pnpm_workspace_yaml(content: &str) -> Vec<String> {
-    // Simple YAML parsing for the common format:
-    // packages:
-    //   - 'packages/*'
-    //   - 'apps/*'
     let mut patterns = Vec::new();
     let mut in_packages = false;
 
@@ -547,7 +612,6 @@ mod tests {
 
     #[test]
     fn strip_trailing_commas_preserves_strings() {
-        // Commas inside strings should NOT be stripped
         assert_eq!(
             strip_trailing_commas(r#"{"a": "hello,}"}"#),
             r#"{"a": "hello,}"}"#
@@ -579,7 +643,6 @@ mod tests {
         std::fs::write(
             temp_dir.join("tsconfig.json"),
             r#"{
-                // Root tsconfig with project references
                 "references": [
                     {"path": "./packages/core"},
                     {"path": "./packages/ui"},
@@ -641,26 +704,12 @@ mod tests {
 
     #[test]
     fn tsconfig_references_skip_file_paths_silently() {
-        // TypeScript Project References allow `path` to point at either a
-        // directory containing tsconfig.json OR a config file directly.
-        // File references are valid and must not surface as
-        // `TsconfigReferenceDirMissing` diagnostics. The TypeScript plugin
-        // already follows file references; workspace discovery skips them
-        // because files cannot host a package.json.
-        //
-        // The directory names chosen below (`build`, `dist`, `packages/foo`,
-        // a top-level config) are arbitrary; the only thing the
-        // implementation inspects is whether the resolved path is a file
-        // via `Path::is_file()`. The fix is intentionally generic across
-        // any framework or convention that generates tsconfig files.
         let temp_dir = std::env::temp_dir().join("plow-test-tsconfig-file-refs");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(temp_dir.join("build")).unwrap();
         std::fs::create_dir_all(temp_dir.join("dist/types")).unwrap();
         std::fs::create_dir_all(temp_dir.join("packages/foo")).unwrap();
 
-        // Mix of locations and filenames — none of them follow a single
-        // convention.
         std::fs::write(
             temp_dir.join("build/tsconfig.app.json"),
             r#"{"compilerOptions": {}}"#,
@@ -702,8 +751,6 @@ mod tests {
             &mut diagnostics,
         );
 
-        // Files at any path are not workspace candidates — they should be
-        // skipped silently rather than surfacing as workspaces or diagnostics.
         assert!(
             refs.is_empty(),
             "file references at any path should not be workspace candidates; got: {refs:?}"
@@ -718,9 +765,6 @@ mod tests {
 
     #[test]
     fn tsconfig_references_mixed_file_and_dir() {
-        // A tsconfig may mix file-path and directory-path references. The
-        // directory references should still be returned; file references
-        // (regardless of location) should be silently skipped.
         let temp_dir = std::env::temp_dir().join("plow-test-tsconfig-mixed-refs");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(temp_dir.join("packages/core")).unwrap();
@@ -828,7 +872,6 @@ mod tests {
 
     #[test]
     fn parse_pnpm_workspace_malformed() {
-        // Garbage input should return empty, not panic
         let patterns = parse_pnpm_workspace_yaml(":::not yaml at all:::");
         assert!(patterns.is_empty());
     }
@@ -868,7 +911,6 @@ mod tests {
         std::fs::create_dir_all(temp_dir.join("packages/c")).unwrap();
         std::fs::write(temp_dir.join("packages/a/package.json"), r#"{"name": "a"}"#).unwrap();
         std::fs::write(temp_dir.join("packages/b/package.json"), r#"{"name": "b"}"#).unwrap();
-        // c has no package.json — should be excluded
 
         let canonical_root = dunce::canonicalize(&temp_dir).unwrap();
         let results = expand_workspace_glob(&temp_dir, "packages/*", &canonical_root);
@@ -900,8 +942,6 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
-
-    // ── parse_tsconfig_root_dir ──────────────────────────────────
 
     #[test]
     fn tsconfig_root_dir_extracted() {
@@ -984,7 +1024,6 @@ mod tests {
         )
         .unwrap();
 
-        // "." is returned as-is — caller filters it out
         assert_eq!(parse_tsconfig_root_dir(&temp_dir), Some(".".to_string()));
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
@@ -1001,7 +1040,6 @@ mod tests {
         )
         .unwrap();
 
-        // Returned as-is — caller filters it out
         assert_eq!(
             parse_tsconfig_root_dir(&temp_dir),
             Some("../other".to_string())
@@ -1022,13 +1060,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
-    // ── parse_pnpm_workspace_yaml edge cases ────────────────────────
-
     #[test]
     fn parse_pnpm_workspace_with_empty_lines_between_entries() {
         let yaml = "packages:\n  - 'packages/*'\n\n  - 'apps/*'\n";
         let patterns = parse_pnpm_workspace_yaml(yaml);
-        // Empty lines between entries should be tolerated (they're skipped)
         assert_eq!(patterns, vec!["packages/*", "apps/*"]);
     }
 
@@ -1046,11 +1081,8 @@ mod tests {
         assert_eq!(patterns, vec!["packages/*", "!packages/test-*"]);
     }
 
-    // ── strip_trailing_commas advanced ───────────────────────────────
-
     #[test]
     fn strip_trailing_commas_string_with_closing_brackets() {
-        // String containing "]" and "}" should not affect comma stripping
         let input = r#"{"key": "value with ] and }",}"#;
         let expected = r#"{"key": "value with ] and }"}"#;
         assert_eq!(strip_trailing_commas(input), expected);
@@ -1062,8 +1094,6 @@ mod tests {
         let expected = r#"{"a": {"b": [1, 2], "c": 3}}"#;
         assert_eq!(strip_trailing_commas(input), expected);
     }
-
-    // ── tsconfig_root_dir edge cases ────────────────────────────────
 
     #[test]
     fn tsconfig_root_dir_with_trailing_commas() {
@@ -1081,8 +1111,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
-    // ── expand_workspace_glob with trailing slash ────────────────────
-
     #[test]
     fn expand_workspace_glob_trailing_slash() {
         let temp_dir = std::env::temp_dir().join("plow-test-expand-trailing");
@@ -1091,26 +1119,21 @@ mod tests {
         std::fs::write(temp_dir.join("packages/a/package.json"), r#"{"name": "a"}"#).unwrap();
 
         let canonical_root = dunce::canonicalize(&temp_dir).unwrap();
-        // Trailing slash pattern gets `*` appended -> `packages/*`
         let results = expand_workspace_glob(&temp_dir, "packages/*", &canonical_root);
         assert_eq!(results.len(), 1);
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
-    // ── expand_workspace_glob excludes node_modules ──────────────────
-
     #[test]
     fn expand_workspace_glob_excludes_node_modules() {
         let temp_dir = std::env::temp_dir().join("plow-test-expand-no-nodemod");
         let _ = std::fs::remove_dir_all(&temp_dir);
 
-        // Nested node_modules package — should be excluded
         let nm_pkg = temp_dir.join("packages/foo/node_modules/bar");
         std::fs::create_dir_all(&nm_pkg).unwrap();
         std::fs::write(nm_pkg.join("package.json"), r#"{"name":"bar"}"#).unwrap();
 
-        // Legitimate workspace package — should be included
         let ws_pkg = temp_dir.join("packages/foo");
         std::fs::write(ws_pkg.join("package.json"), r#"{"name":"foo"}"#).unwrap();
 
@@ -1133,8 +1156,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
-    // ── expand_workspace_glob skips dirs without package.json ────────
-
     #[test]
     fn expand_workspace_glob_skips_dirs_without_pkg() {
         let temp_dir = std::env::temp_dir().join("plow-test-expand-no-pkg");
@@ -1146,7 +1167,6 @@ mod tests {
             r#"{"name": "with"}"#,
         )
         .unwrap();
-        // packages/without-pkg has no package.json
 
         let canonical_root = dunce::canonicalize(&temp_dir).unwrap();
         let results = expand_workspace_glob(&temp_dir, "packages/*", &canonical_root);
@@ -1162,17 +1182,89 @@ mod tests {
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
-    // ── expand_workspace_glob prunes node_modules with ** patterns ───
+    #[test]
+    fn expand_workspace_glob_recovers_nested_package_under_bare_intermediate() {
+        // Reporter layout (issue #842): root glob `packages/*` matches the bare
+        // grouping dir `packages/themes` (no package.json); the real package is
+        // one level deeper at `packages/themes/my-theme`. A nameless manifest and
+        // a non-package dir under the same grouping dir must NOT be recovered.
+        let temp_dir = std::env::temp_dir().join("plow-test-expand-nested-recover");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(temp_dir.join("packages/themes/my-theme")).unwrap();
+        std::fs::create_dir_all(temp_dir.join("packages/themes/no-name")).unwrap();
+        std::fs::create_dir_all(temp_dir.join("packages/themes/just-src")).unwrap();
+        std::fs::write(
+            temp_dir.join("packages/themes/my-theme/package.json"),
+            r#"{"name": "my-theme", "dependencies": {"react": "^18"}}"#,
+        )
+        .unwrap();
+        // Nameless manifest: must be rejected (fixtures / build output shape).
+        std::fs::write(
+            temp_dir.join("packages/themes/no-name/package.json"),
+            r#"{"private": true}"#,
+        )
+        .unwrap();
+        // `just-src` has no package.json at all: nothing to recover.
+
+        let canonical_root = dunce::canonicalize(&temp_dir).unwrap();
+        let results = expand_workspace_glob(&temp_dir, "packages/*", &canonical_root);
+
+        let names: Vec<String> = results
+            .iter()
+            .map(|(p, _)| p.to_string_lossy().replace('\\', "/"))
+            .collect();
+        assert_eq!(
+            results.len(),
+            1,
+            "only the named nested package should be recovered, got {names:?}"
+        );
+        assert!(
+            names[0].ends_with("packages/themes/my-theme"),
+            "recovered path should be the deep named package, got {names:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn expand_workspace_glob_recovery_honors_ignore_patterns() {
+        // A nested package the user excluded via `ignorePatterns` must NOT be
+        // recovered, so `ignorePatterns` stays a reliable opt-out. See issue #842.
+        let temp_dir = std::env::temp_dir().join("plow-test-recover-ignore");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(temp_dir.join("packages/themes/my-theme")).unwrap();
+        std::fs::write(
+            temp_dir.join("packages/themes/my-theme/package.json"),
+            r#"{"name": "my-theme"}"#,
+        )
+        .unwrap();
+
+        let canonical_root = dunce::canonicalize(&temp_dir).unwrap();
+        let mut builder = globset::GlobSetBuilder::new();
+        builder.add(globset::Glob::new("packages/themes/my-theme").unwrap());
+        let ignore = builder.build().unwrap();
+        let mut diagnostics = Vec::new();
+        let results = expand_workspace_glob_with_diagnostics(
+            &temp_dir,
+            "packages/*",
+            "packages/*",
+            &canonical_root,
+            &ignore,
+            &mut diagnostics,
+        );
+        assert!(
+            results.is_empty(),
+            "an ignored nested package must not be recovered, got {results:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
 
     #[test]
     fn expand_recursive_glob_prunes_node_modules() {
-        // When using `packages/**/*` the manual walk should prune
-        // `node_modules` during traversal, so a package.json inside
-        // `packages/app/node_modules/dep/` is never returned.
         let temp_dir = std::env::temp_dir().join("plow-test-expand-recursive-prune");
         let _ = std::fs::remove_dir_all(&temp_dir);
 
-        // Legitimate workspace packages
         std::fs::create_dir_all(temp_dir.join("packages/app")).unwrap();
         std::fs::write(
             temp_dir.join("packages/app/package.json"),
@@ -1186,7 +1278,6 @@ mod tests {
         )
         .unwrap();
 
-        // Nested node_modules dependency (should be pruned)
         let nm_dep = temp_dir.join("packages/app/node_modules/dep");
         std::fs::create_dir_all(&nm_dep).unwrap();
         std::fs::write(nm_dep.join("package.json"), r#"{"name": "dep"}"#).unwrap();
@@ -1194,7 +1285,6 @@ mod tests {
         let canonical_root = dunce::canonicalize(&temp_dir).unwrap();
         let results = expand_workspace_glob(&temp_dir, "packages/**/*", &canonical_root);
 
-        // Should find exactly the two legitimate workspace packages
         let found_names: Vec<String> = results
             .iter()
             .map(|(orig, _)| orig.file_name().unwrap().to_string_lossy().to_string())
@@ -1256,12 +1346,9 @@ mod tests {
 
     #[test]
     fn expand_recursive_glob_prunes_deeply_nested_node_modules() {
-        // Even deeply nested node_modules (e.g., pnpm's deep symlink trees)
-        // should be pruned during the walk.
         let temp_dir = std::env::temp_dir().join("plow-test-expand-deep-prune");
         let _ = std::fs::remove_dir_all(&temp_dir);
 
-        // Legitimate workspace package
         std::fs::create_dir_all(temp_dir.join("packages/core")).unwrap();
         std::fs::write(
             temp_dir.join("packages/core/package.json"),
@@ -1269,7 +1356,6 @@ mod tests {
         )
         .unwrap();
 
-        // Deeply nested node_modules (simulates pnpm virtual store)
         let deep_nm = temp_dir.join("packages/core/node_modules/.pnpm/react@18/node_modules/react");
         std::fs::create_dir_all(&deep_nm).unwrap();
         std::fs::write(deep_nm.join("package.json"), r#"{"name": "react"}"#).unwrap();

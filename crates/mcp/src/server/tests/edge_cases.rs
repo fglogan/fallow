@@ -4,8 +4,6 @@ use crate::tools::{
     build_fix_apply_args, build_fix_preview_args, build_health_args, build_project_info_args,
 };
 
-// ── Edge cases: special characters in arguments ───────────────────
-
 #[test]
 fn analyze_args_with_spaces_in_paths() {
     let params = AnalyzeParams {
@@ -65,8 +63,6 @@ fn health_args_file_scores_flag() {
     assert!(args.contains(&"--file-scores".to_string()));
 }
 
-// ── Additional arg builder coverage: boolean false omission ───────
-
 #[test]
 fn check_changed_args_production_false_is_omitted() {
     let params = CheckChangedParams {
@@ -97,6 +93,39 @@ fn find_dupes_args_cross_language_false_is_omitted() {
     };
     let args = build_find_dupes_args(&params).unwrap();
     assert!(!args.contains(&"--cross-language".to_string()));
+}
+
+#[test]
+fn find_dupes_args_ignore_imports_false_emits_opt_out() {
+    let params = FindDupesParams {
+        ignore_imports: Some(false),
+        ..Default::default()
+    };
+    let args = build_find_dupes_args(&params).unwrap();
+    assert!(args.contains(&"--no-ignore-imports".to_string()));
+    assert!(!args.contains(&"--ignore-imports".to_string()));
+}
+
+#[test]
+fn find_dupes_args_ignore_imports_true_emits_opt_in() {
+    let params = FindDupesParams {
+        ignore_imports: Some(true),
+        ..Default::default()
+    };
+    let args = build_find_dupes_args(&params).unwrap();
+    assert!(args.contains(&"--ignore-imports".to_string()));
+    assert!(!args.contains(&"--no-ignore-imports".to_string()));
+}
+
+#[test]
+fn find_dupes_args_ignore_imports_none_emits_neither() {
+    let params = FindDupesParams {
+        ignore_imports: None,
+        ..Default::default()
+    };
+    let args = build_find_dupes_args(&params).unwrap();
+    assert!(!args.contains(&"--ignore-imports".to_string()));
+    assert!(!args.contains(&"--no-ignore-imports".to_string()));
 }
 
 #[test]
@@ -137,8 +166,6 @@ fn health_args_boolean_flags_false_are_omitted() {
     assert!(!args.contains(&"--no-cache".to_string()));
 }
 
-// ── Additional arg builder coverage: isolated optional params ─────
-
 #[test]
 fn health_args_complexity_flag_only() {
     let params = HealthParams {
@@ -149,6 +176,19 @@ fn health_args_complexity_flag_only() {
     assert!(args.contains(&"--complexity".to_string()));
     assert!(!args.contains(&"--file-scores".to_string()));
     assert!(!args.contains(&"--hotspots".to_string()));
+}
+
+#[test]
+fn health_args_complexity_breakdown_flag() {
+    let on = build_health_args(&HealthParams {
+        complexity_breakdown: Some(true),
+        ..Default::default()
+    });
+    assert!(on.contains(&"--complexity-breakdown".to_string()));
+
+    // The breakdown flag is independent of --complexity and absent by default.
+    let off = build_health_args(&HealthParams::default());
+    assert!(!off.contains(&"--complexity-breakdown".to_string()));
 }
 
 #[test]
@@ -265,8 +305,6 @@ fn project_info_args_only_config() {
     assert!(!args.contains(&"--root".to_string()));
 }
 
-// ── Global flags: baseline and threads in isolation ───────────────
-
 #[test]
 fn analyze_args_baseline_only() {
     let params = AnalyzeParams {
@@ -344,8 +382,6 @@ fn health_args_baseline_and_save_baseline() {
     assert!(args.contains(&"new.json".to_string()));
 }
 
-// ── Health: targets flag ──────────────────────────────────────────
-
 #[test]
 fn health_args_targets_flag_only() {
     let params = HealthParams {
@@ -369,8 +405,6 @@ fn health_args_targets_false_is_omitted() {
     assert!(!args.contains(&"--targets".to_string()));
 }
 
-// ── Health: save_snapshot special handling ─────────────────────────
-
 #[test]
 fn health_args_save_snapshot_with_path() {
     let params = HealthParams {
@@ -390,9 +424,7 @@ fn health_args_save_snapshot_empty_string_produces_valueless_flag() {
     };
     let args = build_health_args(&params);
     assert!(args.contains(&"--save-snapshot".to_string()));
-    // Empty string means no value argument — only the flag itself
     let snap_idx = args.iter().position(|a| a == "--save-snapshot").unwrap();
-    // The next arg (if any) should be another flag, not an empty string
     if let Some(next) = args.get(snap_idx + 1) {
         assert!(
             next.starts_with("--"),
@@ -411,8 +443,6 @@ fn health_args_save_snapshot_none_is_omitted() {
     assert!(!args.contains(&"--save-snapshot".to_string()));
 }
 
-// ── Health: all section flags together ────────────────────────────
-
 #[test]
 fn health_args_all_section_flags_together() {
     let params = HealthParams {
@@ -429,8 +459,6 @@ fn health_args_all_section_flags_together() {
     assert!(args.contains(&"--targets".to_string()));
 }
 
-// ── find_dupes: cross_language true ───────────────────────────────
-
 #[test]
 fn find_dupes_args_cross_language_true() {
     let params = FindDupesParams {
@@ -441,8 +469,6 @@ fn find_dupes_args_cross_language_true() {
     assert!(args.contains(&"--cross-language".to_string()));
 }
 
-// ── VALID_DUPES_MODES constant ────────────────────────────────────
-
 #[test]
 fn valid_dupes_modes_count_and_contents() {
     assert_eq!(VALID_DUPES_MODES.len(), 4);
@@ -451,8 +477,6 @@ fn valid_dupes_modes_count_and_contents() {
     assert!(VALID_DUPES_MODES.contains(&"weak"));
     assert!(VALID_DUPES_MODES.contains(&"semantic"));
 }
-
-// ── Unicode in paths and values ───────────────────────────────────
 
 #[test]
 fn analyze_args_unicode_in_paths() {
@@ -466,8 +490,6 @@ fn analyze_args_unicode_in_paths() {
     assert!(args.contains(&"パッケージ".to_string()));
 }
 
-// ── Empty strings in optional string params ───────────────────────
-
 #[test]
 fn analyze_args_empty_root_is_dropped() {
     let params = AnalyzeParams {
@@ -475,8 +497,6 @@ fn analyze_args_empty_root_is_dropped() {
         ..Default::default()
     };
     let args = build_analyze_args(&params).unwrap();
-    // Empty strings are dropped at the MCP layer so we never invoke the CLI
-    // with `--root ""` (which would either trip clap or silently mean cwd).
     assert!(
         !args.iter().any(|a| a == "--root"),
         "expected empty --root to be dropped, got {args:?}"
@@ -496,8 +516,6 @@ fn health_args_empty_sort_is_dropped() {
     );
 }
 
-// ── find_dupes: min_lines in isolation ────────────────────────────
-
 #[test]
 fn find_dupes_args_min_lines_only() {
     let params = FindDupesParams {
@@ -509,8 +527,6 @@ fn find_dupes_args_min_lines_only() {
     assert!(args.contains(&"20".to_string()));
     assert!(!args.contains(&"--min-tokens".to_string()));
 }
-
-// ── find_dupes: baseline flags ────────────────────────────────────
 
 #[test]
 fn find_dupes_args_baseline_and_save_baseline() {
@@ -525,8 +541,6 @@ fn find_dupes_args_baseline_and_save_baseline() {
     assert!(args.contains(&"--save-baseline".to_string()));
     assert!(args.contains(&"new.json".to_string()));
 }
-
-// ── check_changed: baseline flags ─────────────────────────────────
 
 #[test]
 fn check_changed_args_baseline_only() {
@@ -576,8 +590,6 @@ fn check_changed_args_save_baseline_only() {
     assert!(args.contains(&"new.json".to_string()));
 }
 
-// ── Threads boundary values ───────────────────────────────────────
-
 #[test]
 fn analyze_args_threads_zero() {
     let params = AnalyzeParams {
@@ -600,8 +612,6 @@ fn health_args_threads_large() {
     assert!(args.contains(&"1024".to_string()));
 }
 
-// ── health: changed_since in isolation ────────────────────────────
-
 #[test]
 fn health_args_changed_since_only() {
     let params = HealthParams {
@@ -613,8 +623,6 @@ fn health_args_changed_since_only() {
     assert!(args.contains(&"HEAD~10".to_string()));
     assert!(!args.contains(&"--since".to_string()));
 }
-
-// ── health: max_cognitive in isolation ─────────────────────────────
 
 #[test]
 fn health_args_max_cognitive_only() {
@@ -628,8 +636,6 @@ fn health_args_max_cognitive_only() {
     assert!(!args.contains(&"--max-cyclomatic".to_string()));
 }
 
-// ── health: save_snapshot whitespace-only path ────────────────────
-
 #[test]
 fn health_args_save_snapshot_whitespace_only_passes_value() {
     let params = HealthParams {
@@ -638,11 +644,8 @@ fn health_args_save_snapshot_whitespace_only_passes_value() {
     };
     let args = build_health_args(&params);
     assert!(args.contains(&"--save-snapshot".to_string()));
-    // Whitespace-only is not empty — it should be passed as a value
     assert!(args.contains(&"   ".to_string()));
 }
-
-// ── health: complete args including targets and save_snapshot ──────
 
 #[test]
 fn health_args_with_all_options_including_targets_and_snapshot() {
@@ -656,6 +659,7 @@ fn health_args_with_all_options_including_targets_and_snapshot() {
         sort: Some("cognitive".to_string()),
         changed_since: Some("develop".to_string()),
         complexity: Some(true),
+        complexity_breakdown: Some(true),
         file_scores: Some(true),
         hotspots: Some(true),
         targets: Some(true),
@@ -664,6 +668,7 @@ fn health_args_with_all_options_including_targets_and_snapshot() {
         min_score: Some(70.0),
         since: Some("6m".to_string()),
         min_commits: Some(5),
+        churn_file: Some("churn.json".to_string()),
         workspace: Some("packages/ui".to_string()),
         production: Some(true),
         save_snapshot: Some("snap.json".to_string()),
@@ -686,12 +691,9 @@ fn health_args_with_all_options_including_targets_and_snapshot() {
         group_by: Some("section".to_string()),
     };
     let args = build_health_args(&params);
-    // Every single flag should be present
     assert!(args.contains(&"--ownership".to_string()));
     assert!(args.contains(&"--ownership-emails".to_string()));
     assert!(args.contains(&"anonymized".to_string()));
-    // --hotspots must appear exactly once even when both `hotspots: true`
-    // and `ownership: true` are set; the implied flag is deduplicated.
     assert_eq!(args.iter().filter(|a| *a == "--hotspots").count(), 1);
     assert!(args.contains(&"--targets".to_string()));
     assert!(args.contains(&"--coverage-gaps".to_string()));
@@ -700,6 +702,8 @@ fn health_args_with_all_options_including_targets_and_snapshot() {
     assert!(args.contains(&"70".to_string()));
     assert!(args.contains(&"--save-snapshot".to_string()));
     assert!(args.contains(&"snap.json".to_string()));
+    assert!(args.contains(&"--churn-file".to_string()));
+    assert!(args.contains(&"churn.json".to_string()));
     assert!(args.contains(&"--complexity".to_string()));
     assert!(args.contains(&"--file-scores".to_string()));
     assert!(args.contains(&"--hotspots".to_string()));
@@ -716,8 +720,6 @@ fn health_args_with_all_options_including_targets_and_snapshot() {
     assert!(args.contains(&"--min-severity".to_string()));
     assert!(args.contains(&"critical".to_string()));
 }
-
-// ── Unicode in paths for all arg builders ─────────────────────────
 
 #[test]
 fn check_changed_args_unicode_in_paths() {
@@ -804,8 +806,6 @@ fn project_info_args_unicode_in_paths() {
     assert!(args.contains(&"конфиг.toml".to_string()));
 }
 
-// ── Empty strings in optional params across tools ─────────────────
-
 #[test]
 fn check_changed_args_empty_config_is_dropped() {
     let params = CheckChangedParams {
@@ -862,8 +862,6 @@ fn fix_args_empty_config_is_dropped() {
         "expected empty --config to be dropped from fix_apply, got {apply:?}"
     );
 }
-
-// ── Threads boundary values across tools ──────────────────────────
 
 #[test]
 fn check_changed_args_threads_boundary() {
@@ -925,8 +923,6 @@ fn project_info_args_threads_zero() {
     assert!(args.contains(&"0".to_string()));
 }
 
-// ── find_dupes: cross_language None is omitted ────────────────────
-
 #[test]
 fn find_dupes_args_cross_language_none_is_omitted() {
     let params = FindDupesParams {
@@ -937,43 +933,10 @@ fn find_dupes_args_cross_language_none_is_omitted() {
     assert!(!args.contains(&"--cross-language".to_string()));
 }
 
-// ── find_dupes: ignore_imports true ──────────────────────────────
-
-#[test]
-fn find_dupes_args_ignore_imports_true() {
-    let params = FindDupesParams {
-        ignore_imports: Some(true),
-        ..Default::default()
-    };
-    let args = build_find_dupes_args(&params).unwrap();
-    assert!(args.contains(&"--ignore-imports".to_string()));
-}
-
-// ── find_dupes: ignore_imports false is omitted ──────────────────
-
-#[test]
-fn find_dupes_args_ignore_imports_false_is_omitted() {
-    let params = FindDupesParams {
-        ignore_imports: Some(false),
-        ..Default::default()
-    };
-    let args = build_find_dupes_args(&params).unwrap();
-    assert!(!args.contains(&"--ignore-imports".to_string()));
-}
-
-// ── find_dupes: ignore_imports None is omitted ───────────────────
-
-#[test]
-fn find_dupes_args_ignore_imports_none_is_omitted() {
-    let params = FindDupesParams {
-        ignore_imports: None,
-        ..Default::default()
-    };
-    let args = build_find_dupes_args(&params).unwrap();
-    assert!(!args.contains(&"--ignore-imports".to_string()));
-}
-
-// ── find_dupes: skip_local true ───────────────────────────────────
+// `ignore_imports` opt-in / opt-out / defer coverage lives in the
+// `find_dupes_args_ignore_imports_{false_emits_opt_out,true_emits_opt_in,none_emits_neither}`
+// trio earlier in this file (asserts both the emitted flag and the absence of
+// its opposite); the older absence-only tests were removed as redundant.
 
 #[test]
 fn find_dupes_args_skip_local_true() {
@@ -984,8 +947,6 @@ fn find_dupes_args_skip_local_true() {
     let args = build_find_dupes_args(&params).unwrap();
     assert!(args.contains(&"--skip-local".to_string()));
 }
-
-// ── find_dupes: boundary numeric values ───────────────────────────
 
 #[test]
 fn find_dupes_args_min_tokens_zero() {
@@ -1020,8 +981,6 @@ fn find_dupes_args_threshold_negative() {
     assert!(args.contains(&"-1".to_string()));
 }
 
-// ── check_changed: no_cache true ──────────────────────────────────
-
 #[test]
 fn check_changed_args_no_cache_true() {
     let params = CheckChangedParams {
@@ -1043,8 +1002,6 @@ fn check_changed_args_no_cache_true() {
     let args = build_check_changed_args(params);
     assert!(args.contains(&"--no-cache".to_string()));
 }
-
-// ── fix: config and root in isolation ─────────────────────────────
 
 #[test]
 fn fix_preview_args_config_only() {
@@ -1070,8 +1027,6 @@ fn fix_apply_args_root_only() {
     assert!(!args.contains(&"--config".to_string()));
 }
 
-// ── project_info: no_cache true in isolation ──────────────────────
-
 #[test]
 fn project_info_args_no_cache_true() {
     let params = ProjectInfoParams {
@@ -1084,8 +1039,6 @@ fn project_info_args_no_cache_true() {
     assert!(!args.contains(&"--config".to_string()));
 }
 
-// ── health: save_snapshot arg ordering ─────────────────────────────
-
 #[test]
 fn health_args_save_snapshot_with_value_has_correct_order() {
     let params = HealthParams {
@@ -1096,8 +1049,6 @@ fn health_args_save_snapshot_with_value_has_correct_order() {
     let snap_idx = args.iter().position(|a| a == "--save-snapshot").unwrap();
     assert_eq!(args[snap_idx + 1], "output/snap.json");
 }
-
-// ── health: min_commits boundary ──────────────────────────────────
 
 #[test]
 fn health_args_min_commits_zero() {
@@ -1110,8 +1061,6 @@ fn health_args_min_commits_zero() {
     assert!(args.contains(&"0".to_string()));
 }
 
-// ── health: max_cyclomatic 1 (minimum meaningful value) ───────────
-
 #[test]
 fn health_args_max_cyclomatic_one() {
     let params = HealthParams {
@@ -1122,8 +1071,6 @@ fn health_args_max_cyclomatic_one() {
     assert!(args.contains(&"--max-cyclomatic".to_string()));
     assert!(args.contains(&"1".to_string()));
 }
-
-// ── analyze: save_baseline in isolation ────────────────────────────
 
 #[test]
 fn analyze_args_save_baseline_only() {
@@ -1137,8 +1084,6 @@ fn analyze_args_save_baseline_only() {
     assert!(!args.contains(&"--baseline".to_string()));
 }
 
-// ── analyze: single issue type ────────────────────────────────────
-
 #[test]
 fn analyze_args_single_issue_type() {
     let params = AnalyzeParams {
@@ -1147,12 +1092,9 @@ fn analyze_args_single_issue_type() {
     };
     let args = build_analyze_args(&params).unwrap();
     assert!(args.contains(&"--circular-deps".to_string()));
-    // Should not contain any other issue type flags
     assert!(!args.contains(&"--unused-files".to_string()));
     assert!(!args.contains(&"--unused-exports".to_string()));
 }
-
-// ── find_dupes: case-sensitive mode validation ────────────────────
 
 #[test]
 fn find_dupes_args_uppercase_mode_returns_error() {
@@ -1166,9 +1108,6 @@ fn find_dupes_args_uppercase_mode_returns_error() {
 
 #[test]
 fn find_dupes_args_empty_mode_is_dropped() {
-    // Empty strings are dropped at the MCP layer before validation, so an
-    // agent passing `mode: ""` for "no mode" succeeds and the CLI runs with
-    // its default detection mode instead of being rejected as Invalid.
     let params = FindDupesParams {
         mode: Some(String::new()),
         ..Default::default()

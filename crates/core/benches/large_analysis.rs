@@ -1,3 +1,8 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "tests and benches use unwrap and expect to keep fixture setup concise"
+)]
 #![expect(
     deprecated,
     reason = "ADR-008: benchmark exercises the workspace path-dep plow_core::analyze surface"
@@ -24,7 +29,6 @@ fn bench_full_pipeline_5000(c: &mut Criterion) {
 fn bench_full_pipeline_1000_warm(c: &mut Criterion) {
     let (temp_dir, config) = helpers::create_synthetic_project_with_cache("1000-warm", 1000, false);
 
-    // Populate the cache
     let _ = plow_core::analyze(&config);
 
     c.bench_function("full_pipeline_1000_files_warm_cache", |b| {
@@ -39,7 +43,6 @@ fn bench_full_pipeline_1000_warm(c: &mut Criterion) {
 fn bench_full_pipeline_5000_warm(c: &mut Criterion) {
     let (temp_dir, config) = helpers::create_synthetic_project_with_cache("5000-warm", 5000, false);
 
-    // Populate the cache
     let _ = plow_core::analyze(&config);
 
     c.bench_function("full_pipeline_5000_files_warm_cache", |b| {
@@ -50,8 +53,6 @@ fn bench_full_pipeline_5000_warm(c: &mut Criterion) {
 
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
-
-// ── Full-project dupe detection benchmarks ──────────────────────────
 
 fn bench_dupes_full_1000(c: &mut Criterion) {
     let (temp_dir, config) = helpers::create_dupe_project("1000", 1000);

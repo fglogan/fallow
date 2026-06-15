@@ -3,7 +3,7 @@
 # invocation, but this script handles errors explicitly with if-guards.
 set +e -o pipefail
 
-# Run fallow analysis with CLI argument construction (deduped)
+# Run plow analysis with CLI argument construction (deduped)
 # Required env: INPUT_COMMAND, INPUT_ROOT, INPUT_CONFIG, INPUT_FORMAT, INPUT_PRODUCTION,
 #   INPUT_PRODUCTION_DEAD_CODE, INPUT_PRODUCTION_HEALTH, INPUT_PRODUCTION_DUPES,
 #   INPUT_CHANGED_SINCE, INPUT_AUTO_CHANGED_SINCE, PR_BASE_SHA, EVENT_NAME,
@@ -17,7 +17,7 @@ set +e -o pipefail
 #   INPUT_TARGETS, INPUT_COMPLEXITY, INPUT_SINCE, INPUT_MIN_COMMITS,
 #   INPUT_COVERAGE, INPUT_PRODUCTION_COVERAGE, INPUT_COVERAGE_ROOT, INPUT_MIN_INVOCATIONS_HOT,
 #   INPUT_MIN_OBSERVATION_VOLUME, INPUT_LOW_TRAFFIC_THRESHOLD,
-#   INPUT_GATE, INPUT_DEAD_CODE_BASELINE, INPUT_HEALTH_BASELINE, INPUT_DUPES_BASELINE,
+#   INPUT_GATE, INPUT_SECURITY_GATE, INPUT_DEAD_CODE_BASELINE, INPUT_HEALTH_BASELINE, INPUT_DUPES_BASELINE,
 #   INPUT_SCORE, INPUT_SAVE_SNAPSHOT, INPUT_TREND, INPUT_ISSUE_TYPES, INPUT_NO_CACHE, INPUT_THREADS,
 #   INPUT_ONLY, INPUT_SKIP, INPUT_ARTIFACTS_DIR
 
@@ -28,6 +28,75 @@ artifact_path() {
   else
     printf '%s/%s\n' "$ARTIFACTS_DIR" "$filename"
   fi
+}
+
+is_dead_code_baseline_command() {
+  [ -n "${INPUT_BASELINE:-}" ] || return 1
+  case "${INPUT_COMMAND:-}" in
+    ""|dead-code|check) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+normalize_changed_path() {
+  local path=$1
+  local root="${INPUT_ROOT:-.}"
+
+  path="${path#./}"
+  root="${root#./}"
+
+  if [ "$root" != "." ] && [[ "$path" == "$root/"* ]]; then
+    path="${path#"$root/"}"
+  fi
+
+  printf '%s\n' "$path"
+}
+
+normalize_config_path() {
+  local path=$1
+  local root="${INPUT_ROOT:-.}"
+
+  path="${path#./}"
+  root="${root#./}"
+
+  if [[ "$path" = /* ]]; then
+    local abs_root
+    abs_root=$(cd "${INPUT_ROOT:-.}" 2>/dev/null && pwd -P)
+    if [ -n "$abs_root" ] && [[ "$path" == "$abs_root/"* ]]; then
+      path="${path#"$abs_root/"}"
+    fi
+  elif [ "$root" != "." ] && [[ "$path" == "$root/"* ]]; then
+    path="${path#"$root/"}"
+  fi
+
+  printf '%s\n' "$path"
+}
+
+find_changed_plow_config() {
+  local changed_files=$1
+  local explicit_config=""
+
+  if [ -n "${INPUT_CONFIG:-}" ]; then
+    explicit_config=$(normalize_config_path "$INPUT_CONFIG")
+  fi
+
+  while IFS= read -r changed_file; do
+    [ -n "$changed_file" ] || continue
+    changed_file=$(normalize_changed_path "$changed_file")
+    case "$changed_file" in
+      .plowrc.json|.plowrc.jsonc|plow.toml|.plow.toml)
+        printf '%s\n' "$changed_file"
+        return 0
+        ;;
+    esac
+
+    if [ -n "$explicit_config" ] && [ "$changed_file" = "$explicit_config" ]; then
+      printf '%s\n' "$changed_file"
+      return 0
+    fi
+  done <<< "$changed_files"
+
+  return 1
 }
 
 # --- Shared argument building functions ---
@@ -133,6 +202,9 @@ build_command_args() {
       [ -n "${INPUT_GATE:-}" ] && ARGS+=(--gate "$INPUT_GATE")
       [ "${INPUT_INCLUDE_ENTRY_EXPORTS:-}" = "true" ] && ARGS+=(--include-entry-exports)
       ;;
+    security)
+      [ -n "${INPUT_SECURITY_GATE:-}" ] && ARGS+=(--gate "$INPUT_SECURITY_GATE")
+      ;;
     fix)
       if [ "${INPUT_DRY_RUN:-}" = "true" ]; then
         ARGS+=(--dry-run)
@@ -157,6 +229,8 @@ build_command_args() {
       [ -n "${INPUT_TOLERANCE:-}" ] && [ "${INPUT_TOLERANCE:-}" != "0" ] && ARGS+=(--tolerance "$INPUT_TOLERANCE")
       [ -n "${INPUT_REGRESSION_BASELINE:-}" ] && ARGS+=(--regression-baseline "$INPUT_REGRESSION_BASELINE")
       [ -n "${INPUT_SAVE_REGRESSION_BASELINE:-}" ] && ARGS+=(--save-regression-baseline "$INPUT_SAVE_REGRESSION_BASELINE")
+      [ -n "${INPUT_COVERAGE:-}" ] && ARGS+=(--coverage "$INPUT_COVERAGE")
+      [ -n "${INPUT_COVERAGE_ROOT:-}" ] && ARGS+=(--coverage-root "$INPUT_COVERAGE_ROOT")
       ;;
   esac
 }
@@ -164,8 +238,8 @@ build_command_args() {
 # --- Validation ---
 
 case "$INPUT_COMMAND" in
-  ""|dead-code|check|dupes|health|audit|fix) ;;
-  *) echo "::error::Invalid command: ${INPUT_COMMAND}. Must be dead-code, dupes, health, audit, fix, or empty (runs all)."; exit 2 ;;
+  ""|dead-code|check|dupes|health|audit|security|fix) ;;
+  *) echo "::error::Invalid command: ${INPUT_COMMAND}. Must be dead-code, dupes, health, audit, security, fix, or empty (runs all)."; exit 2 ;;
 esac
 
 if [ "$INPUT_COMMAND" = "audit" ] && { [ -n "${INPUT_BASELINE:-}" ] || [ -n "${INPUT_SAVE_BASELINE:-}" ]; }; then
@@ -175,6 +249,9 @@ fi
 
 if [ -n "${INPUT_GATE:-}" ] && [ "$INPUT_GATE" != "new-only" ] && [ "$INPUT_GATE" != "all" ]; then
   echo "::error::gate must be 'new-only' or 'all', got: ${INPUT_GATE}"; exit 2
+fi
+if [ -n "${INPUT_SECURITY_GATE:-}" ] && [ "$INPUT_SECURITY_GATE" != "new" ] && [ "$INPUT_SECURITY_GATE" != "newly-reachable" ]; then
+  echo "::error::security-gate must be 'new' or 'newly-reachable', got: ${INPUT_SECURITY_GATE}"; exit 2
 fi
 
 for name_val in "min-tokens:${INPUT_MIN_TOKENS:-}" "min-lines:${INPUT_MIN_LINES:-}" \
@@ -215,23 +292,23 @@ if ! mkdir -p "$ARTIFACTS_DIR"; then
   exit 2
 fi
 
-RESULTS_FILE=$(artifact_path fallow-results.json)
-RESULTS_RAW_FILE=$(artifact_path fallow-results-raw.json)
-SCOPED_RESULTS_FILE=$(artifact_path fallow-results-scoped.json)
-SARIF_FILE=$(artifact_path fallow-results.sarif)
-STDERR_FILE=$(artifact_path fallow-stderr.log)
-ANALYSIS_ARGS_FILE=$(artifact_path fallow-analysis-args.sh)
-CHANGED_FILES_FILE=$(artifact_path fallow-changed-files.json)
-AUTO_DIFF_FILE="$PWD/$(artifact_path fallow-pr.diff)"
+RESULTS_FILE=$(artifact_path plow-results.json)
+RESULTS_RAW_FILE=$(artifact_path plow-results-raw.json)
+SCOPED_RESULTS_FILE=$(artifact_path plow-results-scoped.json)
+SARIF_FILE=$(artifact_path plow-results.sarif)
+STDERR_FILE=$(artifact_path plow-stderr.log)
+ANALYSIS_ARGS_FILE=$(artifact_path plow-analysis-args.sh)
+CHANGED_FILES_FILE=$(artifact_path plow-changed-files.json)
+AUTO_DIFF_FILE="$PWD/$(artifact_path plow-pr.diff)"
 
 if [ -n "${GITHUB_ENV:-}" ]; then
   {
-    echo "FALLOW_RESULTS_FILE=${RESULTS_FILE}"
-    echo "FALLOW_SCOPED_RESULTS_FILE=${SCOPED_RESULTS_FILE}"
-    echo "FALLOW_ANALYSIS_ARGS_FILE=${ANALYSIS_ARGS_FILE}"
-    echo "FALLOW_CHANGED_FILES_FILE=${CHANGED_FILES_FILE}"
-    echo "FALLOW_SARIF_FILE=${SARIF_FILE}"
-    echo "FALLOW_ARTIFACTS_DIR=${ARTIFACTS_DIR}"
+    echo "PLOW_RESULTS_FILE=${RESULTS_FILE}"
+    echo "PLOW_SCOPED_RESULTS_FILE=${SCOPED_RESULTS_FILE}"
+    echo "PLOW_ANALYSIS_ARGS_FILE=${ANALYSIS_ARGS_FILE}"
+    echo "PLOW_CHANGED_FILES_FILE=${CHANGED_FILES_FILE}"
+    echo "PLOW_SARIF_FILE=${SARIF_FILE}"
+    echo "PLOW_ARTIFACTS_DIR=${ARTIFACTS_DIR}"
   } >> "$GITHUB_ENV"
 fi
 
@@ -240,7 +317,7 @@ fi
 HAS_SARIF_FILE=false
 if { [ "$INPUT_COMMAND" = "dead-code" ] || [ "$INPUT_COMMAND" = "check" ] || [ -z "$INPUT_COMMAND" ]; }; then
   HELP_TMP=$(mktemp)
-  fallow dead-code --help > "$HELP_TMP" 2>/dev/null || true
+  plow dead-code --help > "$HELP_TMP" 2>/dev/null || true
   if /usr/bin/grep -q -- '--sarif-file' "$HELP_TMP"; then
     HAS_SARIF_FILE=true
   fi
@@ -249,15 +326,17 @@ fi
 
 # --- Auto-detect changed-since in PR context ---
 
+AUTO_CHANGED_SINCE=false
+USER_DIFF_FILE=false
+[ -n "${PLOW_DIFF_FILE:-}" ] && USER_DIFF_FILE=true
+
 if [ -z "${INPUT_CHANGED_SINCE:-}" ] && [ "${INPUT_AUTO_CHANGED_SINCE:-}" = "true" ] && \
    { [ "${EVENT_NAME:-}" = "pull_request" ] || [ "${EVENT_NAME:-}" = "pull_request_target" ]; } && \
    [ -n "${PR_BASE_SHA:-}" ]; then
   INPUT_CHANGED_SINCE="$PR_BASE_SHA"
+  AUTO_CHANGED_SINCE=true
   echo "::notice::Auto-scoping analysis to files changed since PR base (${PR_BASE_SHA:0:7})"
 fi
-
-# Propagate the effective changed-since value so downstream steps can filter
-echo "changed_since=${INPUT_CHANGED_SINCE:-}" >> "$GITHUB_OUTPUT"
 
 # --- Pre-compute changed files list for downstream filtering ---
 # Downstream scripts (comment, summary, annotations, review) need the list of
@@ -270,7 +349,11 @@ echo "changed_since=${INPUT_CHANGED_SINCE:-}" >> "$GITHUB_OUTPUT"
 # requested. Without this, `if:` conditions using
 # `outputs.changed_files_unavailable == 'false'` as a positive signal see an
 # absent field instead of false when changed-since is not set.
-[ -n "${GITHUB_OUTPUT:-}" ] && echo "changed_files_unavailable=false" >> "$GITHUB_OUTPUT"
+if [ -n "${GITHUB_OUTPUT:-}" ]; then
+  echo "changed_files_unavailable=false" >> "$GITHUB_OUTPUT"
+fi
+
+_CHANGED=""
 
 if [ -n "${INPUT_CHANGED_SINCE:-}" ]; then
   _ROOT="${INPUT_ROOT:-.}"
@@ -303,7 +386,7 @@ if [ -n "${INPUT_CHANGED_SINCE:-}" ]; then
       _API_FILES=$(cat "$_API_TMP")
       if [ -n "$_API_FILES" ]; then
         if [ "$_ROOT" != "." ]; then
-          # Strip root prefix; API returns repo-root-relative paths, fallow JSON uses root-relative.
+          # Strip root prefix; API returns repo-root-relative paths, plow JSON uses root-relative.
           _CHANGED=$(echo "$_API_FILES" | sed -n "s|^${_ROOT}/||p")
         else
           _CHANGED="$_API_FILES"
@@ -311,7 +394,7 @@ if [ -n "${INPUT_CHANGED_SINCE:-}" ]; then
       fi
     else
       _STDERR_HEAD=$(head -3 "$_API_ERR" | tr '\n' ' ')
-      echo "::warning::fallow: GitHub API call to list PR files failed; analysis will run against the full codebase, not just files changed in this PR. stderr: ${_STDERR_HEAD} Re-run the job to retry. If persistent, check 'gh auth status' and repo permissions." >&2
+      echo "::warning::plow: GitHub API call to list PR files failed; analysis will run against the full codebase, not just files changed in this PR. stderr: ${_STDERR_HEAD} Re-run the job to retry. If persistent, check 'gh auth status' and repo permissions." >&2
       [ -n "${GITHUB_OUTPUT:-}" ] && echo "changed_files_unavailable=true" >> "$GITHUB_OUTPUT"
     fi
   fi
@@ -323,8 +406,31 @@ if [ -n "${INPUT_CHANGED_SINCE:-}" ]; then
   fi
 fi
 
+if is_dead_code_baseline_command && [ -n "$_CHANGED" ]; then
+  CONFIG_SCOPE_TRIGGER=$(find_changed_plow_config "$_CHANGED" || true)
+  if [ -n "$CONFIG_SCOPE_TRIGGER" ]; then
+    if [ "$AUTO_CHANGED_SINCE" = "true" ]; then
+      if [ "$USER_DIFF_FILE" = "true" ]; then
+        echo "::warning::plow: '${CONFIG_SCOPE_TRIGGER}' changed, so auto changed-since scoping is disabled for dead-code baseline comparison. The explicit diff file remains active and may still hide baseline drift until an unscoped run." >&2
+      else
+        echo "::warning::plow: dead-code baseline comparison is running unscoped because '${CONFIG_SCOPE_TRIGGER}' changed. Plow config can change baseline membership; downstream PR filtering is disabled for this run." >&2
+      fi
+      INPUT_CHANGED_SINCE=""
+      rm -f "$CHANGED_FILES_FILE" "$AUTO_DIFF_FILE"
+    else
+      echo "::warning::plow: '${CONFIG_SCOPE_TRIGGER}' changed while dead-code baseline comparison is explicitly scoped. Plow config can change baseline membership, so baseline drift may stay hidden until an unscoped run." >&2
+    fi
+  fi
+fi
+
+# Propagate the effective changed-since value after config safety logic so
+# downstream steps do not reapply stale PR scope.
+if [ -n "${GITHUB_OUTPUT:-}" ]; then
+  echo "changed_since=${INPUT_CHANGED_SINCE:-}" >> "$GITHUB_OUTPUT"
+fi
+
 # --- Pre-compute unified diff for line-level hot-path scoping ---
-# `fallow audit` and `fallow health` consume a unified diff to do
+# `plow audit` and `plow health` consume a unified diff to do
 # line-overlap matching against runtime hot paths so the
 # `hot-path-touched` verdict only fires when an added line falls inside
 # a hot function's body, not merely when the file was touched. Mirrors
@@ -332,7 +438,7 @@ fi
 # fallback, GitHub API last resort) so behavior is consistent across
 # checkout depths.
 #
-# Skip when the user already supplied `inputs.diff-file` (FALLOW_DIFF_FILE
+# Skip when the user already supplied `inputs.diff-file` (PLOW_DIFF_FILE
 # is non-empty in that case): respect their choice. Skip when there is no
 # changed-since, since there is nothing to scope against.
 #
@@ -341,15 +447,15 @@ fi
 # of re-running `gh pr diff` and double-paying the API quota.
 
 # When the user supplied --diff-file via the action input, the env block
-# already set FALLOW_DIFF_FILE on this step. Propagate it to subsequent
+# already set PLOW_DIFF_FILE on this step. Propagate it to subsequent
 # composite steps via $GITHUB_ENV so the comment / review steps don't
-# need to declare their own FALLOW_DIFF_FILE env (which would override
+# need to declare their own PLOW_DIFF_FILE env (which would override
 # the analyze-step propagation otherwise). User-supplied path wins.
-if [ -n "${FALLOW_DIFF_FILE:-}" ] && [ -n "${GITHUB_ENV:-}" ]; then
-  echo "FALLOW_DIFF_FILE=${FALLOW_DIFF_FILE}" >> "$GITHUB_ENV"
+if [ -n "${PLOW_DIFF_FILE:-}" ] && [ -n "${GITHUB_ENV:-}" ]; then
+  echo "PLOW_DIFF_FILE=${PLOW_DIFF_FILE}" >> "$GITHUB_ENV"
 fi
 
-if [ -n "${INPUT_CHANGED_SINCE:-}" ] && [ -z "${FALLOW_DIFF_FILE:-}" ]; then
+if [ -n "${INPUT_CHANGED_SINCE:-}" ] && [ -z "${PLOW_DIFF_FILE:-}" ]; then
   _ROOT="${INPUT_ROOT:-.}"
   _DIFF_PATH="$AUTO_DIFF_FILE"
 
@@ -373,11 +479,11 @@ if [ -n "${INPUT_CHANGED_SINCE:-}" ] && [ -z "${FALLOW_DIFF_FILE:-}" ]; then
   fi
 
   if [ -s "$_DIFF_PATH" ]; then
-    export FALLOW_DIFF_FILE="$_DIFF_PATH"
+    export PLOW_DIFF_FILE="$_DIFF_PATH"
     # Propagate to the comment / review render steps (separate composite
     # steps see only $GITHUB_ENV, not exported shell variables).
     if [ -n "${GITHUB_ENV:-}" ]; then
-      echo "FALLOW_DIFF_FILE=${_DIFF_PATH}" >> "$GITHUB_ENV"
+      echo "PLOW_DIFF_FILE=${_DIFF_PATH}" >> "$GITHUB_ENV"
     fi
   else
     rm -f "$_DIFF_PATH"
@@ -385,7 +491,7 @@ if [ -n "${INPUT_CHANGED_SINCE:-}" ] && [ -z "${FALLOW_DIFF_FILE:-}" ]; then
     # filter falls back to file-level via `--changed-since`. Emit a
     # machine-greppable warning so dashboards can alert on it without
     # parsing free-form text.
-    echo "::warning::fallow: warning [shallow-clone]: could not produce unified diff for line-level hot-path scoping. Use fetch-depth: 0 in actions/checkout for line-precision."
+    echo "::warning::plow: warning [shallow-clone]: could not produce unified diff for line-level hot-path scoping. Use fetch-depth: 0 in actions/checkout for line-precision."
   fi
 fi
 
@@ -406,14 +512,14 @@ fi
 # followed by the actual combined results. Use jq -s 'last' to extract only
 # the final JSON object so downstream parsing sees a single valid result.
 {
-  printf 'FALLOW_ANALYSIS_ARGS=('
+  printf 'PLOW_ANALYSIS_ARGS=('
   printf '%q ' "${ARGS[@]}" "${EXTRA_ARGS[@]}"
   printf ')\n'
 } > "$ANALYSIS_ARGS_FILE"
 
-if ! fallow "${ARGS[@]}" "${EXTRA_ARGS[@]}" > "$RESULTS_RAW_FILE" 2> "$STDERR_FILE"; then
+if ! plow "${ARGS[@]}" "${EXTRA_ARGS[@]}" > "$RESULTS_RAW_FILE" 2> "$STDERR_FILE"; then
   if [ ! -s "$RESULTS_RAW_FILE" ] || ! jq -e '.' "$RESULTS_RAW_FILE" > /dev/null 2>&1; then
-    echo "::error::Fallow failed to run"
+    echo "::error::Plow failed to run"
     [ -s "$STDERR_FILE" ] && cat "$STDERR_FILE"
     [ -s "$RESULTS_RAW_FILE" ] && cat "$RESULTS_RAW_FILE"
     exit 2
@@ -422,7 +528,7 @@ fi
 jq -s 'last' "$RESULTS_RAW_FILE" > "$RESULTS_FILE"
 rm -f "$RESULTS_RAW_FILE"
 if jq -e '.error == true' "$RESULTS_FILE" > /dev/null 2>&1; then
-  MESSAGE=$(jq -r '.message // "Fallow failed"' "$RESULTS_FILE")
+  MESSAGE=$(jq -r '.message // "Plow failed"' "$RESULTS_FILE")
   EXIT_CODE=$(jq -r '.exit_code // 2' "$RESULTS_FILE")
   echo "::error::${MESSAGE}"
   exit "$EXIT_CODE"
@@ -437,7 +543,12 @@ if { [ "${INPUT_FORMAT:-}" = "sarif" ] || [ "${INPUT_SARIF:-}" = "true" ]; } && 
   build_common_args sarif
   build_command_args false  # omit --top for SARIF
 
-  if ! fallow "${ARGS[@]}" "${EXTRA_ARGS[@]}" > "$SARIF_FILE" 2>/dev/null; then
+  # Validate the produced file rather than gating on the exit code: plow exits
+  # 1 when issues are found (e.g. health with complexity findings), which is not
+  # a generation failure. Only an empty or invalid SARIF file is a real failure,
+  # matching this block's entry condition and plow's exit-code semantics (>=2).
+  plow "${ARGS[@]}" "${EXTRA_ARGS[@]}" > "$SARIF_FILE" 2>/dev/null || true
+  if [ ! -s "$SARIF_FILE" ] || ! jq -e '.' "$SARIF_FILE" > /dev/null 2>&1; then
     echo "::warning::SARIF generation failed"
   fi
 fi
@@ -460,6 +571,8 @@ GATE=""
 if [ "$INPUT_COMMAND" = "audit" ]; then
   VERDICT=$(jq -r '.verdict // ""' "$RESULTS_FILE")
   GATE=$(jq -r '.attribution.gate // ""' "$RESULTS_FILE")
+elif [ "$INPUT_COMMAND" = "security" ]; then
+  GATE=$(jq -r '.gate.mode // ""' "$RESULTS_FILE")
 fi
 
 case "$INPUT_COMMAND" in
@@ -467,6 +580,7 @@ case "$INPUT_COMMAND" in
   dupes)           ISSUES=$(jq -r '.stats.clone_groups' "$RESULTS_FILE") ;;
   health)          ISSUES=$(jq -r '((.summary.functions_above_threshold // 0) + ((.runtime_coverage.findings // []) | map(select(.verdict == "safe_to_delete" or .verdict == "review_required" or .verdict == "low_traffic")) | length))' "$RESULTS_FILE") ;;
   audit)           ISSUES=$(jq -r 'if (.attribution.gate // "new-only") == "all" then ((.summary.dead_code_issues // 0) + (.summary.complexity_findings // 0) + (.summary.duplication_clone_groups // 0)) else ((.attribution.dead_code_introduced // 0) + (.attribution.complexity_introduced // 0) + (.attribution.duplication_introduced // 0)) end' "$RESULTS_FILE") ;;
+  security)        ISSUES=$(jq -r 'if .gate then (.gate.new_count // 0) else (.summary.security_findings // ((.security_findings // []) | length)) end' "$RESULTS_FILE") ;;
   fix)             ISSUES=$(jq -r '(.fixes | length)' "$RESULTS_FILE") ;;
   "")              ISSUES=$(jq -r '((.check.total_issues // 0) + (.dupes.stats.clone_groups // 0) + (.health.summary.functions_above_threshold // 0) + ((.health.runtime_coverage.findings // []) | map(select(.verdict == "safe_to_delete" or .verdict == "review_required" or .verdict == "low_traffic")) | length))' "$RESULTS_FILE") ;;
 esac
@@ -488,11 +602,12 @@ fi
 
 if [ "$ISSUES" -gt 0 ]; then
   case "$INPUT_COMMAND" in
-    dead-code|check) echo "::warning::Fallow found ${ISSUES} unused code issues" ;;
-    dupes)           echo "::warning::Fallow found ${ISSUES} clone groups" ;;
-    health)          echo "::warning::Fallow found ${ISSUES} high complexity functions" ;;
-    audit)           echo "::warning::Fallow audit found ${ISSUES} introduced issues in changed files" ;;
-    fix)             echo "::warning::Fallow proposed ${ISSUES} fixes" ;;
-    "")              echo "::warning::Fallow found ${ISSUES} issues" ;;
+    dead-code|check) echo "::warning::Plow found ${ISSUES} unused code issues" ;;
+    dupes)           echo "::warning::Plow found ${ISSUES} clone groups" ;;
+    health)          echo "::warning::Plow found ${ISSUES} high complexity functions" ;;
+    audit)           echo "::warning::Plow audit found ${ISSUES} introduced issues in changed files" ;;
+    security)        echo "::warning::Plow found ${ISSUES} security candidates" ;;
+    fix)             echo "::warning::Plow proposed ${ISSUES} fixes" ;;
+    "")              echo "::warning::Plow found ${ISSUES} issues" ;;
   esac
 fi

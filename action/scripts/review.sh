@@ -2,17 +2,17 @@
 set -euo pipefail
 
 # Post review comments with rich markdown formatting
-# Required env: GH_TOKEN, PR_NUMBER, GH_REPO, FALLOW_COMMAND, FALLOW_ROOT,
+# Required env: GH_TOKEN, PR_NUMBER, GH_REPO, PLOW_COMMAND, PLOW_ROOT,
 #   MAX_COMMENTS
-# Optional env: CHANGED_SINCE, FALLOW_ANALYSIS_ARGS_FILE, FALLOW_ARTIFACTS_DIR
+# Optional env: CHANGED_SINCE, PLOW_ANALYSIS_ARGS_FILE, PLOW_ARTIFACTS_DIR
 
 : "${GH_TOKEN:?GH_TOKEN is required}"
 : "${PR_NUMBER:?PR_NUMBER is required}"
 : "${GH_REPO:?GH_REPO is required}"
 
 gh_api_retry() {
-  local attempts="${FALLOW_API_RETRIES:-3}"
-  local delay="${FALLOW_API_RETRY_DELAY:-2}"
+  local attempts="${PLOW_API_RETRIES:-3}"
+  local delay="${PLOW_API_RETRY_DELAY:-2}"
   local attempt=1
   local err
   local out
@@ -46,7 +46,7 @@ if ! [[ "$MAX" =~ ^[0-9]+$ ]]; then
 fi
 
 # Reject path traversal in root
-if [[ "${FALLOW_ROOT:-}" =~ \.\. ]]; then
+if [[ "${PLOW_ROOT:-}" =~ \.\. ]]; then
   echo "::error::root input contains path traversal sequence"
   exit 2
 fi
@@ -63,12 +63,12 @@ fi
 
 # Track every mktemp file so an EXIT trap cleans them up on signal or early
 # exit. Avoids leaks when an abort path skips inline `rm -f`.
-_FALLOW_TMPS=()
-trap 'rm -f "${_FALLOW_TMPS[@]:-}"' EXIT
+_PLOW_TMPS=()
+trap 'rm -f "${_PLOW_TMPS[@]:-}"' EXIT
 
 artifact_path() {
   local filename=$1
-  local dir="${FALLOW_ARTIFACTS_DIR:-.}"
+  local dir="${PLOW_ARTIFACTS_DIR:-.}"
   if [ "$dir" = "." ]; then
     printf '%s\n' "$filename"
   else
@@ -77,14 +77,14 @@ artifact_path() {
   fi
 }
 
-render_with_fallow() {
+render_with_plow() {
   local format=$1
   local output=$2
-  local analysis_args_file="${FALLOW_ANALYSIS_ARGS_FILE:-fallow-analysis-args.sh}"
+  local analysis_args_file="${PLOW_ANALYSIS_ARGS_FILE:-plow-analysis-args.sh}"
   [ -f "$analysis_args_file" ] || return 1
   # shellcheck disable=SC1091
   source "$analysis_args_file"
-  local args=("${FALLOW_ANALYSIS_ARGS[@]}")
+  local args=("${PLOW_ANALYSIS_ARGS[@]}")
   local replaced=false
   for i in "${!args[@]}"; do
     if [ "${args[$i]}" = "--format" ] && [ $((i + 1)) -lt "${#args[@]}" ]; then
@@ -96,54 +96,54 @@ render_with_fallow() {
   if [ "$replaced" != "true" ]; then
     args+=(--format "$format")
   fi
-  if [ -z "${FALLOW_DIFF_FILE:-}" ] && [ -n "${GH_REPO:-}" ] && [ -n "${PR_NUMBER:-}" ]; then
-    diff_file=$(artifact_path fallow-pr.diff)
-    diff_stderr_file=$(artifact_path fallow-pr-diff-stderr.log)
+  if [ -z "${PLOW_DIFF_FILE:-}" ] && [ -n "${GH_REPO:-}" ] && [ -n "${PR_NUMBER:-}" ]; then
+    diff_file=$(artifact_path plow-pr.diff)
+    diff_stderr_file=$(artifact_path plow-pr-diff-stderr.log)
     if gh pr diff "$PR_NUMBER" --repo "$GH_REPO" > "$diff_file" 2>"$diff_stderr_file"; then
-      export FALLOW_DIFF_FILE="$PWD/$diff_file"
+      export PLOW_DIFF_FILE="$PWD/$diff_file"
     else
       echo "::warning::Failed to fetch PR diff; diff filter disabled, reporting all findings"
       rm -f "$diff_file"
     fi
   fi
-  export FALLOW_DIFF_FILTER="${FALLOW_DIFF_FILTER:-added}"
-  FALLOW_MAX_COMMENTS="$MAX" fallow "${args[@]}" > "$output" 2> "$(artifact_path fallow-review-stderr.log)" || true
-  # Surface fallow's structured-error envelope before the schema check so the
+  export PLOW_DIFF_FILTER="${PLOW_DIFF_FILTER:-added}"
+  PLOW_MAX_COMMENTS="$MAX" plow "${args[@]}" > "$output" 2> "$(artifact_path plow-review-stderr.log)" || true
+  # Surface plow's structured-error envelope before the schema check so the
   # CLI message lands in the workflow log rather than a generic warning.
   if jq -e '.error == true' "$output" > /dev/null 2>&1; then
-    echo "::warning::fallow render failed: $(jq -r '.message // "unknown error"' "$output")"
+    echo "::warning::plow render failed: $(jq -r '.message // "unknown error"' "$output")"
     return 1
   fi
   # Accept both v1 (historical) and v2 (issue #528) schema markers so a
-  # consumer running an older bundled action against a newer fallow binary
-  # continues to render. Future-tolerant: any `fallow-review-envelope/v<N>`
+  # consumer running an older bundled action against a newer plow binary
+  # continues to render. Future-tolerant: any `plow-review-envelope/v<N>`
   # passes, on the assumption that the back-compat fields (`body`,
   # `comments[].{path,line,side,body}`) remain in every future version.
   jq -e '
-    (.meta.schema | test("^fallow-review-envelope/v[0-9]+$"))
+    (.meta.schema | test("^plow-review-envelope/v[0-9]+$"))
     and .meta.provider == "github"
     and (.body | type == "string")
-    and (.body | contains("<!-- fallow-review -->"))
+    and (.body | contains("<!-- plow-review -->"))
     and (.comments | type == "array")
   ' "$output" > /dev/null 2>&1
 }
 
-REVIEW_FILE=$(artifact_path fallow-review.json)
-RECONCILE_FILE=$(artifact_path fallow-review-reconcile.json)
-RECONCILE_STDERR_FILE=$(artifact_path fallow-review-reconcile-stderr.log)
-NEW_REVIEW_FILE=$(artifact_path fallow-review-new.json)
-PAYLOAD_FILE=$(artifact_path fallow-review-payload.json)
+REVIEW_FILE=$(artifact_path plow-review.json)
+RECONCILE_FILE=$(artifact_path plow-review-reconcile.json)
+RECONCILE_STDERR_FILE=$(artifact_path plow-review-reconcile-stderr.log)
+NEW_REVIEW_FILE=$(artifact_path plow-review-new.json)
+PAYLOAD_FILE=$(artifact_path plow-review-payload.json)
 
-if render_with_fallow review-github "$REVIEW_FILE"; then
+if render_with_plow review-github "$REVIEW_FILE"; then
   reconcile_review() {
-    if fallow ci reconcile-review \
+    if plow ci reconcile-review \
       --provider github \
       --pr "$PR_NUMBER" \
       --repo "$GH_REPO" \
       --envelope "$REVIEW_FILE" > "$RECONCILE_FILE" 2> "$RECONCILE_STDERR_FILE"; then
       if jq -e '(.apply_errors // []) | length > 0' "$RECONCILE_FILE" > /dev/null 2>&1; then
         HINT=$(jq -r '.apply_hint // "refresh provider state and rerun the job"' "$RECONCILE_FILE")
-        echo "::warning::fallow reconcile-review apply incomplete: $HINT"
+        echo "::warning::plow reconcile-review apply incomplete: $HINT"
       fi
     else
       echo "::warning::Failed to reconcile resolved review threads"
@@ -159,16 +159,16 @@ if render_with_fallow review-github "$REVIEW_FILE"; then
     # summary is silently broken from the PR author's view while a duplicate
     # is collapsible. The warning + post_skipped_reason marker still fire.
     _REVIEW_LOOKUP_TMP=$(mktemp); _REVIEW_LOOKUP_ERR=$(mktemp)
-    _FALLOW_TMPS+=("$_REVIEW_LOOKUP_TMP" "$_REVIEW_LOOKUP_ERR")
+    _PLOW_TMPS+=("$_REVIEW_LOOKUP_TMP" "$_REVIEW_LOOKUP_ERR")
     if gh_api_retry --paginate \
          "repos/${GH_REPO}/issues/${PR_NUMBER}/comments?per_page=100" \
-         --jq '.[] | select(.body | contains("<!-- fallow-review -->")) | .id' \
+         --jq '.[] | select(.body | contains("<!-- plow-review -->")) | .id' \
          > "$_REVIEW_LOOKUP_TMP" 2> "$_REVIEW_LOOKUP_ERR"; then
       REVIEW_COMMENT_ID=$(head -1 "$_REVIEW_LOOKUP_TMP")
     else
       REVIEW_COMMENT_ID=""
       _STDERR_HEAD=$(head -3 "$_REVIEW_LOOKUP_ERR" | tr '\n' ' ')
-      echo "::warning::fallow: failed to look up existing summary comment; posting a new one (may duplicate). stderr: ${_STDERR_HEAD} Re-run the job to retry. If persistent, check 'gh auth status' and repo permissions." >&2
+      echo "::warning::plow: failed to look up existing summary comment; posting a new one (may duplicate). stderr: ${_STDERR_HEAD} Re-run the job to retry. If persistent, check 'gh auth status' and repo permissions." >&2
       # Summary-only path: the post proceeds anyway, so do NOT flip
       # post_skipped_reason. Use dedup_lookup_failed so operators can still
       # detect the degraded state without misreading it as a skipped post.
@@ -199,27 +199,27 @@ if render_with_fallow review-github "$REVIEW_FILE"; then
   # error and warrants a loud CI failure; 5xx / 429 / network blips warrant
   # exit 0 since a re-run may succeed.
   _DEDUP_TMP=$(mktemp); _DEDUP_ERR=$(mktemp)
-  _FALLOW_TMPS+=("$_DEDUP_TMP" "$_DEDUP_ERR")
+  _PLOW_TMPS+=("$_DEDUP_TMP" "$_DEDUP_ERR")
   if gh_api_retry --paginate \
        "repos/${GH_REPO}/pulls/${PR_NUMBER}/comments?per_page=100" \
        --jq '.[].body' \
        > "$_DEDUP_TMP" 2> "$_DEDUP_ERR"; then
-    # Extract fingerprints from both v1 (`<!-- fallow-fingerprint: <fp> -->`)
-    # and v2 (`<!-- fallow-fingerprint:v2: <fp> -->`) marker shapes so dedup
+    # Extract fingerprints from both v1 (`<!-- plow-fingerprint: <fp> -->`)
+    # and v2 (`<!-- plow-fingerprint:v2: <fp> -->`) marker shapes so dedup
     # idempotency survives the issue #528 migration. v2 markers use the
     # `:v2:` namespace; the v1 substring would otherwise capture `v2:` as the
     # fingerprint instead of the actual hex string. Two sed expressions, sort
     # -u to dedupe in case a single comment carries both markers (impossible
     # by construction today, defensive).
     EXISTING_FPS=$(sed -n \
-      -e 's/.*fallow-fingerprint:v2: \([^ ]*\) .*/\1/p' \
-      -e 's/.*fallow-fingerprint: \([^ ]*\) .*/\1/p' \
+      -e 's/.*plow-fingerprint:v2: \([^ ]*\) .*/\1/p' \
+      -e 's/.*plow-fingerprint: \([^ ]*\) .*/\1/p' \
       "$_DEDUP_TMP" \
       | sort -u \
       | jq -R -s 'split("\n") | map(select(length > 0))')
   else
     _STDERR_HEAD=$(head -3 "$_DEDUP_ERR" | tr '\n' ' ')
-    echo "::warning::fallow: failed to fetch existing PR review comments; skipping inline review to avoid duplicates. stderr: ${_STDERR_HEAD} Re-run the job to retry. If persistent, check 'gh auth status' and repo permissions." >&2
+    echo "::warning::plow: failed to fetch existing PR review comments; skipping inline review to avoid duplicates. stderr: ${_STDERR_HEAD} Re-run the job to retry. If persistent, check 'gh auth status' and repo permissions." >&2
     if [ -n "${GITHUB_OUTPUT:-}" ]; then
       echo "post_skipped_reason=pagination_failure" >> "$GITHUB_OUTPUT"
       echo "dedup_lookup_failed=true" >> "$GITHUB_OUTPUT"

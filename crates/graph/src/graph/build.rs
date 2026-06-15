@@ -11,6 +11,16 @@ use super::types::ModuleNode;
 use super::types::{ExportSymbol, ReExportEdge};
 use super::{Edge, ImportedSymbol, ModuleGraph};
 
+pub(super) struct PopulateEdgesInput<'a> {
+    pub(super) files: &'a [DiscoveredFile],
+    pub(super) module_by_id: &'a FxHashMap<FileId, &'a ResolvedModule>,
+    pub(super) entry_point_ids: &'a FxHashSet<FileId>,
+    pub(super) runtime_entry_point_ids: &'a FxHashSet<FileId>,
+    pub(super) test_entry_point_ids: &'a FxHashSet<FileId>,
+    pub(super) module_count: usize,
+    pub(super) total_capacity: usize,
+}
+
 /// Mutable accumulator state shared across all files during edge population.
 struct EdgeAccumulator {
     package_usage: FxHashMap<String, Vec<FileId>>,
@@ -92,14 +102,10 @@ fn collect_edges_for_module(
 ) -> Vec<(FileId, Vec<ImportedSymbol>)> {
     let mut edges_by_target: FxHashMap<FileId, Vec<ImportedSymbol>> = FxHashMap::default();
 
-    // Static imports
     for import in &resolved.resolved_imports {
         collect_import_edge(import, file_id, &mut edges_by_target, acc);
     }
 
-    // Re-exports — use SideEffect edges to avoid marking source exports as "used"
-    // just because they're re-exported. Re-export chain propagation handles tracking
-    // which specific names consumers actually import.
     for re_export in &resolved.re_exports {
         if let Some(package_name) = re_export.target.package_usage_name() {
             record_package_usage(acc, package_name, file_id, re_export.info.is_type_only);
@@ -117,16 +123,30 @@ fn collect_edges_for_module(
         }
     }
 
-    // Dynamic imports — Named imports create Named edges, Namespace imports create
-    // Namespace edges with a local_name (enabling member access narrowing),
-    // Side-effect imports create SideEffect edges.
     for import in &resolved.resolved_dynamic_imports {
         collect_import_edge(import, file_id, &mut edges_by_target, acc);
     }
 
-    // Dynamic import patterns (template literals, string concat, import.meta.glob)
+    // Glob-matched dynamic-import patterns (`import(`./${x}`)`, `require(`./${x}`)`)
+    // each resolve to a set of target files, and a single importing file can hold
+    // many such patterns whose match sets overlap heavily (or are identical). Each
+    // match would otherwise push a fresh `Namespace` symbol onto the target's edge,
+    // so a file with P patterns matching F files accumulates F*P symbols, and Phase 2
+    // attaches a `SymbolReference` per symbol: O(patterns * files) memory that drives
+    // the LSP into tens of GB on large React Native / Expo trees (issue #963). The
+    // duplicate symbols carry no information: a `Namespace` symbol with an empty
+    // `local_name` credits the whole target module for reachability, and the first
+    // one already does that (reachability BFS reads only `edge.target`, never the
+    // symbol list; Phase 2 `attach_reference` already dedups by `from_file`). Credit
+    // each distinct target at most once per importing file. The set is per-file
+    // (not global), so two different importers matching the same target still each
+    // create their own edge.
+    let mut credited_pattern_targets: FxHashSet<FileId> = FxHashSet::default();
     for (_pattern, matched_ids) in &resolved.resolved_dynamic_patterns {
         for target_id in matched_ids {
+            if !credited_pattern_targets.insert(*target_id) {
+                continue;
+            }
             record_namespace_import(*target_id, &mut acc.namespace_imported, acc.total_capacity);
             edges_by_target
                 .entry(*target_id)
@@ -140,7 +160,6 @@ fn collect_edges_for_module(
         }
     }
 
-    // Sort by target FileId for deterministic edge order across runs
     let mut sorted: Vec<_> = edges_by_target.into_iter().collect();
     sorted.sort_by_key(|(target_id, _)| target_id.0);
     sorted
@@ -171,22 +190,12 @@ fn build_module_node(
         })
         .unwrap_or_default();
 
-    // Create ExportSymbol entries for re-exports so that consumers
-    // importing from this barrel can have their references attached.
-    // Without this, `export { Foo } from './source'` on a barrel would
-    // not be trackable as an export of the barrel module.
     if let Some(resolved) = module_by_id.get(&file.id) {
         for re in &resolved.re_exports {
-            // Skip star re-exports without an alias (`export * from './x'`)
-            // — they don't create a named export on the barrel.
-            // But `export * as name from './x'` does create one.
             if re.info.exported_name == "*" {
                 continue;
             }
 
-            // Avoid duplicates: if an export with this name already exists
-            // (e.g. the module both declares and re-exports the same name),
-            // skip creating another one.
             let export_name = if re.info.exported_name == "default" {
                 ExportName::Default
             } else {
@@ -202,8 +211,6 @@ fn build_module_node(
                 is_type_only: re.info.is_type_only,
                 is_side_effect_used: false,
                 visibility: VisibilityTag::None,
-                // Use the real span from the visitor when available; falls back
-                // to (0, 0) for re-exports synthesized inside the graph layer.
                 span: re.info.span,
                 references: Vec::new(),
                 members: Vec::new(),
@@ -215,7 +222,6 @@ fn build_module_node(
         .get(&file.id)
         .is_some_and(|m| m.has_cjs_exports);
 
-    // Build re-export edges
     let re_export_edges: Vec<ReExportEdge> = module_by_id
         .get(&file.id)
         .map(|m| {
@@ -249,15 +255,14 @@ impl ModuleGraph {
     ///
     /// Creates `ModuleNode` entries, flat `Edge` storage, reverse dependency
     /// indices, package usage maps, and the namespace-imported bitset.
-    pub(super) fn populate_edges(
-        files: &[DiscoveredFile],
-        module_by_id: &FxHashMap<FileId, &ResolvedModule>,
-        entry_point_ids: &FxHashSet<FileId>,
-        runtime_entry_point_ids: &FxHashSet<FileId>,
-        test_entry_point_ids: &FxHashSet<FileId>,
-        module_count: usize,
-        total_capacity: usize,
-    ) -> Self {
+    pub(super) fn populate_edges(input: &PopulateEdgesInput<'_>) -> Self {
+        let files = input.files;
+        let module_by_id = input.module_by_id;
+        let entry_point_ids = input.entry_point_ids;
+        let runtime_entry_point_ids = input.runtime_entry_point_ids;
+        let test_entry_point_ids = input.test_entry_point_ids;
+        let module_count = input.module_count;
+        let total_capacity = input.total_capacity;
         let mut all_edges = Vec::new();
         let mut modules = Vec::with_capacity(module_count);
         let mut reverse_deps = vec![Vec::new(); total_capacity];
@@ -368,8 +373,6 @@ mod tests {
     use plow_types::discover::{DiscoveredFile, FileId};
     use plow_types::extract::ImportedName;
 
-    // ── export_matches ─────────────────────────────────────────────────
-
     #[test]
     fn export_matches_named_same() {
         assert!(export_matches(
@@ -427,8 +430,6 @@ mod tests {
         ));
     }
 
-    // ── is_css_module_path ──────────────────────────────────────────────
-
     #[test]
     fn css_module_path_css() {
         assert!(is_css_module_path(std::path::Path::new(
@@ -457,7 +458,6 @@ mod tests {
 
     #[test]
     fn css_module_path_less_not_matched() {
-        // .module.less is not supported (only .css and .scss)
         assert!(!is_css_module_path(std::path::Path::new(
             "Button.module.less"
         )));
@@ -477,13 +477,10 @@ mod tests {
 
     #[test]
     fn css_module_path_double_module() {
-        // Edge case: file like "Button.module.module.css"
         assert!(is_css_module_path(std::path::Path::new(
             "Button.module.module.css"
         )));
     }
-
-    // ── record_namespace_import ─────────────────────────────────────────
 
     #[test]
     fn record_namespace_import_within_bounds() {
@@ -496,11 +493,8 @@ mod tests {
     fn record_namespace_import_out_of_bounds() {
         let mut bitset = fixedbitset::FixedBitSet::with_capacity(4);
         record_namespace_import(FileId(10), &mut bitset, 4);
-        // Should silently skip — bitset unchanged
         assert!(!bitset.contains(3));
     }
-
-    // ── record_package_usage ────────────────────────────────────────────
 
     #[test]
     fn record_package_usage_non_type_only() {
@@ -541,8 +535,6 @@ mod tests {
         assert_eq!(acc.package_usage["lodash"], vec![FileId(0), FileId(1)]);
         assert_eq!(acc.type_only_package_usage["lodash"], vec![FileId(1)]);
     }
-
-    // ── collect_import_edge ─────────────────────────────────────────────
 
     fn make_acc(cap: usize) -> EdgeAccumulator {
         EdgeAccumulator {
@@ -633,7 +625,6 @@ mod tests {
             edges[&FileId(1)][0].imported_name,
             ImportedName::SideEffect
         ));
-        // Side-effect should NOT set namespace bitset
         assert!(!acc.namespace_imported.contains(1));
     }
 
@@ -700,8 +691,6 @@ mod tests {
         assert!(edges.is_empty());
     }
 
-    // ── collect_edges_for_module ─────────────────────────────────────────
-
     #[test]
     fn collect_edges_sorted_by_target_id() {
         let resolved = ResolvedModule {
@@ -738,7 +727,6 @@ mod tests {
         let mut acc = make_acc(4);
         let sorted = collect_edges_for_module(&resolved, FileId(0), &mut acc);
 
-        // Should be sorted: FileId(1) before FileId(3)
         assert_eq!(sorted.len(), 2);
         assert_eq!(sorted[0].0, FileId(1));
         assert_eq!(sorted[1].0, FileId(3));
@@ -817,11 +805,87 @@ mod tests {
         assert!(acc.namespace_imported.contains(2));
     }
 
-    // ── build_module_node: star re-export skips creating export symbol ──
+    #[test]
+    fn collect_edges_dynamic_patterns_credit_each_target_once() {
+        // One importing file holding three dynamic-import patterns whose match sets
+        // all overlap on FileId(1). Without per-file dedup, FileId(1) would accrue one
+        // Namespace symbol per matching pattern (the O(patterns * files) blow-up of
+        // issue #963). With dedup it is credited exactly once.
+        let mk = |prefix: &str| plow_types::extract::DynamicImportPattern {
+            prefix: prefix.to_string(),
+            suffix: None,
+            span: oxc_span::Span::new(0, 1),
+        };
+        let resolved = ResolvedModule {
+            file_id: FileId(0),
+            path: std::path::PathBuf::from("/project/loader.ts"),
+            resolved_dynamic_patterns: vec![
+                (mk("./a/"), vec![FileId(1), FileId(2)]),
+                (mk("./b/"), vec![FileId(1)]),
+                (mk("./c/"), vec![FileId(1)]),
+            ],
+            ..Default::default()
+        };
+        let mut acc = make_acc(4);
+        let sorted = collect_edges_for_module(&resolved, FileId(0), &mut acc);
+
+        assert_eq!(sorted.len(), 2, "two distinct targets (FileId 1 and 2)");
+        let target_one = sorted
+            .iter()
+            .find(|(t, _)| *t == FileId(1))
+            .expect("target 1 present");
+        assert_eq!(
+            target_one.1.len(),
+            1,
+            "FileId(1) credited once despite three matching patterns"
+        );
+        assert!(acc.namespace_imported.contains(1));
+        assert!(acc.namespace_imported.contains(2));
+    }
+
+    #[test]
+    fn collect_edges_dynamic_patterns_dedup_is_per_importing_file() {
+        // Two different importing files both pattern-match the same target FileId(2).
+        // The dedup set is per-file (rebuilt per `collect_edges_for_module` call), so
+        // each importer independently creates its own edge to FileId(2). A global
+        // dedup would silently drop the second importer's reachability contribution.
+        let mk = || plow_types::extract::DynamicImportPattern {
+            prefix: "./x/".to_string(),
+            suffix: None,
+            span: oxc_span::Span::new(0, 1),
+        };
+        let importer_a = ResolvedModule {
+            file_id: FileId(0),
+            path: std::path::PathBuf::from("/project/a.ts"),
+            resolved_dynamic_patterns: vec![(mk(), vec![FileId(2)])],
+            ..Default::default()
+        };
+        let importer_b = ResolvedModule {
+            file_id: FileId(1),
+            path: std::path::PathBuf::from("/project/b.ts"),
+            resolved_dynamic_patterns: vec![(mk(), vec![FileId(2)])],
+            ..Default::default()
+        };
+        let mut acc = make_acc(4);
+        let edges_a = collect_edges_for_module(&importer_a, FileId(0), &mut acc);
+        let edges_b = collect_edges_for_module(&importer_b, FileId(1), &mut acc);
+
+        assert_eq!(
+            edges_a.len(),
+            1,
+            "importer A creates its own edge to target 2"
+        );
+        assert_eq!(
+            edges_b.len(),
+            1,
+            "importer B independently creates its own edge to target 2"
+        );
+        assert_eq!(edges_a[0].0, FileId(2));
+        assert_eq!(edges_b[0].0, FileId(2));
+    }
 
     #[test]
     fn star_re_export_does_not_create_named_export_symbol() {
-        // `export * from './source'` should NOT create an ExportSymbol on the barrel
         let files = vec![
             DiscoveredFile {
                 id: FileId(0),
@@ -873,20 +937,14 @@ mod tests {
 
         let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
         let barrel = &graph.modules[0];
-        // Star re-exports should NOT create named ExportSymbol entries
-        // (they are handled by re-export chain propagation instead)
         assert!(
             barrel.exports.is_empty(),
             "star re-export should not create named export symbols on barrel"
         );
     }
 
-    // ── duplicate re-export: skip if export already exists ──────────
-
     #[test]
     fn re_export_skips_duplicate_export_name() {
-        // If a module both declares and re-exports the same name, only one
-        // ExportSymbol should exist.
         let files = vec![DiscoveredFile {
             id: FileId(0),
             path: std::path::PathBuf::from("/project/barrel.ts"),

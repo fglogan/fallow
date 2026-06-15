@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use plow_config::{ConfigOverride, PlowConfig, OutputFormat, PartialRulesConfig, RulesConfig};
+use plow_config::{ConfigOverride, OutputFormat, PartialRulesConfig, PlowConfig, RulesConfig};
 
 pub fn fixture_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -35,6 +35,7 @@ pub fn create_config(root: PathBuf) -> plow_config::ResolvedConfig {
         boundaries: plow_config::BoundaryConfig::default(),
         production: false.into(),
         plugins: vec![],
+        rule_packs: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
@@ -42,6 +43,7 @@ pub fn create_config(root: PathBuf) -> plow_config::ResolvedConfig {
         codeowners: None,
         public_packages: vec![],
         flags: plow_config::FlagsConfig::default(),
+        security: plow_config::SecurityConfig::default(),
         fix: plow_config::FixConfig::default(),
         resolve: plow_config::ResolveConfig::default(),
         sealed: false,
@@ -77,6 +79,7 @@ pub fn create_config_with_cache(
         boundaries: plow_config::BoundaryConfig::default(),
         production: false.into(),
         plugins: vec![],
+        rule_packs: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
@@ -84,6 +87,7 @@ pub fn create_config_with_cache(
         codeowners: None,
         public_packages: vec![],
         flags: plow_config::FlagsConfig::default(),
+        security: plow_config::SecurityConfig::default(),
         fix: plow_config::FixConfig::default(),
         resolve: plow_config::ResolveConfig::default(),
         sealed: false,
@@ -123,6 +127,7 @@ where
         boundaries: plow_config::BoundaryConfig::default(),
         production: false.into(),
         plugins: vec![],
+        rule_packs: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
@@ -130,6 +135,7 @@ where
         codeowners: None,
         public_packages: vec![],
         flags: plow_config::FlagsConfig::default(),
+        security: plow_config::SecurityConfig::default(),
         fix: plow_config::FixConfig::default(),
         resolve: plow_config::ResolveConfig::default(),
         sealed: false,
@@ -172,6 +178,7 @@ pub fn create_config_with_overrides(
         boundaries: plow_config::BoundaryConfig::default(),
         production: false.into(),
         plugins: vec![],
+        rule_packs: vec![],
         dynamically_loaded: vec![],
         overrides,
         regression: None,
@@ -179,6 +186,7 @@ pub fn create_config_with_overrides(
         codeowners: None,
         public_packages: vec![],
         flags: plow_config::FlagsConfig::default(),
+        security: plow_config::SecurityConfig::default(),
         fix: plow_config::FixConfig::default(),
         resolve: plow_config::ResolveConfig::default(),
         sealed: false,
@@ -214,6 +222,7 @@ pub fn create_config_with_ignore_decorators(
         boundaries: plow_config::BoundaryConfig::default(),
         production: false.into(),
         plugins: vec![],
+        rule_packs: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
@@ -221,6 +230,7 @@ pub fn create_config_with_ignore_decorators(
         codeowners: None,
         public_packages: vec![],
         flags: plow_config::FlagsConfig::default(),
+        security: plow_config::SecurityConfig::default(),
         fix: plow_config::FixConfig::default(),
         resolve: plow_config::ResolveConfig::default(),
         sealed: false,

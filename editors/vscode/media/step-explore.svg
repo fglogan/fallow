@@ -3,7 +3,7 @@
   <!-- Sidebar panel -->
   <rect fill="#252526" x="40" y="40" width="280" height="330" rx="8"/>
   <rect x="40" y="40" width="280" height="330" rx="8" stroke="#3c3c3c" stroke-width="1" fill="none"/>
-  <text fill="#3794ff" x="60" y="72" font-size="13" font-weight="600">FALLOW</text>
+  <text fill="#3794ff" x="60" y="72" font-size="13" font-weight="600">PLOW</text>
   <!-- Tree items -->
   <text fill="#f59e0b" x="60" y="106" font-size="14">&#9654;</text>
   <text fill="#d4d4d4" x="82" y="106" font-size="13">Unused Files (2)</text>

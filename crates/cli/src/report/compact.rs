@@ -1,3 +1,4 @@
+use crate::report::sink::outln;
 use std::path::Path;
 
 use plow_core::duplicates::DuplicationReport;
@@ -8,207 +9,463 @@ use super::{normalize_uri, relative_path};
 
 pub(super) fn print_compact(results: &AnalysisResults, root: &Path) {
     for line in build_compact_lines(results, root) {
-        println!("{line}");
+        outln!("{line}");
     }
+}
+
+fn compact_path(path: &Path, root: &Path) -> String {
+    normalize_uri(&relative_path(path, root).display().to_string())
+}
+
+fn compact_circular_dependency_line(
+    cycle: &plow_core::results::CircularDependencyFinding,
+    root: &Path,
+) -> String {
+    let chain: Vec<String> = cycle
+        .cycle
+        .files
+        .iter()
+        .map(|path| compact_path(path, root))
+        .collect();
+    let mut display_chain = chain.clone();
+    if let Some(first) = chain.first() {
+        display_chain.push(first.clone());
+    }
+    let first_file = chain.first().map_or_else(String::new, Clone::clone);
+    let cross_pkg_tag = if cycle.cycle.is_cross_package {
+        " (cross-package)"
+    } else {
+        ""
+    };
+    format!(
+        "circular-dependency:{}:{}:{}{}",
+        first_file,
+        cycle.cycle.line,
+        display_chain.join(" \u{2192} "),
+        cross_pkg_tag
+    )
+}
+
+fn compact_re_export_cycle_line(
+    cycle: &plow_core::results::ReExportCycleFinding,
+    root: &Path,
+) -> String {
+    let chain: Vec<String> = cycle
+        .cycle
+        .files
+        .iter()
+        .map(|path| compact_path(path, root))
+        .collect();
+    let first_file = chain.first().map_or_else(String::new, Clone::clone);
+    let kind_tag = match cycle.cycle.kind {
+        plow_core::results::ReExportCycleKind::SelfLoop => " (self-loop)",
+        plow_core::results::ReExportCycleKind::MultiNode => "",
+    };
+    format!(
+        "re-export-cycle:{}:{}{}",
+        first_file,
+        chain.join(" <-> "),
+        kind_tag
+    )
+}
+
+fn compact_boundary_violation_line(
+    item: &plow_core::results::BoundaryViolationFinding,
+    root: &Path,
+) -> String {
+    format!(
+        "boundary-violation:{}:{}:{} -> {} ({} -> {})",
+        compact_path(&item.violation.from_path, root),
+        item.violation.line,
+        compact_path(&item.violation.from_path, root),
+        compact_path(&item.violation.to_path, root),
+        item.violation.from_zone,
+        item.violation.to_zone,
+    )
+}
+
+fn compact_boundary_coverage_line(
+    item: &plow_core::results::BoundaryCoverageViolationFinding,
+    root: &Path,
+) -> String {
+    format!(
+        "boundary-coverage:{}:{}:no matching boundary zone",
+        compact_path(&item.violation.path, root),
+        item.violation.line,
+    )
+}
+
+fn compact_boundary_call_line(
+    item: &plow_core::results::BoundaryCallViolationFinding,
+    root: &Path,
+) -> String {
+    format!(
+        "boundary-call:{}:{}:{} forbidden in zone {} (pattern {})",
+        compact_path(&item.violation.path, root),
+        item.violation.line,
+        item.violation.callee,
+        item.violation.zone,
+        item.violation.pattern,
+    )
+}
+
+fn compact_stale_suppression_line(
+    item: &plow_core::results::StaleSuppression,
+    root: &Path,
+) -> String {
+    format!(
+        "stale-suppression:{}:{}:{}",
+        compact_path(&item.path, root),
+        item.line,
+        item.display_message(),
+    )
+}
+
+fn compact_catalog_reference_line(
+    item: &plow_core::results::UnresolvedCatalogReferenceFinding,
+    root: &Path,
+) -> String {
+    format!(
+        "unresolved-catalog-reference:{}:{}:{}:{}",
+        compact_path(&item.reference.path, root),
+        item.reference.line,
+        item.reference.catalog_name,
+        item.reference.entry_name,
+    )
+}
+
+fn compact_unused_override_line(
+    item: &plow_core::results::UnusedDependencyOverrideFinding,
+    root: &Path,
+) -> String {
+    format!(
+        "unused-dependency-override:{}:{}:{}:{}",
+        compact_path(&item.entry.path, root),
+        item.entry.line,
+        item.entry.source.as_label(),
+        item.entry.raw_key,
+    )
+}
+
+fn compact_misconfigured_override_line(
+    item: &plow_core::results::MisconfiguredDependencyOverrideFinding,
+    root: &Path,
+) -> String {
+    format!(
+        "misconfigured-dependency-override:{}:{}:{}:{}",
+        compact_path(&item.entry.path, root),
+        item.entry.line,
+        item.entry.source.as_label(),
+        item.entry.raw_key,
+    )
 }
 
 /// Build compact output lines for analysis results.
 /// Each issue is represented as a single `prefix:details` line.
-#[expect(
-    clippy::too_many_lines,
-    reason = "One uniform loop per issue type; the line count grows linearly with new issue types and the structure is clearer than extracting per-loop helpers."
-)]
 pub fn build_compact_lines(results: &AnalysisResults, root: &Path) -> Vec<String> {
-    let rel = |p: &Path| normalize_uri(&relative_path(p, root).display().to_string());
+    CompactLineBuilder::new(results, root).build()
+}
 
-    let compact_export = |export: &UnusedExport, kind: &str, re_kind: &str| -> String {
-        let tag = if export.is_re_export { re_kind } else { kind };
+struct CompactLineBuilder<'a> {
+    lines: Vec<String>,
+    results: &'a AnalysisResults,
+    root: &'a Path,
+}
+
+impl<'a> CompactLineBuilder<'a> {
+    fn new(results: &'a AnalysisResults, root: &'a Path) -> Self {
+        Self {
+            lines: Vec::new(),
+            results,
+            root,
+        }
+    }
+
+    fn build(mut self) -> Vec<String> {
+        self.push_core_lines();
+        self.push_unused_dependency_lines();
+        self.push_member_lines();
+        self.push_secondary_dependency_lines();
+        self.push_graph_lines();
+        self.push_workspace_lines();
+        self.lines
+    }
+
+    fn rel(&self, path: &Path) -> String {
+        compact_path(path, self.root)
+    }
+
+    fn unused_export_line(&self, export: &UnusedExport) -> String {
+        let tag = if export.is_re_export {
+            "unused-re-export"
+        } else {
+            "unused-export"
+        };
         format!(
             "{}:{}:{}:{}",
             tag,
-            rel(&export.path),
+            self.rel(&export.path),
             export.line,
             export.export_name
         )
-    };
+    }
 
-    let compact_member = |member: &UnusedMember, kind: &str| -> String {
+    fn unused_type_line(&self, export: &UnusedExport) -> String {
+        let tag = if export.is_re_export {
+            "unused-re-export-type"
+        } else {
+            "unused-type"
+        };
+        format!(
+            "{}:{}:{}:{}",
+            tag,
+            self.rel(&export.path),
+            export.line,
+            export.export_name
+        )
+    }
+
+    fn compact_member(&self, member: &UnusedMember, kind: &str) -> String {
         format!(
             "{}:{}:{}:{}.{}",
             kind,
-            rel(&member.path),
+            self.rel(&member.path),
             member.line,
             member.parent_name,
             member.member_name
         )
-    };
+    }
 
-    let mut lines = Vec::new();
-
-    for file in &results.unused_files {
-        lines.push(format!("unused-file:{}", rel(&file.file.path)));
-    }
-    for export in &results.unused_exports {
-        lines.push(compact_export(
-            &export.export,
-            "unused-export",
-            "unused-re-export",
-        ));
-    }
-    for export in &results.unused_types {
-        lines.push(compact_export(
-            &export.export,
-            "unused-type",
-            "unused-re-export-type",
-        ));
-    }
-    for leak in &results.private_type_leaks {
-        lines.push(format!(
-            "private-type-leak:{}:{}:{}->{}",
-            rel(&leak.leak.path),
-            leak.leak.line,
-            leak.leak.export_name,
-            leak.leak.type_name
-        ));
-    }
-    for dep in &results.unused_dependencies {
-        lines.push(format!("unused-dep:{}", dep.dep.package_name));
-    }
-    for dep in &results.unused_dev_dependencies {
-        lines.push(format!("unused-devdep:{}", dep.dep.package_name));
-    }
-    for dep in &results.unused_optional_dependencies {
-        lines.push(format!("unused-optionaldep:{}", dep.dep.package_name));
-    }
-    for member in &results.unused_enum_members {
-        lines.push(compact_member(&member.member, "unused-enum-member"));
-    }
-    for member in &results.unused_class_members {
-        lines.push(compact_member(&member.member, "unused-class-member"));
-    }
-    for import in &results.unresolved_imports {
-        lines.push(format!(
-            "unresolved-import:{}:{}:{}",
-            rel(&import.import.path),
-            import.import.line,
-            import.import.specifier
-        ));
-    }
-    for dep in &results.unlisted_dependencies {
-        lines.push(format!("unlisted-dep:{}", dep.dep.package_name));
-    }
-    for dup in &results.duplicate_exports {
-        lines.push(format!("duplicate-export:{}", dup.export.export_name));
-    }
-    for dep in &results.type_only_dependencies {
-        lines.push(format!("type-only-dep:{}", dep.dep.package_name));
-    }
-    for dep in &results.test_only_dependencies {
-        lines.push(format!("test-only-dep:{}", dep.dep.package_name));
-    }
-    for cycle in &results.circular_dependencies {
-        let chain: Vec<String> = cycle.cycle.files.iter().map(|p| rel(p)).collect();
-        let mut display_chain = chain.clone();
-        if let Some(first) = chain.first() {
-            display_chain.push(first.clone());
+    fn push_core_lines(&mut self) {
+        for file in &self.results.unused_files {
+            self.lines
+                .push(format!("unused-file:{}", self.rel(&file.file.path)));
         }
-        let first_file = chain.first().map_or_else(String::new, Clone::clone);
-        let cross_pkg_tag = if cycle.cycle.is_cross_package {
-            " (cross-package)"
-        } else {
-            ""
-        };
-        lines.push(format!(
-            "circular-dependency:{}:{}:{}{}",
-            first_file,
-            cycle.cycle.line,
-            display_chain.join(" \u{2192} "),
-            cross_pkg_tag
-        ));
-    }
-    for cycle in &results.re_export_cycles {
-        let chain: Vec<String> = cycle.cycle.files.iter().map(|p| rel(p)).collect();
-        let first_file = chain.first().map_or_else(String::new, Clone::clone);
-        let kind_tag = match cycle.cycle.kind {
-            plow_core::results::ReExportCycleKind::SelfLoop => " (self-loop)",
-            plow_core::results::ReExportCycleKind::MultiNode => "",
-        };
-        // Re-export cycles are file-scoped; no useful line/col anchor (the
-        // diagnostic spans the whole file). Match `unlisted-dep:` /
-        // `duplicate-export:` shape (no line/col) rather than inventing a
-        // misleading `:1:0:` placeholder (cli-output-reviewer panel catch).
-        lines.push(format!(
-            "re-export-cycle:{}:{}{}",
-            first_file,
-            chain.join(" <-> "),
-            kind_tag
-        ));
-    }
-    for v in &results.boundary_violations {
-        lines.push(format!(
-            "boundary-violation:{}:{}:{} -> {} ({} -> {})",
-            rel(&v.violation.from_path),
-            v.violation.line,
-            rel(&v.violation.from_path),
-            rel(&v.violation.to_path),
-            v.violation.from_zone,
-            v.violation.to_zone,
-        ));
-    }
-    for s in &results.stale_suppressions {
-        lines.push(format!(
-            "stale-suppression:{}:{}:{}",
-            rel(&s.path),
-            s.line,
-            s.display_message(),
-        ));
-    }
-    for entry in &results.unused_catalog_entries {
-        lines.push(format!(
-            "unused-catalog-entry:{}:{}:{}:{}",
-            rel(&entry.entry.path),
-            entry.entry.line,
-            entry.entry.catalog_name,
-            entry.entry.entry_name,
-        ));
-    }
-    for group in &results.empty_catalog_groups {
-        lines.push(format!(
-            "empty-catalog-group:{}:{}:{}",
-            rel(&group.group.path),
-            group.group.line,
-            group.group.catalog_name,
-        ));
-    }
-    for finding in &results.unresolved_catalog_references {
-        lines.push(format!(
-            "unresolved-catalog-reference:{}:{}:{}:{}",
-            rel(&finding.reference.path),
-            finding.reference.line,
-            finding.reference.catalog_name,
-            finding.reference.entry_name,
-        ));
-    }
-    for finding in &results.unused_dependency_overrides {
-        lines.push(format!(
-            "unused-dependency-override:{}:{}:{}:{}",
-            rel(&finding.entry.path),
-            finding.entry.line,
-            finding.entry.source.as_label(),
-            finding.entry.raw_key,
-        ));
-    }
-    for finding in &results.misconfigured_dependency_overrides {
-        lines.push(format!(
-            "misconfigured-dependency-override:{}:{}:{}:{}",
-            rel(&finding.entry.path),
-            finding.entry.line,
-            finding.entry.source.as_label(),
-            finding.entry.raw_key,
-        ));
+        for export in &self.results.unused_exports {
+            self.lines.push(self.unused_export_line(&export.export));
+        }
+        for export in &self.results.unused_types {
+            self.lines.push(self.unused_type_line(&export.export));
+        }
+        for leak in &self.results.private_type_leaks {
+            self.lines.push(format!(
+                "private-type-leak:{}:{}:{}->{}",
+                self.rel(&leak.leak.path),
+                leak.leak.line,
+                leak.leak.export_name,
+                leak.leak.type_name
+            ));
+        }
     }
 
-    lines
+    fn push_unused_dependency_lines(&mut self) {
+        for dep in &self.results.unused_dependencies {
+            self.lines
+                .push(format!("unused-dep:{}", dep.dep.package_name));
+        }
+        for dep in &self.results.unused_dev_dependencies {
+            self.lines
+                .push(format!("unused-devdep:{}", dep.dep.package_name));
+        }
+        for dep in &self.results.unused_optional_dependencies {
+            self.lines
+                .push(format!("unused-optionaldep:{}", dep.dep.package_name));
+        }
+    }
+
+    fn push_member_lines(&mut self) {
+        for member in &self.results.unused_enum_members {
+            self.lines
+                .push(self.compact_member(&member.member, "unused-enum-member"));
+        }
+        for member in &self.results.unused_class_members {
+            self.lines
+                .push(self.compact_member(&member.member, "unused-class-member"));
+        }
+        for member in &self.results.unused_store_members {
+            self.lines
+                .push(self.compact_member(&member.member, "unused-store-member"));
+        }
+        for import in &self.results.unresolved_imports {
+            self.lines.push(format!(
+                "unresolved-import:{}:{}:{}",
+                self.rel(&import.import.path),
+                import.import.line,
+                import.import.specifier
+            ));
+        }
+    }
+
+    fn push_secondary_dependency_lines(&mut self) {
+        for dep in &self.results.unlisted_dependencies {
+            self.lines
+                .push(format!("unlisted-dep:{}", dep.dep.package_name));
+        }
+        for dup in &self.results.duplicate_exports {
+            self.lines
+                .push(format!("duplicate-export:{}", dup.export.export_name));
+        }
+        for dep in &self.results.type_only_dependencies {
+            self.lines
+                .push(format!("type-only-dep:{}", dep.dep.package_name));
+        }
+        for dep in &self.results.test_only_dependencies {
+            self.lines
+                .push(format!("test-only-dep:{}", dep.dep.package_name));
+        }
+    }
+
+    fn push_graph_lines(&mut self) {
+        for cycle in &self.results.circular_dependencies {
+            self.lines
+                .push(compact_circular_dependency_line(cycle, self.root));
+        }
+        for cycle in &self.results.re_export_cycles {
+            self.lines
+                .push(compact_re_export_cycle_line(cycle, self.root));
+        }
+        for violation in &self.results.boundary_violations {
+            self.lines
+                .push(compact_boundary_violation_line(violation, self.root));
+        }
+        for violation in &self.results.boundary_coverage_violations {
+            self.lines
+                .push(compact_boundary_coverage_line(violation, self.root));
+        }
+        for violation in &self.results.boundary_call_violations {
+            self.lines
+                .push(compact_boundary_call_line(violation, self.root));
+        }
+        for violation in &self.results.policy_violations {
+            self.lines.push(format!(
+                "policy-violation:{}:{}:{} banned by {}/{}",
+                self.rel(&violation.violation.path),
+                violation.violation.line,
+                violation.violation.matched,
+                violation.violation.pack,
+                violation.violation.rule_id,
+            ));
+        }
+        for finding in &self.results.invalid_client_exports {
+            self.lines.push(format!(
+                "invalid-client-export:{}:{}:{} (from \"{}\")",
+                self.rel(&finding.export.path),
+                finding.export.line,
+                finding.export.export_name,
+                finding.export.directive,
+            ));
+        }
+        for finding in &self.results.mixed_client_server_barrels {
+            self.lines.push(format!(
+                "mixed-client-server-barrel:{}:{}:{} (server-only \"{}\")",
+                self.rel(&finding.barrel.path),
+                finding.barrel.line,
+                finding.barrel.client_origin,
+                finding.barrel.server_origin,
+            ));
+        }
+        for finding in &self.results.misplaced_directives {
+            self.lines.push(format!(
+                "misplaced-directive:{}:{}:{}",
+                self.rel(&finding.directive_site.path),
+                finding.directive_site.line,
+                finding.directive_site.directive,
+            ));
+        }
+        for finding in &self.results.unprovided_injects {
+            self.lines.push(format!(
+                "unprovided-inject:{}:{}:{}",
+                self.rel(&finding.inject.path),
+                finding.inject.line,
+                finding.inject.key_name,
+            ));
+        }
+        for finding in &self.results.unrendered_components {
+            self.lines.push(format!(
+                "unrendered-component:{}:{}:{}",
+                self.rel(&finding.component.path),
+                finding.component.line,
+                finding.component.component_name,
+            ));
+        }
+        for finding in &self.results.unused_component_props {
+            self.lines.push(format!(
+                "unused-component-prop:{}:{}:{}",
+                self.rel(&finding.prop.path),
+                finding.prop.line,
+                finding.prop.prop_name,
+            ));
+        }
+        for finding in &self.results.unused_component_emits {
+            self.lines.push(format!(
+                "unused-component-emit:{}:{}:{}",
+                self.rel(&finding.emit.path),
+                finding.emit.line,
+                finding.emit.emit_name,
+            ));
+        }
+        for finding in &self.results.unused_server_actions {
+            self.lines.push(format!(
+                "unused-server-action:{}:{}:{}",
+                self.rel(&finding.action.path),
+                finding.action.line,
+                finding.action.action_name,
+            ));
+        }
+        for finding in &self.results.route_collisions {
+            self.lines.push(format!(
+                "route-collision:{}:{} (url {})",
+                self.rel(&finding.collision.path),
+                finding.collision.line,
+                finding.collision.url,
+            ));
+        }
+        for finding in &self.results.dynamic_segment_name_conflicts {
+            self.lines.push(format!(
+                "dynamic-segment-name-conflict:{}:{} ({} at {})",
+                self.rel(&finding.conflict.path),
+                finding.conflict.line,
+                finding.conflict.conflicting_segments.join(" vs "),
+                finding.conflict.position,
+            ));
+        }
+        for suppression in &self.results.stale_suppressions {
+            self.lines
+                .push(compact_stale_suppression_line(suppression, self.root));
+        }
+    }
+
+    fn push_workspace_lines(&mut self) {
+        for entry in &self.results.unused_catalog_entries {
+            self.lines.push(format!(
+                "unused-catalog-entry:{}:{}:{}:{}",
+                self.rel(&entry.entry.path),
+                entry.entry.line,
+                entry.entry.catalog_name,
+                entry.entry.entry_name,
+            ));
+        }
+        for group in &self.results.empty_catalog_groups {
+            self.lines.push(format!(
+                "empty-catalog-group:{}:{}:{}",
+                self.rel(&group.group.path),
+                group.group.line,
+                group.group.catalog_name,
+            ));
+        }
+        for finding in &self.results.unresolved_catalog_references {
+            self.lines
+                .push(compact_catalog_reference_line(finding, self.root));
+        }
+        for finding in &self.results.unused_dependency_overrides {
+            self.lines
+                .push(compact_unused_override_line(finding, self.root));
+        }
+        for finding in &self.results.misconfigured_dependency_overrides {
+            self.lines
+                .push(compact_misconfigured_override_line(finding, self.root));
+        }
+    }
 }
 
 /// Print grouped compact output: each line is prefixed with the group key.
@@ -217,19 +474,70 @@ pub fn build_compact_lines(results: &AnalysisResults, root: &Path) -> Vec<String
 pub(super) fn print_grouped_compact(groups: &[ResultGroup], root: &Path) {
     for group in groups {
         for line in build_compact_lines(&group.results, root) {
-            println!("{}\t{line}", group.key);
+            outln!("{}\t{line}", group.key);
         }
     }
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "health compact formatter stitches many optional sections into one stream"
-)]
 pub(super) fn print_health_compact(report: &crate::health_types::HealthReport, root: &Path) {
-    if let Some(ref hs) = report.health_score {
-        println!("health-score:{:.1}:{}", hs.score, hs.grade);
+    print_health_score_compact(report);
+    print_vital_signs_compact(report);
+    print_health_findings_compact(&report.findings, root);
+    print_threshold_overrides_compact(&report.threshold_overrides, root);
+    print_file_scores_compact(&report.file_scores, root);
+    print_coverage_gaps_compact(report, root);
+    print_runtime_sections_compact(report, root);
+    print_hotspots_compact(&report.hotspots, root);
+    print_health_trend_compact(report);
+    print_refactoring_targets_compact(&report.targets, root);
+}
+
+fn print_threshold_overrides_compact(
+    entries: &[crate::health_types::ThresholdOverrideState],
+    root: &Path,
+) {
+    for entry in entries {
+        let status = match entry.status {
+            crate::health_types::ThresholdOverrideStatus::Active => "active",
+            crate::health_types::ThresholdOverrideStatus::Stale => "stale",
+            crate::health_types::ThresholdOverrideStatus::NoMatch => "no_match",
+        };
+        let target = entry.path.as_ref().map_or_else(
+            || "no-match".to_string(),
+            |path| {
+                let display = health_compact_path(path, root);
+                entry
+                    .function
+                    .as_ref()
+                    .map_or_else(|| display.clone(), |name| format!("{display}:{name}"))
+            },
+        );
+        let metrics = entry.metrics.map_or(String::new(), |metrics| {
+            let crap = metrics
+                .crap
+                .map_or(String::new(), |value| format!(",crap={value:.1}"));
+            format!(
+                ",cyclomatic={},cognitive={}{}",
+                metrics.cyclomatic, metrics.cognitive, crap
+            )
+        });
+        outln!(
+            "threshold-override:{}:{}:{}{}",
+            entry.override_index,
+            status,
+            target,
+            metrics
+        );
     }
+}
+
+fn print_health_score_compact(report: &crate::health_types::HealthReport) {
+    if let Some(ref hs) = report.health_score {
+        outln!("health-score:{:.1}:{}", hs.score, hs.grade);
+    }
+}
+
+fn print_vital_signs_compact(report: &crate::health_types::HealthReport) {
     if let Some(ref vs) = report.vital_signs {
         let mut parts = Vec::new();
         if vs.total_loc > 0 {
@@ -255,10 +563,17 @@ pub(super) fn print_health_compact(report: &crate::health_types::HealthReport, r
         if let Some(v) = vs.unused_dep_count {
             parts.push(format!("unused_dep_count={v}"));
         }
-        println!("vital-signs:{}", parts.join(","));
+        outln!("vital-signs:{}", parts.join(","));
     }
-    for finding in &report.findings {
-        let relative = normalize_uri(&relative_path(&finding.path, root).display().to_string());
+}
+
+fn health_compact_path(path: &Path, root: &Path) -> String {
+    normalize_uri(&relative_path(path, root).display().to_string())
+}
+
+fn print_health_findings_compact(findings: &[crate::health_types::HealthFinding], root: &Path) {
+    for finding in findings {
+        let relative = health_compact_path(&finding.path, root);
         let severity = match finding.severity {
             crate::health_types::FindingSeverity::Critical => "critical",
             crate::health_types::FindingSeverity::High => "high",
@@ -274,7 +589,7 @@ pub(super) fn print_health_compact(report: &crate::health_types::HealthReport, r
             }
             None => String::new(),
         };
-        println!(
+        outln!(
             "high-complexity:{}:{}:{}:cyclomatic={},cognitive={},severity={}{}",
             relative,
             finding.line,
@@ -285,9 +600,12 @@ pub(super) fn print_health_compact(report: &crate::health_types::HealthReport, r
             crap_suffix,
         );
     }
-    for score in &report.file_scores {
-        let relative = normalize_uri(&relative_path(&score.path, root).display().to_string());
-        println!(
+}
+
+fn print_file_scores_compact(scores: &[crate::health_types::FileHealthScore], root: &Path) {
+    for score in scores {
+        let relative = health_compact_path(&score.path, root);
+        outln!(
             "file-score:{}:mi={:.1},fan_in={},fan_out={},dead={:.2},density={:.2},crap_max={:.1},crap_above={}",
             relative,
             score.maintainability_index,
@@ -299,8 +617,11 @@ pub(super) fn print_health_compact(report: &crate::health_types::HealthReport, r
             score.crap_above_threshold,
         );
     }
+}
+
+fn print_coverage_gaps_compact(report: &crate::health_types::HealthReport, root: &Path) {
     if let Some(ref gaps) = report.coverage_gaps {
-        println!(
+        outln!(
             "coverage-gap-summary:runtime_files={},covered_files={},file_coverage_pct={:.1},untested_files={},untested_exports={}",
             gaps.summary.runtime_files,
             gaps.summary.covered_files,
@@ -309,59 +630,71 @@ pub(super) fn print_health_compact(report: &crate::health_types::HealthReport, r
             gaps.summary.untested_exports,
         );
         for item in &gaps.files {
-            let relative =
-                normalize_uri(&relative_path(&item.file.path, root).display().to_string());
-            println!(
+            let relative = health_compact_path(&item.file.path, root);
+            outln!(
                 "untested-file:{}:value_exports={}",
-                relative, item.file.value_export_count,
+                relative,
+                item.file.value_export_count,
             );
         }
         for item in &gaps.exports {
-            let relative =
-                normalize_uri(&relative_path(&item.export.path, root).display().to_string());
-            println!(
+            let relative = health_compact_path(&item.export.path, root);
+            outln!(
                 "untested-export:{}:{}:{}",
-                relative, item.export.line, item.export.export_name,
+                relative,
+                item.export.line,
+                item.export.export_name,
             );
         }
     }
+}
+
+fn print_runtime_sections_compact(report: &crate::health_types::HealthReport, root: &Path) {
     if let Some(ref production) = report.runtime_coverage {
         for line in build_runtime_coverage_compact_lines(production, root) {
-            println!("{line}");
+            outln!("{line}");
         }
     }
-    for entry in &report.hotspots {
-        let relative = normalize_uri(&relative_path(&entry.path, root).display().to_string());
-        let ownership_suffix = entry
-            .ownership
-            .as_ref()
-            .map(|o| {
-                let mut parts = vec![
-                    format!("bus={}", o.bus_factor),
-                    format!("contributors={}", o.contributor_count),
-                    format!("top={}", o.top_contributor.identifier),
-                    format!("top_share={:.3}", o.top_contributor.share),
-                ];
-                if let Some(owner) = &o.declared_owner {
-                    parts.push(format!("owner={owner}"));
-                }
-                if let Some(unowned) = o.unowned {
-                    parts.push(format!("unowned={unowned}"));
-                }
-                let state = match o.ownership_state {
-                    crate::health_types::OwnershipState::Active => "active",
-                    crate::health_types::OwnershipState::Unowned => "unowned",
-                    crate::health_types::OwnershipState::DeclaredInactive => "declared_inactive",
-                    crate::health_types::OwnershipState::Drifting => "drifting",
-                };
-                parts.push(format!("ownership_state={state}"));
-                if o.drift {
-                    parts.push("drift=true".to_string());
-                }
-                format!(",{}", parts.join(","))
-            })
-            .unwrap_or_default();
-        println!(
+    if let Some(ref intelligence) = report.coverage_intelligence {
+        for line in build_coverage_intelligence_compact_lines(intelligence, root) {
+            outln!("{line}");
+        }
+    }
+}
+
+fn compact_ownership_suffix(ownership: Option<&crate::health_types::OwnershipMetrics>) -> String {
+    ownership.map_or_else(String::new, |o| {
+        let mut parts = vec![
+            format!("bus={}", o.bus_factor),
+            format!("contributors={}", o.contributor_count),
+            format!("top={}", o.top_contributor.identifier),
+            format!("top_share={:.3}", o.top_contributor.share),
+        ];
+        if let Some(owner) = &o.declared_owner {
+            parts.push(format!("owner={owner}"));
+        }
+        if let Some(unowned) = o.unowned {
+            parts.push(format!("unowned={unowned}"));
+        }
+        let state = match o.ownership_state {
+            crate::health_types::OwnershipState::Active => "active",
+            crate::health_types::OwnershipState::Unowned => "unowned",
+            crate::health_types::OwnershipState::DeclaredInactive => "declared_inactive",
+            crate::health_types::OwnershipState::Drifting => "drifting",
+        };
+        parts.push(format!("ownership_state={state}"));
+        if o.drift {
+            parts.push("drift=true".to_string());
+        }
+        format!(",{}", parts.join(","))
+    })
+}
+
+fn print_hotspots_compact(hotspots: &[crate::health_types::HotspotFinding], root: &Path) {
+    for entry in hotspots {
+        let relative = health_compact_path(&entry.path, root);
+        let ownership_suffix = compact_ownership_suffix(entry.ownership.as_ref());
+        outln!(
             "hotspot:{}:score={:.1},commits={},churn={},density={:.2},fan_in={},trend={}{}",
             relative,
             entry.score,
@@ -373,13 +706,16 @@ pub(super) fn print_health_compact(report: &crate::health_types::HealthReport, r
             ownership_suffix,
         );
     }
+}
+
+fn print_health_trend_compact(report: &crate::health_types::HealthReport) {
     if let Some(ref trend) = report.health_trend {
-        println!(
+        outln!(
             "trend:overall:direction={}",
             trend.overall_direction.label()
         );
         for m in &trend.metrics {
-            println!(
+            outln!(
                 "trend:{}:previous={:.1},current={:.1},delta={:+.1},direction={}",
                 m.name,
                 m.previous,
@@ -389,12 +725,18 @@ pub(super) fn print_health_compact(report: &crate::health_types::HealthReport, r
             );
         }
     }
-    for target in &report.targets {
-        let relative = normalize_uri(&relative_path(&target.path, root).display().to_string());
+}
+
+fn print_refactoring_targets_compact(
+    targets: &[crate::health_types::RefactoringTargetFinding],
+    root: &Path,
+) {
+    for target in targets {
+        let relative = health_compact_path(&target.path, root);
         let category = target.category.compact_label();
         let effort = target.effort.label();
         let confidence = target.confidence.label();
-        println!(
+        outln!(
             "refactoring-target:{}:priority={:.1},efficiency={:.1},category={},effort={},confidence={}:{}",
             relative,
             target.priority,
@@ -448,12 +790,50 @@ fn build_runtime_coverage_compact_lines(
     lines
 }
 
+fn build_coverage_intelligence_compact_lines(
+    intelligence: &crate::health_types::CoverageIntelligenceReport,
+    root: &Path,
+) -> Vec<String> {
+    let mut lines = vec![format!(
+        "coverage-intelligence-summary:verdict={},findings={},risky_changes={},high_confidence_deletes={},review_required={},refactor_carefully={},skipped_ambiguous_matches={}",
+        intelligence.verdict,
+        intelligence.summary.findings,
+        intelligence.summary.risky_changes,
+        intelligence.summary.high_confidence_deletes,
+        intelligence.summary.review_required,
+        intelligence.summary.refactor_carefully,
+        intelligence.summary.skipped_ambiguous_matches,
+    )];
+    for finding in &intelligence.findings {
+        let relative = normalize_uri(&relative_path(&finding.path, root).display().to_string());
+        let identity = finding.identity.as_deref().unwrap_or("-");
+        let signals = finding
+            .signals
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("+");
+        lines.push(format!(
+            "coverage-intelligence:{}:{}:{}:id={},verdict={},recommendation={},confidence={},signals={}",
+            relative,
+            finding.line,
+            identity,
+            finding.id,
+            finding.verdict,
+            finding.recommendation,
+            finding.confidence,
+            signals,
+        ));
+    }
+    lines
+}
+
 pub(super) fn print_duplication_compact(report: &DuplicationReport, root: &Path) {
     for (i, group) in report.clone_groups.iter().enumerate() {
         for instance in &group.instances {
             let relative =
                 normalize_uri(&relative_path(&instance.file, root).display().to_string());
-            println!(
+            outln!(
                 "clone-group-{}:{}:{}-{}:{}tokens",
                 i + 1,
                 relative,
@@ -544,7 +924,7 @@ mod tests {
                     capture_quality: None,
                 },
                 findings: vec![RuntimeCoverageFinding {
-                    id: "fallow:prod:deadbeef".to_owned(),
+                    id: "plow:prod:deadbeef".to_owned(),
                     stable_id: None,
                     path: root.join("src/cold.ts"),
                     function: "coldPath".to_owned(),
@@ -564,7 +944,7 @@ mod tests {
                     source_hash: None,
                 }],
                 hot_paths: vec![RuntimeCoverageHotPath {
-                    id: "fallow:hot:cafebabe".to_owned(),
+                    id: "plow:hot:cafebabe".to_owned(),
                     stable_id: None,
                     path: root.join("src/hot.ts"),
                     function: "hotPath".to_owned(),
@@ -595,11 +975,66 @@ mod tests {
         );
         assert_eq!(
             lines[1],
-            "runtime-coverage:src/cold.ts:14:coldPath:id=fallow:prod:deadbeef,verdict=review_required,invocations=0,confidence=medium"
+            "runtime-coverage:src/cold.ts:14:coldPath:id=plow:prod:deadbeef,verdict=review_required,invocations=0,confidence=medium"
         );
         assert_eq!(
             lines[2],
-            "production-hot-path:src/hot.ts:3:hotPath:id=fallow:hot:cafebabe,invocations=250,percentile=99"
+            "production-hot-path:src/hot.ts:3:hotPath:id=plow:hot:cafebabe,invocations=250,percentile=99"
+        );
+    }
+
+    #[test]
+    fn compact_health_includes_coverage_intelligence_lines() {
+        use crate::health_types::{
+            CoverageIntelligenceAction, CoverageIntelligenceConfidence,
+            CoverageIntelligenceEvidence, CoverageIntelligenceFinding,
+            CoverageIntelligenceMatchConfidence, CoverageIntelligenceRecommendation,
+            CoverageIntelligenceReport, CoverageIntelligenceSchemaVersion,
+            CoverageIntelligenceSignal, CoverageIntelligenceSummary, CoverageIntelligenceVerdict,
+        };
+
+        let root = PathBuf::from("/project");
+        let report = CoverageIntelligenceReport {
+            schema_version: CoverageIntelligenceSchemaVersion::V1,
+            verdict: CoverageIntelligenceVerdict::HighConfidenceDelete,
+            summary: CoverageIntelligenceSummary {
+                findings: 1,
+                high_confidence_deletes: 1,
+                ..Default::default()
+            },
+            findings: vec![CoverageIntelligenceFinding {
+                id: "plow:coverage-intel:abc123".to_owned(),
+                path: root.join("src/dead.ts"),
+                identity: Some("deadPath".to_owned()),
+                line: 9,
+                verdict: CoverageIntelligenceVerdict::HighConfidenceDelete,
+                signals: vec![
+                    CoverageIntelligenceSignal::StaticUnused,
+                    CoverageIntelligenceSignal::RuntimeCold,
+                ],
+                recommendation: CoverageIntelligenceRecommendation::DeleteAfterConfirmingOwner,
+                confidence: CoverageIntelligenceConfidence::High,
+                related_ids: vec!["plow:prod:deadbeef".to_owned()],
+                evidence: CoverageIntelligenceEvidence {
+                    match_confidence: CoverageIntelligenceMatchConfidence::Direct,
+                    ..Default::default()
+                },
+                actions: vec![CoverageIntelligenceAction {
+                    kind: "delete-after-confirming-owner".to_owned(),
+                    description: "Confirm ownership".to_owned(),
+                    auto_fixable: false,
+                }],
+            }],
+        };
+
+        let lines = build_coverage_intelligence_compact_lines(&report, &root);
+        assert_eq!(
+            lines[0],
+            "coverage-intelligence-summary:verdict=high-confidence-delete,findings=1,risky_changes=0,high_confidence_deletes=1,review_required=0,refactor_carefully=0,skipped_ambiguous_matches=0"
+        );
+        assert_eq!(
+            lines[1],
+            "coverage-intelligence:src/dead.ts:9:deadPath:id=plow:coverage-intel:abc123,verdict=high-confidence-delete,recommendation=delete-after-confirming-owner,confidence=high,signals=static_unused+runtime_cold"
         );
     }
 
@@ -770,10 +1205,8 @@ mod tests {
         let results = sample_results(&root);
         let lines = build_compact_lines(&results, &root);
 
-        // 16 issue types, one of each
-        assert_eq!(lines.len(), 16);
+        assert_eq!(lines.len(), 22);
 
-        // Verify ordering matches output order
         assert!(lines[0].starts_with("unused-file:"));
         assert!(lines[1].starts_with("unused-export:"));
         assert!(lines[2].starts_with("unused-type:"));
@@ -782,13 +1215,95 @@ mod tests {
         assert!(lines[5].starts_with("unused-optionaldep:"));
         assert!(lines[6].starts_with("unused-enum-member:"));
         assert!(lines[7].starts_with("unused-class-member:"));
-        assert!(lines[8].starts_with("unresolved-import:"));
-        assert!(lines[9].starts_with("unlisted-dep:"));
-        assert!(lines[10].starts_with("duplicate-export:"));
-        assert!(lines[11].starts_with("type-only-dep:"));
-        assert!(lines[12].starts_with("test-only-dep:"));
-        assert!(lines[13].starts_with("circular-dependency:"));
-        assert!(lines[14].starts_with("boundary-violation:"));
+        assert!(lines[8].starts_with("unused-store-member:"));
+        assert!(lines[9].starts_with("unresolved-import:"));
+        assert!(lines[10].starts_with("unlisted-dep:"));
+        assert!(lines[11].starts_with("duplicate-export:"));
+        assert!(lines[12].starts_with("type-only-dep:"));
+        assert!(lines[13].starts_with("test-only-dep:"));
+        assert!(lines[14].starts_with("circular-dependency:"));
+        assert!(lines[15].starts_with("boundary-violation:"));
+        assert!(lines.iter().any(|l| l.starts_with("unprovided-inject:")));
+        assert!(lines.iter().any(|l| l.starts_with("unrendered-component:")));
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.starts_with("unused-component-prop:"))
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.starts_with("unused-component-emit:"))
+        );
+        assert!(lines.iter().any(|l| l.starts_with("unused-server-action:")));
+    }
+
+    #[test]
+    fn compact_covers_api_and_boundary_variants() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .private_type_leaks
+            .push(PrivateTypeLeakFinding::with_actions(PrivateTypeLeak {
+                path: root.join("src/api.ts"),
+                export_name: "createApi".to_owned(),
+                type_name: "InternalShape".to_owned(),
+                line: 12,
+                col: 4,
+                span_start: 100,
+            }));
+        results
+            .circular_dependencies
+            .push(CircularDependencyFinding::with_actions(
+                CircularDependency {
+                    files: vec![
+                        root.join("packages/a/index.ts"),
+                        root.join("packages/b/index.ts"),
+                    ],
+                    length: 2,
+                    line: 3,
+                    col: 0,
+                    edges: Vec::new(),
+                    is_cross_package: true,
+                },
+            ));
+        results
+            .boundary_coverage_violations
+            .push(BoundaryCoverageViolationFinding::with_actions(
+                BoundaryCoverageViolation {
+                    path: root.join("src/unmatched.ts"),
+                    line: 1,
+                    col: 0,
+                },
+            ));
+        results
+            .boundary_call_violations
+            .push(BoundaryCallViolationFinding::with_actions(
+                BoundaryCallViolation {
+                    path: root.join("src/ui/button.ts"),
+                    line: 20,
+                    col: 6,
+                    zone: "ui".to_owned(),
+                    callee: "child_process.exec".to_owned(),
+                    pattern: "child_process.*".to_owned(),
+                },
+            ));
+
+        let lines = build_compact_lines(&results, &root);
+
+        assert_eq!(
+            lines[0],
+            "private-type-leak:src/api.ts:12:createApi->InternalShape"
+        );
+        assert!(lines[1].contains(" (cross-package)"));
+        assert_eq!(
+            lines[2],
+            "boundary-coverage:src/unmatched.ts:1:no matching boundary zone"
+        );
+        assert_eq!(
+            lines[3],
+            "boundary-call:src/ui/button.ts:20:child_process.exec forbidden in zone ui (pattern child_process.*)"
+        );
     }
 
     #[test]
@@ -804,8 +1319,6 @@ mod tests {
         let lines = build_compact_lines(&results, &root);
         assert_eq!(lines[0], "unused-file:src/deep/nested/file.ts");
     }
-
-    // ── Re-export variants ──
 
     #[test]
     fn compact_re_export_tagged_correctly() {
@@ -850,8 +1363,6 @@ mod tests {
         );
     }
 
-    // ── Unused optional dependency ──
-
     #[test]
     fn compact_unused_optional_dep_format() {
         let root = PathBuf::from("/project");
@@ -872,8 +1383,6 @@ mod tests {
         assert_eq!(lines[0], "unused-optionaldep:fsevents");
     }
 
-    // ── Circular dependency ──
-
     #[test]
     fn compact_circular_dependency_format() {
         let root = PathBuf::from("/project");
@@ -886,6 +1395,7 @@ mod tests {
                     length: 2,
                     line: 3,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             ));
@@ -895,7 +1405,6 @@ mod tests {
         assert!(lines[0].starts_with("circular-dependency:src/a.ts:3:"));
         assert!(lines[0].contains("src/a.ts"));
         assert!(lines[0].contains("src/b.ts"));
-        // Chain should close the cycle: a -> b -> a
         assert!(lines[0].contains("\u{2192}"));
     }
 
@@ -915,19 +1424,17 @@ mod tests {
                     length: 3,
                     line: 1,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             ));
 
         let lines = build_compact_lines(&results, &root);
-        // Chain: a -> b -> c -> a
         let chain_part = lines[0].split(':').next_back().unwrap();
         let parts: Vec<&str> = chain_part.split(" \u{2192} ").collect();
         assert_eq!(parts.len(), 4);
         assert_eq!(parts[0], parts[3]); // first == last (cycle closes)
     }
-
-    // ── Type-only dependency ──
 
     #[test]
     fn compact_type_only_dep_format() {
@@ -946,8 +1453,6 @@ mod tests {
         let lines = build_compact_lines(&results, &root);
         assert_eq!(lines[0], "type-only-dep:zod");
     }
-
-    // ── Multiple items of same type ──
 
     #[test]
     fn compact_multiple_unused_files() {
@@ -969,8 +1474,6 @@ mod tests {
         assert_eq!(lines[0], "unused-file:src/a.ts");
         assert_eq!(lines[1], "unused-file:src/b.ts");
     }
-
-    // ── Output ordering matches issue types ──
 
     #[test]
     fn compact_ordering_optional_dep_between_devdep_and_enum() {
@@ -1013,8 +1516,6 @@ mod tests {
         assert!(lines[1].starts_with("unused-optionaldep:"));
         assert!(lines[2].starts_with("unused-enum-member:"));
     }
-
-    // ── Path outside root ──
 
     #[test]
     fn compact_path_outside_root_preserved() {

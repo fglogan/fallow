@@ -27,6 +27,7 @@ fn cache_roundtrip() {
         re_exports: vec![],
         dynamic_imports: vec![],
         require_calls: vec![],
+        package_path_references: vec![],
         member_accesses: vec![],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
@@ -41,17 +42,39 @@ fn cache_roundtrip() {
         complexity: vec![],
         flag_uses: vec![],
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: vec![],
         public_signature_type_references: vec![],
         namespace_object_aliases: vec![],
         iconify_prefixes: vec![],
+        iconify_icon_names: vec![],
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     };
 
     store.insert(std::path::Path::new("test.ts"), cached);
     assert_eq!(store.len(), 1);
 
-    // Save and reload
     store
         .save(&temp_dir, 0, plow_extract::cache::DEFAULT_CACHE_MAX_SIZE)
         .unwrap();
@@ -59,11 +82,8 @@ fn cache_roundtrip() {
         CacheStore::load(&temp_dir, 0, plow_extract::cache::DEFAULT_CACHE_MAX_SIZE).unwrap();
     assert_eq!(loaded.len(), 1);
 
-    // Correct hash -> hit
     assert!(loaded.get(std::path::Path::new("test.ts"), 12345).is_some());
-    // Wrong hash -> miss
     assert!(loaded.get(std::path::Path::new("test.ts"), 99999).is_none());
-    // Unknown file -> miss
     assert!(
         loaded
             .get(std::path::Path::new("other.ts"), 12345)
@@ -73,11 +93,8 @@ fn cache_roundtrip() {
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
 
-// ── Incremental analysis (Phase A) tests ──────────────────────────
-
 #[test]
 fn incremental_no_cache_all_misses() {
-    // First run without any existing cache: all files should be cache misses
     let root = fixture_path("basic-project");
     let files = plow_core::discover::discover_files(&create_config(root));
     let parse_result = plow_core::extract::parse_all_files(&files, None, false);
@@ -88,25 +105,83 @@ fn incremental_no_cache_all_misses() {
 }
 
 #[test]
+fn retaining_modules_releases_graph_payload_after_analysis() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).expect("create src dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"payload-release-fixture","version":"1.0.0"}"#,
+    )
+    .expect("write package.json");
+    std::fs::write(root.join("src/lazy.ts"), "export const lazy = 1;\n")
+        .expect("write lazy module");
+    std::fs::write(root.join("src/required.ts"), "exports.value = 2;\n")
+        .expect("write required module");
+    std::fs::write(
+        root.join("src/index.ts"),
+        r#"
+export async function load(flag: boolean) {
+  const required = require("./required");
+  if (flag) {
+    return import("./lazy");
+  }
+  return required.value;
+}
+"#,
+    )
+    .expect("write index module");
+
+    let config = create_config(root.to_path_buf());
+    let files = plow_core::discover::discover_files(&config);
+    let parsed = plow_core::extract::parse_all_files(&files, None, true);
+    let parsed_index = parsed
+        .modules
+        .iter()
+        .find(|module| {
+            files
+                .get(module.file_id.0 as usize)
+                .is_some_and(|file| file.path.ends_with("src/index.ts"))
+        })
+        .expect("parsed index module should exist");
+    assert!(!parsed_index.dynamic_imports.is_empty());
+    assert!(!parsed_index.require_calls.is_empty());
+
+    let output =
+        plow_core::analyze_retaining_modules(&config, true, false).expect("analysis succeeds");
+    let retained_modules = output.modules.expect("retained modules");
+    let retained_files = output.files.expect("retained files");
+    let retained_index = retained_modules
+        .iter()
+        .find(|module| {
+            retained_files
+                .get(module.file_id.0 as usize)
+                .is_some_and(|file| file.path.ends_with("src/index.ts"))
+        })
+        .expect("retained index module should exist");
+
+    assert!(retained_index.dynamic_imports.is_empty());
+    assert_eq!(retained_index.dynamic_imports.capacity(), 0);
+    assert!(retained_index.require_calls.is_empty());
+    assert_eq!(retained_index.require_calls.capacity(), 0);
+    assert!(!retained_index.line_offsets.is_empty());
+    assert!(!retained_index.complexity.is_empty());
+}
+
+#[test]
 fn incremental_with_cache_all_hits() {
-    // Build a cache from the first parse, then parse again — should be all hits
     let root = fixture_path("basic-project");
     let config = create_config(root);
     let files = plow_core::discover::discover_files(&config);
 
-    // First parse: build cache
     let first = plow_core::extract::parse_all_files(&files, None, false);
     let mut cache_store = plow_core::cache::CacheStore::new();
     for module in &first.modules {
         if let Some(file) = files.get(module.file_id.0 as usize) {
-            cache_store.insert(
-                &file.path,
-                plow_core::cache::module_to_cached(module, 0, 0),
-            );
+            cache_store.insert(&file.path, plow_core::cache::module_to_cached(module, 0, 0));
         }
     }
 
-    // Second parse: should hit cache for every file
     let second = plow_core::extract::parse_all_files(&files, Some(&cache_store), false);
     assert_eq!(second.cache_hits, first.modules.len());
     assert_eq!(second.cache_misses, 0);
@@ -115,27 +190,20 @@ fn incremental_with_cache_all_hits() {
 
 #[test]
 fn incremental_results_identical() {
-    // Results from a cached run should be identical to a fresh run
     let root = fixture_path("basic-project");
     let config = create_config(root);
     let files = plow_core::discover::discover_files(&config);
 
-    // First parse
     let first = plow_core::extract::parse_all_files(&files, None, false);
     let mut cache_store = plow_core::cache::CacheStore::new();
     for module in &first.modules {
         if let Some(file) = files.get(module.file_id.0 as usize) {
-            cache_store.insert(
-                &file.path,
-                plow_core::cache::module_to_cached(module, 0, 0),
-            );
+            cache_store.insert(&file.path, plow_core::cache::module_to_cached(module, 0, 0));
         }
     }
 
-    // Second parse (from cache)
     let second = plow_core::extract::parse_all_files(&files, Some(&cache_store), false);
 
-    // Verify all module data matches
     assert_eq!(first.modules.len(), second.modules.len());
     for (a, b) in first.modules.iter().zip(second.modules.iter()) {
         assert_eq!(a.file_id, b.file_id);
@@ -151,18 +219,14 @@ fn incremental_results_identical() {
 
 #[test]
 fn incremental_full_pipeline_results_match() {
-    // Full pipeline results should be identical whether using cache or not
     let root = fixture_path("basic-project");
     let tmp_cache = tempfile::tempdir().expect("create temp dir");
     let config = create_config_with_cache(root, tmp_cache.path().to_path_buf());
 
-    // First run: populates cache
     let first = plow_core::analyze(&config).expect("first analysis should succeed");
 
-    // Second run: uses cache
     let second = plow_core::analyze(&config).expect("second analysis should succeed");
 
-    // Results should be identical
     assert_eq!(first.unused_files.len(), second.unused_files.len());
     assert_eq!(first.unused_exports.len(), second.unused_exports.len());
     assert_eq!(first.unused_types.len(), second.unused_types.len());
@@ -174,7 +238,6 @@ fn incremental_full_pipeline_results_match() {
 
 #[test]
 fn incremental_cache_prune_stale_entries() {
-    // Cache entries for deleted files should be pruned
     let mut store = plow_core::cache::CacheStore::new();
     let make_module = || plow_core::cache::CachedModule {
         content_hash: 1,
@@ -186,6 +249,7 @@ fn incremental_cache_prune_stale_entries() {
         re_exports: vec![],
         dynamic_imports: vec![],
         require_calls: vec![],
+        package_path_references: vec![],
         member_accesses: vec![],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
@@ -200,18 +264,40 @@ fn incremental_cache_prune_stale_entries() {
         complexity: vec![],
         flag_uses: vec![],
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: vec![],
         public_signature_type_references: vec![],
         namespace_object_aliases: vec![],
         iconify_prefixes: vec![],
+        iconify_icon_names: vec![],
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     };
 
     store.insert(std::path::Path::new("/project/existing.ts"), make_module());
     store.insert(std::path::Path::new("/project/deleted.ts"), make_module());
     assert_eq!(store.len(), 2);
 
-    // Only "existing.ts" is in the current file set
     let files = vec![plow_core::discover::DiscoveredFile {
         id: plow_core::discover::FileId(0),
         path: PathBuf::from("/project/existing.ts"),

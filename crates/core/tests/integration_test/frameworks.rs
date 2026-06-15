@@ -1,7 +1,5 @@
 use super::common::{create_config, fixture_path};
 
-// ── Framework entry points (Next.js) ───────────────────────────
-
 #[test]
 fn nextjs_page_default_export_not_flagged() {
     let root = fixture_path("nextjs-project");
@@ -21,13 +19,11 @@ fn nextjs_page_default_export_not_flagged() {
         })
         .collect();
 
-    // page.tsx is a Next.js App Router entry point, so it should NOT be unused
     assert!(
         !unused_file_names.contains(&"page.tsx".to_string()),
         "page.tsx should be treated as framework entry point, unused files: {unused_file_names:?}"
     );
 
-    // utils.ts is not imported by anything, so it should be unused
     assert!(
         unused_file_names.contains(&"utils.ts".to_string()),
         "utils.ts should be detected as unused file, found: {unused_file_names:?}"
@@ -40,9 +36,6 @@ fn nextjs_unused_util_export_flagged() {
     let config = create_config(root);
     let results = plow_core::analyze(&config).expect("analysis should succeed");
 
-    // unusedUtil is exported but never imported — however, since utils.ts is an
-    // unreachable file, it may be reported as unused file instead of unused export.
-    // The key point is that it IS flagged as a problem in some way.
     let has_unused_export = results
         .unused_exports
         .iter()
@@ -400,6 +393,50 @@ fn issue_623_vite_no_react_compiler_config_dependency_is_flagged_unused() {
 }
 
 #[test]
+fn issue_751_vite_react_compiler_preset_dependency_is_not_flagged_unused() {
+    let root = fixture_path("issue-751-vite-react-compiler-preset");
+    let config = create_config(root);
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_dep_names: Vec<&str> = results
+        .unused_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+
+    assert!(
+        !unused_dep_names.contains(&"babel-plugin-react-compiler"),
+        "React Compiler dependency should be credited via reactCompilerPreset(): {unused_dep_names:?}"
+    );
+    assert!(
+        unused_dep_names.contains(&"left-pad"),
+        "left-pad should remain unused as a control dependency: {unused_dep_names:?}"
+    );
+}
+
+#[test]
+fn issue_751_electron_react_compiler_preset_dependency_is_not_flagged_unused() {
+    let root = fixture_path("issue-751-electron-react-compiler-preset");
+    let config = create_config(root);
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_dep_names: Vec<&str> = results
+        .unused_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+
+    assert!(
+        !unused_dep_names.contains(&"babel-plugin-react-compiler"),
+        "React Compiler dependency should be credited via renderer.plugins reactCompilerPreset(): {unused_dep_names:?}"
+    );
+    assert!(
+        unused_dep_names.contains(&"left-pad"),
+        "left-pad should remain unused as a control dependency: {unused_dep_names:?}"
+    );
+}
+
+#[test]
 fn turborepo_generator_config_is_used_without_globbing_generator_directory() {
     let tmp = tempfile::tempdir().expect("failed to create temp dir");
     let root = tmp.path().to_path_buf();
@@ -476,8 +513,6 @@ fn turborepo_generator_config_is_used_without_globbing_generator_directory() {
     );
 }
 
-// ── Test runner entry points ──────────────────────────────────
-
 #[test]
 fn tap_test_files_are_not_flagged_unused() {
     let root = fixture_path("tap-project");
@@ -530,8 +565,6 @@ fn tsd_test_files_are_not_flagged_unused() {
     );
 }
 
-// ── Path aliases ───────────────────────────────────────────────
-
 #[test]
 fn path_alias_not_flagged_as_unlisted() {
     let root = fixture_path("path-aliases");
@@ -544,7 +577,6 @@ fn path_alias_not_flagged_as_unlisted() {
         .map(|d| d.dep.package_name.as_str())
         .collect();
 
-    // @/utils is a path alias, not an npm package, so it should NOT be flagged
     assert!(
         !unlisted_names.contains(&"@/utils"),
         "@/utils should not be flagged as unlisted dependency, found: {unlisted_names:?}"
@@ -570,8 +602,6 @@ fn path_aliases_mixed_exports_no_false_positive_unused_files() {
         })
         .collect();
 
-    // types.ts and helpers.ts have SOME used exports (imported via @/ path alias)
-    // — they should NOT be in unused_files even though they also have unused exports
     assert!(
         !unused_file_names.contains(&"types.ts".to_string()),
         "types.ts has used exports and should not be an unused file: {unused_file_names:?}"
@@ -581,13 +611,11 @@ fn path_aliases_mixed_exports_no_false_positive_unused_files() {
         "helpers.ts has used exports and should not be an unused file: {unused_file_names:?}"
     );
 
-    // orphan.ts is truly unused — no file imports it
     assert!(
         unused_file_names.contains(&"orphan.ts".to_string()),
         "orphan.ts should be detected as unused file: {unused_file_names:?}"
     );
 
-    // Verify unused exports are correctly detected on reachable files
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
@@ -611,15 +639,12 @@ fn path_aliases_mixed_exports_no_false_positive_unused_files() {
     );
 }
 
-// ── CSS/Tailwind ───────────────────────────────────────────────
-
 #[test]
 fn css_apply_marks_tailwind_as_used() {
     let root = fixture_path("css-apply-project");
     let config = create_config(root);
     let results = plow_core::analyze(&config).expect("analysis should succeed");
 
-    // tailwindcss should NOT be in unused dependencies (it's used via @apply in styles.css)
     let unused_dep_names: Vec<&str> = results
         .unused_dependencies
         .iter()
@@ -630,7 +655,6 @@ fn css_apply_marks_tailwind_as_used() {
         "tailwindcss should not be unused, it's referenced via @apply in CSS: {unused_dep_names:?}"
     );
 
-    // unused.css should be detected as an unused file
     let unused_files: Vec<&str> = results
         .unused_files
         .iter()
@@ -771,9 +795,6 @@ fn tailwind_plugin_directive_marks_plugin_targets_used() {
 
 #[test]
 fn iconify_static_icon_strings_credit_icon_set_packages() {
-    // Issue #608: `@iconify-json/<prefix>` packages are consumed through a
-    // build-time string name (`<Icon name="jam:github" />`) rather than an
-    // import, so they must be credited from the static icon string.
     let root = fixture_path("issue-608-iconify-credits");
     let config = create_config(root);
     let results = plow_core::analyze(&config).expect("analysis should succeed");
@@ -794,6 +815,31 @@ fn iconify_static_icon_strings_credit_icon_set_packages() {
     assert!(
         unused_dep_names.contains(&"unused-dep"),
         "an unreferenced dependency should still be reported: {unused_dep_names:?}"
+    );
+}
+
+#[test]
+fn nuxt_ui_script_icon_strings_credit_icon_set_packages() {
+    let root = fixture_path("issue-955-nuxt-ui-iconify-script");
+    let config = create_config(root);
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_dep_names: Vec<&str> = results
+        .unused_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    assert!(
+        !unused_dep_names.contains(&"@iconify-json/simple-icons"),
+        "@iconify-json/simple-icons should be credited via the Nuxt UI icon string: {unused_dep_names:?}"
+    );
+    assert!(
+        unused_dep_names.contains(&"@iconify-json/simple"),
+        "shorter matching Iconify collections should not be credited by a longer icon string: {unused_dep_names:?}"
+    );
+    assert!(
+        unused_dep_names.contains(&"unused-dep"),
+        "an unrelated dependency should still be reported: {unused_dep_names:?}"
     );
 }
 
@@ -870,6 +916,44 @@ fn vite_aliases_from_config_resolve_internal_modules() {
         .collect();
     assert!(
         unused_export_names.contains(&"unusedMessage"),
+        "reachable aliased module should still report unused exports: {unused_export_names:?}"
+    );
+}
+
+#[test]
+fn vite_array_aliases_from_config_resolve_internal_modules() {
+    let root = fixture_path("vite-array-alias-project");
+    let config = create_config(root.clone());
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
+
+    let unresolved_specs: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|u| u.import.specifier.as_str())
+        .collect();
+    assert!(
+        !unresolved_specs.contains(&"@/auth.js"),
+        "vite array alias import should resolve, found unresolved: {unresolved_specs:?}"
+    );
+
+    let unused_file_paths: Vec<String> = results
+        .unused_files
+        .iter()
+        .filter_map(|f| f.file.path.strip_prefix(&root).ok())
+        .map(|path| path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    assert!(
+        !unused_file_paths.contains(&"src/auth.js".to_string()),
+        "src/auth.js should be reachable via vite array alias import: {unused_file_paths:?}"
+    );
+
+    let unused_export_names: Vec<&str> = results
+        .unused_exports
+        .iter()
+        .map(|e| e.export.export_name.as_str())
+        .collect();
+    assert!(
+        unused_export_names.contains(&"unusedAuthHelper"),
         "reachable aliased module should still report unused exports: {unused_export_names:?}"
     );
 }
@@ -1158,6 +1242,47 @@ fn nuxt_default_scan_keeps_nested_plugin_index_but_not_nested_helpers() {
 }
 
 #[test]
+fn nuxt_content_config_is_credited_when_module_registered() {
+    let root = fixture_path("nuxt-content-config");
+    let config = create_config(root);
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_file_names: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
+        .collect();
+
+    assert!(
+        !unused_file_names.contains(&"content.config.ts".to_string()),
+        "content.config.ts should be credited as an entry by @nuxt/content: {unused_file_names:?}"
+    );
+
+    let content_config_unused_export = results.unused_exports.iter().any(|e| {
+        e.export
+            .path
+            .file_name()
+            .is_some_and(|name| name == "content.config.ts")
+    });
+    assert!(
+        !content_config_unused_export,
+        "content.config.ts default export should stay alive"
+    );
+
+    assert!(
+        unused_file_names.contains(&"unused.ts".to_string()),
+        "an unrelated orphan file should still be reported unused: {unused_file_names:?}"
+    );
+}
+
+#[test]
 fn nuxt_runtime_conventions_report_dead_named_exports_without_unused_file_noise() {
     let root = fixture_path("nuxt-runtime-conventions");
     let config = create_config(root);
@@ -1274,8 +1399,6 @@ fn nuxt_configured_runtime_paths_reduce_false_positives_and_keep_dead_exports_vi
 
 #[test]
 fn nuxt_css_tilde_alias_keeps_app_assets_alive() {
-    // nuxt.config.ts with css:['~/assets/main.css'] must not flag
-    // app/assets/main.css as unused (default Nuxt 4 srcDir = app/).
     let root = fixture_path("nuxt-css-alias");
     let config = create_config(root);
     let results = plow_core::analyze(&config).expect("analysis should succeed");
@@ -1372,7 +1495,6 @@ fn wrangler_config_main_entries_keep_worker_files_alive() {
     std::fs::write(
         root.join("wrangler.jsonc"),
         r#"{
-            // Cloudflare Workers entry.
             "main": "src/worker.tsx",
             "env": {
                 "preview": { "main": "worker/entry.ts" }
@@ -1447,7 +1569,6 @@ fn wrangler_config_precedence_only_keeps_selected_main_alive() {
     std::fs::write(
         root.join("wrangler.jsonc"),
         r#"{
-            // Current worker entry; Wrangler selects this over wrangler.toml.
             "main": "src/worker.tsx"
         }"#,
     )
@@ -1550,8 +1671,6 @@ fn content_collections_config_and_tooling_deps_are_used() {
 
 #[test]
 fn content_collections_mjs_config_is_used() {
-    // Issue #590 acceptance: content-collections.{ts,js,mjs} must all be
-    // honored. The .ts case is already covered above; this exercises .mjs.
     let dir = tempfile::tempdir().expect("temp dir");
     let root = dir.path();
 
@@ -1593,10 +1712,6 @@ fn content_collections_mjs_config_is_used() {
 
 #[test]
 fn content_collections_framework_integration_only_activates_plugin() {
-    // Real-world setups typically install only the framework integration
-    // (`@content-collections/vite`, `@content-collections/next`, etc.) at the
-    // top level; `@content-collections/core` arrives transitively. Verify the
-    // plugin still detects the project and credits the config file.
     let dir = tempfile::tempdir().expect("temp dir");
     let root = dir.path();
 
@@ -1773,10 +1888,6 @@ fn fumadocs_source_config_content_roots_and_virtual_imports_are_used() {
 
 #[test]
 fn wrangler_plain_json_config_main_keeps_worker_alive() {
-    // The JSONC branch is exercised by `wrangler_config_main_entries_keep_worker_files_alive`;
-    // this pins the plain `.json` variant since the dispatch in `extract_main_entries`
-    // routes both through `extract_js_main_entries` and config_parser handles them
-    // via the same parens-wrap path.
     let dir = tempfile::tempdir().expect("temp dir");
     let root = dir.path();
 

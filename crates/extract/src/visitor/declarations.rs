@@ -4,7 +4,7 @@
 //! declaration AST nodes, binding patterns, and require/import patterns.
 
 use oxc_ast::ast::{
-    BindingPattern, CallExpression, Declaration, ImportExpression, TSEnumMemberName,
+    Argument, BindingPattern, CallExpression, Declaration, ImportExpression, TSEnumMemberName,
     TSModuleDeclarationName, VariableDeclarator,
 };
 
@@ -34,55 +34,15 @@ impl ModuleInfoExtractor {
             }
             Declaration::FunctionDeclaration(func) => {
                 if let Some(id) = func.id.as_ref() {
-                    let name = ExportName::Named(id.name.to_string());
-                    // Check if this is an overload — same-named export already exists
-                    if let Some(existing) = self.exports.iter_mut().find(|e| e.name == name) {
-                        // Update to the implementation (last declaration wins)
-                        existing.span = id.span;
-                        existing.is_type_only = is_type_only;
-                    } else {
-                        self.exports.push(ExportInfo {
-                            name,
-                            local_name: Some(id.name.to_string()),
-                            is_type_only,
-                            visibility: VisibilityTag::None,
-                            span: id.span,
-                            members: vec![],
-                            is_side_effect_used: false,
-                            super_class: None,
-                        });
-                    }
+                    self.upsert_function_declaration_export(
+                        id.name.as_str(),
+                        id.span,
+                        is_type_only,
+                    );
                 }
             }
             Declaration::ClassDeclaration(class) => {
-                if let Some(id) = class.id.as_ref() {
-                    let is_angular = has_angular_class_decorator(class);
-                    let members = extract_class_members(class, is_angular);
-                    let super_class = extract_super_class_name(class);
-                    let implemented_interfaces = extract_implemented_interface_names(class);
-                    let instance_bindings = extract_class_instance_bindings(class);
-                    if super_class.is_some()
-                        || !implemented_interfaces.is_empty()
-                        || !instance_bindings.is_empty()
-                    {
-                        self.class_heritage.push(ClassHeritageInfo {
-                            export_name: id.name.to_string(),
-                            super_class: super_class.clone(),
-                            implements: implemented_interfaces,
-                            instance_bindings,
-                        });
-                    }
-                    self.exports.push(ExportInfo {
-                        name: ExportName::Named(id.name.to_string()),
-                        local_name: Some(id.name.to_string()),
-                        is_type_only,
-                        is_side_effect_used: false,
-                        visibility: VisibilityTag::None,
-                        span: id.span,
-                        members,
-                        super_class,
-                    });
-                }
+                self.extract_class_declaration_export(class, is_type_only);
             }
             Declaration::TSTypeAliasDeclaration(alias) => {
                 self.push_type_export(&alias.id.name, alias.id.span);
@@ -91,74 +51,138 @@ impl ModuleInfoExtractor {
                 self.push_type_export(&iface.id.name, iface.id.span);
             }
             Declaration::TSEnumDeclaration(enumd) => {
-                let members: Vec<MemberInfo> = enumd
-                    .body
-                    .members
-                    .iter()
-                    .filter_map(|member| {
-                        let name = match &member.id {
-                            TSEnumMemberName::Identifier(id) => id.name.to_string(),
-                            TSEnumMemberName::String(s) | TSEnumMemberName::ComputedString(s) => {
-                                s.value.to_string()
-                            }
-                            TSEnumMemberName::ComputedTemplateString(_) => return None,
-                        };
-                        Some(MemberInfo {
-                            name,
-                            kind: MemberKind::EnumMember,
-                            span: member.span,
-                            has_decorator: false,
-                            decorator_names: Vec::new(),
-                            is_instance_returning_static: false,
-                            is_self_returning: false,
-                        })
-                    })
-                    .collect();
-                self.exports.push(ExportInfo {
-                    name: ExportName::Named(enumd.id.name.to_string()),
-                    local_name: Some(enumd.id.name.to_string()),
-                    is_type_only,
-                    visibility: VisibilityTag::None,
-                    span: enumd.id.span,
-                    members,
-                    is_side_effect_used: false,
-                    super_class: None,
-                });
+                self.extract_enum_declaration_export(enumd, is_type_only);
             }
             Declaration::TSModuleDeclaration(module) => {
-                // `declare namespace` / `declare module` are type-only (ambient).
-                // Runtime namespaces (`export namespace Foo { ... }`) compile to
-                // real JavaScript objects and are NOT type-only.
-                let ns_type_only = module.declare || is_type_only;
-                match &module.id {
-                    TSModuleDeclarationName::Identifier(id) => {
-                        self.exports.push(ExportInfo {
-                            name: ExportName::Named(id.name.to_string()),
-                            local_name: Some(id.name.to_string()),
-                            is_type_only: ns_type_only,
-                            visibility: VisibilityTag::None,
-                            span: id.span,
-                            members: vec![],
-                            is_side_effect_used: false,
-                            super_class: None,
-                        });
-                    }
-                    TSModuleDeclarationName::StringLiteral(lit) => {
-                        self.exports.push(ExportInfo {
-                            name: ExportName::Named(lit.value.to_string()),
-                            local_name: Some(lit.value.to_string()),
-                            is_type_only: ns_type_only,
-                            visibility: VisibilityTag::None,
-                            span: lit.span,
-                            members: vec![],
-                            is_side_effect_used: false,
-                            super_class: None,
-                        });
-                    }
-                }
+                self.extract_module_declaration_export(module, is_type_only);
             }
             _ => {}
         }
+    }
+
+    fn upsert_function_declaration_export(
+        &mut self,
+        name: &str,
+        span: oxc_span::Span,
+        is_type_only: bool,
+    ) {
+        let export_name = ExportName::Named(name.to_string());
+        if let Some(existing) = self.exports.iter_mut().find(|e| e.name == export_name) {
+            existing.span = span;
+            existing.is_type_only = is_type_only;
+        } else {
+            self.exports.push(ExportInfo {
+                name: export_name,
+                local_name: Some(name.to_string()),
+                is_type_only,
+                visibility: VisibilityTag::None,
+                span,
+                members: vec![],
+                is_side_effect_used: false,
+                super_class: None,
+            });
+        }
+    }
+
+    fn extract_class_declaration_export(
+        &mut self,
+        class: &oxc_ast::ast::Class<'_>,
+        is_type_only: bool,
+    ) {
+        let Some(id) = class.id.as_ref() else {
+            return;
+        };
+        let is_angular = has_angular_class_decorator(class);
+        let members = extract_class_members(class, is_angular);
+        let super_class = extract_super_class_name(class);
+        let implemented_interfaces = extract_implemented_interface_names(class);
+        let instance_bindings =
+            extract_class_instance_bindings(class, |local_name, source, imported_name| {
+                self.is_named_import_from(local_name, source, imported_name)
+            });
+        if super_class.is_some()
+            || !implemented_interfaces.is_empty()
+            || !instance_bindings.is_empty()
+        {
+            self.class_heritage.push(ClassHeritageInfo {
+                export_name: id.name.to_string(),
+                super_class: super_class.clone(),
+                implements: implemented_interfaces,
+                instance_bindings,
+            });
+        }
+        self.exports.push(ExportInfo {
+            name: ExportName::Named(id.name.to_string()),
+            local_name: Some(id.name.to_string()),
+            is_type_only,
+            is_side_effect_used: false,
+            visibility: VisibilityTag::None,
+            span: id.span,
+            members,
+            super_class,
+        });
+    }
+
+    fn extract_enum_declaration_export(
+        &mut self,
+        enumd: &oxc_ast::ast::TSEnumDeclaration<'_>,
+        is_type_only: bool,
+    ) {
+        let members: Vec<MemberInfo> = enumd
+            .body
+            .members
+            .iter()
+            .filter_map(|member| {
+                let name = match &member.id {
+                    TSEnumMemberName::Identifier(id) => id.name.to_string(),
+                    TSEnumMemberName::String(s) | TSEnumMemberName::ComputedString(s) => {
+                        s.value.to_string()
+                    }
+                    TSEnumMemberName::ComputedTemplateString(_) => return None,
+                };
+                Some(MemberInfo {
+                    name,
+                    kind: MemberKind::EnumMember,
+                    span: member.span,
+                    has_decorator: false,
+                    decorator_names: Vec::new(),
+                    is_instance_returning_static: false,
+                    is_self_returning: false,
+                })
+            })
+            .collect();
+        self.exports.push(ExportInfo {
+            name: ExportName::Named(enumd.id.name.to_string()),
+            local_name: Some(enumd.id.name.to_string()),
+            is_type_only,
+            visibility: VisibilityTag::None,
+            span: enumd.id.span,
+            members,
+            is_side_effect_used: false,
+            super_class: None,
+        });
+    }
+
+    fn extract_module_declaration_export(
+        &mut self,
+        module: &oxc_ast::ast::TSModuleDeclaration<'_>,
+        is_type_only: bool,
+    ) {
+        let ns_type_only = module.declare || is_type_only;
+        let (name, span) = match &module.id {
+            TSModuleDeclarationName::Identifier(id) => (id.name.to_string(), id.span),
+            TSModuleDeclarationName::StringLiteral(lit) => (lit.value.to_string(), lit.span),
+        };
+        self.exports.push(ExportInfo {
+            name: ExportName::Named(name.clone()),
+            local_name: Some(name),
+            is_type_only: ns_type_only,
+            visibility: VisibilityTag::None,
+            span,
+            members: vec![],
+            is_side_effect_used: false,
+            super_class: None,
+        });
     }
 
     pub(crate) fn extract_binding_pattern_names(
@@ -296,12 +320,20 @@ impl ModuleInfoExtractor {
         call: &CallExpression<'_>,
         source: &str,
     ) {
+        // Span of the specifier string literal (with quotes) for the diagnostic
+        // squiggly; falls back to the whole call when the argument is not a
+        // plain string literal.
+        let source_span = match call.arguments.first() {
+            Some(Argument::StringLiteral(lit)) => lit.span,
+            _ => call.span,
+        };
         match &declarator.id {
             BindingPattern::ObjectPattern(obj_pat) => {
                 let names = extract_destructured_names(obj_pat);
                 self.require_calls.push(RequireCallInfo {
                     source: source.to_string(),
                     span: call.span,
+                    source_span,
                     destructured_names: names,
                     local_name: None,
                 });
@@ -313,6 +345,7 @@ impl ModuleInfoExtractor {
                 self.require_calls.push(RequireCallInfo {
                     source: source.to_string(),
                     span: call.span,
+                    source_span,
                     destructured_names: Vec::new(),
                     local_name: Some(local),
                 });
@@ -332,7 +365,6 @@ impl ModuleInfoExtractor {
     ) {
         if let BindingPattern::ObjectPattern(obj_pat) = &declarator.id {
             if obj_pat.rest.is_some() {
-                // Rest element captures remaining properties — mark as whole-object use
                 self.whole_object_uses.push(ident_name.to_string());
             } else {
                 for prop in &obj_pat.properties {

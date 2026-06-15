@@ -63,12 +63,10 @@ impl Plugin for EslintPlugin {
     /// In monorepos, `eslint` is usually only in the root package.json, but
     /// workspace packages have their own config files and ESLint-related devDeps.
     fn is_enabled_with_deps(&self, deps: &[String], root: &Path) -> bool {
-        // Standard enabler check
         let enablers = self.enablers();
         if enablers.iter().any(|e| deps.iter().any(|d| d == e)) {
             return true;
         }
-        // File-based activation: check for ESLint config files in the workspace root
         ESLINT_CONFIG_FILES.iter().any(|f| root.join(f).exists())
     }
 
@@ -130,7 +128,6 @@ fn extract_eslint_config(
         return;
     }
 
-    // For JSON configs, wrap in parens so Oxc can parse them
     let is_json = config_path.extension().is_some_and(|ext| ext == "json");
     let (parse_source, parse_path_buf) = if is_json {
         (format!("({source})"), config_path.with_extension("js"))
@@ -139,21 +136,40 @@ fn extract_eslint_config(
     };
     let parse_path: &Path = &parse_path_buf;
 
-    // Extract import sources as referenced dependencies (eslint plugins, configs)
-    let imports = config_parser::extract_imports(&parse_source, parse_path);
+    add_eslint_import_dependencies(root, result, &parse_source, parse_path);
+    add_eslint_top_level_config(
+        result,
+        &parse_source,
+        parse_path,
+        config_path,
+        root,
+        visited,
+        depth,
+    );
+    add_eslint_override_config(
+        result,
+        &parse_source,
+        parse_path,
+        config_path,
+        root,
+        visited,
+        depth,
+    );
+    add_eslint_resolver_dependencies(result, &parse_source, parse_path);
+}
+
+fn add_eslint_import_dependencies(
+    root: &Path,
+    result: &mut PluginResult,
+    parse_source: &str,
+    parse_path: &Path,
+) {
+    let imports = config_parser::extract_imports(parse_source, parse_path);
     for imp in &imports {
         let dep = crate::resolve::extract_package_name(imp);
         result.referenced_dependencies.push(dep);
     }
 
-    // Follow shared config imports one level deep to discover peer deps.
-    // e.g. eslint.config.js imports @sveltejs/eslint-config, which internally
-    // imports typescript-eslint, eslint-plugin-svelte, @eslint/js, all peer deps
-    // that the host project must install.
-    //
-    // We use the full import specifier (including subpath, e.g. `@scope/pkg/next`)
-    // so that subpath exports are resolved correctly, and we walk up the directory
-    // tree to find packages hoisted to the monorepo root node_modules.
     for imp in &imports {
         let pkg_name = crate::resolve::extract_package_name(imp);
         if let Some((entry_source, entry_path)) =
@@ -166,39 +182,63 @@ fn extract_eslint_config(
                     .push(crate::resolve::extract_package_name(nested_imp));
             }
         }
-    }
 
-    // Legacy .eslintrc: extract plugins by short name
-    // e.g. plugins: ["react"] → eslint-plugin-react
+        if is_eslint_preset(&pkg_name) {
+            credit_preset_plugin_dependencies(root, &pkg_name, result);
+        }
+    }
+}
+
+fn add_eslint_top_level_config(
+    result: &mut PluginResult,
+    parse_source: &str,
+    parse_path: &Path,
+    config_path: &Path,
+    root: &Path,
+    visited: &mut FxHashSet<PathBuf>,
+    depth: usize,
+) {
     let plugins =
-        config_parser::extract_config_shallow_strings(&parse_source, parse_path, "plugins");
+        config_parser::extract_config_shallow_strings(parse_source, parse_path, "plugins");
     for plugin in &plugins {
         result
             .referenced_dependencies
             .push(resolve_eslint_plugin_name(plugin));
     }
 
-    // Legacy .eslintrc: extract extends
-    // e.g. extends: ["airbnb", "plugin:react/recommended", "./shared/base.js"]
     let extends =
-        config_parser::extract_config_shallow_strings(&parse_source, parse_path, "extends");
+        config_parser::extract_config_shallow_strings(parse_source, parse_path, "extends");
     for ext in &extends {
         process_extends_entry(ext, config_path, root, result, visited, depth);
     }
 
-    // Legacy .eslintrc: extract parser
-    // e.g. parser: "@typescript-eslint/parser"
     if let Some(parser) =
-        config_parser::extract_config_string(&parse_source, parse_path, &["parser"])
+        config_parser::extract_config_string(parse_source, parse_path, &["parser"])
     {
         let dep = crate::resolve::extract_package_name(&parser);
         result.referenced_dependencies.push(dep);
     }
 
-    // overrides[*].parser, plugins, extends: each override entry is a sub-config
-    // with the same fields as the top level. ESLint applies them when files match.
+    let plugin_keys =
+        config_parser::extract_config_object_keys(parse_source, parse_path, &["plugins"]);
+    for key in &plugin_keys {
+        result
+            .referenced_dependencies
+            .push(resolve_eslint_plugin_name(key));
+    }
+}
+
+fn add_eslint_override_config(
+    result: &mut PluginResult,
+    parse_source: &str,
+    parse_path: &Path,
+    config_path: &Path,
+    root: &Path,
+    visited: &mut FxHashSet<PathBuf>,
+    depth: usize,
+) {
     let override_parsers = config_parser::extract_config_array_nested_string_or_array(
-        &parse_source,
+        parse_source,
         parse_path,
         &["overrides"],
         &["parser"],
@@ -209,7 +249,7 @@ fn extract_eslint_config(
             .push(crate::resolve::extract_package_name(parser));
     }
     let override_plugins = config_parser::extract_config_array_nested_string_or_array(
-        &parse_source,
+        parse_source,
         parse_path,
         &["overrides"],
         &["plugins"],
@@ -220,7 +260,7 @@ fn extract_eslint_config(
             .push(resolve_eslint_plugin_name(plugin));
     }
     let override_extends = config_parser::extract_config_array_nested_string_or_array(
-        &parse_source,
+        parse_source,
         parse_path,
         &["overrides"],
         &["extends"],
@@ -228,38 +268,29 @@ fn extract_eslint_config(
     for ext in &override_extends {
         process_extends_entry(ext, config_path, root, result, visited, depth);
     }
+}
 
-    // Flat config: extract plugin names from plugins object keys
-    // e.g. plugins: { react: reactPlugin, "@typescript-eslint": tseslint }
-    let plugin_keys =
-        config_parser::extract_config_object_keys(&parse_source, parse_path, &["plugins"]);
-    for key in &plugin_keys {
-        result
-            .referenced_dependencies
-            .push(resolve_eslint_plugin_name(key));
-    }
-
-    // settings["import/resolver"] → resolver package dependencies
-    // Handles three formats:
-    //   Object: { typescript: { project: "..." } } → eslint-import-resolver-typescript
-    //   String: "typescript" → eslint-import-resolver-typescript
-    //   Array:  ["typescript", "node"] → eslint-import-resolver-typescript
+fn add_eslint_resolver_dependencies(
+    result: &mut PluginResult,
+    parse_source: &str,
+    parse_path: &Path,
+) {
     let resolver_path = &["settings", "import/resolver"];
     let resolver_keys =
-        config_parser::extract_config_object_keys(&parse_source, parse_path, resolver_path);
+        config_parser::extract_config_object_keys(parse_source, parse_path, resolver_path);
     for key in &resolver_keys {
         if let Some(dep) = resolve_eslint_resolver_name(key) {
             result.referenced_dependencies.push(dep);
         }
     }
     if let Some(resolver) =
-        config_parser::extract_config_string(&parse_source, parse_path, resolver_path)
+        config_parser::extract_config_string(parse_source, parse_path, resolver_path)
         && let Some(dep) = resolve_eslint_resolver_name(&resolver)
     {
         result.referenced_dependencies.push(dep);
     }
     let resolver_strings =
-        config_parser::extract_config_string_array(&parse_source, parse_path, resolver_path);
+        config_parser::extract_config_string_array(parse_source, parse_path, resolver_path);
     for resolver in &resolver_strings {
         if let Some(dep) = resolve_eslint_resolver_name(resolver) {
             result.referenced_dependencies.push(dep);
@@ -291,8 +322,6 @@ fn process_extends_entry(
     let candidates: Vec<PathBuf> = if target.extension().is_some() {
         vec![target]
     } else {
-        // ESLint resolves extension-less extends paths against this short list.
-        // Order matches ESLint's own resolution (.js first, then .cjs, .mjs, .json).
         ["js", "cjs", "mjs", "json"]
             .iter()
             .map(|ext| target.with_extension(ext))
@@ -363,8 +392,6 @@ fn read_package_entry_for_specifier(
     let pkg_json_str = std::fs::read_to_string(pkg_dir.join("package.json")).ok()?;
     let pkg_json: serde_json::Value = serde_json::from_str(&pkg_json_str).ok()?;
 
-    // Extract the subpath from the specifier (e.g., "@scope/pkg/next" → "./next").
-    // If there is no subpath the specifier equals the package name and we use ".".
     let subpath_key = if specifier.len() > pkg_name.len() {
         let raw = &specifier[pkg_name.len()..]; // e.g., "/next"
         format!(".{raw}") // e.g., "./next"
@@ -376,6 +403,64 @@ fn read_package_entry_for_specifier(
     let entry_path = pkg_dir.join(entry_rel);
     let source = std::fs::read_to_string(&entry_path).ok()?;
     Some((source, entry_path))
+}
+
+/// True when `name` is an ESLint *preset*: an aggregator config package that
+/// pulls in a fan of plugins, as opposed to a single plugin or parser.
+///
+/// - `eslint-config-airbnb`, `eslint-config-standard` -> true
+/// - `@antfu/eslint-config`, `@vue/eslint-config-typescript`, `@sveltejs/eslint-config` -> true
+/// - `eslint-plugin-react`, `@typescript-eslint/parser` -> false
+fn is_eslint_preset(name: &str) -> bool {
+    name.starts_with("eslint-config-") || name.contains("/eslint-config")
+}
+
+/// True when `name` is an ESLint-ecosystem package (plugin, shareable config,
+/// parser, or import resolver) that a preset legitimately pulls in transitively.
+///
+/// Filters a preset's declared dependencies so only its eslint plugins / configs /
+/// parsers are credited, never general-purpose runtime deps like `globals` or
+/// `ansis` (crediting those could mask a genuinely-unused dep the user declared
+/// for their own reasons).
+fn is_eslint_ecosystem_dependency(name: &str) -> bool {
+    name.starts_with("eslint-plugin-")
+        || name.starts_with("eslint-config-")
+        || name.starts_with("eslint-import-resolver-")
+        || name.contains("/eslint-plugin")
+        || name.contains("/eslint-config")
+        || name.ends_with("-eslint-parser")
+        || name.ends_with("/parser")
+}
+
+/// Read and parse a package's `package.json` from node_modules, walking up the
+/// directory tree to find it (handles hoisted deps in monorepos).
+fn read_package_json(workspace_dir: &Path, pkg_name: &str) -> Option<serde_json::Value> {
+    let pkg_dir = find_package_dir(workspace_dir, pkg_name)?;
+    let pkg_json_str = std::fs::read_to_string(pkg_dir.join("package.json")).ok()?;
+    serde_json::from_str(&pkg_json_str).ok()
+}
+
+/// Credit the ESLint plugins / configs / parsers a meta-preset pulls in.
+///
+/// Reads the preset's own `package.json` and credits every eslint-ecosystem entry
+/// in its `dependencies` / `peerDependencies` / `optionalDependencies`. Presets
+/// declare their framework plugins (react, vue, svelte, ...) as (optional) peer
+/// dependencies the host project installs, which is exactly the transitively-pulled
+/// set that would otherwise surface as `unused-(dev-)dependency`. See issue #754.
+fn credit_preset_plugin_dependencies(root: &Path, pkg_name: &str, result: &mut PluginResult) {
+    let Some(pkg_json) = read_package_json(root, pkg_name) else {
+        return;
+    };
+    for field in ["dependencies", "peerDependencies", "optionalDependencies"] {
+        let Some(map) = pkg_json.get(field).and_then(|v| v.as_object()) else {
+            continue;
+        };
+        for dep_name in map.keys() {
+            if is_eslint_ecosystem_dependency(dep_name) {
+                result.referenced_dependencies.push(dep_name.clone());
+            }
+        }
+    }
 }
 
 /// Resolve a package entry path from its `package.json` for the given subpath key.
@@ -397,7 +482,6 @@ fn resolve_package_entry(
     }
 
     if subpath_key == "." {
-        // Main entry: module → main → index.js
         if let Some(v) = pkg_json.get("module").and_then(|v| v.as_str()) {
             return Some(v.to_string());
         }
@@ -407,9 +491,6 @@ fn resolve_package_entry(
         return Some("index.js".to_string());
     }
 
-    // For subpath keys like "./next", strip the leading "./" and try as a direct
-    // file within the package directory. This handles packages that expose
-    // sub-files without an exports map (e.g., `eslint-config-foo/next` → `next.js`).
     let bare = subpath_key.strip_prefix("./").unwrap_or(subpath_key);
     if std::path::Path::new(bare).extension().is_some() {
         return Some(bare.to_string());
@@ -432,18 +513,15 @@ fn resolve_package_entry(
 /// - Subpath exports: `"exports": { "./next": "./next.js" }`
 fn resolve_exports_subpath(exports: &serde_json::Value, subpath_key: &str) -> Option<String> {
     if subpath_key == "." {
-        // String shorthand: "exports": "./index.js"
         if let Some(s) = exports.as_str() {
             return Some(s.to_string());
         }
-        // Object: look up "."
         if let Some(dot) = exports.get(".") {
             return resolve_condition_object(dot);
         }
         return None;
     }
 
-    // Named subpath: look up the key in the exports object.
     if let Some(entry) = exports.get(subpath_key) {
         return resolve_condition_object(entry);
     }
@@ -456,7 +534,6 @@ fn resolve_condition_object(value: &serde_json::Value) -> Option<String> {
     if let Some(s) = value.as_str() {
         return Some(s.to_string());
     }
-    // Prefer "import", then "default", then "require" for ESM-first packages.
     for key in &["import", "default", "require"] {
         if let Some(s) = value.get(key).and_then(|v| v.as_str()) {
             return Some(s.to_string());
@@ -480,10 +557,8 @@ fn resolve_eslint_plugin_name(name: &str) -> String {
         name.to_string()
     } else if let Some(scope) = name.strip_prefix('@') {
         if scope.contains('/') {
-            // Already scoped with subpath, push as-is
             name.to_string()
         } else {
-            // "@typescript-eslint" → "@typescript-eslint/eslint-plugin"
             format!("{name}/eslint-plugin")
         }
     } else {
@@ -498,16 +573,14 @@ fn resolve_eslint_plugin_name(name: &str) -> String {
 /// - `"eslint:recommended"` → `None` (built-in)
 fn resolve_eslint_extends_name(name: &str) -> Option<String> {
     if name.starts_with("eslint:") {
-        // Built-in ESLint config
         None
     } else if let Some(rest) = name.strip_prefix("plugin:") {
-        // "plugin:react/recommended" → extract plugin name
         let plugin_name = rest.split('/').next()?;
         Some(resolve_eslint_plugin_name(plugin_name))
-    } else if name.starts_with("eslint-config-") || name.contains("/eslint-config") {
-        Some(name.to_string())
-    } else if name.starts_with('@') {
-        // Scoped package, push as-is
+    } else if name.starts_with("eslint-config-")
+        || name.contains("/eslint-config")
+        || name.starts_with('@')
+    {
         Some(name.to_string())
     } else {
         Some(format!("eslint-config-{name}"))
@@ -521,7 +594,6 @@ fn resolve_eslint_extends_name(name: &str) -> Option<String> {
 /// - `"eslint-import-resolver-typescript"` → `"eslint-import-resolver-typescript"` (already full)
 fn resolve_eslint_resolver_name(name: &str) -> Option<String> {
     if matches!(name, "node" | "webpack") {
-        // Built-in resolvers provided by eslint-plugin-import
         None
     } else if name.starts_with("eslint-import-resolver-") {
         Some(name.to_string())
@@ -533,8 +605,6 @@ fn resolve_eslint_resolver_name(name: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ── ESLint plugin name resolution ───────────────────────────────
 
     #[test]
     fn plugin_short_name() {
@@ -564,8 +634,6 @@ mod tests {
             "@scope/some-plugin"
         );
     }
-
-    // ── ESLint extends name resolution ──────────────────────────────
 
     #[test]
     fn extends_short_name() {
@@ -612,8 +680,6 @@ mod tests {
         );
     }
 
-    // ── ESLint resolve_config integration ───────────────────────────
-
     #[test]
     fn resolve_config_legacy_eslintrc() {
         let source = r#"
@@ -635,7 +701,6 @@ mod tests {
         assert!(deps.contains(&"eslint-plugin-react".to_string()));
         assert!(deps.contains(&"@typescript-eslint/eslint-plugin".to_string()));
         assert!(deps.contains(&"eslint-config-airbnb".to_string()));
-        // eslint:recommended should NOT be in deps
         assert!(!deps.iter().any(|d| d.contains("eslint:recommended")));
     }
 
@@ -673,15 +738,11 @@ mod tests {
         assert!(deps.contains(&"typescript-eslint".to_string()));
     }
 
-    // ── Shared config following ─────────────────────────────────────
-
     #[test]
     fn shared_config_following_discovers_peer_deps() {
-        // Create a temp dir with a mock shared config in node_modules
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
 
-        // Create node_modules/@mock/eslint-config with a package.json and index.js
         let pkg_dir = root.join("node_modules/@mock/eslint-config");
         std::fs::create_dir_all(&pkg_dir).unwrap();
         std::fs::write(
@@ -708,12 +769,10 @@ mod tests {
         let result = plugin.resolve_config(std::path::Path::new("eslint.config.js"), source, root);
 
         let deps = &result.referenced_dependencies;
-        // Direct import
         assert!(
             deps.contains(&"@mock/eslint-config".to_string()),
             "should find direct import"
         );
-        // Peer deps from shared config's entry point
         assert!(
             deps.contains(&"@eslint/js".to_string()),
             "should find @eslint/js from shared config"
@@ -729,8 +788,125 @@ mod tests {
     }
 
     #[test]
+    fn is_eslint_preset_recognizes_aggregator_configs() {
+        assert!(super::is_eslint_preset("eslint-config-airbnb"));
+        assert!(super::is_eslint_preset("eslint-config-standard"));
+        assert!(super::is_eslint_preset("@antfu/eslint-config"));
+        assert!(super::is_eslint_preset("@vue/eslint-config-typescript"));
+        assert!(super::is_eslint_preset("@sveltejs/eslint-config"));
+        assert!(!super::is_eslint_preset("eslint-plugin-react"));
+        assert!(!super::is_eslint_preset("@typescript-eslint/parser"));
+        assert!(!super::is_eslint_preset("@typescript-eslint/eslint-plugin"));
+        assert!(!super::is_eslint_preset("eslint"));
+    }
+
+    #[test]
+    fn is_eslint_ecosystem_dependency_filters_to_eslint_packages() {
+        assert!(super::is_eslint_ecosystem_dependency(
+            "eslint-plugin-format"
+        ));
+        assert!(super::is_eslint_ecosystem_dependency(
+            "@eslint-react/eslint-plugin"
+        ));
+        assert!(super::is_eslint_ecosystem_dependency(
+            "@stylistic/eslint-plugin"
+        ));
+        assert!(super::is_eslint_ecosystem_dependency(
+            "eslint-config-flat-gitignore"
+        ));
+        assert!(super::is_eslint_ecosystem_dependency(
+            "@typescript-eslint/parser"
+        ));
+        assert!(super::is_eslint_ecosystem_dependency("vue-eslint-parser"));
+        assert!(super::is_eslint_ecosystem_dependency(
+            "eslint-import-resolver-typescript"
+        ));
+        assert!(!super::is_eslint_ecosystem_dependency("globals"));
+        assert!(!super::is_eslint_ecosystem_dependency("ansis"));
+        assert!(!super::is_eslint_ecosystem_dependency("cac"));
+        assert!(!super::is_eslint_ecosystem_dependency("eslint"));
+    }
+
+    #[test]
+    fn meta_preset_credits_declared_eslint_plugins() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        let pkg_dir = root.join("node_modules/@antfu/eslint-config");
+        std::fs::create_dir_all(&pkg_dir).unwrap();
+        std::fs::write(
+            pkg_dir.join("package.json"),
+            r#"{
+                "name": "@antfu/eslint-config",
+                "main": "index.js",
+                "dependencies": {
+                    "@typescript-eslint/parser": "*",
+                    "eslint-plugin-unicorn": "*",
+                    "ansis": "*"
+                },
+                "peerDependencies": {
+                    "eslint": "*",
+                    "@eslint-react/eslint-plugin": "*",
+                    "eslint-plugin-format": "*",
+                    "eslint-plugin-react-refresh": "*"
+                }
+            }"#,
+        )
+        .unwrap();
+        std::fs::write(
+            pkg_dir.join("index.js"),
+            "export default function antfu() {}",
+        )
+        .unwrap();
+
+        let source = r"
+            import antfu from '@antfu/eslint-config';
+            export default antfu({ formatters: true }).append({ rules: {} });
+        ";
+        let plugin = EslintPlugin;
+        let result = plugin.resolve_config(std::path::Path::new("eslint.config.js"), source, root);
+        let deps = &result.referenced_dependencies;
+
+        assert!(deps.contains(&"@eslint-react/eslint-plugin".to_string()));
+        assert!(deps.contains(&"eslint-plugin-format".to_string()));
+        assert!(deps.contains(&"eslint-plugin-react-refresh".to_string()));
+        assert!(deps.contains(&"@typescript-eslint/parser".to_string()));
+        assert!(deps.contains(&"eslint-plugin-unicorn".to_string()));
+        assert!(!deps.contains(&"ansis".to_string()));
+    }
+
+    #[test]
+    fn plain_plugin_import_does_not_follow_preset_deps() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        let pkg_dir = root.join("node_modules/eslint-plugin-import");
+        std::fs::create_dir_all(&pkg_dir).unwrap();
+        std::fs::write(
+            pkg_dir.join("package.json"),
+            r#"{
+                "name": "eslint-plugin-import",
+                "main": "index.js",
+                "dependencies": { "eslint-plugin-unrelated": "*" }
+            }"#,
+        )
+        .unwrap();
+        std::fs::write(pkg_dir.join("index.js"), "export default {};").unwrap();
+
+        let source = r"
+            import importPlugin from 'eslint-plugin-import';
+            export default [{ plugins: { import: importPlugin } }];
+        ";
+        let plugin = EslintPlugin;
+        let result = plugin.resolve_config(std::path::Path::new("eslint.config.js"), source, root);
+        let deps = &result.referenced_dependencies;
+
+        assert!(deps.contains(&"eslint-plugin-import".to_string()));
+        assert!(!deps.contains(&"eslint-plugin-unrelated".to_string()));
+    }
+
+    #[test]
     fn shared_config_missing_node_modules_graceful() {
-        // When node_modules doesn't exist, should not panic
         let source = r"
             import config from 'some-nonexistent-config';
             export default [...config];
@@ -742,7 +918,6 @@ mod tests {
             std::path::Path::new("/nonexistent"),
         );
 
-        // Should still find the direct import
         assert!(
             result
                 .referenced_dependencies
@@ -752,8 +927,6 @@ mod tests {
 
     #[test]
     fn find_package_dir_finds_local_install_at_depth_zero() {
-        // Confirms the walk does not skip a package that is co-located with
-        // the workspace's own node_modules (the default before this PR).
         let dir = tempfile::tempdir().unwrap();
         let workspace = dir.path();
         let pkg_dir = workspace.join("node_modules/local-pkg");
@@ -766,12 +939,9 @@ mod tests {
 
     #[test]
     fn find_package_dir_returns_none_when_walk_finds_nothing() {
-        // Walk-up failure must return None cleanly, not panic. Uses a deep
-        // workspace path with no node_modules anywhere along the chain.
         let dir = tempfile::tempdir().unwrap();
         let deep = dir.path().join("apps/foo/src");
         std::fs::create_dir_all(&deep).unwrap();
-        // Sanity: no node_modules exists on this path.
         assert!(super::find_package_dir(&deep, "missing-pkg").is_none());
     }
 
@@ -799,8 +969,6 @@ mod tests {
         assert!(path.ends_with("dist/index.mjs"));
     }
 
-    // ── Workspace-package flat-config dep tracing ──────────────────
-
     /// Regression test: apps/foo/eslint.config.mjs imports @scope/eslint-config,
     /// which itself imports eslint-plugin-react. Both packages list eslint-plugin-react
     /// in devDependencies. Plow must NOT flag eslint-plugin-react as unused-devdep.
@@ -811,17 +979,9 @@ mod tests {
     /// must walk up to the monorepo root to find the package.
     #[test]
     fn flat_config_workspace_package_dep_chain_traced() {
-        // Set up a minimal monorepo layout:
-        //   <root>/
-        //     node_modules/@scope/eslint-config/
-        //       package.json  (main: "index.js")
-        //       index.js      (imports eslint-plugin-react)
-        //     apps/foo/
-        //       eslint.config.mjs  (imports @scope/eslint-config)
         let dir = tempfile::tempdir().unwrap();
         let monorepo_root = dir.path();
 
-        // Shared config package in hoisted node_modules
         let shared_pkg_dir = monorepo_root.join("node_modules/@scope/eslint-config");
         std::fs::create_dir_all(&shared_pkg_dir).unwrap();
         std::fs::write(
@@ -839,7 +999,6 @@ mod tests {
         )
         .unwrap();
 
-        // App workspace with its own eslint.config.mjs
         let app_dir = monorepo_root.join("apps/foo");
         std::fs::create_dir_all(&app_dir).unwrap();
         let eslint_config_path = app_dir.join("eslint.config.mjs");
@@ -850,7 +1009,6 @@ mod tests {
         std::fs::write(&eslint_config_path, source).unwrap();
 
         let plugin = EslintPlugin;
-        // root = apps/foo — mirrors how run_workspace_fast calls resolve_config
         let result = plugin.resolve_config(&eslint_config_path, source, &app_dir);
 
         let deps = &result.referenced_dependencies;
@@ -882,9 +1040,7 @@ mod tests {
             r#"{"name": "@scope/eslint-config", "main": "index.js"}"#,
         )
         .unwrap();
-        // main entry does NOT import eslint-plugin-react
         std::fs::write(shared_pkg_dir.join("index.js"), r"export default [];").unwrap();
-        // /next subpath DOES import eslint-plugin-react
         std::fs::write(
             shared_pkg_dir.join("next.js"),
             r"
@@ -922,8 +1078,6 @@ mod tests {
         );
     }
 
-    // ── ESLint resolver name resolution ────────────────────────────
-
     #[test]
     fn resolver_short_name() {
         assert_eq!(
@@ -950,8 +1104,6 @@ mod tests {
         );
     }
 
-    // ── ESLint resolver config integration ─────────────────────────
-
     #[test]
     fn resolve_config_resolver_object_keys() {
         let source = r#"
@@ -976,7 +1128,6 @@ mod tests {
             deps.contains(&"eslint-import-resolver-typescript".to_string()),
             "should resolve typescript resolver"
         );
-        // "node" is built-in, should NOT be added
         assert!(
             !deps.iter().any(|d| d == "eslint-import-resolver-node"),
             "node resolver is built-in"
@@ -1026,7 +1177,6 @@ mod tests {
 
     #[test]
     fn resolve_config_resolver_flat_config() {
-        // Flat configs that use defineConfig() can have settings extracted
         let source = r#"
             import { defineConfig } from 'eslint/config';
             export default defineConfig({
@@ -1051,11 +1201,8 @@ mod tests {
         );
     }
 
-    // ── Overrides[*] sub-config extraction ──────────────────────────
-
     #[test]
     fn resolve_config_overrides_parser_json() {
-        // Issue #198 bug 1: parser inside overrides[*] in .eslintrc.json
         let source = r#"{
             "root": true,
             "overrides": [{ "files": ["*.ts"], "parser": "@typescript-eslint/parser" }]
@@ -1111,12 +1258,8 @@ mod tests {
         );
     }
 
-    // ── Relative-path extends chain following ───────────────────────
-
     #[test]
     fn resolve_config_relative_extends_to_js_file() {
-        // Issue #198 bug 2: .eslintrc.json extends a JS file in a subdirectory.
-        // Plugins/extends/parser referenced in the JS file must be credited.
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
 
@@ -1191,8 +1334,6 @@ mod tests {
 
     #[test]
     fn resolve_config_relative_extends_extensionless_resolves_to_cjs() {
-        // ESLint accepts extension-less paths like "./config/base"; we probe
-        // the same short list as ESLint (.js, .cjs, .mjs, .json).
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
 
@@ -1229,7 +1370,6 @@ mod tests {
 
     #[test]
     fn resolve_config_relative_extends_cycle_protected() {
-        // A.js extends B.js extends A.js: must not infinite-loop.
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
 
@@ -1248,7 +1388,6 @@ mod tests {
 
     #[test]
     fn resolve_config_relative_extends_missing_target_graceful() {
-        // Pointing at a non-existent file must not panic, silently skip.
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
 
@@ -1259,7 +1398,6 @@ mod tests {
         let plugin = EslintPlugin;
         let result = plugin.resolve_config(&root_config, source, root);
 
-        // The non-path entry is still resolved
         assert!(
             result
                 .referenced_dependencies

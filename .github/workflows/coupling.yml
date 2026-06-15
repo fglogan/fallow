@@ -43,7 +43,7 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - uses: ./.github/actions/setup-rust
         with:
@@ -59,12 +59,12 @@ jobs:
         # Note: --acyclic is intentionally omitted. cargo-modules reports
         # struct-to-method relationships (e.g. Foo -> Foo::bar) as circular
         # dependencies even with --no-fns, producing false positives.
-        # Cycle detection is handled by fallow's own --circular-deps instead.
+        # Cycle detection is handled by plow's own --circular-deps instead.
         run: |
           CARGO_MODULES_BIN="${CARGO_HOME:-$HOME/.cargo}/bin/cargo-modules"
           : > coupling-dot.txt
           failures=0
-          for crate in fallow-config fallow-types fallow-extract fallow-graph fallow-core fallow-cli; do
+          for crate in plow-config plow-types plow-extract plow-graph plow-core plow-cli; do
             if "$CARGO_MODULES_BIN" dependencies --lib -p "$crate" \
               --no-externs --no-fns --no-sysroot --no-traits --no-types --no-owns \
               >> coupling-dot.txt 2>/tmp/cargo-modules.stderr; then

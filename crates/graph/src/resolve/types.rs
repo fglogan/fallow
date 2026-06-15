@@ -223,7 +223,7 @@ impl ResolvedModule {
 pub(super) struct ResolveContext<'a> {
     /// The oxc_resolver instance (configured once, shared across threads).
     pub resolver: &'a Resolver,
-    /// CSS-only resolver with the package.json `style` condition enabled.
+    /// CSS-only resolver with package.json `sass` and `style` conditions enabled.
     /// Used only for stylesheet package subpaths so JS/TS imports do not
     /// accidentally prefer CSS export branches.
     pub style_resolver: &'a Resolver,
@@ -337,7 +337,6 @@ mod tests {
         let canonical = dunce::canonicalize(&test_file).unwrap();
         assert_eq!(fallback.get(&canonical), Some(FileId(42)));
 
-        // Second call uses cached map (OnceLock)
         assert_eq!(fallback.get(&canonical), Some(FileId(42)));
 
         let _ = std::fs::remove_dir_all(&temp);

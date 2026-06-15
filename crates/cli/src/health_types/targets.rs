@@ -173,7 +173,7 @@ impl Confidence {
 ///
 /// Provides enough detail for an AI agent to act on a recommendation
 /// without a second tool call.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TargetEvidence {
     /// Names of unused exports (populated for `RemoveDeadCode` targets).
@@ -185,6 +185,51 @@ pub struct TargetEvidence {
     /// Files forming the import cycle (populated for `BreakCircularDependency` targets).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cycle_path: Vec<String>,
+    /// Files that directly import this target, with imported and local symbols.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub direct_callers: Vec<DirectCallerEvidence>,
+    /// Other duplicate-code instances that share a clone group with this target.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub clone_siblings: Vec<CloneSiblingEvidence>,
+}
+
+/// A direct importer referenced in target evidence.
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct DirectCallerEvidence {
+    /// File that directly imports the target.
+    #[serde(serialize_with = "plow_types::serde_path::serialize")]
+    pub path: std::path::PathBuf,
+    /// Symbols imported from the target by this file.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub symbols: Vec<DirectCallerSymbolEvidence>,
+}
+
+/// Symbol details for a direct importer.
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct DirectCallerSymbolEvidence {
+    /// Imported binding name.
+    pub imported: String,
+    /// Local binding name in the importing file.
+    pub local: String,
+    /// Whether the import is type-only.
+    pub type_only: bool,
+}
+
+/// A duplicate-code sibling referenced in target evidence.
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CloneSiblingEvidence {
+    /// File containing the sibling clone instance.
+    #[serde(serialize_with = "plow_types::serde_path::serialize")]
+    pub path: std::path::PathBuf,
+    /// 1-based start line of the sibling clone.
+    pub start_line: usize,
+    /// 1-based end line of the sibling clone.
+    pub end_line: usize,
+    /// Stable duplicate-group handle, matching `dupes --trace dup:<id>`.
+    pub fingerprint: String,
 }
 
 /// A function referenced in target evidence.
@@ -232,8 +277,6 @@ pub struct RefactoringTarget {
 mod tests {
     use super::*;
 
-    // --- RecommendationCategory ---
-
     #[test]
     fn category_labels_are_non_empty() {
         let categories = [
@@ -268,8 +311,6 @@ mod tests {
         let unique: rustc_hash::FxHashSet<&&str> = labels.iter().collect();
         assert_eq!(labels.len(), unique.len(), "category labels must be unique");
     }
-
-    // --- Serde serialization ---
 
     #[test]
     fn category_serializes_as_snake_case() {
@@ -338,8 +379,6 @@ mod tests {
         assert_eq!(parsed["threshold"], 10.0);
     }
 
-    // --- RecommendationCategory compact_labels ---
-
     #[test]
     fn category_compact_labels_are_non_empty() {
         let categories = [
@@ -399,8 +438,6 @@ mod tests {
         }
     }
 
-    // --- EffortEstimate ---
-
     #[test]
     fn effort_labels_are_non_empty() {
         let efforts = [
@@ -429,19 +466,21 @@ mod tests {
         );
     }
 
-    // --- TargetEvidence ---
-
     #[test]
     fn target_evidence_skips_empty_fields() {
         let evidence = TargetEvidence {
             unused_exports: vec![],
             complex_functions: vec![],
             cycle_path: vec![],
+            direct_callers: vec![],
+            clone_siblings: vec![],
         };
         let json = serde_json::to_string(&evidence).unwrap();
         assert!(!json.contains("unused_exports"));
         assert!(!json.contains("complex_functions"));
         assert!(!json.contains("cycle_path"));
+        assert!(!json.contains("direct_callers"));
+        assert!(!json.contains("clone_siblings"));
     }
 
     #[test]
@@ -454,11 +493,27 @@ mod tests {
                 cognitive: 30,
             }],
             cycle_path: vec![],
+            direct_callers: vec![DirectCallerEvidence {
+                path: "src/consumer.ts".into(),
+                symbols: vec![DirectCallerSymbolEvidence {
+                    imported: "processData".into(),
+                    local: "processData".into(),
+                    type_only: false,
+                }],
+            }],
+            clone_siblings: vec![CloneSiblingEvidence {
+                path: "src/peer.ts".into(),
+                start_line: 12,
+                end_line: 20,
+                fingerprint: "dup:12345678".into(),
+            }],
         };
         let json = serde_json::to_string(&evidence).unwrap();
         assert!(json.contains("unused_exports"));
         assert!(json.contains("complex_functions"));
         assert!(json.contains("processData"));
+        assert!(json.contains("direct_callers"));
+        assert!(json.contains("clone_siblings"));
         assert!(!json.contains("cycle_path"));
     }
 }

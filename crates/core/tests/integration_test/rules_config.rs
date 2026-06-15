@@ -1,7 +1,5 @@
 use super::common::{create_config, fixture_path};
-use plow_config::{PlowConfig, OutputFormat, RulesConfig};
-
-// ── Rules "off" disables detection ─────────────────────────────
+use plow_config::{OutputFormat, PlowConfig, RulesConfig};
 
 #[test]
 fn rules_off_disables_unused_files() {
@@ -68,8 +66,6 @@ fn rules_off_disables_duplicate_exports() {
     );
 }
 
-// ── Ignore exports ─────────────────────────────────────────────
-
 #[test]
 fn ignore_exports_wildcard() {
     let root = fixture_path("ignore-exports");
@@ -97,6 +93,7 @@ fn ignore_exports_wildcard() {
         boundaries: plow_config::BoundaryConfig::default(),
         production: false.into(),
         plugins: vec![],
+        rule_packs: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
@@ -104,6 +101,7 @@ fn ignore_exports_wildcard() {
         codeowners: None,
         public_packages: vec![],
         flags: plow_config::FlagsConfig::default(),
+        security: plow_config::SecurityConfig::default(),
         fix: plow_config::FixConfig::default(),
         resolve: plow_config::ResolveConfig::default(),
         sealed: false,
@@ -158,6 +156,7 @@ fn ignore_exports_specific() {
         boundaries: plow_config::BoundaryConfig::default(),
         production: false.into(),
         plugins: vec![],
+        rule_packs: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
@@ -165,6 +164,7 @@ fn ignore_exports_specific() {
         codeowners: None,
         public_packages: vec![],
         flags: plow_config::FlagsConfig::default(),
+        security: plow_config::SecurityConfig::default(),
         fix: plow_config::FixConfig::default(),
         resolve: plow_config::ResolveConfig::default(),
         sealed: false,
@@ -282,10 +282,6 @@ fn ignore_exports_used_in_file_kind_form_can_target_types_only() {
 
 #[test]
 fn ignore_exports_used_in_file_does_not_suppress_export_specifier_self_references() {
-    // Regression: `function foo() {}; export { foo };` and
-    // `export default foo;` reference the binding only at the export site.
-    // The export specifier identifier is not a same-file *use*, so these
-    // exports must still be reported when ignoreExportsUsedInFile is on.
     let root = fixture_path("ignore-exports-used-in-file");
     let mut config = create_config(root);
     config.ignore_exports_used_in_file = true.into();
@@ -314,8 +310,6 @@ fn ignore_exports_used_in_file_does_not_suppress_export_specifier_self_reference
     );
 }
 
-// ── Ignore dependencies ────────────────────────────────────────
-
 #[test]
 fn ignore_dependencies_config() {
     let root = fixture_path("basic-project");
@@ -340,6 +334,7 @@ fn ignore_dependencies_config() {
         boundaries: plow_config::BoundaryConfig::default(),
         production: false.into(),
         plugins: vec![],
+        rule_packs: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
@@ -347,6 +342,7 @@ fn ignore_dependencies_config() {
         codeowners: None,
         public_packages: vec![],
         flags: plow_config::FlagsConfig::default(),
+        security: plow_config::SecurityConfig::default(),
         fix: plow_config::FixConfig::default(),
         resolve: plow_config::ResolveConfig::default(),
         sealed: false,
@@ -367,8 +363,6 @@ fn ignore_dependencies_config() {
     );
 }
 
-// ── JSON serialization ─────────────────────────────────────────
-
 #[test]
 fn results_serializable_to_json() {
     let root = fixture_path("basic-project");
@@ -376,6 +370,5 @@ fn results_serializable_to_json() {
     let results = plow_core::analyze(&config).expect("analysis should succeed");
     let json = serde_json::to_string(&results).unwrap();
     assert!(!json.is_empty());
-    // Verify it round-trips
     let _: serde_json::Value = serde_json::from_str(&json).unwrap();
 }

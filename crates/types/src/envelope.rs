@@ -23,7 +23,7 @@ use serde::Serialize;
 /// changes, enum-variant removals, semantic changes to existing fields) DO
 /// bump. To detect newly-added fields without a bump, check field presence via
 /// JSON-key existence rather than gating on the version. v4 was introduced
-/// alongside fallow-cov-protocol 0.2 (per-finding verdict, stable IDs, evidence
+/// alongside plow-cov-protocol 0.2 (per-finding verdict, stable IDs, evidence
 /// block, renamed summary fields); v5 introduced health_score formula_version 2
 /// with scale-invariant scoring semantics; v6 widened `AddToConfigAction.value`
 /// from a scalar string to `oneOf: [string, array]` so the new `ignoreExports`
@@ -102,6 +102,25 @@ pub struct CheckSummary {
     pub unused_enum_members: usize,
     /// Unused class members.
     pub unused_class_members: usize,
+    /// Unused store members.
+    #[serde(default)]
+    pub unused_store_members: usize,
+    /// Vue/Svelte injects whose key is provided nowhere in the project.
+    #[serde(default)]
+    pub unprovided_injects: usize,
+    /// Vue/Svelte components reachable but rendered nowhere in the project.
+    #[serde(default)]
+    pub unrendered_components: usize,
+    /// Vue `<script setup>` props referenced nowhere inside their own SFC.
+    #[serde(default)]
+    pub unused_component_props: usize,
+    /// Vue `<script setup>` emits emitted nowhere inside their own SFC.
+    #[serde(default)]
+    pub unused_component_emits: usize,
+    /// Next.js Server Actions (exports of `"use server"` files) referenced by no
+    /// code in the project.
+    #[serde(default)]
+    pub unused_server_actions: usize,
     /// Imports that could not be resolved against the project's module graph.
     pub unresolved_imports: usize,
     /// Dependencies imported but absent from `package.json`.
@@ -122,6 +141,15 @@ pub struct CheckSummary {
     pub re_export_cycles: usize,
     /// Imports that cross architecture boundary rules.
     pub boundary_violations: usize,
+    /// Files that match no architecture boundary zone.
+    #[serde(default)]
+    pub boundary_coverage_violations: usize,
+    /// Calls from zoned files to callees forbidden for that zone.
+    #[serde(default)]
+    pub boundary_call_violations: usize,
+    /// Banned calls and banned imports matched by declarative rule packs.
+    #[serde(default)]
+    pub policy_violations: usize,
     /// Suppression comments that no longer match a finding.
     pub stale_suppressions: usize,
     /// Unused pnpm-workspace catalog entries.
@@ -136,6 +164,25 @@ pub struct CheckSummary {
     pub unused_dependency_overrides: usize,
     /// Pnpm `overrides:` entries whose key or value cannot be parsed.
     pub misconfigured_dependency_overrides: usize,
+    /// `"use client"` files that export a Next.js server-only / route-config name.
+    #[serde(default)]
+    pub invalid_client_exports: usize,
+    /// Barrel files that re-export both a `"use client"` origin and a
+    /// server-only origin.
+    #[serde(default)]
+    pub mixed_client_server_barrels: usize,
+    /// Misplaced `"use client"` / `"use server"` directives written as
+    /// expression statements after a non-directive statement.
+    #[serde(default)]
+    pub misplaced_directives: usize,
+    /// Next.js App Router route files that resolve to the same URL within one
+    /// app-root.
+    #[serde(default)]
+    pub route_collisions: usize,
+    /// Sibling Next.js dynamic route segments at one position using different
+    /// param spellings.
+    #[serde(default)]
+    pub dynamic_segment_name_conflicts: usize,
 }
 
 /// Per-category delta comparison against a saved baseline. Only present in
@@ -237,6 +284,9 @@ pub struct Meta {
     /// URL to the documentation page for this command.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub docs: Option<String>,
+    /// Local telemetry correlation metadata for agent follow-up runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub telemetry: Option<TelemetryMeta>,
     /// Per-field definitions for envelope fields and action payload fields.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub field_definitions: BTreeMap<String, String>,
@@ -246,6 +296,17 @@ pub struct Meta {
     /// Per-rule definitions for check command output.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub rules: BTreeMap<String, MetaRule>,
+}
+
+/// Privacy-safe local run metadata emitted for JSON consumers.
+#[derive(Debug, Clone, Default, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct TelemetryMeta {
+    /// Ephemeral local token that may be passed to the hidden `--parent-run`
+    /// flag on a later command. It is not derived from repository, path, user,
+    /// machine, project, or cloud data.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub analysis_run_id: Option<String>,
 }
 
 /// Single-metric definition inside [`Meta::metrics`].

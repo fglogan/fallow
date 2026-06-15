@@ -1,8 +1,10 @@
 use crate::health_types::{
-    COGNITIVE_EXTRACTION_THRESHOLD, Confidence, ContributingFactor, EffortEstimate,
-    EvidenceFunction, FileHealthScore, HotspotEntry, RecommendationCategory, RefactoringTarget,
-    TargetEvidence, TargetThresholds,
+    COGNITIVE_EXTRACTION_THRESHOLD, CloneSiblingEvidence, Confidence, ContributingFactor,
+    DirectCallerEvidence, EffortEstimate, EvidenceFunction, FileHealthScore, HotspotEntry,
+    RecommendationCategory, RefactoringTarget, TargetEvidence, TargetThresholds,
 };
+
+const MAX_CLONE_SIBLING_EVIDENCE: usize = 5;
 
 /// Auxiliary data used by `compute_refactoring_targets` to generate evidence and apply rules.
 pub(super) struct TargetAuxData<'a> {
@@ -12,10 +14,15 @@ pub(super) struct TargetAuxData<'a> {
     pub value_export_counts: &'a rustc_hash::FxHashMap<std::path::PathBuf, usize>,
     pub unused_export_names: &'a rustc_hash::FxHashMap<std::path::PathBuf, Vec<String>>,
     pub cycle_members: &'a rustc_hash::FxHashMap<std::path::PathBuf, Vec<std::path::PathBuf>>,
+    pub direct_callers: &'a rustc_hash::FxHashMap<std::path::PathBuf, Vec<DirectCallerEvidence>>,
+    pub clone_siblings: &'a rustc_hash::FxHashMap<std::path::PathBuf, Vec<CloneSiblingEvidence>>,
 }
 
-impl<'a> From<&'a super::scoring::FileScoreOutput> for TargetAuxData<'a> {
-    fn from(output: &'a super::scoring::FileScoreOutput) -> Self {
+impl<'a> TargetAuxData<'a> {
+    pub(super) fn from_output(
+        output: &'a super::scoring::FileScoreOutput,
+        clone_siblings: &'a rustc_hash::FxHashMap<std::path::PathBuf, Vec<CloneSiblingEvidence>>,
+    ) -> Self {
         Self {
             circular_files: &output.circular_files,
             top_complex_fns: &output.top_complex_fns,
@@ -23,6 +30,8 @@ impl<'a> From<&'a super::scoring::FileScoreOutput> for TargetAuxData<'a> {
             value_export_counts: &output.value_export_counts,
             unused_export_names: &output.unused_export_names,
             cycle_members: &output.cycle_members,
+            direct_callers: &output.direct_callers,
+            clone_siblings,
         }
     }
 }
@@ -106,7 +115,6 @@ fn compute_target_priority(
     hotspot_score: Option<f64>,
     thresholds: &DistributionThresholds,
 ) -> f64 {
-    // Normalize all inputs to [0, 1] so each weight is a true percentage share.
     let density_norm = score.complexity_density.min(1.0);
     let fan_in_norm = (score.fan_in as f64 / thresholds.fan_in_p95).min(1.0);
     let fan_out_norm = (score.fan_out as f64 / thresholds.fan_out_p95).min(1.0);
@@ -132,23 +140,13 @@ fn compute_target_priority(
 /// Files matching no rule are skipped.
 ///
 /// Targets are sorted by efficiency (priority / effort) descending to surface quick wins first.
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "f64 percentile and ratio values are bounded by collection sizes"
-)]
-#[expect(
-    clippy::too_many_lines,
-    reason = "target computation applies 7 refactoring rules sequentially"
-)]
 pub(super) fn compute_refactoring_targets(
     file_scores: &[FileHealthScore],
     aux: &TargetAuxData,
     hotspots: &[HotspotEntry],
 ) -> (Vec<RefactoringTarget>, TargetThresholds) {
-    // Compute adaptive thresholds from the project's distribution
     let thresholds = compute_thresholds(file_scores);
 
-    // Build hotspot lookup by path for O(1) access
     let hotspot_map: rustc_hash::FxHashMap<&std::path::Path, &HotspotEntry> =
         hotspots.iter().map(|h| (h.path.as_path(), h)).collect();
 
@@ -166,105 +164,26 @@ pub(super) fn compute_refactoring_targets(
             .copied()
             .unwrap_or(0);
 
-        // Collect all contributing factors (using adaptive thresholds)
         let mut factors = Vec::new();
 
-        if score.complexity_density > 0.3 {
-            factors.push(ContributingFactor {
-                metric: "complexity_density",
-                value: score.complexity_density,
-                threshold: 0.3,
-                detail: format!("density {:.2} exceeds 0.3", score.complexity_density),
-            });
-        }
-        if score.fan_in as f64 >= thresholds.fan_in_p75 {
-            factors.push(ContributingFactor {
-                metric: "fan_in",
-                value: score.fan_in as f64,
-                threshold: thresholds.fan_in_p75,
-                detail: format!("{} files depend on this", score.fan_in),
-            });
-        }
-        if score.dead_code_ratio >= 0.5 && value_exports >= 3 {
-            let unused_count = (score.dead_code_ratio * value_exports as f64)
-                .round()
-                .min(value_exports as f64) as usize;
-            factors.push(ContributingFactor {
-                metric: "dead_code_ratio",
-                value: score.dead_code_ratio,
-                threshold: 0.5,
-                detail: format!(
-                    "{} unused of {} value exports ({:.0}%)",
-                    unused_count,
-                    value_exports,
-                    score.dead_code_ratio * 100.0
-                ),
-            });
-        }
-        if score.fan_out >= thresholds.fan_out_p90 {
-            factors.push(ContributingFactor {
-                metric: "fan_out",
-                value: score.fan_out as f64,
-                threshold: thresholds.fan_out_p90 as f64,
-                detail: format!("imports {} modules", score.fan_out),
-            });
-        }
-        if is_circular {
-            factors.push(ContributingFactor {
-                metric: "circular_dependency",
-                value: 1.0,
-                threshold: 1.0,
-                detail: "participates in an import cycle".into(),
-            });
-        }
-        if let Some(h) = hotspot
-            && h.score >= 30.0
-        {
-            factors.push(ContributingFactor {
-                metric: "hotspot_score",
-                value: h.score,
-                threshold: 30.0,
-                detail: format!(
-                    "hotspot score {:.0} ({} commits, {} trend)",
-                    h.score,
-                    h.commits,
-                    match h.trend {
-                        plow_core::churn::ChurnTrend::Accelerating => "accelerating",
-                        plow_core::churn::ChurnTrend::Cooling => "cooling",
-                        plow_core::churn::ChurnTrend::Stable => "stable",
-                    }
-                ),
-            });
-        }
-        if let Some(fns) = top_fns
-            && let Some((name, _, cog)) = fns.first()
-            && *cog >= COGNITIVE_EXTRACTION_THRESHOLD
-        {
-            factors.push(ContributingFactor {
-                metric: "cognitive_complexity",
-                value: f64::from(*cog),
-                threshold: f64::from(COGNITIVE_EXTRACTION_THRESHOLD),
-                detail: format!("{name} has cognitive complexity {cog}"),
-            });
-        }
-        if score.crap_above_threshold >= 2 && score.crap_max >= super::scoring::CRAP_THRESHOLD {
-            factors.push(ContributingFactor {
-                metric: "crap_max",
-                value: score.crap_max,
-                threshold: super::scoring::CRAP_THRESHOLD,
-                detail: format!(
-                    "{} functions with untested complexity risk",
-                    score.crap_above_threshold,
-                ),
-            });
-        }
+        push_structural_target_factors(
+            &mut factors,
+            score,
+            value_exports,
+            is_circular,
+            &thresholds,
+        );
+        push_runtime_target_factors(
+            &mut factors,
+            score,
+            hotspot.copied(),
+            top_fns.map(Vec::as_slice),
+        );
 
-        // Skip if no factors triggered
         if factors.is_empty() {
             continue;
         }
 
-        // Evaluate rules in priority order — first match determines category + recommendation
         let matched = try_match_rules(
             score,
             hotspot.copied(),
@@ -289,6 +208,8 @@ pub(super) fn compute_refactoring_targets(
             aux.unused_export_names,
             top_fns,
             aux.cycle_members,
+            aux.direct_callers,
+            aux.clone_siblings,
         );
 
         targets.push(RefactoringTarget {
@@ -304,7 +225,123 @@ pub(super) fn compute_refactoring_targets(
         });
     }
 
-    // Sort by efficiency descending (quick wins first), break ties by priority desc, then path
+    sort_refactoring_targets(&mut targets);
+    let exported_thresholds = export_target_thresholds(&thresholds);
+
+    (targets, exported_thresholds)
+}
+
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "unused export estimate is capped by the value export count"
+)]
+fn push_structural_target_factors(
+    factors: &mut Vec<ContributingFactor>,
+    score: &FileHealthScore,
+    value_exports: usize,
+    is_circular: bool,
+    thresholds: &DistributionThresholds,
+) {
+    if score.complexity_density > 0.3 {
+        factors.push(ContributingFactor {
+            metric: "complexity_density",
+            value: score.complexity_density,
+            threshold: 0.3,
+            detail: format!("density {:.2} exceeds 0.3", score.complexity_density),
+        });
+    }
+    if score.fan_in as f64 >= thresholds.fan_in_p75 {
+        factors.push(ContributingFactor {
+            metric: "fan_in",
+            value: score.fan_in as f64,
+            threshold: thresholds.fan_in_p75,
+            detail: format!("{} files depend on this", score.fan_in),
+        });
+    }
+    if score.dead_code_ratio >= 0.5 && value_exports >= 3 {
+        let unused_count = (score.dead_code_ratio * value_exports as f64)
+            .round()
+            .min(value_exports as f64) as usize;
+        factors.push(ContributingFactor {
+            metric: "dead_code_ratio",
+            value: score.dead_code_ratio,
+            threshold: 0.5,
+            detail: format!(
+                "{} unused of {} value exports ({:.0}%)",
+                unused_count,
+                value_exports,
+                score.dead_code_ratio * 100.0
+            ),
+        });
+    }
+    if score.fan_out >= thresholds.fan_out_p90 {
+        factors.push(ContributingFactor {
+            metric: "fan_out",
+            value: score.fan_out as f64,
+            threshold: thresholds.fan_out_p90 as f64,
+            detail: format!("imports {} modules", score.fan_out),
+        });
+    }
+    if is_circular {
+        factors.push(ContributingFactor {
+            metric: "circular_dependency",
+            value: 1.0,
+            threshold: 1.0,
+            detail: "participates in an import cycle".into(),
+        });
+    }
+}
+
+fn push_runtime_target_factors(
+    factors: &mut Vec<ContributingFactor>,
+    score: &FileHealthScore,
+    hotspot: Option<&HotspotEntry>,
+    top_fns: Option<&[(String, u32, u16)]>,
+) {
+    if let Some(h) = hotspot
+        && h.score >= 30.0
+    {
+        factors.push(ContributingFactor {
+            metric: "hotspot_score",
+            value: h.score,
+            threshold: 30.0,
+            detail: format!(
+                "hotspot score {:.0} ({} commits, {} trend)",
+                h.score,
+                h.commits,
+                match h.trend {
+                    plow_core::churn::ChurnTrend::Accelerating => "accelerating",
+                    plow_core::churn::ChurnTrend::Cooling => "cooling",
+                    plow_core::churn::ChurnTrend::Stable => "stable",
+                }
+            ),
+        });
+    }
+    if let Some(fns) = top_fns
+        && let Some((name, _, cog)) = fns.first()
+        && *cog >= COGNITIVE_EXTRACTION_THRESHOLD
+    {
+        factors.push(ContributingFactor {
+            metric: "cognitive_complexity",
+            value: f64::from(*cog),
+            threshold: f64::from(COGNITIVE_EXTRACTION_THRESHOLD),
+            detail: format!("{name} has cognitive complexity {cog}"),
+        });
+    }
+    if score.crap_above_threshold >= 2 && score.crap_max >= super::scoring::CRAP_THRESHOLD {
+        factors.push(ContributingFactor {
+            metric: "crap_max",
+            value: score.crap_max,
+            threshold: super::scoring::CRAP_THRESHOLD,
+            detail: format!(
+                "{} functions with untested complexity risk",
+                score.crap_above_threshold,
+            ),
+        });
+    }
+}
+
+fn sort_refactoring_targets(targets: &mut [RefactoringTarget]) {
     targets.sort_by(|a, b| {
         b.efficiency
             .partial_cmp(&a.efficiency)
@@ -316,15 +353,15 @@ pub(super) fn compute_refactoring_targets(
             })
             .then_with(|| a.path.cmp(&b.path))
     });
+}
 
-    let exported_thresholds = TargetThresholds {
+fn export_target_thresholds(thresholds: &DistributionThresholds) -> TargetThresholds {
+    TargetThresholds {
         fan_in_p95: thresholds.fan_in_p95,
         fan_in_p75: thresholds.fan_in_p75,
         fan_out_p95: thresholds.fan_out_p95,
         fan_out_p90: thresholds.fan_out_p90,
-    };
-
-    (targets, exported_thresholds)
+    }
 }
 
 /// Try to match a file against refactoring rules in priority order.
@@ -343,7 +380,6 @@ fn try_match_rules(
     value_exports: usize,
     thresholds: &DistributionThresholds,
 ) -> Option<(RecommendationCategory, String)> {
-    // Rule 1: Urgent churn + complexity
     if let Some(h) = hotspot
         && h.score >= 50.0
         && matches!(h.trend, plow_core::churn::ChurnTrend::Accelerating)
@@ -355,7 +391,6 @@ fn try_match_rules(
         ));
     }
 
-    // Rule 2: Circular dependency with high fan-in
     if is_circular && score.fan_in >= 5 {
         return Some((
             RecommendationCategory::BreakCircularDependency,
@@ -366,7 +401,6 @@ fn try_match_rules(
         ));
     }
 
-    // Rule 3: Split high-impact file (adaptive fan-in thresholds)
     let fan_in_high = thresholds.fan_in_p95 as usize;
     let fan_in_moderate = thresholds.fan_in_p75 as usize;
     if score.complexity_density > 0.3
@@ -382,7 +416,6 @@ fn try_match_rules(
         ));
     }
 
-    // Rule 4: Remove dead code (gate: >=3 value exports)
     if score.dead_code_ratio >= 0.5 && value_exports >= 3 {
         let unused_count = (score.dead_code_ratio * value_exports as f64).round() as usize;
         return Some((
@@ -395,7 +428,6 @@ fn try_match_rules(
         ));
     }
 
-    // Rule 5: Extract complex functions above cognitive extraction threshold
     if let Some(fns) = top_fns {
         let high: Vec<&(String, u32, u16)> = fns
             .iter()
@@ -416,7 +448,6 @@ fn try_match_rules(
         }
     }
 
-    // Rule 6: Extract dependencies (not for entry points, adaptive fan-out threshold)
     if !is_entry && score.fan_out >= thresholds.fan_out_p90 && score.maintainability_index < 60.0 {
         return Some((
             RecommendationCategory::ExtractDependencies,
@@ -427,7 +458,6 @@ fn try_match_rules(
         ));
     }
 
-    // Rule 7: High untested complexity risk (multiple high-CRAP functions)
     if score.crap_above_threshold >= 2 && score.complexity_density > 0.3 {
         return Some((
             RecommendationCategory::AddTestCoverage,
@@ -438,7 +468,6 @@ fn try_match_rules(
         ));
     }
 
-    // Rule 8: Circular dependency (low fan-in fallback)
     if is_circular {
         return Some((
             RecommendationCategory::BreakCircularDependency,
@@ -452,16 +481,13 @@ fn try_match_rules(
 /// Map recommendation category to confidence level based on data source reliability.
 const fn confidence_for_category(category: &RecommendationCategory) -> Confidence {
     match category {
-        // Deterministic: graph analysis (dead code, cycles) + AST analysis (complexity)
         RecommendationCategory::RemoveDeadCode
         | RecommendationCategory::BreakCircularDependency
         | RecommendationCategory::ExtractComplexFunctions
         | RecommendationCategory::AddTestCoverage => Confidence::High,
-        // Heuristic thresholds (fan-in/fan-out coupling)
         RecommendationCategory::SplitHighImpact | RecommendationCategory::ExtractDependencies => {
             Confidence::Medium
         }
-        // Depends on git history quality
         RecommendationCategory::UrgentChurnComplexity => Confidence::Low,
     }
 }
@@ -498,19 +524,19 @@ fn build_evidence(
     unused_export_names: &rustc_hash::FxHashMap<std::path::PathBuf, Vec<String>>,
     top_fns: Option<&Vec<(String, u32, u16)>>,
     cycle_members: &rustc_hash::FxHashMap<std::path::PathBuf, Vec<std::path::PathBuf>>,
+    direct_callers: &rustc_hash::FxHashMap<std::path::PathBuf, Vec<DirectCallerEvidence>>,
+    clone_siblings: &rustc_hash::FxHashMap<std::path::PathBuf, Vec<CloneSiblingEvidence>>,
 ) -> Option<TargetEvidence> {
+    let mut evidence = TargetEvidence {
+        direct_callers: direct_callers.get(path).cloned().unwrap_or_default(),
+        clone_siblings: clone_siblings.get(path).cloned().unwrap_or_default(),
+        ..Default::default()
+    };
+
     match category {
         RecommendationCategory::RemoveDeadCode => {
             let exports = unused_export_names.get(path).cloned().unwrap_or_default();
-            if exports.is_empty() {
-                None
-            } else {
-                Some(TargetEvidence {
-                    unused_exports: exports,
-                    complex_functions: vec![],
-                    cycle_path: vec![],
-                })
-            }
+            evidence.unused_exports = exports;
         }
         RecommendationCategory::ExtractComplexFunctions => {
             let functions = top_fns
@@ -525,15 +551,7 @@ fn build_evidence(
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
-            if functions.is_empty() {
-                None
-            } else {
-                Some(TargetEvidence {
-                    unused_exports: vec![],
-                    complex_functions: functions,
-                    cycle_path: vec![],
-                })
-            }
+            evidence.complex_functions = functions;
         }
         RecommendationCategory::BreakCircularDependency => {
             let members = cycle_members
@@ -545,19 +563,9 @@ fn build_evidence(
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
-            if members.is_empty() {
-                None
-            } else {
-                Some(TargetEvidence {
-                    unused_exports: vec![],
-                    complex_functions: vec![],
-                    cycle_path: members,
-                })
-            }
+            evidence.cycle_path = members;
         }
         RecommendationCategory::AddTestCoverage => {
-            // Reuse top complex functions as evidence: these are the functions
-            // that need test coverage most urgently (highest cognitive complexity).
             let functions = top_fns
                 .map(|fns| {
                     fns.iter()
@@ -569,25 +577,73 @@ fn build_evidence(
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
-            if functions.is_empty() {
-                None
-            } else {
-                Some(TargetEvidence {
-                    unused_exports: vec![],
-                    complex_functions: functions,
-                    cycle_path: vec![],
-                })
+            evidence.complex_functions = functions;
+        }
+        _ => {}
+    }
+
+    if target_evidence_is_empty(&evidence) {
+        None
+    } else {
+        Some(evidence)
+    }
+}
+
+fn target_evidence_is_empty(evidence: &TargetEvidence) -> bool {
+    evidence.unused_exports.is_empty()
+        && evidence.complex_functions.is_empty()
+        && evidence.cycle_path.is_empty()
+        && evidence.direct_callers.is_empty()
+        && evidence.clone_siblings.is_empty()
+}
+
+pub(super) fn build_clone_sibling_evidence(
+    report: &plow_core::duplicates::DuplicationReport,
+) -> rustc_hash::FxHashMap<std::path::PathBuf, Vec<CloneSiblingEvidence>> {
+    let mut by_path: rustc_hash::FxHashMap<std::path::PathBuf, Vec<CloneSiblingEvidence>> =
+        rustc_hash::FxHashMap::default();
+
+    for group in &report.clone_groups {
+        let fingerprint = plow_core::duplicates::clone_fingerprint(&group.instances);
+        for (idx, instance) in group.instances.iter().enumerate() {
+            let siblings = by_path.entry(instance.file.clone()).or_default();
+            for (sibling_idx, sibling) in group.instances.iter().enumerate() {
+                if sibling_idx == idx {
+                    continue;
+                }
+                siblings.push(CloneSiblingEvidence {
+                    path: sibling.file.clone(),
+                    start_line: sibling.start_line,
+                    end_line: sibling.end_line,
+                    fingerprint: fingerprint.clone(),
+                });
             }
         }
-        _ => None,
     }
+
+    for siblings in by_path.values_mut() {
+        siblings.sort_by(|a, b| {
+            a.path
+                .cmp(&b.path)
+                .then_with(|| a.start_line.cmp(&b.start_line))
+                .then_with(|| a.end_line.cmp(&b.end_line))
+                .then_with(|| a.fingerprint.cmp(&b.fingerprint))
+        });
+        siblings.dedup_by(|a, b| {
+            a.path == b.path
+                && a.start_line == b.start_line
+                && a.end_line == b.end_line
+                && a.fingerprint == b.fingerprint
+        });
+        siblings.truncate(MAX_CLONE_SIBLING_EVIDENCE);
+    }
+
+    by_path
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // --- helpers ---
 
     fn make_score(overrides: impl FnOnce(&mut FileHealthScore)) -> FileHealthScore {
         let mut s = FileHealthScore {
@@ -619,8 +675,6 @@ mod tests {
         }
     }
 
-    // --- compute_thresholds ---
-
     #[test]
     fn thresholds_empty_scores_use_floors() {
         let t = compute_thresholds(&[]);
@@ -633,7 +687,6 @@ mod tests {
 
     #[test]
     fn thresholds_floors_prevent_degenerate_values() {
-        // All files have fan_in=1, fan_out=1 — floors should kick in
         let scores: Vec<FileHealthScore> = (0..10)
             .map(|i| {
                 make_score(|s| {
@@ -656,7 +709,6 @@ mod tests {
 
     #[test]
     fn thresholds_adapt_to_large_project() {
-        // Simulate a project with varied fan_in distribution including high values
         let mut scores: Vec<FileHealthScore> = (0..80)
             .map(|i| {
                 make_score(|s| {
@@ -666,7 +718,6 @@ mod tests {
                 })
             })
             .collect();
-        // Top 20% have higher fan_in — enough to push p95 above floors
         for i in 80..100 {
             scores.push(make_score(|s| {
                 s.path = std::path::PathBuf::from(format!("/src/{i}.ts"));
@@ -675,7 +726,6 @@ mod tests {
             }));
         }
         let t = compute_thresholds(&scores);
-        // p95 should reflect the distribution, not just the floor
         assert!(
             t.fan_in_p95 > 5.0,
             "p95 should exceed floor: {}",
@@ -687,8 +737,6 @@ mod tests {
             t.fan_out_p95
         );
     }
-
-    // --- compute_target_priority ---
 
     #[test]
     fn target_priority_all_zero() {
@@ -713,7 +761,6 @@ mod tests {
 
     #[test]
     fn target_priority_complexity_density_weight() {
-        // density=1.0, all else zero -> 30 points
         let score = make_score(|s| s.complexity_density = 1.0);
         let t = default_thresholds();
         let priority = compute_target_priority(&score, None, &t);
@@ -722,7 +769,6 @@ mod tests {
 
     #[test]
     fn target_priority_hotspot_weight() {
-        // hotspot_score=100 -> boost=1.0 -> 25 points
         let score = make_score(|_| {});
         let t = default_thresholds();
         let priority = compute_target_priority(&score, Some(100.0), &t);
@@ -731,7 +777,6 @@ mod tests {
 
     #[test]
     fn target_priority_dead_code_weight() {
-        // dead_code_ratio=1.0 -> 20 points
         let score = make_score(|s| s.dead_code_ratio = 1.0);
         let t = default_thresholds();
         let priority = compute_target_priority(&score, None, &t);
@@ -740,7 +785,6 @@ mod tests {
 
     #[test]
     fn target_priority_fan_in_weight() {
-        // fan_in=20 (== p95) -> norm=1.0 -> 15 points
         let score = make_score(|s| s.fan_in = 20);
         let t = default_thresholds();
         let priority = compute_target_priority(&score, None, &t);
@@ -749,7 +793,6 @@ mod tests {
 
     #[test]
     fn target_priority_fan_out_weight() {
-        // fan_out=30 (== p95) -> norm=1.0 -> 10 points
         let score = make_score(|s| s.fan_out = 30);
         let t = default_thresholds();
         let priority = compute_target_priority(&score, None, &t);
@@ -759,10 +802,8 @@ mod tests {
     #[test]
     fn target_priority_adapts_to_thresholds() {
         let score = make_score(|s| s.fan_in = 10);
-        // With threshold=20: norm=0.5 -> 7.5 points
         let t_default = default_thresholds();
         let p1 = compute_target_priority(&score, None, &t_default);
-        // With threshold=10: norm=1.0 -> 15 points
         let t_small = DistributionThresholds {
             fan_in_p95: 10.0,
             ..default_thresholds()
@@ -773,8 +814,6 @@ mod tests {
             "smaller project threshold should yield higher priority"
         );
     }
-
-    // --- confidence ---
 
     #[test]
     fn confidence_mapping() {
@@ -808,11 +847,8 @@ mod tests {
         ));
     }
 
-    // --- efficiency ---
-
     #[test]
     fn efficiency_surfaces_quick_wins() {
-        // Low effort, high priority should have higher efficiency than high effort, high priority
         let low_effort_priority = 60.0_f64;
         let high_effort_priority = 90.0_f64;
         let low_eff = low_effort_priority / EffortEstimate::Low.numeric();
@@ -825,8 +861,6 @@ mod tests {
 
     #[test]
     fn targets_sorted_by_efficiency_descending() {
-        // High-priority + high-effort (eff ~30) vs low-priority + low-effort (eff ~20)
-        // The low-effort file should appear first because efficiency = priority/effort
         let scores = vec![
             make_score(|s| {
                 s.path = std::path::PathBuf::from("/src/big.ts");
@@ -856,10 +890,11 @@ mod tests {
             .collect(),
             unused_export_names: &rustc_hash::FxHashMap::default(),
             cycle_members: &rustc_hash::FxHashMap::default(),
+            direct_callers: &rustc_hash::FxHashMap::default(),
+            clone_siblings: &rustc_hash::FxHashMap::default(),
         };
         let (targets, _thresholds) = compute_refactoring_targets(&scores, &aux, &[]);
         assert!(targets.len() >= 2, "expected at least 2 targets");
-        // First target should have higher efficiency (quick win)
         assert!(
             targets[0].efficiency >= targets[1].efficiency,
             "targets should be sorted by efficiency desc: {} >= {}",
@@ -868,7 +903,92 @@ mod tests {
         );
     }
 
-    // --- try_match_rules ---
+    #[test]
+    fn target_evidence_includes_direct_callers_and_clone_siblings() {
+        let path = std::path::PathBuf::from("/src/foo.ts");
+        let caller_path = std::path::PathBuf::from("/src/consumer.ts");
+        let clone_path = std::path::PathBuf::from("/src/peer.ts");
+        let mut direct_callers = rustc_hash::FxHashMap::default();
+        direct_callers.insert(
+            path.clone(),
+            vec![DirectCallerEvidence {
+                path: caller_path.clone(),
+                symbols: vec![crate::health_types::DirectCallerSymbolEvidence {
+                    imported: "foo".into(),
+                    local: "fooAlias".into(),
+                    type_only: false,
+                }],
+            }],
+        );
+        let mut clone_siblings = rustc_hash::FxHashMap::default();
+        clone_siblings.insert(
+            path.clone(),
+            vec![CloneSiblingEvidence {
+                path: clone_path.clone(),
+                start_line: 10,
+                end_line: 18,
+                fingerprint: "dup:12345678".into(),
+            }],
+        );
+
+        let evidence = build_evidence(
+            &RecommendationCategory::ExtractDependencies,
+            &path,
+            &rustc_hash::FxHashMap::default(),
+            None,
+            &rustc_hash::FxHashMap::default(),
+            &direct_callers,
+            &clone_siblings,
+        )
+        .expect("generic evidence should keep target evidence present");
+
+        assert_eq!(evidence.direct_callers[0].path, caller_path);
+        assert_eq!(evidence.direct_callers[0].symbols[0].local, "fooAlias");
+        assert_eq!(evidence.clone_siblings[0].path, clone_path);
+        assert_eq!(evidence.clone_siblings[0].fingerprint, "dup:12345678");
+    }
+
+    #[test]
+    fn clone_sibling_evidence_maps_each_instance_to_peers() {
+        let report = plow_core::duplicates::DuplicationReport {
+            clone_groups: vec![plow_core::duplicates::CloneGroup {
+                instances: vec![
+                    plow_core::duplicates::CloneInstance {
+                        file: "/src/a.ts".into(),
+                        start_line: 1,
+                        end_line: 5,
+                        start_col: 0,
+                        end_col: 1,
+                        fragment: "const value = call();".into(),
+                    },
+                    plow_core::duplicates::CloneInstance {
+                        file: "/src/b.ts".into(),
+                        start_line: 20,
+                        end_line: 24,
+                        start_col: 0,
+                        end_col: 1,
+                        fragment: "const value = call();".into(),
+                    },
+                ],
+                token_count: 8,
+                line_count: 5,
+            }],
+            ..Default::default()
+        };
+
+        let evidence = build_clone_sibling_evidence(&report);
+        let a_siblings = evidence
+            .get(&std::path::PathBuf::from("/src/a.ts"))
+            .expect("a.ts should have sibling evidence");
+        let b_siblings = evidence
+            .get(&std::path::PathBuf::from("/src/b.ts"))
+            .expect("b.ts should have sibling evidence");
+
+        assert_eq!(a_siblings[0].path, std::path::PathBuf::from("/src/b.ts"));
+        assert_eq!(a_siblings[0].start_line, 20);
+        assert_eq!(b_siblings[0].path, std::path::PathBuf::from("/src/a.ts"));
+        assert!(a_siblings[0].fingerprint.starts_with("dup:"));
+    }
 
     #[test]
     fn rule_no_match_clean_file() {
@@ -921,7 +1041,6 @@ mod tests {
 
     #[test]
     fn rule_add_test_coverage_below_density_threshold() {
-        // crap_above >= 2 but density <= 0.3 -> rule does not fire
         let score = make_score(|s| {
             s.crap_above_threshold = 3;
             s.crap_max = 72.0;
@@ -961,11 +1080,9 @@ mod tests {
 
     #[test]
     fn rule_dead_code_gate_too_few_exports() {
-        // dead_code_ratio high but only 2 value exports — below gate of 3
         let score = make_score(|s| s.dead_code_ratio = 0.8);
         let t = default_thresholds();
         let result = try_match_rules(&score, None, false, false, None, 2, &t);
-        // Should NOT match dead code rule
         assert!(result.is_none());
     }
 
@@ -1012,7 +1129,6 @@ mod tests {
             s.maintainability_index = 50.0;
         });
         let t = default_thresholds();
-        // is_entry=true -> rule 6 should not match
         let result = try_match_rules(&score, None, false, true, None, 0, &t);
         assert!(result.is_none());
     }
@@ -1039,8 +1155,6 @@ mod tests {
         let (cat, _) = result.unwrap();
         assert!(matches!(cat, RecommendationCategory::UrgentChurnComplexity));
     }
-
-    // --- compute_effort_estimate ---
 
     #[test]
     fn effort_high_for_large_file() {
@@ -1103,8 +1217,6 @@ mod tests {
         ));
     }
 
-    // --- build_evidence ---
-
     #[test]
     fn evidence_dead_code_includes_unused_exports() {
         let mut unused = rustc_hash::FxHashMap::default();
@@ -1119,6 +1231,8 @@ mod tests {
             &unused,
             None,
             &cycle_members,
+            &rustc_hash::FxHashMap::default(),
+            &rustc_hash::FxHashMap::default(),
         );
         assert!(ev.is_some());
         let ev = ev.unwrap();
@@ -1137,6 +1251,8 @@ mod tests {
             &unused,
             None,
             &cycle_members,
+            &rustc_hash::FxHashMap::default(),
+            &rustc_hash::FxHashMap::default(),
         );
         assert!(ev.is_none());
     }
@@ -1156,11 +1272,12 @@ mod tests {
             &unused,
             Some(&fns),
             &cycle_members,
+            &rustc_hash::FxHashMap::default(),
+            &rustc_hash::FxHashMap::default(),
         );
         assert!(ev.is_some());
         let ev = ev.unwrap();
         assert!(ev.unused_exports.is_empty());
-        // Only functions above COGNITIVE_EXTRACTION_THRESHOLD (25) included
         assert_eq!(ev.complex_functions.len(), 2);
         assert_eq!(ev.complex_functions[0].name, "processData");
         assert_eq!(ev.complex_functions[1].name, "handleEvent");
@@ -1183,6 +1300,8 @@ mod tests {
             &unused,
             None,
             &cycle_members,
+            &rustc_hash::FxHashMap::default(),
+            &rustc_hash::FxHashMap::default(),
         );
         assert!(ev.is_some());
         let ev = ev.unwrap();
@@ -1201,6 +1320,8 @@ mod tests {
             &unused,
             Some(&fns),
             &cycle_members,
+            &rustc_hash::FxHashMap::default(),
+            &rustc_hash::FxHashMap::default(),
         );
         assert!(ev.is_some());
         let ev = ev.unwrap();
@@ -1218,11 +1339,11 @@ mod tests {
             &unused,
             None,
             &cycle_members,
+            &rustc_hash::FxHashMap::default(),
+            &rustc_hash::FxHashMap::default(),
         );
         assert!(ev.is_none());
     }
-
-    // --- percentile_usize ---
 
     #[test]
     fn percentile_empty_returns_zero() {
@@ -1241,12 +1362,8 @@ mod tests {
         assert!((p50 - 5.0).abs() < f64::EPSILON);
     }
 
-    // --- rule priority ordering ---
-
     #[test]
     fn rule_urgent_churn_overrides_circular_dep() {
-        // Both Rule 1 (urgent churn) and Rule 2 (circular dep) could match
-        // Rule 1 has higher priority
         let score = make_score(|s| {
             s.complexity_density = 0.8;
             s.fan_in = 10;
@@ -1297,8 +1414,6 @@ mod tests {
         );
     }
 
-    // --- contributing factors ---
-
     #[test]
     fn contributing_factor_hotspot() {
         let scores = vec![make_score(|s| {
@@ -1327,6 +1442,8 @@ mod tests {
             value_export_counts: &value_exports,
             unused_export_names: &rustc_hash::FxHashMap::default(),
             cycle_members: &rustc_hash::FxHashMap::default(),
+            direct_callers: &rustc_hash::FxHashMap::default(),
+            clone_siblings: &rustc_hash::FxHashMap::default(),
         };
         let (targets, _) = compute_refactoring_targets(&scores, &aux, &hotspots);
         assert!(!targets.is_empty());
@@ -1350,6 +1467,8 @@ mod tests {
             value_export_counts: &value_exports,
             unused_export_names: &rustc_hash::FxHashMap::default(),
             cycle_members: &rustc_hash::FxHashMap::default(),
+            direct_callers: &rustc_hash::FxHashMap::default(),
+            clone_siblings: &rustc_hash::FxHashMap::default(),
         };
         let (targets, _) = compute_refactoring_targets(&scores, &aux, &[]);
         assert!(!targets.is_empty());
@@ -1371,6 +1490,8 @@ mod tests {
             value_export_counts: &value_exports,
             unused_export_names: &rustc_hash::FxHashMap::default(),
             cycle_members: &rustc_hash::FxHashMap::default(),
+            direct_callers: &rustc_hash::FxHashMap::default(),
+            clone_siblings: &rustc_hash::FxHashMap::default(),
         };
         let (targets, _) = compute_refactoring_targets(&scores, &aux, &[]);
         assert!(!targets.is_empty());
@@ -1395,6 +1516,8 @@ mod tests {
             value_export_counts: &value_exports,
             unused_export_names: &rustc_hash::FxHashMap::default(),
             cycle_members: &rustc_hash::FxHashMap::default(),
+            direct_callers: &rustc_hash::FxHashMap::default(),
+            clone_siblings: &rustc_hash::FxHashMap::default(),
         };
         let (targets, _) = compute_refactoring_targets(&scores, &aux, &[]);
         assert!(!targets.is_empty());
@@ -1417,6 +1540,8 @@ mod tests {
             value_export_counts: &value_exports,
             unused_export_names: &rustc_hash::FxHashMap::default(),
             cycle_members: &rustc_hash::FxHashMap::default(),
+            direct_callers: &rustc_hash::FxHashMap::default(),
+            clone_siblings: &rustc_hash::FxHashMap::default(),
         };
         let (targets, _) = compute_refactoring_targets(&scores, &aux, &[]);
         assert!(!targets.is_empty());
@@ -1441,6 +1566,8 @@ mod tests {
             value_export_counts: &value_exports,
             unused_export_names: &rustc_hash::FxHashMap::default(),
             cycle_members: &rustc_hash::FxHashMap::default(),
+            direct_callers: &rustc_hash::FxHashMap::default(),
+            clone_siblings: &rustc_hash::FxHashMap::default(),
         };
         let (targets, _) = compute_refactoring_targets(&scores, &aux, &[]);
         assert!(!targets.is_empty());
@@ -1471,6 +1598,8 @@ mod tests {
             value_export_counts: &value_exports,
             unused_export_names: &rustc_hash::FxHashMap::default(),
             cycle_members: &rustc_hash::FxHashMap::default(),
+            direct_callers: &rustc_hash::FxHashMap::default(),
+            clone_siblings: &rustc_hash::FxHashMap::default(),
         };
         let (targets, _) = compute_refactoring_targets(&scores, &aux, &[]);
         assert!(targets.is_empty());
@@ -1478,7 +1607,6 @@ mod tests {
 
     #[test]
     fn rule_split_high_impact_moderate_fan_in_many_functions() {
-        // Rule 3 alternate path: fan_in >= p75 AND function_count >= 5
         let score = make_score(|s| {
             s.complexity_density = 0.5;
             s.fan_in = 10; // equals p75 in default thresholds

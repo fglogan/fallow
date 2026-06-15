@@ -10,15 +10,17 @@ use crate::load_config_for_analysis;
 use crate::regression::{self, RegressionOpts, RegressionOutcome};
 use crate::report;
 
-mod filtering;
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "reused by crate::security; check is crate-private so pub(crate) is the minimal widening that exposes filtering crate-wide"
+)]
+pub(crate) mod filtering;
 mod output;
 mod rules;
 
 pub use filtering::get_changed_files;
 pub use filtering::resolve_workspace_scope;
 pub use rules::has_error_severity_issues;
-
-// ── Issue type filters ──────────────────────────────────────────
 
 #[derive(Default)]
 pub struct IssueFilters {
@@ -29,18 +31,30 @@ pub struct IssueFilters {
     pub private_type_leaks: bool,
     pub unused_enum_members: bool,
     pub unused_class_members: bool,
+    pub unused_store_members: bool,
+    pub unprovided_injects: bool,
+    pub unrendered_components: bool,
+    pub unused_component_props: bool,
+    pub unused_component_emits: bool,
+    pub unused_server_actions: bool,
     pub unresolved_imports: bool,
     pub unlisted_deps: bool,
     pub duplicate_exports: bool,
     pub circular_deps: bool,
     pub re_export_cycles: bool,
     pub boundary_violations: bool,
+    pub policy_violations: bool,
     pub stale_suppressions: bool,
     pub unused_catalog_entries: bool,
     pub empty_catalog_groups: bool,
     pub unresolved_catalog_references: bool,
     pub unused_dependency_overrides: bool,
     pub misconfigured_dependency_overrides: bool,
+    pub invalid_client_exports: bool,
+    pub mixed_client_server_barrels: bool,
+    pub misplaced_directives: bool,
+    pub route_collisions: bool,
+    pub dynamic_segment_name_conflicts: bool,
 }
 
 impl IssueFilters {
@@ -52,18 +66,30 @@ impl IssueFilters {
             || self.private_type_leaks
             || self.unused_enum_members
             || self.unused_class_members
+            || self.unused_store_members
+            || self.unprovided_injects
+            || self.unrendered_components
+            || self.unused_component_props
+            || self.unused_component_emits
+            || self.unused_server_actions
             || self.unresolved_imports
             || self.unlisted_deps
             || self.duplicate_exports
             || self.circular_deps
             || self.re_export_cycles
             || self.boundary_violations
+            || self.policy_violations
             || self.stale_suppressions
             || self.unused_catalog_entries
             || self.empty_catalog_groups
             || self.unresolved_catalog_references
             || self.unused_dependency_overrides
             || self.misconfigured_dependency_overrides
+            || self.invalid_client_exports
+            || self.mixed_client_server_barrels
+            || self.misplaced_directives
+            || self.route_collisions
+            || self.dynamic_segment_name_conflicts
     }
 
     /// Enable off-by-default issue types when explicitly requested as filters.
@@ -95,12 +121,31 @@ impl IssueFilters {
             results.unused_dev_dependencies.clear();
             results.unused_optional_dependencies.clear();
             results.type_only_dependencies.clear();
+            results.test_only_dependencies.clear();
         }
         if !self.unused_enum_members {
             results.unused_enum_members.clear();
         }
         if !self.unused_class_members {
             results.unused_class_members.clear();
+        }
+        if !self.unused_store_members {
+            results.unused_store_members.clear();
+        }
+        if !self.unprovided_injects {
+            results.unprovided_injects.clear();
+        }
+        if !self.unrendered_components {
+            results.unrendered_components.clear();
+        }
+        if !self.unused_component_props {
+            results.unused_component_props.clear();
+        }
+        if !self.unused_component_emits {
+            results.unused_component_emits.clear();
+        }
+        if !self.unused_server_actions {
+            results.unused_server_actions.clear();
         }
         if !self.unresolved_imports {
             results.unresolved_imports.clear();
@@ -119,6 +164,11 @@ impl IssueFilters {
         }
         if !self.boundary_violations {
             results.boundary_violations.clear();
+            results.boundary_coverage_violations.clear();
+            results.boundary_call_violations.clear();
+        }
+        if !self.policy_violations {
+            results.policy_violations.clear();
         }
         if !self.stale_suppressions {
             results.stale_suppressions.clear();
@@ -138,10 +188,23 @@ impl IssueFilters {
         if !self.misconfigured_dependency_overrides {
             results.misconfigured_dependency_overrides.clear();
         }
+        if !self.invalid_client_exports {
+            results.invalid_client_exports.clear();
+        }
+        if !self.mixed_client_server_barrels {
+            results.mixed_client_server_barrels.clear();
+        }
+        if !self.misplaced_directives {
+            results.misplaced_directives.clear();
+        }
+        if !self.route_collisions {
+            results.route_collisions.clear();
+        }
+        if !self.dynamic_segment_name_conflicts {
+            results.dynamic_segment_name_conflicts.clear();
+        }
     }
 }
-
-// ── Trace options ───────────────────────────────────────────────
 
 pub struct TraceOptions {
     pub trace_export: Option<String>,
@@ -158,8 +221,6 @@ impl TraceOptions {
             || self.performance
     }
 }
-
-// ── Check command ────────────────────────────────────────────────
 
 pub struct CheckOptions<'a> {
     pub root: &'a std::path::Path,
@@ -216,14 +277,62 @@ pub struct CheckResult {
     pub shared_parse: Option<crate::health::SharedParseData>,
 }
 
-/// Run analysis, filtering, and baseline handling. Returns results without printing.
-#[expect(
-    clippy::too_many_lines,
-    reason = "orchestration function: analysis + filtering + baseline + regression; split candidate"
-)]
-pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
-    let start = Instant::now();
+struct CheckAnalysisData {
+    results: AnalysisResults,
+    trace_graph: Option<plow_core::graph::ModuleGraph>,
+    trace_timings: Option<plow_core::trace::PipelineTimings>,
+    retained_modules: Option<Vec<plow_core::extract::ModuleInfo>>,
+    retained_files: Option<Vec<plow_core::discover::DiscoveredFile>>,
+    script_used_packages: rustc_hash::FxHashSet<String>,
+}
 
+#[expect(
+    deprecated,
+    reason = "ADR-008 deprecates plow_core::analyze* externally; the CLI still uses the workspace path dependency"
+)]
+fn run_check_analysis(
+    opts: &CheckOptions<'_>,
+    config: &ResolvedConfig,
+) -> Result<CheckAnalysisData, ExitCode> {
+    if opts.retain_modules_for_health {
+        return plow_core::analyze_retaining_modules(config, true, true)
+            .map(|output| CheckAnalysisData {
+                results: output.results,
+                trace_graph: output.graph,
+                trace_timings: output.timings,
+                retained_modules: output.modules,
+                retained_files: output.files,
+                script_used_packages: output.script_used_packages,
+            })
+            .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output));
+    }
+
+    if opts.trace_opts.any_active() {
+        return plow_core::analyze_with_trace(config)
+            .map(|output| CheckAnalysisData {
+                results: output.results,
+                trace_graph: output.graph,
+                trace_timings: output.timings,
+                retained_modules: None,
+                retained_files: None,
+                script_used_packages: output.script_used_packages,
+            })
+            .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output));
+    }
+
+    plow_core::analyze(config)
+        .map(|results| CheckAnalysisData {
+            results,
+            trace_graph: None,
+            trace_timings: None,
+            retained_modules: None,
+            retained_files: None,
+            script_used_packages: rustc_hash::FxHashSet::default(),
+        })
+        .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output))
+}
+
+fn prepare_check_config(opts: &CheckOptions<'_>) -> Result<ResolvedConfig, ExitCode> {
     let mut config = load_config_for_analysis(
         opts.root,
         opts.config_path,
@@ -235,15 +344,191 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         opts.quiet,
         plow_config::ProductionAnalysis::DeadCode,
     )?;
-
-    // Thread --include-entry-exports flag into config for analysis layer
     if opts.include_entry_exports {
         config.include_entry_exports = true;
     }
-
     opts.filters.activate_explicit_opt_ins(&mut config.rules);
+    Ok(config)
+}
 
-    // Workspace filter resolution (either --workspace or --changed-workspaces)
+fn handle_trace_side_effects(
+    opts: &CheckOptions<'_>,
+    config: &ResolvedConfig,
+    trace_graph: Option<&plow_core::graph::ModuleGraph>,
+    trace_timings: Option<&plow_core::trace::PipelineTimings>,
+    script_used_packages: &rustc_hash::FxHashSet<String>,
+) -> Result<(), ExitCode> {
+    if let Some(timings) = trace_timings
+        && opts.trace_opts.performance
+        && !opts.defer_performance
+    {
+        report::print_performance(timings, config.output);
+    }
+    if let Some(graph) = trace_graph {
+        crate::telemetry::note_graph_structure(graph);
+        if let Some(code) = output::handle_trace_output(
+            graph,
+            opts.trace_opts,
+            &config.root,
+            config.output,
+            script_used_packages,
+        ) {
+            return Err(code);
+        }
+    }
+    Ok(())
+}
+
+fn apply_scope_filters(
+    opts: &CheckOptions<'_>,
+    results: &mut AnalysisResults,
+    ws_roots: Option<&Vec<std::path::PathBuf>>,
+    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
+) {
+    if let Some(ws_roots) = ws_roots {
+        filtering::filter_to_workspaces(results, ws_roots);
+    }
+    if let Some(changed) = changed_files {
+        filtering::filter_changed_files(results, changed);
+    }
+    let diff_index = match opts.diff_index {
+        Some(index) => Some(index),
+        None if opts.use_shared_diff_index => crate::report::ci::diff_filter::shared_diff_index(),
+        None => None,
+    };
+    if let Some(diff_index) = diff_index {
+        filtering::filter_results_by_diff(results, diff_index, opts.root);
+    }
+}
+
+fn apply_rules_and_filters(
+    opts: &CheckOptions<'_>,
+    config: &ResolvedConfig,
+    results: &mut AnalysisResults,
+) {
+    rules::apply_rules(results, config);
+    if opts.fail_on_issues {
+        rules::promote_policy_finding_warns(results);
+    }
+    opts.filters.apply(results);
+}
+
+fn apply_file_filter(opts: &CheckOptions<'_>, results: &mut AnalysisResults) {
+    if opts.file.is_empty() {
+        return;
+    }
+    let file_set: rustc_hash::FxHashSet<std::path::PathBuf> = opts
+        .file
+        .iter()
+        .map(|path| {
+            if crate::path_util::is_absolute_path_any_platform(path) {
+                path.clone()
+            } else {
+                opts.root.join(path)
+            }
+        })
+        .collect();
+    for (original, resolved) in opts.file.iter().zip(file_set.iter()) {
+        if !resolved.exists() {
+            eprintln!(
+                "Warning: --file '{}' (resolved to '{}') was not found in the project",
+                original.display(),
+                resolved.display()
+            );
+        }
+    }
+    filtering::filter_changed_files(results, &file_set);
+    results.unused_dependencies.clear();
+    results.unused_dev_dependencies.clear();
+    results.unused_optional_dependencies.clear();
+    results.type_only_dependencies.clear();
+    results.test_only_dependencies.clear();
+}
+
+fn warn_scoped_regression_save(opts: &CheckOptions<'_>) {
+    if matches!(
+        opts.regression_opts.save_target,
+        regression::SaveRegressionTarget::None
+    ) || !opts.regression_opts.scoped
+    {
+        return;
+    }
+    eprintln!(
+        "Warning: saving regression baseline with --changed-since, --workspace, or \
+         --changed-workspaces active. The baseline will reflect only scoped results, \
+         not the full project."
+    );
+}
+
+fn save_check_regression_baseline(
+    opts: &CheckOptions<'_>,
+    results: &AnalysisResults,
+) -> Result<Option<regression::CheckCounts>, ExitCode> {
+    let counts = match opts.regression_opts.save_target {
+        regression::SaveRegressionTarget::None => return Ok(None),
+        regression::SaveRegressionTarget::File(save_path) => {
+            let counts = regression::CheckCounts::from_results(results);
+            regression::save_regression_baseline(
+                save_path,
+                opts.root,
+                Some(&counts),
+                None,
+                opts.output,
+            )?;
+            counts
+        }
+        regression::SaveRegressionTarget::Config => {
+            let counts = regression::CheckCounts::from_results(results);
+            let config_path = regression_config_path(opts);
+            regression::save_baseline_to_config(&config_path, &counts, opts.output)?;
+            counts
+        }
+    };
+    Ok(Some(counts))
+}
+
+fn regression_config_path(opts: &CheckOptions<'_>) -> std::path::PathBuf {
+    opts.config_path.as_ref().map_or_else(
+        || {
+            plow_config::PlowConfig::find_config_path(opts.root)
+                .unwrap_or_else(|| opts.root.join(".plowrc.json"))
+        },
+        Clone::clone,
+    )
+}
+
+fn build_shared_parse_data(
+    results: &AnalysisResults,
+    trace_graph: Option<plow_core::graph::ModuleGraph>,
+    retained_modules: Option<Vec<plow_core::extract::ModuleInfo>>,
+    retained_files: Option<Vec<plow_core::discover::DiscoveredFile>>,
+    script_used_packages: &rustc_hash::FxHashSet<String>,
+) -> Option<crate::health::SharedParseData> {
+    let (Some(modules), Some(files)) = (retained_modules, retained_files) else {
+        return None;
+    };
+    let analysis_output = trace_graph.map(|graph| plow_core::AnalysisOutput {
+        results: results.clone(),
+        timings: None,
+        graph: Some(graph),
+        modules: None,
+        files: None,
+        script_used_packages: script_used_packages.clone(),
+        file_hashes: rustc_hash::FxHashMap::default(),
+    });
+    Some(crate::health::SharedParseData {
+        files,
+        modules,
+        analysis_output,
+    })
+}
+
+/// Run analysis, filtering, and baseline handling. Returns results without printing.
+pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
+    let start = Instant::now();
+
+    let config = prepare_check_config(opts)?;
+
     let ws_roots = filtering::resolve_workspace_scope(
         opts.root,
         opts.workspace,
@@ -251,151 +536,38 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         opts.output,
     )?;
 
-    // Changed-files resolution
     let changed_files: Option<rustc_hash::FxHashSet<std::path::PathBuf>> = opts
         .changed_since
         .and_then(|git_ref| filtering::get_changed_files(opts.root, git_ref));
 
-    // Core analysis
-    let use_trace = opts.trace_opts.any_active();
-    #[expect(
-        deprecated,
-        reason = "ADR-008 deprecates plow_core::analyze* externally; the CLI still uses the workspace path dependency"
-    )]
-    let (
+    let CheckAnalysisData {
         mut results,
         trace_graph,
         trace_timings,
         retained_modules,
         retained_files,
         script_used_packages,
-    ) = if opts.retain_modules_for_health {
-        match plow_core::analyze_retaining_modules(&config, true, true) {
-            Ok(output) => (
-                output.results,
-                output.graph,
-                output.timings,
-                output.modules,
-                output.files,
-                output.script_used_packages,
-            ),
-            Err(e) => {
-                return Err(emit_error(&format!("Analysis error: {e}"), 2, opts.output));
-            }
-        }
-    } else if use_trace {
-        match plow_core::analyze_with_trace(&config) {
-            Ok(output) => (
-                output.results,
-                output.graph,
-                output.timings,
-                None,
-                None,
-                output.script_used_packages,
-            ),
-            Err(e) => {
-                return Err(emit_error(&format!("Analysis error: {e}"), 2, opts.output));
-            }
-        }
-    } else {
-        // `plow_core::analyze` returns only `AnalysisResults`, not the wider
-        // `AnalysisOutput`, so `script_used_packages` is intentionally empty here.
-        // No code on this path reads it: trace dispatch is gated on `trace_graph`
-        // (which is also `None` here), and `SharedParseData` is only constructed
-        // when `retain_modules_for_health` is set (which routes through
-        // `analyze_retaining_modules`, populating the real set).
-        match plow_core::analyze(&config) {
-            Ok(r) => (r, None, None, None, None, rustc_hash::FxHashSet::default()),
-            Err(e) => {
-                return Err(emit_error(&format!("Analysis error: {e}"), 2, opts.output));
-            }
-        }
-    };
+    } = run_check_analysis(opts, &config)?;
     let elapsed = start.elapsed();
 
-    // Performance output
-    if let Some(ref timings) = trace_timings
-        && opts.trace_opts.performance
-        && !opts.defer_performance
-    {
-        report::print_performance(timings, config.output);
-    }
+    handle_trace_side_effects(
+        opts,
+        &config,
+        trace_graph.as_ref(),
+        trace_timings.as_ref(),
+        &script_used_packages,
+    )?;
 
-    // Trace early-return
-    if let Some(ref graph) = trace_graph
-        && let Some(code) = output::handle_trace_output(
-            graph,
-            opts.trace_opts,
-            &config.root,
-            config.output,
-            &script_used_packages,
-        )
-    {
-        return Err(code);
-    }
+    apply_scope_filters(
+        opts,
+        &mut results,
+        ws_roots.as_ref(),
+        changed_files.as_ref(),
+    );
+    apply_file_filter(opts, &mut results);
 
-    // Workspace scoping
-    if let Some(ref ws_roots) = ws_roots {
-        filtering::filter_to_workspaces(&mut results, ws_roots);
-    }
+    apply_rules_and_filters(opts, &config, &mut results);
 
-    // Changed-file filtering
-    if let Some(ref changed) = changed_files {
-        filtering::filter_changed_files(&mut results, changed);
-    }
-
-    // Diff-line filtering (issue #424). CLI calls use the startup cache so
-    // combined runs do not re-read stdin or re-parse the same file three
-    // times; programmatic/NAPI calls pass an explicit per-call index so
-    // concurrent requests cannot inherit another request's diff scope.
-    if let Some(diff_index) = match opts.diff_index {
-        Some(index) => Some(index),
-        None if opts.use_shared_diff_index => crate::report::ci::diff_filter::shared_diff_index(),
-        None => None,
-    } {
-        filtering::filter_results_by_diff(&mut results, diff_index, opts.root);
-    }
-
-    // Single-file filtering (--file)
-    if !opts.file.is_empty() {
-        let file_set: rustc_hash::FxHashSet<std::path::PathBuf> = opts
-            .file
-            .iter()
-            .map(|p| {
-                if crate::path_util::is_absolute_path_any_platform(p) {
-                    p.clone()
-                } else {
-                    opts.root.join(p)
-                }
-            })
-            .collect();
-        // Warn about paths that don't exist on disk (show resolved path for clarity)
-        for (original, resolved) in opts.file.iter().zip(file_set.iter()) {
-            if !resolved.exists() {
-                eprintln!(
-                    "Warning: --file '{}' (resolved to '{}') was not found in the project",
-                    original.display(),
-                    resolved.display()
-                );
-            }
-        }
-        filtering::filter_changed_files(&mut results, &file_set);
-        // Suppress project-wide dependency issues in single-file mode.
-        // Users expect --file to scope ALL output to the specified file(s).
-        results.unused_dependencies.clear();
-        results.unused_dev_dependencies.clear();
-        results.unused_optional_dependencies.clear();
-        results.type_only_dependencies.clear();
-        results.test_only_dependencies.clear();
-    }
-
-    // Rules application
-    rules::apply_rules(&mut results, &config);
-
-    // CLI issue-type filters
-    opts.filters.apply(&mut results);
-
-    // Baseline handling
     let baseline_matched = handle_baseline(
         &mut results,
         opts.save_baseline,
@@ -405,50 +577,10 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         opts.output,
     )?;
 
-    // Warn if saving a baseline from scoped results (would produce misleading counts)
-    if !matches!(
-        opts.regression_opts.save_target,
-        regression::SaveRegressionTarget::None
-    ) && opts.regression_opts.scoped
-    {
-        eprintln!(
-            "Warning: saving regression baseline with --changed-since, --workspace, or \
-             --changed-workspaces active. The baseline will reflect only scoped results, \
-             not the full project."
-        );
-    }
+    warn_scoped_regression_save(opts);
 
-    // Save regression baseline if requested.
-    // Track the just-saved counts so that if --fail-on-regression is also active,
-    // the same-run comparison uses the fresh baseline (not the pre-save config state).
-    let just_saved_baseline = match opts.regression_opts.save_target {
-        regression::SaveRegressionTarget::File(save_path) => {
-            let counts = regression::CheckCounts::from_results(&results);
-            regression::save_regression_baseline(
-                save_path,
-                opts.root,
-                Some(&counts),
-                None,
-                opts.output,
-            )?;
-            Some(counts)
-        }
-        regression::SaveRegressionTarget::Config => {
-            let counts = regression::CheckCounts::from_results(&results);
-            let config_path = opts.config_path.as_ref().map_or_else(
-                || {
-                    plow_config::PlowConfig::find_config_path(opts.root)
-                        .unwrap_or_else(|| opts.root.join(".plowrc.json"))
-                },
-                |explicit| explicit.clone(),
-            );
-            regression::save_baseline_to_config(&config_path, &counts, opts.output)?;
-            Some(counts)
-        }
-        regression::SaveRegressionTarget::None => None,
-    };
+    let just_saved_baseline = save_check_regression_baseline(opts, &results)?;
 
-    // Regression detection — use just-saved baseline if available, then config, then file
     let config_baseline_ref = just_saved_baseline
         .as_ref()
         .map(regression::CheckCounts::to_config_baseline);
@@ -458,32 +590,23 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
     let regression_outcome =
         regression::compare_check_regression(&results, &opts.regression_opts, config_baseline)?;
 
-    // SARIF file write
     if let Some(sarif_path) = opts.sarif_file {
         output::write_sarif_file(&results, &config, sarif_path, opts.quiet);
     }
 
-    let shared_parse = match (retained_modules, retained_files) {
-        (Some(modules), Some(files)) => {
-            let analysis_output = trace_graph.map(|graph| plow_core::AnalysisOutput {
-                results: results.clone(),
-                timings: None,
-                graph: Some(graph),
-                modules: None,
-                files: None,
-                script_used_packages: script_used_packages.clone(),
-                file_hashes: rustc_hash::FxHashMap::default(),
-            });
-            Some(crate::health::SharedParseData {
-                files,
-                modules,
-                analysis_output,
-            })
-        }
-        _ => None,
-    };
+    let shared_parse = build_shared_parse_data(
+        &results,
+        trace_graph,
+        retained_modules,
+        retained_files,
+        &script_used_packages,
+    );
 
     let config_fixable = crate::fix::is_config_fixable(opts.root, opts.config_path.as_ref());
+
+    // Report result volume to telemetry from the real result, independent of
+    // the exit-code gate. Exact counts are bucketed before serialization.
+    crate::telemetry::note_result_count(results.total_issues());
 
     Ok(CheckResult {
         results,
@@ -549,7 +672,6 @@ pub fn print_check_result(result: &CheckResult, opts: PrintCheckOptions) -> Exit
         return report_code;
     }
 
-    // Print regression outcome to stderr
     if let Some(ref outcome) = result.regression {
         if !opts.quiet {
             regression::print_regression_outcome(outcome);
@@ -572,7 +694,6 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
         Err(code) => return code,
     };
 
-    // Entry-point summary (standalone check mode; combined mode uses orientation header)
     if !opts.quiet && matches!(opts.output, OutputFormat::Human) {
         crate::combined::print_entry_point_summary(&result.results);
     }
@@ -600,16 +721,12 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
         },
     );
 
-    // Cross-reference: run duplication analysis on the full results
-    // (the combined command handles this separately)
     if opts.include_dupes && result.config.duplicates.enabled {
         output::run_cross_reference(&result.config, &result.results, opts.quiet);
     }
 
     exit
 }
-
-// ── Baseline helpers ────────────────────────────────────────────
 
 /// Save baseline and/or compare against an existing baseline.
 ///
@@ -624,11 +741,11 @@ fn handle_baseline(
     quiet: bool,
     output: OutputFormat,
 ) -> Result<Option<(usize, usize)>, ExitCode> {
-    // Save baseline if requested
     if let Some(baseline_path) = save_path {
         let baseline_data = BaselineData::from_results(results, root);
         match serde_json::to_string_pretty(&baseline_data) {
-            Ok(json) => {
+            Ok(mut json) => {
+                json.push('\n');
                 if let Some(parent) = baseline_path.parent()
                     && !parent.as_os_str().is_empty()
                     && let Err(e) = std::fs::create_dir_all(parent)
@@ -660,7 +777,6 @@ fn handle_baseline(
         }
     }
 
-    // Compare against baseline if provided
     if let Some(baseline_path) = load_path {
         match std::fs::read_to_string(baseline_path) {
             Ok(content) => match serde_json::from_str::<BaselineData>(&content) {
@@ -720,18 +836,30 @@ mod tests {
             private_type_leaks: false,
             unused_enum_members: false,
             unused_class_members: false,
+            unused_store_members: false,
+            unprovided_injects: false,
+            unrendered_components: false,
+            unused_component_props: false,
+            unused_component_emits: false,
+            unused_server_actions: false,
             unresolved_imports: false,
             unlisted_deps: false,
             duplicate_exports: false,
             circular_deps: false,
             re_export_cycles: false,
             boundary_violations: false,
+            policy_violations: false,
             stale_suppressions: false,
             unused_catalog_entries: false,
             empty_catalog_groups: false,
             unresolved_catalog_references: false,
             unused_dependency_overrides: false,
             misconfigured_dependency_overrides: false,
+            invalid_client_exports: false,
+            mixed_client_server_barrels: false,
+            misplaced_directives: false,
+            route_collisions: false,
+            dynamic_segment_name_conflicts: false,
         }
     }
 
@@ -789,6 +917,14 @@ mod tests {
                 line: 5,
                 used_in_workspaces: Vec::new(),
             }));
+        r.test_only_dependencies
+            .push(TestOnlyDependencyFinding::with_actions(
+                TestOnlyDependency {
+                    package_name: "msw".into(),
+                    path: PathBuf::from("/project/package.json"),
+                    line: 9,
+                },
+            ));
         r.unused_enum_members
             .push(UnusedEnumMemberFinding::with_actions(UnusedMember {
                 path: PathBuf::from("/project/src/d.ts"),
@@ -845,7 +981,26 @@ mod tests {
         r
     }
 
-    // ── IssueFilters::any_active ─────────────────────────────────
+    #[test]
+    fn save_baseline_writes_trailing_newline() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let baseline_path = dir.path().join("baseline.json");
+        let mut results = make_results();
+
+        handle_baseline(
+            &mut results,
+            Some(&baseline_path),
+            None,
+            std::path::Path::new("/project"),
+            true,
+            OutputFormat::Json,
+        )
+        .expect("baseline save succeeds");
+
+        let saved = std::fs::read_to_string(&baseline_path).expect("baseline is written");
+        assert!(saved.ends_with('\n'));
+        assert!(!saved.ends_with("\n\n"));
+    }
 
     #[test]
     fn no_filters_means_none_active() {
@@ -882,8 +1037,6 @@ mod tests {
         }
     }
 
-    // ── IssueFilters::apply ──────────────────────────────────────
-
     #[test]
     fn apply_no_active_filters_preserves_all_results() {
         let mut results = make_results();
@@ -904,6 +1057,7 @@ mod tests {
         assert!(results.unused_types.is_empty());
         assert!(results.unused_dependencies.is_empty());
         assert!(results.unused_dev_dependencies.is_empty());
+        assert!(results.test_only_dependencies.is_empty());
         assert!(results.unused_enum_members.is_empty());
         assert!(results.unused_class_members.is_empty());
         assert!(results.unresolved_imports.is_empty());
@@ -920,8 +1074,28 @@ mod tests {
 
         assert_eq!(results.unused_dependencies.len(), 1);
         assert_eq!(results.unused_dev_dependencies.len(), 1);
+        assert_eq!(results.test_only_dependencies.len(), 1);
         assert!(results.unused_files.is_empty());
         assert!(results.unused_exports.is_empty());
+    }
+
+    #[test]
+    fn apply_single_type_filter_clears_test_only_dependencies() {
+        // Regression for #1192: a single-type filter that is not --unused-deps must clear
+        // test-only-dependency findings, matching every other dependency kind. Before the fix the
+        // --unused-deps clear arm omitted test_only_dependencies, so it leaked into the output of
+        // any single-type filter run (e.g. `plow dead-code --unused-files`).
+        let mut results = make_results();
+        assert_eq!(results.test_only_dependencies.len(), 1);
+
+        let mut f = no_filters();
+        f.unused_files = true;
+        f.apply(&mut results);
+
+        assert!(
+            results.test_only_dependencies.is_empty(),
+            "test-only-dependency findings must be cleared when --unused-deps is not active"
+        );
     }
 
     #[test]
@@ -942,7 +1116,6 @@ mod tests {
     #[test]
     fn apply_circular_deps_filter_keeps_only_circular_deps() {
         let mut results = make_results();
-        // Add circular dependency to results
         results.circular_dependencies.push(
             plow_types::output_dead_code::CircularDependencyFinding::with_actions(
                 plow_core::results::CircularDependency {
@@ -953,6 +1126,7 @@ mod tests {
                     length: 2,
                     line: 1,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             ),
@@ -966,8 +1140,6 @@ mod tests {
         assert!(results.unused_exports.is_empty());
         assert!(results.unused_dependencies.is_empty());
     }
-
-    // ── TraceOptions::any_active ─────────────────────────────────
 
     #[test]
     fn no_trace_options_means_none_active() {
@@ -1024,8 +1196,6 @@ mod tests {
         assert!(t.any_active());
     }
 
-    // ── Boundary violations filter ──────────────────────────────
-
     #[test]
     fn apply_boundary_violations_filter() {
         let mut results = make_results();
@@ -1053,8 +1223,6 @@ mod tests {
         assert!(results.circular_dependencies.is_empty());
     }
 
-    // ── Combined filter for multiple types ──────────────────────
-
     #[test]
     fn apply_all_filter_types_simultaneously() {
         let mut results = make_results();
@@ -1068,6 +1236,7 @@ mod tests {
                     length: 2,
                     line: 1,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             ),
@@ -1086,7 +1255,6 @@ mod tests {
             ),
         );
 
-        // Enable all filters
         let f = IssueFilters {
             unused_files: true,
             unused_exports: true,
@@ -1095,26 +1263,35 @@ mod tests {
             private_type_leaks: true,
             unused_enum_members: true,
             unused_class_members: true,
+            unused_store_members: true,
+            unprovided_injects: true,
+            unrendered_components: true,
+            unused_component_props: true,
+            unused_component_emits: true,
+            unused_server_actions: true,
             unresolved_imports: true,
             unlisted_deps: true,
             duplicate_exports: true,
             circular_deps: true,
             re_export_cycles: true,
             boundary_violations: true,
+            policy_violations: true,
             stale_suppressions: true,
             unused_catalog_entries: true,
             empty_catalog_groups: true,
             unresolved_catalog_references: true,
             unused_dependency_overrides: true,
             misconfigured_dependency_overrides: true,
+            invalid_client_exports: true,
+            mixed_client_server_barrels: true,
+            misplaced_directives: true,
+            route_collisions: true,
+            dynamic_segment_name_conflicts: true,
         };
         let total_before = results.total_issues();
         f.apply(&mut results);
-        // With all filters enabled, all issues should be preserved
         assert_eq!(results.total_issues(), total_before);
     }
-
-    // ── Optional and type-only dependency filters ───────────────
 
     #[test]
     fn apply_unused_deps_clears_optional_and_type_only() {

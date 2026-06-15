@@ -7,7 +7,7 @@ use std::time::Instant;
 
 use plow_config::OutputFormat;
 use plow_core::git_env::clear_ambient_git_env;
-use fallow_cov_protocol::function_identity_id;
+use plow_cov_protocol::function_identity_id as protocol_function_identity_id;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::coverage::RunContext;
@@ -26,6 +26,17 @@ use crate::health_types::{
 };
 
 const RUNTIME_COVERAGE_SCHEMA_VERSION: &str = "1";
+
+fn function_identity_id(file: &str, name: &str, start_line: u32) -> String {
+    rebrand_protocol_id(protocol_function_identity_id(file, name, start_line))
+}
+
+fn rebrand_protocol_id(stable_id: String) -> String {
+    match stable_id.strip_prefix("fallow:") {
+        Some(rest) => format!("plow:{rest}"),
+        None => stable_id,
+    }
+}
 
 #[derive(Clone, Default)]
 pub struct AnalyzeArgs {
@@ -47,8 +58,6 @@ pub struct AnalyzeArgs {
     pub importance: bool,
 }
 
-// Manual `Debug` so `CoverageSubcommand::Analyze` formatting cannot expose a
-// CLI-provided API key through future trace/debug output.
 impl fmt::Debug for AnalyzeArgs {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("AnalyzeArgs")
@@ -158,6 +167,7 @@ fn run_local(path: &Path, args: &AnalyzeArgs, ctx: &RunContext<'_>) -> ExitCode 
         baseline: None,
         save_baseline: None,
         complexity: false,
+        complexity_breakdown: false,
         file_scores: false,
         coverage_gaps: false,
         config_activates_coverage_gaps: false,
@@ -182,9 +192,10 @@ fn run_local(path: &Path, args: &AnalyzeArgs, ctx: &RunContext<'_>) -> ExitCode 
         coverage_root: None,
         performance: false,
         min_severity: None,
+        report_only: false,
         runtime_coverage: Some(runtime_coverage),
-        // `coverage analyze` is a focused runtime-only command; PR-scope
-        // line filtering belongs on `plow audit` and `plow health`.
+        // coverage analyze focuses on runtime data, not churn hotspots.
+        churn_file: None,
     }) {
         Ok(result) => result,
         Err(code) => return code,
@@ -320,7 +331,7 @@ struct StaticFunctionInfo {
     cyclomatic: u32,
     caller_count: u32,
     owner_count: Option<u32>,
-    /// Cross-surface join key (`fallow:fn:<hash>`) computed over the
+    /// Cross-surface join key (`plow:fn:<hash>`) computed over the
     /// repo-relative `path`. Agrees with the static-inventory producer's
     /// `stable_id` for the same function, so a cloud function carrying a
     /// `stable_id` joins here directly.
@@ -433,8 +444,6 @@ fn build_index_from_analysis(
                 && !unused_export_lines
                     .get(*path)
                     .is_some_and(|lines| lines.contains(&function.line));
-            // Computed over the repo-relative `rel` so it agrees with the
-            // static-inventory producer's stable_id for the same function.
             let stable_id = function_identity_id(&rel, &function.name, function.line);
             let info = StaticFunctionInfo {
                 path: PathBuf::from(&rel),
@@ -468,30 +477,13 @@ fn merge_cloud_snapshot(
     static_index: &StaticIndex,
     min_invocations_hot: u64,
 ) -> RuntimeCoverageReport {
-    let mut findings = Vec::new();
-    let mut hot_paths = Vec::new();
-    let mut synthesized_blast_radius = Vec::new();
-    let mut synthesized_importance = Vec::new();
-    let mut unmatched_cloud_functions = 0_usize;
-    for function in &snapshot.functions {
-        let Some(local) = match_cloud_function(function, static_index) else {
-            unmatched_cloud_functions = unmatched_cloud_functions.saturating_add(1);
-            continue;
-        };
-        if matches!(function.tracking_state, CloudTrackingState::Called) {
-            if let Some(invocations) = function.hit_count
-                && invocations >= min_invocations_hot
-            {
-                hot_paths.push(cloud_hot_path(&local, invocations));
-            }
-            if let Some(invocations) = function.hit_count {
-                synthesized_blast_radius.push(cloud_blast_radius(&local, invocations, function));
-                synthesized_importance.push(cloud_importance(&local, invocations));
-            }
-            continue;
-        }
-        findings.push(cloud_finding(function, &local, snapshot.window.period_days));
-    }
+    let CloudMergeEntries {
+        mut findings,
+        mut hot_paths,
+        synthesized_blast_radius,
+        synthesized_importance,
+        unmatched_cloud_functions,
+    } = collect_cloud_merge_entries(snapshot, static_index, min_invocations_hot);
 
     findings.sort_by(|left, right| {
         runtime_verdict_rank(left.verdict)
@@ -506,49 +498,8 @@ fn merge_cloud_snapshot(
             .then_with(|| left.path.cmp(&right.path))
             .then_with(|| left.function.cmp(&right.function))
     });
-    let blast_radius = if snapshot.blast_radius.is_empty() {
-        synthesized_blast_radius
-    } else {
-        snapshot
-            .blast_radius
-            .iter()
-            .map(
-                |entry| crate::health_types::RuntimeCoverageBlastRadiusEntry {
-                    id: entry.id.clone(),
-                    stable_id: entry.stable_id.clone(),
-                    file: PathBuf::from(&entry.file),
-                    function: entry.function.clone(),
-                    line: entry.line,
-                    caller_count: entry.caller_count,
-                    caller_count_weighted_by_traffic: entry.caller_count_weighted_by_traffic,
-                    deploys_touched: entry.deploys_touched,
-                    risk_band: map_cloud_risk_band(entry.risk_band),
-                },
-            )
-            .collect::<Vec<_>>()
-    };
-    let importance = if snapshot.importance.is_empty() {
-        rank_importance(synthesized_importance)
-    } else {
-        snapshot
-            .importance
-            .iter()
-            .map(
-                |entry| crate::health_types::RuntimeCoverageImportanceEntry {
-                    id: entry.id.clone(),
-                    stable_id: entry.stable_id.clone(),
-                    file: PathBuf::from(&entry.file),
-                    function: entry.function.clone(),
-                    line: entry.line,
-                    invocations: entry.invocations,
-                    cyclomatic: entry.cyclomatic,
-                    owner_count: entry.owner_count,
-                    importance_score: entry.importance_score,
-                    reason: entry.reason.clone(),
-                },
-            )
-            .collect::<Vec<_>>()
-    };
+    let blast_radius = cloud_blast_radius_entries(snapshot, synthesized_blast_radius);
+    let importance = cloud_importance_entries(snapshot, synthesized_importance);
 
     let warnings = cloud_warnings(snapshot, unmatched_cloud_functions);
 
@@ -580,6 +531,122 @@ fn merge_cloud_snapshot(
         watermark: None,
         warnings,
     }
+}
+
+struct CloudMergeEntries {
+    findings: Vec<RuntimeCoverageFinding>,
+    hot_paths: Vec<RuntimeCoverageHotPath>,
+    synthesized_blast_radius: Vec<crate::health_types::RuntimeCoverageBlastRadiusEntry>,
+    synthesized_importance: Vec<(
+        crate::health_types::RuntimeCoverageImportanceEntry,
+        Option<u32>,
+    )>,
+    unmatched_cloud_functions: usize,
+}
+
+fn collect_cloud_merge_entries(
+    snapshot: &CloudRuntimeContext,
+    static_index: &StaticIndex,
+    min_invocations_hot: u64,
+) -> CloudMergeEntries {
+    let mut entries = CloudMergeEntries {
+        findings: Vec::new(),
+        hot_paths: Vec::new(),
+        synthesized_blast_radius: Vec::new(),
+        synthesized_importance: Vec::new(),
+        unmatched_cloud_functions: 0,
+    };
+    for function in &snapshot.functions {
+        let Some(local) = match_cloud_function(function, static_index) else {
+            entries.unmatched_cloud_functions = entries.unmatched_cloud_functions.saturating_add(1);
+            continue;
+        };
+        if matches!(function.tracking_state, CloudTrackingState::Called) {
+            collect_called_cloud_function(&mut entries, function, &local, min_invocations_hot);
+        } else {
+            entries
+                .findings
+                .push(cloud_finding(function, &local, snapshot.window.period_days));
+        }
+    }
+    entries
+}
+
+fn collect_called_cloud_function(
+    entries: &mut CloudMergeEntries,
+    function: &CloudRuntimeFunction,
+    local: &StaticFunctionInfo,
+    min_invocations_hot: u64,
+) {
+    if let Some(invocations) = function.hit_count
+        && invocations >= min_invocations_hot
+    {
+        entries.hot_paths.push(cloud_hot_path(local, invocations));
+    }
+    if let Some(invocations) = function.hit_count {
+        entries
+            .synthesized_blast_radius
+            .push(cloud_blast_radius(local, invocations, function));
+        entries
+            .synthesized_importance
+            .push(cloud_importance(local, invocations));
+    }
+}
+
+fn cloud_blast_radius_entries(
+    snapshot: &CloudRuntimeContext,
+    synthesized: Vec<crate::health_types::RuntimeCoverageBlastRadiusEntry>,
+) -> Vec<crate::health_types::RuntimeCoverageBlastRadiusEntry> {
+    if snapshot.blast_radius.is_empty() {
+        return synthesized;
+    }
+    snapshot
+        .blast_radius
+        .iter()
+        .map(
+            |entry| crate::health_types::RuntimeCoverageBlastRadiusEntry {
+                id: entry.id.clone(),
+                stable_id: entry.stable_id.clone(),
+                file: PathBuf::from(&entry.file),
+                function: entry.function.clone(),
+                line: entry.line,
+                caller_count: entry.caller_count,
+                caller_count_weighted_by_traffic: entry.caller_count_weighted_by_traffic,
+                deploys_touched: entry.deploys_touched,
+                risk_band: map_cloud_risk_band(entry.risk_band),
+            },
+        )
+        .collect()
+}
+
+fn cloud_importance_entries(
+    snapshot: &CloudRuntimeContext,
+    synthesized: Vec<(
+        crate::health_types::RuntimeCoverageImportanceEntry,
+        Option<u32>,
+    )>,
+) -> Vec<crate::health_types::RuntimeCoverageImportanceEntry> {
+    if snapshot.importance.is_empty() {
+        return rank_importance(synthesized);
+    }
+    snapshot
+        .importance
+        .iter()
+        .map(
+            |entry| crate::health_types::RuntimeCoverageImportanceEntry {
+                id: entry.id.clone(),
+                stable_id: entry.stable_id.clone(),
+                file: PathBuf::from(&entry.file),
+                function: entry.function.clone(),
+                line: entry.line,
+                invocations: entry.invocations,
+                cyclomatic: entry.cyclomatic,
+                owner_count: entry.owner_count,
+                importance_score: entry.importance_score,
+                reason: entry.reason.clone(),
+            },
+        )
+        .collect()
 }
 
 fn cloud_hot_path(local: &StaticFunctionInfo, invocations: u64) -> RuntimeCoverageHotPath {
@@ -823,10 +890,6 @@ fn cloud_warnings(
             },
         })
         .collect::<Vec<_>>();
-    // Only synthesize the empty-window warning if the server did not already
-    // emit one. The server's `no_runtime_data` message includes the projectId
-    // when present, so dedup-by-(code,message) cannot catch this case; the
-    // CLI defers to the server's variant unconditionally when both apply.
     let server_emitted_no_runtime_data = warnings
         .iter()
         .any(|warning| warning.code == "no_runtime_data");
@@ -899,9 +962,6 @@ fn match_cloud_function(
     function: &CloudRuntimeFunction,
     static_index: &StaticIndex,
 ) -> Option<StaticFunctionInfo> {
-    // Tier 1: cross-surface stable-id join. Strongest match, survives line
-    // moves. Only fires when the cloud has been migrated to emit `stableId`
-    // (plow-cloud#63); `None` for the current cloud.
     if let Some(stable_id) = function.stable_id.as_deref()
         && let Some(info) = static_index.by_stable_id.get(stable_id)
     {
@@ -909,17 +969,11 @@ fn match_cloud_function(
     }
     let path = normalize_runtime_path(Path::new(&function.file_path));
     let line = function.start_line.or(function.line_number)?;
-    // Tier 2: exact (path, name, line).
     if let Some(info) =
         static_index
             .by_key
             .get(&(path.clone(), function.function_name.clone(), line))
     {
-        // Diagnostic: the cloud carried a stable_id that did NOT join in tier 1
-        // yet (path, name, line) did. This means the producer and consumer
-        // disagree on the identity hash (typically a path-space divergence).
-        // Surface it under RUST_LOG so the silent fuzzy-tier masking is
-        // field-observable instead of invisible.
         if let Some(stable_id) = function.stable_id.as_deref()
             && stable_id != info.stable_id
         {
@@ -933,7 +987,6 @@ fn match_cloud_function(
         }
         return Some(info.clone());
     }
-    // Tier 3: fuzzy nearest candidate within a line tolerance.
     static_index
         .by_path_name
         .get(&(path, function.function_name.clone()))
@@ -1025,12 +1078,13 @@ const fn runtime_verdict_rank(verdict: RuntimeCoverageVerdict) -> u8 {
 
 fn stable_runtime_id(prefix: &str, path: &Path, function: &str, line: u32) -> String {
     let file = normalize_runtime_path(path);
-    match prefix {
-        "hot" => fallow_cov_protocol::hot_path_id(&file, function, line),
-        "blast" => fallow_cov_protocol::blast_radius_id(&file, function, line),
-        "importance" => fallow_cov_protocol::importance_id(&file, function, line),
-        _ => fallow_cov_protocol::finding_id(&file, function, line),
-    }
+    let id = match prefix {
+        "hot" => plow_cov_protocol::hot_path_id(&file, function, line),
+        "blast" => plow_cov_protocol::blast_radius_id(&file, function, line),
+        "importance" => plow_cov_protocol::importance_id(&file, function, line),
+        _ => plow_cov_protocol::finding_id(&file, function, line),
+    };
+    rebrand_protocol_id(id)
 }
 
 fn print_runtime_report(
@@ -1060,13 +1114,11 @@ fn print_runtime_json(
     elapsed: std::time::Duration,
     explain: bool,
 ) -> ExitCode {
-    use crate::output_envelope::{CoverageAnalyzeOutput, CoverageAnalyzeSchemaVersion};
+    use crate::output_envelope::{
+        CoverageAnalyzeOutput, CoverageAnalyzeSchemaVersion, PlowOutput, serialize_root_output,
+    };
     use plow_types::envelope::{ElapsedMs, ToolVersion};
 
-    // Schema-derived constant: the schema-version enum has a single variant
-    // serialized as `"1"`; the legacy `RUNTIME_COVERAGE_SCHEMA_VERSION`
-    // constant is retained for the cloud client surface but the wire-shape
-    // source of truth is now the typed enum.
     debug_assert_eq!(
         RUNTIME_COVERAGE_SCHEMA_VERSION, "1",
         "the schema-version enum has one variant serialized as \"1\"; bump CoverageAnalyzeSchemaVersion if the constant moves"
@@ -1079,7 +1131,7 @@ fn print_runtime_json(
         runtime_coverage: report.clone(),
         meta: None,
     };
-    let mut output = match serde_json::to_value(&envelope) {
+    let mut output = match serialize_root_output(PlowOutput::CoverageAnalyze(envelope)) {
         Ok(value) => value,
         Err(err) => {
             eprintln!("Error: failed to serialize runtime coverage report: {err}");
@@ -1089,6 +1141,7 @@ fn print_runtime_json(
     if explain && let Some(map) = output.as_object_mut() {
         map.insert("_meta".to_owned(), crate::explain::coverage_analyze_meta());
     }
+    crate::output_envelope::attach_telemetry_meta(&mut output);
     crate::report::emit_json(&output, "runtime coverage JSON")
 }
 
@@ -1198,10 +1251,134 @@ mod tests {
     }
 
     #[test]
+    fn analyze_args_debug_includes_non_secret_options() {
+        let args = AnalyzeArgs {
+            runtime_coverage: Some(PathBuf::from("coverage-final.json")),
+            cloud: true,
+            api_key: Some("plow_live_secret_token_value".to_owned()),
+            api_endpoint: Some("https://api.example.test".to_owned()),
+            repo: Some("acme/web".to_owned()),
+            project_id: Some("apps/web".to_owned()),
+            coverage_period: 14,
+            environment: Some("production".to_owned()),
+            commit_sha: Some("abc123".to_owned()),
+            production: true,
+            min_invocations_hot: 250,
+            min_observation_volume: Some(50),
+            low_traffic_threshold: Some(0.25),
+            top: Some(5),
+            blast_radius: true,
+            importance: true,
+        };
+
+        let formatted = format!("{args:?}");
+
+        assert!(!formatted.contains("plow_live_secret_token_value"));
+        for expected in [
+            "runtime_coverage: Some(\"coverage-final.json\")",
+            "cloud: true",
+            "api_endpoint: Some(\"https://api.example.test\")",
+            "repo: Some(\"acme/web\")",
+            "project_id: Some(\"apps/web\")",
+            "coverage_period: 14",
+            "environment: Some(\"production\")",
+            "commit_sha: Some(\"abc123\")",
+            "production: true",
+            "min_invocations_hot: 250",
+            "min_observation_volume: Some(50)",
+            "low_traffic_threshold: Some(0.25)",
+            "top: Some(5)",
+            "blast_radius: true",
+            "importance: true",
+        ] {
+            assert!(
+                formatted.contains(expected),
+                "missing {expected:?} in {formatted}"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_output_format_accepts_only_json_and_human() {
+        assert!(validate_output_format(OutputFormat::Json).is_ok());
+        assert!(validate_output_format(OutputFormat::Human).is_ok());
+
+        let error = validate_output_format(OutputFormat::Sarif)
+            .expect_err("sarif should be rejected for coverage analyze");
+        assert!(error.contains("only supports --format json or --format human"));
+        assert!(error.contains("Sarif"));
+    }
+
+    #[test]
+    fn resolve_api_key_prefers_trimmed_explicit_value() {
+        assert_eq!(
+            resolve_api_key(Some("  plow_live_token  ")).expect("explicit key should resolve"),
+            "plow_live_token"
+        );
+    }
+
+    #[test]
+    fn resolve_repo_prefers_trimmed_explicit_value() {
+        let dir = tempfile::TempDir::new().expect("temp dir should be created");
+
+        assert_eq!(
+            resolve_repo(Some("  fglogan/genesis-plow  "), dir.path())
+                .expect("explicit repo should resolve"),
+            "fglogan/genesis-plow"
+        );
+    }
+
+    #[test]
     fn parse_git_remote_https() {
         assert_eq!(
-            parse_git_remote_to_project_id("https://github.com/plow-rs/plow.git"),
-            Some("plow-rs/plow".to_owned())
+            parse_git_remote_to_project_id("https://github.com/fglogan/genesis-plow.git"),
+            Some("fglogan/genesis-plow".to_owned())
+        );
+    }
+
+    #[test]
+    fn parse_git_remote_ssh_and_nested_paths() {
+        assert_eq!(
+            parse_git_remote_to_project_id("git@github.com:fglogan/genesis-plow.git"),
+            Some("fglogan/genesis-plow".to_owned())
+        );
+        assert_eq!(
+            parse_git_remote_to_project_id("ssh://git@gitlab.com/group/subgroup/repo.git"),
+            Some("subgroup/repo".to_owned())
+        );
+    }
+
+    #[test]
+    fn parse_git_remote_rejects_incomplete_urls() {
+        assert_eq!(parse_git_remote_to_project_id("git@github.com:owner"), None);
+        assert_eq!(parse_git_remote_to_project_id("https://github.com"), None);
+        assert_eq!(parse_git_remote_to_project_id("not a remote"), None);
+    }
+
+    #[test]
+    fn resolve_repo_infers_origin_remote() {
+        let dir = tempfile::TempDir::new().expect("temp dir should be created");
+        let init = Command::new("git")
+            .args(["init", "-b", "main"])
+            .current_dir(dir.path())
+            .output()
+            .expect("git init should run");
+        assert!(init.status.success());
+        let remote = Command::new("git")
+            .args([
+                "remote",
+                "add",
+                "origin",
+                "git@github.com:fglogan/genesis-plow.git",
+            ])
+            .current_dir(dir.path())
+            .output()
+            .expect("git remote add should run");
+        assert!(remote.status.success());
+
+        assert_eq!(
+            resolve_repo(None, dir.path()).expect("repo should resolve from origin"),
+            "fglogan/genesis-plow"
         );
     }
 
@@ -1308,6 +1485,58 @@ mod tests {
     }
 
     #[test]
+    fn cloud_called_function_emits_hot_path_blast_radius_and_importance() {
+        let info = StaticFunctionInfo {
+            caller_count: 8,
+            cyclomatic: 12,
+            owner_count: Some(1),
+            ..static_info("src/api.ts", "handler", 10, 22)
+        };
+        let static_index = static_index_with(vec![info]);
+        let mut function = cloud_function("src/api.ts", "handler", Some(10), Some(10), Some(22));
+        function.tracking_state = CloudTrackingState::Called;
+        function.hit_count = Some(20_000);
+        function.deployments_observed = 4;
+        let snapshot = CloudRuntimeContext {
+            repo: "acme/web".to_owned(),
+            window: crate::coverage::cloud_client::CloudRuntimeWindow { period_days: 14 },
+            summary: crate::coverage::cloud_client::CloudRuntimeSummary {
+                trace_count: 10,
+                deployments_seen: 4,
+                functions_tracked: 1,
+                functions_hit: 1,
+                functions_unhit: 0,
+                functions_untracked: 0,
+                coverage_percent: 100.0,
+                last_received_at: None,
+            },
+            blast_radius: vec![],
+            importance: vec![],
+            functions: vec![function],
+            warnings: vec![],
+        };
+
+        let report = merge_cloud_snapshot(&snapshot, &static_index, 100);
+
+        assert_eq!(report.verdict, RuntimeCoverageReportVerdict::Clean);
+        assert!(report.findings.is_empty());
+        assert_eq!(report.hot_paths[0].function, "handler");
+        assert_eq!(report.hot_paths[0].invocations, 20_000);
+        assert_eq!(report.blast_radius[0].caller_count, 8);
+        assert_eq!(
+            report.blast_radius[0].risk_band,
+            RuntimeCoverageRiskBand::Medium
+        );
+        assert_eq!(report.importance[0].function, "handler");
+        assert!(
+            report.importance[0]
+                .reason
+                .contains("Moderate traffic, high complexity, single owner")
+        );
+        assert!(report.summary.capture_quality.is_some());
+    }
+
+    #[test]
     fn cloud_match_rejects_same_name_when_line_does_not_match() {
         let static_index = static_index_with(vec![
             static_info("src/api.ts", "handler", 10, 20),
@@ -1355,12 +1584,57 @@ mod tests {
     }
 
     #[test]
+    fn cloud_finding_decision_maps_tracking_states() {
+        let mut used = static_info("src/api.ts", "handler", 10, 20);
+        used.static_used = true;
+        let mut unused = used.clone();
+        unused.static_used = false;
+
+        let never_called = cloud_function("src/api.ts", "handler", Some(10), Some(10), Some(20));
+        assert_eq!(
+            cloud_finding_decision(&never_called, &used),
+            (
+                RuntimeCoverageVerdict::ReviewRequired,
+                RuntimeCoverageConfidence::High,
+                Some(0)
+            )
+        );
+        assert_eq!(
+            cloud_finding_decision(&never_called, &unused),
+            (
+                RuntimeCoverageVerdict::SafeToDelete,
+                RuntimeCoverageConfidence::High,
+                Some(0)
+            )
+        );
+
+        let mut untracked = never_called.clone();
+        untracked.tracking_state = CloudTrackingState::Untracked;
+        untracked.hit_count = None;
+        assert_eq!(
+            cloud_finding_decision(&untracked, &used),
+            (
+                RuntimeCoverageVerdict::CoverageUnavailable,
+                RuntimeCoverageConfidence::None,
+                None
+            )
+        );
+
+        let mut unknown = never_called;
+        unknown.tracking_state = CloudTrackingState::Unknown;
+        unknown.hit_count = Some(42);
+        assert_eq!(
+            cloud_finding_decision(&unknown, &used),
+            (
+                RuntimeCoverageVerdict::Unknown,
+                RuntimeCoverageConfidence::Low,
+                Some(42)
+            )
+        );
+    }
+
+    #[test]
     fn cloud_warnings_dedupe_server_and_cli_no_runtime_data() {
-        // Empty window: server adds no_runtime_data; CLI's empty-summary
-        // branch must defer to the server's variant unconditionally so the
-        // user never sees the same code twice. Caught live against
-        // api.plow.cloud during the v2.57.0 smoke (both --repo nonexistent
-        // and --project-id apps/dashboard returned duplicates).
         let snapshot = CloudRuntimeContext {
             repo: "nonexistent-repo".to_owned(),
             window: crate::coverage::cloud_client::CloudRuntimeWindow { period_days: 30 },
@@ -1398,10 +1672,6 @@ mod tests {
 
     #[test]
     fn cloud_warnings_dedupe_when_server_message_includes_project_id() {
-        // Regression: with --project-id set, the server's no_runtime_data
-        // message embeds the projectId ("... apps/dashboard in plow-cloud
-        // ...") while the CLI's variant does not, so dedup-by-(code,message)
-        // does not catch the duplicate. Defer to code-only check.
         let snapshot = CloudRuntimeContext {
             repo: "plow-cloud".to_owned(),
             window: crate::coverage::cloud_client::CloudRuntimeWindow { period_days: 30 },
@@ -1437,6 +1707,39 @@ mod tests {
     }
 
     #[test]
+    fn cloud_capture_quality_reports_untracked_ratio_only_when_data_exists() {
+        let mut snapshot = CloudRuntimeContext {
+            repo: "acme/web".to_owned(),
+            window: crate::coverage::cloud_client::CloudRuntimeWindow { period_days: 7 },
+            summary: crate::coverage::cloud_client::CloudRuntimeSummary {
+                trace_count: 0,
+                deployments_seen: 0,
+                functions_tracked: 0,
+                functions_hit: 0,
+                functions_unhit: 0,
+                functions_untracked: 0,
+                coverage_percent: 0.0,
+                last_received_at: None,
+            },
+            blast_radius: vec![],
+            importance: vec![],
+            functions: vec![],
+            warnings: vec![],
+        };
+        assert!(cloud_capture_quality(&snapshot).is_none());
+
+        snapshot.summary.functions_tracked = 1;
+        snapshot.summary.functions_untracked = 3;
+        snapshot.summary.deployments_seen = 2;
+        let quality = cloud_capture_quality(&snapshot).expect("data should emit quality");
+
+        assert_eq!(quality.window_seconds, 604_800);
+        assert_eq!(quality.instances_observed, 2);
+        assert!((quality.untracked_ratio_percent - 75.0).abs() < f64::EPSILON);
+        assert!(quality.lazy_parse_warning);
+    }
+
+    #[test]
     fn validate_output_format_accepts_json_and_human() {
         assert!(validate_output_format(OutputFormat::Json).is_ok());
         assert!(validate_output_format(OutputFormat::Human).is_ok());
@@ -1450,20 +1753,20 @@ mod tests {
             signals: Vec::new(),
             summary: RuntimeCoverageSummary::default(),
             findings: vec![
-                runtime_finding("fallow:prod:00000001"),
-                runtime_finding("fallow:prod:00000002"),
+                runtime_finding("plow:prod:00000001"),
+                runtime_finding("plow:prod:00000002"),
             ],
             hot_paths: vec![
-                runtime_hot_path("fallow:hot:00000001"),
-                runtime_hot_path("fallow:hot:00000002"),
+                runtime_hot_path("plow:hot:00000001"),
+                runtime_hot_path("plow:hot:00000002"),
             ],
             blast_radius: vec![
-                runtime_blast_radius("fallow:blast:00000001"),
-                runtime_blast_radius("fallow:blast:00000002"),
+                runtime_blast_radius("plow:blast:00000001"),
+                runtime_blast_radius("plow:blast:00000002"),
             ],
             importance: vec![
-                runtime_importance("fallow:importance:00000001"),
-                runtime_importance("fallow:importance:00000002"),
+                runtime_importance("plow:importance:00000001"),
+                runtime_importance("plow:importance:00000002"),
             ],
             watermark: None,
             warnings: vec![],
@@ -1477,36 +1780,71 @@ mod tests {
 
     #[test]
     fn cloud_importance_scores_missing_codeowners_lower_than_unowned() {
-        let no_codeowners = runtime_importance("fallow:importance:00000001");
+        let no_codeowners = runtime_importance("plow:importance:00000001");
         let unowned = RuntimeCoverageImportanceEntry {
-            id: "fallow:importance:00000002".to_owned(),
+            id: "plow:importance:00000002".to_owned(),
             owner_count: 0,
             reason: "High traffic, low complexity, unowned".to_owned(),
-            ..runtime_importance("fallow:importance:00000002")
+            ..runtime_importance("plow:importance:00000002")
         };
 
         let ranked = rank_importance(vec![(no_codeowners, None), (unowned, Some(0))]);
-        assert_eq!(ranked[0].id, "fallow:importance:00000002");
+        assert_eq!(ranked[0].id, "plow:importance:00000002");
         assert!((ranked[0].importance_score - 78.8).abs() < f64::EPSILON);
         assert!((ranked[1].importance_score - 63.0).abs() < f64::EPSILON);
     }
 
     #[test]
     fn stable_runtime_id_emits_eight_hex_chars() {
-        // Schema regex: ^fallow:prod:[0-9a-f]{8}$. Local sidecar already
-        // emits 8 chars; cloud merge must match. Caught live during the
-        // v2.57.0 jsonschema validation pass against the published schema.
         let path = PathBuf::from("src/foo.ts");
         let id = stable_runtime_id("prod", &path, "doThing", 42);
         let suffix = id
-            .strip_prefix("fallow:prod:")
-            .expect("id has fallow:prod: prefix");
+            .strip_prefix("plow:prod:")
+            .expect("id has plow:prod: prefix");
         assert_eq!(suffix.len(), 8, "expected 8 hex chars, got {suffix:?}");
         assert!(
             suffix
                 .chars()
                 .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()),
             "expected lowercase hex chars, got {suffix:?}"
+        );
+    }
+
+    #[test]
+    fn runtime_helper_tables_cover_actions_ranks_tracking_and_paths() {
+        let delete_actions = runtime_actions(RuntimeCoverageVerdict::SafeToDelete);
+        assert_eq!(delete_actions.len(), 1);
+        assert_eq!(delete_actions[0].kind, "delete-cold-code");
+        assert!(runtime_actions(RuntimeCoverageVerdict::Active).is_empty());
+        assert!(runtime_actions(RuntimeCoverageVerdict::Unknown).is_empty());
+
+        assert!(
+            runtime_verdict_rank(RuntimeCoverageVerdict::SafeToDelete)
+                < runtime_verdict_rank(RuntimeCoverageVerdict::ReviewRequired)
+        );
+        assert!(
+            runtime_verdict_rank(RuntimeCoverageVerdict::Unknown)
+                < runtime_verdict_rank(RuntimeCoverageVerdict::Active)
+        );
+
+        assert_eq!(
+            blast_radius_risk_band(25, 10),
+            RuntimeCoverageRiskBand::High
+        );
+        assert_eq!(
+            blast_radius_risk_band(5, 10),
+            RuntimeCoverageRiskBand::Medium
+        );
+        assert_eq!(blast_radius_risk_band(1, 10), RuntimeCoverageRiskBand::Low);
+
+        assert_eq!(cloud_v8_tracking(CloudTrackingState::Called), "tracked");
+        assert_eq!(
+            cloud_v8_tracking(CloudTrackingState::Untracked),
+            "untracked"
+        );
+        assert_eq!(
+            normalize_runtime_path(Path::new("/src\\feature\\handler.ts")),
+            "src/feature/handler.ts"
         );
     }
 

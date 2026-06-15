@@ -71,6 +71,24 @@ pub struct BaselineData {
     /// Unused class members, keyed by `file:parent.member`.
     #[serde(default)]
     pub unused_class_members: Vec<String>,
+    /// Unused store members, keyed by `file:parent.member`.
+    #[serde(default)]
+    pub unused_store_members: Vec<String>,
+    /// Unprovided injects, keyed by `file:key_name`.
+    #[serde(default)]
+    pub unprovided_injects: Vec<String>,
+    /// Unrendered components, keyed by `file:component_name`.
+    #[serde(default)]
+    pub unrendered_components: Vec<String>,
+    /// Unused component props, keyed by `file:prop_name`.
+    #[serde(default)]
+    pub unused_component_props: Vec<String>,
+    /// Unused component emits, keyed by `file:emit_name`.
+    #[serde(default)]
+    pub unused_component_emits: Vec<String>,
+    /// Unused server actions, keyed by `file:action_name`.
+    #[serde(default)]
+    pub unused_server_actions: Vec<String>,
     /// Unresolved imports, keyed by `file:specifier`.
     #[serde(default)]
     pub unresolved_imports: Vec<String>,
@@ -93,6 +111,15 @@ pub struct BaselineData {
     /// Boundary violations, keyed by `from_path->to_path`.
     #[serde(default)]
     pub boundary_violations: Vec<String>,
+    /// Boundary coverage violations, keyed by `path`.
+    #[serde(default)]
+    pub boundary_coverage_violations: Vec<String>,
+    /// Boundary call violations, keyed by `path:callee`.
+    #[serde(default)]
+    pub boundary_call_violations: Vec<String>,
+    /// Rule-pack policy violations, keyed by `path:pack/rule_id:matched`.
+    #[serde(default)]
+    pub policy_violations: Vec<String>,
     /// Stale suppressions, keyed by `file:line`.
     #[serde(default)]
     pub stale_suppressions: Vec<String>,
@@ -111,177 +138,70 @@ pub struct BaselineData {
     /// Misconfigured pnpm dependency overrides, keyed by `source:raw_key`.
     #[serde(default)]
     pub misconfigured_dependency_overrides: Vec<String>,
+    /// Invalid `"use client"` exports, keyed by `path:export_name`.
+    #[serde(default)]
+    pub invalid_client_exports: Vec<String>,
+    /// Mixed client/server barrels, keyed by `path:client_origin:server_origin`.
+    #[serde(default)]
+    pub mixed_client_server_barrels: Vec<String>,
+    /// Misplaced `"use client"` / `"use server"` directives, keyed by
+    /// `path:line:directive`.
+    #[serde(default)]
+    pub misplaced_directives: Vec<String>,
+    /// Next.js route collisions, keyed by `path:url`.
+    #[serde(default)]
+    pub route_collisions: Vec<String>,
+    /// Next.js dynamic-segment name conflicts, keyed by `path:position`.
+    #[serde(default)]
+    pub dynamic_segment_name_conflicts: Vec<String>,
 }
 
 impl BaselineData {
-    #[expect(
-        clippy::too_many_lines,
-        reason = "one match arm per issue type keeps the baseline key map flat and grep-friendly"
-    )]
     pub fn from_results(results: &plow_core::results::AnalysisResults, root: &Path) -> Self {
+        let file_exports = baseline_file_export_keys(results, root);
+        let member_imports = baseline_member_import_keys(results, root);
+        let dependencies = baseline_dependency_keys(results, root);
+        let graph = baseline_graph_keys(results, root);
+        let catalog = baseline_catalog_keys(results, root);
+
         Self {
-            unused_files: results
-                .unused_files
-                .iter()
-                .map(|f| relative_path(&f.file.path, root))
-                .collect(),
-            unused_exports: results
-                .unused_exports
-                .iter()
-                .map(|e| {
-                    format!(
-                        "{}:{}",
-                        relative_path(&e.export.path, root),
-                        e.export.export_name
-                    )
-                })
-                .collect(),
-            unused_types: results
-                .unused_types
-                .iter()
-                .map(|e| {
-                    format!(
-                        "{}:{}",
-                        relative_path(&e.export.path, root),
-                        e.export.export_name
-                    )
-                })
-                .collect(),
-            private_type_leaks: results
-                .private_type_leaks
-                .iter()
-                .map(|e| {
-                    format!(
-                        "{}:{}->{}",
-                        relative_path(&e.leak.path, root),
-                        e.leak.export_name,
-                        e.leak.type_name
-                    )
-                })
-                .collect(),
-            unused_dependencies: results
-                .unused_dependencies
-                .iter()
-                .map(|d| package_json_dependency_key(&d.dep.package_name, &d.dep.path, root))
-                .collect(),
-            unused_dev_dependencies: results
-                .unused_dev_dependencies
-                .iter()
-                .map(|d| package_json_dependency_key(&d.dep.package_name, &d.dep.path, root))
-                .collect(),
-            circular_dependencies: results
-                .circular_dependencies
-                .iter()
-                .map(|c| circular_dep_key(&c.cycle, root))
-                .collect(),
-            re_export_cycles: results
-                .re_export_cycles
-                .iter()
-                .map(|c| re_export_cycle_key(&c.cycle, root))
-                .collect(),
-            unused_optional_dependencies: results
-                .unused_optional_dependencies
-                .iter()
-                .map(|d| package_json_dependency_key(&d.dep.package_name, &d.dep.path, root))
-                .collect(),
-            unused_enum_members: results
-                .unused_enum_members
-                .iter()
-                .map(|m| {
-                    format!(
-                        "{}:{}.{}",
-                        relative_path(&m.member.path, root),
-                        m.member.parent_name,
-                        m.member.member_name
-                    )
-                })
-                .collect(),
-            unused_class_members: results
-                .unused_class_members
-                .iter()
-                .map(|m| {
-                    format!(
-                        "{}:{}.{}",
-                        relative_path(&m.member.path, root),
-                        m.member.parent_name,
-                        m.member.member_name
-                    )
-                })
-                .collect(),
-            unresolved_imports: results
-                .unresolved_imports
-                .iter()
-                .map(|i| {
-                    format!(
-                        "{}:{}",
-                        relative_path(&i.import.path, root),
-                        i.import.specifier
-                    )
-                })
-                .collect(),
-            unlisted_dependencies: results
-                .unlisted_dependencies
-                .iter()
-                .map(|d| d.dep.package_name.clone())
-                .collect(),
-            duplicate_exports: results
-                .duplicate_exports
-                .iter()
-                .map(|d| duplicate_export_key(&d.export, root))
-                .collect(),
-            type_only_dependencies: results
-                .type_only_dependencies
-                .iter()
-                .map(|d| package_json_dependency_key(&d.dep.package_name, &d.dep.path, root))
-                .collect(),
-            test_only_dependencies: results
-                .test_only_dependencies
-                .iter()
-                .map(|d| package_json_dependency_key(&d.dep.package_name, &d.dep.path, root))
-                .collect(),
-            boundary_violations: results
-                .boundary_violations
-                .iter()
-                .map(|v| boundary_violation_key(&v.violation, root))
-                .collect(),
-            stale_suppressions: results
-                .stale_suppressions
-                .iter()
-                .map(|s| format!("{}:{}", relative_path(&s.path, root), s.line))
-                .collect(),
-            unused_catalog_entries: results
-                .unused_catalog_entries
-                .iter()
-                .map(|e| format!("{}:{}", e.entry.catalog_name, e.entry.entry_name))
-                .collect(),
-            empty_catalog_groups: results
-                .empty_catalog_groups
-                .iter()
-                .map(|g| g.group.catalog_name.clone())
-                .collect(),
-            unresolved_catalog_references: results
-                .unresolved_catalog_references
-                .iter()
-                .map(|r| {
-                    format!(
-                        "{}:{}:{}:{}",
-                        relative_path(&r.reference.path, root),
-                        r.reference.line,
-                        r.reference.catalog_name,
-                        r.reference.entry_name,
-                    )
-                })
-                .collect(),
-            unused_dependency_overrides: results
-                .unused_dependency_overrides
-                .iter()
-                .map(|o| format!("{}:{}", o.entry.source, o.entry.raw_key))
-                .collect(),
-            misconfigured_dependency_overrides: results
-                .misconfigured_dependency_overrides
-                .iter()
-                .map(|o| format!("{}:{}", o.entry.source, o.entry.raw_key))
-                .collect(),
+            unused_files: file_exports.unused_files,
+            unused_exports: file_exports.unused_exports,
+            unused_types: file_exports.unused_types,
+            private_type_leaks: file_exports.private_type_leaks,
+            unused_dependencies: dependencies.unused,
+            unused_dev_dependencies: dependencies.unused_dev,
+            circular_dependencies: graph.circular_dependencies,
+            re_export_cycles: graph.re_export_cycles,
+            unused_optional_dependencies: dependencies.unused_optional,
+            unused_enum_members: member_imports.unused_enum_members,
+            unused_class_members: member_imports.unused_class_members,
+            unused_store_members: member_imports.unused_store_members,
+            unprovided_injects: member_imports.unprovided_injects,
+            unrendered_components: member_imports.unrendered_components,
+            unused_component_props: member_imports.unused_component_props,
+            unused_component_emits: member_imports.unused_component_emits,
+            unused_server_actions: member_imports.unused_server_actions,
+            unresolved_imports: member_imports.unresolved_imports,
+            unlisted_dependencies: dependencies.unlisted,
+            duplicate_exports: member_imports.duplicate_exports,
+            type_only_dependencies: dependencies.type_only,
+            test_only_dependencies: dependencies.test_only,
+            boundary_violations: graph.boundary_violations,
+            boundary_coverage_violations: graph.boundary_coverage_violations,
+            boundary_call_violations: graph.boundary_call_violations,
+            policy_violations: graph.policy_violations,
+            stale_suppressions: member_imports.stale_suppressions,
+            unused_catalog_entries: catalog.unused_catalog_entries,
+            empty_catalog_groups: catalog.empty_catalog_groups,
+            unresolved_catalog_references: catalog.unresolved_catalog_references,
+            unused_dependency_overrides: catalog.unused_dependency_overrides,
+            misconfigured_dependency_overrides: catalog.misconfigured_dependency_overrides,
+            invalid_client_exports: file_exports.invalid_client_exports,
+            mixed_client_server_barrels: file_exports.mixed_client_server_barrels,
+            misplaced_directives: file_exports.misplaced_directives,
+            route_collisions: file_exports.route_collisions,
+            dynamic_segment_name_conflicts: file_exports.dynamic_segment_name_conflicts,
         }
     }
 
@@ -298,18 +218,413 @@ impl BaselineData {
             + self.unused_optional_dependencies.len()
             + self.unused_enum_members.len()
             + self.unused_class_members.len()
+            + self.unused_store_members.len()
+            + self.unprovided_injects.len()
+            + self.unrendered_components.len()
+            + self.unused_component_props.len()
+            + self.unused_component_emits.len()
+            + self.unused_server_actions.len()
             + self.unresolved_imports.len()
             + self.unlisted_dependencies.len()
             + self.duplicate_exports.len()
             + self.type_only_dependencies.len()
             + self.test_only_dependencies.len()
             + self.boundary_violations.len()
+            + self.boundary_coverage_violations.len()
+            + self.boundary_call_violations.len()
+            + self.policy_violations.len()
             + self.stale_suppressions.len()
             + self.unused_catalog_entries.len()
             + self.empty_catalog_groups.len()
             + self.unresolved_catalog_references.len()
             + self.unused_dependency_overrides.len()
             + self.misconfigured_dependency_overrides.len()
+            + self.invalid_client_exports.len()
+            + self.mixed_client_server_barrels.len()
+            + self.misplaced_directives.len()
+            + self.route_collisions.len()
+            + self.dynamic_segment_name_conflicts.len()
+    }
+}
+
+struct BaselineFileExportKeys {
+    unused_files: Vec<String>,
+    unused_exports: Vec<String>,
+    unused_types: Vec<String>,
+    private_type_leaks: Vec<String>,
+    invalid_client_exports: Vec<String>,
+    mixed_client_server_barrels: Vec<String>,
+    misplaced_directives: Vec<String>,
+    route_collisions: Vec<String>,
+    dynamic_segment_name_conflicts: Vec<String>,
+}
+
+fn baseline_file_export_keys(
+    results: &plow_core::results::AnalysisResults,
+    root: &Path,
+) -> BaselineFileExportKeys {
+    BaselineFileExportKeys {
+        unused_files: results
+            .unused_files
+            .iter()
+            .map(|f| relative_path(&f.file.path, root))
+            .collect(),
+        unused_exports: results
+            .unused_exports
+            .iter()
+            .map(|e| {
+                format!(
+                    "{}:{}",
+                    relative_path(&e.export.path, root),
+                    e.export.export_name
+                )
+            })
+            .collect(),
+        unused_types: results
+            .unused_types
+            .iter()
+            .map(|e| {
+                format!(
+                    "{}:{}",
+                    relative_path(&e.export.path, root),
+                    e.export.export_name
+                )
+            })
+            .collect(),
+        private_type_leaks: results
+            .private_type_leaks
+            .iter()
+            .map(|e| {
+                format!(
+                    "{}:{}->{}",
+                    relative_path(&e.leak.path, root),
+                    e.leak.export_name,
+                    e.leak.type_name
+                )
+            })
+            .collect(),
+        invalid_client_exports: results
+            .invalid_client_exports
+            .iter()
+            .map(|e| {
+                format!(
+                    "{}:{}",
+                    relative_path(&e.export.path, root),
+                    e.export.export_name
+                )
+            })
+            .collect(),
+        mixed_client_server_barrels: results
+            .mixed_client_server_barrels
+            .iter()
+            .map(|b| {
+                format!(
+                    "{}:{}:{}",
+                    relative_path(&b.barrel.path, root),
+                    b.barrel.client_origin,
+                    b.barrel.server_origin
+                )
+            })
+            .collect(),
+        misplaced_directives: results
+            .misplaced_directives
+            .iter()
+            .map(|d| {
+                format!(
+                    "{}:{}:{}",
+                    relative_path(&d.directive_site.path, root),
+                    d.directive_site.line,
+                    d.directive_site.directive
+                )
+            })
+            .collect(),
+        route_collisions: results
+            .route_collisions
+            .iter()
+            .map(|c| {
+                format!(
+                    "{}:{}",
+                    relative_path(&c.collision.path, root),
+                    c.collision.url
+                )
+            })
+            .collect(),
+        dynamic_segment_name_conflicts: results
+            .dynamic_segment_name_conflicts
+            .iter()
+            .map(|c| {
+                format!(
+                    "{}:{}",
+                    relative_path(&c.conflict.path, root),
+                    c.conflict.position
+                )
+            })
+            .collect(),
+    }
+}
+
+struct BaselineMemberImportKeys {
+    unused_enum_members: Vec<String>,
+    unused_class_members: Vec<String>,
+    unused_store_members: Vec<String>,
+    unprovided_injects: Vec<String>,
+    unrendered_components: Vec<String>,
+    unused_component_props: Vec<String>,
+    unused_component_emits: Vec<String>,
+    unused_server_actions: Vec<String>,
+    unresolved_imports: Vec<String>,
+    duplicate_exports: Vec<String>,
+    stale_suppressions: Vec<String>,
+}
+
+fn baseline_member_import_keys(
+    results: &plow_core::results::AnalysisResults,
+    root: &Path,
+) -> BaselineMemberImportKeys {
+    BaselineMemberImportKeys {
+        unused_enum_members: results
+            .unused_enum_members
+            .iter()
+            .map(|m| {
+                format!(
+                    "{}:{}.{}",
+                    relative_path(&m.member.path, root),
+                    m.member.parent_name,
+                    m.member.member_name
+                )
+            })
+            .collect(),
+        unused_class_members: results
+            .unused_class_members
+            .iter()
+            .map(|m| {
+                format!(
+                    "{}:{}.{}",
+                    relative_path(&m.member.path, root),
+                    m.member.parent_name,
+                    m.member.member_name
+                )
+            })
+            .collect(),
+        unused_store_members: results
+            .unused_store_members
+            .iter()
+            .map(|m| {
+                format!(
+                    "{}:{}.{}",
+                    relative_path(&m.member.path, root),
+                    m.member.parent_name,
+                    m.member.member_name
+                )
+            })
+            .collect(),
+        unprovided_injects: results
+            .unprovided_injects
+            .iter()
+            .map(|f| {
+                format!(
+                    "{}:{}",
+                    relative_path(&f.inject.path, root),
+                    f.inject.key_name
+                )
+            })
+            .collect(),
+        unrendered_components: results
+            .unrendered_components
+            .iter()
+            .map(|c| {
+                format!(
+                    "{}:{}",
+                    relative_path(&c.component.path, root),
+                    c.component.component_name
+                )
+            })
+            .collect(),
+        unused_component_props: results
+            .unused_component_props
+            .iter()
+            .map(|p| format!("{}:{}", relative_path(&p.prop.path, root), p.prop.prop_name))
+            .collect(),
+        unused_component_emits: results
+            .unused_component_emits
+            .iter()
+            .map(|e| format!("{}:{}", relative_path(&e.emit.path, root), e.emit.emit_name))
+            .collect(),
+        unused_server_actions: results
+            .unused_server_actions
+            .iter()
+            .map(|a| {
+                format!(
+                    "{}:{}",
+                    relative_path(&a.action.path, root),
+                    a.action.action_name
+                )
+            })
+            .collect(),
+        unresolved_imports: results
+            .unresolved_imports
+            .iter()
+            .map(|i| {
+                format!(
+                    "{}:{}",
+                    relative_path(&i.import.path, root),
+                    i.import.specifier
+                )
+            })
+            .collect(),
+        duplicate_exports: results
+            .duplicate_exports
+            .iter()
+            .map(|d| duplicate_export_key(&d.export, root))
+            .collect(),
+        stale_suppressions: results
+            .stale_suppressions
+            .iter()
+            .map(|s| format!("{}:{}", relative_path(&s.path, root), s.line))
+            .collect(),
+    }
+}
+
+struct BaselineDependencyKeys {
+    unused: Vec<String>,
+    unused_dev: Vec<String>,
+    unused_optional: Vec<String>,
+    unlisted: Vec<String>,
+    type_only: Vec<String>,
+    test_only: Vec<String>,
+}
+
+fn baseline_dependency_keys(
+    results: &plow_core::results::AnalysisResults,
+    root: &Path,
+) -> BaselineDependencyKeys {
+    BaselineDependencyKeys {
+        unused: results
+            .unused_dependencies
+            .iter()
+            .map(|d| package_json_dependency_key(&d.dep.package_name, &d.dep.path, root))
+            .collect(),
+        unused_dev: results
+            .unused_dev_dependencies
+            .iter()
+            .map(|d| package_json_dependency_key(&d.dep.package_name, &d.dep.path, root))
+            .collect(),
+        unused_optional: results
+            .unused_optional_dependencies
+            .iter()
+            .map(|d| package_json_dependency_key(&d.dep.package_name, &d.dep.path, root))
+            .collect(),
+        unlisted: results
+            .unlisted_dependencies
+            .iter()
+            .map(|d| d.dep.package_name.clone())
+            .collect(),
+        type_only: results
+            .type_only_dependencies
+            .iter()
+            .map(|d| package_json_dependency_key(&d.dep.package_name, &d.dep.path, root))
+            .collect(),
+        test_only: results
+            .test_only_dependencies
+            .iter()
+            .map(|d| package_json_dependency_key(&d.dep.package_name, &d.dep.path, root))
+            .collect(),
+    }
+}
+
+struct BaselineGraphKeys {
+    circular_dependencies: Vec<String>,
+    re_export_cycles: Vec<String>,
+    boundary_violations: Vec<String>,
+    boundary_coverage_violations: Vec<String>,
+    boundary_call_violations: Vec<String>,
+    policy_violations: Vec<String>,
+}
+
+fn baseline_graph_keys(
+    results: &plow_core::results::AnalysisResults,
+    root: &Path,
+) -> BaselineGraphKeys {
+    BaselineGraphKeys {
+        circular_dependencies: results
+            .circular_dependencies
+            .iter()
+            .map(|c| circular_dep_key(&c.cycle, root))
+            .collect(),
+        re_export_cycles: results
+            .re_export_cycles
+            .iter()
+            .map(|c| re_export_cycle_key(&c.cycle, root))
+            .collect(),
+        boundary_violations: results
+            .boundary_violations
+            .iter()
+            .map(|v| boundary_violation_key(&v.violation, root))
+            .collect(),
+        boundary_coverage_violations: results
+            .boundary_coverage_violations
+            .iter()
+            .map(|v| relative_path(&v.violation.path, root))
+            .collect(),
+        boundary_call_violations: results
+            .boundary_call_violations
+            .iter()
+            .map(|v| boundary_call_violation_key(&v.violation, root))
+            .collect(),
+        policy_violations: results
+            .policy_violations
+            .iter()
+            .map(|v| policy_violation_key(&v.violation, root))
+            .collect(),
+    }
+}
+
+struct BaselineCatalogKeys {
+    unused_catalog_entries: Vec<String>,
+    empty_catalog_groups: Vec<String>,
+    unresolved_catalog_references: Vec<String>,
+    unused_dependency_overrides: Vec<String>,
+    misconfigured_dependency_overrides: Vec<String>,
+}
+
+fn baseline_catalog_keys(
+    results: &plow_core::results::AnalysisResults,
+    root: &Path,
+) -> BaselineCatalogKeys {
+    BaselineCatalogKeys {
+        unused_catalog_entries: results
+            .unused_catalog_entries
+            .iter()
+            .map(|e| format!("{}:{}", e.entry.catalog_name, e.entry.entry_name))
+            .collect(),
+        empty_catalog_groups: results
+            .empty_catalog_groups
+            .iter()
+            .map(|g| g.group.catalog_name.clone())
+            .collect(),
+        unresolved_catalog_references: results
+            .unresolved_catalog_references
+            .iter()
+            .map(|r| {
+                format!(
+                    "{}:{}:{}:{}",
+                    relative_path(&r.reference.path, root),
+                    r.reference.line,
+                    r.reference.catalog_name,
+                    r.reference.entry_name,
+                )
+            })
+            .collect(),
+        unused_dependency_overrides: results
+            .unused_dependency_overrides
+            .iter()
+            .map(|o| format!("{}:{}", o.entry.source, o.entry.raw_key))
+            .collect(),
+        misconfigured_dependency_overrides: results
+            .misconfigured_dependency_overrides
+            .iter()
+            .map(|o| format!("{}:{}", o.entry.source, o.entry.raw_key))
+            .collect(),
     }
 }
 
@@ -319,6 +634,27 @@ fn boundary_violation_key(v: &plow_core::results::BoundaryViolation, root: &Path
         "{}->{}",
         relative_path(&v.from_path, root),
         relative_path(&v.to_path, root),
+    )
+}
+
+/// Generate a stable key for a boundary call violation: `path:callee`.
+fn boundary_call_violation_key(
+    v: &plow_core::results::BoundaryCallViolation,
+    root: &Path,
+) -> String {
+    format!("{}:{}", relative_path(&v.path, root), v.callee)
+}
+
+/// Generate a stable key for a rule-pack policy violation:
+/// `path:pack/rule_id:matched`. Line numbers are deliberately excluded so a
+/// baselined finding survives unrelated edits above it.
+fn policy_violation_key(v: &plow_core::results::PolicyViolation, root: &Path) -> String {
+    format!(
+        "{}:{}/{}:{}",
+        relative_path(&v.path, root),
+        v.pack,
+        v.rule_id,
+        v.matched
     )
 }
 
@@ -377,11 +713,491 @@ fn filter_private_type_leaks(
     });
 }
 
+struct BaselineFilterContext<'a> {
+    baseline: &'a BaselineData,
+    root: &'a Path,
+}
+
+impl BaselineFilterContext<'_> {
+    fn filter_cycles_and_members(&self, results: &mut plow_core::results::AnalysisResults) {
+        let baseline_circular: FxHashSet<&str> = self
+            .baseline
+            .circular_dependencies
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.circular_dependencies.retain(|cycle| {
+            let key = circular_dep_key(&cycle.cycle, self.root);
+            !baseline_circular.contains(key.as_str())
+        });
+
+        let baseline_re_export_cycles: FxHashSet<&str> = self
+            .baseline
+            .re_export_cycles
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.re_export_cycles.retain(|cycle| {
+            let key = re_export_cycle_key(&cycle.cycle, self.root);
+            !baseline_re_export_cycles.contains(key.as_str())
+        });
+
+        self.filter_unused_members(results);
+        self.filter_unresolved_and_exports(results);
+    }
+
+    fn filter_unused_members(&self, results: &mut plow_core::results::AnalysisResults) {
+        let baseline_enum_members: FxHashSet<&str> = self
+            .baseline
+            .unused_enum_members
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.unused_enum_members.retain(|member| {
+            let key = format!(
+                "{}:{}.{}",
+                relative_path(&member.member.path, self.root),
+                member.member.parent_name,
+                member.member.member_name
+            );
+            !baseline_enum_members.contains(key.as_str())
+        });
+
+        let baseline_class_members: FxHashSet<&str> = self
+            .baseline
+            .unused_class_members
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.unused_class_members.retain(|member| {
+            let key = format!(
+                "{}:{}.{}",
+                relative_path(&member.member.path, self.root),
+                member.member.parent_name,
+                member.member.member_name
+            );
+            !baseline_class_members.contains(key.as_str())
+        });
+
+        let baseline_store_members: FxHashSet<&str> = self
+            .baseline
+            .unused_store_members
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.unused_store_members.retain(|member| {
+            let key = format!(
+                "{}:{}.{}",
+                relative_path(&member.member.path, self.root),
+                member.member.parent_name,
+                member.member.member_name
+            );
+            !baseline_store_members.contains(key.as_str())
+        });
+
+        let baseline_unprovided_injects: FxHashSet<&str> = self
+            .baseline
+            .unprovided_injects
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.unprovided_injects.retain(|finding| {
+            let key = format!(
+                "{}:{}",
+                relative_path(&finding.inject.path, self.root),
+                finding.inject.key_name
+            );
+            !baseline_unprovided_injects.contains(key.as_str())
+        });
+
+        let baseline_unrendered_components: FxHashSet<&str> = self
+            .baseline
+            .unrendered_components
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.unrendered_components.retain(|finding| {
+            let key = format!(
+                "{}:{}",
+                relative_path(&finding.component.path, self.root),
+                finding.component.component_name
+            );
+            !baseline_unrendered_components.contains(key.as_str())
+        });
+
+        let baseline_unused_component_props: FxHashSet<&str> = self
+            .baseline
+            .unused_component_props
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.unused_component_props.retain(|finding| {
+            let key = format!(
+                "{}:{}",
+                relative_path(&finding.prop.path, self.root),
+                finding.prop.prop_name
+            );
+            !baseline_unused_component_props.contains(key.as_str())
+        });
+
+        let baseline_unused_component_emits: FxHashSet<&str> = self
+            .baseline
+            .unused_component_emits
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.unused_component_emits.retain(|finding| {
+            let key = format!(
+                "{}:{}",
+                relative_path(&finding.emit.path, self.root),
+                finding.emit.emit_name
+            );
+            !baseline_unused_component_emits.contains(key.as_str())
+        });
+
+        let baseline_unused_server_actions: FxHashSet<&str> = self
+            .baseline
+            .unused_server_actions
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.unused_server_actions.retain(|finding| {
+            let key = format!(
+                "{}:{}",
+                relative_path(&finding.action.path, self.root),
+                finding.action.action_name
+            );
+            !baseline_unused_server_actions.contains(key.as_str())
+        });
+    }
+
+    fn filter_unresolved_and_exports(&self, results: &mut plow_core::results::AnalysisResults) {
+        let baseline_unresolved: FxHashSet<&str> = self
+            .baseline
+            .unresolved_imports
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.unresolved_imports.retain(|import| {
+            let key = format!(
+                "{}:{}",
+                relative_path(&import.import.path, self.root),
+                import.import.specifier
+            );
+            !baseline_unresolved.contains(key.as_str())
+        });
+
+        let baseline_unlisted: FxHashSet<&str> = self
+            .baseline
+            .unlisted_dependencies
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results
+            .unlisted_dependencies
+            .retain(|dep| !baseline_unlisted.contains(dep.dep.package_name.as_str()));
+
+        let baseline_dup_exports: FxHashSet<&str> = self
+            .baseline
+            .duplicate_exports
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.duplicate_exports.retain(|duplicate| {
+            let key = duplicate_export_key(&duplicate.export, self.root);
+            !baseline_dup_exports.contains(key.as_str())
+        });
+    }
+
+    fn filter_dependency_variants(&self, results: &mut plow_core::results::AnalysisResults) {
+        let baseline_optional_deps: FxHashSet<&str> = self
+            .baseline
+            .unused_optional_dependencies
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.unused_optional_dependencies.retain(|dep| {
+            let key = package_json_dependency_key(&dep.dep.package_name, &dep.dep.path, self.root);
+            !baseline_contains_dependency(
+                &baseline_optional_deps,
+                &dep.dep.package_name,
+                key.as_str(),
+            )
+        });
+
+        self.filter_type_and_test_only_dependencies(results);
+    }
+
+    fn filter_type_and_test_only_dependencies(
+        &self,
+        results: &mut plow_core::results::AnalysisResults,
+    ) {
+        let baseline_type_only: FxHashSet<&str> = self
+            .baseline
+            .type_only_dependencies
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.type_only_dependencies.retain(|dep| {
+            let key = package_json_dependency_key(&dep.dep.package_name, &dep.dep.path, self.root);
+            !baseline_contains_dependency(&baseline_type_only, &dep.dep.package_name, key.as_str())
+        });
+
+        let baseline_test_only: FxHashSet<&str> = self
+            .baseline
+            .test_only_dependencies
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.test_only_dependencies.retain(|dep| {
+            let key = package_json_dependency_key(&dep.dep.package_name, &dep.dep.path, self.root);
+            !baseline_contains_dependency(&baseline_test_only, &dep.dep.package_name, key.as_str())
+        });
+    }
+
+    fn filter_boundaries_and_suppressions(
+        &self,
+        results: &mut plow_core::results::AnalysisResults,
+    ) {
+        let baseline_boundary: FxHashSet<&str> = self
+            .baseline
+            .boundary_violations
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.boundary_violations.retain(|violation| {
+            let key = boundary_violation_key(&violation.violation, self.root);
+            !baseline_boundary.contains(key.as_str())
+        });
+
+        self.filter_boundary_details(results);
+        self.filter_stale_suppressions(results);
+        self.filter_invalid_client_exports(results);
+        self.filter_mixed_client_server_barrels(results);
+        self.filter_misplaced_directives(results);
+        self.filter_route_collisions(results);
+        self.filter_dynamic_segment_name_conflicts(results);
+    }
+
+    fn filter_invalid_client_exports(&self, results: &mut plow_core::results::AnalysisResults) {
+        let baseline_invalid: FxHashSet<&str> = self
+            .baseline
+            .invalid_client_exports
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.invalid_client_exports.retain(|finding| {
+            let key = format!(
+                "{}:{}",
+                relative_path(&finding.export.path, self.root),
+                finding.export.export_name
+            );
+            !baseline_invalid.contains(key.as_str())
+        });
+    }
+
+    fn filter_mixed_client_server_barrels(
+        &self,
+        results: &mut plow_core::results::AnalysisResults,
+    ) {
+        let baseline_barrels: FxHashSet<&str> = self
+            .baseline
+            .mixed_client_server_barrels
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.mixed_client_server_barrels.retain(|finding| {
+            let key = format!(
+                "{}:{}:{}",
+                relative_path(&finding.barrel.path, self.root),
+                finding.barrel.client_origin,
+                finding.barrel.server_origin
+            );
+            !baseline_barrels.contains(key.as_str())
+        });
+    }
+
+    fn filter_misplaced_directives(&self, results: &mut plow_core::results::AnalysisResults) {
+        let baseline_directives: FxHashSet<&str> = self
+            .baseline
+            .misplaced_directives
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.misplaced_directives.retain(|finding| {
+            let key = format!(
+                "{}:{}:{}",
+                relative_path(&finding.directive_site.path, self.root),
+                finding.directive_site.line,
+                finding.directive_site.directive
+            );
+            !baseline_directives.contains(key.as_str())
+        });
+    }
+
+    fn filter_route_collisions(&self, results: &mut plow_core::results::AnalysisResults) {
+        let baseline_collisions: FxHashSet<&str> = self
+            .baseline
+            .route_collisions
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.route_collisions.retain(|finding| {
+            let key = format!(
+                "{}:{}",
+                relative_path(&finding.collision.path, self.root),
+                finding.collision.url
+            );
+            !baseline_collisions.contains(key.as_str())
+        });
+    }
+
+    fn filter_dynamic_segment_name_conflicts(
+        &self,
+        results: &mut plow_core::results::AnalysisResults,
+    ) {
+        let baseline_conflicts: FxHashSet<&str> = self
+            .baseline
+            .dynamic_segment_name_conflicts
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.dynamic_segment_name_conflicts.retain(|finding| {
+            let key = format!(
+                "{}:{}",
+                relative_path(&finding.conflict.path, self.root),
+                finding.conflict.position
+            );
+            !baseline_conflicts.contains(key.as_str())
+        });
+    }
+
+    fn filter_boundary_details(&self, results: &mut plow_core::results::AnalysisResults) {
+        let baseline_boundary_coverage: FxHashSet<&str> = self
+            .baseline
+            .boundary_coverage_violations
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.boundary_coverage_violations.retain(|violation| {
+            let key = relative_path(&violation.violation.path, self.root);
+            !baseline_boundary_coverage.contains(key.as_str())
+        });
+
+        let baseline_boundary_calls: FxHashSet<&str> = self
+            .baseline
+            .boundary_call_violations
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.boundary_call_violations.retain(|violation| {
+            let key = boundary_call_violation_key(&violation.violation, self.root);
+            !baseline_boundary_calls.contains(key.as_str())
+        });
+    }
+
+    fn filter_stale_suppressions(&self, results: &mut plow_core::results::AnalysisResults) {
+        let baseline_stale: FxHashSet<&str> = self
+            .baseline
+            .stale_suppressions
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.stale_suppressions.retain(|suppression| {
+            let key = format!(
+                "{}:{}",
+                relative_path(&suppression.path, self.root),
+                suppression.line
+            );
+            !baseline_stale.contains(key.as_str())
+        });
+    }
+
+    fn filter_pnpm_entries(&self, results: &mut plow_core::results::AnalysisResults) {
+        let baseline_catalog: FxHashSet<&str> = self
+            .baseline
+            .unused_catalog_entries
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.unused_catalog_entries.retain(|entry| {
+            let key = format!("{}:{}", entry.entry.catalog_name, entry.entry.entry_name);
+            !baseline_catalog.contains(key.as_str())
+        });
+
+        let baseline_empty_catalog_groups: FxHashSet<&str> = self
+            .baseline
+            .empty_catalog_groups
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.empty_catalog_groups.retain(|group| {
+            !baseline_empty_catalog_groups.contains(group.group.catalog_name.as_str())
+        });
+
+        self.filter_pnpm_references_and_overrides(results);
+    }
+
+    fn filter_pnpm_references_and_overrides(
+        &self,
+        results: &mut plow_core::results::AnalysisResults,
+    ) {
+        let baseline_unresolved: FxHashSet<&str> = self
+            .baseline
+            .unresolved_catalog_references
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.unresolved_catalog_references.retain(|reference| {
+            let key = format!(
+                "{}:{}:{}:{}",
+                relative_path(&reference.reference.path, self.root),
+                reference.reference.line,
+                reference.reference.catalog_name,
+                reference.reference.entry_name,
+            );
+            !baseline_unresolved.contains(key.as_str())
+        });
+
+        self.filter_pnpm_overrides(results);
+    }
+
+    fn filter_pnpm_overrides(&self, results: &mut plow_core::results::AnalysisResults) {
+        let baseline_unused_overrides: FxHashSet<&str> = self
+            .baseline
+            .unused_dependency_overrides
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results
+            .unused_dependency_overrides
+            .retain(|override_entry| {
+                let key = format!(
+                    "{}:{}",
+                    override_entry.entry.source, override_entry.entry.raw_key
+                );
+                !baseline_unused_overrides.contains(key.as_str())
+            });
+
+        let baseline_misconfigured_overrides: FxHashSet<&str> = self
+            .baseline
+            .misconfigured_dependency_overrides
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results
+            .misconfigured_dependency_overrides
+            .retain(|override_entry| {
+                let key = format!(
+                    "{}:{}",
+                    override_entry.entry.source, override_entry.entry.raw_key
+                );
+                !baseline_misconfigured_overrides.contains(key.as_str())
+            });
+    }
+}
+
 /// Filter results to only include issues not present in the baseline.
-#[expect(
-    clippy::too_many_lines,
-    reason = "flat list of per-issue-type retain calls; one block per category keeps each filter local and easy to audit"
-)]
 pub fn filter_new_issues(
     mut results: plow_core::results::AnalysisResults,
     baseline: &BaselineData,
@@ -437,193 +1253,11 @@ pub fn filter_new_issues(
         !baseline_contains_dependency(&baseline_dev_deps, &d.dep.package_name, key.as_str())
     });
 
-    let baseline_circular: FxHashSet<&str> = baseline
-        .circular_dependencies
-        .iter()
-        .map(String::as_str)
-        .collect();
-    results.circular_dependencies.retain(|c| {
-        let key = circular_dep_key(&c.cycle, root);
-        !baseline_circular.contains(key.as_str())
-    });
-
-    let baseline_re_export_cycles: FxHashSet<&str> = baseline
-        .re_export_cycles
-        .iter()
-        .map(String::as_str)
-        .collect();
-    results.re_export_cycles.retain(|c| {
-        let key = re_export_cycle_key(&c.cycle, root);
-        !baseline_re_export_cycles.contains(key.as_str())
-    });
-
-    let baseline_optional_deps: FxHashSet<&str> = baseline
-        .unused_optional_dependencies
-        .iter()
-        .map(String::as_str)
-        .collect();
-    results.unused_optional_dependencies.retain(|d| {
-        let key = package_json_dependency_key(&d.dep.package_name, &d.dep.path, root);
-        !baseline_contains_dependency(&baseline_optional_deps, &d.dep.package_name, key.as_str())
-    });
-
-    let baseline_enum_members: FxHashSet<&str> = baseline
-        .unused_enum_members
-        .iter()
-        .map(String::as_str)
-        .collect();
-    results.unused_enum_members.retain(|m| {
-        let key = format!(
-            "{}:{}.{}",
-            relative_path(&m.member.path, root),
-            m.member.parent_name,
-            m.member.member_name
-        );
-        !baseline_enum_members.contains(key.as_str())
-    });
-
-    let baseline_class_members: FxHashSet<&str> = baseline
-        .unused_class_members
-        .iter()
-        .map(String::as_str)
-        .collect();
-    results.unused_class_members.retain(|m| {
-        let key = format!(
-            "{}:{}.{}",
-            relative_path(&m.member.path, root),
-            m.member.parent_name,
-            m.member.member_name
-        );
-        !baseline_class_members.contains(key.as_str())
-    });
-
-    let baseline_unresolved: FxHashSet<&str> = baseline
-        .unresolved_imports
-        .iter()
-        .map(String::as_str)
-        .collect();
-    results.unresolved_imports.retain(|i| {
-        let key = format!(
-            "{}:{}",
-            relative_path(&i.import.path, root),
-            i.import.specifier
-        );
-        !baseline_unresolved.contains(key.as_str())
-    });
-
-    let baseline_unlisted: FxHashSet<&str> = baseline
-        .unlisted_dependencies
-        .iter()
-        .map(String::as_str)
-        .collect();
-    results
-        .unlisted_dependencies
-        .retain(|d| !baseline_unlisted.contains(d.dep.package_name.as_str()));
-
-    let baseline_dup_exports: FxHashSet<&str> = baseline
-        .duplicate_exports
-        .iter()
-        .map(String::as_str)
-        .collect();
-    results.duplicate_exports.retain(|d| {
-        let key = duplicate_export_key(&d.export, root);
-        !baseline_dup_exports.contains(key.as_str())
-    });
-
-    let baseline_type_only: FxHashSet<&str> = baseline
-        .type_only_dependencies
-        .iter()
-        .map(String::as_str)
-        .collect();
-    results.type_only_dependencies.retain(|d| {
-        let key = package_json_dependency_key(&d.dep.package_name, &d.dep.path, root);
-        !baseline_contains_dependency(&baseline_type_only, &d.dep.package_name, key.as_str())
-    });
-
-    let baseline_test_only: FxHashSet<&str> = baseline
-        .test_only_dependencies
-        .iter()
-        .map(String::as_str)
-        .collect();
-    results.test_only_dependencies.retain(|d| {
-        let key = package_json_dependency_key(&d.dep.package_name, &d.dep.path, root);
-        !baseline_contains_dependency(&baseline_test_only, &d.dep.package_name, key.as_str())
-    });
-
-    let baseline_boundary: FxHashSet<&str> = baseline
-        .boundary_violations
-        .iter()
-        .map(String::as_str)
-        .collect();
-    results.boundary_violations.retain(|v| {
-        let key = boundary_violation_key(&v.violation, root);
-        !baseline_boundary.contains(key.as_str())
-    });
-
-    let baseline_stale: FxHashSet<&str> = baseline
-        .stale_suppressions
-        .iter()
-        .map(String::as_str)
-        .collect();
-    results.stale_suppressions.retain(|s| {
-        let key = format!("{}:{}", relative_path(&s.path, root), s.line);
-        !baseline_stale.contains(key.as_str())
-    });
-
-    let baseline_catalog: FxHashSet<&str> = baseline
-        .unused_catalog_entries
-        .iter()
-        .map(String::as_str)
-        .collect();
-    results.unused_catalog_entries.retain(|e| {
-        let key = format!("{}:{}", e.entry.catalog_name, e.entry.entry_name);
-        !baseline_catalog.contains(key.as_str())
-    });
-
-    let baseline_empty_catalog_groups: FxHashSet<&str> = baseline
-        .empty_catalog_groups
-        .iter()
-        .map(String::as_str)
-        .collect();
-    results
-        .empty_catalog_groups
-        .retain(|g| !baseline_empty_catalog_groups.contains(g.group.catalog_name.as_str()));
-
-    let baseline_unresolved: FxHashSet<&str> = baseline
-        .unresolved_catalog_references
-        .iter()
-        .map(String::as_str)
-        .collect();
-    results.unresolved_catalog_references.retain(|r| {
-        let key = format!(
-            "{}:{}:{}:{}",
-            relative_path(&r.reference.path, root),
-            r.reference.line,
-            r.reference.catalog_name,
-            r.reference.entry_name,
-        );
-        !baseline_unresolved.contains(key.as_str())
-    });
-
-    let baseline_unused_overrides: FxHashSet<&str> = baseline
-        .unused_dependency_overrides
-        .iter()
-        .map(String::as_str)
-        .collect();
-    results.unused_dependency_overrides.retain(|o| {
-        let key = format!("{}:{}", o.entry.source, o.entry.raw_key);
-        !baseline_unused_overrides.contains(key.as_str())
-    });
-
-    let baseline_misconfigured_overrides: FxHashSet<&str> = baseline
-        .misconfigured_dependency_overrides
-        .iter()
-        .map(String::as_str)
-        .collect();
-    results.misconfigured_dependency_overrides.retain(|o| {
-        let key = format!("{}:{}", o.entry.source, o.entry.raw_key);
-        !baseline_misconfigured_overrides.contains(key.as_str())
-    });
+    let filter = BaselineFilterContext { baseline, root };
+    filter.filter_cycles_and_members(&mut results);
+    filter.filter_dependency_variants(&mut results);
+    filter.filter_boundaries_and_suppressions(&mut results);
+    filter.filter_pnpm_entries(&mut results);
 
     results
 }
@@ -683,15 +1317,11 @@ pub fn filter_new_clone_groups(
         !baseline_keys.contains(key.as_str())
     });
 
-    // Re-generate families from the filtered groups
     report.clone_families =
         plow_core::duplicates::families::group_into_families(&report.clone_groups, root);
-    report.mirrored_directories = plow_core::duplicates::families::detect_mirrored_directories(
-        &report.clone_families,
-        root,
-    );
+    report.mirrored_directories =
+        plow_core::duplicates::families::detect_mirrored_directories(&report.clone_families, root);
 
-    // Re-compute stats for the filtered groups
     report.stats = recompute_stats(&report);
 
     report
@@ -738,8 +1368,6 @@ pub fn recompute_stats(report: &DuplicationReport) -> plow_core::duplicates::Dup
         clone_groups_below_min_occurrences: report.stats.clone_groups_below_min_occurrences,
     }
 }
-
-// ── Health baseline ─────────────────────────────────────────────────
 
 /// Baseline data for health (complexity) comparison.
 ///
@@ -970,8 +1598,6 @@ fn overflowing_severities(current: [usize; 3], baseline: [usize; 3]) -> [bool; 3
     let mut available = baseline;
     let mut overflow = [false; 3];
 
-    // Match lower severities first with the least-flexible compatible baseline
-    // slots so ambiguous cases still leave worse current severities visible.
     for severity_idx in 0..3 {
         let compatible = available[severity_idx..].iter().sum::<usize>();
         overflow[severity_idx] = compatible < current[severity_idx];
@@ -1059,12 +1685,6 @@ fn runtime_coverage_finding_key(
     finding: &crate::health_types::RuntimeCoverageFinding,
     _root: &Path,
 ) -> String {
-    // Writer key. Prefer the cross-surface join key (`fallow:fn:<hash>`) when
-    // present so the baseline keys on the same identity the cloud and the other
-    // coverage surfaces use; fall back to the legacy per-finding suppression id
-    // (`fallow:prod:<hash>`) for 0.5-shape findings that carry no identity. Both
-    // forms hash the function's start line, so a moved function gets a new key
-    // under either; the grace-window reader accepts both forms.
     finding
         .stable_id
         .clone()
@@ -1137,13 +1757,6 @@ pub fn filter_new_runtime_coverage_findings(
         .map(String::as_str)
         .collect();
     findings.retain(|finding| {
-        // Grace window: a finding counts as baselined if ANY of three keys
-        // match: its stable_id (baselines written on this version), its legacy
-        // `fallow:prod:` id (baselines written before the upgrade), or the
-        // line-move-tolerant `path\0name\0source_hash` composite (so a
-        // moved-but-unedited function stays suppressed). Retain (report as new)
-        // only when NONE matches. A finding with no `source_hash` simply relies
-        // on the stable_id / legacy keys.
         let suppressed_by_stable_id = finding
             .stable_id
             .as_deref()
@@ -1199,9 +1812,7 @@ mod tests {
         UnusedDependency, UnusedDependencyFinding, UnusedDevDependencyFinding, UnusedExport,
         UnusedFile,
     };
-    use plow_types::output_dead_code::{
-        UnusedExportFinding, UnusedFileFinding, UnusedTypeFinding,
-    };
+    use plow_types::output_dead_code::{UnusedExportFinding, UnusedFileFinding, UnusedTypeFinding};
     use std::path::PathBuf;
 
     fn make_results() -> AnalysisResults {
@@ -1251,8 +1862,6 @@ mod tests {
             ..Default::default()
         }
     }
-
-    // ── BaselineData round-trip ──────────────────────────────────
 
     #[test]
     fn baseline_from_results_captures_all_fields() {
@@ -1379,8 +1988,6 @@ mod tests {
         );
     }
 
-    // ── filter_new_issues ────────────────────────────────────────
-
     #[test]
     fn filter_removes_baseline_issues() {
         let results = make_results();
@@ -1422,18 +2029,32 @@ mod tests {
             unused_optional_dependencies: vec![],
             unused_enum_members: vec![],
             unused_class_members: vec![],
+            unused_store_members: vec![],
+            unprovided_injects: vec![],
+            unrendered_components: vec![],
+            unused_component_props: vec![],
+            unused_component_emits: vec![],
+            unused_server_actions: vec![],
             unresolved_imports: vec![],
             unlisted_dependencies: vec![],
             duplicate_exports: vec![],
             type_only_dependencies: vec![],
             test_only_dependencies: vec![],
             boundary_violations: vec![],
+            boundary_coverage_violations: vec![],
+            boundary_call_violations: vec![],
+            policy_violations: vec![],
             stale_suppressions: vec![],
             unused_catalog_entries: vec![],
             empty_catalog_groups: vec![],
             unresolved_catalog_references: vec![],
             unused_dependency_overrides: vec![],
             misconfigured_dependency_overrides: vec![],
+            invalid_client_exports: vec![],
+            mixed_client_server_barrels: vec![],
+            misplaced_directives: vec![],
+            route_collisions: vec![],
+            dynamic_segment_name_conflicts: vec![],
         };
         let results = AnalysisResults {
             unused_files: vec![
@@ -1468,18 +2089,32 @@ mod tests {
             unused_optional_dependencies: vec![],
             unused_enum_members: vec![],
             unused_class_members: vec![],
+            unused_store_members: vec![],
+            unprovided_injects: vec![],
+            unrendered_components: vec![],
+            unused_component_props: vec![],
+            unused_component_emits: vec![],
+            unused_server_actions: vec![],
             unresolved_imports: vec![],
             unlisted_dependencies: vec![],
             duplicate_exports: vec![],
             type_only_dependencies: vec![],
             test_only_dependencies: vec![],
             boundary_violations: vec![],
+            boundary_coverage_violations: vec![],
+            boundary_call_violations: vec![],
+            policy_violations: vec![],
             stale_suppressions: vec![],
             unused_catalog_entries: vec![],
             empty_catalog_groups: vec![],
             unresolved_catalog_references: vec![],
             unused_dependency_overrides: vec![],
             misconfigured_dependency_overrides: vec![],
+            invalid_client_exports: vec![],
+            mixed_client_server_barrels: vec![],
+            misplaced_directives: vec![],
+            route_collisions: vec![],
+            dynamic_segment_name_conflicts: vec![],
         };
         let results = make_results();
         let filtered = filter_new_issues(results, &baseline, Path::new(""));
@@ -1501,18 +2136,32 @@ mod tests {
             unused_optional_dependencies: vec![],
             unused_enum_members: vec![],
             unused_class_members: vec![],
+            unused_store_members: vec![],
+            unprovided_injects: vec![],
+            unrendered_components: vec![],
+            unused_component_props: vec![],
+            unused_component_emits: vec![],
+            unused_server_actions: vec![],
             unresolved_imports: vec![],
             unlisted_dependencies: vec![],
             duplicate_exports: vec![],
             type_only_dependencies: vec![],
             test_only_dependencies: vec![],
             boundary_violations: vec![],
+            boundary_coverage_violations: vec![],
+            boundary_call_violations: vec![],
+            policy_violations: vec![],
             stale_suppressions: vec![],
             unused_catalog_entries: vec![],
             empty_catalog_groups: vec![],
             unresolved_catalog_references: vec![],
             unused_dependency_overrides: vec![],
             misconfigured_dependency_overrides: vec![],
+            invalid_client_exports: vec![],
+            mixed_client_server_barrels: vec![],
+            misplaced_directives: vec![],
+            route_collisions: vec![],
+            dynamic_segment_name_conflicts: vec![],
         };
         let results = AnalysisResults {
             unused_exports: vec![
@@ -1541,8 +2190,6 @@ mod tests {
         assert_eq!(filtered.unused_exports.len(), 1);
         assert_eq!(filtered.unused_exports[0].export.export_name, "helperB");
     }
-
-    // ── DuplicationBaselineData ──────────────────────────────────
 
     fn make_clone_group(instances: Vec<(&str, usize, usize)>) -> CloneGroup {
         CloneGroup {
@@ -1597,7 +2244,6 @@ mod tests {
     #[test]
     fn clone_group_key_is_sorted() {
         let root = Path::new("/project");
-        // Order of instances in group shouldn't matter for the key
         let group_ab = make_clone_group(vec![
             ("/project/src/a.ts", 1, 10),
             ("/project/src/b.ts", 5, 15),
@@ -1710,8 +2356,6 @@ mod tests {
         assert!((stats.duplication_percentage - 0.0).abs() < f64::EPSILON);
     }
 
-    // ── HealthBaselineData ──────────────────────────────────────────
-
     fn make_health_finding(
         root: &Path,
         name: &str,
@@ -1750,6 +2394,9 @@ mod tests {
             coverage_source: None,
             inherited_from: None,
             component_rollup: None,
+            contributions: Vec::new(),
+            effective_thresholds: None,
+            threshold_source: None,
         }
     }
 
@@ -1968,8 +2615,6 @@ mod tests {
         assert_eq!(filtered.len(), 1);
     }
 
-    // ── circular_dep_key sort stability ─────────────────────────
-
     #[test]
     fn circular_dep_key_is_order_independent() {
         use plow_core::results::CircularDependency;
@@ -1979,6 +2624,7 @@ mod tests {
             length: 2,
             line: 1,
             col: 0,
+            edges: Vec::new(),
             is_cross_package: false,
         });
         let dep_ba = CircularDependencyFinding::with_actions(CircularDependency {
@@ -1986,6 +2632,7 @@ mod tests {
             length: 2,
             line: 1,
             col: 0,
+            edges: Vec::new(),
             is_cross_package: false,
         });
         assert_eq!(
@@ -2004,6 +2651,7 @@ mod tests {
             length: 2,
             line: 1,
             col: 0,
+            edges: Vec::new(),
             is_cross_package: false,
         });
         let dep2 = CircularDependencyFinding::with_actions(CircularDependency {
@@ -2011,6 +2659,7 @@ mod tests {
             length: 2,
             line: 1,
             col: 0,
+            edges: Vec::new(),
             is_cross_package: false,
         });
         assert_ne!(
@@ -2032,6 +2681,7 @@ mod tests {
             length: 3,
             line: 1,
             col: 0,
+            edges: Vec::new(),
             is_cross_package: false,
         });
         let dep_cab = CircularDependencyFinding::with_actions(CircularDependency {
@@ -2043,6 +2693,7 @@ mod tests {
             length: 3,
             line: 1,
             col: 0,
+            edges: Vec::new(),
             is_cross_package: false,
         });
         assert_eq!(
@@ -2050,8 +2701,6 @@ mod tests {
             super::circular_dep_key(&dep_cab.cycle, Path::new("")),
         );
     }
-
-    // ── filter_new_issues: extended issue types ────────────────
 
     fn make_full_results() -> AnalysisResults {
         use plow_core::extract::MemberKind;
@@ -2065,6 +2714,7 @@ mod tests {
                     length: 2,
                     line: 1,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             ));
@@ -2096,6 +2746,15 @@ mod tests {
                 line: 42,
                 col: 0,
             }));
+        r.unused_store_members
+            .push(UnusedStoreMemberFinding::with_actions(UnusedMember {
+                path: PathBuf::from("src/store.ts"),
+                parent_name: "useStore".to_string(),
+                member_name: "legacyAction".to_string(),
+                kind: MemberKind::StoreMember,
+                line: 17,
+                col: 0,
+            }));
         r.unresolved_imports.push(
             plow_types::output_dead_code::UnresolvedImportFinding::with_actions(
                 plow_core::results::UnresolvedImport {
@@ -2107,12 +2766,13 @@ mod tests {
                 },
             ),
         );
-        r.unlisted_dependencies.push(
-            plow_core::results::UnlistedDependencyFinding::with_actions(UnlistedDependency {
-                package_name: "chalk".to_string(),
-                imported_from: vec![],
-            }),
-        );
+        r.unlisted_dependencies
+            .push(plow_core::results::UnlistedDependencyFinding::with_actions(
+                UnlistedDependency {
+                    package_name: "chalk".to_string(),
+                    imported_from: vec![],
+                },
+            ));
         r.duplicate_exports
             .push(plow_core::results::DuplicateExportFinding::with_actions(
                 plow_core::results::DuplicateExport {
@@ -2131,20 +2791,22 @@ mod tests {
                     ],
                 },
             ));
-        r.type_only_dependencies.push(
-            plow_core::results::TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
-                package_name: "zod".to_string(),
-                path: PathBuf::from("package.json"),
-                line: 8,
-            }),
-        );
-        r.test_only_dependencies.push(
-            plow_core::results::TestOnlyDependencyFinding::with_actions(TestOnlyDependency {
-                package_name: "vitest".to_string(),
-                path: PathBuf::from("package.json"),
-                line: 10,
-            }),
-        );
+        r.type_only_dependencies
+            .push(plow_core::results::TypeOnlyDependencyFinding::with_actions(
+                TypeOnlyDependency {
+                    package_name: "zod".to_string(),
+                    path: PathBuf::from("package.json"),
+                    line: 8,
+                },
+            ));
+        r.test_only_dependencies
+            .push(plow_core::results::TestOnlyDependencyFinding::with_actions(
+                TestOnlyDependency {
+                    package_name: "vitest".to_string(),
+                    path: PathBuf::from("package.json"),
+                    line: 10,
+                },
+            ));
         r.boundary_violations.push(
             plow_types::output_dead_code::BoundaryViolationFinding::with_actions(
                 plow_core::results::BoundaryViolation {
@@ -2174,6 +2836,8 @@ mod tests {
         assert!(baseline.unused_enum_members[0].contains("Status.Deprecated"));
         assert_eq!(baseline.unused_class_members.len(), 1);
         assert!(baseline.unused_class_members[0].contains("UserService.legacy"));
+        assert_eq!(baseline.unused_store_members.len(), 1);
+        assert!(baseline.unused_store_members[0].contains("useStore.legacyAction"));
         assert_eq!(baseline.unresolved_imports.len(), 1);
         assert!(baseline.unresolved_imports[0].contains("./missing"));
         assert_eq!(baseline.unlisted_dependencies, vec!["chalk"]);
@@ -2194,6 +2858,7 @@ mod tests {
         assert!(filtered.unused_optional_dependencies.is_empty());
         assert!(filtered.unused_enum_members.is_empty());
         assert!(filtered.unused_class_members.is_empty());
+        assert!(filtered.unused_store_members.is_empty());
         assert!(filtered.unresolved_imports.is_empty());
         assert!(filtered.unlisted_dependencies.is_empty());
         assert!(filtered.duplicate_exports.is_empty());
@@ -2210,7 +2875,6 @@ mod tests {
             ..BaselineData::from_results(&AnalysisResults::default(), Path::new(""))
         };
         let mut results = AnalysisResults::default();
-        // One in baseline, one new
         results
             .circular_dependencies
             .push(CircularDependencyFinding::with_actions(
@@ -2219,6 +2883,7 @@ mod tests {
                     length: 2,
                     line: 1,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             ));
@@ -2230,6 +2895,7 @@ mod tests {
                     length: 2,
                     line: 5,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             ));
@@ -2242,6 +2908,9 @@ mod tests {
         use plow_core::results::BoundaryViolation;
         let baseline = BaselineData {
             boundary_violations: vec!["src/a.ts->src/b.ts".to_string()],
+            boundary_coverage_violations: vec![],
+            boundary_call_violations: vec![],
+            policy_violations: vec![],
             ..BaselineData::from_results(&AnalysisResults::default(), Path::new(""))
         };
         let mut results = AnalysisResults::default();
@@ -2270,8 +2939,6 @@ mod tests {
         let filtered = filter_new_issues(results, &baseline, Path::new(""));
         assert_eq!(filtered.boundary_violations.len(), 1);
     }
-
-    // ── filter_new_health_targets ──────────────────────────────
 
     #[test]
     fn health_targets_baseline_filters_known() {
@@ -2305,8 +2972,6 @@ mod tests {
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].path, root.join("src/new-issue.ts"));
     }
-
-    // ── duplicate_export_key ───────────────────────────────────
 
     #[test]
     fn duplicate_export_key_is_sorted() {
@@ -2347,8 +3012,6 @@ mod tests {
         );
     }
 
-    // ── boundary_violation_key ─────────────────────────────────
-
     #[test]
     fn boundary_violation_key_format() {
         use plow_core::results::BoundaryViolation;
@@ -2364,8 +3027,6 @@ mod tests {
         let key = super::boundary_violation_key(&v, Path::new(""));
         assert_eq!(key, "src/ui/btn.ts->src/db/query.ts");
     }
-
-    // ── cross-machine baseline portability (#87) ──────────────
 
     /// Build results with absolute paths rooted at the given prefix.
     fn make_absolute_results(root: &str) -> AnalysisResults {
@@ -2400,6 +3061,7 @@ mod tests {
                     length: 2,
                     line: 1,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             )],
@@ -2417,6 +3079,14 @@ mod tests {
                 member_name: "legacy".to_string(),
                 kind: MemberKind::ClassMethod,
                 line: 42,
+                col: 0,
+            })],
+            unused_store_members: vec![UnusedStoreMemberFinding::with_actions(UnusedMember {
+                path: p("src/store.ts"),
+                parent_name: "useStore".to_string(),
+                member_name: "legacyAction".to_string(),
+                kind: MemberKind::StoreMember,
+                line: 17,
                 col: 0,
             })],
             unresolved_imports: vec![UnresolvedImportFinding::with_actions(UnresolvedImport {
@@ -2462,7 +3132,6 @@ mod tests {
         let results = make_absolute_results("/Users/dev/project");
         let baseline = BaselineData::from_results(&results, local_root);
 
-        // Keys should be relative
         assert_eq!(baseline.unused_files, vec!["src/old.ts"]);
         assert_eq!(baseline.unused_exports, vec!["src/utils.ts:helper"]);
         assert_eq!(
@@ -2482,10 +3151,13 @@ mod tests {
             baseline.unused_class_members,
             vec!["src/service.ts:UserService.legacy"]
         );
+        assert_eq!(
+            baseline.unused_store_members,
+            vec!["src/store.ts:useStore.legacyAction"]
+        );
         assert_eq!(baseline.unresolved_imports, vec!["src/app.ts:./missing"]);
         assert_eq!(baseline.duplicate_exports, vec!["Config|src/a.ts|src/b.ts"]);
 
-        // Simulate loading baseline on CI (different absolute root, same relative structure)
         let ci_root = Path::new("/home/runner/work/project/project");
         let ci_results = make_absolute_results("/home/runner/work/project/project");
 
@@ -2500,6 +3172,7 @@ mod tests {
         assert!(filtered.circular_dependencies.is_empty(), "circular deps");
         assert!(filtered.unused_enum_members.is_empty(), "enum members");
         assert!(filtered.unused_class_members.is_empty(), "class members");
+        assert!(filtered.unused_store_members.is_empty(), "store members");
         assert!(filtered.unresolved_imports.is_empty(), "unresolved imports");
         assert!(filtered.duplicate_exports.is_empty(), "duplicate exports");
     }
@@ -2534,16 +3207,13 @@ mod tests {
 
     #[test]
     fn legacy_prod_baseline_still_suppresses_finding() {
-        // A baseline written before the v2 upgrade holds only `fallow:prod:`
-        // ids. A finding carrying a stable_id MUST still be suppressed by its
-        // legacy id during the grace window.
         let baseline = HealthBaselineData {
-            runtime_coverage_findings: vec!["fallow:prod:deadbeef".to_owned()],
+            runtime_coverage_findings: vec!["plow:prod:deadbeef".to_owned()],
             ..HealthBaselineData::default()
         };
         let findings = vec![runtime_finding(
-            "fallow:prod:deadbeef",
-            Some("fallow:fn:00000001"),
+            "plow:prod:deadbeef",
+            Some("plow:fn:00000001"),
             14,
             None,
         )];
@@ -2554,27 +3224,19 @@ mod tests {
 
     #[test]
     fn source_hash_baseline_survives_line_move() {
-        // A baseline written on this version holds the line-move-tolerant
-        // `path\0name\0source_hash` composite. After the function moves lines,
-        // a real producer emits a DIFFERENT `fallow:prod:` id AND a different
-        // `fallow:fn:` stable_id (both hash the start line), but the SAME
-        // content digest (`source_hash`). The finding MUST stay suppressed via
-        // the source_hash match alone.
         let root = Path::new("/repo");
         let baselined = runtime_finding(
-            "fallow:prod:deadbeef",
-            Some("fallow:fn:00000001"),
+            "plow:prod:deadbeef",
+            Some("plow:fn:00000001"),
             14,
             Some("0123456789abcdef"),
         );
         let baseline = HealthBaselineData::from_findings(&[], &[baselined], &[], root);
-        // Sanity: the composite key was written.
         assert_eq!(baseline.runtime_coverage_source_hashes.len(), 1);
 
-        // Moved from line 14 to 40: new prod id, new stable_id, SAME source_hash.
         let findings = vec![runtime_finding(
-            "fallow:prod:99999999",
-            Some("fallow:fn:cafe0002"),
+            "plow:prod:99999999",
+            Some("plow:fn:cafe0002"),
             40,
             Some("0123456789abcdef"),
         )];
@@ -2588,12 +3250,12 @@ mod tests {
     #[test]
     fn unbaselined_finding_is_reported() {
         let baseline = HealthBaselineData {
-            runtime_coverage_findings: vec!["fallow:fn:00000001".to_owned()],
+            runtime_coverage_findings: vec!["plow:fn:00000001".to_owned()],
             ..HealthBaselineData::default()
         };
         let findings = vec![runtime_finding(
-            "fallow:prod:abc1234d",
-            Some("fallow:fn:beefcafe"),
+            "plow:prod:abc1234d",
+            Some("plow:fn:beefcafe"),
             7,
             None,
         )];

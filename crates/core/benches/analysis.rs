@@ -1,3 +1,8 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "tests and benches use unwrap and expect to keep fixture setup concise"
+)]
 #![expect(
     deprecated,
     reason = "ADR-008: benchmark exercises the workspace path-dep plow_core::analyze surface"
@@ -11,7 +16,6 @@ use rustc_hash::FxHashSet;
 mod helpers;
 
 fn bench_parse_file(c: &mut Criterion) {
-    // Create a temporary file with typical TypeScript content
     let temp_dir = std::env::temp_dir().join("plow-bench");
     std::fs::create_dir_all(&temp_dir).unwrap();
 
@@ -105,24 +109,20 @@ export default function App({ name, age }: Props) {
         });
     });
 
-    // Cleanup
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
 
 fn bench_full_pipeline(c: &mut Criterion) {
-    // Create a small test project
     let temp_dir = std::env::temp_dir().join("plow-bench-project");
     let _ = std::fs::remove_dir_all(&temp_dir);
     std::fs::create_dir_all(temp_dir.join("src")).unwrap();
 
-    // Create package.json
     std::fs::write(
         temp_dir.join("package.json"),
         r#"{"name": "bench-project", "main": "src/index.ts", "dependencies": {"react": "^18"}}"#,
     )
     .unwrap();
 
-    // Create 10 source files
     for i in 0..10 {
         let content = format!(
             r"
@@ -134,7 +134,6 @@ export type Type{i} = {{ value: number }};
         std::fs::write(temp_dir.join(format!("src/module{i}.ts")), content).unwrap();
     }
 
-    // Create index that imports some
     let imports: Vec<String> = (0..5)
         .map(|i| format!("import {{ value{i} }} from './module{i}';"))
         .collect();
@@ -153,7 +152,6 @@ export type Type{i} = {{ value: number }};
         });
     });
 
-    // Cleanup
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
 
@@ -196,15 +194,6 @@ fn bench_resolve_re_export_chains(c: &mut Criterion) {
     };
     use plow_core::resolve::{ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport};
 
-    // Build a graph with multiple re-export chains:
-    //
-    //   entry.ts -> barrel1.ts -> barrel2.ts -> source_a.ts
-    //                                        -> source_b.ts
-    //            -> barrel3.ts -> source_c.ts
-    //
-    // Each source file has 10 exports. Barrel files re-export all of them.
-    // This exercises the iterative re-export chain resolution with the HashSet optimization.
-
     let source_count = 20;
     let barrel_count = 10;
     let exports_per_source = 10;
@@ -213,25 +202,18 @@ fn bench_resolve_re_export_chains(c: &mut Criterion) {
     let mut files: Vec<DiscoveredFile> = Vec::with_capacity(total_files);
     let mut resolved_modules: Vec<ResolvedModule> = Vec::with_capacity(total_files);
 
-    // FileId layout:
-    //   0        = entry.ts
-    //   1..=B    = barrel files (barrel_count)
-    //   B+1..=N  = source files (source_count)
     let barrel_start: u32 = 1;
     let source_start: u32 = barrel_start + barrel_count as u32;
 
-    // --- entry.ts (id=0) ---
     files.push(DiscoveredFile {
         id: FileId(0),
         path: PathBuf::from("/project/src/entry.ts"),
         size_bytes: 100,
     });
 
-    // Entry imports from each barrel
     let entry_imports: Vec<ResolvedImport> = (0..barrel_count)
         .flat_map(|b| {
             let barrel_id = FileId(barrel_start + b as u32);
-            // Import the first 3 re-exported symbols from each barrel
             (0..3).map(move |e| ResolvedImport {
                 info: ImportInfo {
                     source: format!("./barrel{b}"),
@@ -265,9 +247,6 @@ fn bench_resolve_re_export_chains(c: &mut Criterion) {
         namespace_object_aliases: vec![],
     });
 
-    // --- Barrel files ---
-    // Each barrel re-exports from 2 sources (creating chains).
-    // barrels 0..4 also re-export from barrel 5..9, forming 2-level chains.
     for b in 0..barrel_count {
         let barrel_id = FileId(barrel_start + b as u32);
         files.push(DiscoveredFile {
@@ -279,7 +258,6 @@ fn bench_resolve_re_export_chains(c: &mut Criterion) {
         let mut re_exports: Vec<ResolvedReExport> = Vec::new();
 
         if b < barrel_count / 2 {
-            // First half of barrels re-export from a second-tier barrel (chaining)
             let chained_barrel = barrel_count / 2 + (b % (barrel_count / 2));
             let chained_id = FileId(barrel_start + chained_barrel as u32);
             for e in 0..exports_per_source {
@@ -295,7 +273,6 @@ fn bench_resolve_re_export_chains(c: &mut Criterion) {
                 });
             }
         } else {
-            // Second half of barrels re-export directly from source files
             let src_a = (b * 2) % source_count;
             let src_b = (b * 2 + 1) % source_count;
             let src_a_id = FileId(source_start + src_a as u32);
@@ -344,7 +321,6 @@ fn bench_resolve_re_export_chains(c: &mut Criterion) {
         });
     }
 
-    // --- Source files ---
     for s in 0..source_count {
         let source_id = FileId(source_start + s as u32);
         files.push(DiscoveredFile {
@@ -423,9 +399,6 @@ fn bench_cache_round_trip(c: &mut Criterion) {
         MemberInfo, MemberKind, ModuleInfo, ReExportInfo, RequireCallInfo, VisibilityTag,
     };
 
-    // Build a representative ModuleInfo with realistic data:
-    // imports, exports (including enums and classes with members), re-exports,
-    // dynamic imports, require calls, and member accesses.
     let module = ModuleInfo {
         file_id: FileId(0),
         exports: vec![
@@ -620,7 +593,9 @@ fn bench_cache_round_trip(c: &mut Criterion) {
             span: oxc_span::Span::new(950, 970),
             destructured_names: vec![],
             local_name: None,
+            source_span: oxc_span::Span::default(),
         }],
+        package_path_references: vec![],
         member_accesses: vec![
             MemberAccess {
                 object: "Status".to_string(),
@@ -649,11 +624,35 @@ fn bench_cache_round_trip(c: &mut Criterion) {
         complexity: Vec::new(),
         flag_uses: vec![],
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks: Vec::new(),
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        referenced_import_bindings: Vec::new(),
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     };
 
     c.bench_function("cache_round_trip", |b| {
@@ -664,18 +663,14 @@ fn bench_cache_round_trip(c: &mut Criterion) {
     });
 }
 
-// ── Dupe detection benchmarks ──────────────────────────────────────
-
 fn make_hashed_tokens(hashes: &[u64]) -> Vec<plow_core::duplicates::normalize::HashedToken> {
     hashes
         .iter()
         .enumerate()
-        .map(
-            |(i, &hash)| plow_core::duplicates::normalize::HashedToken {
-                hash,
-                original_index: i,
-            },
-        )
+        .map(|(i, &hash)| plow_core::duplicates::normalize::HashedToken {
+            hash,
+            original_index: i,
+        })
         .collect()
 }
 
@@ -684,8 +679,8 @@ fn make_hashed_tokens(hashes: &[u64]) -> Vec<plow_core::duplicates::normalize::H
     reason = "bench span values are trivially small"
 )]
 fn make_file_tokens_for(count: usize) -> plow_core::duplicates::tokenize::FileTokens {
-    use plow_core::duplicates::tokenize::{FileTokens, SourceToken, TokenKind};
     use oxc_span::Span;
+    use plow_core::duplicates::tokenize::{FileTokens, SourceToken, TokenKind};
 
     let tokens: Vec<SourceToken> = (0..count)
         .map(|i| SourceToken {
@@ -795,7 +790,6 @@ fn bench_dupe_detect_50x200_diverse(c: &mut Criterion) {
 
 fn bench_dupe_detect_100x200_mixed(c: &mut Criterion) {
     use plow_core::duplicates::detect::CloneDetector;
-    // 20 identical + 80 diverse
     let hashes: Vec<u64> = (1..=200).collect();
     let data: DupeInput = (0..100)
         .map(|i| {
@@ -856,8 +850,6 @@ fn bench_dupe_detect_100x200_mixed_focused(c: &mut Criterion) {
 }
 
 fn bench_dupe_suffix_array_only(c: &mut Criterion) {
-    // Benchmark just the suffix array construction on a large input
-    // to isolate its cost. We access it through the public detect() API.
     use plow_core::duplicates::detect::CloneDetector;
     let data = make_identical_files(2, 5000);
     c.bench_function("dupe_detect_2x5000_identical", |b| {

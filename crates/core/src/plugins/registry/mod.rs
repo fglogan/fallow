@@ -1,6 +1,7 @@
 //! Plugin registry: discovers active plugins, collects patterns, parses configs.
 
 use rustc_hash::FxHashSet;
+use std::fmt;
 use std::path::{Path, PathBuf};
 
 use plow_config::{
@@ -9,21 +10,29 @@ use plow_config::{
 
 use crate::scripts;
 
-use super::{PathRule, Plugin, PluginUsedExportRule, ProvidedDependencyRule};
+use super::{PathRule, Plugin, PluginResult, PluginUsedExportRule, ProvidedDependencyRule};
 
 pub(crate) mod builtin;
 mod helpers;
 
+/// Names of every built-in framework plugin, in registry order.
+///
+/// Derived live from the plugin registry so capability introspection
+/// (`plow schema`) can list plugins without a hand-maintained mirror.
+#[must_use]
+pub fn builtin_plugin_names() -> Vec<&'static str> {
+    builtin::create_builtin_plugins()
+        .iter()
+        .map(|plugin| plugin.name())
+        .collect()
+}
+
 use helpers::{
     check_has_config_file, discover_config_files, is_external_plugin_active,
     prepare_config_pattern, process_config_result, process_external_plugins,
-    process_static_patterns,
+    process_package_json_metadata, process_static_patterns,
 };
 
-// ESLint is included because each workspace owns its own eslint.config.{mjs,js,...}
-// that may import a shared workspace eslint-config package. Those transitive deps
-// (e.g. eslint-config-next, eslint-plugin-react) are declared in the workspace's
-// devDependencies and will be flagged as unused if we skip config parsing here.
 fn must_parse_workspace_config_when_root_active(plugin_name: &str) -> bool {
     matches!(
         plugin_name,
@@ -31,10 +40,99 @@ fn must_parse_workspace_config_when_root_active(plugin_name: &str) -> bool {
     )
 }
 
+fn compile_config_matchers<'a>(
+    active: &[&'a dyn Plugin],
+) -> Vec<(&'a dyn Plugin, Vec<globset::GlobMatcher>)> {
+    active
+        .iter()
+        .filter(|plugin| !plugin.config_patterns().is_empty())
+        .map(|plugin| {
+            let matchers = plugin
+                .config_patterns()
+                .iter()
+                .filter_map(|pattern| {
+                    let prepared = prepare_config_pattern(pattern);
+                    globset::Glob::new(&prepared)
+                        .ok()
+                        .map(|glob| glob.compile_matcher())
+                })
+                .collect();
+            (*plugin, matchers)
+        })
+        .collect()
+}
+
 /// Registry of all available plugins (built-in + external).
 pub struct PluginRegistry {
     plugins: Vec<Box<dyn Plugin>>,
     external_plugins: Vec<ExternalPluginDef>,
+}
+
+/// Invalid user-authored regex extracted from a plugin config file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginRegexValidationError {
+    plugin_name: String,
+    config_path: Option<PathBuf>,
+    rule_kind: &'static str,
+    field: &'static str,
+    rule_pattern: String,
+    regex_pattern: String,
+    source: String,
+}
+
+impl PluginRegexValidationError {
+    pub(crate) fn new(
+        plugin_name: &str,
+        config_path: Option<&Path>,
+        rule_kind: &'static str,
+        field: &'static str,
+        rule_pattern: &str,
+        regex_pattern: &str,
+        source: &regex::Error,
+    ) -> Self {
+        Self {
+            plugin_name: plugin_name.to_owned(),
+            config_path: config_path.map(Path::to_path_buf),
+            rule_kind,
+            field,
+            rule_pattern: rule_pattern.to_owned(),
+            regex_pattern: regex_pattern.to_owned(),
+            source: source.to_string(),
+        }
+    }
+}
+
+impl fmt::Display for PluginRegexValidationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let location = self
+            .config_path
+            .as_ref()
+            .map(|path| format!(" in {}", path.display()))
+            .unwrap_or_default();
+        write!(
+            f,
+            "plugin '{}'{}: invalid regex '{}' in {}.{} for path rule '{}': {}",
+            self.plugin_name,
+            location,
+            self.regex_pattern,
+            self.rule_kind,
+            self.field,
+            self.rule_pattern,
+            self.source
+        )
+    }
+}
+
+#[must_use]
+pub fn format_plugin_regex_errors(errors: &[PluginRegexValidationError]) -> String {
+    let joined = errors
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n  - ");
+    format!(
+        "invalid plugin regex configuration:\n  - {joined}\n\nRewrite the plugin config with Rust-compatible regex syntax, or remove unsupported constructs such as JavaScript lookahead and lookbehind."
+    )
 }
 
 /// Aggregated results from all active plugins for a project.
@@ -56,6 +154,8 @@ pub struct AggregatedPluginResult {
     pub used_class_members: Vec<UsedClassMemberRule>,
     /// Dependencies referenced in config files (should not be flagged unused).
     pub referenced_dependencies: Vec<String>,
+    /// Dependencies referenced by package.json metadata, scoped to that package.json path.
+    pub package_referenced_dependencies: Vec<(PathBuf, String)>,
     /// Additional always-used files discovered from config parsing: (pattern, plugin_name).
     pub discovered_always_used: Vec<(String, String)>,
     /// Setup files discovered from config parsing: (path, plugin_name).
@@ -98,6 +198,142 @@ pub struct AggregatedPluginResult {
     pub provided_dependencies: Vec<ProvidedDependencyRule>,
 }
 
+/// Append `incoming` string items to `target`, skipping values already present
+/// in `target` or earlier in `incoming`. Matches the deduplication the
+/// workspace merge applied via per-field `seen` sets before #444 centralized
+/// it on [`AggregatedPluginResult::merge_into`].
+fn extend_unique(target: &mut Vec<String>, incoming: Vec<String>) {
+    let mut seen: FxHashSet<String> = target.iter().cloned().collect();
+    for item in incoming {
+        if seen.insert(item.clone()) {
+            target.push(item);
+        }
+    }
+}
+
+/// Prefix a workspace-relative pattern so it matches from the monorepo root,
+/// unless it is already workspace-prefixed or project-root-relative (leading
+/// `/`, e.g. an angular.json path). Mirrors the pre-#444 inline closure.
+fn prefix_if_needed(pat: &str, ws_prefix: &str) -> String {
+    if pat.starts_with(ws_prefix) || pat.starts_with('/') {
+        pat.to_string()
+    } else {
+        format!("{ws_prefix}/{pat}")
+    }
+}
+
+impl AggregatedPluginResult {
+    /// Apply a workspace prefix to every path-bearing field in place.
+    ///
+    /// Workspace-package results are collected with patterns relative to the
+    /// package root; to be matchable from the monorepo root they need the
+    /// package's prefix applied. This transform is call-site-specific (it
+    /// depends on `ws_prefix`), so it stays separate from [`Self::merge_into`],
+    /// which is a prefix-agnostic union. The root project's own result is
+    /// never prefixed.
+    ///
+    /// Fields that carry package names, absolute paths, or import-specifier
+    /// boundaries (referenced/tooling deps, setup files, static dir mappings,
+    /// auto-imports, virtual prefixes/suffixes, generated patterns) are left
+    /// untouched, matching the pre-#444 merge loop.
+    pub fn apply_workspace_prefix(&mut self, ws_prefix: &str) {
+        for (rule, _) in &mut self.entry_patterns {
+            *rule = rule.prefixed(ws_prefix);
+        }
+        for (pat, _) in &mut self.always_used {
+            *pat = prefix_if_needed(pat, ws_prefix);
+        }
+        for (pat, _) in &mut self.discovered_always_used {
+            *pat = prefix_if_needed(pat, ws_prefix);
+        }
+        for (pat, _) in &mut self.fixture_patterns {
+            *pat = prefix_if_needed(pat, ws_prefix);
+        }
+        for rule in &mut self.used_exports {
+            *rule = rule.prefixed(ws_prefix);
+        }
+        for rule in &mut self.provided_dependencies {
+            *rule = rule.prefixed(ws_prefix);
+        }
+        for (_, replacement) in &mut self.path_aliases {
+            *replacement = format!("{ws_prefix}/{replacement}");
+        }
+    }
+
+    /// Merge `other` into `self`, taking the union of every field.
+    ///
+    /// Exhaustively destructures `Self` so adding a field to
+    /// `AggregatedPluginResult` becomes a `missing field in pattern` compile
+    /// error here instead of a silently-dropped field. See issue #444.
+    ///
+    /// Callers that need the workspace prefix applied must call
+    /// [`Self::apply_workspace_prefix`] on `other` first; this method does not
+    /// transform any path. Dedup-bearing fields (`active_plugins`, the virtual
+    /// prefix/suffix and generated-pattern lists) deduplicate the incoming
+    /// values against the contents already in `self`, matching the pre-#444
+    /// `seen`-set behavior. `entry_point_roles` is first-writer-wins.
+    pub fn merge_into(&mut self, other: Self) {
+        let Self {
+            entry_patterns,
+            entry_point_roles,
+            config_patterns,
+            always_used,
+            used_exports,
+            used_class_members,
+            referenced_dependencies,
+            package_referenced_dependencies,
+            discovered_always_used,
+            setup_files,
+            tooling_dependencies,
+            script_used_packages,
+            virtual_module_prefixes,
+            virtual_package_suffixes,
+            generated_import_patterns,
+            generated_type_import_prefixes,
+            path_aliases,
+            auto_imports,
+            active_plugins,
+            fixture_patterns,
+            scss_include_paths,
+            static_dir_mappings,
+            provided_dependencies,
+        } = other;
+
+        self.entry_patterns.extend(entry_patterns);
+        for (plugin_name, role) in entry_point_roles {
+            self.entry_point_roles.entry(plugin_name).or_insert(role);
+        }
+        self.config_patterns.extend(config_patterns);
+        self.always_used.extend(always_used);
+        self.used_exports.extend(used_exports);
+        self.used_class_members.extend(used_class_members);
+        self.referenced_dependencies.extend(referenced_dependencies);
+        self.package_referenced_dependencies
+            .extend(package_referenced_dependencies);
+        self.discovered_always_used.extend(discovered_always_used);
+        self.setup_files.extend(setup_files);
+        self.tooling_dependencies.extend(tooling_dependencies);
+        self.script_used_packages.extend(script_used_packages);
+        extend_unique(&mut self.virtual_module_prefixes, virtual_module_prefixes);
+        extend_unique(&mut self.virtual_package_suffixes, virtual_package_suffixes);
+        extend_unique(
+            &mut self.generated_import_patterns,
+            generated_import_patterns,
+        );
+        extend_unique(
+            &mut self.generated_type_import_prefixes,
+            generated_type_import_prefixes,
+        );
+        self.path_aliases.extend(path_aliases);
+        self.auto_imports.extend(auto_imports);
+        extend_unique(&mut self.active_plugins, active_plugins);
+        self.fixture_patterns.extend(fixture_patterns);
+        self.scss_include_paths.extend(scss_include_paths);
+        self.static_dir_mappings.extend(static_dir_mappings);
+        self.provided_dependencies.extend(provided_dependencies);
+    }
+}
+
 impl PluginRegistry {
     /// Create a registry with all built-in plugins and optional external plugins.
     #[must_use]
@@ -132,43 +368,45 @@ impl PluginRegistry {
         dirs
     }
 
-    /// Run all plugins against a project, returning aggregated results.
+    /// Test convenience wrapper for running all plugins against a project.
     ///
     /// This discovers which plugins are active, collects their static patterns,
     /// then parses any config files to extract dynamic information.
+    #[cfg(test)]
     pub fn run(
         &self,
         pkg: &PackageJson,
         root: &Path,
         discovered_files: &[PathBuf],
     ) -> AggregatedPluginResult {
-        self.run_with_search_roots(pkg, root, discovered_files, &[root], false)
+        self.try_run(pkg, root, discovered_files)
+            .unwrap_or_else(|errors| panic!("{}", format_plugin_regex_errors(&errors)))
     }
 
-    /// Run all plugins against a project with explicit config-file search roots.
-    ///
-    /// `config_search_roots` should stay narrowly focused to directories that are
-    /// already known to matter for this project. Broad recursive scans are
-    /// intentionally avoided because they become prohibitively expensive on
-    /// large monorepos with populated `node_modules` trees.
-    ///
-    /// `production_mode` controls the FS fallback for source-extension config
-    /// patterns. In production mode the source walker excludes `*.config.*` so
-    /// the FS walk is required; otherwise Phase 3a's in-memory matcher covers
-    /// them and the walk is skipped.
-    pub fn run_with_search_roots(
+    /// Run all plugins, returning invalid plugin regexes as hard errors.
+    pub fn try_run(
+        &self,
+        pkg: &PackageJson,
+        root: &Path,
+        discovered_files: &[PathBuf],
+    ) -> Result<AggregatedPluginResult, Vec<PluginRegexValidationError>> {
+        self.try_run_with_search_roots(pkg, root, discovered_files, &[root], false)
+    }
+
+    /// Run all plugins against a project with explicit config-file search roots,
+    /// returning invalid plugin regexes as hard errors.
+    pub fn try_run_with_search_roots(
         &self,
         pkg: &PackageJson,
         root: &Path,
         discovered_files: &[PathBuf],
         config_search_roots: &[&Path],
         production_mode: bool,
-    ) -> AggregatedPluginResult {
+    ) -> Result<AggregatedPluginResult, Vec<PluginRegexValidationError>> {
         let _span = tracing::info_span!("run_plugins").entered();
         let mut result = AggregatedPluginResult::default();
+        let mut regex_errors = Vec::new();
 
-        // Phase 1: Determine which plugins are active
-        // Compute deps once to avoid repeated Vec<String> allocation per plugin
         let all_deps = pkg.all_dependency_names();
         let script_packages = script_activation_packages(pkg, root, &all_deps, production_mode);
         let active: Vec<&dyn Plugin> = self
@@ -177,6 +415,7 @@ impl PluginRegistry {
             .filter(|p| {
                 p.is_enabled_with_files(&all_deps, root, discovered_files)
                     || p.is_enabled_with_scripts(&script_packages, root)
+                    || p.is_enabled_with_package_json(pkg, root)
             })
             .map(AsRef::as_ref)
             .collect();
@@ -190,19 +429,15 @@ impl PluginRegistry {
             "active plugins"
         );
 
-        // Warn when meta-frameworks are active but their generated configs are missing.
-        // Without these, tsconfig extends chains break and import resolution fails.
         check_meta_framework_prerequisites(&active, root);
 
-        // Silent-fail diagnostics for the plugin system (#479).
         self.emit_silent_fail_diagnostics(&active, &all_deps, root, discovered_files);
 
-        // Phase 2: Collect static patterns from active plugins
         for plugin in &active {
             process_static_patterns(*plugin, root, &mut result);
         }
+        process_package_json_metadata(&active, pkg, root, &mut result, &mut regex_errors);
 
-        // Phase 2b: Process external plugins (includes inline framework definitions)
         process_external_plugins(
             &self.external_plugins,
             &all_deps,
@@ -211,34 +446,9 @@ impl PluginRegistry {
             &mut result,
         );
 
-        // Phase 3: Find and parse config files for dynamic resolution
-        // Pre-compile all config patterns. Source-extension root-anchored
-        // patterns are wrapped with `**/` so they match nested files via the
-        // discovered file set (Phase 3a), letting Phase 3b skip those plugins
-        // and avoid a per-directory stat storm on large monorepos.
-        let config_matchers: Vec<(&dyn Plugin, Vec<globset::GlobMatcher>)> = active
-            .iter()
-            .filter(|p| !p.config_patterns().is_empty())
-            .map(|p| {
-                let matchers: Vec<globset::GlobMatcher> = p
-                    .config_patterns()
-                    .iter()
-                    .filter_map(|pat| {
-                        let prepared = prepare_config_pattern(pat);
-                        globset::Glob::new(&prepared)
-                            .ok()
-                            .map(|g| g.compile_matcher())
-                    })
-                    .collect();
-                (*p, matchers)
-            })
-            .collect();
+        let config_matchers = compile_config_matchers(&active);
 
         use rayon::prelude::*;
-        // Build relative paths lazily: only needed when config matchers exist
-        // or plugins have package_json_config_key. Skip entirely for projects
-        // with no config-parsing plugins (e.g., only React), avoiding O(files)
-        // String allocations.
         let needs_relative_files = !config_matchers.is_empty()
             || active.iter().any(|p| p.package_json_config_key().is_some());
         let relative_files: Vec<(PathBuf, String)> = if needs_relative_files {
@@ -257,95 +467,33 @@ impl PluginRegistry {
             Vec::new()
         };
 
-        if !config_matchers.is_empty() {
-            // Phase 3a: Match config files from discovered source files. Per-file
-            // glob matching is parallelized: on monorepos with tens of thousands
-            // of source files, the file-scan cost dominates the plugins phase.
-            let mut resolved_plugins: FxHashSet<&str> = FxHashSet::default();
+        resolve_plugin_config_files(
+            &config_matchers,
+            &relative_files,
+            config_search_roots,
+            production_mode,
+            root,
+            &mut result,
+            &mut regex_errors,
+        );
 
-            for (plugin, matchers) in &config_matchers {
-                let plugin_hits: Vec<&PathBuf> = relative_files
-                    .par_iter()
-                    .filter_map(|(abs_path, rel_path)| {
-                        matchers
-                            .iter()
-                            .any(|m| m.is_match(rel_path.as_str()))
-                            .then_some(abs_path)
-                    })
-                    .collect();
-                for abs_path in plugin_hits {
-                    if let Ok(source) = std::fs::read_to_string(abs_path) {
-                        let plugin_result = plugin.resolve_config(abs_path, &source, root);
-                        if !plugin_result.is_empty() {
-                            resolved_plugins.insert(plugin.name());
-                            tracing::debug!(
-                                plugin = plugin.name(),
-                                config = %abs_path.display(),
-                                entries = plugin_result.entry_patterns.len(),
-                                deps = plugin_result.referenced_dependencies.len(),
-                                "resolved config"
-                            );
-                            process_config_result(
-                                plugin.name(),
-                                plugin_result,
-                                &mut result,
-                                Some(abs_path),
-                            );
-                        }
-                    }
-                }
-            }
-
-            // Phase 3b: Filesystem fallback for JSON config files.
-            // JSON files (angular.json, project.json) are not in the discovered file set
-            // because plow only discovers JS/TS/CSS/Vue/etc. files. In production
-            // mode, source-extension configs (`*.config.*`, dotfiles) are also
-            // excluded from the walker, so the FS walk runs for those patterns too.
-            let json_configs = discover_config_files(
-                &config_matchers,
-                &resolved_plugins,
-                config_search_roots,
-                production_mode,
-            );
-            for (abs_path, plugin) in &json_configs {
-                if let Ok(source) = std::fs::read_to_string(abs_path) {
-                    let plugin_result = plugin.resolve_config(abs_path, &source, root);
-                    if !plugin_result.is_empty() {
-                        let rel = abs_path
-                            .strip_prefix(root)
-                            .map(|p| p.to_string_lossy())
-                            .unwrap_or_default();
-                        tracing::debug!(
-                            plugin = plugin.name(),
-                            config = %rel,
-                            entries = plugin_result.entry_patterns.len(),
-                            deps = plugin_result.referenced_dependencies.len(),
-                            "resolved config (filesystem fallback)"
-                        );
-                        process_config_result(
-                            plugin.name(),
-                            plugin_result,
-                            &mut result,
-                            Some(abs_path),
-                        );
-                    }
-                }
-            }
-        }
-
-        // Phase 4: Package.json inline config fallback.
         process_package_json_inline_configs(
             &active,
             &config_matchers,
             &relative_files,
             root,
             &mut result,
+            &mut regex_errors,
         );
 
-        result
+        if regex_errors.is_empty() {
+            Ok(result)
+        } else {
+            Err(regex_errors)
+        }
     }
 
-    /// Fast variant of `run()` for workspace packages.
+    /// Test convenience wrapper for the fast workspace plugin path.
     ///
     /// Reuses pre-compiled config matchers and pre-computed relative files from the root
     /// project run, avoiding repeated glob compilation and path computation per workspace.
@@ -355,7 +503,8 @@ impl PluginRegistry {
         reason = "Each parameter is a distinct, small value with no natural grouping; \
                   bundling them into a struct hurts call-site readability."
     )]
-    pub fn run_workspace_fast(
+    #[cfg(test)]
+    fn run_workspace_fast(
         &self,
         pkg: &PackageJson,
         root: &Path,
@@ -365,10 +514,42 @@ impl PluginRegistry {
         skip_config_plugins: &FxHashSet<&str>,
         production_mode: bool,
     ) -> AggregatedPluginResult {
+        self.try_run_workspace_fast(
+            pkg,
+            root,
+            project_root,
+            precompiled_config_matchers,
+            relative_files,
+            skip_config_plugins,
+            production_mode,
+        )
+        .unwrap_or_else(|errors| panic!("{}", format_plugin_regex_errors(&errors)))
+    }
+
+    /// Fast variant of `try_run()` for workspace packages.
+    ///
+    /// Reuses pre-compiled config matchers and pre-computed relative files from the root
+    /// project run, avoiding repeated glob compilation and path computation per workspace.
+    /// Skips package.json inline config (workspace packages rarely have inline configs).
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Each parameter is a distinct, small value with no natural grouping; \
+                  bundling them into a struct hurts call-site readability."
+    )]
+    pub fn try_run_workspace_fast(
+        &self,
+        pkg: &PackageJson,
+        root: &Path,
+        project_root: &Path,
+        precompiled_config_matchers: &[(&dyn Plugin, Vec<globset::GlobMatcher>)],
+        relative_files: &[(PathBuf, String)],
+        skip_config_plugins: &FxHashSet<&str>,
+        production_mode: bool,
+    ) -> Result<AggregatedPluginResult, Vec<PluginRegexValidationError>> {
         let _span = tracing::info_span!("run_plugins").entered();
         let mut result = AggregatedPluginResult::default();
+        let mut regex_errors = Vec::new();
 
-        // Phase 1: Determine which plugins are active (with pre-computed deps)
         let all_deps = pkg.all_dependency_names();
         let script_packages = script_activation_packages(pkg, root, &all_deps, production_mode);
         let workspace_files: Vec<PathBuf> = relative_files
@@ -382,6 +563,7 @@ impl PluginRegistry {
             .filter(|p| {
                 p.is_enabled_with_files(&all_deps, root, &workspace_files)
                     || p.is_enabled_with_scripts(&script_packages, root)
+                    || p.is_enabled_with_package_json(pkg, root)
             })
             .map(AsRef::as_ref)
             .collect();
@@ -395,9 +577,6 @@ impl PluginRegistry {
             "active plugins"
         );
 
-        // Silent-fail diagnostics (#479); the shared dedupe set means the
-        // same external plugin's enabler typo or pattern collision only warns
-        // once per process even when this fast path runs per workspace.
         self.emit_silent_fail_diagnostics(&active, &all_deps, root, &workspace_files);
 
         process_external_plugins(
@@ -408,18 +587,15 @@ impl PluginRegistry {
             &mut result,
         );
 
-        // Early exit if no plugins are active (common for leaf workspace packages)
         if active.is_empty() && result.active_plugins.is_empty() {
-            return result;
+            return Ok(result);
         }
 
-        // Phase 2: Collect static patterns from active plugins
         for plugin in &active {
             process_static_patterns(*plugin, root, &mut result);
         }
+        process_package_json_metadata(&active, pkg, root, &mut result, &mut regex_errors);
 
-        // Phase 3: Find and parse config files using pre-compiled matchers
-        // Only check matchers for plugins that are active in this workspace
         let active_names: FxHashSet<&str> = active.iter().map(|p| p.name()).collect();
         let workspace_matchers: Vec<_> = precompiled_config_matchers
             .iter()
@@ -432,46 +608,18 @@ impl PluginRegistry {
             .collect();
 
         let mut resolved_ws_plugins: FxHashSet<&str> = FxHashSet::default();
-        if !workspace_matchers.is_empty() {
-            use rayon::prelude::*;
-            for (plugin, matchers) in &workspace_matchers {
-                let plugin_hits: Vec<&PathBuf> = relative_files
-                    .par_iter()
-                    .filter_map(|(abs_path, rel_path)| {
-                        matchers
-                            .iter()
-                            .any(|m| m.is_match(rel_path.as_str()))
-                            .then_some(abs_path)
-                    })
-                    .collect();
-                for abs_path in plugin_hits {
-                    if let Ok(source) = std::fs::read_to_string(abs_path) {
-                        let plugin_result = plugin.resolve_config(abs_path, &source, root);
-                        if !plugin_result.is_empty() {
-                            resolved_ws_plugins.insert(plugin.name());
-                            tracing::debug!(
-                                plugin = plugin.name(),
-                                config = %abs_path.display(),
-                                entries = plugin_result.entry_patterns.len(),
-                                deps = plugin_result.referenced_dependencies.len(),
-                                "resolved config"
-                            );
-                            process_config_result(
-                                plugin.name(),
-                                plugin_result,
-                                &mut result,
-                                Some(abs_path),
-                            );
-                        }
-                    }
-                }
-            }
+        for (plugin, matchers) in &workspace_matchers {
+            resolve_plugin_matching_files(
+                *plugin,
+                matchers,
+                relative_files,
+                root,
+                &mut result,
+                &mut regex_errors,
+                &mut resolved_ws_plugins,
+            );
         }
 
-        // Phase 3b: Filesystem fallback for JSON config files at the project root.
-        // Config files like angular.json live at the monorepo root, but Angular is
-        // only active in workspace packages. Check the project root for unresolved
-        // config patterns.
         let ws_json_configs = if root == project_root {
             discover_config_files(
                 &workspace_matchers,
@@ -487,7 +635,6 @@ impl PluginRegistry {
                 production_mode,
             )
         };
-        // Parse discovered JSON config files
         for (abs_path, plugin) in &ws_json_configs {
             if let Ok(source) = std::fs::read_to_string(abs_path) {
                 let plugin_result = plugin.resolve_config(abs_path, &source, root);
@@ -503,17 +650,23 @@ impl PluginRegistry {
                         deps = plugin_result.referenced_dependencies.len(),
                         "resolved config (workspace filesystem fallback)"
                     );
-                    process_config_result(
+                    if let Err(mut errors) = process_config_result(
                         plugin.name(),
                         plugin_result,
                         &mut result,
                         Some(abs_path),
-                    );
+                    ) {
+                        regex_errors.append(&mut errors);
+                    }
                 }
             }
         }
 
-        result
+        if regex_errors.is_empty() {
+            Ok(result)
+        } else {
+            Err(regex_errors)
+        }
     }
 
     /// Pre-compile config pattern glob matchers for all plugins that have config patterns.
@@ -585,6 +738,136 @@ fn plugin_warn_dedupe() -> &'static std::sync::Mutex<FxHashSet<String>> {
     WARNED.get_or_init(|| std::sync::Mutex::new(FxHashSet::default()))
 }
 
+fn resolve_plugin_config_files(
+    config_matchers: &[(&dyn Plugin, Vec<globset::GlobMatcher>)],
+    relative_files: &[(PathBuf, String)],
+    config_search_roots: &[&Path],
+    production_mode: bool,
+    root: &Path,
+    result: &mut AggregatedPluginResult,
+    regex_errors: &mut Vec<PluginRegexValidationError>,
+) {
+    if config_matchers.is_empty() {
+        return;
+    }
+
+    let mut resolved_plugins: FxHashSet<&str> = FxHashSet::default();
+    for (plugin, matchers) in config_matchers {
+        resolve_plugin_matching_files(
+            *plugin,
+            matchers,
+            relative_files,
+            root,
+            result,
+            regex_errors,
+            &mut resolved_plugins,
+        );
+    }
+
+    let json_configs = discover_config_files(
+        config_matchers,
+        &resolved_plugins,
+        config_search_roots,
+        production_mode,
+    );
+    for (abs_path, plugin) in &json_configs {
+        resolve_plugin_filesystem_config(*plugin, abs_path, root, result, regex_errors);
+    }
+}
+
+fn resolve_plugin_matching_files<'a>(
+    plugin: &'a dyn Plugin,
+    matchers: &[globset::GlobMatcher],
+    relative_files: &'a [(PathBuf, String)],
+    root: &Path,
+    result: &mut AggregatedPluginResult,
+    regex_errors: &mut Vec<PluginRegexValidationError>,
+    resolved_plugins: &mut FxHashSet<&'a str>,
+) {
+    use rayon::prelude::*;
+
+    let plugin_hits: Vec<&PathBuf> = relative_files
+        .par_iter()
+        .filter_map(|(abs_path, rel_path)| {
+            matchers
+                .iter()
+                .any(|m| m.is_match(rel_path.as_str()))
+                .then_some(abs_path)
+        })
+        .collect();
+    for abs_path in plugin_hits {
+        let Ok(source) = std::fs::read_to_string(abs_path) else {
+            continue;
+        };
+        let plugin_result = plugin.resolve_config(abs_path, &source, root);
+        if plugin_result.is_empty() {
+            continue;
+        }
+        resolved_plugins.insert(plugin.name());
+        process_resolved_plugin_config(
+            plugin,
+            abs_path,
+            plugin_result,
+            result,
+            regex_errors,
+            "resolved config",
+            abs_path.display(),
+        );
+    }
+}
+
+fn resolve_plugin_filesystem_config(
+    plugin: &dyn Plugin,
+    abs_path: &Path,
+    root: &Path,
+    result: &mut AggregatedPluginResult,
+    regex_errors: &mut Vec<PluginRegexValidationError>,
+) {
+    let Ok(source) = std::fs::read_to_string(abs_path) else {
+        return;
+    };
+    let plugin_result = plugin.resolve_config(abs_path, &source, root);
+    if plugin_result.is_empty() {
+        return;
+    }
+    let rel = abs_path
+        .strip_prefix(root)
+        .map(|p| p.to_string_lossy())
+        .unwrap_or_default();
+    process_resolved_plugin_config(
+        plugin,
+        abs_path,
+        plugin_result,
+        result,
+        regex_errors,
+        "resolved config (filesystem fallback)",
+        rel,
+    );
+}
+
+fn process_resolved_plugin_config(
+    plugin: &dyn Plugin,
+    abs_path: &Path,
+    plugin_result: PluginResult,
+    result: &mut AggregatedPluginResult,
+    regex_errors: &mut Vec<PluginRegexValidationError>,
+    message: &'static str,
+    config_display: impl std::fmt::Display,
+) {
+    tracing::debug!(
+        plugin = plugin.name(),
+        config = %config_display,
+        entries = plugin_result.entry_patterns.len(),
+        deps = plugin_result.referenced_dependencies.len(),
+        message
+    );
+    if let Err(mut errors) =
+        process_config_result(plugin.name(), plugin_result, result, Some(abs_path))
+    {
+        regex_errors.append(&mut errors);
+    }
+}
+
 /// Insert `key` into the dedupe set and return `true` when it was newly
 /// inserted (caller should emit). Returns `true` on a poisoned mutex so
 /// over-warning beats swallowing.
@@ -620,10 +903,21 @@ pub(crate) enum PluginDiagnostic {
 ///
 /// Detection is byte-equal on the pattern string. Overlapping but non-identical
 /// globs (e.g. `vite.config.{ts,js}` vs `vite.config.ts`) require pattern
-/// intersection logic and are intentionally out of scope; there are no known
-/// collisions in the built-in plugin set. The warning's purpose is to surface
-/// USER-AUTHORED collisions between external plugins or between an external
-/// plugin and a built-in, so the user can disambiguate by editing one side.
+/// intersection logic and are intentionally out of scope. The warning's purpose
+/// is to surface USER-AUTHORED collisions between external plugins or between an
+/// external plugin and a built-in, so the user can disambiguate by editing one
+/// side.
+///
+/// Built-in-vs-built-in collisions are intentionally NOT reported: they are
+/// curated and benign (Phase 3a config matching runs every matching plugin's
+/// `resolve_config` independently, so there is no data loss), and the warning's
+/// remediation advice ("rename one of the patterns or remove the duplicate
+/// plugin") is impossible to follow for a built-in. Such a collision exists by
+/// design, e.g. both `vite` and `tanstack-router` claim
+/// `vite.config.{ts,js,mts,mjs}` because tanstack-router parses the
+/// `tanstackRouter({...})` call inside the vite config to find a custom
+/// `generatedRouteTree` path (#808). A finding is therefore emitted only when
+/// at least one owner is an external (user-authored) plugin.
 ///
 /// Precedence rule when two plugins claim the same pattern: the one registered
 /// first wins. For built-in plugins, registration order is defined in
@@ -636,12 +930,6 @@ pub(crate) fn detect_pattern_collisions(
 ) -> Vec<PluginDiagnostic> {
     use rustc_hash::FxHashMap;
 
-    // Owners are stored as a Vec to preserve REGISTRATION ORDER: owners[0]
-    // is the plugin that wins Phase 3a config matching, and the warning text
-    // names it as the winner. A `FxHashSet` is held alongside to dedupe a
-    // single plugin that legitimately lists the same pattern twice in its
-    // own `config_patterns` (rare but legal) so it does not look like a
-    // self-vs-self collision.
     let mut pattern_owners: FxHashMap<String, (Vec<String>, FxHashSet<String>)> =
         FxHashMap::default();
 
@@ -669,10 +957,18 @@ pub(crate) fn detect_pattern_collisions(
         }
     }
 
+    // Names of built-in plugins. Built-in-only collisions are curated + benign
+    // (every matching plugin runs `resolve_config` independently), so they must
+    // not surface an un-actionable warning (#808). Keying on the built-in set
+    // and emitting only when an owner is NOT built-in is robust even if a
+    // user-authored external plugin happens to share a built-in's name: the
+    // built-in owner alone never re-enables the warning.
+    let builtin_names: FxHashSet<&str> = builtin_active.iter().map(|p| p.name()).collect();
+
     let mut findings: Vec<PluginDiagnostic> = pattern_owners
         .into_iter()
         .filter_map(|(pattern, (owners, _seen))| {
-            if owners.len() < 2 {
+            if owners.len() < 2 || owners.iter().all(|o| builtin_names.contains(o.as_str())) {
                 None
             } else {
                 Some(PluginDiagnostic::PatternCollision { pattern, owners })
@@ -795,6 +1091,7 @@ fn process_package_json_inline_configs(
     relative_files: &[(PathBuf, String)],
     root: &Path,
     result: &mut AggregatedPluginResult,
+    regex_errors: &mut Vec<PluginRegexValidationError>,
 ) {
     for plugin in active {
         let Some(key) = plugin.package_json_config_key() else {
@@ -824,7 +1121,11 @@ fn process_package_json_inline_configs(
             key = key,
             "resolved inline package.json config"
         );
-        process_config_result(plugin.name(), plugin_result, result, Some(&pkg_path));
+        if let Err(mut errors) =
+            process_config_result(plugin.name(), plugin_result, result, Some(&pkg_path))
+        {
+            regex_errors.append(&mut errors);
+        }
     }
 }
 
@@ -905,8 +1206,17 @@ fn script_activation_packages(
         nm_roots.push(root);
     }
     let bin_map = scripts::build_bin_to_package_map(&nm_roots, all_deps);
+    let dep_set: FxHashSet<String> = all_deps.iter().cloned().collect();
+    let script_names: FxHashSet<String> = pkg_scripts.keys().cloned().collect();
 
-    scripts::analyze_scripts(&scripts_to_analyze, root, &bin_map).used_packages
+    scripts::analyze_scripts_with_dependency_context(
+        &scripts_to_analyze,
+        root,
+        &bin_map,
+        &dep_set,
+        &script_names,
+    )
+    .used_packages
 }
 
 #[cfg(test)]

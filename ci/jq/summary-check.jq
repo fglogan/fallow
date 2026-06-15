@@ -1,7 +1,7 @@
 # GitLab variant of summary-check.jq
 # Differences from GitHub: no > [!NOTE] / > [!WARNING] / > [!TIP] callouts
 
-def docs(anchor): "https://docs.fallow.tools/explanations/dead-code#" + anchor;
+def docs(anchor): "https://docs.genesis-plow.dev/explanations/dead-code#" + anchor;
 def workspace_context:
   if ((.used_in_workspaces // []) | length) > 0 then
     (.used_in_workspaces | map("`\(.)`") | join(", "))
@@ -19,16 +19,16 @@ def section(name; key; header; fmt):
     "\n<details><summary><strong>\(name) (\($n))</strong></summary>\n\n" +
     header +
     ([.[key][:25][] | fmt] | join("\n")) +
-    (if $n > 25 then "\n\n> \($n - 25) more \u2014 run `fallow` locally for the full list" else "" end) +
+    (if $n > 25 then "\n\n> \($n - 25) more \u2014 run `plow` locally for the full list" else "" end) +
     "\n\n</details>\n"
   else "" end;
 
 if .total_issues == 0 then
-  "# Fallow Analysis\n\n" +
+  "# Plow Analysis\n\n" +
   "> **No issues found** \u00b7 \(.elapsed_ms)ms\n\n" +
   "All exports are used, all dependencies are declared, and no issues were detected."
 else
-  "# Fallow Analysis\n\n" +
+  "# Plow Analysis\n\n" +
   "> :warning: **\(.total_issues) issues** found \u00b7 \(.elapsed_ms)ms\n\n" +
   "| Category | Count |\n|----------|------:|\n" +
   ([
@@ -41,12 +41,21 @@ else
     table_row("Unused optionalDependencies"; "unused_optional_dependencies"; "unused-dependencies"),
     table_row("Unused enum members"; "unused_enum_members"; "unused-enum-members"),
     table_row("Unused class members"; "unused_class_members"; "unused-class-members"),
+    table_row("Unused store members"; "unused_store_members"; "unused-store-members"),
     table_row("Unresolved imports"; "unresolved_imports"; "unresolved-imports"),
     table_row("Unlisted dependencies"; "unlisted_dependencies"; "unlisted-dependencies"),
     table_row("Duplicate exports"; "duplicate_exports"; "duplicate-exports"),
     table_row("Circular dependencies"; "circular_dependencies"; "circular-dependencies"),
     table_row("Re-export cycles"; "re_export_cycles"; "re-export-cycles"),
     table_row("Boundary violations"; "boundary_violations"; "boundary-violations"),
+    table_row("Boundary coverage"; "boundary_coverage_violations"; "boundary-violations"),
+    table_row("Boundary calls"; "boundary_call_violations"; "boundary-violations"),
+    table_row("Policy violations"; "policy_violations"; "policy-violations"),
+    table_row("Invalid client exports"; "invalid_client_exports"; "invalid-client-exports"),
+    table_row("Mixed client/server barrels"; "mixed_client_server_barrels"; "mixed-client-server-barrels"),
+    table_row("Misplaced directives"; "misplaced_directives"; "misplaced-directives"),
+    table_row("Route collisions"; "route_collisions"; "route-collisions"),
+    table_row("Dynamic segment conflicts"; "dynamic_segment_name_conflicts"; "dynamic-segment-name-conflicts"),
     table_row("Type-only dependencies"; "type_only_dependencies"; "type-only-dependencies"),
     table_row("Test-only dependencies"; "test_only_dependencies"; "test-only-dependencies"),
     table_row("Stale suppressions"; "stale_suppressions"; "stale-suppressions"),
@@ -84,6 +93,9 @@ else
   section("Unused class members"; "unused_class_members";
     "Class methods or properties never referenced outside their class.\n\n| File | Line | Class | Member |\n|------|-----:|-------|--------|\n";
     "| `\(.path)` | \(.line) | `\(.parent_name)` | `\(.member_name)` |") +
+  section("Unused store members"; "unused_store_members";
+    "Pinia store members (state, getter, action) never accessed by any consumer.\n\n| File | Line | Store | Member |\n|------|-----:|-------|--------|\n";
+    "| `\(.path)` | \(.line) | `\(.parent_name)` | `\(.member_name)` |") +
   section("Unresolved imports"; "unresolved_imports";
     "Import paths that could not be resolved \u2014 check for missing packages or broken paths.\n\n| File | Line | Import |\n|------|-----:|--------|\n";
     "| `\(.path)` | \(.line) | `\(.specifier)` |") +
@@ -102,6 +114,30 @@ else
   section("Boundary violations"; "boundary_violations";
     "Imports that cross defined architecture zone boundaries.\n\n| From | To | Zones |\n|------|-----|-------|\n";
     "| `\(.from_path):\(.line)` | `\(.to_path)` | \(.from_zone) \u2192 \(.to_zone) |") +
+  section("Boundary coverage"; "boundary_coverage_violations";
+    "Files that match no configured architecture boundary zone.\n\n| File |\n|------|\n";
+    "| `\(.path):\(.line)` |") +
+  section("Boundary calls"; "boundary_call_violations";
+    "Calls from zoned files to callees forbidden for that zone.\n\n| File | Callee | Zone | Pattern |\n|------|--------|------|---------|\n";
+    "| `\(.path):\(.line)` | `\(.callee)` | \(.zone) | `\(.pattern)` |") +
+  section("Policy violations"; "policy_violations";
+    "Banned calls and banned imports matched by configured rule packs.\n\n| File | Matched | Rule | Severity |\n|------|---------|------|----------|\n";
+    "| `\(.path):\(.line)` | `\(.matched)` | `\(.pack)/\(.rule_id)` | \(.severity) |") +
+  section("Invalid client exports"; "invalid_client_exports";
+    "`\"use client\"` files exporting a Next.js server-only / route-config name. Next.js rejects this at build time.\n\n| File | Export | Directive |\n|------|--------|-----------|\n";
+    "| `\(.path):\(.line)` | `\(.export_name)` | `\"\(.directive)\"` |") +
+  section("Mixed client/server barrels"; "mixed_client_server_barrels";
+    "Barrels re-exporting both a `\"use client\"` module and a server-only module. One import drags the other's directive across the boundary.\n\n| File | Client origin | Server origin |\n|------|---------------|---------------|\n";
+    "| `\(.path):\(.line)` | `\(.client_origin)` | `\(.server_origin)` |") +
+  section("Misplaced directives"; "misplaced_directives";
+    "`\"use client\"` / `\"use server\"` directives written after a non-directive statement, so the RSC bundler ignores them. Move the directive to the top of the file.\n\n| File | Directive |\n|------|-----------|\n";
+    "| `\(.path):\(.line)` | `\"\(.directive)\"` |") +
+  section("Route collisions"; "route_collisions";
+    "Next.js App Router route files that resolve to the same URL within one app-root. Next.js fails the build because a URL can have only one owner.\n\n| File | URL |\n|------|-----|\n";
+    "| `\(.path)` | `\(.url)` |") +
+  section("Dynamic segment conflicts"; "dynamic_segment_name_conflicts";
+    "Sibling Next.js dynamic route segments at one position using different slug names. Next.js requires one consistent name per dynamic path.\n\n| File | Position | Segments |\n|------|----------|----------|\n";
+    "| `\(.path)` | `\(.position)` | `\(.conflicting_segments | join(", "))` |") +
   section("Type-only dependencies"; "type_only_dependencies";
     "Dependencies only used for type imports \u2014 consider moving to `devDependencies`.\n\n| Package |\n|---------|\n";
     "| `\(.package_name)` |") +
@@ -128,10 +164,10 @@ else
     "| `\(.raw_key // "")` | `\(.raw_value // "")` | `\(.source)` | `\(.path):\(.line)` | \(.reason // "unparsable") |") +
   "\n\n" +
   (if ((.unused_exports // []) + (.unused_dependencies // []) + (.unused_enum_members // [])) | length > 0 then
-    "> :bulb: Run `fallow fix --dry-run` to preview safe auto-fixes.\n"
+    "> :bulb: Run `plow fix --dry-run` to preview safe auto-fixes.\n"
   else "" end) +
   (if (.unused_exports // []) | length > 0 then
-    "> :bulb: Intentionally public? Add [`/** @public */`](https://docs.fallow.tools/configuration/suppression) above exports to preserve them.\n"
+    "> :bulb: Intentionally public? Add [`/** @public */`](https://docs.genesis-plow.dev/configuration/suppression) above exports to preserve them.\n"
   else "" end) +
-  "> :bulb: Add [`// fallow-ignore-next-line`](https://docs.fallow.tools/configuration/suppression) above a line to suppress a specific finding."
+  "> :bulb: Add [`// plow-ignore-next-line`](https://docs.genesis-plow.dev/configuration/suppression) above a line to suppress a specific finding."
 end

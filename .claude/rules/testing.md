@@ -12,7 +12,7 @@ paths:
 - Each crate has a `tests/` directory with an `integration_test.rs` hub that includes sub-modules via `#[path]`
 - Helper utilities in `common.rs`: `fixture_path(name)` resolves `tests/fixtures/{name}/`, `create_config(root)` builds a minimal `ResolvedConfig`
 - Test fixtures at workspace root `tests/fixtures/` — each fixture is a minimal but complete project with `package.json`, `tsconfig.json`, and source files
-- Tests call `fallow_core::analyze(&config)` and assert on the structured `AnalysisResults`
+- Tests call `plow_core::analyze(&config)` and assert on the structured `AnalysisResults`
 
 ## Snapshot tests (insta)
 - CLI output snapshots in `crates/cli/tests/snapshot_tests.rs` with snapshots stored in `crates/cli/tests/snapshots/*.snap`

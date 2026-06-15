@@ -165,6 +165,22 @@ expression: json_str
   },
   {
     "type": "issue",
+    "check_name": "plow/unused-store-member",
+    "description": "Store member 'useCounterStore.legacyAction' is never referenced",
+    "categories": [
+      "Bug Risk"
+    ],
+    "severity": "minor",
+    "fingerprint": "1b6b9adec9797dbc",
+    "location": {
+      "path": "src/stores/counter.ts",
+      "lines": {
+        "begin": 24
+      }
+    }
+  },
+  {
+    "type": "issue",
     "check_name": "plow/unresolved-import",
     "description": "Import './missing-module' could not be resolved",
     "categories": [
@@ -256,6 +272,54 @@ expression: json_str
       "path": "src/api/index.ts",
       "lines": {
         "begin": 1
+      }
+    }
+  },
+  {
+    "type": "issue",
+    "check_name": "plow/invalid-client-export",
+    "description": "Export `metadata` is not allowed in a \"use client\" file (Next.js server-only / route-config name)",
+    "categories": [
+      "Bug Risk"
+    ],
+    "severity": "minor",
+    "fingerprint": "81283760fca75e0c",
+    "location": {
+      "path": "app/page.tsx",
+      "lines": {
+        "begin": 3
+      }
+    }
+  },
+  {
+    "type": "issue",
+    "check_name": "plow/mixed-client-server-barrel",
+    "description": "Barrel re-exports both a \"use client\" module (`./Button`) and a server-only module (`./fetchUser`); one import drags the other's directive across the boundary",
+    "categories": [
+      "Bug Risk"
+    ],
+    "severity": "minor",
+    "fingerprint": "a26a1cc5a4e57127",
+    "location": {
+      "path": "app/components/index.ts",
+      "lines": {
+        "begin": 2
+      }
+    }
+  },
+  {
+    "type": "issue",
+    "check_name": "plow/unprovided-inject",
+    "description": "inject(`THEME_KEY`) has no matching provide(`THEME_KEY`) in this project; at runtime it returns undefined (provide the key or remove this inject)",
+    "categories": [
+      "Bug Risk"
+    ],
+    "severity": "minor",
+    "fingerprint": "4e4a7216bbdc8cfa",
+    "location": {
+      "path": "src/useTheme.ts",
+      "lines": {
+        "begin": 5
       }
     }
   },

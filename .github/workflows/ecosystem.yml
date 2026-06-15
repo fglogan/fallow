@@ -29,7 +29,7 @@ permissions: {}
 
 env:
   CARGO_TERM_COLOR: always
-  FALLOW_QUIET: "1"
+  PLOW_QUIET: "1"
 
 jobs:
   ecosystem:
@@ -64,15 +64,15 @@ jobs:
             path: .
 
     steps:
-      - name: Checkout fallow
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Checkout plow
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       - uses: ./.github/actions/setup-rust
         with:
           cache-key: ecosystem
 
-      - name: Build fallow (release)
-        run: cargo build --release -p fallow-cli
+      - name: Build plow (release)
+        run: cargo build --release -p plow-cli
 
       - name: Clone target project
         env:
@@ -94,7 +94,7 @@ jobs:
               ecosystem-project
           fi
 
-      - name: Run fallow dead-code
+      - name: Run plow dead-code
         # Never fail the workflow — this is for monitoring, not gating
         continue-on-error: true
         env:
@@ -102,7 +102,7 @@ jobs:
           PROJECT_PATH: ${{ matrix.project.path }}
         run: |
           cd "ecosystem-project/$PROJECT_PATH"
-          "$GITHUB_WORKSPACE/target/release/fallow" dead-code --format json \
+          "$GITHUB_WORKSPACE/target/release/plow" dead-code --format json \
             > "$GITHUB_WORKSPACE/ecosystem-$PROJECT_NAME.json" 2>&1 || true
 
       - name: Upload results

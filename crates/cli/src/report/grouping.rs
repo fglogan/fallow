@@ -24,10 +24,6 @@ pub enum OwnershipResolver {
     /// Group by workspace package (monorepo).
     Package(PackageResolver),
     /// Group by GitLab CODEOWNERS section name (`[Section]` headers).
-    ///
-    /// Distinct sections produce distinct groups even when they share the
-    /// same default owner. Rules that appear before any section header
-    /// fall into the `(no section)` bucket.
     Section(CodeOwners),
 }
 
@@ -155,23 +151,15 @@ pub struct ResultGroup {
 /// Each issue is assigned to a group by extracting its primary file path
 /// and resolving the group key via the `OwnershipResolver`.
 /// Returns groups sorted alphabetically by key, with `(unowned)` last.
-#[expect(
-    clippy::too_many_lines,
-    reason = "one per-issue-type loop body; each loop is 4-7 lines and tightly correlated; splitting into helpers per type would scatter the per-path-key derivation logic that this fn exists to consolidate. Workspace-config issue types already factored into `group_workspace_config_issues`."
-)]
 pub fn group_analysis_results(
     results: &AnalysisResults,
     root: &Path,
     resolver: &OwnershipResolver,
 ) -> Vec<ResultGroup> {
-    let mut groups: FxHashMap<String, AnalysisResults> = FxHashMap::default();
-    // Section-mode: remember the default owners for each section key. Written
-    // once per key (the first path that lands there); all subsequent paths in
-    // the same section share the same defaults.
     let mut group_owners: FxHashMap<String, Vec<String>> = FxHashMap::default();
     let is_section_mode = matches!(resolver, OwnershipResolver::Section(_));
 
-    let mut key_for = |path: &Path| -> String {
+    let key_for = |path: &Path| -> String {
         let rel = relative_path(path, root);
         let key = resolver.resolve(rel);
         if is_section_mode && !group_owners.contains_key(&key) {
@@ -184,189 +172,236 @@ pub fn group_analysis_results(
         key
     };
 
-    // ── File-scoped issue types ─────────────────────────────────
-    for item in &results.unused_files {
-        groups
-            .entry(key_for(&item.file.path))
-            .or_default()
-            .unused_files
-            .push(item.clone());
-    }
-    for item in &results.unused_exports {
-        groups
-            .entry(key_for(&item.export.path))
-            .or_default()
-            .unused_exports
-            .push(item.clone());
-    }
-    for item in &results.unused_types {
-        groups
-            .entry(key_for(&item.export.path))
-            .or_default()
-            .unused_types
-            .push(item.clone());
-    }
-    for item in &results.private_type_leaks {
-        groups
-            .entry(key_for(&item.leak.path))
-            .or_default()
-            .private_type_leaks
-            .push(item.clone());
-    }
-    for item in &results.unused_enum_members {
-        groups
-            .entry(key_for(&item.member.path))
-            .or_default()
-            .unused_enum_members
-            .push(item.clone());
-    }
-    for item in &results.unused_class_members {
-        groups
-            .entry(key_for(&item.member.path))
-            .or_default()
-            .unused_class_members
-            .push(item.clone());
-    }
-    for item in &results.unresolved_imports {
-        groups
-            .entry(key_for(&item.import.path))
-            .or_default()
-            .unresolved_imports
-            .push(item.clone());
-    }
+    let mut builder = GroupingBuilder::new(key_for);
+    builder.group_symbol_issues(results);
+    builder.group_dependency_issues(results);
+    builder.group_relationship_issues(results);
+    builder.group_workspace_config_issues(results);
 
-    // ── Dependency-scoped (use package.json path) ───────────────
-    for item in &results.unused_dependencies {
-        groups
-            .entry(key_for(&item.dep.path))
-            .or_default()
-            .unused_dependencies
-            .push(item.clone());
-    }
-    for item in &results.unused_dev_dependencies {
-        groups
-            .entry(key_for(&item.dep.path))
-            .or_default()
-            .unused_dev_dependencies
-            .push(item.clone());
-    }
-    for item in &results.unused_optional_dependencies {
-        groups
-            .entry(key_for(&item.dep.path))
-            .or_default()
-            .unused_optional_dependencies
-            .push(item.clone());
-    }
-    for item in &results.type_only_dependencies {
-        groups
-            .entry(key_for(&item.dep.path))
-            .or_default()
-            .type_only_dependencies
-            .push(item.clone());
-    }
-    for item in &results.test_only_dependencies {
-        groups
-            .entry(key_for(&item.dep.path))
-            .or_default()
-            .test_only_dependencies
-            .push(item.clone());
-    }
-
-    // ── Multi-location types (use first location) ───────────────
-    for item in &results.unlisted_dependencies {
-        let key = item
-            .dep
-            .imported_from
-            .first()
-            .map_or_else(|| UNOWNED_LABEL.to_string(), |site| key_for(&site.path));
-        groups
-            .entry(key)
-            .or_default()
-            .unlisted_dependencies
-            .push(item.clone());
-    }
-    for item in &results.duplicate_exports {
-        let key = item
-            .export
-            .locations
-            .first()
-            .map_or_else(|| UNOWNED_LABEL.to_string(), |loc| key_for(&loc.path));
-        groups
-            .entry(key)
-            .or_default()
-            .duplicate_exports
-            .push(item.clone());
-    }
-    for item in &results.circular_dependencies {
-        let key = item
-            .cycle
-            .files
-            .first()
-            .map_or_else(|| UNOWNED_LABEL.to_string(), |f| key_for(f));
-        groups
-            .entry(key)
-            .or_default()
-            .circular_dependencies
-            .push(item.clone());
-    }
-    for item in &results.boundary_violations {
-        groups
-            .entry(key_for(&item.violation.from_path))
-            .or_default()
-            .boundary_violations
-            .push(item.clone());
-    }
-    for item in &results.stale_suppressions {
-        groups
-            .entry(key_for(&item.path))
-            .or_default()
-            .stale_suppressions
-            .push(item.clone());
-    }
-    group_workspace_config_issues(results, &mut groups, &mut key_for);
-
-    finalize_groups(groups, group_owners, is_section_mode)
+    finalize_groups(builder.into_groups(), group_owners, is_section_mode)
 }
 
-fn group_workspace_config_issues(
-    results: &AnalysisResults,
-    groups: &mut FxHashMap<String, AnalysisResults>,
-    mut key_for: impl FnMut(&Path) -> String,
-) {
-    for item in &results.unused_catalog_entries {
-        groups
-            .entry(key_for(&item.entry.path))
-            .or_default()
-            .unused_catalog_entries
-            .push(item.clone());
+struct GroupingBuilder<F> {
+    groups: FxHashMap<String, AnalysisResults>,
+    key_for: F,
+}
+
+impl<F> GroupingBuilder<F>
+where
+    F: FnMut(&Path) -> String,
+{
+    fn new(key_for: F) -> Self {
+        Self {
+            groups: FxHashMap::default(),
+            key_for,
+        }
     }
-    for item in &results.empty_catalog_groups {
-        groups
-            .entry(key_for(&item.group.path))
-            .or_default()
-            .empty_catalog_groups
-            .push(item.clone());
+
+    fn entry_for_path(&mut self, path: &Path) -> &mut AnalysisResults {
+        let key = (self.key_for)(path);
+        self.groups.entry(key).or_default()
     }
-    for item in &results.unresolved_catalog_references {
-        groups
-            .entry(key_for(&item.reference.path))
-            .or_default()
-            .unresolved_catalog_references
-            .push(item.clone());
+
+    fn entry_for_key(&mut self, key: String) -> &mut AnalysisResults {
+        self.groups.entry(key).or_default()
     }
-    for item in &results.unused_dependency_overrides {
-        groups
-            .entry(key_for(&item.entry.path))
-            .or_default()
-            .unused_dependency_overrides
-            .push(item.clone());
+
+    fn into_groups(self) -> FxHashMap<String, AnalysisResults> {
+        self.groups
     }
-    for item in &results.misconfigured_dependency_overrides {
-        groups
-            .entry(key_for(&item.entry.path))
-            .or_default()
-            .misconfigured_dependency_overrides
-            .push(item.clone());
+
+    fn group_symbol_issues(&mut self, results: &AnalysisResults) {
+        for item in &results.unused_files {
+            self.entry_for_path(&item.file.path)
+                .unused_files
+                .push(item.clone());
+        }
+        for item in &results.unused_exports {
+            self.entry_for_path(&item.export.path)
+                .unused_exports
+                .push(item.clone());
+        }
+        for item in &results.unused_types {
+            self.entry_for_path(&item.export.path)
+                .unused_types
+                .push(item.clone());
+        }
+        for item in &results.private_type_leaks {
+            self.entry_for_path(&item.leak.path)
+                .private_type_leaks
+                .push(item.clone());
+        }
+        for item in &results.unused_enum_members {
+            self.entry_for_path(&item.member.path)
+                .unused_enum_members
+                .push(item.clone());
+        }
+        for item in &results.unused_class_members {
+            self.entry_for_path(&item.member.path)
+                .unused_class_members
+                .push(item.clone());
+        }
+        for item in &results.unused_store_members {
+            self.entry_for_path(&item.member.path)
+                .unused_store_members
+                .push(item.clone());
+        }
+        for item in &results.unresolved_imports {
+            self.entry_for_path(&item.import.path)
+                .unresolved_imports
+                .push(item.clone());
+        }
+    }
+
+    fn group_dependency_issues(&mut self, results: &AnalysisResults) {
+        for item in &results.unused_dependencies {
+            self.entry_for_path(&item.dep.path)
+                .unused_dependencies
+                .push(item.clone());
+        }
+        for item in &results.unused_dev_dependencies {
+            self.entry_for_path(&item.dep.path)
+                .unused_dev_dependencies
+                .push(item.clone());
+        }
+        for item in &results.unused_optional_dependencies {
+            self.entry_for_path(&item.dep.path)
+                .unused_optional_dependencies
+                .push(item.clone());
+        }
+        for item in &results.type_only_dependencies {
+            self.entry_for_path(&item.dep.path)
+                .type_only_dependencies
+                .push(item.clone());
+        }
+        for item in &results.test_only_dependencies {
+            self.entry_for_path(&item.dep.path)
+                .test_only_dependencies
+                .push(item.clone());
+        }
+
+        for item in &results.unlisted_dependencies {
+            let key = item.dep.imported_from.first().map_or_else(
+                || UNOWNED_LABEL.to_string(),
+                |site| (self.key_for)(&site.path),
+            );
+            self.entry_for_key(key)
+                .unlisted_dependencies
+                .push(item.clone());
+        }
+        for item in &results.duplicate_exports {
+            let key = item.export.locations.first().map_or_else(
+                || UNOWNED_LABEL.to_string(),
+                |loc| (self.key_for)(&loc.path),
+            );
+            self.entry_for_key(key).duplicate_exports.push(item.clone());
+        }
+    }
+
+    fn group_relationship_issues(&mut self, results: &AnalysisResults) {
+        for item in &results.circular_dependencies {
+            let key = item
+                .cycle
+                .files
+                .first()
+                .map_or_else(|| UNOWNED_LABEL.to_string(), |f| (self.key_for)(f));
+            self.entry_for_key(key)
+                .circular_dependencies
+                .push(item.clone());
+        }
+        for item in &results.boundary_violations {
+            self.entry_for_path(&item.violation.from_path)
+                .boundary_violations
+                .push(item.clone());
+        }
+        for item in &results.boundary_coverage_violations {
+            self.entry_for_path(&item.violation.path)
+                .boundary_coverage_violations
+                .push(item.clone());
+        }
+        for item in &results.boundary_call_violations {
+            self.entry_for_path(&item.violation.path)
+                .boundary_call_violations
+                .push(item.clone());
+        }
+        for item in &results.policy_violations {
+            self.entry_for_path(&item.violation.path)
+                .policy_violations
+                .push(item.clone());
+        }
+        for item in &results.invalid_client_exports {
+            self.entry_for_path(&item.export.path)
+                .invalid_client_exports
+                .push(item.clone());
+        }
+        for item in &results.mixed_client_server_barrels {
+            self.entry_for_path(&item.barrel.path)
+                .mixed_client_server_barrels
+                .push(item.clone());
+        }
+        for item in &results.misplaced_directives {
+            self.entry_for_path(&item.directive_site.path)
+                .misplaced_directives
+                .push(item.clone());
+        }
+        for item in &results.unprovided_injects {
+            self.entry_for_path(&item.inject.path)
+                .unprovided_injects
+                .push(item.clone());
+        }
+        for item in &results.unrendered_components {
+            self.entry_for_path(&item.component.path)
+                .unrendered_components
+                .push(item.clone());
+        }
+        for item in &results.unused_component_props {
+            self.entry_for_path(&item.prop.path)
+                .unused_component_props
+                .push(item.clone());
+        }
+        for item in &results.unused_component_emits {
+            self.entry_for_path(&item.emit.path)
+                .unused_component_emits
+                .push(item.clone());
+        }
+        for item in &results.unused_server_actions {
+            self.entry_for_path(&item.action.path)
+                .unused_server_actions
+                .push(item.clone());
+        }
+        for item in &results.stale_suppressions {
+            self.entry_for_path(&item.path)
+                .stale_suppressions
+                .push(item.clone());
+        }
+    }
+
+    fn group_workspace_config_issues(&mut self, results: &AnalysisResults) {
+        for item in &results.unused_catalog_entries {
+            self.entry_for_path(&item.entry.path)
+                .unused_catalog_entries
+                .push(item.clone());
+        }
+        for item in &results.empty_catalog_groups {
+            self.entry_for_path(&item.group.path)
+                .empty_catalog_groups
+                .push(item.clone());
+        }
+        for item in &results.unresolved_catalog_references {
+            self.entry_for_path(&item.reference.path)
+                .unresolved_catalog_references
+                .push(item.clone());
+        }
+        for item in &results.unused_dependency_overrides {
+            self.entry_for_path(&item.entry.path)
+                .unused_dependency_overrides
+                .push(item.clone());
+        }
+        for item in &results.misconfigured_dependency_overrides {
+            self.entry_for_path(&item.entry.path)
+                .misconfigured_dependency_overrides
+                .push(item.clone());
+        }
     }
 }
 
@@ -424,8 +459,6 @@ mod tests {
     use super::*;
     use crate::codeowners::CodeOwners;
 
-    // ── Helpers ────────────────────────────────────────────────────
-
     fn root() -> PathBuf {
         PathBuf::from("/root")
     }
@@ -463,16 +496,12 @@ mod tests {
         }
     }
 
-    // ── 1. Empty results ──────────────────────────────────────────
-
     #[test]
     fn empty_results_returns_empty_vec() {
         let results = AnalysisResults::default();
         let groups = group_analysis_results(&results, &root(), &OwnershipResolver::Directory);
         assert!(groups.is_empty());
     }
-
-    // ── 2. Single group ──────────────────────────────────────────
 
     #[test]
     fn single_group_all_same_directory() {
@@ -491,8 +520,6 @@ mod tests {
         assert_eq!(groups[0].results.unused_exports.len(), 1);
         assert_eq!(groups[0].results.total_issues(), 3);
     }
-
-    // ── 3. Multiple groups ───────────────────────────────────────
 
     #[test]
     fn multiple_groups_split_by_directory() {
@@ -514,20 +541,15 @@ mod tests {
         assert_eq!(lib_group.results.total_issues(), 1);
     }
 
-    // ── 4. Sort order: most issues first ─────────────────────────
-
     #[test]
     fn sort_order_descending_by_total_issues() {
         let mut results = AnalysisResults::default();
-        // lib: 1 issue
         results.unused_files.push(unused_file("/root/lib/a.ts"));
-        // src: 3 issues
         results.unused_files.push(unused_file("/root/src/a.ts"));
         results.unused_files.push(unused_file("/root/src/b.ts"));
         results
             .unused_exports
             .push(unused_export("/root/src/c.ts", "x"));
-        // test: 2 issues
         results.unused_files.push(unused_file("/root/test/a.ts"));
         results.unused_files.push(unused_file("/root/test/b.ts"));
 
@@ -551,19 +573,14 @@ mod tests {
         let groups = group_analysis_results(&results, &root(), &OwnershipResolver::Directory);
 
         assert_eq!(groups.len(), 2);
-        // Same issue count (1 each) -> alphabetical
         assert_eq!(groups[0].key, "alpha");
         assert_eq!(groups[1].key, "beta");
     }
 
-    // ── 5. Unowned always last ───────────────────────────────────
-
     #[test]
     fn unowned_sorts_last_regardless_of_count() {
         let mut results = AnalysisResults::default();
-        // src: 1 issue
         results.unused_files.push(unused_file("/root/src/a.ts"));
-        // unlisted dep with empty imported_from -> goes to (unowned)
         results
             .unlisted_dependencies
             .push(unlisted_dep("pkg-a", vec![]));
@@ -577,13 +594,10 @@ mod tests {
         let groups = group_analysis_results(&results, &root(), &OwnershipResolver::Directory);
 
         assert_eq!(groups.len(), 2);
-        // (unowned) has 3 issues vs src's 1, but must still be last
         assert_eq!(groups[0].key, "src");
         assert_eq!(groups[1].key, UNOWNED_LABEL);
         assert_eq!(groups[1].results.total_issues(), 3);
     }
-
-    // ── 6. Multi-location fallback ───────────────────────────────
 
     #[test]
     fn unlisted_dep_empty_imported_from_goes_to_unowned() {
@@ -614,8 +628,6 @@ mod tests {
         assert_eq!(groups[0].results.unlisted_dependencies.len(), 1);
     }
 
-    // ── 7. Directory mode ────────────────────────────────────────
-
     #[test]
     fn directory_mode_groups_by_first_path_component() {
         let mut results = AnalysisResults::default();
@@ -640,8 +652,6 @@ mod tests {
         assert_eq!(apps.results.total_issues(), 1);
     }
 
-    // ── 8. Owner mode ────────────────────────────────────────────
-
     #[test]
     fn owner_mode_groups_by_codeowners_owner() {
         let co = CodeOwners::parse("* @default\n/src/ @frontend\n").unwrap();
@@ -664,7 +674,6 @@ mod tests {
 
     #[test]
     fn owner_mode_unmatched_goes_to_unowned() {
-        // No catch-all rule -- files outside /src/ have no owner
         let co = CodeOwners::parse("/src/ @frontend\n").unwrap();
         let resolver = OwnershipResolver::Owner(co);
 
@@ -676,8 +685,6 @@ mod tests {
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].key, UNOWNED_LABEL);
     }
-
-    // ── Boundary violations ──────────────────────────────────────
 
     #[test]
     fn boundary_violations_grouped_by_from_path() {
@@ -701,8 +708,6 @@ mod tests {
         assert_eq!(groups[0].results.boundary_violations.len(), 1);
     }
 
-    // ── Circular dependencies ────────────────────────────────────
-
     #[test]
     fn circular_dep_empty_files_goes_to_unowned() {
         let mut results = AnalysisResults::default();
@@ -714,6 +719,7 @@ mod tests {
                     length: 0,
                     line: 0,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             ));
@@ -738,6 +744,7 @@ mod tests {
                     length: 2,
                     line: 1,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             ));
@@ -747,8 +754,6 @@ mod tests {
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].key, "src");
     }
-
-    // ── Duplicate exports ────────────────────────────────────────
 
     #[test]
     fn duplicate_exports_empty_locations_goes_to_unowned() {
@@ -765,8 +770,6 @@ mod tests {
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].key, UNOWNED_LABEL);
     }
-
-    // ── resolve_owner ────────────────────────────────────────────
 
     #[test]
     fn resolve_owner_returns_directory() {
@@ -785,8 +788,6 @@ mod tests {
         let owner = resolve_owner(Path::new("/root/src/file.ts"), &root(), &resolver);
         assert_eq!(owner, "@team");
     }
-
-    // ── mode_label ───────────────────────────────────────────────
 
     #[test]
     fn mode_label_owner() {
@@ -812,12 +813,8 @@ mod tests {
         assert_eq!(OwnershipResolver::Section(co).mode_label(), "section");
     }
 
-    // ── Section mode ────────────────────────────────────────────
-
     #[test]
     fn section_mode_groups_distinct_sections_with_shared_owners() {
-        // Issue #133 reproduction: billing and notifications share the lead
-        // owner but are separate sections, so they must produce 2 groups.
         let content = "\
             [billing] @core-reviewers @alice @bob\n\
             src/billing/\n\
@@ -920,8 +917,6 @@ mod tests {
         assert_eq!(groups[0].owners, None);
     }
 
-    // ── PackageResolver ─────────────────────────────────────────
-
     #[test]
     fn package_resolver_matches_longest_prefix() {
         let ws = vec![
@@ -937,7 +932,6 @@ mod tests {
             },
         ];
         let pr = PackageResolver::new(Path::new("/root"), &ws);
-        // A file in packages/ui/ should match the more specific workspace
         assert_eq!(
             pr.resolve(Path::new("packages/ui/Button.ts")),
             "packages/ui"
@@ -952,7 +946,6 @@ mod tests {
             is_internal_dependency: false,
         }];
         let pr = PackageResolver::new(Path::new("/root"), &ws);
-        // A file outside any workspace returns (root)
         assert_eq!(pr.resolve(Path::new("src/app.ts")), ROOT_PACKAGE_LABEL);
     }
 
@@ -994,8 +987,6 @@ mod tests {
         assert!(root_group.is_some());
     }
 
-    // ── resolve_with_rule ───────────────────────────────────────
-
     #[test]
     fn resolve_with_rule_directory_mode_no_rule() {
         let (key, rule) = OwnershipResolver::Directory.resolve_with_rule(Path::new("src/file.ts"));
@@ -1030,8 +1021,6 @@ mod tests {
         assert_eq!(key, ROOT_PACKAGE_LABEL);
         assert!(rule.is_none());
     }
-
-    // ── Missing issue type groupings ────────────────────────────
 
     #[test]
     fn group_unused_optional_deps() {

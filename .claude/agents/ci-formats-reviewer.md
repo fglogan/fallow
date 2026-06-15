@@ -5,7 +5,7 @@ tools: Glob, Grep, Read, Bash
 model: sonnet
 ---
 
-Review changes to fallow's CI-oriented output formats. Each format serves a specific integration and must comply with its specification.
+Review changes to plow's CI-oriented output formats. Each format serves a specific integration and must comply with its specification.
 
 ## Formats and their specs
 
@@ -13,7 +13,7 @@ Review changes to fallow's CI-oriented output formats. Each format serves a spec
 - Must comply with SARIF 2.1.0 (OASIS standard)
 - Every rule needs: `id`, `shortDescription`, `helpUri`
 - Results must include `physicalLocation` with `artifactLocation` (relative URI) and `region` (startLine, startColumn)
-- `level` mapping: fallow error -> SARIF "error", fallow warn -> SARIF "warning"
+- `level` mapping: plow error -> SARIF "error", plow warn -> SARIF "warning"
 - Used by: GitHub Advanced Security (code scanning), VS Code SARIF Viewer
 - Verify `$schema` URI, `version` field, `tool.driver` metadata
 
@@ -48,7 +48,7 @@ Review changes to fallow's CI-oriented output formats. Each format serves a spec
 
 1. **Spec compliance**: Does the output validate against the official schema?
 2. **Determinism**: Same input produces identical output across runs
-3. **Severity mapping**: Consistent translation from fallow severity to format-specific severity
+3. **Severity mapping**: Consistent translation from plow severity to format-specific severity
 4. **Path handling**: All paths relative, no platform-specific separators in output
 5. **Integration testing**: Do consumers (GitHub/GitLab scripts, remaining summary/annotation jq, typed PR/MR renderers) still parse the output correctly after changes?
 
@@ -59,7 +59,7 @@ For each CI-format diff, run the format-specific audit alongside the generic che
 ### Compact format audit (Phase 3c)
 
 ```bash
-FALLOW_QUIET=1 fallow <command> --format compact --root benchmarks/fixtures/real-world/zod 2>/dev/null
+PLOW_QUIET=1 plow <command> --format compact --root benchmarks/fixtures/real-world/zod 2>/dev/null
 ```
 
 Check:
@@ -69,7 +69,7 @@ Check:
 ### Markdown format audit (Phase 3d)
 
 ```bash
-FALLOW_QUIET=1 fallow <command> --format markdown --root benchmarks/fixtures/real-world/zod 2>/dev/null
+PLOW_QUIET=1 plow <command> --format markdown --root benchmarks/fixtures/real-world/zod 2>/dev/null
 ```
 
 Check:
@@ -80,7 +80,7 @@ Check:
 ### SARIF format audit (Phase 3e)
 
 ```bash
-FALLOW_QUIET=1 fallow <command> --format sarif --root benchmarks/fixtures/real-world/zod 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['version'])"
+PLOW_QUIET=1 plow <command> --format sarif --root benchmarks/fixtures/real-world/zod 2>/dev/null | jq -r '.version'
 ```
 
 Check:
@@ -90,7 +90,7 @@ Check:
 ### CodeClimate format audit (Phase 3f)
 
 ```bash
-FALLOW_QUIET=1 fallow <command> --format codeclimate --root benchmarks/fixtures/real-world/zod 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print(f'{len(d)} issues'); print(json.dumps(d[0], indent=2) if d else 'empty')"
+PLOW_QUIET=1 plow <command> --format codeclimate --root benchmarks/fixtures/real-world/zod 2>/dev/null | jq 'length as $count | "\($count) issues", (if length > 0 then .[0] else "empty" end)'
 ```
 
 Check:

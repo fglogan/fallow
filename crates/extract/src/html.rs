@@ -20,36 +20,32 @@ use plow_types::discover::FileId;
 
 /// Regex to match HTML comments (`<!-- ... -->`) for stripping before extraction.
 static HTML_COMMENT_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"(?s)<!--.*?-->").expect("valid regex"));
+    LazyLock::new(|| crate::static_regex(r"(?s)<!--.*?-->"));
 
 /// Regex to extract `src` attribute from `<script>` tags.
 /// Matches both `<script src="...">` and `<script type="module" src="...">`.
 /// Uses `(?s)` so `.` matches newlines (multi-line attributes).
 static SCRIPT_SRC_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r#"(?si)<script\b(?:[^>"']|"[^"]*"|'[^']*')*?\bsrc\s*=\s*["']([^"']+)["']"#)
-        .expect("valid regex")
+    crate::static_regex(r#"(?si)<script\b(?:[^>"']|"[^"]*"|'[^']*')*?\bsrc\s*=\s*["']([^"']+)["']"#)
 });
 
 /// Regex to extract `href` attribute from `<link>` tags with `rel="stylesheet"` or
 /// `rel="modulepreload"`.
 /// Handles attributes in any order (rel before or after href).
 static LINK_HREF_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(
+    crate::static_regex(
         r#"(?si)<link\b(?:[^>"']|"[^"]*"|'[^']*')*?\brel\s*=\s*["'](stylesheet|modulepreload)["'](?:[^>"']|"[^"]*"|'[^']*')*?\bhref\s*=\s*["']([^"']+)["']"#,
     )
-    .expect("valid regex")
 });
 
 /// Regex for the reverse attribute order: href before rel.
 static LINK_HREF_REVERSE_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(
+    crate::static_regex(
         r#"(?si)<link\b(?:[^>"']|"[^"]*"|'[^']*')*?\bhref\s*=\s*["']([^"']+)["'](?:[^>"']|"[^"]*"|'[^']*')*?\brel\s*=\s*["'](stylesheet|modulepreload)["']"#,
     )
-    .expect("valid regex")
 });
 
 /// Check if a path is an HTML file.
-// Keep in sync with plow_core::analyze::predicates::is_html_file (crate boundary prevents sharing)
 pub(crate) fn is_html_file(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
@@ -136,8 +132,6 @@ pub(crate) fn parse_html_to_module_with_complexity(
 ) -> ModuleInfo {
     let parsed_suppressions = crate::suppress::parse_suppressions_from_source(source);
 
-    // Bare filenames (e.g., `src="app.js"`) are normalized to `./app.js` so
-    // the resolver doesn't misclassify them as npm packages.
     let mut imports: Vec<ImportInfo> = collect_asset_refs(source)
         .into_iter()
         .map(|raw| ImportInfo {
@@ -151,33 +145,22 @@ pub(crate) fn parse_html_to_module_with_complexity(
         })
         .collect();
 
-    // Deduplicate: the same asset may be referenced by both <script src> and
-    // <link rel="modulepreload" href> for the same path.
     imports.sort_unstable_by(|a, b| a.source.cmp(&b.source));
     imports.dedup_by(|a, b| a.source == b.source);
 
-    // Scan for Angular template syntax ({{ }}, [prop], (event), @if, etc.).
-    //
-    // Bare identifier refs (e.g. `title`, `dataService`, pipe names) are stored
-    // as `MemberAccess` entries with a sentinel object name so the analysis
-    // phase can credit them as members of the component class.
-    //
-    // Static member-access chains (`dataService.getTotal`) where `dataService`
-    // is an unresolved identifier are stored as regular (non-sentinel)
-    // `MemberAccess` entries. The analysis phase resolves these through the
-    // importing component's typed instance bindings (from
-    // `ClassHeritageInfo.instance_bindings`) to credit the target class's
-    // member as used.
-    let template_refs = angular::collect_angular_template_refs(source);
-    let mut member_accesses: Vec<MemberAccess> = template_refs
-        .identifiers
+    let angular::AngularTemplateRefs {
+        identifiers,
+        member_accesses: template_member_accesses,
+        security_sinks,
+    } = angular::collect_angular_template_refs(source);
+    let mut member_accesses: Vec<MemberAccess> = identifiers
         .into_iter()
         .map(|name| MemberAccess {
             object: ANGULAR_TPL_SENTINEL.to_string(),
             member: name,
         })
         .collect();
-    member_accesses.extend(template_refs.member_accesses);
+    member_accesses.extend(template_member_accesses);
 
     let complexity = if need_complexity {
         crate::template_complexity::compute_angular_template_complexity(source)
@@ -195,6 +178,7 @@ pub(crate) fn parse_html_to_module_with_complexity(
         dynamic_imports: Vec::new(),
         dynamic_import_patterns: Vec::new(),
         require_calls: Vec::new(),
+        package_path_references: Vec::new(),
         member_accesses,
         whole_object_uses: Vec::new(),
         has_cjs_exports: false,
@@ -209,19 +193,41 @@ pub(crate) fn parse_html_to_module_with_complexity(
         complexity,
         flag_uses: Vec::new(),
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
+        directives: Vec::new(),
+        client_only_dynamic_import_spans: Vec::new(),
+        security_sinks,
+        security_sinks_skipped: 0,
+        security_unresolved_callee_sites: Vec::new(),
+        tainted_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
+        callee_uses: Vec::new(),
+        misplaced_directives: Vec::new(),
+        di_key_sites: Vec::new(),
+        has_dynamic_provide: false,
+        referenced_import_bindings: Vec::new(),
+        component_props: Vec::new(),
+        has_props_attrs_fallthrough: false,
+        has_define_expose: false,
+        has_define_model: false,
+        has_unharvestable_props: false,
+        component_emits: Vec::new(),
+        has_unharvestable_emits: false,
+        has_dynamic_emit: false,
+        has_emit_whole_object_use: false,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ── is_html_file ─────────────────────────────────────────────
 
     #[test]
     fn is_html_file_html() {
@@ -253,8 +259,6 @@ mod tests {
         assert!(!is_html_file(Path::new("App.vue")));
     }
 
-    // ── is_remote_url ────────────────────────────────────────────
-
     #[test]
     fn remote_url_http() {
         assert!(is_remote_url("http://example.com/script.js"));
@@ -284,8 +288,6 @@ mod tests {
     fn local_root_relative_not_remote() {
         assert!(!is_remote_url("/src/entry.js"));
     }
-
-    // ── parse_html_to_module: script src extraction ──────────────
 
     #[test]
     fn extracts_module_script_src() {
@@ -330,12 +332,6 @@ mod tests {
 
     #[test]
     fn skips_handlebars_placeholder_in_script_src() {
-        // Ember `app/index.html` references assets via `{{rootURL}}` /
-        // `{{config.assetsPath}}`, which ember-cli rewrites at build time.
-        // The raw specifier is never a real path, so the HTML asset scanner
-        // must skip it instead of seeding an unresolvable import. Same for
-        // any other Handlebars/Mustache/Jinja2-using site that ships a
-        // checked-in `index.html` template.
         let info = parse_html_to_module(
             FileId(0),
             r#"<script src="{{rootURL}}assets/app.js"></script>
@@ -351,7 +347,6 @@ mod tests {
 
     #[test]
     fn skips_handlebars_placeholder_in_link_href() {
-        // Same protection for stylesheet / modulepreload `href`s.
         let info = parse_html_to_module(
             FileId(0),
             r#"<link rel="stylesheet" href="{{rootURL}}assets/app.css">"#,
@@ -362,8 +357,6 @@ mod tests {
 
     #[test]
     fn skips_ember_cli_blueprint_placeholder() {
-        // ember-cli blueprint scaffolds carry `###APPNAME###` / `###DUMMY###`
-        // placeholders in checked-in addon-fixture HTML.
         let info = parse_html_to_module(
             FileId(0),
             r####"<script src="###APPNAME###/app.js"></script>"####,
@@ -374,9 +367,6 @@ mod tests {
 
     #[test]
     fn extracts_normal_specifier_alongside_placeholders() {
-        // Mixed-mode: a real specifier still extracts even when sibling
-        // specifiers contain template placeholders. Guards against the
-        // filter accidentally short-circuiting the whole scan.
         let info = parse_html_to_module(
             FileId(0),
             r#"<script src="{{rootURL}}assets/app.js"></script>
@@ -406,8 +396,6 @@ mod tests {
         );
         assert!(info.imports.is_empty());
     }
-
-    // ── parse_html_to_module: link href extraction ───────────────
 
     #[test]
     fn extracts_stylesheet_link() {
@@ -441,12 +429,6 @@ mod tests {
         assert_eq!(info.imports.len(), 1);
         assert_eq!(info.imports[0].source, "./src/global.css");
     }
-
-    // ── Bare asset references normalized to relative paths ──────
-    // Regression tests for the same class of bug as #99 (Angular templateUrl).
-    // Browsers resolve `src="app.js"` and `href="styles.css"` relative to the
-    // HTML file, so emitting these as bare specifiers would misclassify them
-    // as unlisted npm packages.
 
     #[test]
     fn bare_script_src_normalized_to_relative() {
@@ -508,8 +490,6 @@ mod tests {
 
     #[test]
     fn root_absolute_script_src_unchanged() {
-        // `/src/main.ts` is a web convention (Vite root-relative) and must
-        // stay absolute so the resolver's HTML special case applies.
         let info = parse_html_to_module(FileId(0), r#"<script src="/src/main.ts"></script>"#, 0);
         assert_eq!(info.imports.len(), 1);
         assert_eq!(info.imports[0].source, "/src/main.ts");
@@ -553,8 +533,6 @@ mod tests {
         assert!(info.imports.is_empty());
     }
 
-    // ── HTML comment stripping ───────────────────────────────────
-
     #[test]
     fn skips_commented_out_script() {
         let info = parse_html_to_module(
@@ -579,8 +557,6 @@ mod tests {
         assert_eq!(info.imports[0].source, "./new.css");
     }
 
-    // ── Multi-line attributes ────────────────────────────────────
-
     #[test]
     fn handles_multiline_script_tag() {
         let info = parse_html_to_module(
@@ -602,8 +578,6 @@ mod tests {
         assert_eq!(info.imports.len(), 1);
         assert_eq!(info.imports[0].source, "./src/global.css");
     }
-
-    // ── Full HTML document ───────────────────────────────────────
 
     #[test]
     fn full_vite_html() {
@@ -627,8 +601,6 @@ mod tests {
         assert!(sources.contains(&"./src/global.css"));
         assert!(sources.contains(&"./src/entry.js"));
     }
-
-    // ── Edge cases ───────────────────────────────────────────────
 
     #[test]
     fn empty_html() {
@@ -675,13 +647,8 @@ mod tests {
             "<!-- plow-ignore-file -->\n<script src=\"./entry.js\"></script>",
             0,
         );
-        // HTML comments use <!-- --> not //, so suppression parsing
-        // from source text won't find standard JS-style comments.
-        // This is expected; HTML suppression is not supported.
         assert_eq!(info.imports.len(), 1);
     }
-
-    // ── Angular template scanning ──────────────────────────────
 
     #[test]
     fn angular_template_extracts_member_refs() {

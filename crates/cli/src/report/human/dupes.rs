@@ -1,17 +1,18 @@
+use crate::report::sink::outln;
 use std::path::Path;
 use std::time::Duration;
 
 use colored::Colorize;
-use plow_core::duplicates::DuplicationReport;
+use plow_core::duplicates::{CloneFamily, CloneFingerprintSet, CloneGroup, DuplicationReport};
 
 use super::{
-    MAX_FLAT_ITEMS, format_path, plural, print_explain_tip_if_tty, relative_path,
-    split_dir_filename, thousands,
+    MAX_FLAT_ITEMS, format_path, plural, print_explain_tip_if_tty, split_dir_filename, thousands,
 };
-use crate::report::dupes_grouping::DuplicationGrouping;
+use crate::output_dupes::AttributedCloneGroupFinding;
+use crate::report::dupes_grouping::{AttributedInstance, DuplicationGroup, DuplicationGrouping};
 
 /// Docs base URL for duplication explanations.
-const DOCS_DUPLICATION: &str = "https://docs.genesis-plow.dev/explanations/duplication";
+pub(super) const DOCS_DUPLICATION: &str = "https://docs.genesis-plow.dev/explanations/duplication";
 
 /// Maximum clone groups shown in duplication output.
 const MAX_CLONE_GROUPS: usize = 10;
@@ -51,7 +52,7 @@ pub(in crate::report) fn print_duplication_human(
         build_duplication_human_lines(report, root)
     };
     for line in lines {
-        println!("{line}");
+        outln!("{line}");
     }
 
     let stats = &report.stats;
@@ -73,7 +74,6 @@ pub(in crate::report) fn print_duplication_human(
             .red()
             .bold()
         );
-        // Advisory when duplication rate is very high (likely mirrored directories)
         if stats.duplication_percentage > 80.0 {
             eprintln!(
                 "  {}",
@@ -92,48 +92,76 @@ pub(in crate::report) fn build_duplication_human_lines(
     build_duplication_human_lines_with_explain(report, root, false)
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "report builder with grouped output formatting"
-)]
 fn build_duplication_human_lines_with_explain(
     report: &DuplicationReport,
     root: &Path,
     explain: bool,
 ) -> Vec<String> {
-    let mut lines = Vec::new();
+    DuplicationHumanBuilder {
+        lines: Vec::new(),
+        report,
+        root,
+        explain,
+    }
+    .build()
+}
 
-    if report.clone_groups.is_empty() && report.clone_families.is_empty() {
-        return lines;
+struct DuplicationHumanBuilder<'a> {
+    lines: Vec<String>,
+    report: &'a DuplicationReport,
+    root: &'a Path,
+    explain: bool,
+}
+
+impl DuplicationHumanBuilder<'_> {
+    fn build(mut self) -> Vec<String> {
+        if self.report.clone_groups.is_empty() && self.report.clone_families.is_empty() {
+            return self.lines;
+        }
+
+        let mut sorted_groups: Vec<&CloneGroup> = self.report.clone_groups.iter().collect();
+        sorted_groups.sort_by_key(|b| std::cmp::Reverse(b.line_count));
+        let fingerprints = CloneFingerprintSet::from_groups(&self.report.clone_groups);
+
+        self.push_clone_header(sorted_groups.len());
+        self.push_clone_groups(&sorted_groups, &fingerprints);
+        self.push_clone_footer(sorted_groups.len());
+
+        let (mirrored, non_mirrored) =
+            detect_mirrored_families(&self.report.clone_families, self.root);
+        self.push_mirrored_families(&mirrored);
+        self.push_multi_group_families(&non_mirrored);
+
+        self.lines
     }
 
-    // Sort clone groups by line count descending for most impactful first
-    let mut sorted_groups: Vec<&plow_core::duplicates::CloneGroup> =
-        report.clone_groups.iter().collect();
-    sorted_groups.sort_by_key(|b| std::cmp::Reverse(b.line_count));
-
-    let total_groups = sorted_groups.len();
-    let shown = total_groups.min(MAX_CLONE_GROUPS);
-
-    lines.push(format!(
-        "{} {}",
-        "\u{25cf}".cyan(),
-        format!("Duplicates ({total_groups} clone groups)")
-            .cyan()
-            .bold()
-    ));
-    if explain && let Some(rule) = crate::explain::rule_by_id("plow/code-duplication") {
-        lines.push(format!(
-            "  {}",
-            format!("Description: {}", rule.full).dimmed()
+    fn push_clone_header(&mut self, total_groups: usize) {
+        self.lines.push(format!(
+            "{} {}",
+            "\u{25cf}".cyan(),
+            format!("Duplicates ({total_groups} clone groups)")
+                .cyan()
+                .bold()
         ));
+        if self.explain
+            && let Some(rule) = crate::explain::rule_by_id("plow/code-duplication")
+        {
+            self.lines.push(format!(
+                "  {}",
+                format!("Description: {}", rule.full).dimmed()
+            ));
+        }
+        self.lines.push(String::new());
     }
-    lines.push(String::new());
 
-    for group in &sorted_groups[..shown] {
+    fn push_clone_groups(&mut self, groups: &[&CloneGroup], fingerprints: &CloneFingerprintSet) {
+        for group in &groups[..groups.len().min(MAX_CLONE_GROUPS)] {
+            self.push_clone_group(group, fingerprints);
+        }
+    }
+
+    fn push_clone_group(&mut self, group: &CloneGroup, fingerprints: &CloneFingerprintSet) {
         let instance_count = group.instances.len();
-
-        // Line count: right-aligned, color-coded
         let lc = group.line_count;
         let lc_str = format!("{:>5}", thousands(lc));
         let lc_colored = if lc > 1000 {
@@ -144,18 +172,18 @@ fn build_duplication_human_lines_with_explain(
             lc_str.dimmed().to_string()
         };
 
-        lines.push(format!(
-            "  {} lines  {} instance{}",
+        self.lines.push(format!(
+            "  {} lines  {} instance{}  {}",
             lc_colored,
             instance_count,
-            plural(instance_count)
+            plural(instance_count),
+            fingerprints.fingerprint_for_group(group).dimmed(),
         ));
 
         for instance in &group.instances {
-            let relative = relative_path(&instance.file, root);
-            let path_str = relative.display().to_string();
+            let path_str = crate::report::format_display_path(&instance.file, self.root);
             let (dir, filename) = split_dir_filename(&path_str);
-            lines.push(format!(
+            self.lines.push(format!(
                 "    {}{}:{}-{}",
                 dir.dimmed(),
                 filename,
@@ -163,61 +191,36 @@ fn build_duplication_human_lines_with_explain(
                 instance.end_line
             ));
         }
-        lines.push(String::new());
+        self.lines.push(String::new());
     }
 
-    if total_groups > MAX_CLONE_GROUPS {
-        lines.push(format!(
-            "  {}",
-            format!(
-                "... and {} more clone groups",
-                total_groups - MAX_CLONE_GROUPS
-            )
-            .dimmed()
-        ));
-    }
-    lines.push(format!(
-        "  {}",
-        format!("Identical code blocks detected via suffix-array analysis \u{2014} {DOCS_DUPLICATION}#clone-groups").dimmed()
-    ));
-    lines.push(String::new());
-
-    // Detect mirrored directory patterns across families.
-    // Families with exactly 2 files that share a common filename after stripping
-    // directory prefixes are grouped under a "Mirrored directories" header.
-    let (mirrored, non_mirrored) = detect_mirrored_families(&report.clone_families, root);
-
-    if !mirrored.is_empty() {
-        let shown_mirrors = mirrored.len().min(MAX_FLAT_ITEMS);
-        for mirror in &mirrored[..shown_mirrors] {
-            lines.push(format!(
-                "{} {}",
-                "\u{25cf}".yellow(),
+    fn push_clone_footer(&mut self, total_groups: usize) {
+        if total_groups > MAX_CLONE_GROUPS {
+            self.lines.push(format!(
+                "  {}",
                 format!(
-                    "Mirrored: {} \u{2194} {} ({} files, {} lines)",
-                    mirror.dir_a,
-                    mirror.dir_b,
-                    mirror.file_count,
-                    thousands(mirror.total_lines),
+                    "... and {} more clone groups",
+                    total_groups - MAX_CLONE_GROUPS
                 )
-                .yellow()
-                .bold()
+                .dimmed()
             ));
+        }
+        self.lines.push(format!(
+            "  {}",
+            format!("Identical code blocks detected via suffix-array analysis \u{2014} {DOCS_DUPLICATION}#clone-groups").dimmed()
+        ));
+        self.lines.push(String::new());
+    }
 
-            let shown = mirror.files.len().min(MAX_FLAT_ITEMS);
-            for filename in &mirror.files[..shown] {
-                lines.push(format!("  {}", filename.dimmed()));
-            }
-            if mirror.files.len() > MAX_FLAT_ITEMS {
-                lines.push(format!(
-                    "  {}",
-                    format!("... and {} more", mirror.files.len() - MAX_FLAT_ITEMS).dimmed()
-                ));
-            }
-            lines.push(String::new());
+    fn push_mirrored_families(&mut self, mirrored: &[MirroredDirs]) {
+        if mirrored.is_empty() {
+            return;
+        }
+        for mirror in &mirrored[..mirrored.len().min(MAX_FLAT_ITEMS)] {
+            self.push_mirror(mirror);
         }
         if mirrored.len() > MAX_FLAT_ITEMS {
-            lines.push(format!(
+            self.lines.push(format!(
                 "  {}",
                 format!(
                     "... and {} more mirrored pairs",
@@ -225,21 +228,51 @@ fn build_duplication_human_lines_with_explain(
                 )
                 .dimmed()
             ));
-            lines.push(String::new());
+            self.lines.push(String::new());
         }
-        lines.push(format!(
+        self.lines.push(format!(
             "  {}",
             format!("Directories containing identical file copies \u{2014} {DOCS_DUPLICATION}#clone-families").dimmed()
         ));
-        lines.push(String::new());
+        self.lines.push(String::new());
     }
 
-    // Print remaining clone families with refactoring suggestions
-    // Suppress single-group families -- not actionable
-    let multi_group_families: Vec<_> = non_mirrored.iter().filter(|f| f.groups.len() > 1).collect();
+    fn push_mirror(&mut self, mirror: &MirroredDirs) {
+        self.lines.push(format!(
+            "{} {}",
+            "\u{25cf}".yellow(),
+            format!(
+                "Mirrored: {} \u{2194} {} ({} files, {} lines)",
+                mirror.dir_a,
+                mirror.dir_b,
+                mirror.file_count,
+                thousands(mirror.total_lines),
+            )
+            .yellow()
+            .bold()
+        ));
 
-    if !multi_group_families.is_empty() {
-        lines.push(format!(
+        for filename in &mirror.files[..mirror.files.len().min(MAX_FLAT_ITEMS)] {
+            self.lines.push(format!("  {}", filename.dimmed()));
+        }
+        if mirror.files.len() > MAX_FLAT_ITEMS {
+            self.lines.push(format!(
+                "  {}",
+                format!("... and {} more", mirror.files.len() - MAX_FLAT_ITEMS).dimmed()
+            ));
+        }
+        self.lines.push(String::new());
+    }
+
+    fn push_multi_group_families(&mut self, non_mirrored: &[&CloneFamily]) {
+        let multi_group_families: Vec<_> =
+            non_mirrored.iter().filter(|f| f.groups.len() > 1).collect();
+
+        if multi_group_families.is_empty() {
+            return;
+        }
+
+        self.lines.push(format!(
             "{} {}",
             "\u{25cf}".yellow(),
             format!(
@@ -249,38 +282,14 @@ fn build_duplication_human_lines_with_explain(
             .yellow()
             .bold()
         ));
-        lines.push(String::new());
+        self.lines.push(String::new());
 
-        let shown_families = multi_group_families.len().min(MAX_FLAT_ITEMS);
-        for family in &multi_group_families[..shown_families] {
-            let file_names: Vec<_> = family
-                .files
-                .iter()
-                .map(|f| {
-                    let path_str = crate::report::format_display_path(f, root);
-                    format_path(&path_str)
-                })
-                .collect();
-
-            lines.push(format!(
-                "  {} groups, {} lines across {}",
-                family.groups.len().to_string().bold(),
-                thousands(family.total_duplicated_lines).bold(),
-                file_names.join(", "),
-            ));
-
-            for suggestion in &family.suggestions {
-                // Drop "lines saved" -- misleading
-                lines.push(format!(
-                    "    {} {}",
-                    "\u{2192}".yellow(),
-                    suggestion.description.dimmed(),
-                ));
-            }
-            lines.push(String::new());
+        for family in &multi_group_families[..multi_group_families.len().min(MAX_FLAT_ITEMS)] {
+            self.push_multi_group_family(family);
         }
+
         if multi_group_families.len() > MAX_FLAT_ITEMS {
-            lines.push(format!(
+            self.lines.push(format!(
                 "  {}",
                 format!(
                     "... and {} more families",
@@ -288,16 +297,41 @@ fn build_duplication_human_lines_with_explain(
                 )
                 .dimmed()
             ));
-            lines.push(String::new());
+            self.lines.push(String::new());
         }
-        lines.push(format!(
+        self.lines.push(format!(
             "  {}",
             format!("Groups of related clones across the same files \u{2014} {DOCS_DUPLICATION}#clone-families").dimmed()
         ));
-        lines.push(String::new());
+        self.lines.push(String::new());
     }
 
-    lines
+    fn push_multi_group_family(&mut self, family: &CloneFamily) {
+        let file_names: Vec<_> = family
+            .files
+            .iter()
+            .map(|f| {
+                let path_str = crate::report::format_display_path(f, self.root);
+                format_path(&path_str)
+            })
+            .collect();
+
+        self.lines.push(format!(
+            "  {} groups, {} lines across {}",
+            family.groups.len().to_string().bold(),
+            thousands(family.total_duplicated_lines).bold(),
+            file_names.join(", "),
+        ));
+
+        for suggestion in &family.suggestions {
+            self.lines.push(format!(
+                "    {} {}",
+                "\u{2192}".yellow(),
+                suggestion.description.dimmed(),
+            ));
+        }
+        self.lines.push(String::new());
+    }
 }
 
 /// A detected mirrored directory pattern: two directory prefixes that contain
@@ -327,8 +361,6 @@ pub(super) fn detect_mirrored_families<'a>(
 ) {
     const MIN_MIRROR_FAMILIES: usize = 3;
 
-    // For each 2-file family, extract the directory pair + relative filename
-    // Entry: (family_index, filename, duplicated_lines)
     type MirrorEntry = (usize, String, usize);
     let mut pair_map: rustc_hash::FxHashMap<(String, String), Vec<MirrorEntry>> =
         rustc_hash::FxHashMap::default();
@@ -337,18 +369,16 @@ pub(super) fn detect_mirrored_families<'a>(
         if family.files.len() != 2 {
             continue;
         }
-        let path_a = relative_path(&family.files[0], root).display().to_string();
-        let path_b = relative_path(&family.files[1], root).display().to_string();
+        let path_a = crate::report::format_display_path(&family.files[0], root);
+        let path_b = crate::report::format_display_path(&family.files[1], root);
 
         let (dir_a, file_a) = split_dir_filename(&path_a);
         let (dir_b, file_b) = split_dir_filename(&path_b);
 
-        // Only match if the filenames are the same
         if file_a != file_b {
             continue;
         }
 
-        // Normalize: always use the lexically smaller dir first
         let (da, db) = if dir_a <= dir_b {
             (dir_a.to_string(), dir_b.to_string())
         } else {
@@ -385,7 +415,6 @@ pub(super) fn detect_mirrored_families<'a>(
         });
     }
 
-    // Sort mirrors by total lines descending
     mirrors.sort_by_key(|b| std::cmp::Reverse(b.total_lines));
 
     let non_mirrored: Vec<&plow_core::duplicates::CloneFamily> = families
@@ -423,16 +452,16 @@ pub(in crate::report) fn print_duplication_summary(
     let stats = &report.stats;
 
     if heading {
-        println!("{}", "Duplication Summary".bold());
-        println!();
+        outln!("{}", "Duplication Summary".bold());
+        outln!();
     }
-    println!("  {:>6}  Clone families", report.clone_families.len());
-    println!("  {:>6}  Clone groups", report.clone_groups.len());
-    println!(
+    outln!("  {:>6}  Clone families", report.clone_families.len());
+    outln!("  {:>6}  Clone groups", report.clone_groups.len());
+    outln!(
         "  {:>6}  Duplicated lines",
         thousands(stats.duplicated_lines)
     );
-    println!("  {:>5.1}%  Duplication rate", stats.duplication_percentage);
+    outln!("  {:>5.1}%  Duplication rate", stats.duplication_percentage);
 
     if !quiet {
         eprintln!(
@@ -466,113 +495,153 @@ pub(in crate::report) fn print_grouped_duplication_human(
         eprintln!();
     }
 
-    if grouping.groups.is_empty() {
-        if !quiet {
-            eprintln!(
-                "{}",
-                format!(
-                    "\u{2713} No code duplication found ({:.2}s)",
-                    elapsed.as_secs_f64()
-                )
-                .green()
-                .bold()
-            );
-        }
+    if print_empty_grouped_duplication(grouping, elapsed, quiet) {
         return;
     }
 
-    // Top-level grouped section header, matching health's grouped output:
-    //   "● Per-{mode} duplication"
-    println!(
+    print_grouped_duplication_header(grouping);
+    for bucket in &grouping.groups {
+        print_grouped_duplication_bucket(bucket, root);
+    }
+    print_grouped_duplication_footer(report, grouping, elapsed, quiet);
+}
+
+fn print_empty_grouped_duplication(
+    grouping: &DuplicationGrouping,
+    elapsed: Duration,
+    quiet: bool,
+) -> bool {
+    if !grouping.groups.is_empty() {
+        return false;
+    }
+    if !quiet {
+        eprintln!(
+            "{}",
+            format!(
+                "\u{2713} No code duplication found ({:.2}s)",
+                elapsed.as_secs_f64()
+            )
+            .green()
+            .bold()
+        );
+    }
+    true
+}
+
+fn print_grouped_duplication_header(grouping: &DuplicationGrouping) {
+    outln!(
         "{} {}",
         "\u{25cf}".cyan(),
         format!("Per-{} duplication", grouping.mode).cyan().bold()
     );
-    println!();
+    outln!();
+}
 
-    // Per-bucket render. Each bucket leads with a cyan-bullet sub-header
-    // (matching the design system) followed by a blank line before the
-    // first clone-group row.
-    for bucket in &grouping.groups {
-        let total_groups = bucket.clone_groups.len();
-        let dup_lines = bucket.stats.duplicated_lines;
-        println!(
-            "{} {} ({} clone group{}, {} LOC duplicated)",
-            "\u{25cf}".cyan(),
-            bucket.key.clone().cyan().bold(),
-            total_groups,
-            plural(total_groups),
-            thousands(dup_lines),
+fn print_grouped_duplication_bucket(bucket: &DuplicationGroup, root: &Path) {
+    let total_groups = bucket.clone_groups.len();
+    let dup_lines = bucket.stats.duplicated_lines;
+    outln!(
+        "{} {} ({} clone group{}, {} LOC duplicated)",
+        "\u{25cf}".cyan(),
+        bucket.key.clone().cyan().bold(),
+        total_groups,
+        plural(total_groups),
+        thousands(dup_lines),
+    );
+    outln!();
+
+    let shown = total_groups.min(MAX_CLONE_GROUPS);
+    let mut sorted: Vec<_> = bucket.clone_groups.iter().collect();
+    sorted.sort_by_key(|cg| std::cmp::Reverse(cg.group.line_count));
+
+    for finding in &sorted[..shown] {
+        print_grouped_duplication_finding(bucket, root, finding);
+    }
+    print_grouped_duplication_bucket_overflow(total_groups);
+    print_grouped_duplication_bucket_stats(bucket, dup_lines);
+    outln!();
+}
+
+fn print_grouped_duplication_finding(
+    bucket: &DuplicationGroup,
+    root: &Path,
+    finding: &AttributedCloneGroupFinding,
+) {
+    let cg = &finding.group;
+    outln!(
+        "  {} lines  {} instance{}",
+        colored_clone_line_count(cg.line_count),
+        cg.instances.len(),
+        plural(cg.instances.len()),
+    );
+    for inst in &cg.instances {
+        let path_str = crate::report::format_display_path(&inst.instance.file, root);
+        let (dir, filename) = split_dir_filename(&path_str);
+        let owner_tag = grouped_duplication_owner_tag(bucket, inst);
+        outln!(
+            "    {}{}:{}-{}{}",
+            dir.dimmed(),
+            format_path(filename),
+            inst.instance.start_line,
+            inst.instance.end_line,
+            owner_tag,
         );
-        println!();
+    }
+    outln!();
+}
 
-        let shown = total_groups.min(MAX_CLONE_GROUPS);
-        let mut sorted: Vec<_> = bucket.clone_groups.iter().collect();
-        sorted.sort_by_key(|cg| std::cmp::Reverse(cg.group.line_count));
+fn colored_clone_line_count(line_count: usize) -> String {
+    let line_count_label = format!("{:>5}", thousands(line_count));
+    if line_count > 1000 {
+        line_count_label.red().bold().to_string()
+    } else if line_count > 100 {
+        line_count_label.yellow().to_string()
+    } else {
+        line_count_label.dimmed().to_string()
+    }
+}
 
-        for finding in &sorted[..shown] {
-            let cg = &finding.group;
-            let lc = cg.line_count;
-            let lc_str = format!("{:>5}", thousands(lc));
-            let lc_colored = if lc > 1000 {
-                lc_str.red().bold().to_string()
-            } else if lc > 100 {
-                lc_str.yellow().to_string()
-            } else {
-                lc_str.dimmed().to_string()
-            };
-            println!(
-                "  {} lines  {} instance{}",
-                lc_colored,
-                cg.instances.len(),
-                plural(cg.instances.len()),
-            );
-            for inst in &cg.instances {
-                let relative = relative_path(&inst.instance.file, root);
-                let path_str = relative.display().to_string();
-                let (dir, filename) = split_dir_filename(&path_str);
-                let owner_tag = if inst.owner == bucket.key {
-                    String::new()
-                } else {
-                    format!("  [{}]", inst.owner).dimmed().to_string()
-                };
-                println!(
-                    "    {}{}:{}-{}{}",
-                    dir.dimmed(),
-                    format_path(filename),
-                    inst.instance.start_line,
-                    inst.instance.end_line,
-                    owner_tag,
-                );
-            }
-            println!();
-        }
-        if total_groups > MAX_CLONE_GROUPS {
-            println!(
-                "  {}",
-                format!(
-                    "... and {} more clone groups",
-                    total_groups - MAX_CLONE_GROUPS
-                )
-                .dimmed()
-            );
-        }
-        // Per-group stats footer
-        println!(
+fn grouped_duplication_owner_tag(bucket: &DuplicationGroup, inst: &AttributedInstance) -> String {
+    if inst.owner == bucket.key {
+        String::new()
+    } else {
+        format!("  [{}]", inst.owner).dimmed().to_string()
+    }
+}
+
+fn print_grouped_duplication_bucket_overflow(total_groups: usize) {
+    if total_groups > MAX_CLONE_GROUPS {
+        outln!(
             "  {}",
             format!(
-                "{} duplicated lines ({:.1}%) across {} file{}",
-                thousands(dup_lines),
-                bucket.stats.duplication_percentage,
-                bucket.stats.files_with_clones,
-                plural(bucket.stats.files_with_clones),
+                "... and {} more clone groups",
+                total_groups - MAX_CLONE_GROUPS
             )
             .dimmed()
         );
-        println!();
     }
+}
 
-    // Project-level totals footer
+fn print_grouped_duplication_bucket_stats(bucket: &DuplicationGroup, dup_lines: usize) {
+    outln!(
+        "  {}",
+        format!(
+            "{} duplicated lines ({:.1}%) across {} file{}",
+            thousands(dup_lines),
+            bucket.stats.duplication_percentage,
+            bucket.stats.files_with_clones,
+            plural(bucket.stats.files_with_clones),
+        )
+        .dimmed()
+    );
+}
+
+fn print_grouped_duplication_footer(
+    report: &DuplicationReport,
+    grouping: &DuplicationGrouping,
+    elapsed: Duration,
+    quiet: bool,
+) {
     let stats = &report.stats;
     if !quiet {
         eprintln!(
@@ -588,20 +657,12 @@ pub(in crate::report) fn print_grouped_duplication_human(
             .red()
             .bold()
         );
-        // The largest-owner attribution rule only matters when grouping
-        // produces ambiguity. In `directory`, `package`, and `section` modes,
-        // every file lives in exactly one bucket so attribution is
-        // unambiguous and the preamble is noise. Only render it for owner
-        // grouping where a clone group can span multiple owners.
         if grouping.mode == "owner" {
             eprintln!(
                 "  {}",
                 format!("Group attribution rule: largest owner (most instances; alphabetical tiebreak); see {DOCS_DUPLICATION}#grouping").dimmed()
             );
         }
-        // Per-bucket files-with-clones is local to that bucket; the project
-        // total deduplicates files appearing in multiple buckets so per-bucket
-        // counts can sum to more than the project headline.
         eprintln!(
             "  {}",
             "Per-bucket files-with-clones is local; project total deduplicates across buckets."
@@ -664,13 +725,11 @@ mod tests {
         };
         let lines = build_duplication_human_lines(&report, &root);
         let text = plain(&lines);
-        // Line-count-led format, no "Clone group N" label
         assert!(text.contains("10"));
         assert!(text.contains("lines"));
         assert!(text.contains("2 instances"));
         assert!(text.contains("a.ts:1-10"));
         assert!(text.contains("b.ts:5-14"));
-        // No tree connectors
         assert!(!text.contains("\u{251c}\u{2500}"));
         assert!(!text.contains("\u{2514}\u{2500}"));
     }
@@ -740,7 +799,6 @@ mod tests {
         let text = plain(&lines);
         assert!(text.contains("Clone families"));
         assert!(text.contains("Extract shared utility function"));
-        // "lines saved" is no longer shown
         assert!(!text.contains("lines saved"));
     }
 
@@ -817,7 +875,6 @@ mod tests {
         };
         let lines = build_duplication_human_lines(&report, &root);
         let text = plain(&lines);
-        // Single-group families are suppressed from output
         assert!(!text.contains("Clone families"));
     }
 
@@ -879,17 +936,63 @@ mod tests {
         };
         let lines = build_duplication_human_lines(&report, &root);
         let text = plain(&lines);
-        // No tree connectors -- simple indentation
         assert!(!text.contains("\u{2514}\u{2500}"));
         assert!(!text.contains("\u{251c}\u{2500}"));
         assert!(text.contains("a.ts:1-10"));
     }
 
     #[test]
+    fn duplication_output_truncates_groups_and_shows_mirrors() {
+        let root = PathBuf::from("/project");
+        let group = |idx: usize, line_count: usize| CloneGroup {
+            instances: vec![CloneInstance {
+                file: root.join(format!("src/{idx}.ts")),
+                start_line: 1,
+                end_line: line_count,
+                start_col: 0,
+                end_col: 0,
+                fragment: String::new(),
+            }],
+            token_count: line_count * 5,
+            line_count,
+        };
+        let mirror_family = |name: &str| CloneFamily {
+            files: vec![
+                root.join(format!("src/{name}")),
+                root.join(format!("deno/lib/{name}")),
+            ],
+            groups: vec![group(99, 10)],
+            total_duplicated_lines: 10,
+            total_duplicated_tokens: 50,
+            suggestions: Vec::new(),
+        };
+        let report = DuplicationReport {
+            clone_groups: (0..12)
+                .map(|idx| group(idx, if idx == 0 { 1_500 } else { 150 }))
+                .collect(),
+            clone_families: vec![
+                mirror_family("a.ts"),
+                mirror_family("b.ts"),
+                mirror_family("c.ts"),
+            ],
+            mirrored_directories: vec![],
+            stats: DuplicationStats::default(),
+        };
+
+        let lines = build_duplication_human_lines(&report, &root);
+        let text = plain(&lines);
+
+        assert!(text.contains("... and 2 more clone groups"));
+        assert!(text.contains("Mirrored: deno/lib/"));
+        assert!(text.contains("src/"));
+        assert!(text.contains("3 files, 30 lines"));
+        assert!(text.contains("Directories containing identical file copies"));
+    }
+
+    #[test]
     fn mirrored_dirs_detected() {
         let root = PathBuf::from("/project");
         let mut families = Vec::new();
-        // 4 families with same dir pattern (above MIN_MIRROR_FAMILIES threshold of 3)
         for name in &["a.ts", "b.ts", "c.ts", "d.ts"] {
             families.push(CloneFamily {
                 files: vec![
@@ -932,7 +1035,6 @@ mod tests {
             },
         ];
         let (mirrored, _) = detect_mirrored_families(&families, &root);
-        // Only 2 families -- below threshold of 3
         assert!(mirrored.is_empty());
     }
 }

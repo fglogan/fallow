@@ -1,11 +1,12 @@
 use std::fmt::Write;
 use std::path::Path;
 
-use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position, Range};
+use ls_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position, Range};
 
 use plow_core::duplicates::DuplicationReport;
-use plow_core::results::AnalysisResults;
+use plow_core::results::{AnalysisResults, SecurityFindingKind};
 
+use crate::diagnostics::security::security_label;
 use crate::markdown::format_inline_code;
 
 /// Build hover information for a position in a file.
@@ -23,34 +24,159 @@ pub fn build_hover(
     file_path: &Path,
     position: Position,
 ) -> Option<Hover> {
-    // Check unused files (file-level hover at any position)
     if let Some(hover) = check_unused_file(results, file_path) {
         return Some(hover);
     }
 
-    // Check unused exports at this line
     if let Some(hover) = check_unused_export(results, file_path, position) {
         return Some(hover);
     }
 
-    // Check used exports at this line (show reference info)
     if let Some(hover) = check_used_export(results, file_path, position) {
         return Some(hover);
     }
 
-    // Check unused members at this line
     if let Some(hover) = check_unused_member(results, file_path, position) {
         return Some(hover);
     }
 
-    // Check unresolved imports at this line
+    if let Some(hover) = check_unrendered_component(results, file_path, position) {
+        return Some(hover);
+    }
+
+    if let Some(hover) = check_unused_component_prop(results, file_path, position) {
+        return Some(hover);
+    }
+
+    if let Some(hover) = check_unused_component_emit(results, file_path, position) {
+        return Some(hover);
+    }
+
+    if let Some(hover) = check_unused_server_action(results, file_path, position) {
+        return Some(hover);
+    }
+
     if let Some(hover) = check_unresolved_import(results, file_path, position) {
         return Some(hover);
     }
 
-    // Check code duplication at this position
+    if let Some(hover) = check_security(results, file_path, position) {
+        return Some(hover);
+    }
+
     if let Some(hover) = check_duplication(duplication, file_path, position) {
         return Some(hover);
+    }
+
+    None
+}
+
+/// Check if the position is on a security candidate's anchor line.
+///
+/// The hover is a confidence-first TRIAGE surface, not a port of the CLI's
+/// vertical report: it leads with the candidate kind + the honest confidence
+/// signals (`source_backed`, `reachable_from_entry`), then evidence, then a
+/// one-line blast-radius summary, the kind-appropriate next step, and a pointer
+/// to the full trace (`plow security --file`). The multi-hop traces stay out
+/// of the hover. Every user-controlled string goes through `format_inline_code`
+/// (never backslash-escaped) so a crafted evidence/path string cannot leak
+/// markdown or a `command:` URI.
+fn check_security(
+    results: &AnalysisResults,
+    file_path: &Path,
+    position: Position,
+) -> Option<Hover> {
+    for finding in &results.security_findings {
+        if finding.path != file_path {
+            continue;
+        }
+        let finding_line = finding.line.saturating_sub(1);
+        if finding_line != position.line {
+            continue;
+        }
+        if position.character < finding.col {
+            continue;
+        }
+
+        let label = security_label(finding);
+        let mut value = format!(
+            "**plow** security candidate: {} (unverified, verify before acting)",
+            format_inline_code(&label),
+        );
+
+        let source_backed = if finding.source_backed { "yes" } else { "no" };
+        let reachable = finding.reachability.as_ref().map_or("unknown", |r| {
+            if r.reachable_from_entry { "yes" } else { "no" }
+        });
+        let _ = write!(
+            value,
+            "\n\nconfidence: source-backed {source_backed}, reachable from a runtime entry point \
+             {reachable}",
+        );
+
+        let _ = write!(value, "\n\n{}", format_inline_code(&finding.evidence));
+
+        if let Some(context) = finding.dead_code.as_ref() {
+            // `guidance` is a trusted static constant from the analyzer
+            // (`UNUSED_FILE_GUIDANCE` / `UNUSED_EXPORT_GUIDANCE` in
+            // `analyze/security/rank.rs`), never user-derived, so it is rendered
+            // as prose. If it ever becomes dynamic, route it through
+            // `format_inline_code` or split out the user-controlled part.
+            let _ = write!(value, "\n\ndead-code: {}", context.guidance);
+        }
+
+        if let Some(reach) = finding.reachability.as_ref() {
+            let boundary = if reach.crosses_boundary {
+                "; crosses an architecture boundary"
+            } else {
+                ""
+            };
+            let _ = write!(value, "\n\nblast radius {}{boundary}", reach.blast_radius);
+        }
+
+        let next = match finding.kind {
+            SecurityFindingKind::ClientServerLeak => {
+                "Next: check whether the import is type-only, server-only, or behind a build-time \
+                 guard; if the value never ships to the client bundle, this candidate is a false \
+                 positive."
+            }
+            SecurityFindingKind::TaintedSink if finding.dead_code.is_some() => {
+                "Next: verify the dead-code finding and delete the code if safe; otherwise verify \
+                 and harden the sink."
+            }
+            SecurityFindingKind::TaintedSink => {
+                "Next: verify whether untrusted input can reach this sink; harden it or dismiss the \
+                 candidate if it cannot."
+            }
+        };
+        let _ = write!(value, "\n\n{next}");
+
+        let basename = file_path.file_name().map_or_else(
+            || file_path.display().to_string(),
+            |name| name.to_string_lossy().into_owned(),
+        );
+        let _ = write!(
+            value,
+            "\n\nFull trace: run {} or see the security docs.",
+            format_inline_code(&format!("plow security --file {basename}")),
+        );
+
+        return Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value,
+            }),
+            range: Some(Range {
+                start: Position {
+                    line: finding_line,
+                    character: finding.col,
+                },
+                end: Position {
+                    line: finding_line,
+                    character: u32::MAX,
+                },
+            }),
+        });
     }
 
     None
@@ -164,7 +290,6 @@ fn check_used_export(
             continue;
         }
 
-        // Skip exports with 0 references (they will be caught by unused export check)
         if usage.reference_count == 0 {
             continue;
         }
@@ -181,7 +306,6 @@ fn check_used_export(
             usage.reference_count,
         );
 
-        // List up to 10 reference locations
         if usage.reference_locations.is_empty() {
             value.push('.');
         } else {
@@ -239,6 +363,7 @@ fn check_unused_member(
 ) -> Option<Hover> {
     let enum_iter = results.unused_enum_members.iter().map(|f| &f.member);
     let class_iter = results.unused_class_members.iter().map(|f| &f.member);
+    let store_iter = results.unused_store_members.iter().map(|f| &f.member);
     for (members, kind_label) in [
         (
             Box::new(enum_iter) as Box<dyn Iterator<Item = &plow_core::results::UnusedMember>>,
@@ -247,6 +372,10 @@ fn check_unused_member(
         (
             Box::new(class_iter) as Box<dyn Iterator<Item = &plow_core::results::UnusedMember>>,
             "Class member",
+        ),
+        (
+            Box::new(store_iter) as Box<dyn Iterator<Item = &plow_core::results::UnusedMember>>,
+            "Store member",
         ),
     ] {
         for member in members {
@@ -262,9 +391,6 @@ fn check_unused_member(
                 continue;
             }
 
-            // Embed the full `parent.member` reference as a single code
-            // span so backtick / link characters in either name cannot
-            // break out. `format_inline_code` handles the fence.
             let qualified = format!("{}.{}", member.parent_name, member.member_name);
             let value = format!(
                 "**plow**: {kind_label} {} is never used outside its declaration.",
@@ -293,6 +419,206 @@ fn check_unused_member(
     None
 }
 
+/// Check if the position is on an unrendered Vue/Svelte component anchor.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "component name lengths are bounded by source size"
+)]
+fn check_unrendered_component(
+    results: &AnalysisResults,
+    file_path: &Path,
+    position: Position,
+) -> Option<Hover> {
+    for finding in &results.unrendered_components {
+        let c = &finding.component;
+        if c.path != file_path {
+            continue;
+        }
+        let component_line = c.line.saturating_sub(1);
+        if component_line != position.line {
+            continue;
+        }
+        let end_col = c.col + c.component_name.len() as u32;
+        if position.character < c.col || position.character >= end_col {
+            continue;
+        }
+
+        let value = format!(
+            "**plow**: Component {} is reachable but rendered nowhere in this project.",
+            format_inline_code(&c.component_name),
+        );
+
+        return Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value,
+            }),
+            range: Some(Range {
+                start: Position {
+                    line: component_line,
+                    character: c.col,
+                },
+                end: Position {
+                    line: component_line,
+                    character: end_col,
+                },
+            }),
+        });
+    }
+
+    None
+}
+
+/// Check if the position is on an unused Vue component prop anchor.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "prop name lengths are bounded by source size"
+)]
+fn check_unused_component_prop(
+    results: &AnalysisResults,
+    file_path: &Path,
+    position: Position,
+) -> Option<Hover> {
+    for finding in &results.unused_component_props {
+        let p = &finding.prop;
+        if p.path != file_path {
+            continue;
+        }
+        let prop_line = p.line.saturating_sub(1);
+        if prop_line != position.line {
+            continue;
+        }
+        let end_col = p.col + p.prop_name.len() as u32;
+        if position.character < p.col || position.character >= end_col {
+            continue;
+        }
+
+        let value = format!(
+            "**plow**: Prop {} is declared but referenced nowhere in this component.",
+            format_inline_code(&p.prop_name),
+        );
+
+        return Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value,
+            }),
+            range: Some(Range {
+                start: Position {
+                    line: prop_line,
+                    character: p.col,
+                },
+                end: Position {
+                    line: prop_line,
+                    character: end_col,
+                },
+            }),
+        });
+    }
+
+    None
+}
+
+/// Check if the position is on an unused Vue component emit anchor.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "emit name lengths are bounded by source size"
+)]
+fn check_unused_component_emit(
+    results: &AnalysisResults,
+    file_path: &Path,
+    position: Position,
+) -> Option<Hover> {
+    for finding in &results.unused_component_emits {
+        let e = &finding.emit;
+        if e.path != file_path {
+            continue;
+        }
+        let emit_line = e.line.saturating_sub(1);
+        if emit_line != position.line {
+            continue;
+        }
+        let end_col = e.col + e.emit_name.len() as u32;
+        if position.character < e.col || position.character >= end_col {
+            continue;
+        }
+
+        let value = format!(
+            "**plow**: Emit {} is declared but emitted nowhere in this component.",
+            format_inline_code(&e.emit_name),
+        );
+
+        return Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value,
+            }),
+            range: Some(Range {
+                start: Position {
+                    line: emit_line,
+                    character: e.col,
+                },
+                end: Position {
+                    line: emit_line,
+                    character: end_col,
+                },
+            }),
+        });
+    }
+
+    None
+}
+
+/// Check if the position is on an unused Next.js server action.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "action name lengths are bounded by source size"
+)]
+fn check_unused_server_action(
+    results: &AnalysisResults,
+    file_path: &Path,
+    position: Position,
+) -> Option<Hover> {
+    for finding in &results.unused_server_actions {
+        let a = &finding.action;
+        if a.path != file_path {
+            continue;
+        }
+        let action_line = a.line.saturating_sub(1);
+        if action_line != position.line {
+            continue;
+        }
+        let end_col = a.col + a.action_name.len() as u32;
+        if position.character < a.col || position.character >= end_col {
+            continue;
+        }
+
+        let value = format!(
+            "**plow**: Server action {} is exported from a \"use server\" file but no code in this project references it.",
+            format_inline_code(&a.action_name),
+        );
+
+        return Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value,
+            }),
+            range: Some(Range {
+                start: Position {
+                    line: action_line,
+                    character: a.col,
+                },
+                end: Position {
+                    line: action_line,
+                    character: end_col,
+                },
+            }),
+        });
+    }
+
+    None
+}
+
 /// Check if the position is on an unresolved import.
 #[expect(
     clippy::cast_possible_truncation,
@@ -311,7 +637,6 @@ fn check_unresolved_import(
         if import_line != position.line {
             continue;
         }
-        // Range covers the source string literal including quotes (+2)
         let end_col = import.import.specifier_col + import.import.specifier.len() as u32 + 2;
         if position.character < import.import.specifier_col || position.character >= end_col {
             continue;
@@ -363,7 +688,6 @@ fn check_duplication(
             let start_line = (instance.start_line as u32).saturating_sub(1);
             let end_line = (instance.end_line as u32).saturating_sub(1);
 
-            // Check if the cursor is within this duplication range
             if position.line < start_line || position.line > end_line {
                 continue;
             }
@@ -381,7 +705,6 @@ fn check_duplication(
                 group.line_count, group.token_count,
             );
 
-            // List other instances
             let others: Vec<_> = group
                 .instances
                 .iter()
@@ -444,9 +767,10 @@ mod tests {
     use plow_core::duplicates::{CloneGroup, CloneInstance, DuplicationStats};
     use plow_core::extract::MemberKind;
     use plow_core::results::{
-        ExportUsage, ReferenceLocation, UnresolvedImport, UnresolvedImportFinding,
-        UnusedClassMemberFinding, UnusedEnumMemberFinding, UnusedExport, UnusedExportFinding,
-        UnusedFile, UnusedFileFinding, UnusedMember, UnusedTypeFinding,
+        ExportUsage, ReferenceLocation, SecuritySeverity, UnresolvedImport,
+        UnresolvedImportFinding, UnusedClassMemberFinding, UnusedEnumMemberFinding, UnusedExport,
+        UnusedExportFinding, UnusedFile, UnusedFileFinding, UnusedMember, UnusedStoreMemberFinding,
+        UnusedTypeFinding,
     };
 
     /// Extract the markdown text from a Hover's contents.
@@ -541,7 +865,6 @@ mod tests {
         let value = markup_value(&hover);
         assert!(value.contains("helper"));
         assert!(value.contains("not imported"));
-        // Should have a range covering the export name
         let range = hover.range.unwrap();
         assert_eq!(range.start.line, 4);
         assert_eq!(range.start.character, 7);
@@ -640,7 +963,6 @@ mod tests {
         let hover = build_hover(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
         assert!(value.contains("1 file"));
-        // Should not contain "files" (plural)
         assert!(!value.contains("1 files"));
     }
 
@@ -663,8 +985,6 @@ mod tests {
             character: 0,
         };
 
-        // Should not produce hover from export_usages for 0-ref export
-        // (unused export check would handle it if present)
         let hover = build_hover(&results, &duplication, &path, pos);
         assert!(hover.is_none());
     }
@@ -724,6 +1044,33 @@ mod tests {
     }
 
     #[test]
+    fn hover_on_unused_store_member() {
+        let root = test_root();
+        let path = root.join("src/store.ts");
+        let mut results = AnalysisResults::default();
+        results
+            .unused_store_members
+            .push(UnusedStoreMemberFinding::with_actions(UnusedMember {
+                path: path.clone(),
+                parent_name: "useStore".to_string(),
+                member_name: "reset".to_string(),
+                kind: MemberKind::StoreMember,
+                line: 20,
+                col: 4,
+            }));
+        let duplication = DuplicationReport::default();
+        let pos = Position {
+            line: 19,
+            character: 6,
+        };
+
+        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let value = markup_value(&hover);
+        assert!(value.contains("useStore.reset"));
+        assert!(value.contains("Store member"));
+    }
+
+    #[test]
     fn hover_on_unresolved_import() {
         let root = test_root();
         let path = root.join("src/app.ts");
@@ -745,7 +1092,6 @@ mod tests {
 
         let hover = build_hover(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
-        // The specifier renders verbatim inside a CommonMark code span.
         assert!(value.contains("./missing-module"));
         assert!(value.contains("Cannot resolve"));
     }
@@ -795,7 +1141,6 @@ mod tests {
             },
         };
 
-        // Hover inside the duplication range in file a
         let pos = Position {
             line: 11, // Between lines 9 (0-based 10-1) and 14 (15-1)
             character: 5,
@@ -808,7 +1153,6 @@ mod tests {
         assert!(value.contains("1 other instance"));
         assert!(value.contains("b.ts"));
 
-        // Range should cover the duplication span
         let range = hover.range.unwrap();
         assert_eq!(range.start.line, 9); // 10 - 1
         assert_eq!(range.end.line, 14); // 15 - 1
@@ -848,7 +1192,6 @@ mod tests {
             },
         };
 
-        // Position before the duplication
         let pos = Position {
             line: 5,
             character: 0,
@@ -856,7 +1199,6 @@ mod tests {
         let hover = build_hover(&results, &duplication, &path, pos);
         assert!(hover.is_none());
 
-        // Position after the duplication
         let pos = Position {
             line: 20,
             character: 0,
@@ -889,7 +1231,6 @@ mod tests {
             character: 0,
         };
 
-        // Should show unused file hover, not export usage
         let hover = build_hover(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
         assert!(value.contains("not imported"));
@@ -914,7 +1255,6 @@ mod tests {
             }));
         let duplication = DuplicationReport::default();
 
-        // Line 10, but export is on line 5 (0-based: 4)
         let pos = Position {
             line: 10,
             character: 0,
@@ -941,7 +1281,6 @@ mod tests {
             }));
         let duplication = DuplicationReport::default();
 
-        // Correct line (0-based: 4), but character is past the export name [7, 13)
         let pos = Position {
             line: 4,
             character: 20,
@@ -949,7 +1288,6 @@ mod tests {
         let hover = build_hover(&results, &duplication, &path, pos);
         assert!(hover.is_none());
 
-        // Character before the export name
         let pos = Position {
             line: 4,
             character: 3,
@@ -1044,7 +1382,6 @@ mod tests {
 
         let hover = build_hover(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
-        // Should end with "." when no locations are listed
         assert!(
             value.ends_with('.'),
             "Expected message to end with period, got: {value}",
@@ -1059,7 +1396,6 @@ mod tests {
         let path = root.join("src/popular.ts");
         let mut results = AnalysisResults::default();
 
-        // Create 15 reference locations
         let locations: Vec<ReferenceLocation> = (1..=15)
             .map(|i| ReferenceLocation {
                 path: root.join(format!("src/file{i}.ts")),
@@ -1085,16 +1421,13 @@ mod tests {
         let hover = build_hover(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
         assert!(value.contains("15 files"));
-        // Should list first 10 files (rendered verbatim inside code spans).
         for i in 1..=10 {
             assert!(
                 value.contains(&format!("file{i}.ts")),
                 "Expected file{i}.ts in hover, got: {value}",
             );
         }
-        // Should NOT list files 11-15 inline.
         assert!(!value.contains("file11.ts"));
-        // Should show "... and 5 more"
         assert!(
             value.contains("... and 5 more"),
             "Expected truncation message, got: {value}",
@@ -1131,11 +1464,9 @@ mod tests {
 
         let hover = build_hover(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
-        // All 10 should be listed (rendered verbatim inside code spans).
         for i in 1..=10 {
             assert!(value.contains(&format!("ref{i}.ts")));
         }
-        // No "... and X more" message
         assert!(!value.contains("... and"));
     }
 
@@ -1144,7 +1475,6 @@ mod tests {
         let root = test_root();
         let path = root.join("src/app.ts");
         let mut results = AnalysisResults::default();
-        // specifier "./mod" is 5 chars, specifier_col=10, range covers [10, 17) (5 + 2 quotes)
         results
             .unresolved_imports
             .push(UnresolvedImportFinding::with_actions(UnresolvedImport {
@@ -1156,28 +1486,24 @@ mod tests {
             }));
         let duplication = DuplicationReport::default();
 
-        // At specifier_col (start boundary) => should match
         let pos = Position {
             line: 0,
             character: 10,
         };
         assert!(build_hover(&results, &duplication, &path, pos).is_some());
 
-        // At end_col - 1 (last char in range, 10 + 5 + 2 - 1 = 16) => should match
         let pos = Position {
             line: 0,
             character: 16,
         };
         assert!(build_hover(&results, &duplication, &path, pos).is_some());
 
-        // At end_col (past the range, 10 + 5 + 2 = 17) => should NOT match
         let pos = Position {
             line: 0,
             character: 17,
         };
         assert!(build_hover(&results, &duplication, &path, pos).is_none());
 
-        // Just before specifier_col => should NOT match
         let pos = Position {
             line: 0,
             character: 9,
@@ -1190,7 +1516,6 @@ mod tests {
         let root = test_root();
         let path = root.join("src/utils.ts");
         let mut results = AnalysisResults::default();
-        // export name "abc" at col=7, spans [7, 10)
         results
             .unused_exports
             .push(UnusedExportFinding::with_actions(UnusedExport {
@@ -1204,21 +1529,18 @@ mod tests {
             }));
         let duplication = DuplicationReport::default();
 
-        // At col (start boundary, inclusive) => should match
         let pos = Position {
             line: 0,
             character: 7,
         };
         assert!(build_hover(&results, &duplication, &path, pos).is_some());
 
-        // At end_col - 1 (last inclusive char) => should match
         let pos = Position {
             line: 0,
             character: 9,
         };
         assert!(build_hover(&results, &duplication, &path, pos).is_some());
 
-        // At end_col (exclusive) => should NOT match
         let pos = Position {
             line: 0,
             character: 10,
@@ -1231,7 +1553,6 @@ mod tests {
         let root = test_root();
         let path = root.join("src/enums.ts");
         let mut results = AnalysisResults::default();
-        // member "Red" at col=4, spans [4, 7)
         results
             .unused_enum_members
             .push(UnusedEnumMemberFinding::with_actions(UnusedMember {
@@ -1244,14 +1565,12 @@ mod tests {
             }));
         let duplication = DuplicationReport::default();
 
-        // Exactly at col => match
         let pos = Position {
             line: 2,
             character: 4,
         };
         assert!(build_hover(&results, &duplication, &path, pos).is_some());
 
-        // Past end => no match
         let pos = Position {
             line: 2,
             character: 7,
@@ -1265,7 +1584,6 @@ mod tests {
         let path_main = root.join("src/main.ts");
         let results = AnalysisResults::default();
 
-        // Create 13 instances total (1 for main file + 12 others)
         let mut instances = vec![CloneInstance {
             file: path_main.clone(),
             start_line: 1,
@@ -1303,7 +1621,6 @@ mod tests {
         let hover = build_hover(&results, &duplication, &path_main, pos).unwrap();
         let value = markup_value(&hover);
         assert!(value.contains("12 other instances"));
-        // Should only list first 10 (rendered verbatim inside code spans).
         for i in 1..=10 {
             assert!(
                 value.contains(&format!("dup{i}.ts")),
@@ -1320,7 +1637,6 @@ mod tests {
         let path = root.join("src/utils.ts");
         let mut results = AnalysisResults::default();
 
-        // Both unused export and used export at the same position
         results
             .unused_exports
             .push(UnusedExportFinding::with_actions(UnusedExport {
@@ -1348,19 +1664,11 @@ mod tests {
 
         let hover = build_hover(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
-        // Unused export check runs before used export check
         assert!(value.contains("not imported"));
     }
 
     #[test]
     fn hover_on_unused_export_neutralizes_link_injection() {
-        // A crafted export name that would render as a markdown link if
-        // it leaked outside a code span. JS / TS allow arbitrary identifier
-        // characters inside backtick-quoted property names and dynamically
-        // computed exports, so a hostile dependency or a crafted PR can
-        // reach this code path. The fix embeds the value inside a
-        // CommonMark inline code span (no escapes), where link syntax is
-        // inert.
         let root = test_root();
         let path = root.join("src/utils.ts");
         let crafted = "[click](command:vscode.open?evil)";
@@ -1385,19 +1693,11 @@ mod tests {
         let hover = build_hover(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
 
-        // The value renders inside a single-backtick code span. The
-        // `](command:` substring is between backticks, so no CommonMark
-        // renderer treats it as a link. The literal characters are
-        // preserved verbatim (no visible backslashes).
         assert!(value.contains("`[click](command:vscode.open?evil)`"));
     }
 
     #[test]
     fn hover_on_unused_export_with_backtick_in_name_uses_escalated_fence() {
-        // Backtick-injection probe. A naive `format!("`{}`", name)` would
-        // close the code span and let the trailing payload render as a
-        // link. `format_inline_code` picks a longer fence to keep the
-        // value verbatim inside.
         let root = test_root();
         let path = root.join("src/utils.ts");
         let crafted = "evil`](command:foo)";
@@ -1422,10 +1722,7 @@ mod tests {
         let hover = build_hover(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
 
-        // Outer fence is two backticks; inner content is verbatim.
         assert!(value.contains("``evil`](command:foo)``"));
-        // The double-backtick + `](command:` pattern that would close the
-        // span and start a link must NOT appear together.
         assert!(!value.contains("``](command:"));
     }
 
@@ -1449,11 +1746,116 @@ mod tests {
             }));
         let duplication = DuplicationReport::default();
 
-        // Hover on path_b where there are no issues
         let pos = Position {
             line: 0,
             character: 0,
         };
         assert!(build_hover(&results, &duplication, &path_b, pos).is_none());
+    }
+
+    fn tainted_sink_finding(path: PathBuf) -> plow_core::results::SecurityFinding {
+        plow_core::results::SecurityFinding {
+            finding_id: String::new(),
+            candidate: plow_core::results::SecurityCandidate::default(),
+            taint_flow: None,
+            attack_surface: None,
+            kind: plow_core::results::SecurityFindingKind::TaintedSink,
+            category: Some("dangerous-html".to_string()),
+            cwe: Some(79),
+            path,
+            line: 8,
+            col: 6,
+            evidence: "req.query.html flows into dangerouslySetInnerHTML".to_string(),
+            source_backed: true,
+            source_read: None,
+            severity: SecuritySeverity::Low,
+            trace: vec![],
+            actions: vec![],
+            dead_code: None,
+            reachability: Some(plow_core::results::SecurityReachability {
+                reachable_from_entry: true,
+                reachable_from_untrusted_source: false,
+                taint_confidence: None,
+                untrusted_source_hop_count: None,
+                untrusted_source_trace: vec![],
+                blast_radius: 4,
+                crosses_boundary: false,
+            }),
+            runtime: None,
+        }
+    }
+
+    #[test]
+    fn hover_on_security_candidate() {
+        let root = test_root();
+        let path = root.join("src/render.ts");
+        let mut results = AnalysisResults::default();
+        results
+            .security_findings
+            .push(tainted_sink_finding(path.clone()));
+        let duplication = DuplicationReport::default();
+        let pos = Position {
+            line: 7, // 1-based 8 -> 0-based 7
+            character: 10,
+        };
+
+        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let value = markup_value(&hover);
+        assert!(value.contains("security candidate"));
+        assert!(value.contains("unverified"));
+        assert!(value.contains("CWE-79"));
+        assert!(value.contains("source-backed yes"));
+        assert!(value.contains("reachable from a runtime entry point yes"));
+        assert!(value.contains("dangerouslySetInnerHTML"));
+        assert!(value.contains("blast radius 4"));
+        assert!(value.contains("Next:"));
+        assert!(value.contains("plow security --file render.ts"));
+        let range = hover.range.unwrap();
+        assert_eq!(range.start.line, 7);
+        assert_eq!(range.start.character, 6);
+    }
+
+    #[test]
+    fn hover_off_security_candidate_line_returns_none() {
+        let root = test_root();
+        let path = root.join("src/render.ts");
+        let mut results = AnalysisResults::default();
+        results
+            .security_findings
+            .push(tainted_sink_finding(path.clone()));
+        let duplication = DuplicationReport::default();
+
+        // Wrong line.
+        let pos = Position {
+            line: 20,
+            character: 6,
+        };
+        assert!(build_hover(&results, &duplication, &path, pos).is_none());
+
+        // Before the anchor column.
+        let pos = Position {
+            line: 7,
+            character: 2,
+        };
+        assert!(build_hover(&results, &duplication, &path, pos).is_none());
+    }
+
+    #[test]
+    fn hover_on_security_candidate_neutralizes_link_injection() {
+        let root = test_root();
+        let path = root.join("src/render.ts");
+        let mut finding = tainted_sink_finding(path.clone());
+        finding.evidence = "[click](command:vscode.open?evil)".to_string();
+        let mut results = AnalysisResults::default();
+        results.security_findings.push(finding);
+        let duplication = DuplicationReport::default();
+        let pos = Position {
+            line: 7,
+            character: 6,
+        };
+
+        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let value = markup_value(&hover);
+        assert!(value.contains("`[click](command:vscode.open?evil)`"));
     }
 }

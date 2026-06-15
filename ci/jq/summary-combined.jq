@@ -13,11 +13,11 @@ def file_link(path; start; end_line):
   if (project_url | length) > 0 and (sha | length) > 0 then
     "[`\($display):\(start)-\(end_line)`](\(project_url)/-/blob/\(sha)/\(prefix)\(path)#L\(start)-\(end_line))"
   else "`\($display):\(start)-\(end_line)`" end;
-def dead_code_docs: "https://docs.fallow.tools/explanations/dead-code";
+def dead_code_docs: "https://docs.genesis-plow.dev/explanations/dead-code";
 def docs(anchor): dead_code_docs + "#" + anchor;
-def health_docs: "https://docs.fallow.tools/explanations/health";
-def dupes_docs: "https://docs.fallow.tools/explanations/duplication";
-def suppression_docs: "https://docs.fallow.tools/configuration/suppression";
+def health_docs: "https://docs.genesis-plow.dev/explanations/health";
+def dupes_docs: "https://docs.genesis-plow.dev/explanations/duplication";
+def suppression_docs: "https://docs.genesis-plow.dev/configuration/suppression";
 def metric_delta(name):
   (.health.health_trend.metrics // []) | map(select(.name == name)) | first // null;
 def exceeded_priority:
@@ -79,13 +79,13 @@ def prod_hot_path_label($n):
       " \u00b7 \($cx_delta.label | ascii_downcase) \(pct($cx_delta.current)) (\(signed($cx_delta.delta)))"
     else "" end)
   else
-    "\n> _Set `FALLOW_SAVE_SNAPSHOT: \"true\"` to track score trends over time._"
+    "\n> _Set `PLOW_SAVE_SNAPSHOT: \"true\"` to track score trends over time._"
   end) +
   "\n\n"
 else "" end) +
 
 if $total == 0 then
-  "# :seedling: Fallow\n\n" +
+  "# :seedling: Plow\n\n" +
   (if $prod_advisory > 0 or $hot_paths > 0 then
     "> **No blocking issues found**\n\n" +
     ":white_check_mark: No code issues \u00b7 :white_check_mark: No duplication \u00b7 :white_check_mark: No blocking health findings" +
@@ -100,7 +100,7 @@ if $total == 0 then
     "| [Maintainability](\(health_docs)#maintainability-index-mi) | **\(pct($vitals.maintainability_avg))** / 100 |\n"
   else "" end)
 else
-  "# :seedling: Fallow\n\n" +
+  "# :seedling: Plow\n\n" +
 
   # One-line status
   (if $check > 0 then ":warning: **\($check)** code \(if $check == 1 then "issue" else "issues" end)" else ":white_check_mark: No code issues" end) +
@@ -131,12 +131,19 @@ else
       (if (.check.unused_optional_dependencies | length) > 0 then "| [Unused optionalDependencies](\(docs("unused-dependencies"))) | \(.check.unused_optional_dependencies | length) |" else null end),
       (if (.check.unused_enum_members | length) > 0 then "| [Unused enum members](\(docs("unused-enum-members"))) | \(.check.unused_enum_members | length) |" else null end),
       (if (.check.unused_class_members | length) > 0 then "| [Unused class members](\(docs("unused-class-members"))) | \(.check.unused_class_members | length) |" else null end),
+      (if (.check.unused_store_members | length) > 0 then "| [Unused store members](\(docs("unused-store-members"))) | \(.check.unused_store_members | length) |" else null end),
       (if (.check.unresolved_imports | length) > 0 then "| [Unresolved imports](\(docs("unresolved-imports"))) | \(.check.unresolved_imports | length) |" else null end),
       (if (.check.unlisted_dependencies | length) > 0 then "| [Unlisted dependencies](\(docs("unlisted-dependencies"))) | \(.check.unlisted_dependencies | length) |" else null end),
       (if (.check.duplicate_exports | length) > 0 then "| [Duplicate exports](\(docs("duplicate-exports"))) | \(.check.duplicate_exports | length) |" else null end),
       (if (.check.circular_dependencies | length) > 0 then "| [Circular dependencies](\(docs("circular-dependencies"))) | \(.check.circular_dependencies | length) |" else null end),
       (if ((.check.re_export_cycles // []) | length) > 0 then "| [Re-export cycles](\(docs("re-export-cycles"))) | \(.check.re_export_cycles | length) |" else null end),
       (if (.check.boundary_violations | length) > 0 then "| [Boundary violations](\(docs("boundary-violations"))) | \(.check.boundary_violations | length) |" else null end),
+      (if (.check.boundary_coverage_violations | length) > 0 then "| [Boundary coverage](\(docs("boundary-violations"))) | \(.check.boundary_coverage_violations | length) |" else null end),
+      (if ((.check.boundary_call_violations // []) | length) > 0 then "| [Boundary calls](\(docs("boundary-violations"))) | \(.check.boundary_call_violations | length) |" else null end),
+      (if ((.check.policy_violations // []) | length) > 0 then "| [Policy violations](\(docs("policy-violations"))) | \(.check.policy_violations | length) |" else null end),
+      (if ((.check.invalid_client_exports // []) | length) > 0 then "| [Invalid client exports](\(docs("invalid-client-exports"))) | \(.check.invalid_client_exports | length) |" else null end),
+      (if ((.check.mixed_client_server_barrels // []) | length) > 0 then "| [Mixed client/server barrels](\(docs("mixed-client-server-barrels"))) | \(.check.mixed_client_server_barrels | length) |" else null end),
+      (if ((.check.misplaced_directives // []) | length) > 0 then "| [Misplaced directives](\(docs("misplaced-directives"))) | \(.check.misplaced_directives | length) |" else null end),
       (if (.check.type_only_dependencies | length) > 0 then "| [Type-only dependencies](\(docs("type-only-dependencies"))) | \(.check.type_only_dependencies | length) |" else null end),
       (if (.check.test_only_dependencies | length) > 0 then "| [Test-only dependencies](\(docs("test-only-dependencies"))) | \(.check.test_only_dependencies | length) |" else null end),
       (if (.check.stale_suppressions | length) > 0 then "| [Stale suppressions](\(docs("stale-suppressions"))) | \(.check.stale_suppressions | length) |" else null end),
@@ -213,9 +220,9 @@ else
 
   # Conditional tips based on which categories were found
   (if ((.check.unused_exports // []) + (.check.unused_dependencies // []) + (.check.unused_enum_members // [])) | length > 0 then
-    "> :bulb: Run `fallow fix --dry-run` to preview auto-fixes." +
+    "> :bulb: Run `plow fix --dry-run` to preview auto-fixes." +
     (if (.check.unused_exports // []) | length > 0 then
-      " Add [`/** @public */`](https://docs.fallow.tools/configuration/suppression) above exports to preserve them."
+      " Add [`/** @public */`](https://docs.genesis-plow.dev/configuration/suppression) above exports to preserve them."
     else "" end)
   else "" end)
 end

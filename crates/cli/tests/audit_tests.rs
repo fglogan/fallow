@@ -1,7 +1,13 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "tests and benches use unwrap and expect to keep fixture setup concise"
+)]
+
 #[path = "common/mod.rs"]
 mod common;
 
-use common::{plow_bin, parse_json, run_plow_raw};
+use common::{parse_json, plow_bin, run_plow_raw};
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -71,8 +77,6 @@ fn create_audit_fixture(_suffix: &str) -> TempDir {
         Command::new("git")
             .args(args)
             .current_dir(dir)
-            // Isolate from parent git context (pre-push hook sets GIT_DIR to the main repo,
-            // which overrides current_dir and causes commits to leak into the real repo)
             .env_remove("GIT_DIR")
             .env_remove("GIT_WORK_TREE")
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
@@ -143,10 +147,7 @@ fn write_branchy_istanbul_coverage(coverage_path: &std::path::Path, coverage_sou
     fs::write(coverage_path, serde_json::to_string(&coverage).unwrap()).unwrap();
 }
 
-fn run_plow_raw_with_env(
-    args: &[&str],
-    env: &[(&str, &std::path::Path)],
-) -> common::CommandOutput {
+fn run_plow_raw_with_env(args: &[&str], env: &[(&str, &std::path::Path)]) -> common::CommandOutput {
     let mut cmd = Command::new(plow_bin());
     cmd.env("RUST_LOG", "").env("NO_COLOR", "1");
     for (key, value) in env {
@@ -162,10 +163,6 @@ fn run_plow_raw_with_env(
         code: output.status.code().unwrap_or(-1),
     }
 }
-
-// ---------------------------------------------------------------------------
-// Audit JSON output structure
-// ---------------------------------------------------------------------------
 
 #[test]
 fn audit_json_has_verdict_and_schema() {
@@ -267,6 +264,13 @@ fn audit_parallel_output_is_deterministic() {
             serde_json::Value::Object(map) => {
                 map.remove("elapsed_ms");
                 map.remove("head_sha");
+                if let Some(telemetry) = map
+                    .get_mut("_meta")
+                    .and_then(|meta| meta.get_mut("telemetry"))
+                    .and_then(|telemetry| telemetry.as_object_mut())
+                {
+                    telemetry.remove("analysis_run_id");
+                }
                 for v in map.values_mut() {
                     normalize(v);
                 }
@@ -370,10 +374,6 @@ fn audit_json_has_summary_with_changes() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Audit baseline support (issue #139)
-// ---------------------------------------------------------------------------
-
 /// Create a fixture whose legacy file already has several unused exports,
 /// then branch and touch that file without introducing new issues.
 ///
@@ -395,7 +395,6 @@ fn create_audit_baseline_fixture() -> TempDir {
     )
     .unwrap();
 
-    // Legacy file with multiple pre-existing unused exports.
     fs::write(
         dir.join("src/legacy.ts"),
         "export const used = 1;\n\
@@ -433,7 +432,6 @@ fn create_audit_baseline_fixture() -> TempDir {
     git(&["-c", "commit.gpgsign=false", "commit", "-m", "initial"]);
     git(&["checkout", "-b", "feature"]);
 
-    // Touch the legacy file without adding new issues.
     let legacy = fs::read_to_string(dir.join("src/legacy.ts")).unwrap();
     fs::write(dir.join("src/legacy.ts"), format!("{legacy}// touched\n")).unwrap();
     git(&["add", "."]);
@@ -619,9 +617,6 @@ fn audit_base_preserves_node_modules_tsconfig_extends_context() {
     )
     .unwrap();
 
-    // Add a real new export so the diff is not token-equivalent. A comment-only
-    // change would trip the `can_reuse_current_as_base` fast path and skip
-    // `BaseWorktree::create` entirely, defeating the point of this test.
     fs::write(
         dir.join("src/feature.ts"),
         "export const used = 1;\nexport const legacyUnused = 2;\nexport const introduced = 3;\n",
@@ -805,6 +800,59 @@ fn audit_empty_catalog_group_changed_manifest_is_introduced() {
 }
 
 #[test]
+fn audit_invalid_client_export_is_introduced() {
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("app")).unwrap();
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name":"audit-invalid-client-export","private":true,"dependencies":{"next":"15.0.0","react":"19.0.0"}}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("app/page.tsx"),
+        "\"use client\";\nexport default function Page() { return null; }\n",
+    )
+    .unwrap();
+    git(dir, &["init", "-b", "main"]);
+    commit_all(dir, "initial");
+
+    // Introduce a server-only export inside the existing "use client" file.
+    fs::write(
+        dir.join("app/page.tsx"),
+        "\"use client\";\nexport const metadata = { title: \"Home\" };\nexport default function Page() { return null; }\n",
+    )
+    .unwrap();
+
+    let output = run_plow_raw(&[
+        "audit",
+        "--root",
+        dir.to_str().unwrap(),
+        "--base",
+        "HEAD",
+        "--format",
+        "json",
+        "--quiet",
+        "--no-cache",
+    ]);
+
+    assert_eq!(
+        output.code, 0,
+        "new warning-level invalid client export should not fail audit. stdout: {}\nstderr: {}",
+        output.stdout, output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(
+        json["dead_code"]["invalid_client_exports"][0]["export_name"].as_str(),
+        Some("metadata")
+    );
+    assert_eq!(
+        json["dead_code"]["invalid_client_exports"][0]["introduced"],
+        true
+    );
+}
+
+#[test]
 fn audit_dependency_location_change_is_introduced() {
     let tmp = TempDir::new().expect("failed to create temp dir");
     let dir = tmp.path();
@@ -859,8 +907,6 @@ fn audit_with_dead_code_baseline_filters_preexisting_issues() {
     let dir = tmp.path();
     let baseline_path = dir.join(".plow-dead-code-baseline.json");
 
-    // Save baseline from `main` state (before touching the file).
-    // Switch back to main, save, then back to feature.
     let git = |args: &[&str]| {
         Command::new("git")
             .args(args)
@@ -899,7 +945,6 @@ fn audit_with_dead_code_baseline_filters_preexisting_issues() {
     );
     git(&["checkout", "feature"]);
 
-    // Now audit with the dead-code baseline.
     let output = run_plow_raw(&[
         "audit",
         "--root",
@@ -991,10 +1036,6 @@ fn audit_rejects_global_save_baseline_flag() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Audit error handling
-// ---------------------------------------------------------------------------
-
 #[test]
 fn audit_badge_format_exits_2() {
     let dir = create_audit_fixture("badge");
@@ -1021,9 +1062,6 @@ fn audit_badge_format_exits_2() {
 fn audit_max_crap_flag_fails_when_threshold_crossed() {
     let dir = create_audit_fixture("crap");
 
-    // Introduce a file with a branchy, untested function. Combined with the
-    // low `--max-crap 1`, any non-trivial cyclomatic count is guaranteed to
-    // exceed the threshold.
     write_branchy_change(dir.path());
 
     let output = run_plow_raw(&[
@@ -1051,9 +1089,49 @@ fn audit_max_crap_flag_fails_when_threshold_crossed() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Issue #301: ambient git repo-state env vars must not break audit
-// ---------------------------------------------------------------------------
+#[test]
+fn audit_respects_health_threshold_override() {
+    let dir = create_audit_fixture("health-threshold-override");
+    fs::write(
+        dir.path().join(".plowrc.json"),
+        r#"{
+  "health": {
+    "thresholdOverrides": [
+      {
+        "files": ["src/index.ts"],
+        "functions": ["branchy"],
+        "maxCyclomatic": 20,
+        "maxCognitive": 20,
+        "maxCrap": 100
+      }
+    ]
+  }
+}
+"#,
+    )
+    .unwrap();
+    write_branchy_change(dir.path());
+
+    let output = run_plow_raw(&[
+        "audit",
+        "--root",
+        dir.path().to_str().unwrap(),
+        "--base",
+        "HEAD~1",
+        "--max-crap",
+        "1",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(
+        output.code, 0,
+        "audit should pass when health override raises local thresholds. stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["verdict"].as_str(), Some("pass"));
+}
 
 fn audit_with_env(root: &Path, env: &[(&str, &str)]) -> common::CommandOutput {
     let bin = plow_bin();
@@ -1095,8 +1173,6 @@ fn audit_succeeds_when_ambient_git_env_vars_leak_from_a_hook() {
     let dir = create_audit_fixture("hook_env_leak");
     let root = dir.path();
 
-    // `GIT_INDEX_FILE=.git/index` is the exact leak shape `git commit`
-    // produces; absolute form must also remain a no-op since plow strips it.
     let abs_index = root.join(".git/index").to_string_lossy().to_string();
     let cases: &[(&str, &str)] = &[
         ("GIT_INDEX_FILE", ".git/index"),
@@ -1207,14 +1283,6 @@ fn audit_rejects_relative_coverage_root() {
 
 #[test]
 fn audit_coverage_relative_path_resolves_against_root_through_base_snapshot() {
-    // Regression: audit.rs::compute_base_snapshot recursively invokes the
-    // health analysis with --root rebound to a temporary base worktree. A
-    // relative --coverage path that worked on the HEAD pass must NOT be
-    // re-resolved against the worktree on the base pass; the coverage file
-    // only exists inside the user's project root. This test exercises the
-    // full audit pipeline (HEAD pass + base-worktree recursion) with a
-    // relative coverage path while the working directory is OUTSIDE the
-    // project, so the resolution against process cwd would silently fail.
     let dir = create_audit_fixture("coverage-relative");
     write_branchy_change(dir.path());
 
@@ -1222,8 +1290,6 @@ fn audit_coverage_relative_path_resolves_against_root_through_base_snapshot() {
     let branchy_source = dir.path().join("src/index.ts");
     write_branchy_istanbul_coverage(&coverage_path, &branchy_source.to_string_lossy());
 
-    // Pass --coverage as a relative path; --root is the project. Resolution
-    // must happen against --root, not against the binary's process cwd.
     let with_relative = run_plow_raw(&[
         "audit",
         "--root",
@@ -1296,4 +1362,681 @@ fn audit_coverage_env_fallback_feeds_crap_scoring() {
     );
     let json = parse_json(&output);
     assert_eq!(json["verdict"].as_str(), Some("pass"));
+}
+
+/// Run `plow audit` against `root` with string env vars set on the child
+/// process. The path-typed `run_plow_raw_with_env` cannot carry a git ref
+/// value, so this builds the command directly.
+fn run_audit_string_env(
+    root: &std::path::Path,
+    extra_args: &[&str],
+    env: &[(&str, &str)],
+) -> common::CommandOutput {
+    let mut cmd = Command::new(plow_bin());
+    cmd.env("RUST_LOG", "").env("NO_COLOR", "1");
+    for (key, value) in env {
+        cmd.env(key, value);
+    }
+    cmd.args(["audit", "--root"]);
+    cmd.arg(root);
+    cmd.args(["--format", "json", "--quiet"]);
+    cmd.args(extra_args);
+    let output = cmd.output().expect("failed to run plow binary");
+    common::CommandOutput {
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        code: output.status.code().unwrap_or(-1),
+    }
+}
+
+/// Add a second commit so `HEAD~1` resolves, then return the fixture.
+fn audit_fixture_with_two_commits() -> TempDir {
+    let tmp = create_audit_fixture("env-base");
+    fs::write(
+        tmp.path().join("src/utils.ts"),
+        "export const used = () => 43;\nexport const unused = () => 0;\n",
+    )
+    .unwrap();
+    commit_all(tmp.path(), "second commit");
+    tmp
+}
+
+#[test]
+fn audit_honors_plow_audit_base_env_when_no_flag() {
+    let dir = audit_fixture_with_two_commits();
+    let output = run_audit_string_env(dir.path(), &[], &[("PLOW_AUDIT_BASE", "HEAD~1")]);
+
+    assert_eq!(
+        output.code, 0,
+        "audit with PLOW_AUDIT_BASE should run. stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(
+        json["base_ref"].as_str(),
+        Some("HEAD~1"),
+        "PLOW_AUDIT_BASE should set the base ref"
+    );
+    assert_eq!(
+        json["base_description"].as_str(),
+        Some("PLOW_AUDIT_BASE=HEAD~1"),
+        "env-set base should carry its provenance"
+    );
+}
+
+#[test]
+fn audit_base_flag_wins_over_plow_audit_base_env() {
+    let dir = audit_fixture_with_two_commits();
+    let output = run_audit_string_env(
+        dir.path(),
+        &["--base", "HEAD"],
+        &[("PLOW_AUDIT_BASE", "HEAD~1")],
+    );
+
+    assert_eq!(
+        output.code, 0,
+        "explicit --base HEAD has no changes, should pass. stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(
+        json["base_ref"].as_str(),
+        Some("HEAD"),
+        "the --base flag must win over PLOW_AUDIT_BASE"
+    );
+    assert!(
+        json.get("base_description").is_none() || json["base_description"].is_null(),
+        "an explicit --base carries no provenance description"
+    );
+}
+
+#[test]
+fn audit_rejects_malformed_plow_audit_base_env() {
+    let dir = audit_fixture_with_two_commits();
+    let output = run_audit_string_env(dir.path(), &[], &[("PLOW_AUDIT_BASE", "bad;ref")]);
+
+    assert_eq!(
+        output.code, 2,
+        "a malformed PLOW_AUDIT_BASE must exit 2, not be silently ignored. stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["error"].as_bool(), Some(true));
+    assert!(
+        json["message"]
+            .as_str()
+            .is_some_and(|m| m.contains("PLOW_AUDIT_BASE")),
+        "the error should name the offending env var, got: {}",
+        json["message"]
+    );
+}
+
+// Base-reuse predicate characterization tests
+//
+// These tests pin the behavior of `can_reuse_current_as_base` end-to-end
+// through the `plow audit --gate new-only` path. Each test establishes a
+// committed base and a committed head, then asserts on the JSON attribution
+// fields `dead_code_introduced` and `dead_code_inherited` to confirm whether
+// the reuse predicate correctly skipped the base-snapshot rebuild.
+//
+// They serve as the safety net for refactors of the underlying helpers
+// (for example, batching the per-file `git show` calls).
+
+/// A whitespace-only reformat of a TS file must be treated as equivalent by
+/// the tokenizer and allow the base snapshot to be reused. The audit should
+/// report zero introduced dead-code findings.
+#[test]
+fn audit_whitespace_only_change_reports_no_introduced_findings() {
+    let dir = create_audit_fixture("reuse-whitespace");
+    let root = dir.path();
+    let base_sha = {
+        let output = Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(root)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .output()
+            .expect("git rev-parse should succeed");
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    };
+
+    // Reformat src/utils.ts with whitespace only (no semantic change).
+    fs::write(
+        root.join("src/utils.ts"),
+        "export const used = () => 42;\n\n\nexport const unused = () => 0;\n",
+    )
+    .unwrap();
+    commit_all(root, "reformat utils");
+
+    let output = run_plow_raw(&[
+        "audit",
+        "--root",
+        root.to_str().unwrap(),
+        "--base",
+        &base_sha,
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    assert!(
+        output.code == 0 || output.code == 1,
+        "audit should not crash on whitespace-only change. stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(
+        json["attribution"]["dead_code_introduced"].as_u64(),
+        Some(0),
+        "whitespace-only change must introduce zero dead-code findings. full json: {}",
+        serde_json::to_string_pretty(&json).unwrap_or_default()
+    );
+    // The pre-existing `unused` export should be inherited, not introduced.
+    assert!(
+        json["attribution"]["dead_code_inherited"]
+            .as_u64()
+            .is_some_and(|n| n >= 1),
+        "pre-existing unused export must appear as inherited"
+    );
+}
+
+/// Adding a genuinely new unused export must be classified as introduced.
+#[test]
+fn audit_semantic_change_reports_introduced_finding() {
+    let dir = create_audit_fixture("reuse-semantic");
+    let root = dir.path();
+    let base_sha = {
+        let output = Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(root)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .output()
+            .expect("git rev-parse should succeed");
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    };
+
+    // Add a new unused export.
+    fs::write(
+        root.join("src/utils.ts"),
+        "export const used = () => 42;\nexport const unused = () => 0;\nexport const extra = 1;\n",
+    )
+    .unwrap();
+    commit_all(root, "add extra unused export");
+
+    let output = run_plow_raw(&[
+        "audit",
+        "--root",
+        root.to_str().unwrap(),
+        "--base",
+        &base_sha,
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    assert!(
+        output.code == 0 || output.code == 1,
+        "audit should not crash. stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert!(
+        json["attribution"]["dead_code_introduced"]
+            .as_u64()
+            .is_some_and(|n| n >= 1),
+        "new unused export must be attributed as introduced. full json: {}",
+        serde_json::to_string_pretty(&json).unwrap_or_default()
+    );
+}
+
+/// Changing only a Markdown README must not introduce dead-code findings.
+/// `is_non_behavioral_doc` classifies `.md` as non-behavioral, so the reuse
+/// predicate returns true for a doc-only diff.
+#[test]
+fn audit_doc_only_change_reports_no_introduced_findings() {
+    let dir = create_audit_fixture("reuse-doc");
+    let root = dir.path();
+    let base_sha = {
+        let output = Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(root)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .output()
+            .expect("git rev-parse should succeed");
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    };
+
+    fs::write(root.join("README.md"), "# My project\nUpdated docs.\n").unwrap();
+    commit_all(root, "update readme");
+
+    let output = run_plow_raw(&[
+        "audit",
+        "--root",
+        root.to_str().unwrap(),
+        "--base",
+        &base_sha,
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    assert!(
+        output.code == 0 || output.code == 1,
+        "audit should not crash on doc-only change. stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(
+        json["attribution"]["dead_code_introduced"].as_u64(),
+        Some(0),
+        "doc-only change must introduce zero dead-code findings. full json: {}",
+        serde_json::to_string_pretty(&json).unwrap_or_default()
+    );
+}
+
+/// Adding a brand-new TS file with an unused export forces a real base-snapshot
+/// computation (the file does not exist in base, so `BaseFileReader::read`
+/// returns None and the reuse predicate returns false). The new export should be
+/// attributed as introduced.
+#[test]
+fn audit_new_file_is_treated_as_behavioral() {
+    let dir = create_audit_fixture("reuse-newfile");
+    let root = dir.path();
+    let base_sha = {
+        let output = Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(root)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .output()
+            .expect("git rev-parse should succeed");
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    };
+
+    // Add a new file with an unused export; it has no counterpart in base.
+    fs::write(
+        root.join("src/new.ts"),
+        "export const brandNew = 'nobody uses me';\n",
+    )
+    .unwrap();
+    commit_all(root, "add new file with unused export");
+
+    let output = run_plow_raw(&[
+        "audit",
+        "--root",
+        root.to_str().unwrap(),
+        "--base",
+        &base_sha,
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    assert!(
+        output.code == 0 || output.code == 1,
+        "audit should complete successfully even when a new file forces a base-snapshot rebuild. stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert!(
+        json["attribution"]["dead_code_introduced"]
+            .as_u64()
+            .is_some_and(|n| n >= 1),
+        "new unused export in a new file must be attributed as introduced. full json: {}",
+        serde_json::to_string_pretty(&json).unwrap_or_default()
+    );
+}
+
+/// Whitespace-only edits across many `.ts` files in one commit exercise the
+/// batched base-file reader: the reuse predicate reads the base version of each
+/// changed file sequentially through one `git cat-file --batch` process (the
+/// previous implementation spawned one `git show` per file). Each file is
+/// token-equivalent to its base, so the reuse check should hold and the audit
+/// should introduce zero findings. This pins correctness of multiple
+/// sequential reads through a single batch process (trailing-newline
+/// consumption, lockstep request/response).
+#[test]
+fn audit_reuse_check_handles_many_equivalent_files() {
+    let dir = create_audit_fixture("reuse-many");
+    let root = dir.path();
+
+    // Seed 12 source files that are imported in a chain so each is reachable
+    // (no pre-existing unused-file findings), then commit them as the base.
+    const FILE_COUNT: usize = 12;
+    for i in 0..FILE_COUNT {
+        fs::write(
+            root.join(format!("src/mod{i}.ts")),
+            format!("export const value{i} = {i};\nexport const helper{i} = () => value{i};\n"),
+        )
+        .unwrap();
+    }
+    // Wire every module into the import graph via index.ts so none is orphaned.
+    use std::fmt::Write as _;
+    let mut index = String::from("import { used } from './utils';\nused();\n");
+    for i in 0..FILE_COUNT {
+        writeln!(index, "import {{ helper{i} }} from './mod{i}';").unwrap();
+        writeln!(index, "helper{i}();").unwrap();
+    }
+    fs::write(root.join("src/index.ts"), &index).unwrap();
+    commit_all(root, "seed many modules");
+
+    let base_sha = {
+        let output = Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(root)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .output()
+            .expect("git rev-parse should succeed");
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    };
+
+    // Apply whitespace-only edits to every module in one commit. Each file
+    // stays token-equivalent to its base, so the reuse predicate must accept
+    // all of them across one batch process.
+    for i in 0..FILE_COUNT {
+        fs::write(
+            root.join(format!("src/mod{i}.ts")),
+            format!(
+                "export const value{i}  =  {i};\n\nexport const helper{i} = ()   => value{i};\n"
+            ),
+        )
+        .unwrap();
+    }
+    commit_all(root, "whitespace-only edits across modules");
+
+    let output = run_plow_raw(&[
+        "audit",
+        "--root",
+        root.to_str().unwrap(),
+        "--base",
+        &base_sha,
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    assert!(
+        output.code == 0,
+        "audit over many whitespace-only edits should succeed with no introduced findings. code: {}, stderr: {}",
+        output.code,
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(
+        json["attribution"]["dead_code_introduced"].as_u64(),
+        Some(0),
+        "whitespace-only edits across many files must introduce zero dead-code findings. full json: {}",
+        serde_json::to_string_pretty(&json).unwrap_or_default()
+    );
+}
+
+/// Changing only `package.json` is neither an analysis-input file nor a
+/// non-behavioral doc (`.json` passes neither check), so the reuse predicate
+/// treats it as behavioral. The audit must complete and produce a coherent
+/// verdict; this test checks exit success rather than a specific attribution
+/// count because the JSON change may or may not affect dead-code counts.
+#[test]
+fn audit_json_only_change_is_behavioral() {
+    let dir = create_audit_fixture("reuse-json");
+    let root = dir.path();
+    let base_sha = {
+        let output = Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(root)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .output()
+            .expect("git rev-parse should succeed");
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    };
+
+    // Remove the unused dependency from package.json: a plausible behavioral change.
+    fs::write(
+        root.join("package.json"),
+        r#"{"name": "audit-test", "main": "src/index.ts", "dependencies": {}}"#,
+    )
+    .unwrap();
+    commit_all(root, "remove unused dep from package.json");
+
+    let output = run_plow_raw(&[
+        "audit",
+        "--root",
+        root.to_str().unwrap(),
+        "--base",
+        &base_sha,
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    // The audit must complete and produce a parseable verdict; it may pass or
+    // fail depending on analysis results, but must not crash (exit 2+).
+    assert!(
+        output.code == 0 || output.code == 1,
+        "audit on a package.json-only change must complete without crashing. stderr: {}\nstdout: {}",
+        output.stderr,
+        output.stdout
+    );
+    let json = parse_json(&output);
+    assert!(
+        json.get("verdict").is_some(),
+        "audit must produce a verdict field in JSON output. full json: {}",
+        serde_json::to_string_pretty(&json).unwrap_or_default()
+    );
+    // The attribution block must be present.
+    assert!(
+        json.get("attribution").is_some(),
+        "audit must produce an attribution block even when package.json is the only change"
+    );
+}
+
+/// A Next.js project whose base barrel re-exports only a `"use client"`
+/// component. The feature branch adds a server-only re-export to that barrel,
+/// turning it into a mixed client/server barrel: the finding is NEW relative to
+/// the base, so audit must annotate it `introduced: true`.
+fn create_mixed_barrel_audit_fixture() -> TempDir {
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("app/components")).unwrap();
+
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name":"audit-mixed-barrel","dependencies":{"next":"^14.0.0","react":"^18.0.0","server-only":"^0.0.1"}}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("tsconfig.json"),
+        r#"{"compilerOptions":{"target":"ES2022","module":"ESNext","moduleResolution":"bundler","jsx":"preserve"},"include":["app"]}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("app/components/Button.tsx"),
+        "\"use client\";\nexport function Button() {\n  return null;\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("app/components/fetchUser.ts"),
+        "import \"server-only\";\nexport function fetchUser() {\n  return { id: 1 };\n}\n",
+    )
+    .unwrap();
+    // Base barrel: client-only re-export, NOT a mixed barrel yet.
+    fs::write(
+        dir.join("app/components/index.ts"),
+        "export { Button } from \"./Button\";\n",
+    )
+    .unwrap();
+
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_AUTHOR_NAME", "test")
+            .env("GIT_AUTHOR_EMAIL", "test@test.com")
+            .env("GIT_COMMITTER_NAME", "test")
+            .env("GIT_COMMITTER_EMAIL", "test@test.com")
+            .output()
+            .expect("git command failed")
+    };
+
+    git(&["init", "-b", "main"]);
+    git(&["add", "."]);
+    git(&["-c", "commit.gpgsign=false", "commit", "-m", "initial"]);
+    git(&["checkout", "-b", "feature"]);
+
+    // Feature branch: add the server-only re-export, creating the mix.
+    fs::write(
+        dir.join("app/components/index.ts"),
+        "export { Button } from \"./Button\";\nexport { fetchUser } from \"./fetchUser\";\n",
+    )
+    .unwrap();
+    git(&["add", "."]);
+    git(&[
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-m",
+        "add server-only re-export to barrel",
+    ]);
+
+    tmp
+}
+
+#[test]
+fn audit_annotates_newly_added_mixed_barrel_as_introduced() {
+    let tmp = create_mixed_barrel_audit_fixture();
+    let output = run_plow_raw(&[
+        "audit",
+        "--root",
+        tmp.path().to_str().unwrap(),
+        "--base",
+        "main",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    let json = parse_json(&output);
+    let barrels = json["dead_code"]["mixed_client_server_barrels"]
+        .as_array()
+        .expect("dead_code.mixed_client_server_barrels should be an array");
+    assert_eq!(
+        barrels.len(),
+        1,
+        "exactly one mixed client/server barrel expected. full json: {}",
+        serde_json::to_string_pretty(&json).unwrap_or_default()
+    );
+    assert_eq!(
+        barrels[0]["introduced"], true,
+        "the newly-mixed barrel must be annotated introduced: true"
+    );
+}
+
+/// A Next.js project whose base file has a correctly-positioned leading
+/// `"use client"` directive. The feature branch adds an import ABOVE the
+/// directive, demoting it to an ordinary expression statement the RSC bundler
+/// ignores: the finding is NEW relative to the base, so audit must annotate it
+/// `introduced: true`.
+fn create_misplaced_directive_audit_fixture() -> TempDir {
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("app")).unwrap();
+
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name":"audit-misplaced-directive","dependencies":{"next":"^14.0.0","react":"^18.0.0"}}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("tsconfig.json"),
+        r#"{"compilerOptions":{"target":"ES2022","module":"ESNext","moduleResolution":"bundler","jsx":"preserve"},"include":["app"]}"#,
+    )
+    .unwrap();
+    fs::write(dir.join("app/helper.ts"), "export const helper = 1;\n").unwrap();
+    // Base: the directive is correctly positioned at the top of the file.
+    fs::write(
+        dir.join("app/page.tsx"),
+        "\"use client\";\nimport { helper } from \"./helper\";\nexport default function Page() {\n  return helper;\n}\n",
+    )
+    .unwrap();
+
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_AUTHOR_NAME", "test")
+            .env("GIT_AUTHOR_EMAIL", "test@test.com")
+            .env("GIT_COMMITTER_NAME", "test")
+            .env("GIT_COMMITTER_EMAIL", "test@test.com")
+            .output()
+            .expect("git command failed")
+    };
+
+    git(&["init", "-b", "main"]);
+    git(&["add", "."]);
+    git(&["-c", "commit.gpgsign=false", "commit", "-m", "initial"]);
+    git(&["checkout", "-b", "feature"]);
+
+    // Feature branch: move an import above the directive, demoting it.
+    fs::write(
+        dir.join("app/page.tsx"),
+        "import { helper } from \"./helper\";\n\"use client\";\nexport default function Page() {\n  return helper;\n}\n",
+    )
+    .unwrap();
+    git(&["add", "."]);
+    git(&[
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-m",
+        "move import above use client directive",
+    ]);
+
+    tmp
+}
+
+#[test]
+fn audit_annotates_newly_added_misplaced_directive_as_introduced() {
+    let tmp = create_misplaced_directive_audit_fixture();
+    let output = run_plow_raw(&[
+        "audit",
+        "--root",
+        tmp.path().to_str().unwrap(),
+        "--base",
+        "main",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    let json = parse_json(&output);
+    let directives = json["dead_code"]["misplaced_directives"]
+        .as_array()
+        .expect("dead_code.misplaced_directives should be an array");
+    assert_eq!(
+        directives.len(),
+        1,
+        "exactly one misplaced directive expected. full json: {}",
+        serde_json::to_string_pretty(&json).unwrap_or_default()
+    );
+    assert_eq!(
+        directives[0]["introduced"], true,
+        "the newly-misplaced directive must be annotated introduced: true"
+    );
 }

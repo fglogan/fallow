@@ -16,7 +16,7 @@ doctest = false
 
 [dependencies]
 plow-types = { workspace = true }
-fallow-cov-protocol = "0.8"
+plow-cov-protocol = { package = "fallow-cov-protocol", version = "0.8" }
 
 # Parsing & analysis
 oxc_allocator = { workspace = true }

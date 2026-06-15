@@ -1,8 +1,8 @@
-# Public Fallow Config Corpus
+# Public Plow Config Corpus
 
-This maintainer workflow turns public Fallow config files into repeatable evidence for recurring false-positive workarounds. It uses only public GitHub repositories that already publish `.fallowrc.json`, `.fallowrc.jsonc`, or `fallow.toml`.
+This maintainer workflow turns public Plow config files into repeatable evidence for recurring false-positive workarounds. It uses only public GitHub repositories that already publish `.plowrc.json`, `.plowrc.jsonc`, or `plow.toml`.
 
-The corpus is not telemetry. It does not read private repositories, upload data, or prove that every comment is a confirmed Fallow bug. Comment matches are candidate evidence for maintainers to inspect.
+The corpus is not telemetry. It does not read private repositories, upload data, or prove that every comment is a confirmed Plow bug. Comment matches are candidate evidence for maintainers to inspect.
 
 ## How To Run
 
@@ -22,7 +22,7 @@ python3 scripts/public-config-corpus.py \
   --output docs/public-config-corpus.md
 ```
 
-The default cache lives under `.fallow/public-config-corpus/`, which is intentionally untracked. The manifest is written to `.fallow/public-config-corpus/manifest.json` unless `--manifest` is provided.
+The default cache lives under `.plow/public-config-corpus/`, which is intentionally untracked. The manifest is written to `.plow/public-config-corpus/manifest.json` unless `--manifest` is provided.
 
 For reviewable local testing without GitHub access:
 
@@ -62,9 +62,9 @@ When turning a finding into an issue:
 Start with the review queue:
 
 1. Look for repeated use of `entry`, `dynamicallyLoaded`, `ignorePatterns`, `ignoreDependencies`, `ignoreExports`, `usedClassMembers`, and rule downgrades.
-2. Inspect candidate workaround comments for phrases such as `false positive`, `workaround`, `fallow misses`, `loaded by`, `framework`, `generated`, `runtime`, `plugin`, `dynamic`, `entrypoint`, `keep`, and `manual`.
+2. Inspect candidate workaround comments for phrases such as `false positive`, `workaround`, `plow misses`, `loaded by`, `framework`, `generated`, `runtime`, `plugin`, `dynamic`, `entrypoint`, `keep`, and `manual`.
 3. Check parse failures separately. Some are unsupported syntax, but some are search noise or invalid historical configs.
-4. File a focused issue only after confirming the workaround maps to a current Fallow false positive or missing plugin convention.
+4. File a focused issue only after confirming the workaround maps to a current Plow false positive or missing plugin convention.
 
 ## Current Seed Report
 
@@ -80,14 +80,14 @@ The 2026-05-22 manual pass over 100 public configs found:
 
 Known issue family from that pass:
 
-- [#546](https://github.com/fallow-rs/fallow/issues/546): Storybook `staticDirs` assets and manager-runtime imports.
-- [#586](https://github.com/fallow-rs/fallow/issues/586): Playwright fixture class-member propagation.
-- [#588](https://github.com/fallow-rs/fallow/issues/588), [#589](https://github.com/fallow-rs/fallow/issues/589), [#590](https://github.com/fallow-rs/fallow/issues/590): rwsdk, Wrangler, Node loader, and content-collections convention-loaded files.
-- [#600](https://github.com/fallow-rs/fallow/issues/600): Electron-Vite renderer HTML entries.
-- [#601](https://github.com/fallow-rs/fallow/issues/601), [#602](https://github.com/fallow-rs/fallow/issues/602): Vitest alias and mock-module consumers.
+- [#546](https://github.com/fglogan/genesis-plow/issues/546): Storybook `staticDirs` assets and manager-runtime imports.
+- [#586](https://github.com/fglogan/genesis-plow/issues/586): Playwright fixture class-member propagation.
+- [#588](https://github.com/fglogan/genesis-plow/issues/588), [#589](https://github.com/fglogan/genesis-plow/issues/589), [#590](https://github.com/fglogan/genesis-plow/issues/590): rwsdk, Wrangler, Node loader, and content-collections convention-loaded files.
+- [#600](https://github.com/fglogan/genesis-plow/issues/600): Electron-Vite renderer HTML entries.
+- [#601](https://github.com/fglogan/genesis-plow/issues/601), [#602](https://github.com/fglogan/genesis-plow/issues/602): Vitest alias and mock-module consumers.
 
 ## Follow-Up Ideas
 
-- Clone a tiny pinned subset and run the local Fallow binary to compare findings against config comments and baselines.
+- Clone a tiny pinned subset and run the local Plow binary to compare findings against config comments and baselines.
 - Add JSON output if the corpus becomes a trendable quality signal.
 - Consider a scheduled workflow only after the manual process proves useful and rate-limit behavior is well understood.

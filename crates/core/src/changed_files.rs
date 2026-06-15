@@ -165,13 +165,47 @@ pub fn resolve_git_toplevel(cwd: &Path) -> Result<PathBuf, ChangedFilesError> {
     }
 
     let path = PathBuf::from(trimmed);
-    // `dunce::canonicalize` strips Windows `\\?\` verbatim prefix; without
-    // this, every changed file emitted by `git diff --name-only` got joined
-    // onto a verbatim-prefixed toplevel, and downstream `strip_prefix`
-    // comparisons against an `opts.root` that does NOT carry the verbatim
-    // prefix silently mismatched. The focus-filter then dropped EVERY
-    // finding on Windows, breaking `plow audit` and `--changed-since`.
-    // On POSIX `dunce::canonicalize` is identical to `std::fs::canonicalize`.
+    Ok(dunce::canonicalize(&path).unwrap_or(path))
+}
+
+/// Resolve the canonical git *common* directory for `cwd`.
+///
+/// Runs `git rev-parse --path-format=absolute --git-common-dir`. Unlike
+/// `--show-toplevel` (which returns each worktree's own working directory),
+/// `--git-common-dir` returns the SHARED `.git` directory of the repository,
+/// so every linked worktree of the same repo resolves to the SAME path. This
+/// is what lets the Impact store collapse all worktrees of a repo onto a
+/// single identity (one history per repo, not per checkout).
+///
+/// `--path-format=absolute` (git 2.31+) forces an absolute result, so the
+/// bare-`.git` relative form `--git-common-dir` would otherwise emit at the
+/// repo root is avoided. The path is canonicalized to agree with paths from
+/// `fs::canonicalize` elsewhere (macOS `/tmp` -> `/private/tmp`, Windows 8.3).
+pub fn resolve_git_common_dir(cwd: &Path) -> Result<PathBuf, ChangedFilesError> {
+    let output = spawn_output(&mut git_command(
+        cwd,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    ))
+    .map_err(|e| ChangedFilesError::GitMissing(e.to_string()))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(if stderr.contains("not a git repository") {
+            ChangedFilesError::NotARepository
+        } else {
+            ChangedFilesError::GitFailed(stderr.trim().to_owned())
+        });
+    }
+
+    let raw = String::from_utf8_lossy(&output.stdout);
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err(ChangedFilesError::GitFailed(
+            "git rev-parse --git-common-dir returned empty output".to_owned(),
+        ));
+    }
+
+    let path = PathBuf::from(trimmed);
     Ok(dunce::canonicalize(&path).unwrap_or(path))
 }
 
@@ -192,24 +226,6 @@ fn collect_git_paths(
         });
     }
 
-    // All callers use modes whose output is repository-root-relative
-    // (`git diff --name-only`, `git ls-files --full-name --others`). Joining
-    // against `toplevel` yields absolute paths that line up with what
-    // `analyze_project` emits when given a canonical workspace root, even if
-    // the LSP / CLI was invoked from a subdirectory.
-    //
-    // Windows-specific normalisation: `git diff --name-only` always emits
-    // forward-slashed paths (`src/legacy.ts`) regardless of OS. `PathBuf::join`
-    // on Windows appends with the native backslash separator without
-    // converting separators inside the appended segment, so the result is
-    // `C:\Users\...\Temp\test\src/legacy.ts` (mixed). File discovery via
-    // walkdir produces all-backslash paths. `FxHashSet::contains` compares
-    // bytes, not components, so the two forms mismatch and the focused
-    // duplicates / changed-since filters silently drop every finding.
-    // Convert forward slashes to backslashes inside the relative segment
-    // before joining so both sides land in native shape. On POSIX the
-    // segment is already in native form (forward slashes) so the conversion
-    // is a no-op.
     #[cfg(windows)]
     let normalise_segment = |line: &str| line.replace('/', "\\");
     #[cfg(not(windows))]
@@ -225,9 +241,8 @@ fn collect_git_paths(
 }
 
 fn git_command(cwd: &Path, args: &[&str]) -> std::process::Command {
-    let mut command = std::process::Command::new("git");
+    let mut command = crate::spawn::git();
     command.args(args).current_dir(cwd);
-    crate::git_env::clear_ambient_git_env(&mut command);
     command
 }
 
@@ -252,11 +267,6 @@ pub fn try_get_changed_files(
     root: &Path,
     git_ref: &str,
 ) -> Result<FxHashSet<PathBuf>, ChangedFilesError> {
-    // Validate the ref BEFORE resolving the toplevel so the security-relevant
-    // boundary check (rejects refs starting with `-`, etc.) runs even when
-    // `cwd` happens to not be a git repo. Otherwise an attacker-controlled
-    // `--changed-since=--upload-pack=evil` would leak through to
-    // `git rev-parse` instead of being rejected at validation.
     validate_git_ref(git_ref).map_err(ChangedFilesError::InvalidRef)?;
     let toplevel = resolve_git_toplevel(root)?;
     try_get_changed_files_with_toplevel(root, &toplevel, git_ref)
@@ -291,16 +301,53 @@ pub fn try_get_changed_files_with_toplevel(
         toplevel,
         &["diff", "--name-only", "HEAD"],
     )?);
-    // `--full-name` forces `ls-files` to emit repository-root-relative paths,
-    // matching `git diff`'s default. Without it, `ls-files` emits paths
-    // relative to cwd, which silently produces wrong joins when the caller
-    // invokes from a subdirectory.
     files.extend(collect_git_paths(
         cwd,
         toplevel,
         &["ls-files", "--full-name", "--others", "--exclude-standard"],
     )?);
     Ok(files)
+}
+
+/// Get the zero-context unified diff of the merge-base range `git_ref...HEAD`,
+/// with paths relative to `root`, for the line-level security gate (issue #886).
+///
+/// Unlike [`get_changed_files`] (which falls back to full scope on failure), this
+/// returns `Err` when the git invocation itself fails (missing/unfetched ref,
+/// shallow clone, not a repo). The security gate hard-errors on `Err` rather than
+/// emitting a green gate: a diff it could not compute must NEVER read as "no new
+/// sinks". `--relative` emits paths relative to `root` (rewriting the prefix to
+/// match the keys `DiffIndex` is queried with, `relative_to_diff_path(finding,
+/// root)`) and, when plow runs in a monorepo subpackage, omits changes outside
+/// `root` from the output entirely; a sibling-package edit `git diff --relative`
+/// did emit would carry a `../...` path that `relative_to_diff_path` cannot strip
+/// (returns `None`), which is harmless because no findings exist for files
+/// outside the analyzed `root`. An empty diff (no changes / docs-only) is
+/// `Ok("")`, a clean pass, not an error.
+pub fn try_get_changed_diff(root: &Path, git_ref: &str) -> Result<String, ChangedFilesError> {
+    validate_git_ref(git_ref).map_err(ChangedFilesError::InvalidRef)?;
+    let output = spawn_output(&mut git_command(
+        root,
+        &[
+            "diff",
+            "--relative",
+            "--unified=0",
+            "--end-of-options",
+            &format!("{git_ref}...HEAD"),
+        ],
+    ))
+    .map_err(|e| ChangedFilesError::GitMissing(e.to_string()))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(if stderr.contains("not a git repository") {
+            ChangedFilesError::NotARepository
+        } else {
+            ChangedFilesError::GitFailed(stderr.trim().to_owned())
+        });
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 /// Get files changed since a git ref. Returns `None` on git failure after
@@ -339,6 +386,11 @@ pub fn get_changed_files(root: &Path, git_ref: &str) -> Option<FxHashSet<PathBuf
 /// deps, test-only deps) are intentionally NOT filtered here. Unlike
 /// file-level issues, a dependency being "unused" is a function of the entire
 /// import graph and can't be attributed to individual changed source files.
+///
+/// This destructure is deliberately exhaustive: adding a field to
+/// `AnalysisResults` must fail compilation here so the author decides
+/// explicitly whether the new finding type is file-attributable (add a retain)
+/// or graph-global (bind with underscore and document why).
 #[expect(
     clippy::implicit_hasher,
     reason = "plow standardizes on FxHashSet across the workspace"
@@ -347,87 +399,129 @@ pub fn filter_results_by_changed_files(
     results: &mut AnalysisResults,
     changed_files: &FxHashSet<PathBuf>,
 ) {
-    let cf = normalize_changed_files_set(changed_files);
-    results
-        .unused_files
-        .retain(|f| contains_normalized(&cf, &f.file.path));
-    results
-        .unused_exports
-        .retain(|e| contains_normalized(&cf, &e.export.path));
-    results
-        .unused_types
-        .retain(|e| contains_normalized(&cf, &e.export.path));
-    results
-        .private_type_leaks
-        .retain(|e| contains_normalized(&cf, &e.leak.path));
-    results
-        .unused_enum_members
-        .retain(|m| contains_normalized(&cf, &m.member.path));
-    results
-        .unused_class_members
-        .retain(|m| contains_normalized(&cf, &m.member.path));
-    results
-        .unresolved_imports
-        .retain(|i| contains_normalized(&cf, &i.import.path));
+    let AnalysisResults {
+        unused_files,
+        unused_exports,
+        unused_types,
+        private_type_leaks,
+        // Dependency-level issues are graph-global: "unused" is a function of
+        // the whole import graph and cannot be attributed to a changed file.
+        unused_dependencies: _unused_dependencies,
+        unused_dev_dependencies: _unused_dev_dependencies,
+        unused_optional_dependencies: _unused_optional_dependencies,
+        unused_enum_members,
+        unused_class_members,
+        unused_store_members,
+        unresolved_imports,
+        unlisted_dependencies,
+        duplicate_exports,
+        // Type-only and test-only dependency issues are graph-global for the
+        // same reason as the other dependency kinds above.
+        type_only_dependencies: _type_only_dependencies,
+        test_only_dependencies: _test_only_dependencies,
+        circular_dependencies,
+        re_export_cycles,
+        boundary_violations,
+        boundary_coverage_violations,
+        boundary_call_violations,
+        policy_violations,
+        stale_suppressions,
+        // Catalog entries are workspace-global: whether a catalog entry is
+        // unused depends on all workspace packages, not a single changed file.
+        unused_catalog_entries: _unused_catalog_entries,
+        empty_catalog_groups,
+        unresolved_catalog_references,
+        unused_dependency_overrides,
+        misconfigured_dependency_overrides,
+        invalid_client_exports,
+        mixed_client_server_barrels,
+        misplaced_directives,
+        unprovided_injects,
+        unrendered_components,
+        route_collisions,
+        dynamic_segment_name_conflicts,
+        unused_component_props,
+        unused_component_emits,
+        unused_server_actions,
+        // Non-finding fields: counts and metadata, not issue collections.
+        suppression_count: _suppression_count,
+        active_suppressions: _active_suppressions,
+        feature_flags: _feature_flags,
+        security_findings,
+        security_unresolved_edge_files: _security_unresolved_edge_files,
+        security_unresolved_callee_sites: _security_unresolved_callee_sites,
+        security_unresolved_callee_diagnostics,
+        // Export usages and entry-point summary are metadata, not issue
+        // collections; they are not changed-files filtered.
+        export_usages: _export_usages,
+        entry_point_summary: _entry_point_summary,
+    } = &mut *results;
 
-    // Unlisted deps: keep only if any importing file is changed
-    results.unlisted_dependencies.retain(|d| {
+    let cf = normalize_changed_files_set(changed_files);
+    unused_files.retain(|f| contains_normalized(&cf, &f.file.path));
+    unused_exports.retain(|e| contains_normalized(&cf, &e.export.path));
+    unused_types.retain(|e| contains_normalized(&cf, &e.export.path));
+    private_type_leaks.retain(|e| contains_normalized(&cf, &e.leak.path));
+    unused_enum_members.retain(|m| contains_normalized(&cf, &m.member.path));
+    unused_class_members.retain(|m| contains_normalized(&cf, &m.member.path));
+    unused_store_members.retain(|m| contains_normalized(&cf, &m.member.path));
+    unresolved_imports.retain(|i| contains_normalized(&cf, &i.import.path));
+
+    unlisted_dependencies.retain(|d| {
         d.dep
             .imported_from
             .iter()
             .any(|s| contains_normalized(&cf, &s.path))
     });
 
-    // Duplicate exports: filter locations to changed files, drop groups with < 2
-    for dup in &mut results.duplicate_exports {
+    for dup in &mut *duplicate_exports {
         dup.export
             .locations
             .retain(|loc| contains_normalized(&cf, &loc.path));
     }
-    results
-        .duplicate_exports
-        .retain(|d| d.export.locations.len() >= 2);
+    duplicate_exports.retain(|d| d.export.locations.len() >= 2);
 
-    // Circular deps: keep cycles where at least one file is changed
-    results
-        .circular_dependencies
-        .retain(|c| c.cycle.files.iter().any(|f| contains_normalized(&cf, f)));
+    circular_dependencies.retain(|c| c.cycle.files.iter().any(|f| contains_normalized(&cf, f)));
 
-    // Re-export cycles: same file-level treatment as circular deps; the
-    // cycle is file-scoped so any member changing counts as touching the
-    // cycle.
-    results
-        .re_export_cycles
-        .retain(|c| c.cycle.files.iter().any(|f| contains_normalized(&cf, f)));
+    re_export_cycles.retain(|c| c.cycle.files.iter().any(|f| contains_normalized(&cf, f)));
 
-    // Boundary violations: keep if the importing file changed
-    results
-        .boundary_violations
-        .retain(|v| contains_normalized(&cf, &v.violation.from_path));
+    boundary_violations.retain(|v| contains_normalized(&cf, &v.violation.from_path));
+    boundary_coverage_violations.retain(|v| contains_normalized(&cf, &v.violation.path));
+    boundary_call_violations.retain(|v| contains_normalized(&cf, &v.violation.path));
+    policy_violations.retain(|v| contains_normalized(&cf, &v.violation.path));
 
-    // Stale suppressions: keep if the file changed
-    results
-        .stale_suppressions
-        .retain(|s| contains_normalized(&cf, &s.path));
+    stale_suppressions.retain(|s| contains_normalized(&cf, &s.path));
 
-    // Unresolved catalog references: anchored at the consumer package.json,
-    // so keep only findings whose path is in the changed set.
-    results
-        .unresolved_catalog_references
-        .retain(|r| contains_normalized(&cf, &r.reference.path));
-    results
-        .empty_catalog_groups
-        .retain(|g| normalized_set_contains_path(&cf, &g.group.path));
+    security_findings.retain(|f| {
+        contains_normalized(&cf, &f.path)
+            || f.trace
+                .iter()
+                .any(|hop| contains_normalized(&cf, &hop.path))
+            || f.reachability.as_ref().is_some_and(|reachability| {
+                reachability
+                    .untrusted_source_trace
+                    .iter()
+                    .any(|hop| contains_normalized(&cf, &hop.path))
+            })
+    });
+    security_unresolved_callee_diagnostics.retain(|d| contains_normalized(&cf, &d.path));
 
-    // Unused / misconfigured dependency overrides: anchored at the declaring
-    // source file (pnpm-workspace.yaml or root package.json). Keep only
-    // findings whose source file is in the changed set.
-    results
-        .unused_dependency_overrides
-        .retain(|o| contains_normalized(&cf, &o.entry.path));
-    results
-        .misconfigured_dependency_overrides
-        .retain(|o| contains_normalized(&cf, &o.entry.path));
+    unresolved_catalog_references.retain(|r| contains_normalized(&cf, &r.reference.path));
+    empty_catalog_groups.retain(|g| normalized_set_contains_path(&cf, &g.group.path));
+
+    unused_dependency_overrides.retain(|o| contains_normalized(&cf, &o.entry.path));
+    misconfigured_dependency_overrides.retain(|o| contains_normalized(&cf, &o.entry.path));
+
+    invalid_client_exports.retain(|e| contains_normalized(&cf, &e.export.path));
+    mixed_client_server_barrels.retain(|b| contains_normalized(&cf, &b.barrel.path));
+    misplaced_directives.retain(|d| contains_normalized(&cf, &d.directive_site.path));
+    unprovided_injects.retain(|i| contains_normalized(&cf, &i.inject.path));
+    unrendered_components.retain(|c| contains_normalized(&cf, &c.component.path));
+    route_collisions.retain(|c| contains_normalized(&cf, &c.collision.path));
+    dynamic_segment_name_conflicts.retain(|c| contains_normalized(&cf, &c.conflict.path));
+    unused_component_props.retain(|p| contains_normalized(&cf, &p.prop.path));
+    unused_component_emits.retain(|e| contains_normalized(&cf, &e.emit.path));
+    unused_server_actions.retain(|a| contains_normalized(&cf, &a.action.path));
 }
 
 /// Pre-normalise a `changed_files` set through `dunce::simplified` so each
@@ -535,12 +629,16 @@ mod tests {
     use super::*;
     use crate::duplicates::{CloneGroup, CloneInstance};
     use crate::results::{
-        BoundaryViolation, CircularDependency, EmptyCatalogGroup, UnusedExport, UnusedFile,
+        BoundaryViolation, CircularDependency, EmptyCatalogGroup, SecurityFinding,
+        SecurityFindingKind, SecurityUnresolvedCalleeDiagnostic, TraceHop, TraceHopRole,
+        UnusedExport, UnusedFile,
     };
+    use plow_types::extract::{SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason};
     use plow_types::output_dead_code::{
         BoundaryViolationFinding, CircularDependencyFinding, EmptyCatalogGroupFinding,
         UnusedExportFinding, UnusedFileFinding,
     };
+    use plow_types::results::{SecurityReachability, SecuritySeverity};
 
     #[test]
     fn changed_files_error_describe_variants() {
@@ -582,7 +680,6 @@ mod tests {
 
     #[test]
     fn augment_git_failed_passthrough_for_other_errors() {
-        // Errors that aren't shallow-clone-related stay verbatim
         let stderr = "fatal: refusing to merge unrelated histories";
         let described = ChangedFilesError::GitFailed(stderr.to_owned()).describe();
         assert_eq!(described, stderr);
@@ -596,15 +693,45 @@ mod tests {
 
     #[test]
     fn validate_git_ref_accepts_baseline_tag() {
+        assert_eq!(validate_git_ref("plow-baseline").unwrap(), "plow-baseline");
+    }
+
+    #[test]
+    fn changed_files_filter_scopes_unresolved_callee_diagnostics() {
+        let mut results = AnalysisResults::default();
+        results
+            .security_unresolved_callee_diagnostics
+            .push(SecurityUnresolvedCalleeDiagnostic {
+                path: PathBuf::from("/repo/src/changed.ts"),
+                line: 4,
+                col: 0,
+                reason: SkippedSecurityCalleeReason::DynamicDispatch,
+                expression_kind: SkippedSecurityCalleeExpressionKind::Other,
+            });
+        results
+            .security_unresolved_callee_diagnostics
+            .push(SecurityUnresolvedCalleeDiagnostic {
+                path: PathBuf::from("/repo/src/unchanged.ts"),
+                line: 4,
+                col: 0,
+                reason: SkippedSecurityCalleeReason::ComputedMember,
+                expression_kind: SkippedSecurityCalleeExpressionKind::ComputedMemberExpression,
+            });
+
+        let mut changed: FxHashSet<PathBuf> = FxHashSet::default();
+        changed.insert(PathBuf::from("/repo/src/changed.ts"));
+
+        filter_results_by_changed_files(&mut results, &changed);
+
+        assert_eq!(results.security_unresolved_callee_diagnostics.len(), 1);
         assert_eq!(
-            validate_git_ref("plow-baseline").unwrap(),
-            "plow-baseline"
+            results.security_unresolved_callee_diagnostics[0].path,
+            PathBuf::from("/repo/src/changed.ts")
         );
     }
 
     #[test]
     fn try_get_changed_files_rejects_invalid_ref() {
-        // Validation runs before git invocation, so any path will do
         let err = try_get_changed_files(Path::new("/"), "--evil")
             .expect_err("leading-dash ref must be rejected");
         assert!(matches!(err, ChangedFilesError::InvalidRef(_)));
@@ -706,7 +833,6 @@ mod tests {
         let changed: FxHashSet<PathBuf> = FxHashSet::default();
         filter_results_by_changed_files(&mut results, &changed);
 
-        // Dependency-level issues survive even when no source files changed
         assert_eq!(results.unused_dependencies.len(), 1);
     }
 
@@ -721,6 +847,7 @@ mod tests {
                     length: 2,
                     line: 1,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             ));
@@ -743,6 +870,7 @@ mod tests {
                     length: 2,
                     line: 1,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             ));
@@ -768,11 +896,110 @@ mod tests {
             }));
 
         let mut changed: FxHashSet<PathBuf> = FxHashSet::default();
-        // only the imported file changed, not the importer
         changed.insert("/b.ts".into());
 
         filter_results_by_changed_files(&mut results, &changed);
         assert!(results.boundary_violations.is_empty());
+    }
+
+    #[test]
+    fn filter_results_keeps_security_finding_when_trace_file_changed() {
+        let mut results = AnalysisResults::default();
+        results.security_findings.push(SecurityFinding {
+            finding_id: String::new(),
+            candidate: plow_types::results::SecurityCandidate::default(),
+            taint_flow: None,
+            attack_surface: None,
+            kind: SecurityFindingKind::ClientServerLeak,
+            category: None,
+            cwe: None,
+            path: "/project/src/client.tsx".into(),
+            line: 2,
+            col: 0,
+            evidence: "candidate".into(),
+            source_backed: false,
+            source_read: None,
+            severity: SecuritySeverity::Low,
+            trace: vec![
+                TraceHop {
+                    path: "/project/src/client.tsx".into(),
+                    line: 2,
+                    col: 0,
+                    role: TraceHopRole::ClientBoundary,
+                },
+                TraceHop {
+                    path: "/project/src/server.ts".into(),
+                    line: 1,
+                    col: 0,
+                    role: TraceHopRole::SecretSource,
+                },
+            ],
+            actions: Vec::new(),
+            dead_code: None,
+            reachability: None,
+            runtime: None,
+        });
+
+        let mut changed: FxHashSet<PathBuf> = FxHashSet::default();
+        changed.insert("/project/src/server.ts".into());
+
+        filter_results_by_changed_files(&mut results, &changed);
+
+        assert_eq!(results.security_findings.len(), 1);
+    }
+
+    #[test]
+    fn filter_results_keeps_security_finding_when_untrusted_source_trace_file_changed() {
+        let mut results = AnalysisResults::default();
+        results.security_findings.push(SecurityFinding {
+            finding_id: String::new(),
+            candidate: plow_types::results::SecurityCandidate::default(),
+            taint_flow: None,
+            attack_surface: None,
+            kind: SecurityFindingKind::TaintedSink,
+            category: Some("command-injection".into()),
+            cwe: Some(78),
+            path: "/project/src/runner.ts".into(),
+            line: 4,
+            col: 2,
+            evidence: "candidate".into(),
+            source_backed: false,
+            source_read: None,
+            severity: SecuritySeverity::Low,
+            trace: Vec::new(),
+            actions: Vec::new(),
+            dead_code: None,
+            reachability: Some(SecurityReachability {
+                reachable_from_entry: false,
+                reachable_from_untrusted_source: true,
+                taint_confidence: Some(plow_types::results::TaintConfidence::ModuleLevel),
+                untrusted_source_hop_count: Some(1),
+                untrusted_source_trace: vec![
+                    TraceHop {
+                        path: "/project/src/route.ts".into(),
+                        line: 1,
+                        col: 0,
+                        role: TraceHopRole::UntrustedSource,
+                    },
+                    TraceHop {
+                        path: "/project/src/runner.ts".into(),
+                        line: 4,
+                        col: 2,
+                        role: TraceHopRole::Sink,
+                    },
+                ],
+                blast_radius: 0,
+                crosses_boundary: false,
+            }),
+            runtime: None,
+        });
+
+        let mut changed: FxHashSet<PathBuf> = FxHashSet::default();
+        changed.insert("/project/src/route.ts".into());
+
+        filter_results_by_changed_files(&mut results, &changed);
+
+        assert_eq!(results.security_findings.len(), 1);
     }
 
     #[test]
@@ -841,7 +1068,6 @@ mod tests {
 
         filter_duplication_by_changed_files(&mut report, &changed, Path::new(""));
         assert_eq!(report.clone_groups.len(), 1);
-        // stats recomputed from surviving groups
         assert_eq!(report.stats.clone_groups, 1);
         assert_eq!(report.stats.clone_instances, 2);
     }
@@ -933,15 +1159,6 @@ mod tests {
         );
     }
 
-    // -----------------------------------------------------------------------
-    // Real git interactions (tempdir + git init). These exercise the
-    // path-resolution boundary between `git rev-parse --show-toplevel`,
-    // `git diff --name-only`, and `git ls-files --full-name --others` to
-    // catch regressions like issue #190 where the LSP workspace was a
-    // subdirectory of the git repo and changed-file paths were joined
-    // against the wrong base.
-    // -----------------------------------------------------------------------
-
     /// Initialize a temp git repo with a single committed file plus a tag
     /// at HEAD. Returns the canonical repo root.
     ///
@@ -1018,7 +1235,6 @@ mod tests {
             changed.contains(&expected),
             "changed set should contain canonical {expected:?}; actual: {changed:?}"
         );
-        // Verify the bogus double-frontend path is NOT in the set
         let bogus = frontend.join("frontend/src/new.ts");
         assert!(
             !changed.contains(&bogus),
@@ -1075,7 +1291,6 @@ mod tests {
         run_git(&repo, &["add", "."]);
         run_git(&repo, &["commit", "--quiet", "-m", "add old"]);
         run_git(&repo, &["tag", "plow-baseline-v2"]);
-        // Modify the tracked file (no commit, so diff-HEAD picks it up)
         std::fs::write(frontend.join("src/old.ts"), "export const x = 2;\n").unwrap();
 
         let changed = try_get_changed_files(&frontend, "plow-baseline-v2").unwrap();
@@ -1101,11 +1316,6 @@ mod tests {
 
         let toplevel = resolve_git_toplevel(&frontend).unwrap();
         assert_eq!(toplevel, repo, "toplevel should equal canonical repo root");
-        // Use `dunce::canonicalize` rather than `std::fs::canonicalize` on
-        // the RHS so the assertion stays self-consistent on Windows.
-        // Production `resolve_git_toplevel` runs `dunce::canonicalize` (PR
-        // #566); `std::fs::canonicalize` on Windows would re-add the `\\?\`
-        // verbatim prefix and diverge from `toplevel`. POSIX is identical.
         assert_eq!(
             toplevel,
             dunce::canonicalize(&toplevel).unwrap(),
@@ -1120,6 +1330,55 @@ mod tests {
     fn resolve_git_toplevel_not_a_repository() {
         let tmp = tempfile::tempdir().unwrap();
         let result = resolve_git_toplevel(tmp.path());
+        assert!(
+            matches!(result, Err(ChangedFilesError::NotARepository)),
+            "expected NotARepository, got {result:?}"
+        );
+    }
+
+    /// Two linked worktrees of the same repo resolve to the SAME common dir
+    /// (the shared `.git`), even though their `--show-toplevel` working
+    /// directories differ. This is the invariant the Impact store relies on to
+    /// collapse all worktrees of a repo onto one history.
+    #[test]
+    fn resolve_git_common_dir_collapses_worktrees() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = init_repo(tmp.path());
+        let linked = tmp.path().join("linked-worktree");
+        run_git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "--quiet",
+                linked.to_str().unwrap(),
+                "-b",
+                "feat",
+            ],
+        );
+
+        let main_common = resolve_git_common_dir(&repo).unwrap();
+        let linked_common = resolve_git_common_dir(&linked).unwrap();
+        assert_eq!(
+            main_common, linked_common,
+            "worktrees of one repo must share a common dir"
+        );
+
+        // The per-worktree toplevels DO differ, proving the collapse is real.
+        let main_top = resolve_git_toplevel(&repo).unwrap();
+        let linked_top = resolve_git_toplevel(&linked).unwrap();
+        assert_ne!(
+            main_top, linked_top,
+            "the two worktrees should have distinct toplevels"
+        );
+    }
+
+    /// Outside any git repo, `resolve_git_common_dir` returns `NotARepository`
+    /// so the Impact key can fall back to the canonical root.
+    #[test]
+    fn resolve_git_common_dir_not_a_repository() {
+        let tmp = tempfile::tempdir().unwrap();
+        let result = resolve_git_common_dir(tmp.path());
         assert!(
             matches!(result, Err(ChangedFilesError::NotARepository)),
             "expected NotARepository, got {result:?}"

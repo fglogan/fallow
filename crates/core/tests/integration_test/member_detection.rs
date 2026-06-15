@@ -1,7 +1,5 @@
 use super::common::{create_config, create_config_with_ignore_decorators, fixture_path};
 
-// ── Enum/class members integration ─────────────────────────────
-
 #[test]
 fn enum_class_members_detects_unused_members() {
     let root = fixture_path("enum-class-members");
@@ -14,7 +12,6 @@ fn enum_class_members_detects_unused_members() {
         .map(|m| m.member.member_name.as_str())
         .collect();
 
-    // Only Status.Active is used; Inactive and Pending should be unused
     assert!(
         unused_enum_member_names.contains(&"Inactive"),
         "Inactive should be detected as unused enum member, found: {unused_enum_member_names:?}"
@@ -30,19 +27,16 @@ fn enum_class_members_detects_unused_members() {
         .map(|m| m.member.member_name.as_str())
         .collect();
 
-    // unusedMethod is never called
     assert!(
         unused_class_member_names.contains(&"unusedMethod"),
         "unusedMethod should be detected as unused class member, found: {unused_class_member_names:?}"
     );
 
-    // greet() is called via instance: `const svc = new MyService(); svc.greet()`
     assert!(
         !unused_class_member_names.contains(&"greet"),
         "greet should NOT be unused (called via instance), found: {unused_class_member_names:?}"
     );
 
-    // name property is never accessed (not via svc.name or this.name)
     assert!(
         unused_class_member_names.contains(&"name"),
         "name should be detected as unused class property, found: {unused_class_member_names:?}"
@@ -165,8 +159,6 @@ fn public_api_class_members_reexported_from_entry_points_are_not_reported() {
     );
 }
 
-// ── Cross-package enum/class member access (issue #178) ────────
-
 #[test]
 fn cross_package_enum_class_members_credit_re_exported_origin() {
     let root = fixture_path("cross-package-enum-class-members");
@@ -179,12 +171,6 @@ fn cross_package_enum_class_members_credit_re_exported_origin() {
         .map(|m| m.member.member_name.as_str())
         .collect();
 
-    // StatusCode.Active/Inactive/Pending are referenced cross-package via
-    // `import { StatusCode } from '@repro/lib-a'` then `StatusCode.Active`,
-    // where the `@repro/lib-a` import resolves to the barrel `index.ts`.
-    // Without re-export chain propagation in `find_unused_members`, all
-    // four members would be flagged. After the fix, only the genuinely
-    // unused `Archived` should be reported.
     assert!(
         !unused_enum_member_names.contains(&"Active"),
         "StatusCode.Active should be credited via cross-package access, found: {unused_enum_member_names:?}"
@@ -202,7 +188,6 @@ fn cross_package_enum_class_members_credit_re_exported_origin() {
         "StatusCode.Archived is genuinely unused and should still be flagged, found: {unused_enum_member_names:?}"
     );
 
-    // Direction: only East and West are referenced cross-package.
     assert!(
         !unused_enum_member_names.contains(&"East"),
         "Direction.East should be credited via cross-package access, found: {unused_enum_member_names:?}"
@@ -220,8 +205,6 @@ fn cross_package_enum_class_members_credit_re_exported_origin() {
         "Direction.South is genuinely unused, found: {unused_enum_member_names:?}"
     );
 
-    // Class static method case from the issue comment: StringUtils.toUpper
-    // is called cross-package; the other two static methods are not.
     let unused_class_member_names: Vec<&str> = results
         .unused_class_members
         .iter()
@@ -413,6 +396,82 @@ fn playwright_fixture_teardown_credits_factory_getter_member_usage() {
 }
 
 #[test]
+fn playwright_fixture_getter_chain_credits_nested_fixture_methods() {
+    let root = fixture_path("issue-1190-playwright-fixture-getter-chain");
+    let config = create_config_with_ignore_decorators(root, vec!["@step".to_string()]);
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<String> = results
+        .unused_class_members
+        .iter()
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&"MessageChecks.hasExpectedRecord".to_string()),
+        "MessageChecks.hasExpectedRecord should be credited through app.assert.messageChecks.hasExpectedRecord(), found: {unused_class_members:?}"
+    );
+    assert!(
+        !unused_class_members.contains(&"MessageChecks.hasMessageForRecordId".to_string()),
+        "MessageChecks.hasMessageForRecordId should be credited through app.assert.messageChecks.hasMessageForRecordId(), found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&"MessageChecks.unusedCheck".to_string()),
+        "a decorated but genuinely unused MessageChecks method should still be reported, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn playwright_wrapper_fixtures_credit_nested_fixture_methods() {
+    let root = fixture_path("issue-1210-playwright-wrapper-fixtures");
+    let config = create_config_with_ignore_decorators(root, vec!["@step".to_string()]);
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<String> = results
+        .unused_class_members
+        .iter()
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&"MessageChecks.hasExpectedRecord".to_string()),
+        "MessageChecks.hasExpectedRecord should remain credited through the direct fixture, found: {unused_class_members:?}"
+    );
+    assert!(
+        !unused_class_members.contains(&"MessageChecks.hasMessageForRecordId".to_string()),
+        "MessageChecks.hasMessageForRecordId should remain credited through the direct fixture, found: {unused_class_members:?}"
+    );
+    assert!(
+        !unused_class_members.contains(&"MessageChecks.hasMergedRecord".to_string()),
+        "MessageChecks.hasMergedRecord should be credited through mergeTests, found: {unused_class_members:?}"
+    );
+    assert!(
+        !unused_class_members.contains(&"MessageChecks.hasMergedMessageForRecordId".to_string()),
+        "MessageChecks.hasMergedMessageForRecordId should be credited through aliased mergeTests, found: {unused_class_members:?}"
+    );
+    assert!(
+        !unused_class_members.contains(&"MessageChecks.hasExtendedRecord".to_string()),
+        "MessageChecks.hasExtendedRecord should be credited through wrapper .extend, found: {unused_class_members:?}"
+    );
+    assert!(
+        !unused_class_members.contains(&"MessageChecks.hasExtendedMessageForRecordId".to_string()),
+        "MessageChecks.hasExtendedMessageForRecordId should be credited through wrapper .extend, found: {unused_class_members:?}"
+    );
+    assert!(
+        !unused_class_members.contains(&"MessageChecks.hasExtendedMergedRecord".to_string()),
+        "MessageChecks.hasExtendedMergedRecord should be credited through transitive wrapper aliases, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&"MessageChecks.isActuallyUnused".to_string()),
+        "the first genuinely unused decorated control should still be reported, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&"MessageChecks.isActuallyUnusedExtended".to_string()),
+        "the second genuinely unused decorated control should still be reported, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
 fn fluent_builder_chain_credits_intermediate_setters() {
     let root = fixture_path("issue-387-fluent-builder");
     let config = create_config(root);
@@ -439,10 +498,6 @@ fn fluent_builder_chain_credits_intermediate_setters() {
         unused_class_members.contains(&"EventBuilder.setUnused".to_string()),
         "genuinely unused fluent setters should still be reported, found: {unused_class_members:?}"
     );
-    // Negative case: `EventBuilder.format("x").trim()` emits a fluent-chain
-    // sentinel, but `format` is NOT `is_instance_returning_static` (it returns
-    // string). The analyze-layer `!has_factory` guard must reject the chain so
-    // `fakeFromNonFactory` stays reported as unused.
     assert!(
         unused_class_members.contains(&"EventBuilder.fakeFromNonFactory".to_string()),
         "fluent-chain credit must not piggy-back on a non-factory root method, found: {unused_class_members:?}"
@@ -497,8 +552,6 @@ fn angular_inject_fields_credit_service_member_usage() {
     );
 }
 
-// ── Whole-object enum member heuristics ────────────────────────
-
 #[test]
 fn enum_whole_object_uses_no_false_positives() {
     let root = fixture_path("enum-whole-object");
@@ -511,7 +564,6 @@ fn enum_whole_object_uses_no_false_positives() {
         .map(|m| m.member.member_name.as_str())
         .collect();
 
-    // Status used via Object.values — no members should be unused
     assert!(
         !unused_enum_member_names.contains(&"Active"),
         "Active should not be unused (Object.values), found: {unused_enum_member_names:?}"
@@ -525,7 +577,6 @@ fn enum_whole_object_uses_no_false_positives() {
         "Pending should not be unused (Object.values), found: {unused_enum_member_names:?}"
     );
 
-    // Direction used via Object.keys — no members should be unused
     assert!(
         !unused_enum_member_names.contains(&"Up"),
         "Up should not be unused (Object.keys), found: {unused_enum_member_names:?}"
@@ -535,7 +586,6 @@ fn enum_whole_object_uses_no_false_positives() {
         "Down should not be unused (Object.keys), found: {unused_enum_member_names:?}"
     );
 
-    // Color used via for..in — no members should be unused
     assert!(
         !unused_enum_member_names.contains(&"Red"),
         "Red should not be unused (for..in), found: {unused_enum_member_names:?}"
@@ -545,7 +595,6 @@ fn enum_whole_object_uses_no_false_positives() {
         "Green should not be unused (for..in), found: {unused_enum_member_names:?}"
     );
 
-    // Priority — only High accessed via computed literal, Low and Medium should be unused
     assert!(
         unused_enum_member_names.contains(&"Low"),
         "Low should be unused (only High accessed via computed), found: {unused_enum_member_names:?}"
@@ -555,8 +604,6 @@ fn enum_whole_object_uses_no_false_positives() {
         "Medium should be unused (only High accessed via computed), found: {unused_enum_member_names:?}"
     );
 }
-
-// ── Type-level enum member usage ──────────────────────────────
 
 #[test]
 fn enum_type_level_usage_no_false_positives() {
@@ -570,7 +617,6 @@ fn enum_type_level_usage_no_false_positives() {
         .map(|m| m.member.member_name.as_str())
         .collect();
 
-    // BreakpointString used as mapped type constraint — all members should be used
     assert!(
         !unused_enum_member_names.contains(&"xs"),
         "xs should not be unused (mapped type constraint), found: {unused_enum_member_names:?}"
@@ -580,7 +626,6 @@ fn enum_type_level_usage_no_false_positives() {
         "xxl should not be unused (mapped type constraint), found: {unused_enum_member_names:?}"
     );
 
-    // Status.Active used via qualified type name, Status.Inactive via runtime access
     assert!(
         !unused_enum_member_names.contains(&"Active"),
         "Active should not be unused (type qualified name), found: {unused_enum_member_names:?}"
@@ -590,13 +635,11 @@ fn enum_type_level_usage_no_false_positives() {
         "Inactive should not be unused (runtime access), found: {unused_enum_member_names:?}"
     );
 
-    // Status.Pending is not used in any way — should be unused
     assert!(
         unused_enum_member_names.contains(&"Pending"),
         "Pending should be unused (no type-level or runtime access), found: {unused_enum_member_names:?}"
     );
 
-    // Color used via Record<Color, string> — all members should be used
     assert!(
         !unused_enum_member_names.contains(&"Red"),
         "Red should not be unused (Record<Color, T>), found: {unused_enum_member_names:?}"
@@ -606,7 +649,6 @@ fn enum_type_level_usage_no_false_positives() {
         "Blue should not be unused (Record<Color, T>), found: {unused_enum_member_names:?}"
     );
 
-    // Direction used via { [K in keyof typeof Direction]: ... } — all members should be used
     assert!(
         !unused_enum_member_names.contains(&"Up"),
         "Up should not be unused (keyof typeof in mapped type), found: {unused_enum_member_names:?}"
@@ -616,8 +658,6 @@ fn enum_type_level_usage_no_false_positives() {
         "Right should not be unused (keyof typeof in mapped type), found: {unused_enum_member_names:?}"
     );
 }
-
-// ── Typed-binding nullable unions ─────────
 
 #[test]
 fn typed_binding_through_nullable_unions_credits_class_methods() {
@@ -631,29 +671,21 @@ fn typed_binding_through_nullable_unions_credits_class_methods() {
         .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
         .collect();
 
-    // `let pending: Aggregate | undefined; pending.rename();` reaches rename
-    // through the nullable-union branch of `extract_type_reference_name`.
     assert!(
         !unused.contains(&"Aggregate.rename".to_string()),
         "Aggregate.rename should be credited through `Aggregate | undefined`, found unused: {unused:?}"
     );
 
-    // `const ready: Promise<Aggregate> = ...; ready.archive();` is a member
-    // access on the Promise object, not on Aggregate. It should not credit
-    // Aggregate.archive.
     assert!(
         unused.contains(&"Aggregate.archive".to_string()),
         "Aggregate.archive should not be credited through `Promise<Aggregate>`, found unused: {unused:?}"
     );
 
-    // unusedMethod has no call site in any form and should still be reported.
     assert!(
         unused.contains(&"Aggregate.unusedMethod".to_string()),
         "Aggregate.unusedMethod should still be flagged as unused, found unused: {unused:?}"
     );
 }
-
-// ── ignoreDecorators (issue #471) ──────────────────────────────
 
 #[test]
 fn ignore_decorators_unlocks_only_listed_decorators() {
@@ -667,29 +699,22 @@ fn ignore_decorators_unlocks_only_listed_decorators() {
         .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
         .collect();
 
-    // @step is in the ignore list; decoratedOnly has only @step, so it gets
-    // checked normally and surfaces as unused.
     assert!(
         unused.contains(&"Demo.decoratedOnly".to_string()),
         "decoratedOnly carries only @step and should be reported, found: {unused:?}"
     );
-    // plainUnused has no decorators; the existing detector reports it.
     assert!(
         unused.contains(&"Demo.plainUnused".to_string()),
         "plainUnused has no decorators and should be reported, found: {unused:?}"
     );
-    // mixed has @step AND @Inject; @Inject is not in the ignore list, so the
-    // conservative skip still applies.
     assert!(
         !unused.contains(&"Demo.mixed".to_string()),
         "mixed carries a non-ignored @Inject and must stay skipped, found: {unused:?}"
     );
-    // frameworkOnly has only @Inject (not ignored); stays skipped.
     assert!(
         !unused.contains(&"Demo.frameworkOnly".to_string()),
         "frameworkOnly carries only the non-ignored @Inject and must stay skipped, found: {unused:?}"
     );
-    // actuallyUsed is called from entry.ts; never surfaces as unused regardless.
     assert!(
         !unused.contains(&"Demo.actuallyUsed".to_string()),
         "actuallyUsed is called from entry and must not be reported, found: {unused:?}"
@@ -708,17 +733,14 @@ fn ignore_decorators_dotted_entry_matches_exact_path() {
         .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
         .collect();
 
-    // @decorators.log matches the dotted entry; loggedMethod is checked.
     assert!(
         unused.contains(&"Demo.loggedMethod".to_string()),
         "loggedMethod's @decorators.log matches the dotted entry and the method should be reported, found: {unused:?}"
     );
-    // @decorators.audit does NOT match the dotted entry; auditedMethod stays skipped.
     assert!(
         !unused.contains(&"Demo.auditedMethod".to_string()),
         "auditedMethod's @decorators.audit is not in the ignore list and must stay skipped, found: {unused:?}"
     );
-    // plainMethod has no decorators; reported as unused normally.
     assert!(
         unused.contains(&"Demo.plainMethod".to_string()),
         "plainMethod has no decorators and should be reported, found: {unused:?}"
@@ -737,8 +759,6 @@ fn ignore_decorators_bare_entry_collapses_namespace() {
         .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
         .collect();
 
-    // Bare "decorators" matches the leftmost segment of every @decorators.*
-    // path, so both decorated methods are checked.
     assert!(
         unused.contains(&"Demo.loggedMethod".to_string()),
         "loggedMethod's @decorators.log should match bare entry 'decorators', found: {unused:?}"
@@ -751,11 +771,6 @@ fn ignore_decorators_bare_entry_collapses_namespace() {
 
 #[test]
 fn ignore_decorators_applies_to_declaring_class_only() {
-    // class Page { @step run() {} }; class AdminPage extends Page {}.
-    // entry.ts references AdminPage only. With @step in the ignore list, the
-    // declaring class's @step-decorated method is checked: Page.run should
-    // surface as unused. AdminPage has no own members; the gate has nothing to
-    // do with the child.
     let root = fixture_path("ignore-decorators-inheritance");
     let config = create_config_with_ignore_decorators(root, vec!["@step".to_string()]);
     let results = plow_core::analyze(&config).expect("analysis should succeed");
@@ -770,7 +785,6 @@ fn ignore_decorators_applies_to_declaring_class_only() {
         unused.contains(&"Page.run".to_string()),
         "Page.run carries only @step and should be reported on the declaring class, found: {unused:?}"
     );
-    // AdminPage has zero members of its own; the gate is irrelevant for it.
     let admin_findings: Vec<&String> = unused
         .iter()
         .filter(|entry| entry.starts_with("AdminPage."))

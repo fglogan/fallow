@@ -337,9 +337,10 @@ pub fn compute_angular_template_complexity(source: &str) -> Option<FunctionCompl
         cognitive: complexity.cognitive,
         line_count,
         param_count: 0,
-        // Synthetic template-derived complexity has no source-byte span to
-        // digest; runtime coverage does not track templates.
         source_hash: None,
+        // The hand-rolled Angular template scanner emits only aggregate metrics;
+        // per-construct contributions are out of scope for the first cut.
+        contributions: Vec::new(),
     })
 }
 
@@ -484,7 +485,10 @@ fn find_top_level_ternary(source: &str) -> Result<Option<(usize, usize)>, ScanEr
             }
             b':' if depth == 0 && question.is_some() => {
                 if nested_ternaries == 0 {
-                    return Ok(Some((question.expect("question exists"), offset)));
+                    if let Some(question) = question {
+                        return Ok(Some((question, offset)));
+                    }
+                    return Err(ScanError);
                 }
                 nested_ternaries -= 1;
                 offset += 1;
@@ -598,7 +602,14 @@ fn skip_quoted(source: &str, quote_offset: usize) -> Result<usize, ScanError> {
     let mut offset = quote_offset + 1;
     while offset < source.len() {
         match source.as_bytes()[offset] {
-            b'\\' => offset = (offset + 2).min(source.len()),
+            // Advance past the backslash, then one full char: a fixed +2 byte
+            // advance can land mid-character when the escapee is multi-byte.
+            b'\\' => {
+                offset += 1;
+                if offset < source.len() {
+                    offset += source[offset..].chars().next().map_or(0, char::len_utf8);
+                }
+            }
             byte if byte == quote => return Ok(offset + 1),
             _ => offset += source[offset..].chars().next().map_or(1, char::len_utf8),
         }
@@ -843,13 +854,11 @@ mod tests {
 
     #[test]
     fn html_comments_are_skipped() {
-        // Logical-and inside an HTML comment must not contribute.
         assert!(compute_angular_template_complexity("<!-- a && b && c --><p>plain</p>").is_none());
     }
 
     #[test]
     fn closing_tags_without_attributes_do_not_panic() {
-        // Regression: scan_attributes must short-circuit on `</tag>` form.
         let complexity =
             compute_angular_template_complexity("<section><div *ngIf=\"a\">x</div></section>")
                 .expect("template should have complexity");
@@ -858,11 +867,19 @@ mod tests {
 
     #[test]
     fn quoted_strings_inside_attributes_do_not_break_scanner() {
-        // Single-quoted attribute values containing > and { must not derail scanning.
         let complexity = compute_angular_template_complexity(
             r"<a href='https://example.com?q=1&r=2' [class.x]='a && b' />",
         )
         .expect("template should have complexity");
+        assert!(complexity.cyclomatic >= 2, "{complexity:?}");
+    }
+
+    #[test]
+    fn backslash_before_multibyte_char_in_attribute_does_not_panic() {
+        // U+200B is a 3-byte char, so a +2 byte advance past `\` lands mid-char.
+        let complexity =
+            compute_angular_template_complexity("<a title='x\\\u{200b}y' [class.x]='a && b' />")
+                .expect("template should have complexity");
         assert!(complexity.cyclomatic >= 2, "{complexity:?}");
     }
 }

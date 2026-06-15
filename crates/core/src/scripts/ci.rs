@@ -9,7 +9,7 @@ use std::path::Path;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use super::{could_be_file_path, parse_script, resolve_binary_to_package};
+use super::{analyze_commands_with_context, could_be_file_path};
 
 /// Result of scanning CI config files: package names used by CI tooling AND
 /// project-relative file paths referenced as command-line arguments.
@@ -33,17 +33,27 @@ pub struct CiAnalysis {
 ///
 /// CI files always live at `.gitlab-ci.yml` or `.github/workflows/*.yml`
 /// relative to the project root, so no workspace-prefix transformation applies.
-pub fn analyze_ci_files(root: &Path, bin_map: &FxHashMap<String, String>) -> CiAnalysis {
+pub fn analyze_ci_files(
+    root: &Path,
+    bin_map: &FxHashMap<String, String>,
+    declared_packages: &FxHashSet<String>,
+    script_names: &FxHashSet<String>,
+) -> CiAnalysis {
     let _span = tracing::info_span!("analyze_ci_files").entered();
     let mut analysis = CiAnalysis::default();
 
-    // GitLab CI
     let gitlab_ci = root.join(".gitlab-ci.yml");
     if let Ok(content) = std::fs::read_to_string(&gitlab_ci) {
-        extract_ci_signals(&content, root, bin_map, &mut analysis);
+        extract_ci_signals(
+            &content,
+            root,
+            bin_map,
+            declared_packages,
+            script_names,
+            &mut analysis,
+        );
     }
 
-    // GitHub Actions workflows
     let workflows_dir = root.join(".github/workflows");
     if let Ok(entries) = std::fs::read_dir(&workflows_dir) {
         for entry in entries.flatten() {
@@ -52,14 +62,18 @@ pub fn analyze_ci_files(root: &Path, bin_map: &FxHashMap<String, String>) -> CiA
             if (name_str.ends_with(".yml") || name_str.ends_with(".yaml"))
                 && let Ok(content) = std::fs::read_to_string(entry.path())
             {
-                extract_ci_signals(&content, root, bin_map, &mut analysis);
+                extract_ci_signals(
+                    &content,
+                    root,
+                    bin_map,
+                    declared_packages,
+                    script_names,
+                    &mut analysis,
+                );
             }
         }
     }
 
-    // File path entries can be repeated across workflow files (`build.yml` and
-    // `deploy.yml` both invoking `node scripts/deploy.ts`). Dedup so the
-    // entry-pattern globset is not seeded with duplicates.
     analysis.entry_files.sort();
     analysis.entry_files.dedup();
     analysis
@@ -77,29 +91,21 @@ fn extract_ci_signals(
     content: &str,
     root: &Path,
     bin_map: &FxHashMap<String, String>,
+    declared_packages: &FxHashSet<String>,
+    script_names: &FxHashSet<String>,
     analysis: &mut CiAnalysis,
 ) {
-    for command in extract_ci_commands(content) {
-        let parsed = parse_script(&command);
-        for cmd in parsed {
-            if !cmd.binary.is_empty() && !super::is_builtin_command(&cmd.binary) {
-                let pkg = resolve_binary_to_package(&cmd.binary, root, bin_map);
-                analysis.used_packages.insert(pkg);
-            }
-            // `parse_script` already routes `cmd.file_args` through
-            // `looks_like_file_path`, so they are pre-filtered.
-            // `cmd.config_args` come from `extract_config_arg` (e.g. the
-            // value after `--config`/`-c`) and bypass that gate, so jq
-            // array iterators or Perl regex fragments passed via flags
-            // can leak through. Re-filter here.
-            analysis.entry_files.extend(
-                cmd.config_args
-                    .into_iter()
-                    .filter(|s| could_be_file_path(s)),
-            );
-            analysis.entry_files.extend(cmd.file_args);
-        }
-    }
+    let commands = extract_ci_commands(content);
+    let parsed =
+        analyze_commands_with_context(&commands, root, bin_map, declared_packages, script_names);
+    analysis.used_packages.extend(parsed.used_packages);
+    analysis.entry_files.extend(
+        parsed
+            .config_files
+            .into_iter()
+            .filter(|s| could_be_file_path(s)),
+    );
+    analysis.entry_files.extend(parsed.entry_files);
 }
 
 /// Extract shell command strings from a CI config file.
@@ -116,12 +122,10 @@ fn extract_ci_commands(content: &str) -> Vec<String> {
     for line in content.lines() {
         let trimmed = line.trim();
 
-        // Skip comments and empty lines
         if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
 
-        // Track multi-line `run: |` blocks (GitHub Actions)
         if in_multiline_run {
             let indent = line.len() - line.trim_start().len();
             if indent > multiline_indent && !trimmed.is_empty() {
@@ -129,11 +133,8 @@ fn extract_ci_commands(content: &str) -> Vec<String> {
                 continue;
             }
             in_multiline_run = false;
-            // Fall through to re-classify this line normally
         }
 
-        // GitHub Actions: `run: |` or `- run: command` (multi-line or inline)
-        // Check both bare `run:` and list-item `- run:` forms
         let run_value = strip_yaml_key(trimmed, "run")
             .or_else(|| {
                 trimmed
@@ -147,18 +148,13 @@ fn extract_ci_commands(content: &str) -> Vec<String> {
                 in_multiline_run = true;
                 multiline_indent = line.len() - line.trim_start().len();
             } else if !rest.is_empty() {
-                // Inline run: `run: npm test` or `- run: npm test`
                 commands.push(rest.to_string());
             }
             continue;
         }
 
-        // YAML list items in script/before_script/after_script blocks
-        // GitLab CI: `  - npx @cyclonedx/cyclonedx-npm --output-file sbom.json`
-        // These are the most common form of CI commands
         if let Some(rest) = trimmed.strip_prefix("- ") {
             let rest = rest.trim();
-            // Skip YAML mappings (key: value), image references, and other non-commands
             if !rest.is_empty()
                 && !rest.starts_with('{')
                 && !rest.starts_with('[')
@@ -182,8 +178,6 @@ fn strip_yaml_key<'a>(line: &'a str, key: &str) -> Option<&'a str> {
 
 /// Check if a string looks like a YAML mapping (key: value) rather than a shell command.
 fn is_yaml_mapping(s: &str) -> bool {
-    // Simple heuristic: if the first "word" ends with `:` and doesn't look like
-    // a protocol (http:, https:, ftp:), it's likely a YAML key
     if let Some(first_word) = s.split_whitespace().next()
         && first_word.ends_with(':')
         && !first_word.starts_with("http")
@@ -198,7 +192,26 @@ fn is_yaml_mapping(s: &str) -> bool {
 mod tests {
     use super::*;
 
-    // ── extract_ci_commands tests ──────────────────────────────────
+    fn empty_set() -> FxHashSet<String> {
+        FxHashSet::default()
+    }
+
+    fn set(values: &[&str]) -> FxHashSet<String> {
+        values.iter().map(|value| (*value).to_string()).collect()
+    }
+
+    fn analyze_content(content: &str) -> CiAnalysis {
+        let mut analysis = CiAnalysis::default();
+        extract_ci_signals(
+            content,
+            Path::new("/nonexistent"),
+            &FxHashMap::default(),
+            &empty_set(),
+            &empty_set(),
+            &mut analysis,
+        );
+        analysis
+    }
 
     #[test]
     fn gitlab_ci_script_items() {
@@ -268,7 +281,6 @@ build:
     - npm ci
 ";
         let commands = extract_ci_commands(content);
-        // "node:18" and "NODE_ENV: production" should NOT be treated as commands
         assert!(!commands.iter().any(|c| c.contains("node:18")));
         assert!(!commands.iter().any(|c| c.contains("NODE_ENV")));
         assert!(commands.contains(&"npm ci".to_string()));
@@ -288,8 +300,6 @@ build:
         assert_eq!(commands, vec!["npm ci"]);
     }
 
-    // ── extract_ci_packages tests ──────────────────────────────────
-
     #[test]
     fn npx_package_extracted() {
         let content = r"
@@ -297,13 +307,7 @@ build:
   script:
     - npx @cyclonedx/cyclonedx-npm --output-file sbom.json
 ";
-        let mut analysis = CiAnalysis::default();
-        extract_ci_signals(
-            content,
-            Path::new("/nonexistent"),
-            &FxHashMap::default(),
-            &mut analysis,
-        );
+        let analysis = analyze_content(content);
         let packages = &analysis.used_packages;
         assert!(
             packages.contains("@cyclonedx/cyclonedx-npm"),
@@ -320,13 +324,7 @@ build:
     - npx prettier --check .
     - tsc --noEmit
 ";
-        let mut analysis = CiAnalysis::default();
-        extract_ci_signals(
-            content,
-            Path::new("/nonexistent"),
-            &FxHashMap::default(),
-            &mut analysis,
-        );
+        let analysis = analyze_content(content);
         let packages = &analysis.used_packages;
         assert!(packages.contains("eslint"));
         assert!(packages.contains("prettier"));
@@ -342,13 +340,7 @@ build:
     - mkdir -p dist
     - cp -r build/* dist/
 ";
-        let mut analysis = CiAnalysis::default();
-        extract_ci_signals(
-            content,
-            Path::new("/nonexistent"),
-            &FxHashMap::default(),
-            &mut analysis,
-        );
+        let analysis = analyze_content(content);
         let packages = &analysis.used_packages;
         assert!(
             packages.is_empty(),
@@ -364,22 +356,53 @@ jobs:
     steps:
       - run: npx @cyclonedx/cyclonedx-npm --output-file sbom.json
 ";
-        let mut analysis = CiAnalysis::default();
-        extract_ci_signals(
-            content,
-            Path::new("/nonexistent"),
-            &FxHashMap::default(),
-            &mut analysis,
-        );
+        let analysis = analyze_content(content);
         let packages = &analysis.used_packages;
         assert!(packages.contains("@cyclonedx/cyclonedx-npm"));
     }
 
     #[test]
+    fn github_actions_pnpm_bare_declared_binary_extracted() {
+        let content = r"
+jobs:
+  info:
+    steps:
+      - run: pnpm envinfo --system
+";
+        let mut analysis = CiAnalysis::default();
+        extract_ci_signals(
+            content,
+            Path::new("/nonexistent"),
+            &FxHashMap::default(),
+            &set(&["envinfo"]),
+            &empty_set(),
+            &mut analysis,
+        );
+        assert!(analysis.used_packages.contains("envinfo"));
+    }
+
+    #[test]
+    fn github_actions_pnpm_script_name_shorthand_skipped() {
+        let content = r"
+jobs:
+  build:
+    steps:
+      - run: pnpm build
+";
+        let mut analysis = CiAnalysis::default();
+        extract_ci_signals(
+            content,
+            Path::new("/nonexistent"),
+            &FxHashMap::default(),
+            &set(&["build"]),
+            &set(&["build"]),
+            &mut analysis,
+        );
+        assert!(!analysis.used_packages.contains("build"));
+    }
+
+    #[test]
     fn github_actions_expression_fragments_not_entry_files() {
-        // Regression: tokens like `}}/api/health/ready"` produced by splitting
-        // `"${{ env.ENVIRONMENT_URL }}/api/health/ready"` on whitespace contain
-        // `}}` and must not be recorded as entry file paths.
         let content = r#"
 jobs:
   health-check:
@@ -388,13 +411,7 @@ jobs:
           RESPONSE_CODE=$(curl -s -o "$TMPFILE" -w "%{http_code}" -m 15 "${{ env.ENVIRONMENT_URL }}/api/health/ready")
           echo "$RESPONSE_CODE"
 "#;
-        let mut analysis = CiAnalysis::default();
-        extract_ci_signals(
-            content,
-            Path::new("/nonexistent"),
-            &FxHashMap::default(),
-            &mut analysis,
-        );
+        let analysis = analyze_content(content);
         for path in &analysis.entry_files {
             assert!(
                 !path.contains("${{") && !path.contains("}}"),
@@ -405,9 +422,6 @@ jobs:
 
     #[test]
     fn jq_array_iterator_not_entry_file() {
-        // Regression: `jq -c '.[]'` and `jq -r '.[]'` in CI run blocks must not
-        // produce entry-file candidates. `'.[]'` is a jq array-iterator; globset
-        // rejects it as an empty character class `[]`.
         let content = r#"
 jobs:
   process:
@@ -416,13 +430,7 @@ jobs:
           jq -c '.[]' /tmp/x.json | while read item; do echo "$item"; done
           result=$(jq -r '.[]' data.json)
 "#;
-        let mut analysis = CiAnalysis::default();
-        extract_ci_signals(
-            content,
-            Path::new("/nonexistent"),
-            &FxHashMap::default(),
-            &mut analysis,
-        );
+        let analysis = analyze_content(content);
         for path in &analysis.entry_files {
             assert!(
                 !path.contains(".[]"),
@@ -433,10 +441,6 @@ jobs:
 
     #[test]
     fn grep_perl_regex_fragment_not_entry_file() {
-        // Regression: `grep -oP '(?<=Module )\./[^ ]+(?= has finished with an error)'`
-        // in CI run blocks splits on whitespace into tokens including `)\./[^`.
-        // That fragment contains a backslash (`\.`) and an unclosed character class
-        // (`[^`) — neither is a valid file path.
         let content = r"
 jobs:
   deploy:
@@ -444,13 +448,7 @@ jobs:
       - run: |
           grep -oP '(?<=Module )\./[^ ]+(?= has finished with an error)' deploy.log
 ";
-        let mut analysis = CiAnalysis::default();
-        extract_ci_signals(
-            content,
-            Path::new("/nonexistent"),
-            &FxHashMap::default(),
-            &mut analysis,
-        );
+        let analysis = analyze_content(content);
         for path in &analysis.entry_files {
             assert!(
                 !path.contains(r"\./"),
@@ -462,8 +460,6 @@ jobs:
             );
         }
     }
-
-    // ── helper tests ───────────────────────────────────────────────
 
     #[test]
     fn strip_yaml_key_basic() {

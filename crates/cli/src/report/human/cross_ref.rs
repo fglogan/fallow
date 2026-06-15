@@ -1,3 +1,4 @@
+use crate::report::sink::outln;
 use std::path::Path;
 
 use colored::Colorize;
@@ -15,8 +16,6 @@ pub(in crate::report) fn print_cross_reference_findings(
         return;
     }
 
-    // Only emit human-readable output; structured formats (JSON, SARIF, Compact)
-    // should not have unstructured text mixed into stdout.
     if !matches!(output, OutputFormat::Human) {
         return;
     }
@@ -26,7 +25,7 @@ pub(in crate::report) fn print_cross_reference_findings(
     }
 
     for line in build_cross_reference_lines(cross_ref, root) {
-        println!("{line}");
+        outln!("{line}");
     }
 
     let total = cross_ref.total();

@@ -23,7 +23,9 @@ export type {
   AddToConfigAction,
   AttributedCloneGroup,
   AttributedCloneGroupFinding,
+  AuditGate,
   AuditOutput,
+  AuditVerdict,
   BoundaryViolation,
   BoundaryViolationFinding,
   CheckOutput,
@@ -38,7 +40,15 @@ export type {
   CloneGroupFinding,
   CloneInstance,
   CombinedOutput,
+  ComplexityContribution,
+  ComplexityContributionKind,
   CoverageAnalyzeOutput,
+  RuntimeCoverageReport,
+  RuntimeCoverageHotPath,
+  RuntimeCoverageFinding,
+  RuntimeCoverageVerdict,
+  RuntimeCoverageConfidence,
+  RuntimeCoverageWatermark,
   DuplicateExport,
   DuplicateExportFinding,
   DuplicateLocation,
@@ -49,8 +59,14 @@ export type {
   EmptyCatalogGroup,
   EmptyCatalogGroupFinding,
   EntryPoints,
+  FindingSeverity,
   FixAction as SuggestionFixAction,
+  HealthFinding,
   HealthOutput,
+  HealthReport,
+  HealthScore,
+  HealthScorePenalties,
+  HotspotFinding,
   ImportSite,
   IssueAction,
   MisconfiguredDependencyOverride,
@@ -58,11 +74,18 @@ export type {
   PrivateTypeLeak,
   PrivateTypeLeakFinding,
   RefactoringSuggestion,
+  RefactoringTargetFinding,
+  SecurityFinding,
+  SecurityFindingKind,
+  SecurityOutput,
+  SecurityReachability,
   StaleSuppression,
   SuppressFileAction,
   SuppressLineAction,
   TestOnlyDependency,
   TestOnlyDependencyFinding,
+  TraceHop,
+  TraceHopRole,
   TypeOnlyDependency,
   TypeOnlyDependencyFinding,
   UnlistedDependency,
@@ -87,6 +110,8 @@ export type {
   UnusedMember,
   UnusedOptionalDependencyFinding,
   UnusedTypeFinding,
+  WorkspaceInfo,
+  WorkspacesOutput,
 } from "./generated/output-contract.js";
 
 export type { CheckOutput as PlowCheckResult } from "./generated/output-contract.js";
@@ -104,7 +129,20 @@ export type { CheckOutput as PlowCheckResult } from "./generated/output-contract
 export type { DupesReportPayload as PlowDupesResult } from "./generated/output-contract.js";
 export type { CombinedOutput as PlowCombinedResult } from "./generated/output-contract.js";
 
-export type { DuplicationMode, IssueTypeConfig, TraceLevel } from "./settings.js";
+export type {
+  DiagnosticSeveritySetting,
+  DuplicationMode,
+  IssueTypeConfig,
+  TraceLevel,
+} from "./settings.js";
 export type { IssueCategory } from "./labels.js";
 export { ISSUE_CATEGORY_LABELS } from "./labels.js";
 export type { PlowFixResult, FixAction } from "./fix-types.js";
+export type {
+  LicenseActionResult,
+  LicenseErrorJson,
+  LicenseKind,
+  LicenseParseResult,
+  LicenseState,
+  LicenseStatusJson,
+} from "./license-types.js";

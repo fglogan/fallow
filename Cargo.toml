@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "2.84.0"
+version = "2.96.0"
 edition = "2024"
 rust-version = "1.92"
 license = "LicenseRef-Tempext-Commercial"
@@ -14,12 +14,12 @@ keywords = ["typescript", "javascript", "lint", "static-analysis", "code-quality
 categories = ["command-line-utilities", "development-tools"]
 
 [workspace.dependencies]
-plow-core = { version = "2.84.0", path = "crates/core" }
-plow-config = { version = "2.84.0", path = "crates/config" }
-plow-extract = { version = "2.84.0", path = "crates/extract" }
-plow-graph = { version = "2.84.0", path = "crates/graph" }
-plow-types = { version = "2.84.0", path = "crates/types" }
-plow-cli = { version = "2.84.0", path = "crates/cli" }
+plow-core = { version = "2.96.0", path = "crates/core" }
+plow-config = { version = "2.96.0", path = "crates/config" }
+plow-extract = { version = "2.96.0", path = "crates/extract" }
+plow-graph = { version = "2.96.0", path = "crates/graph" }
+plow-types = { version = "2.96.0", path = "crates/types" }
+plow-cli = { version = "2.96.0", path = "crates/cli" }
 
 # Parsing & analysis
 oxc_allocator = "0.126"
@@ -31,7 +31,7 @@ oxc_semantic = "0.126"
 oxc_span = "0.126"
 oxc_str = "0.126"
 oxc_syntax = "0.126"
-oxc_coverage_instrument = "0.5"
+oxc_coverage_instrument = "0.9.0"
 
 # CLI
 clap = { version = "4", features = ["derive"] }
@@ -40,6 +40,7 @@ clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 serde_yaml_ng = "0.10"
+semver = "1"
 jsonc-parser = { version = "0.32", features = ["cst", "serde", "serde_json"] }
 toml = "1.1"
 toml_edit = "0.25"
@@ -80,7 +81,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 fixedbitset = "0.5"
 
 # LSP
-tower-lsp = "0.20"
+ls-types = "0.0.6"
+tower-lsp-server = "0.23"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "io-std", "process", "signal", "time"] }
 
 # File watching
@@ -116,6 +118,8 @@ empty_drop = "warn"                     # Catch no-op Drop impls
 empty_structs_with_brackets = "warn"    # Use `struct Foo;` not `struct Foo {}`
 exit = "warn"                           # Prevent silent process::exit()
 get_unwrap = "warn"                     # Prefer .get() over [] indexing
+unwrap_used = "warn"                    # Require explicit justification for panic-prone unwrap()
+expect_used = "warn"                    # Require explicit justification for panic-prone expect()
 rc_buffer = "warn"                      # Prevent Rc<Vec<T>> anti-pattern
 rc_mutex = "warn"                       # Prevent Rc<Mutex<T>> anti-pattern
 undocumented_unsafe_blocks = "warn"     # All unsafe must have SAFETY comment
@@ -133,6 +137,13 @@ pub_underscore_fields = "warn"           # Catch accidentally public _-prefixed 
 non_zero_suggestions = "warn"            # Suggest NonZero types for naturally non-zero values
 precedence_bits = "warn"                 # Catch bitwise operator precedence mistakes
 map_with_unused_argument_over_ranges = "warn" # Use `repeat`/`repeat_with` instead
+
+# Process-spawn ban (method list lives in .clippy.toml). Allowed workspace-wide
+# so the CLI / MCP crates can spawn git worktrees, the coverage sidecar, and
+# subprocesses off the analysis path; plow-core/extract/graph re-deny it at
+# their crate root to enforce that the analysis path spawns only `git` via
+# plow_core::spawn.
+disallowed_methods = "allow"
 
 # Allow common pedantic false positives
 module_name_repetitions = "allow"

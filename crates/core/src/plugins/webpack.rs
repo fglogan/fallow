@@ -4,7 +4,7 @@
 //! Parses webpack config to extract entry points, plugin dependencies, loader
 //! packages from module.rules, and external dependencies.
 
-use std::path::{Component, Path, PathBuf};
+use std::path::Path;
 
 use super::config_parser;
 use super::{Plugin, PluginResult};
@@ -36,20 +36,19 @@ define_plugin!(
             result.referenced_dependencies.push(dep);
         }
 
-        // entry → entry points (string, array, object values, or Webpack 5 descriptors)
         let entries =
             config_parser::extract_config_string_or_array(source, config_path, &["entry"]);
-        let context = config_parser::extract_config_path_string(source, config_path, &["context"])
-            .and_then(|raw| config_parser::normalize_config_path(&raw, config_path, root));
+        let context = config_parser::extract_config_path(source, config_path, &["context"])
+            .and_then(|raw| config_parser::normalize_config_path_buf(&raw, config_path, root));
         result.extend_entry_patterns(entries.into_iter().map(|entry| {
             context
-                .as_deref()
+                .as_ref()
                 .map(|context| normalize_context_entry(&entry, context, config_path, root))
                 .unwrap_or(entry)
         }));
 
         for (find, replacement) in
-            config_parser::extract_config_aliases(source, config_path, &["resolve", "alias"])
+            config_parser::extract_config_path_aliases(source, config_path, &["resolve", "alias"])
         {
             if let Some(normalized) =
                 config_parser::normalize_config_path(&replacement, config_path, root)
@@ -58,7 +57,6 @@ define_plugin!(
             }
         }
 
-        // require() calls for loaders/plugins in CJS configs
         let require_deps =
             config_parser::extract_config_require_strings(source, config_path, "plugins");
         for dep in &require_deps {
@@ -67,7 +65,6 @@ define_plugin!(
                 .push(crate::resolve::extract_package_name(dep));
         }
 
-        // externals → referenced dependencies (string array form)
         let externals =
             config_parser::extract_config_shallow_strings(source, config_path, "externals");
         for ext in &externals {
@@ -76,7 +73,6 @@ define_plugin!(
                 .push(crate::resolve::extract_package_name(ext));
         }
 
-        // module.rules → extract loader package names
         parse_webpack_loaders(source, config_path, &mut result);
 
         result
@@ -104,7 +100,6 @@ pub(super) fn parse_webpack_loaders(source: &str, path: &Path, result: &mut Plug
         return;
     };
 
-    // Navigate to module.rules
     let Some(module_prop) = find_obj_prop(obj, "module") else {
         return;
     };
@@ -164,14 +159,12 @@ fn walk_rule(rule: &oxc_ast::ast::ObjectExpression, result: &mut PluginResult) {
         };
 
         match key_name {
-            // loader: 'ts-loader'
             "loader" => {
                 if let Expression::StringLiteral(s) = &p.value {
                     let dep = crate::resolve::extract_package_name(&s.value);
                     result.referenced_dependencies.push(dep);
                 }
             }
-            // use: 'babel-loader' or use: ['style-loader', { loader: 'css-loader' }]
             "use" => match &p.value {
                 Expression::StringLiteral(s) => {
                     let dep = crate::resolve::extract_package_name(&s.value);
@@ -200,7 +193,6 @@ fn walk_rule(rule: &oxc_ast::ast::ObjectExpression, result: &mut PluginResult) {
                 }
                 _ => {}
             },
-            // oneOf: [...rules] → recurse
             "oneOf" => {
                 if let Expression::ArrayExpression(one_of) = &p.value {
                     walk_rules(one_of, result);
@@ -211,34 +203,27 @@ fn walk_rule(rule: &oxc_ast::ast::ObjectExpression, result: &mut PluginResult) {
     }
 }
 
-fn normalize_context_entry(entry: &str, context: &str, config_path: &Path, root: &Path) -> String {
-    if entry.starts_with('/') || Path::new(entry).is_absolute() {
+fn normalize_context_entry(entry: &str, context: &Path, config_path: &Path, root: &Path) -> String {
+    let entry_path = config_parser::path_from_config_string(entry);
+    if entry.starts_with('/') || entry_path.is_absolute() {
         return config_parser::normalize_config_path(entry, config_path, root)
             .unwrap_or_else(|| entry.to_string());
     }
 
-    if entry.starts_with("./") || entry.starts_with("../") {
-        return normalize_project_relative_join(context, entry);
+    if entry.starts_with("./")
+        || entry.starts_with("../")
+        || entry.starts_with(".\\")
+        || entry.starts_with("..\\")
+    {
+        return normalize_project_relative_join(context, &entry_path);
     }
 
     entry.to_string()
 }
 
-fn normalize_project_relative_join(base: &str, child: &str) -> String {
-    let path = PathBuf::from(base).join(child);
-
-    let mut normalized = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::ParentDir => {
-                normalized.pop();
-            }
-            Component::CurDir | Component::RootDir | Component::Prefix(_) => {}
-            Component::Normal(segment) => normalized.push(segment),
-        }
-    }
-
-    normalized.to_string_lossy().replace('\\', "/")
+fn normalize_project_relative_join(base: &Path, child: &Path) -> String {
+    let normalized = config_parser::lexical_normalize(&base.join(child));
+    config_parser::path_to_config_string(&normalized)
 }
 
 #[cfg(test)]
@@ -315,6 +300,37 @@ mod tests {
                 "react",
                 "react-dom",
             ]
+        );
+    }
+
+    #[test]
+    fn resolve_config_context_normalizes_mixed_separator_entries() {
+        let source = r#"
+            module.exports = {
+                context: "./app/features",
+                entry: {
+                    main: ".\\dashboard\\main.ts",
+                    shared: "../shared/index.ts",
+                },
+            };
+        "#;
+        let plugin = WebpackPlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new("/project/webpack.config.js"),
+            source,
+            std::path::Path::new("/project"),
+        );
+        assert_eq!(
+            result.entry_patterns,
+            vec!["app/features/dashboard/main.ts", "app/shared/index.ts"]
+        );
+        assert!(
+            result
+                .entry_patterns
+                .iter()
+                .all(|entry| !entry.contains('\\')),
+            "entry patterns should use forward slashes: {:?}",
+            result.entry_patterns
         );
     }
 

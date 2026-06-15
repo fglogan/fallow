@@ -6,21 +6,21 @@ use std::process::{Command, Stdio};
 use std::{collections::BTreeMap, fs};
 
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
-use plow_config::OutputFormat;
-use fallow_cov_protocol::{
-    CaptureQuality, Confidence, CoverageSource, Evidence, FunctionIdentity, IdentityResolution,
-    PROTOCOL_VERSION, ReportVerdict, Request, Response, RiskBand, StaticFile, StaticFindings,
-    StaticFunction, Verdict, Watermark, function_identity_id,
-};
-use plow_license::{
-    DEFAULT_HARD_FAIL_DAYS, Feature, LicenseStatus, load_and_verify, load_raw_jwt,
-};
-use plow_v8_coverage::V8CoverageDump;
 use globset::GlobSet;
 use oxc_coverage_instrument::{FileCoverage, FnEntry, Location, Position};
+use plow_config::OutputFormat;
+use plow_cov_protocol::{
+    BlastRadiusEntry as ProtocolBlastRadiusEntry, CaptureQuality, Confidence, CoverageSource,
+    Evidence, Finding as ProtocolFinding, FunctionIdentity, HotPath as ProtocolHotPath,
+    IdentityResolution, ImportanceEntry as ProtocolImportanceEntry, PROTOCOL_VERSION,
+    ReportVerdict, Request, Response, RiskBand, StaticFile, StaticFindings, StaticFunction,
+    Verdict, Watermark, function_identity_id as protocol_function_identity_id,
+};
+use plow_license::{DEFAULT_HARD_FAIL_DAYS, Feature, LicenseStatus, load_and_verify, load_raw_jwt};
+use plow_v8_coverage::V8CoverageDump;
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::Deserialize;
-use srcmap_sourcemap::SourceMap;
+use srcmap_sourcemap::{GeneratedLocation, GeneratedOffsetLookup, SourceMap};
 use tempfile::TempDir;
 use url::Url;
 
@@ -34,6 +34,14 @@ use crate::health_types::{
     RuntimeCoverageRiskBand, RuntimeCoverageSchemaVersion, RuntimeCoverageSummary,
     RuntimeCoverageVerdict, RuntimeCoverageWatermark,
 };
+
+fn function_identity_id(file: &str, name: &str, start_line: u32) -> String {
+    let stable_id = protocol_function_identity_id(file, name, start_line);
+    match stable_id.strip_prefix("fallow:") {
+        Some(rest) => format!("plow:{rest}"),
+        None => stable_id,
+    }
+}
 use crate::license::verifying_key;
 
 /// Ed25519 public key used to verify the plow-cov sidecar binary at every
@@ -47,7 +55,7 @@ use crate::license::verifying_key;
 /// misidentifies it as the license pubkey.
 ///
 /// Must match the `ED25519_BINARY_SIGNING_PUBLIC_KEY` repository variable on
-/// `plow-rs/plow-cloud` byte-for-byte; the `binary-signing-parity.yml`
+/// `fglogan/genesis-plow-cloud` byte-for-byte; the `binary-signing-parity.yml`
 /// workflow on plow-cloud asserts this daily. If you rotate the key, update
 /// both sides in the same release cycle per the procedure in ADR 008.
 #[cfg(not(feature = "test-sidecar-key"))]
@@ -67,10 +75,6 @@ const BINARY_SIGNING_VERIFY_KEY: [u8; 32] = [
     0x48, 0x7e, 0x6b, 0x46, 0x3c, 0x02, 0x9e, 0xd3, 0x06, 0xdf, 0x2f, 0x01, 0xb5, 0x63, 0x6b, 0x58,
 ];
 
-// Hard stop: `test-sidecar-key` ships the test pubkey instead of the real
-// binary-signing pubkey. A release build with this feature active would accept
-// stub sidecars signed by any party in possession of the seed. Debug builds
-// only.
 #[cfg(all(feature = "test-sidecar-key", not(debug_assertions)))]
 compile_error!(
     "feature `test-sidecar-key` must never be enabled in release builds; it swaps the sidecar binary-signing pubkey for a test keypair whose seed is public"
@@ -103,6 +107,41 @@ struct SourceMapCacheEntry {
     line_lengths: Vec<u32>,
 }
 
+enum GeneratedPositionLookup<'a> {
+    SourceText {
+        source: &'a str,
+        lookup: GeneratedOffsetLookup<'a>,
+    },
+    V8LineOffsets(plow_v8_coverage::LineOffsetTable),
+}
+
+impl GeneratedPositionLookup<'_> {
+    fn generated_position_for_offset(&self, v8_source_offset: u32) -> Option<GeneratedLocation> {
+        match self {
+            Self::SourceText { source, lookup } => {
+                let byte_offset = utf16_source_offset_to_byte_offset(source, v8_source_offset)?;
+                lookup.byte_offset_to_position(byte_offset)
+            }
+            Self::V8LineOffsets(line_offsets) => {
+                let pos = line_offsets.position(v8_source_offset);
+                Some(GeneratedLocation {
+                    line: pos.line.saturating_sub(1),
+                    column: pos.column,
+                })
+            }
+        }
+    }
+
+    fn original_position_for_offset(
+        &self,
+        sourcemap: &SourceMap,
+        v8_source_offset: u32,
+    ) -> Option<srcmap_sourcemap::OriginalLocation> {
+        let position = self.generated_position_for_offset(v8_source_offset)?;
+        sourcemap.original_position_for(position.line, position.column)
+    }
+}
+
 #[derive(Debug, Clone)]
 struct RemappedFunction {
     path: PathBuf,
@@ -124,7 +163,7 @@ struct AccumulatedFunction {
 }
 
 /// Dedup key for merging V8-remapped functions across overlapping script
-/// dumps. NOT the protocol's `fallow_cov_protocol::FunctionIdentity` (the
+/// dumps. NOT the protocol's `plow_cov_protocol::FunctionIdentity` (the
 /// cross-surface join key); this is a purely local position-based key used to
 /// coalesce the same physical function seen in multiple coverage scripts.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -208,48 +247,37 @@ pub fn prepare_options(
     })
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "sidecar invocation needs the same filter context as health analysis"
-)]
+pub(super) struct RuntimeCoverageAnalysisInput<'a> {
+    pub root: &'a Path,
+    pub modules: &'a [plow_types::extract::ModuleInfo],
+    pub analysis_output: &'a plow_core::AnalysisOutput,
+    pub istanbul_coverage: Option<&'a IstanbulCoverage>,
+    pub file_paths: &'a FxHashMap<plow_types::discover::FileId, &'a PathBuf>,
+    pub ignore_set: &'a GlobSet,
+    pub changed_files: Option<&'a FxHashSet<PathBuf>>,
+    pub ws_roots: Option<&'a [PathBuf]>,
+    pub top: Option<usize>,
+    pub codeowners_path: Option<&'a str>,
+    pub quiet: bool,
+    pub output: OutputFormat,
+}
+
 pub(super) fn analyze(
     options: &RuntimeCoverageOptions,
-    root: &Path,
-    modules: &[plow_types::extract::ModuleInfo],
-    analysis_output: &plow_core::AnalysisOutput,
-    istanbul_coverage: Option<&IstanbulCoverage>,
-    file_paths: &FxHashMap<plow_types::discover::FileId, &PathBuf>,
-    ignore_set: &GlobSet,
-    changed_files: Option<&FxHashSet<PathBuf>>,
-    ws_roots: Option<&[PathBuf]>,
-    top: Option<usize>,
-    codeowners_path: Option<&str>,
-    quiet: bool,
-    output: OutputFormat,
+    input: &RuntimeCoverageAnalysisInput<'_>,
 ) -> Result<RuntimeCoverageReport, ExitCode> {
-    let sidecar =
-        discover_sidecar(Some(root)).map_err(|message| emit_error(&message, 4, output))?;
+    let sidecar = discover_sidecar(Some(input.root))
+        .map_err(|message| emit_error(&message, 4, input.output))?;
     let prepared_sources = prepare_coverage_sources(&options.path)
-        .map_err(|message| emit_error(&message, 5, output))?;
-    let static_signals = build_static_signal_index(modules, analysis_output, file_paths)
-        .map_err(|message| emit_error(&message, 2, output))?;
-    let (request, locations) = build_request(
-        options,
-        root,
-        modules,
-        analysis_output,
-        &static_signals,
-        istanbul_coverage,
-        file_paths,
-        ignore_set,
-        changed_files,
-        ws_roots,
-        prepared_sources.sources,
-        codeowners_path,
-    );
-    let response = run_sidecar(&sidecar, &request, quiet, output)?;
+        .map_err(|message| emit_error(&message, 5, input.output))?;
+    let static_signals =
+        build_static_signal_index(input.modules, input.analysis_output, input.file_paths)
+            .map_err(|message| emit_error(&message, 2, input.output))?;
+    let (request, locations) =
+        build_request(options, input, &static_signals, prepared_sources.sources);
+    let response = run_sidecar(&sidecar, &request, input.quiet, input.output)?;
     let mut report = convert_response(response, &locations, options.watermark);
-    apply_top_limit(&mut report, top);
+    apply_top_limit(&mut report, input.top);
     Ok(report)
 }
 
@@ -283,11 +311,6 @@ fn validate_license_status(
 }
 
 pub fn discover_sidecar(root: Option<&Path>) -> Result<PathBuf, String> {
-    // `PLOW_COV_BIN` is an explicit override: if the user sets it, they
-    // expect plow to either use that path or error. Silently falling
-    // through to auto-discovery when the path is missing / not a file
-    // contradicts the "explicit beats implicit" contract documented in
-    // `.claude/rules/cli-crate.md`.
     if let Some(path) = env_non_empty("PLOW_COV_BIN") {
         let candidate = PathBuf::from(&path);
         if candidate.is_file() {
@@ -298,11 +321,6 @@ pub fn discover_sidecar(root: Option<&Path>) -> Result<PathBuf, String> {
         ));
     }
 
-    // `PLOW_COV_BINARY_PATH` is the air-gap / pre-placed-binary override.
-    // Precedes project-local, canonical, and PATH lookup so users in
-    // enterprise / Docker / distro-packaged setups can point plow straight
-    // at a specific binary without having it on PATH. Same explicit-beats-
-    // implicit semantics as PLOW_COV_BIN: if it's set and invalid, error.
     if let Some(path) = env_non_empty("PLOW_COV_BINARY_PATH") {
         let candidate = PathBuf::from(&path);
         if candidate.is_file() {
@@ -313,12 +331,6 @@ pub fn discover_sidecar(root: Option<&Path>) -> Result<PathBuf, String> {
         ));
     }
 
-    // Prefer the platform-specific package's real binary over the wrapper at
-    // `node_modules/.bin/plow-cov`. The wrapper is a Node.js script that
-    // re-execs the platform binary; its path has no adjacent `.sig` file, so
-    // sig verification fails if we point at the wrapper. The real binary
-    // lives at `node_modules/@plow-cli/plow-cov-<platform>/plow-cov`
-    // with its signature alongside.
     if let Some(root) = root
         && let Some(path) = find_platform_package_sidecar(root)
     {
@@ -436,8 +448,6 @@ fn find_scoped_platform_sidecar(plow_cli_dir: &Path, binary_name: &str) -> Optio
         let Some(name_str) = name.to_str() else {
             continue;
         };
-        // Match only `plow-cov-<platform>` subpackages, not the
-        // pure-wrapper `plow-cov` package.
         if !name_str.starts_with("plow-cov-") {
             continue;
         }
@@ -704,13 +714,9 @@ impl LocalPackageManager {
 /// here), so the identity is resolved no further than `file` / `name` /
 /// `start_line`, which is exactly the `Unresolved` contract. The join is
 /// unaffected because columns are excluded from `stable_id`.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "mirrors the protocol StaticFunction field set, which has no builder"
-)]
-fn static_function(
-    relative_posix: &str,
-    name: &str,
+struct StaticFunctionInput<'a> {
+    relative_posix: &'a str,
+    name: &'a str,
     start_line: u32,
     end_line: u32,
     cyclomatic: u32,
@@ -719,31 +725,33 @@ fn static_function(
     caller_count: u32,
     owner_count: Option<u32>,
     source_hash: Option<String>,
-) -> StaticFunction {
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "static function test fixtures are constructed from JSON literals"
+)]
+fn static_function(input: StaticFunctionInput<'_>) -> StaticFunction {
     let identity = FunctionIdentity {
-        file: relative_posix.to_owned(),
-        name: name.to_owned(),
-        start_line,
+        file: input.relative_posix.to_owned(),
+        name: input.name.to_owned(),
+        start_line: input.start_line,
         start_column: None,
         end_line: None,
         end_column: None,
-        // Content digest of the function's full-span source slice (from
-        // `FunctionComplexity.source_hash`). Carried on the wire so the sidecar
-        // can echo it back, letting runtime-coverage baselines survive line
-        // moves. Excluded from `stable_id`.
-        source_hash,
+        source_hash: input.source_hash,
         resolution: IdentityResolution::Unresolved,
-        stable_id: function_identity_id(relative_posix, name, start_line),
+        stable_id: function_identity_id(input.relative_posix, input.name, input.start_line),
     };
     serde_json::from_value(serde_json::json!({
-        "name": name,
-        "start_line": start_line,
-        "end_line": end_line,
-        "cyclomatic": cyclomatic,
-        "static_used": static_used,
-        "test_covered": test_covered,
-        "caller_count": caller_count,
-        "owner_count": owner_count,
+        "name": input.name,
+        "start_line": input.start_line,
+        "end_line": input.end_line,
+        "cyclomatic": input.cyclomatic,
+        "static_used": input.static_used,
+        "test_covered": input.test_covered,
+        "caller_count": input.caller_count,
+        "owner_count": input.owner_count,
         "identity": identity,
     }))
     .expect(
@@ -751,42 +759,28 @@ fn static_function(
     )
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "request assembly mirrors the health analysis filter context plus prepared coverage inputs"
-)]
 fn build_request(
     options: &RuntimeCoverageOptions,
-    root: &Path,
-    modules: &[plow_types::extract::ModuleInfo],
-    analysis_output: &plow_core::AnalysisOutput,
+    input: &RuntimeCoverageAnalysisInput<'_>,
     static_signals: &StaticSignalIndex,
-    istanbul_coverage: Option<&IstanbulCoverage>,
-    file_paths: &FxHashMap<plow_types::discover::FileId, &PathBuf>,
-    ignore_set: &GlobSet,
-    changed_files: Option<&FxHashSet<PathBuf>>,
-    ws_roots: Option<&[PathBuf]>,
     coverage_sources: Vec<CoverageSource>,
-    codeowners_path: Option<&str>,
 ) -> (Request, FunctionLocations) {
-    // Sidecar expects a single project_root for path relativization. When a
-    // single workspace is scoped, use it; otherwise fall back to the repo root
-    // so multi-workspace runs stay unambiguous.
-    let project_root = match ws_roots {
+    let project_root = match input.ws_roots {
         Some([only]) => only.as_path(),
-        _ => root,
+        _ => input.root,
     };
     let mut files = Vec::new();
     let mut locations = FxHashMap::default();
-    let graph = analysis_output.graph.as_ref();
-    let codeowners = crate::codeowners::CodeOwners::load(root, codeowners_path).ok();
-    for module in modules {
-        let Some(&path) = file_paths.get(&module.file_id) else {
+    let graph = input.analysis_output.graph.as_ref();
+    let codeowners = crate::codeowners::CodeOwners::load(input.root, input.codeowners_path).ok();
+    for module in input.modules {
+        let Some(&path) = input.file_paths.get(&module.file_id) else {
             continue;
         };
-        let canonical_path =
-            istanbul_coverage.map(|_| dunce::canonicalize(path).unwrap_or_else(|_| path.clone()));
-        let relative = path.strip_prefix(root).unwrap_or(path);
+        let canonical_path = input
+            .istanbul_coverage
+            .map(|_| dunce::canonicalize(path).unwrap_or_else(|_| path.clone()));
+        let relative = path.strip_prefix(input.root).unwrap_or(path);
         let caller_count = graph
             .and_then(|g| g.reverse_deps.get(module.file_id.0 as usize))
             .map_or(0_usize, Vec::len);
@@ -794,15 +788,15 @@ fn build_request(
         let owner_count = codeowners
             .as_ref()
             .map(|co| co.owner_count_of(relative).unwrap_or(0));
-        if ignore_set.is_match(relative) {
+        if input.ignore_set.is_match(relative) {
             continue;
         }
-        if let Some(changed) = changed_files
+        if let Some(changed) = input.changed_files
             && !changed.contains(path.as_path())
         {
             continue;
         }
-        if let Some(ws) = ws_roots
+        if let Some(ws) = input.ws_roots
             && !ws.iter().any(|r| path.starts_with(r))
         {
             continue;
@@ -810,13 +804,6 @@ fn build_request(
         if module.complexity.is_empty() {
             continue;
         }
-        // Forward-slash repo-relative path. Used BOTH as the sidecar
-        // `StaticFile.path` AND as the `FunctionIdentity.file` / `stable_id`
-        // input, so the identity plow produces here agrees with the
-        // static-inventory producer and the `coverage analyze` consumer (both
-        // hash the repo-relative path). Sidecar wire format uses forward
-        // slashes regardless of host OS so a Windows-hosted run interoperates
-        // with a sidecar on a different machine.
         let relative_posix = relative.to_string_lossy().replace('\\', "/");
         let functions = module
             .complexity
@@ -829,35 +816,23 @@ fn build_request(
                     canonical_path.as_deref(),
                     function,
                     static_signals,
-                    istanbul_coverage,
+                    input.istanbul_coverage,
                 );
-                // Export-level dead-code signals are reliable enough to mark
-                // unreferenced exports as statically unused. Internal-only
-                // functions still default to `true` until plow grows an
-                // intra-file call graph; that avoids false `safe_to_delete`
-                // verdicts when a private helper is only called locally.
-                //
-                // Join real test evidence when available: Istanbul per-function
-                // hits first, then direct test-reachable export references as a
-                // conservative fallback. We intentionally do not infer "covered"
-                // for every function in a test-reachable file.
-                static_function(
-                    &relative_posix,
-                    &function.name,
-                    function.line,
-                    function.line.saturating_add(function.line_count),
-                    u32::from(function.cyclomatic),
+                static_function(StaticFunctionInput {
+                    relative_posix: &relative_posix,
+                    name: &function.name,
+                    start_line: function.line,
+                    end_line: function.line.saturating_add(function.line_count),
+                    cyclomatic: u32::from(function.cyclomatic),
                     static_used,
                     test_covered,
                     caller_count,
                     owner_count,
-                    function.source_hash.clone(),
-                )
+                    source_hash: function.source_hash.clone(),
+                })
             })
             .collect();
         files.push(StaticFile {
-            // Matches the existing convention in `report::ci::diff_filter`
-            // and `crates/cli/src/health/mod.rs::relative_to_root`.
             path: relative_posix,
             functions,
         });
@@ -865,30 +840,20 @@ fn build_request(
     (
         Request {
             protocol_version: PROTOCOL_VERSION.to_owned(),
-            license: fallow_cov_protocol::License {
+            license: plow_cov_protocol::License {
                 jwt: options.license_jwt.clone(),
             },
             project_root: project_root.to_string_lossy().into_owned(),
             coverage_sources,
             static_findings: StaticFindings { files },
-            options: fallow_cov_protocol::Options {
+            options: plow_cov_protocol::Options {
                 include_hot_paths: true,
                 min_invocations_for_hot: Some(options.min_invocations_hot),
                 min_observation_volume: options.min_observation_volume,
                 low_traffic_threshold: options.low_traffic_threshold,
-                // Trace count, period, and deployments come from the beacon side in
-                // Phase 3. Phase 2 reads a single coverage dump — the sidecar falls
-                // back to summing observed invocations when `trace_count` is None.
                 trace_count: None,
                 period_days: None,
                 deployments_seen: None,
-                // Window/instance hints feed `CaptureQuality` on the sidecar.
-                // In Phase 2 single-dump local mode all four of trace_count,
-                // period_days, deployments_seen, window_seconds, and
-                // instances_observed are None; the sidecar derives
-                // `CaptureQuality.instances_observed` from the count of
-                // distinct deployments it sees in the dump itself.
-                // Populated by the beacon transport in Phase 3.
                 window_seconds: None,
                 instances_observed: None,
             },
@@ -1215,6 +1180,10 @@ fn parse_source_map_cache(dump: &V8CoverageDump) -> Option<BTreeMap<String, Sour
     serde_json::from_value(raw).ok()
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "temp dir option is initialized immediately before it is read"
+)]
 fn ensure_temp_dir(temp_dir: &mut Option<TempDir>) -> Result<&Path, String> {
     if temp_dir.is_none() {
         *temp_dir = Some(
@@ -1233,12 +1202,21 @@ fn remap_script_with_source_map(
     entry: &SourceMapCacheEntry,
 ) -> Option<RemappedScript> {
     let sourcemap = SourceMap::from_json(&entry.data.to_string()).ok()?;
-    let offsets = line_offsets_for_script(script, entry)?;
+    let generated_source = generated_source_for_script(script);
+    let positions = match generated_source.as_deref() {
+        Some(source) => GeneratedPositionLookup::SourceText {
+            source,
+            lookup: GeneratedOffsetLookup::new(source),
+        },
+        None => GeneratedPositionLookup::V8LineOffsets(
+            plow_v8_coverage::LineOffsetTable::from_v8_line_lengths(&entry.line_lengths)?,
+        ),
+    };
     let mut remapped = Vec::new();
     let mut residual_functions = Vec::new();
 
     for function in &script.functions {
-        match remap_function(script, function, entry, &sourcemap, &offsets) {
+        match remap_function(script, function, entry, &sourcemap, &positions) {
             Some(mapped) => remapped.push(mapped),
             None => residual_functions.push(function.clone()),
         }
@@ -1260,16 +1238,30 @@ fn remap_script_with_source_map(
     })
 }
 
-fn line_offsets_for_script(
-    script: &plow_v8_coverage::ScriptCoverage,
-    entry: &SourceMapCacheEntry,
-) -> Option<plow_v8_coverage::LineOffsetTable> {
+fn generated_source_for_script(script: &plow_v8_coverage::ScriptCoverage) -> Option<String> {
     if let Some(path) = file_url_to_path(&script.url)
         && let Ok(source) = fs::read_to_string(path)
     {
-        return Some(plow_v8_coverage::LineOffsetTable::from_source(&source));
+        return Some(source);
     }
-    plow_v8_coverage::LineOffsetTable::from_v8_line_lengths(&entry.line_lengths)
+    None
+}
+
+fn utf16_source_offset_to_byte_offset(source: &str, target_offset: u32) -> Option<u32> {
+    let mut utf16_offset = 0u32;
+    for (byte_offset, ch) in source.char_indices() {
+        if utf16_offset == target_offset {
+            return u32::try_from(byte_offset).ok();
+        }
+        utf16_offset = utf16_offset.checked_add(ch.len_utf16() as u32)?;
+        if utf16_offset > target_offset {
+            return None;
+        }
+    }
+    if utf16_offset == target_offset {
+        return u32::try_from(source.len()).ok();
+    }
+    None
 }
 
 fn remap_function(
@@ -1277,21 +1269,18 @@ fn remap_function(
     function: &plow_v8_coverage::FunctionCoverage,
     entry: &SourceMapCacheEntry,
     sourcemap: &SourceMap,
-    line_offsets: &plow_v8_coverage::LineOffsetTable,
+    positions: &GeneratedPositionLookup<'_>,
 ) -> Option<RemappedFunction> {
     let outer = function.ranges.first().copied()?;
-    let start = offset_to_position(line_offsets, outer.start_offset);
-    let end = offset_to_position(line_offsets, outer.end_offset);
-    let start_lookup =
-        sourcemap.original_position_for(start.line.saturating_sub(1), start.column)?;
+    let start_lookup = positions.original_position_for_offset(sourcemap, outer.start_offset)?;
     let resolved_path = resolve_original_source_path(
         sourcemap.source(start_lookup.source),
         &script.url,
         entry.url.as_deref(),
     )?;
     let canonical_path = dunce::canonicalize(&resolved_path).unwrap_or(resolved_path);
-    let end_lookup = sourcemap
-        .original_position_for(end.line.saturating_sub(1), end.column)
+    let end_lookup = positions
+        .original_position_for_offset(sourcemap, outer.end_offset)
         .filter(|lookup| lookup.source == start_lookup.source);
     let end_line = end_lookup
         .as_ref()
@@ -1332,17 +1321,6 @@ fn remap_function(
         },
         hits: outer.count.min(u64::from(u32::MAX)) as u32,
     })
-}
-
-fn offset_to_position(
-    line_offsets: &plow_v8_coverage::LineOffsetTable,
-    source_offset: u32,
-) -> Position {
-    let pos = line_offsets.position(source_offset);
-    Position {
-        line: pos.line,
-        column: pos.column,
-    }
 }
 
 fn resolve_original_source_path(
@@ -1509,6 +1487,7 @@ fn write_istanbul_coverage_file(
                 b: BTreeMap::new(),
                 b_t: None,
                 input_source_map: None,
+                x_fallow_function_map: None,
             },
         );
     }
@@ -1739,157 +1718,15 @@ fn stderr_message(stderr: &[u8], fallback: &str) -> String {
     }
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "flat mapping of four response collections (findings/hot_paths/blast/importance) into output structs plus their sort comparators; splitting would scatter the closely-coupled field mapping"
-)]
 fn convert_response(
     response: Response,
     _locations: &FunctionLocations,
     watermark: Option<RuntimeCoverageWatermark>,
 ) -> RuntimeCoverageReport {
-    let mut findings = response
-        .findings
-        .into_iter()
-        .filter_map(|finding| {
-            let verdict = map_verdict(finding.verdict);
-            if matches!(verdict, RuntimeCoverageVerdict::Active) {
-                return None;
-            }
-            // Pull both the cross-surface join key and the line-move-immune
-            // content digest off the sidecar's FunctionIdentity in one move
-            // (`identity` is consumed; `None` for 0.5-shape responses).
-            let (stable_id, source_hash) = finding.identity.map_or((None, None), |identity| {
-                (Some(identity.stable_id), identity.source_hash)
-            });
-            // The sidecar backfills source_hash onto its finding identities
-            // from the static index the CLI sends (joined by stable_id), so the
-            // wire value is authoritative. It is None only for pre-#742
-            // sidecars; such a finding then degrades to stable_id / legacy-id
-            // baseline keying (no line-move tolerance for that finding).
-            Some(RuntimeCoverageFinding {
-                id: finding.id,
-                // Cross-surface join key from the sidecar's FunctionIdentity
-                // when present; `None` for 0.5-shape responses (legacy
-                // fallback). Baseline keying prefers this over `id`.
-                stable_id,
-                // Content digest from the sidecar's FunctionIdentity (the
-                // sidecar backfills it from the static index); stable across
-                // line moves so baselines suppress after a pure line shift.
-                source_hash,
-                path: PathBuf::from(finding.file),
-                function: finding.function,
-                line: finding.line,
-                verdict,
-                invocations: finding.invocations,
-                confidence: map_confidence(finding.confidence),
-                evidence: map_evidence(finding.evidence),
-                actions: finding
-                    .actions
-                    .into_iter()
-                    .map(|action| RuntimeCoverageAction {
-                        kind: action.kind,
-                        description: action.description,
-                        auto_fixable: action.auto_fixable,
-                    })
-                    .collect(),
-            })
-        })
-        .collect::<Vec<_>>();
-
-    findings.sort_by(|left, right| {
-        verdict_rank(left.verdict)
-            .cmp(&verdict_rank(right.verdict))
-            .then_with(|| left.path.cmp(&right.path))
-            .then_with(|| left.function.cmp(&right.function))
-    });
-
-    let mut hot_paths = response
-        .hot_paths
-        .into_iter()
-        .map(|entry| RuntimeCoverageHotPath {
-            id: entry.id,
-            stable_id: entry.identity.map(|identity| identity.stable_id),
-            path: PathBuf::from(entry.file),
-            function: entry.function,
-            line: entry.line,
-            // 0.4-shape sidecars omit end_line; protocol's serde default is
-            // 0. The line-overlap filter folds 0 into a single-line range,
-            // so we forward the value as-is rather than synthesizing
-            // `entry.line` here (preserves the "we don't know" signal).
-            end_line: entry.end_line,
-            invocations: entry.invocations,
-            percentile: entry.percentile,
-            // Actions on hot paths are reserved for future protocol versions
-            // (e.g., a "review-on-change" suggestion). The sidecar protocol
-            // at 0.5 does not emit per-hot-path actions, so leave empty.
-            actions: Vec::new(),
-        })
-        .collect::<Vec<_>>();
-    hot_paths.sort_by(|left, right| {
-        right
-            .invocations
-            .cmp(&left.invocations)
-            .then_with(|| left.path.cmp(&right.path))
-            .then_with(|| left.function.cmp(&right.function))
-    });
-
-    let mut blast_radius = response
-        .blast_radius
-        .into_iter()
-        .map(
-            |entry| crate::health_types::RuntimeCoverageBlastRadiusEntry {
-                id: entry.id,
-                stable_id: entry.identity.map(|identity| identity.stable_id),
-                file: PathBuf::from(entry.file),
-                function: entry.function,
-                line: entry.line,
-                caller_count: entry.caller_count,
-                caller_count_weighted_by_traffic: entry.caller_count_weighted_by_traffic,
-                deploys_touched: entry.deploys_touched,
-                risk_band: map_risk_band(entry.risk_band),
-            },
-        )
-        .collect::<Vec<_>>();
-    blast_radius.sort_by(|left, right| {
-        risk_band_rank(right.risk_band)
-            .cmp(&risk_band_rank(left.risk_band))
-            .then_with(|| {
-                right
-                    .caller_count_weighted_by_traffic
-                    .cmp(&left.caller_count_weighted_by_traffic)
-            })
-            .then_with(|| right.caller_count.cmp(&left.caller_count))
-            .then_with(|| left.file.cmp(&right.file))
-            .then_with(|| left.function.cmp(&right.function))
-    });
-
-    let mut importance = response
-        .importance
-        .into_iter()
-        .map(
-            |entry| crate::health_types::RuntimeCoverageImportanceEntry {
-                id: entry.id,
-                stable_id: entry.identity.map(|identity| identity.stable_id),
-                file: PathBuf::from(entry.file),
-                function: entry.function,
-                line: entry.line,
-                invocations: entry.invocations,
-                cyclomatic: entry.cyclomatic,
-                owner_count: entry.owner_count,
-                importance_score: entry.importance_score,
-                reason: entry.reason,
-            },
-        )
-        .collect::<Vec<_>>();
-    importance.sort_by(|left, right| {
-        right
-            .importance_score
-            .total_cmp(&left.importance_score)
-            .then_with(|| right.invocations.cmp(&left.invocations))
-            .then_with(|| left.file.cmp(&right.file))
-            .then_with(|| left.function.cmp(&right.function))
-    });
+    let findings = map_runtime_findings(response.findings);
+    let hot_paths = map_runtime_hot_paths(response.hot_paths);
+    let blast_radius = map_runtime_blast_radius(response.blast_radius);
+    let importance = map_runtime_importance(response.importance);
 
     let coverage_percent = response.summary.coverage_percent;
     let clamped_percent = if coverage_percent.is_finite() {
@@ -1935,6 +1772,139 @@ fn convert_response(
     }
 }
 
+fn map_runtime_findings(findings: Vec<ProtocolFinding>) -> Vec<RuntimeCoverageFinding> {
+    let mut findings = findings
+        .into_iter()
+        .filter_map(|finding| {
+            let verdict = map_verdict(finding.verdict);
+            if matches!(verdict, RuntimeCoverageVerdict::Active) {
+                return None;
+            }
+            let (stable_id, source_hash) = finding.identity.map_or((None, None), |identity| {
+                (Some(identity.stable_id), identity.source_hash)
+            });
+            Some(RuntimeCoverageFinding {
+                id: finding.id,
+                stable_id,
+                source_hash,
+                path: PathBuf::from(finding.file),
+                function: finding.function,
+                line: finding.line,
+                verdict,
+                invocations: finding.invocations,
+                confidence: map_confidence(finding.confidence),
+                evidence: map_evidence(finding.evidence),
+                actions: finding
+                    .actions
+                    .into_iter()
+                    .map(|action| RuntimeCoverageAction {
+                        kind: action.kind,
+                        description: action.description,
+                        auto_fixable: action.auto_fixable,
+                    })
+                    .collect(),
+            })
+        })
+        .collect::<Vec<_>>();
+    findings.sort_by(|left, right| {
+        verdict_rank(left.verdict)
+            .cmp(&verdict_rank(right.verdict))
+            .then_with(|| left.path.cmp(&right.path))
+            .then_with(|| left.function.cmp(&right.function))
+    });
+    findings
+}
+
+fn map_runtime_hot_paths(entries: Vec<ProtocolHotPath>) -> Vec<RuntimeCoverageHotPath> {
+    let mut hot_paths = entries
+        .into_iter()
+        .map(|entry| RuntimeCoverageHotPath {
+            id: entry.id,
+            stable_id: entry.identity.map(|identity| identity.stable_id),
+            path: PathBuf::from(entry.file),
+            function: entry.function,
+            line: entry.line,
+            end_line: entry.end_line,
+            invocations: entry.invocations,
+            percentile: entry.percentile,
+            actions: Vec::new(),
+        })
+        .collect::<Vec<_>>();
+    hot_paths.sort_by(|left, right| {
+        right
+            .invocations
+            .cmp(&left.invocations)
+            .then_with(|| left.path.cmp(&right.path))
+            .then_with(|| left.function.cmp(&right.function))
+    });
+    hot_paths
+}
+
+fn map_runtime_blast_radius(
+    entries: Vec<ProtocolBlastRadiusEntry>,
+) -> Vec<crate::health_types::RuntimeCoverageBlastRadiusEntry> {
+    let mut blast_radius = entries
+        .into_iter()
+        .map(
+            |entry| crate::health_types::RuntimeCoverageBlastRadiusEntry {
+                id: entry.id,
+                stable_id: entry.identity.map(|identity| identity.stable_id),
+                file: PathBuf::from(entry.file),
+                function: entry.function,
+                line: entry.line,
+                caller_count: entry.caller_count,
+                caller_count_weighted_by_traffic: entry.caller_count_weighted_by_traffic,
+                deploys_touched: entry.deploys_touched,
+                risk_band: map_risk_band(entry.risk_band),
+            },
+        )
+        .collect::<Vec<_>>();
+    blast_radius.sort_by(|left, right| {
+        risk_band_rank(right.risk_band)
+            .cmp(&risk_band_rank(left.risk_band))
+            .then_with(|| {
+                right
+                    .caller_count_weighted_by_traffic
+                    .cmp(&left.caller_count_weighted_by_traffic)
+            })
+            .then_with(|| right.caller_count.cmp(&left.caller_count))
+            .then_with(|| left.file.cmp(&right.file))
+            .then_with(|| left.function.cmp(&right.function))
+    });
+    blast_radius
+}
+
+fn map_runtime_importance(
+    entries: Vec<ProtocolImportanceEntry>,
+) -> Vec<crate::health_types::RuntimeCoverageImportanceEntry> {
+    let mut importance = entries
+        .into_iter()
+        .map(
+            |entry| crate::health_types::RuntimeCoverageImportanceEntry {
+                id: entry.id,
+                stable_id: entry.identity.map(|identity| identity.stable_id),
+                file: PathBuf::from(entry.file),
+                function: entry.function,
+                line: entry.line,
+                invocations: entry.invocations,
+                cyclomatic: entry.cyclomatic,
+                owner_count: entry.owner_count,
+                importance_score: entry.importance_score,
+                reason: entry.reason,
+            },
+        )
+        .collect::<Vec<_>>();
+    importance.sort_by(|left, right| {
+        right
+            .importance_score
+            .total_cmp(&left.importance_score)
+            .then_with(|| right.invocations.cmp(&left.invocations))
+            .then_with(|| left.file.cmp(&right.file))
+            .then_with(|| left.function.cmp(&right.function))
+    });
+    importance
+}
+
 fn apply_top_limit(report: &mut RuntimeCoverageReport, top: Option<usize>) {
     let Some(top) = top else {
         return;
@@ -1949,10 +1919,6 @@ const fn map_risk_band(risk_band: RiskBand) -> RuntimeCoverageRiskBand {
     match risk_band {
         RiskBand::Low => RuntimeCoverageRiskBand::Low,
         RiskBand::High => RuntimeCoverageRiskBand::High,
-        // Medium, plus the forward-compat `Unknown` sentinel (protocol 0.7.0):
-        // a sidecar on a newer protocol emitted a risk band this CLI has not
-        // seen yet. Map it to the neutral middle rather than dropping the
-        // entry; plow's own output enum carries only Low/Medium/High.
         RiskBand::Medium | RiskBand::Unknown => RuntimeCoverageRiskBand::Medium,
     }
 }
@@ -2047,21 +2013,21 @@ const fn verdict_rank(verdict: RuntimeCoverageVerdict) -> u8 {
 mod tests {
     use super::{
         AccumulatedFunction, BINARY_SIGNING_VERIFY_KEY, PackageManagerOutput, RemappedFnKey,
-        RemappedFunction, StaticSignalIndex, build_request, build_static_signal_index,
-        convert_response, discover_sidecar, looks_like_istanbul, merge_remapped_functions,
+        RemappedFunction, RuntimeCoverageAnalysisInput, StaticFunctionInput, StaticSignalIndex,
+        build_request, build_static_signal_index, convert_response, discover_sidecar,
+        function_identity_id, looks_like_istanbul, merge_remapped_functions,
         path_binary_candidates, prepare_coverage_sources, resolve_original_source_path,
         resolve_sidecar_via_command, sidecar_binary_name, static_function,
         verify_sidecar_signature, write_istanbul_coverage_file,
     };
     use crate::health::RuntimeCoverageOptions;
-    use plow_config::{PlowConfig, OutputFormat};
-    use fallow_cov_protocol::{
+    use globset::{Glob, GlobSetBuilder};
+    use oxc_coverage_instrument::{Location, Position};
+    use plow_config::{OutputFormat, PlowConfig};
+    use plow_cov_protocol::{
         Confidence, CoverageSource, DiagnosticMessage, Evidence, Finding, FunctionIdentity,
         HotPath, IdentityResolution, PROTOCOL_VERSION, ReportVerdict, Response, Summary, Verdict,
-        function_identity_id,
     };
-    use globset::GlobSetBuilder;
-    use oxc_coverage_instrument::{Location, Position};
     use rustc_hash::{FxHashMap, FxHashSet};
     use std::collections::BTreeMap;
     use std::path::Path;
@@ -2093,15 +2059,9 @@ mod tests {
 
     #[test]
     fn binary_signing_verify_key_is_32_bytes() {
-        // Ed25519 public keys are always 32 bytes. Guards against accidental
-        // byte-array edits that would silently break verification.
         assert_eq!(BINARY_SIGNING_VERIFY_KEY.len(), 32);
     }
 
-    // Hard-fail gate for the release process. Asserts the constant is not the
-    // all-zeros placeholder that shipped in the Phase 2.5 A' commit. Now runs
-    // by default (no `#[ignore]`) so any accidental revert to the placeholder
-    // would break `cargo test` immediately.
     #[test]
     fn binary_signing_verify_key_must_not_be_placeholder() {
         assert_ne!(
@@ -2110,17 +2070,8 @@ mod tests {
         );
     }
 
-    // Structural invariant: the runtime-coverage analysis path must not
-    // perform any network I/O. Enterprise / air-gapped buyers depend on this.
-    // The gate for Phase 2 step 4 of the roadmap is explicitly "integration
-    // test asserting zero network calls during analysis"; this source-level
-    // assertion is the fastest regression guard for that contract. The sibling
-    // integration tests in `crates/cli/tests/runtime_coverage_tests.rs`
-    // exercise the full spawn pipeline with a signed stub sidecar.
     #[test]
     fn runtime_coverage_module_has_no_network_code() {
-        // Scan only the non-test portion of the file; the FORBIDDEN list below
-        // would otherwise match its own entries.
         let full = include_str!("coverage.rs");
         let analysis_source = full.split("#[cfg(test)]").next().unwrap_or(full);
         const FORBIDDEN: &[&str] = &[
@@ -2296,6 +2247,24 @@ mod tests {
     }
 
     #[test]
+    fn empty_coverage_directory_is_treated_as_v8_directory() {
+        let root = make_temp_dir("coverage-empty-dir");
+        std::fs::create_dir_all(&root)
+            .unwrap_or_else(|err| panic!("failed to create temp dir: {err}"));
+
+        let prepared = prepare_coverage_sources(&root)
+            .unwrap_or_else(|err| panic!("failed to collect coverage sources: {err}"));
+
+        assert!(matches!(
+            &prepared.sources[..],
+            [CoverageSource::V8Dir { path }] if path == &root.to_string_lossy()
+        ));
+
+        std::fs::remove_dir_all(&root)
+            .unwrap_or_else(|err| panic!("failed to clean temp dir {}: {err}", root.display()));
+    }
+
+    #[test]
     fn discovers_project_local_sidecar_before_global_locations() {
         let root = make_temp_dir("sidecar-local");
         let bin_dir = root.join("node_modules").join(".bin");
@@ -2318,12 +2287,6 @@ mod tests {
             .unwrap_or_else(|err| panic!("failed to clean temp dir {}: {err}", root.display()));
     }
 
-    // Regression test for the Phase 2.5 smoke-test finding: when both the
-    // `@plow-cli/plow-cov-<platform>/plow-cov` real binary and the
-    // `node_modules/.bin/plow-cov` Node wrapper exist (the usual layout
-    // after `npm install @plow-cli/plow-cov`), discovery must prefer
-    // the platform package's real binary. The wrapper has no adjacent
-    // `.sig` file, so pointing at it breaks signature verification.
     #[test]
     fn discovers_platform_package_sidecar_before_bin_wrapper() {
         let root = make_temp_dir("sidecar-platform-pkg");
@@ -2425,9 +2388,6 @@ mod tests {
     #[test]
     fn discovers_pnpm_store_platform_sidecar_before_bin_wrapper() {
         let root = make_temp_dir("sidecar-pnpm-store");
-        // pnpm with `node-linker=isolated` extracts platform packages into
-        // `.pnpm/<scope+name>@<version>_<peer-hash>/...`; the peer-hash
-        // suffix must not break the `@plow-cli+plow-cov-` prefix match.
         let platform_dir = root
             .join("node_modules")
             .join(".pnpm")
@@ -2466,13 +2426,139 @@ mod tests {
         let candidates = path_binary_candidates("plow-cov");
 
         if cfg!(windows) {
-            assert_eq!(
-                candidates,
-                vec!["plow-cov", "plow-cov.exe", "plow-cov.cmd"]
-            );
+            assert_eq!(candidates, vec!["plow-cov", "plow-cov.exe", "plow-cov.cmd"]);
         } else {
             assert_eq!(candidates, vec!["plow-cov"]);
         }
+    }
+
+    #[test]
+    fn finds_project_local_sidecar_from_ancestor_node_modules_bin() {
+        let root = make_temp_dir("sidecar-project-local");
+        let app = root.join("apps").join("web");
+        let bin_dir = root.join("node_modules").join(".bin");
+        std::fs::create_dir_all(&app)
+            .unwrap_or_else(|err| panic!("failed to create {}: {err}", app.display()));
+        std::fs::create_dir_all(&bin_dir)
+            .unwrap_or_else(|err| panic!("failed to create {}: {err}", bin_dir.display()));
+        let sidecar = bin_dir.join(sidecar_binary_name());
+        std::fs::write(&sidecar, "")
+            .unwrap_or_else(|err| panic!("failed to write {}: {err}", sidecar.display()));
+
+        assert_eq!(super::find_project_local_sidecar(&app), Some(sidecar));
+
+        std::fs::remove_dir_all(&root)
+            .unwrap_or_else(|err| panic!("failed to clean temp dir {}: {err}", root.display()));
+    }
+
+    #[test]
+    fn detects_package_manager_from_field_before_lockfiles() {
+        let root = make_temp_dir("sidecar-package-manager-field");
+        std::fs::create_dir_all(&root)
+            .unwrap_or_else(|err| panic!("failed to create {}: {err}", root.display()));
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"demo","packageManager":"pnpm@9.15.0"}"#,
+        )
+        .unwrap_or_else(|err| panic!("failed to write package.json: {err}"));
+        std::fs::write(root.join("package-lock.json"), "")
+            .unwrap_or_else(|err| panic!("failed to write package-lock.json: {err}"));
+
+        assert_eq!(
+            super::detect_package_manager(&root),
+            Some(super::LocalPackageManager::Pnpm)
+        );
+
+        std::fs::remove_dir_all(&root)
+            .unwrap_or_else(|err| panic!("failed to clean temp dir {}: {err}", root.display()));
+    }
+
+    #[test]
+    fn detects_package_manager_from_lockfiles() {
+        for (lockfile, expected) in [
+            ("bun.lock", super::LocalPackageManager::Bun),
+            ("pnpm-lock.yaml", super::LocalPackageManager::Pnpm),
+            ("yarn.lock", super::LocalPackageManager::Yarn),
+            ("npm-shrinkwrap.json", super::LocalPackageManager::Npm),
+        ] {
+            let root = make_temp_dir(&format!("sidecar-lockfile-{lockfile}"));
+            std::fs::create_dir_all(&root)
+                .unwrap_or_else(|err| panic!("failed to create {}: {err}", root.display()));
+            std::fs::write(root.join(lockfile), "")
+                .unwrap_or_else(|err| panic!("failed to write {lockfile}: {err}"));
+
+            assert_eq!(super::detect_package_manager(&root), Some(expected));
+
+            std::fs::remove_dir_all(&root)
+                .unwrap_or_else(|err| panic!("failed to clean temp dir {}: {err}", root.display()));
+        }
+    }
+
+    #[test]
+    fn detect_package_manager_ignores_unknown_package_manager_field() {
+        let root = make_temp_dir("sidecar-package-manager-unknown");
+        std::fs::create_dir_all(&root)
+            .unwrap_or_else(|err| panic!("failed to create {}: {err}", root.display()));
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"demo","packageManager":"pnpmish@1.0.0"}"#,
+        )
+        .unwrap_or_else(|err| panic!("failed to write package.json: {err}"));
+
+        assert_eq!(super::detect_package_manager(&root), None);
+
+        std::fs::remove_dir_all(&root)
+            .unwrap_or_else(|err| panic!("failed to clean temp dir {}: {err}", root.display()));
+    }
+
+    #[test]
+    fn detect_package_manager_falls_back_after_invalid_package_json() {
+        let root = make_temp_dir("sidecar-package-manager-invalid");
+        std::fs::create_dir_all(&root)
+            .unwrap_or_else(|err| panic!("failed to create {}: {err}", root.display()));
+        std::fs::write(root.join("package.json"), "{")
+            .unwrap_or_else(|err| panic!("failed to write package.json: {err}"));
+        std::fs::write(root.join("package-lock.json"), "")
+            .unwrap_or_else(|err| panic!("failed to write package-lock.json: {err}"));
+
+        assert_eq!(
+            super::detect_package_manager(&root),
+            Some(super::LocalPackageManager::Npm)
+        );
+
+        std::fs::remove_dir_all(&root)
+            .unwrap_or_else(|err| panic!("failed to clean temp dir {}: {err}", root.display()));
+    }
+
+    #[test]
+    fn package_store_sidecar_prefers_highest_version() {
+        let root = make_temp_dir("sidecar-store-version");
+        let node_modules = root.join("node_modules");
+        let store = node_modules.join(".pnpm");
+        for version in ["0.1.4", "0.1.8"] {
+            let package_dir = store
+                .join(format!("@plow-cli+plow-cov-darwin-arm64@{version}"))
+                .join("node_modules")
+                .join("@plow-cli")
+                .join("plow-cov-darwin-arm64");
+            std::fs::create_dir_all(&package_dir)
+                .unwrap_or_else(|err| panic!("failed to create {}: {err}", package_dir.display()));
+            std::fs::write(
+                package_dir.join("package.json"),
+                format!(r#"{{"version":"{version}"}}"#),
+            )
+            .unwrap_or_else(|err| panic!("failed to write package.json: {err}"));
+            std::fs::write(package_dir.join(sidecar_binary_name()), "")
+                .unwrap_or_else(|err| panic!("failed to write sidecar: {err}"));
+        }
+
+        let resolved = super::find_package_store_platform_sidecar(&node_modules, ".pnpm")
+            .expect("store sidecar should resolve");
+
+        assert!(resolved.display().to_string().contains("0.1.8"));
+
+        std::fs::remove_dir_all(&root)
+            .unwrap_or_else(|err| panic!("failed to clean temp dir {}: {err}", root.display()));
     }
 
     #[test]
@@ -2567,31 +2653,25 @@ mod tests {
 
     #[test]
     fn static_function_round_trips() {
-        // Pins the `static_function` serde round-trip shape. If a future
-        // protocol revision adds a required-without-default field to
-        // StaticFunction, this fails in CI rather than the `.expect()`
-        // panicking in the paid runtime-coverage path.
-        let sf = static_function(
-            "src/render.tsx",
-            "render",
-            42,
-            50,
-            4,
-            true,
-            false,
-            0,
-            None,
-            Some("0123456789abcdef".to_owned()),
-        );
+        let sf = static_function(StaticFunctionInput {
+            relative_posix: "src/render.tsx",
+            name: "render",
+            start_line: 42,
+            end_line: 50,
+            cyclomatic: 4,
+            static_used: true,
+            test_covered: false,
+            caller_count: 0,
+            owner_count: None,
+            source_hash: Some("0123456789abcdef".to_owned()),
+        });
         let value = serde_json::to_value(&sf).expect("serialize StaticFunction");
         assert_eq!(value["name"], "render");
         assert_eq!(value["start_line"], 42);
         assert_eq!(value["end_line"], 50);
         assert_eq!(value["identity"]["resolution"], "unresolved");
-        assert_eq!(value["identity"]["stable_id"], "fallow:fn:cb4482d6aef7c79a");
-        // source_hash is carried on the wire so the sidecar can echo it back.
+        assert_eq!(value["identity"]["stable_id"], "plow:fn:cb4482d6aef7c79a");
         assert_eq!(value["identity"]["source_hash"], "0123456789abcdef");
-        // Columns are deliberately absent on the health path (Unresolved).
         assert!(value["identity"].get("start_column").is_none());
     }
 
@@ -2601,7 +2681,7 @@ mod tests {
     /// wire reprs). `identity` lets a test exercise the v2 join-key threading.
     fn proto_finding(identity: Option<&FunctionIdentity>) -> Finding {
         serde_json::from_value(serde_json::json!({
-            "id": "fallow:prod:abc12345",
+            "id": "plow:prod:abc12345",
             "file": "src/app.ts",
             "function": "alpha",
             "line": 8,
@@ -2625,7 +2705,7 @@ mod tests {
 
     fn proto_hot_path() -> HotPath {
         serde_json::from_value(serde_json::json!({
-            "id": "fallow:hot:def67890",
+            "id": "plow:hot:def67890",
             "file": "src/app.ts",
             "function": "alpha",
             "line": 8,
@@ -2737,14 +2817,14 @@ mod tests {
             None,
         );
 
-        assert_eq!(report.findings[0].id, "fallow:prod:abc12345");
+        assert_eq!(report.findings[0].id, "plow:prod:abc12345");
         assert_eq!(report.findings[0].line, 8);
         assert_eq!(
             report.findings[0].verdict,
             crate::health_types::RuntimeCoverageVerdict::ReviewRequired,
         );
         assert_eq!(report.findings[0].evidence.static_status, "used");
-        assert_eq!(report.hot_paths[0].id, "fallow:hot:def67890");
+        assert_eq!(report.hot_paths[0].id, "plow:hot:def67890");
         assert_eq!(report.hot_paths[0].percentile, 50);
     }
 
@@ -2764,20 +2844,27 @@ mod tests {
         let ignore_set = GlobSetBuilder::new()
             .build()
             .unwrap_or_else(|err| panic!("failed to build empty globset: {err}"));
+        let analysis_output = empty_analysis_output();
+        let file_paths = FxHashMap::default();
 
         let (request, _locations) = build_request(
             &options,
-            &root,
-            &[],
-            &empty_analysis_output(),
+            &RuntimeCoverageAnalysisInput {
+                root: &root,
+                modules: &[],
+                analysis_output: &analysis_output,
+                istanbul_coverage: None,
+                file_paths: &file_paths,
+                ignore_set: &ignore_set,
+                changed_files: None,
+                ws_roots: Some(&ws_roots),
+                top: None,
+                codeowners_path: None,
+                quiet: true,
+                output: OutputFormat::Json,
+            },
             &StaticSignalIndex::default(),
-            None,
-            &FxHashMap::default(),
-            &ignore_set,
-            None,
-            Some(&ws_roots),
             vec![],
-            None,
         );
 
         assert_eq!(request.project_root, ws_root.to_string_lossy());
@@ -2865,17 +2952,22 @@ mod tests {
 
         let (request, _locations) = build_request(
             &options,
-            &root,
-            &modules,
-            &empty_analysis_output(),
+            &RuntimeCoverageAnalysisInput {
+                root: &root,
+                modules: &modules,
+                analysis_output: &analysis_output,
+                istanbul_coverage: None,
+                file_paths: &file_paths,
+                ignore_set: &ignore_set,
+                changed_files: None,
+                ws_roots: None,
+                top: None,
+                codeowners_path: None,
+                quiet: true,
+                output: OutputFormat::Json,
+            },
             &static_signals,
-            None,
-            &file_paths,
-            &ignore_set,
-            None,
-            None,
             vec![],
-            None,
         );
 
         let app_file = request
@@ -2906,6 +2998,94 @@ mod tests {
         assert!(!cold.test_covered);
         assert!(internal.static_used);
         assert!(!internal.test_covered);
+
+        std::fs::remove_dir_all(&root)
+            .unwrap_or_else(|err| panic!("failed to clean temp dir {}: {err}", root.display()));
+    }
+
+    #[test]
+    fn build_request_applies_changed_workspace_and_ignore_filters() {
+        let root = make_temp_dir("coverage-request-filters");
+        let app_dir = root.join("packages").join("app");
+        let other_dir = root.join("packages").join("other");
+        std::fs::create_dir_all(app_dir.join("src"))
+            .unwrap_or_else(|err| panic!("failed to create app src dir: {err}"));
+        std::fs::create_dir_all(other_dir.join("src"))
+            .unwrap_or_else(|err| panic!("failed to create other src dir: {err}"));
+        std::fs::write(root.join("package.json"), r#"{"name":"demo"}"#)
+            .unwrap_or_else(|err| panic!("failed to write package.json: {err}"));
+        std::fs::write(
+            app_dir.join("src").join("app.ts"),
+            "export function included() { return 1; }\n",
+        )
+        .unwrap_or_else(|err| panic!("failed to write app.ts: {err}"));
+        std::fs::write(
+            app_dir.join("src").join("ignored.ts"),
+            "export function ignored() { return 2; }\n",
+        )
+        .unwrap_or_else(|err| panic!("failed to write ignored.ts: {err}"));
+        std::fs::write(
+            other_dir.join("src").join("other.ts"),
+            "export function outside() { return 3; }\n",
+        )
+        .unwrap_or_else(|err| panic!("failed to write other.ts: {err}"));
+
+        let config =
+            PlowConfig::default().resolve(root.clone(), OutputFormat::Json, 1, true, true, None);
+        let files = plow_core::discover::discover_files(&config);
+        let parse_result = plow_core::extract::parse_all_files(&files, None, true);
+        let modules = parse_result.modules;
+        let file_paths: FxHashMap<_, _> = files.iter().map(|file| (file.id, &file.path)).collect();
+        let analysis_output = empty_analysis_output();
+        let mut changed_files = FxHashSet::default();
+        changed_files.insert(app_dir.join("src").join("app.ts"));
+        changed_files.insert(app_dir.join("src").join("ignored.ts"));
+        changed_files.insert(other_dir.join("src").join("other.ts"));
+        let ws_roots = [app_dir];
+        let mut ignore_builder = GlobSetBuilder::new();
+        ignore_builder.add(
+            Glob::new("packages/app/src/ignored.ts")
+                .unwrap_or_else(|err| panic!("failed to build ignore glob: {err}")),
+        );
+        let ignore_set = ignore_builder
+            .build()
+            .unwrap_or_else(|err| panic!("failed to build ignore set: {err}"));
+        let options = RuntimeCoverageOptions {
+            path: root.join("coverage"),
+            min_invocations_hot: 100,
+            min_observation_volume: None,
+            low_traffic_threshold: None,
+            license_jwt: "test-jwt".to_owned(),
+            watermark: None,
+        };
+
+        let (request, _locations) = build_request(
+            &options,
+            &RuntimeCoverageAnalysisInput {
+                root: &root,
+                modules: &modules,
+                analysis_output: &analysis_output,
+                istanbul_coverage: None,
+                file_paths: &file_paths,
+                ignore_set: &ignore_set,
+                changed_files: Some(&changed_files),
+                ws_roots: Some(&ws_roots),
+                top: None,
+                codeowners_path: None,
+                quiet: true,
+                output: OutputFormat::Json,
+            },
+            &StaticSignalIndex::default(),
+            vec![],
+        );
+
+        let paths = request
+            .static_findings
+            .files
+            .iter()
+            .map(|file| file.path.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(paths, vec!["packages/app/src/app.ts"]);
 
         std::fs::remove_dir_all(&root)
             .unwrap_or_else(|err| panic!("failed to clean temp dir {}: {err}", root.display()));
@@ -3002,8 +3182,9 @@ mod tests {
         let function_byte_offset = generated
             .find("function")
             .expect("generated source should contain function");
-        let function_v8_offset = generated[..function_byte_offset].encode_utf16().count() as u32;
-        assert_ne!(function_v8_offset, function_byte_offset as u32);
+        let function_utf16_offset = generated[..function_byte_offset].encode_utf16().count();
+        assert_ne!(function_utf16_offset, function_byte_offset);
+        let function_v8_offset = function_utf16_offset as u32;
 
         let v8_file = root.join("coverage-v8.json");
         let v8_json = serde_json::json!({
@@ -3520,5 +3701,253 @@ mod tests {
             std::fs::set_permissions(path, permissions)
                 .unwrap_or_else(|err| panic!("failed to chmod {}: {err}", path.display()));
         }
+    }
+
+    #[test]
+    fn parse_sidecar_version_key_splits_on_non_digits() {
+        assert_eq!(super::parse_sidecar_version_key("1.2.3"), vec![1, 2, 3]);
+        // Prerelease and build separators are non-digit boundaries.
+        assert_eq!(
+            super::parse_sidecar_version_key("0.1.5-beta.2"),
+            vec![0, 1, 5, 2]
+        );
+        assert_eq!(super::parse_sidecar_version_key("v2"), vec![2]);
+        assert!(super::parse_sidecar_version_key("").is_empty());
+    }
+
+    #[test]
+    fn sidecar_package_version_key_reads_sibling_package_json() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("package.json"), r#"{"version":"3.4.5"}"#).unwrap();
+        let binary = dir.path().join("plow-cov");
+        assert_eq!(super::sidecar_package_version_key(&binary), vec![3, 4, 5]);
+
+        // No package.json next to the binary -> empty key, never a panic.
+        let bare = tempfile::tempdir().expect("tempdir");
+        assert!(super::sidecar_package_version_key(&bare.path().join("plow-cov")).is_empty());
+    }
+
+    #[test]
+    fn normalize_package_manager_path_joins_relative_against_root() {
+        let root = Path::new("/proj");
+        assert_eq!(
+            super::normalize_package_manager_path(root, "node_modules/.bin/plow-cov"),
+            PathBuf::from("/proj/node_modules/.bin/plow-cov")
+        );
+        // Absolute candidates are returned unchanged.
+        let abs = if cfg!(windows) {
+            "C:\\tools\\plow-cov"
+        } else {
+            "/tools/plow-cov"
+        };
+        assert_eq!(
+            super::normalize_package_manager_path(root, abs),
+            PathBuf::from(abs)
+        );
+    }
+
+    #[test]
+    fn project_local_sidecar_names_include_the_bare_binary() {
+        let names = super::project_local_sidecar_names();
+        assert!(!names.is_empty());
+        assert!(names.contains(&"plow-cov"));
+    }
+
+    #[test]
+    fn sidecar_missing_message_lists_checked_locations() {
+        // Without a project root: canonical path, PATH, and the default npm hint.
+        let generic = super::sidecar_missing_message(None);
+        assert!(generic.contains("PATH"), "got: {generic}");
+        assert!(generic.contains("npm install --save-dev @plow-cli/plow-cov"));
+        assert!(generic.contains("PLOW_COV_BIN"));
+
+        // With a pnpm project root: the node_modules bin path and a pnpm hint.
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("package.json"),
+            r#"{"name":"p","packageManager":"pnpm@9.0.0"}"#,
+        )
+        .unwrap();
+        let scoped = super::sidecar_missing_message(Some(dir.path()));
+        assert!(
+            scoped.contains("node_modules/.bin/plow-cov"),
+            "got: {scoped}"
+        );
+        assert!(scoped.contains("pnpm"), "pnpm hint missing: {scoped}");
+    }
+
+    #[test]
+    fn detect_package_manager_prefers_package_json_field() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("package.json"),
+            r#"{"packageManager":"bun@1.2.0"}"#,
+        )
+        .expect("write package.json");
+        std::fs::write(dir.path().join("pnpm-lock.yaml"), "").expect("write lockfile");
+
+        assert!(matches!(
+            super::detect_package_manager(dir.path()),
+            Some(super::LocalPackageManager::Bun)
+        ));
+    }
+
+    #[test]
+    fn detect_package_manager_falls_back_to_lockfiles() {
+        for (lockfile, expected) in [
+            ("bun.lock", super::LocalPackageManager::Bun),
+            ("pnpm-lock.yaml", super::LocalPackageManager::Pnpm),
+            ("yarn.lock", super::LocalPackageManager::Yarn),
+            ("package-lock.json", super::LocalPackageManager::Npm),
+            ("npm-shrinkwrap.json", super::LocalPackageManager::Npm),
+        ] {
+            let dir = tempfile::tempdir().expect("tempdir");
+            std::fs::write(dir.path().join(lockfile), "").expect("write lockfile");
+
+            assert!(
+                matches!(super::detect_package_manager(dir.path()), Some(actual) if actual == expected),
+                "failed for {lockfile}"
+            );
+        }
+    }
+
+    #[test]
+    fn package_manager_install_commands_match_detected_tool() {
+        assert_eq!(
+            super::LocalPackageManager::Npm.install_command(),
+            "npm install --save-dev @plow-cli/plow-cov"
+        );
+        assert_eq!(
+            super::LocalPackageManager::Pnpm.install_command(),
+            "pnpm add -D @plow-cli/plow-cov"
+        );
+        assert_eq!(
+            super::LocalPackageManager::Yarn.install_command(),
+            "yarn add -D @plow-cli/plow-cov"
+        );
+        assert_eq!(
+            super::LocalPackageManager::Bun.install_command(),
+            "bun add -d @plow-cli/plow-cov"
+        );
+    }
+
+    #[test]
+    fn utf16_offset_maps_surrogate_pairs_to_byte_offsets() {
+        // "a😀b": 'a'=1 byte/1 utf16, '😀'=4 bytes/2 utf16, 'b'=1 byte/1 utf16.
+        let s = "a😀b";
+        assert_eq!(super::utf16_source_offset_to_byte_offset(s, 0), Some(0));
+        assert_eq!(super::utf16_source_offset_to_byte_offset(s, 1), Some(1)); // start of emoji
+        assert_eq!(super::utf16_source_offset_to_byte_offset(s, 3), Some(5)); // start of 'b'
+        assert_eq!(super::utf16_source_offset_to_byte_offset(s, 4), Some(6)); // end of string
+        // An offset landing inside the surrogate pair is unmappable.
+        assert_eq!(super::utf16_source_offset_to_byte_offset(s, 2), None);
+        // Past the end is unmappable.
+        assert_eq!(super::utf16_source_offset_to_byte_offset(s, 5), None);
+    }
+
+    #[test]
+    fn file_url_to_path_accepts_file_urls_and_absolute_paths_only() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("app.js");
+        let url = file_url(&path);
+        assert_eq!(super::file_url_to_path(&url), Some(path));
+        // Non-file URLs and relative paths are rejected.
+        assert_eq!(super::file_url_to_path("https://example.com/app.js"), None);
+        assert_eq!(super::file_url_to_path("relative/app.js"), None);
+    }
+
+    #[test]
+    fn resolve_source_map_base_handles_inline_relative_and_remote_urls() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let generated = file_url(&dir.path().join("app.js"));
+        // No source-map URL: base is the generated file's directory.
+        assert_eq!(
+            super::resolve_source_map_base(&generated, None),
+            Some(dir.path().to_path_buf())
+        );
+        // Relative .map URL resolves against the generated directory.
+        assert_eq!(
+            super::resolve_source_map_base(&generated, Some("app.js.map")),
+            Some(dir.path().to_path_buf())
+        );
+        // A remote http(s) source-map URL has no local base.
+        assert_eq!(
+            super::resolve_source_map_base(&generated, Some("https://cdn.example.com/app.js.map")),
+            None
+        );
+    }
+
+    #[test]
+    fn resolve_original_source_path_handles_file_absolute_and_relative_sources() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let source = dir.path().join("src/app.ts");
+        let generated = file_url(&dir.path().join("dist/app.js"));
+
+        assert_eq!(
+            super::resolve_original_source_path("", &generated, None),
+            None
+        );
+        assert_eq!(
+            super::resolve_original_source_path(&file_url(&source), &generated, None),
+            Some(source.clone())
+        );
+        assert_eq!(
+            super::resolve_original_source_path(
+                source.to_str().expect("utf8 path"),
+                &generated,
+                None
+            ),
+            Some(source)
+        );
+        assert_eq!(
+            super::resolve_original_source_path("src/app.ts", &generated, None),
+            Some(dir.path().join("dist/src/app.ts"))
+        );
+    }
+
+    #[test]
+    fn resolve_original_source_path_resolves_virtual_sources_from_ancestors() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let source = dir.path().join("src/app.ts");
+        std::fs::create_dir_all(source.parent().expect("source parent"))
+            .expect("create source dir");
+        std::fs::write(&source, "export const app = true;").expect("write source");
+        let generated = file_url(&dir.path().join("dist/chunks/app.js"));
+
+        assert_eq!(
+            super::resolve_original_source_path("webpack://app/src/app.ts", &generated, None),
+            Some(source)
+        );
+    }
+
+    #[test]
+    fn virtual_source_candidates_strip_known_pseudo_hosts() {
+        let url = Url::parse("webpack://_N_E/./src/app.ts").expect("url");
+        let candidates = super::virtual_source_candidates(&url);
+        // The `_N_E` pseudo-host is dropped and the url crate normalizes the
+        // `/.` segment, leaving the path-only candidate.
+        assert!(
+            candidates.contains(&PathBuf::from("src/app.ts")),
+            "got: {candidates:?}"
+        );
+        assert!(!candidates.iter().any(|c| c.starts_with("_N_E")));
+    }
+
+    #[test]
+    fn resolve_virtual_source_path_ignores_non_virtual_schemes() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        assert_eq!(
+            super::resolve_virtual_source_path("https://example.com/app.ts", dir.path()),
+            None
+        );
+    }
+
+    #[test]
+    fn location_precedes_orders_by_line_then_column() {
+        let p = |line, column| Position { line, column };
+        assert!(super::location_precedes(&p(1, 0), &p(2, 0)));
+        assert!(super::location_precedes(&p(3, 4), &p(3, 9)));
+        assert!(!super::location_precedes(&p(3, 9), &p(3, 4)));
+        assert!(!super::location_precedes(&p(2, 0), &p(2, 0)));
     }
 }

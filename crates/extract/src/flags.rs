@@ -20,7 +20,6 @@ use plow_types::extract::{FlagUse, FlagUseKind, byte_offset_to_line_col};
 
 /// Built-in SDK function patterns: (function_name, name_arg_index, provider_label).
 const BUILTIN_SDK_PATTERNS: &[(&str, usize, &str)] = &[
-    // LaunchDarkly
     ("useFlag", 0, "LaunchDarkly"),
     ("useLDFlag", 0, "LaunchDarkly"),
     ("useFeatureFlag", 0, "LaunchDarkly"),
@@ -29,31 +28,23 @@ const BUILTIN_SDK_PATTERNS: &[(&str, usize, &str)] = &[
     ("stringVariation", 0, "LaunchDarkly"),
     ("numberVariation", 0, "LaunchDarkly"),
     ("jsonVariation", 0, "LaunchDarkly"),
-    // Statsig
     ("useGate", 0, "Statsig"),
     ("checkGate", 0, "Statsig"),
     ("useExperiment", 0, "Statsig"),
     ("useConfig", 0, "Statsig"),
-    // Unleash
     ("isEnabled", 0, "Unleash"),
     ("getVariant", 0, "Unleash"),
-    // GrowthBook
     ("isOn", 0, "GrowthBook"),
     ("isOff", 0, "GrowthBook"),
     ("getFeatureValue", 0, "GrowthBook"),
-    // Split
     ("getTreatment", 0, "Split"),
-    // PostHog
     ("useFeatureFlagEnabled", 0, "PostHog"),
     ("useFeatureFlagPayload", 0, "PostHog"),
     ("useFeatureFlagVariantKey", 0, "PostHog"),
     ("getFeatureFlagPayload", 0, "PostHog"),
-    // ConfigCat
     ("getValueAsync", 0, "ConfigCat"),
     ("getValueDetailsAsync", 0, "ConfigCat"),
-    // Flagsmith
     ("hasFeature", 0, "Flagsmith"),
-    // Optimizely
     ("useDecision", 0, "Optimizely"),
     ("getFeatureVariable", 0, "Optimizely"),
     ("getFeatureVariableBoolean", 0, "Optimizely"),
@@ -62,7 +53,6 @@ const BUILTIN_SDK_PATTERNS: &[(&str, usize, &str)] = &[
     ("getFeatureVariableDouble", 0, "Optimizely"),
     ("getFeatureVariableJson", 0, "Optimizely"),
     ("getFeatureVariableJSON", 0, "Optimizely"),
-    // Eppo
     ("getStringAssignment", 0, "Eppo"),
     ("getBooleanAssignment", 0, "Eppo"),
     ("getNumericAssignment", 0, "Eppo"),
@@ -73,10 +63,7 @@ const BUILTIN_SDK_PATTERNS: &[(&str, usize, &str)] = &[
     ("getNumericAssignmentDetails", 0, "Eppo"),
     ("getIntegerAssignmentDetails", 0, "Eppo"),
     ("getJSONAssignmentDetails", 0, "Eppo"),
-    // Shared: getValue is used by both ConfigCat and Flagsmith.
-    // Attribution is best-effort when function names collide.
     ("getValue", 0, ""),
-    // Generic
     ("useFeature", 0, ""),
     ("getFeatureFlag", 0, ""),
 ];
@@ -99,6 +86,35 @@ const BUILTIN_ENV_PREFIXES: &[&str] = &[
     "FLAG_",
     "TOGGLE_",
 ];
+
+/// Distinct built-in SDK provider labels, in declaration order.
+///
+/// Used by `plow flags` to tell the user which SDKs the default detectors
+/// cover when no flags are found. Derived from `BUILTIN_SDK_PATTERNS` (empty
+/// provider labels skipped) with the import-based Vercel Flags provider appended,
+/// so the surfaced list stays in sync with what is actually detected.
+#[must_use]
+pub fn builtin_sdk_providers() -> Vec<&'static str> {
+    let mut providers: Vec<&'static str> = Vec::new();
+    for &(_, _, provider) in BUILTIN_SDK_PATTERNS {
+        if !provider.is_empty() && !providers.contains(&provider) {
+            providers.push(provider);
+        }
+    }
+    if !providers.contains(&VERCEL_FLAGS_PROVIDER) {
+        providers.push(VERCEL_FLAGS_PROVIDER);
+    }
+    providers
+}
+
+/// Built-in environment variable prefixes treated as feature flags.
+///
+/// Used by `plow flags` to surface the default env-prefix detectors in the
+/// empty-result hint. Returns the source-of-truth `BUILTIN_ENV_PREFIXES`.
+#[must_use]
+pub fn builtin_env_prefixes() -> &'static [&'static str] {
+    BUILTIN_ENV_PREFIXES
+}
 
 /// Config object names that heuristically indicate feature flag namespaces.
 const CONFIG_OBJECT_KEYWORDS: &[&str] = &[
@@ -148,7 +164,6 @@ impl<'a> FlagVisitor<'a> {
 
     /// Check if a member expression matches `process.env.SOMETHING`.
     fn check_env_var(&mut self, expr: &MemberExpression<'_>, guard: Option<(u32, u32)>) {
-        // Match: process.env.X (static member)
         if let MemberExpression::StaticMemberExpression(static_expr) = expr
             && let Some(env_name) = extract_process_env_name(static_expr)
             && self.is_flag_env_name(&env_name)
@@ -182,7 +197,6 @@ impl<'a> FlagVisitor<'a> {
             return;
         }
 
-        // Check built-in patterns
         for &(pattern_name, name_arg_idx, provider) in BUILTIN_SDK_PATTERNS {
             if func_name == pattern_name {
                 if let Some(flag_name) = extract_string_arg(&call.arguments, name_arg_idx) {
@@ -205,7 +219,6 @@ impl<'a> FlagVisitor<'a> {
             }
         }
 
-        // Check user-configured extra patterns
         for (pattern_name, name_arg_idx, provider) in self.extra_sdk_patterns {
             if func_name == pattern_name {
                 if let Some(flag_name) = extract_string_arg(&call.arguments, *name_arg_idx) {
@@ -327,8 +340,6 @@ impl<'a> FlagVisitor<'a> {
             return;
         }
 
-        // Look for patterns like config.features.x, flags.enableNewFeature
-        // The object must contain a keyword from CONFIG_OBJECT_KEYWORDS
         if let Some((obj_name, prop_name)) = extract_config_object_access(expr)
             && CONFIG_OBJECT_KEYWORDS
                 .iter()
@@ -375,10 +386,8 @@ impl Visit<'_> for FlagVisitor<'_> {
     fn visit_if_statement(&mut self, stmt: &IfStatement<'_>) {
         let guard = Some((stmt.span.start, stmt.span.end));
 
-        // Check the test expression for flag patterns (with guard context)
         check_expression_for_flags(self, &stmt.test, guard);
 
-        // Visit consequent and alternate, but NOT the test expression again
         self.visit_statement(&stmt.consequent);
         if let Some(alt) = &stmt.alternate {
             self.visit_statement(alt);
@@ -389,7 +398,6 @@ impl Visit<'_> for FlagVisitor<'_> {
         let guard = Some((expr.span.start, expr.span.end));
         check_expression_for_flags(self, &expr.test, guard);
 
-        // Visit consequent and alternate, but NOT the test expression again
         self.visit_expression(&expr.consequent);
         self.visit_expression(&expr.alternate);
     }
@@ -464,7 +472,6 @@ fn check_static_member_for_env(
 
 /// Extract the environment variable name from `process.env.X`.
 fn extract_process_env_name(expr: &StaticMemberExpression<'_>) -> Option<String> {
-    // Match: process.env.SOMETHING
     let prop_name = expr.property.name.as_str();
 
     if let Expression::StaticMemberExpression(inner) = &expr.object
@@ -524,7 +531,6 @@ fn extract_config_object_access(expr: &StaticMemberExpression<'_>) -> Option<(St
         Expression::Identifier(id) => Some((id.name.to_string(), prop_name)),
         Expression::StaticMemberExpression(inner) => {
             if matches!(&inner.object, Expression::Identifier(_)) {
-                // Two-level: config.features.x -> obj="features", prop="x"
                 Some((inner.property.name.to_string(), prop_name))
             } else {
                 None
@@ -600,8 +606,6 @@ mod tests {
         extract_flags(&parser_return.program, &line_offsets, &[], &[], true)
     }
 
-    // ── Environment variable detection ──────────────────────────────
-
     #[test]
     fn detects_process_env_feature_flag() {
         let flags = extract_from_source("if (process.env.FEATURE_NEW_CHECKOUT) { doStuff(); }");
@@ -630,8 +634,6 @@ mod tests {
         assert_eq!(flags.len(), 1);
         assert_eq!(flags[0].flag_name, "FEATURE_X");
     }
-
-    // ── SDK call detection ──────────────────────────────────────────
 
     #[test]
     fn detects_launchdarkly_use_flag() {
@@ -788,8 +790,6 @@ mod tests {
         assert!(flags.is_empty());
     }
 
-    // ── Config object detection (opt-in) ────────────────────────────
-
     #[test]
     fn config_objects_off_by_default() {
         let flags = extract_from_source("if (config.features.newCheckout) {}");
@@ -817,8 +817,6 @@ mod tests {
         assert!(flags.is_empty());
     }
 
-    // ── Guard span detection ────────────────────────────────────────
-
     #[test]
     fn captures_if_guard_span() {
         let source = "if (process.env.FEATURE_X) {\n  doStuff();\n}";
@@ -835,8 +833,6 @@ mod tests {
         assert_eq!(flags.len(), 1);
         assert!(flags[0].guard_span_start.is_some());
     }
-
-    // ── Custom SDK patterns ─────────────────────────────────────────
 
     #[test]
     fn detects_custom_sdk_pattern() {
@@ -864,8 +860,6 @@ mod tests {
         assert_eq!(flags[0].sdk_name.as_deref(), Some("Internal"));
     }
 
-    // ── Custom env prefixes ─────────────────────────────────────────
-
     #[test]
     fn detects_custom_env_prefix() {
         let allocator = Allocator::default();
@@ -882,5 +876,33 @@ mod tests {
         );
         assert_eq!(flags.len(), 1);
         assert_eq!(flags[0].flag_name, "MYAPP_ENABLE_V2");
+    }
+
+    #[test]
+    fn builtin_sdk_providers_are_distinct_and_ordered() {
+        let providers = builtin_sdk_providers();
+        assert!(!providers.is_empty());
+        let mut sorted = providers.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(
+            sorted.len(),
+            providers.len(),
+            "providers must be distinct: {providers:?}"
+        );
+        assert!(
+            !providers.contains(&""),
+            "empty provider labels must not leak into the surfaced list"
+        );
+        assert_eq!(providers.first(), Some(&"LaunchDarkly"));
+        assert_eq!(providers.last(), Some(&VERCEL_FLAGS_PROVIDER));
+    }
+
+    #[test]
+    fn builtin_env_prefixes_match_source_constant() {
+        let prefixes = builtin_env_prefixes();
+        assert_eq!(prefixes, BUILTIN_ENV_PREFIXES);
+        assert!(prefixes.contains(&"FEATURE_"));
+        assert!(prefixes.contains(&"TOGGLE_"));
     }
 }

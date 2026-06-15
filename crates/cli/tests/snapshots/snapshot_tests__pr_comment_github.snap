@@ -5,10 +5,10 @@ expression: output
 <!-- plow-id: plow-results -->
 ### Plow dead-code report
 
-Found **22** findings.
+Found **26** findings.
 
 <details>
-<summary>Dead code (8)</summary>
+<summary>Dead code (10)</summary>
 
 | Severity | Rule | Location | Description |
 | --- | --- | --- | --- |
@@ -17,8 +17,10 @@ Found **22** findings.
 | major | `plow/unused-file` | `src/dead.ts`:1 | File is not reachable from any entry point |
 | major | `plow/unused-enum-member` | `src/enums.ts`:8 | Enum member 'Status.Deprecated' is never referenced |
 | major | `plow/unused-class-member` | `src/service.ts`:42 | Class member 'UserService.legacyMethod' is never referenced |
+| minor | `plow/unused-store-member` | `src/stores/counter.ts`:24 | Store member 'useCounterStore.legacyAction' is never referenced |
 | major | `plow/unused-type` | `src/types.ts`:5 | Type export 'OldType' is never imported by other modules |
 | major | `plow/duplicate-export` | `src/types.ts`:30 | Export 'Config' appears in multiple modules |
+| minor | `plow/unprovided-inject` | `src/useTheme.ts`:5 | inject\(\`THEME\_KEY\`\) has no matching provide\(\`THEME\_KEY\`\) in this project; at runtime it returns undefined \(provide the key or remove this inject\) |
 | major | `plow/unused-export` | `src/utils.ts`:10 | Export 'helperFn' is never imported by other modules |
 
 </details>
@@ -50,6 +52,16 @@ Found **22** findings.
 | --- | --- | --- | --- |
 | major | `plow/circular-dependency` | `src/a.ts`:3 | Circular dependency: src/a.ts → src/b.ts |
 | minor | `plow/re-export-cycle` | `src/api/index.ts`:1 | Re-export cycle: src/api/index.ts \<-\> src/api/internal/index.ts |
+
+</details>
+
+<details>
+<summary>Policy (2)</summary>
+
+| Severity | Rule | Location | Description |
+| --- | --- | --- | --- |
+| minor | `plow/mixed-client-server-barrel` | `app/components/index.ts`:2 | Barrel re-exports both a "use client" module \(\`./Button\`\) and a server-only module \(\`./fetchUser\`\); one import drags the other's directive across the boundary |
+| minor | `plow/invalid-client-export` | `app/page.tsx`:3 | Export \`metadata\` is not allowed in a "use client" file \(Next.js server-only / route-config name\) |
 
 </details>
 

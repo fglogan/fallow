@@ -1,3 +1,9 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "tests and benches use unwrap and expect to keep fixture setup concise"
+)]
+
 #[path = "common/mod.rs"]
 mod common;
 
@@ -5,10 +11,6 @@ use common::{parse_json, run_plow_raw};
 use std::fs;
 use std::path::{Path, PathBuf};
 use syn::spanned::Spanned;
-
-// ---------------------------------------------------------------------------
-// schema command
-// ---------------------------------------------------------------------------
 
 #[test]
 fn schema_outputs_valid_json() {
@@ -101,9 +103,9 @@ fn explain_markdown_is_markdown() {
     assert!(output.stdout.starts_with("# Unused Exports\n\n"));
     assert!(output.stdout.contains("## Why it matters"));
     assert!(
-        output
-            .stdout
-            .contains("[Docs](https://docs.genesis-plow.dev/explanations/dead-code#unused-exports)")
+        output.stdout.contains(
+            "[Docs](https://docs.genesis-plow.dev/explanations/dead-code#unused-exports)"
+        )
     );
 }
 
@@ -113,6 +115,115 @@ fn explain_rejects_unknown_issue_type() {
     assert_eq!(output.code, 2, "unknown explain id should exit 2");
     let json = parse_json(&output);
     assert_eq!(json["error"].as_bool(), Some(true));
+}
+
+#[test]
+fn explain_outputs_tainted_sink_guidance_as_json() {
+    let output = run_plow_raw(&["explain", "tainted-sink", "--format", "json", "--quiet"]);
+    assert_eq!(output.code, 0, "explain should exit 0: {}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["id"].as_str(), Some("security/tainted-sink"));
+    assert!(
+        json["rationale"]
+            .as_str()
+            .is_some_and(|s| s.contains("unverified candidates"))
+    );
+    assert!(
+        json["example"]
+            .as_str()
+            .is_some_and(|s| s.contains("security/sql-injection"))
+    );
+}
+
+#[test]
+fn explain_outputs_client_server_leak_guidance_as_json() {
+    let output = run_plow_raw(&[
+        "explain",
+        "client-server-leak",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(output.code, 0, "explain should exit 0: {}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["id"].as_str(), Some("security/client-server-leak"));
+    assert!(
+        json["rationale"]
+            .as_str()
+            .is_some_and(|s| s.contains("process.env"))
+    );
+    assert!(
+        json["example"]
+            .as_str()
+            .is_some_and(|s| s.contains("use client"))
+    );
+}
+
+#[test]
+fn explain_outputs_hardcoded_secret_guidance_as_json() {
+    let output = run_plow_raw(&["explain", "hardcoded-secret", "--format", "json", "--quiet"]);
+    assert_eq!(output.code, 0, "explain should exit 0: {}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["id"].as_str(), Some("security/hardcoded-secret"));
+    assert!(
+        json["rationale"]
+            .as_str()
+            .is_some_and(|s| s.contains("include-required"))
+    );
+    assert!(
+        json["how_to_fix"]
+            .as_str()
+            .is_some_and(|s| s.contains("Rotate real credentials"))
+    );
+}
+
+#[test]
+fn explain_accepts_security_catalogue_ids() {
+    let output = run_plow_raw(&["explain", "sql-injection", "--format", "json", "--quiet"]);
+    assert_eq!(output.code, 0, "explain should exit 0: {}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["id"].as_str(), Some("security/sql-injection"));
+    assert_eq!(json["name"].as_str(), Some("SQL injection sink"));
+    assert!(
+        json["rationale"]
+            .as_str()
+            .is_some_and(|s| s.contains("CWE-89"))
+    );
+
+    let output = run_plow_raw(&["explain", "security/ssrf", "--format", "json", "--quiet"]);
+    assert_eq!(output.code, 0, "explain should exit 0: {}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["id"].as_str(), Some("security/ssrf"));
+    assert_eq!(
+        json["name"].as_str(),
+        Some("Server-side request forgery sink")
+    );
+}
+
+#[test]
+fn explain_security_unknown_suggests_security_examples() {
+    let output = run_plow_raw(&[
+        "explain",
+        "security-not-a-real-rule",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(output.code, 2, "unknown explain id should exit 2");
+    let json = parse_json(&output);
+    let message = json["message"]
+        .as_str()
+        .or_else(|| json["error_message"].as_str())
+        .unwrap_or("");
+    assert!(message.contains("tainted-sink"), "message was: {message}");
+    assert!(
+        message.contains("client-server-leak"),
+        "message was: {message}"
+    );
+    assert!(
+        message.contains("hardcoded-secret"),
+        "message was: {message}"
+    );
 }
 
 #[test]
@@ -743,10 +854,6 @@ fn serde_has_skip_serializing_if(attrs: &[syn::Attribute], expected: &str) -> bo
     })
 }
 
-// ---------------------------------------------------------------------------
-// config-schema command
-// ---------------------------------------------------------------------------
-
 #[test]
 fn config_schema_outputs_valid_json() {
     let output = run_plow_raw(&["config-schema"]);
@@ -764,10 +871,6 @@ fn config_schema_is_json_schema() {
         "config-schema should be a JSON Schema document"
     );
 }
-
-// ---------------------------------------------------------------------------
-// plugin-schema command
-// ---------------------------------------------------------------------------
 
 #[test]
 fn plugin_schema_outputs_valid_json() {

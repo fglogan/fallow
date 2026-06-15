@@ -7,17 +7,8 @@ use rustc_hash::FxHashSet;
 use super::PlowConfig;
 
 /// Supported config file names in priority order.
-///
-/// `find_and_load` checks these names in order within each directory,
-/// returning the first match found. `.plowrc.json` wins over
-/// `.plowrc.jsonc` if both exist (mirrors `tsconfig.json` >
-/// `tsconfig.jsonc` precedence).
-pub(super) const CONFIG_NAMES: &[&str] = &[
-    ".plowrc.json",
-    ".plowrc.jsonc",
-    "plow.toml",
-    ".plow.toml",
-];
+pub(super) const CONFIG_NAMES: &[&str] =
+    &[".plowrc.json", ".plowrc.jsonc", "plow.toml", ".plow.toml"];
 
 pub(super) const MAX_EXTENDS_DEPTH: usize = 10;
 
@@ -70,9 +61,6 @@ pub(super) fn deep_merge_json(base: &mut serde_json::Value, overlay: serde_json:
 pub(super) fn parse_config_to_value(path: &Path) -> Result<serde_json::Value, miette::Report> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| miette::miette!("Failed to read config file {}: {}", path.display(), e))?;
-    // Strip a leading UTF-8 BOM so Windows-authored configs parse cleanly.
-    // jsonc-parser and serde_yaml_ng both reject `\u{FEFF}` as an unexpected
-    // token; matches the pre-existing behaviour in workspace/parsers.rs.
     let content = content.trim_start_matches('\u{FEFF}');
 
     match ConfigFormat::from_path(path) {
@@ -93,21 +81,10 @@ pub(super) fn parse_config_to_value(path: &Path) -> Result<serde_json::Value, mi
     }
 }
 
-/// Return `true` if `dir` contains a VCS marker indicating a repository root.
-///
-/// Used as the walk-up stop condition for config discovery. Matches `.git`
-/// (directory for normal repos, file for git submodules/worktrees), `.hg`
-/// (Mercurial), and `.svn` (Subversion). We intentionally do NOT treat
-/// `package.json` as a stop boundary so monorepo sub-packages can inherit a
-/// root config. This matches Prettier/ESLint/Biome behavior.
 fn is_repo_root(dir: &Path) -> bool {
     dir.join(".git").exists() || dir.join(".hg").exists() || dir.join(".svn").exists()
 }
 
-/// Verify that `resolved` stays within `base_dir` after canonicalization.
-///
-/// Prevents path traversal attacks where a subpath or `package.json` field
-/// like `../../etc/passwd` escapes the intended directory.
 fn resolve_confined(
     base_dir: &Path,
     resolved: &Path,
@@ -137,7 +114,6 @@ fn resolve_confined(
     Ok(canonical_file)
 }
 
-/// Validate that a parsed package name is a legal npm package name.
 fn validate_npm_package_name(name: &str, source_config: &Path) -> Result<(), miette::Report> {
     if name.starts_with('@') && !name.contains('/') {
         return Err(miette::miette!(
@@ -156,16 +132,8 @@ fn validate_npm_package_name(name: &str, source_config: &Path) -> Result<(), mie
     Ok(())
 }
 
-/// Parse an npm specifier into `(package_name, optional_subpath)`.
-///
-/// Scoped: `@scope/name` → `("@scope/name", None)`,
-///         `@scope/name/strict.json` → `("@scope/name", Some("strict.json"))`.
-/// Unscoped: `name` → `("name", None)`,
-///           `name/strict.json` → `("name", Some("strict.json"))`.
 fn parse_npm_specifier(specifier: &str) -> (&str, Option<&str>) {
     if specifier.starts_with('@') {
-        // Scoped: @scope/name[/subpath]
-        // Find the second '/' which separates name from subpath.
         let mut slashes = 0;
         for (i, ch) in specifier.char_indices() {
             if ch == '/' {
@@ -175,7 +143,6 @@ fn parse_npm_specifier(specifier: &str) -> (&str, Option<&str>) {
                 }
             }
         }
-        // No subpath — entire string is the package name.
         (specifier, None)
     } else if let Some(slash) = specifier.find('/') {
         (&specifier[..slash], Some(&specifier[slash + 1..]))
@@ -184,12 +151,6 @@ fn parse_npm_specifier(specifier: &str) -> (&str, Option<&str>) {
     }
 }
 
-/// Resolve the default export path from a `package.json` `exports` field.
-///
-/// Handles the common patterns:
-/// - `"exports": "./config.json"` (string shorthand)
-/// - `"exports": {".": "./config.json"}` (object with default entry point)
-/// - `"exports": {".": {"default": "./config.json"}}` (conditional exports)
 fn resolve_package_exports(pkg: &serde_json::Value, package_dir: &Path) -> Option<PathBuf> {
     let exports = pkg.get("exports")?;
     match exports {
@@ -209,21 +170,10 @@ fn resolve_package_exports(pkg: &serde_json::Value, package_dir: &Path) -> Optio
                 _ => None,
             }
         }
-        // Array export fallback form (e.g., `[\"./config.json\", null]`) is not supported;
-        // falls through to main/config name scan.
         _ => None,
     }
 }
 
-/// Find a plow config file inside an npm package directory.
-///
-/// Resolution order:
-/// 1. `package.json` `exports` field (default entry point)
-/// 2. `package.json` `main` field
-/// 3. Standard config file names (`.plowrc.json`, `.plowrc.jsonc`, `plow.toml`, `.plow.toml`)
-///
-/// Paths from `exports`/`main` are confined to the package directory to prevent
-/// path traversal attacks from malicious packages.
 fn find_config_in_npm_package(
     package_dir: &Path,
     source_config: &Path,
@@ -278,11 +228,6 @@ fn find_config_in_npm_package(
     ))
 }
 
-/// Resolve an npm package specifier to a config file path.
-///
-/// Walks up from `config_dir` looking for `node_modules/<package_name>`.
-/// If a subpath is given (e.g., `@scope/name/strict.json`), resolves that file directly.
-/// Otherwise, finds the config file inside the package via [`find_config_in_npm_package`].
 fn resolve_npm_package(
     config_dir: &Path,
     specifier: &str,
@@ -340,26 +285,17 @@ fn resolve_npm_package(
 }
 
 /// Normalize a URL for deduplication.
-///
-/// - Lowercase scheme and host (path casing is preserved — it's server-dependent).
-/// - Strip fragment (`#...`) and query string (`?...`).
-/// - Strip trailing slash from path.
-/// - Normalize default HTTPS port (`:443` → omitted).
 fn normalize_url_for_dedup(url: &str) -> String {
-    // Split at the first `://` to get scheme, then find host boundary.
     let Some((scheme, rest)) = url.split_once("://") else {
         return url.to_string();
     };
     let scheme = scheme.to_ascii_lowercase();
 
-    // Split host from path at the first `/` after the authority.
     let (authority, path) = rest.split_once('/').map_or((rest, ""), |(a, p)| (a, p));
     let authority = authority.to_ascii_lowercase();
 
-    // Strip default HTTPS port.
     let authority = authority.strip_suffix(":443").unwrap_or(&authority);
 
-    // Strip fragment and query string from path, then trailing slash.
     let path = path.split_once('#').map_or(path, |(p, _)| p);
     let path = path.split_once('?').map_or(path, |(p, _)| p);
     let path = path.strip_suffix('/').unwrap_or(path);
@@ -372,9 +308,6 @@ fn normalize_url_for_dedup(url: &str) -> String {
 }
 
 /// Read the `PLOW_EXTENDS_TIMEOUT_SECS` env var, falling back to [`DEFAULT_URL_TIMEOUT_SECS`].
-///
-/// A value of `0` is treated as invalid and falls back to the default (a zero-duration
-/// timeout would make every request fail immediately with an opaque timeout error).
 fn url_timeout() -> Duration {
     std::env::var("PLOW_EXTENDS_TIMEOUT_SECS")
         .ok()
@@ -385,14 +318,10 @@ fn url_timeout() -> Duration {
         )
 }
 
-/// Maximum response body size for fetched config files (1 MB).
-/// Config files are never legitimately larger than a few kilobytes.
+/// Maximum response body size for fetched config files.
 const MAX_URL_CONFIG_BYTES: u64 = 1024 * 1024;
 
 /// Fetch a remote JSON config from an HTTPS URL.
-///
-/// Returns the parsed `serde_json::Value`. Only JSON (with optional JSONC comments) is
-/// supported for URL-sourced configs — TOML cannot be detected without a file extension.
 fn fetch_url_config(url: &str, source: &str) -> Result<serde_json::Value, miette::Report> {
     let timeout = url_timeout();
     let agent = ureq::Agent::config_builder()
@@ -427,7 +356,7 @@ fn fetch_url_config(url: &str, source: &str) -> Result<serde_json::Value, miette
     })
 }
 
-/// Extract the `extends` array from a parsed JSON config value, removing it from the object.
+/// Extract the `extends` array from a parsed JSON config value.
 fn extract_extends(value: &mut serde_json::Value) -> Vec<String> {
     value
         .as_object_mut()
@@ -445,9 +374,6 @@ fn extract_extends(value: &mut serde_json::Value) -> Vec<String> {
 }
 
 /// Resolve extends entries from a URL-sourced config.
-///
-/// URL-sourced configs may extend other URLs or `npm:` packages, but NOT relative
-/// paths (there is no filesystem base directory for a URL).
 fn resolve_url_extends(
     url: &str,
     visited: &mut FxHashSet<String>,
@@ -486,19 +412,12 @@ fn resolve_url_extends(
                 url
             ));
         } else if let Some(npm_specifier) = entry.strip_prefix(NPM_PREFIX) {
-            // npm: from URL context — no config_dir to walk up from, so we use the cwd.
-            // This is a best-effort fallback; the npm package must be available in the
-            // working directory's node_modules tree.
             let cwd = std::env::current_dir().map_err(|e| {
                 miette::miette!(
                     "Cannot resolve npm: specifier from URL-sourced config: \
                      failed to determine current directory: {e}"
                 )
             })?;
-            tracing::warn!(
-                "Resolving npm:{npm_specifier} from URL-sourced config ({url}) using the \
-                 current working directory for node_modules lookup"
-            );
             let path_placeholder = PathBuf::from(url);
             let npm_path = resolve_npm_package(&cwd, npm_specifier, &path_placeholder)?;
             resolve_extends_file(&npm_path, visited, depth + 1)?
@@ -517,10 +436,6 @@ fn resolve_url_extends(
 }
 
 /// Resolve extends from a local config file.
-///
-/// This is the main recursive resolver for file-based configs. It reads the file,
-/// extracts `extends`, and recursively resolves each entry (relative paths, npm
-/// packages, or HTTPS URLs).
 fn resolve_extends_file(
     path: &Path,
     visited: &mut FxHashSet<String>,
@@ -533,20 +448,7 @@ fn resolve_extends_file(
         ));
     }
 
-    let canonical = dunce::canonicalize(path).map_err(|e| {
-        miette::miette!(
-            "Config file not found or unresolvable: {}: {}",
-            path.display(),
-            e
-        )
-    })?;
-
-    if !visited.insert(canonical.to_string_lossy().into_owned()) {
-        return Err(miette::miette!(
-            "Circular extends detected: {} was already visited in the extends chain",
-            path.display()
-        ));
-    }
+    record_extends_visit(path, visited)?;
 
     let mut value = parse_config_to_value(path)?;
     let extends = extract_extends(&mut value);
@@ -560,92 +462,170 @@ fn resolve_extends_file(
         .get("sealed")
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
-    // Canonicalize the config directory once when sealed; reused inside the
-    // loop for each `extends` confinement check.
-    let sealed_dir_canonical = if sealed {
-        Some(dunce::canonicalize(config_dir).map_err(|e| {
-            miette::miette!(
-                "Sealed config directory '{}' could not be canonicalized: {e}",
-                config_dir.display()
-            )
-        })?)
-    } else {
-        None
-    };
+    let sealed_dir_canonical = sealed_config_dir(config_dir, sealed)?;
     let mut merged = serde_json::Value::Object(serde_json::Map::new());
 
     for extend_path_str in &extends {
-        let base = if extend_path_str.starts_with(HTTPS_PREFIX) {
-            if sealed {
-                return Err(miette::miette!(
-                    "'sealed: true' config at {} rejects URL extends '{}'. \
-                     Sealed configs only allow file-relative extends within \
-                     the config's directory",
-                    path.display(),
-                    extend_path_str
-                ));
-            }
-            resolve_url_extends(extend_path_str, visited, depth + 1)?
-        } else if extend_path_str.starts_with(HTTP_PREFIX) {
-            return Err(miette::miette!(
-                "URL extends must use https://, got http:// URL '{}' (in {}). \
-                 Change the URL to use https:// instead",
-                extend_path_str,
-                path.display()
-            ));
-        } else if let Some(npm_specifier) = extend_path_str.strip_prefix(NPM_PREFIX) {
-            if sealed {
-                return Err(miette::miette!(
-                    "'sealed: true' config at {} rejects npm extends '{}'. \
-                     Sealed configs only allow file-relative extends within \
-                     the config's directory",
-                    path.display(),
-                    extend_path_str
-                ));
-            }
-            let npm_path = resolve_npm_package(config_dir, npm_specifier, path)?;
-            resolve_extends_file(&npm_path, visited, depth + 1)?
-        } else {
-            if is_absolute_path_any_platform(Path::new(extend_path_str)) {
-                return Err(miette::miette!(
-                    "extends paths must be relative, got absolute path: {} (in {})",
-                    extend_path_str,
-                    path.display()
-                ));
-            }
-            let p = config_dir.join(extend_path_str);
-            if !p.exists() {
-                return Err(miette::miette!(
-                    "Extended config file not found: {} (referenced from {})",
-                    p.display(),
-                    path.display()
-                ));
-            }
-            if let Some(dir_canonical) = &sealed_dir_canonical {
-                let p_canonical = dunce::canonicalize(&p).map_err(|e| {
-                    miette::miette!(
-                        "Sealed config extends path '{}' could not be canonicalized: {e}",
-                        p.display()
-                    )
-                })?;
-                if !p_canonical.starts_with(dir_canonical) {
-                    return Err(miette::miette!(
-                        "'sealed: true' config at {} rejects extends '{}' which resolves \
-                         outside the config's directory ({}). Sealed configs only allow \
-                         extends within the config's directory",
-                        path.display(),
-                        extend_path_str,
-                        p_canonical.display()
-                    ));
-                }
-            }
-            resolve_extends_file(&p, visited, depth + 1)?
-        };
+        let base = resolve_extends_file_entry(
+            path,
+            config_dir,
+            extend_path_str,
+            sealed,
+            sealed_dir_canonical.as_deref(),
+            visited,
+            depth,
+        )?;
         deep_merge_json(&mut merged, base);
     }
 
     deep_merge_json(&mut merged, value);
     Ok(merged)
+}
+
+fn record_extends_visit(
+    path: &Path,
+    visited: &mut FxHashSet<String>,
+) -> Result<(), miette::Report> {
+    let canonical = dunce::canonicalize(path).map_err(|e| {
+        miette::miette!(
+            "Config file not found or unresolvable: {}: {}",
+            path.display(),
+            e
+        )
+    })?;
+
+    if visited.insert(canonical.to_string_lossy().into_owned()) {
+        Ok(())
+    } else {
+        Err(miette::miette!(
+            "Circular extends detected: {} was already visited in the extends chain",
+            path.display()
+        ))
+    }
+}
+
+fn sealed_config_dir(config_dir: &Path, sealed: bool) -> Result<Option<PathBuf>, miette::Report> {
+    if !sealed {
+        return Ok(None);
+    }
+    dunce::canonicalize(config_dir).map(Some).map_err(|e| {
+        miette::miette!(
+            "Sealed config directory '{}' could not be canonicalized: {e}",
+            config_dir.display()
+        )
+    })
+}
+
+fn resolve_extends_file_entry(
+    path: &Path,
+    config_dir: &Path,
+    entry: &str,
+    sealed: bool,
+    sealed_dir_canonical: Option<&Path>,
+    visited: &mut FxHashSet<String>,
+    depth: usize,
+) -> Result<serde_json::Value, miette::Report> {
+    if entry.starts_with(HTTPS_PREFIX) {
+        reject_sealed_remote_extends(path, entry, sealed, "URL")?;
+        return resolve_url_extends(entry, visited, depth + 1);
+    }
+    if entry.starts_with(HTTP_PREFIX) {
+        return Err(miette::miette!(
+            "URL extends must use https://, got http:// URL '{}' (in {}). \
+             Change the URL to use https:// instead",
+            entry,
+            path.display()
+        ));
+    }
+    if let Some(npm_specifier) = entry.strip_prefix(NPM_PREFIX) {
+        reject_sealed_remote_extends(path, entry, sealed, "npm")?;
+        let npm_path = resolve_npm_package(config_dir, npm_specifier, path)?;
+        return resolve_extends_file(&npm_path, visited, depth + 1);
+    }
+    resolve_relative_extends_file(
+        path,
+        config_dir,
+        entry,
+        sealed_dir_canonical,
+        visited,
+        depth,
+    )
+}
+
+fn reject_sealed_remote_extends(
+    path: &Path,
+    entry: &str,
+    sealed: bool,
+    kind: &str,
+) -> Result<(), miette::Report> {
+    if sealed {
+        Err(miette::miette!(
+            "'sealed: true' config at {} rejects {} extends '{}'. \
+             Sealed configs only allow file-relative extends within \
+             the config's directory",
+            path.display(),
+            kind,
+            entry
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn resolve_relative_extends_file(
+    path: &Path,
+    config_dir: &Path,
+    entry: &str,
+    sealed_dir_canonical: Option<&Path>,
+    visited: &mut FxHashSet<String>,
+    depth: usize,
+) -> Result<serde_json::Value, miette::Report> {
+    if is_absolute_path_any_platform(Path::new(entry)) {
+        return Err(miette::miette!(
+            "extends paths must be relative, got absolute path: {} (in {})",
+            entry,
+            path.display()
+        ));
+    }
+    let p = config_dir.join(entry);
+    if !p.exists() {
+        return Err(miette::miette!(
+            "Extended config file not found: {} (referenced from {})",
+            p.display(),
+            path.display()
+        ));
+    }
+    validate_sealed_relative_extends(path, entry, &p, sealed_dir_canonical)?;
+    resolve_extends_file(&p, visited, depth + 1)
+}
+
+fn validate_sealed_relative_extends(
+    path: &Path,
+    entry: &str,
+    resolved_path: &Path,
+    sealed_dir_canonical: Option<&Path>,
+) -> Result<(), miette::Report> {
+    let Some(dir_canonical) = sealed_dir_canonical else {
+        return Ok(());
+    };
+    let p_canonical = dunce::canonicalize(resolved_path).map_err(|e| {
+        miette::miette!(
+            "Sealed config extends path '{}' could not be canonicalized: {e}",
+            resolved_path.display()
+        )
+    })?;
+    if p_canonical.starts_with(dir_canonical) {
+        Ok(())
+    } else {
+        Err(miette::miette!(
+            "'sealed: true' config at {} rejects extends '{}' which resolves \
+             outside the config's directory ({}). Sealed configs only allow \
+             extends within the config's directory",
+            path.display(),
+            entry,
+            p_canonical.display()
+        ))
+    }
 }
 
 /// Public entry point: resolve a config file with all its extends chain.
@@ -742,8 +722,6 @@ fn warn_on_unknown_rule_keys(config_path: &Path, merged: &serde_json::Value) {
 
     for finding in collect_unknown_rule_keys(merged) {
         let dedupe_key = format!("{path_display}::{}::{}", finding.context, finding.key);
-        // On a poisoned mutex, fall through and emit anyway: over-warning is
-        // strictly better than swallowing a typo silently.
         if let Ok(mut set) = warned.lock()
             && !set.insert(dedupe_key)
         {
@@ -777,6 +755,112 @@ fn warn_on_unknown_rule_keys(config_path: &Path, merged: &serde_json::Value) {
     }
 }
 
+/// Return the lower-precedence config names from [`CONFIG_NAMES`] that ALSO
+/// exist in `dir`, given that `chosen_index` is the index of the first-match
+/// (winning) name.
+///
+/// Only indices after `chosen_index` are scanned: a higher-precedence name
+/// cannot coexist undetected, because it would have been the first match.
+fn shadowed_config_names(dir: &Path, chosen_index: usize) -> Vec<&'static str> {
+    CONFIG_NAMES
+        .iter()
+        .skip(chosen_index + 1)
+        .filter(|name| dir.join(name).exists())
+        .copied()
+        .collect()
+}
+
+/// A captured coexistence warning: `(chosen file name, shadowed file names)`.
+/// Test-only; populated by `warn_on_coexisting_configs` under capture.
+#[cfg(test)]
+type CoexistWarning = (String, Vec<String>);
+
+thread_local! {
+    /// Per-thread capture of coexisting-config warnings, for the wiring
+    /// regression test in this module. Mirrors [`UNKNOWN_RULE_CAPTURE`]: each
+    /// test installs a fresh capture via
+    /// [`capture_coexisting_config_warnings`], runs `find_and_load`, and reads
+    /// back the `(chosen, shadowed)` pairs. Thread-local so parallel test
+    /// execution does not race; bypassed entirely in production code.
+    #[cfg(test)]
+    static COEXIST_CAPTURE: std::cell::RefCell<Option<Vec<CoexistWarning>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Install a thread-local capture buffer and run `body`. Returns every
+/// `(chosen, shadowed)` pair emitted by `warn_on_coexisting_configs` within
+/// `body`'s call tree on the current thread, in order. Test-only.
+#[cfg(test)]
+pub(super) fn capture_coexisting_config_warnings<F: FnOnce() -> R, R>(
+    body: F,
+) -> (R, Vec<CoexistWarning>) {
+    COEXIST_CAPTURE.with(|cell| {
+        *cell.borrow_mut() = Some(Vec::new());
+    });
+    let result = body();
+    let findings = COEXIST_CAPTURE.with(|cell| cell.borrow_mut().take().unwrap_or_default());
+    (result, findings)
+}
+
+/// Emit a `tracing::warn!` when `find_and_load` picked `chosen_path` while one
+/// or more lower-precedence config files (`shadowed`) coexist in the same
+/// directory. Silent precedence is the worst class of config bug: the user
+/// sees correct-looking output produced from the wrong source (#458).
+///
+/// `chosen_path` is the absolute candidate path of the winning config;
+/// `shadowed` are the bare names of the lower-precedence files that also exist.
+///
+/// Deduplicates within the process keyed on the canonical directory, because
+/// `find_and_load` runs multiple times per analysis (combined mode loads config
+/// for check + dupes + health); without the dedupe the same directory would
+/// warn 3+ times per run. Two different directories with coexisting configs
+/// warn independently.
+fn warn_on_coexisting_configs(chosen_path: &Path, shadowed: &[&str]) {
+    use std::sync::{Mutex, OnceLock};
+
+    if shadowed.is_empty() {
+        return;
+    }
+
+    let chosen_name = chosen_path.file_name().map_or_else(
+        || chosen_path.display().to_string(),
+        |n| n.to_string_lossy().into_owned(),
+    );
+    let dir = chosen_path.parent().unwrap_or(chosen_path);
+
+    #[cfg(test)]
+    COEXIST_CAPTURE.with(|cell| {
+        if let Some(buf) = cell.borrow_mut().as_mut() {
+            buf.push((
+                chosen_name.clone(),
+                shadowed.iter().map(|s| (*s).to_owned()).collect(),
+            ));
+        }
+    });
+
+    static WARNED: OnceLock<Mutex<FxHashSet<String>>> = OnceLock::new();
+    let warned = WARNED.get_or_init(|| Mutex::new(FxHashSet::default()));
+    let dedupe_key = std::fs::canonicalize(dir)
+        .unwrap_or_else(|_| dir.to_path_buf())
+        .display()
+        .to_string();
+    if let Ok(mut set) = warned.lock()
+        && !set.insert(dedupe_key)
+    {
+        return;
+    }
+
+    tracing::warn!(
+        "multiple plow config files in {dir}: loaded '{chosen}', ignoring '{shadowed}'. \
+         plow uses the first match in precedence order \
+         (.plowrc.json > .plowrc.jsonc > plow.toml > .plow.toml); \
+         remove the unused file(s) to silence this warning.",
+        dir = dir.display(),
+        chosen = chosen_name,
+        shadowed = shadowed.join(", "),
+    );
+}
+
 impl PlowConfig {
     /// Load config from a plow config file (TOML or JSON/JSONC).
     ///
@@ -789,7 +873,7 @@ impl PlowConfig {
     ///
     /// User-supplied glob patterns (`entry`, `ignorePatterns`,
     /// `dynamicallyLoaded`, `duplicates.ignore`, `health.ignore`,
-    /// `boundaries.zones[].patterns`, `overrides[].files`,
+    /// `health.thresholdOverrides[].files`, `boundaries.zones[].patterns`, `overrides[].files`,
     /// `ignoreExports[].file`, `ignoreCatalogReferences[].consumer`) are
     /// validated against absolute paths, `..` traversal segments, and invalid
     /// glob syntax. Loading fails loud on any rejection so silent no-match
@@ -813,10 +897,6 @@ impl PlowConfig {
             )
         })?;
 
-        // Surface validation errors as a bullet list. The outer wrapper in
-        // `find_and_load` / `runtime_support::load_config_for_analysis` is
-        // responsible for prefixing the file path so the path appears exactly
-        // once in the rendered error.
         config.validate_user_globs().map_err(|errors| {
             let joined = errors
                 .iter()
@@ -825,6 +905,18 @@ impl PlowConfig {
                 .join("\n  - ");
             miette::miette!("invalid config:\n  - {}", joined)
         })?;
+        if !config.security.request_receivers_are_valid() {
+            return Err(miette::miette!(
+                "invalid config:\n  - security.requestReceivers entries must be non-empty strings"
+            ));
+        }
+        let threshold_override_errors = config.health.threshold_override_errors();
+        if !threshold_override_errors.is_empty() {
+            return Err(miette::miette!(
+                "invalid config:\n  - {}",
+                threshold_override_errors.join("\n  - ")
+            ));
+        }
 
         Ok(config)
     }
@@ -837,8 +929,9 @@ impl PlowConfig {
     ///
     /// Covered filesystem glob fields: `entry`, `ignorePatterns`,
     /// `dynamicallyLoaded`, `duplicates.ignore`, `health.ignore`,
-    /// `overrides[].files`, `ignoreExports[].file`,
+    /// `health.thresholdOverrides[].files`, `overrides[].files`, `ignoreExports[].file`,
     /// `ignoreCatalogReferences[].consumer`, `boundaries.zones[].patterns`,
+    /// `boundaries.coverage.allowUnmatched`,
     /// plus every glob-bearing field on inline `framework[]` plugin
     /// definitions (entry points, always-used, config patterns, used-exports
     /// patterns, and `fileExists` detection patterns; the last reaches
@@ -877,6 +970,13 @@ impl PlowConfig {
         );
         validate_user_globs(&self.duplicates.ignore, "duplicates.ignore", &mut errors);
         validate_user_globs(&self.health.ignore, "health.ignore", &mut errors);
+        for override_entry in &self.health.threshold_overrides {
+            validate_user_globs(
+                &override_entry.files,
+                "health.thresholdOverrides[].files",
+                &mut errors,
+            );
+        }
 
         for override_entry in &self.overrides {
             validate_user_globs(&override_entry.files, "overrides[].files", &mut errors);
@@ -909,14 +1009,12 @@ impl PlowConfig {
                 &mut errors,
             );
         }
+        validate_user_globs(
+            &self.boundaries.coverage.allow_unmatched,
+            "boundaries.coverage.allowUnmatched",
+            &mut errors,
+        );
 
-        // Inline framework plugins. Shares validation logic with external
-        // plugin files loaded from `.plow/plugins/` / `plow-plugin-*`
-        // (see `ExternalPluginDef::validate_user_globs`), so an inline
-        // `framework[]` block and a file-loaded plugin get identical checks.
-        // The `detection.fileExists.pattern` field is the security-critical
-        // case because it reaches `glob::glob` on disk via `root.join(pattern)`
-        // in `crates/core/src/plugins/registry/helpers.rs`.
         for plugin in &self.framework {
             if let Err(mut plugin_errors) = plugin.validate_user_globs() {
                 errors.append(&mut plugin_errors);
@@ -958,9 +1056,10 @@ impl PlowConfig {
     pub fn find_and_load(start: &Path) -> Result<Option<(Self, PathBuf)>, String> {
         let mut dir = start;
         loop {
-            for name in CONFIG_NAMES {
+            for (idx, name) in CONFIG_NAMES.iter().enumerate() {
                 let candidate = dir.join(name);
                 if candidate.exists() {
+                    warn_on_coexisting_configs(&candidate, &shadowed_config_names(dir, idx));
                     match Self::load(&candidate) {
                         Ok(config) => return Ok(Some((config, candidate))),
                         Err(e) => {
@@ -969,9 +1068,6 @@ impl PlowConfig {
                     }
                 }
             }
-            // Stop at project root indicators (VCS markers). We intentionally
-            // do NOT stop at `package.json` so that monorepo sub-packages
-            // inherit a root config placed alongside the workspace root.
             if is_repo_root(dir) {
                 break;
             }
@@ -1023,13 +1119,8 @@ impl PlowConfig {
     ) -> Result<(), Vec<super::boundaries::ZoneValidationError>> {
         use super::boundaries::ZoneValidationError;
 
-        // Clone the boundary section so this method stays non-consuming;
-        // resolve() takes `self` by value and runs the same expansion in-place.
         let mut boundaries = self.boundaries.clone();
         if boundaries.preset.is_some() {
-            // Mirror the source-root detection in `PlowConfig::resolve`:
-            // tsconfig.json's `rootDir` wins when it points at a relative,
-            // non-traversal subtree; otherwise default to `src`.
             let source_root = crate::workspace::parse_tsconfig_root_dir(root)
                 .filter(|r| r != "." && !r.starts_with("..") && !Path::new(r).is_absolute())
                 .unwrap_or_else(|| "src".to_owned());
@@ -1047,6 +1138,12 @@ impl PlowConfig {
                 .validate_root_prefixes()
                 .into_iter()
                 .map(ZoneValidationError::RedundantRootPrefix),
+        );
+        errors.extend(
+            boundaries
+                .validate_call_rules()
+                .into_iter()
+                .map(ZoneValidationError::InvalidForbiddenCallee),
         );
 
         if errors.is_empty() {
@@ -1131,7 +1228,6 @@ ignoreUnresolvedImports = ["@example/icons", "@example/icons/**", "../generated/
             None,
         );
 
-        // Default ignores should be compiled
         assert!(resolved.ignore_patterns.is_match("node_modules/foo/bar.ts"));
         assert!(resolved.ignore_patterns.is_match("dist/bundle.js"));
         assert!(resolved.ignore_patterns.is_match("build/output.js"));
@@ -1281,7 +1377,6 @@ unused-types = "off"
         assert_eq!(config.rules.unused_files, Severity::Error);
         assert_eq!(config.rules.unused_exports, Severity::Warn);
         assert_eq!(config.rules.unused_types, Severity::Off);
-        // Unset fields default to error
         assert_eq!(config.rules.unresolved_imports, Severity::Error);
     }
 
@@ -1314,7 +1409,6 @@ unknown_field = true
     #[test]
     fn plow_config_deserialize_jsonc() {
         let jsonc_str = r#"{
-            // This is a comment
             "entry": ["src/main.ts"],
             "rules": {
                 "unused-files": "warn"
@@ -1384,13 +1478,45 @@ unknown_field = true
     }
 
     #[test]
+    fn load_json_config_file_with_health_threshold_override() {
+        let dir = test_dir("json-health-threshold-override");
+        let config_path = dir.path().join(".plowrc.json");
+        std::fs::write(
+            &config_path,
+            r#"{
+                "health": {
+                    "thresholdOverrides": [
+                        {
+                            "files": ["src/legacy.ts"],
+                            "functions": ["legacyFlow"],
+                            "maxCyclomatic": 30,
+                            "maxCognitive": 25,
+                            "maxCrap": 80.5,
+                            "reason": "legacy migration"
+                        }
+                    ]
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let config = PlowConfig::load(&config_path).unwrap();
+        let override_config = &config.health.threshold_overrides[0];
+        assert_eq!(override_config.files, vec!["src/legacy.ts"]);
+        assert_eq!(override_config.functions, vec!["legacyFlow"]);
+        assert_eq!(override_config.max_cyclomatic, Some(30));
+        assert_eq!(override_config.max_cognitive, Some(25));
+        assert_eq!(override_config.max_crap, Some(80.5));
+        assert_eq!(override_config.reason.as_deref(), Some("legacy migration"));
+    }
+
+    #[test]
     fn load_jsonc_config_file() {
         let dir = test_dir("jsonc-config");
         let config_path = dir.path().join(".plowrc.json");
         std::fs::write(
             &config_path,
             r#"{
-                // Entry points for analysis
                 "entry": ["src/index.ts"],
                 /* Block comment */
                 "rules": {
@@ -1406,14 +1532,36 @@ unknown_field = true
     }
 
     #[test]
+    fn load_jsonc_config_file_with_health_threshold_override() {
+        let dir = test_dir("jsonc-health-threshold-override");
+        let config_path = dir.path().join(".plowrc.jsonc");
+        std::fs::write(
+            &config_path,
+            r#"{
+                "health": {
+                    // Empty functions means every function in matching files.
+                    "thresholdOverrides": [
+                        { "files": ["src/legacy.ts"], "maxCognitive": 25 }
+                    ]
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let config = PlowConfig::load(&config_path).unwrap();
+        let override_config = &config.health.threshold_overrides[0];
+        assert_eq!(override_config.files, vec!["src/legacy.ts"]);
+        assert!(override_config.functions.is_empty());
+        assert_eq!(override_config.max_cognitive, Some(25));
+    }
+
+    #[test]
     fn load_plowrc_jsonc_extension() {
         let dir = test_dir("jsonc-extension");
         let config_path = dir.path().join(".plowrc.jsonc");
         std::fs::write(
             &config_path,
             r#"{
-                // editors that recognize the .jsonc extension show
-                // proper JSON-with-comments syntax highlighting
                 "ignoreDependencies": ["tailwindcss-react-aria-components"],
                 "entry": ["src/index.ts"]
             }"#,
@@ -1478,8 +1626,6 @@ unknown_field = true
         assert!(config.duplicates.skip_local);
     }
 
-    // ── extends tests ──────────────────────────────────────────────
-
     #[test]
     fn extends_single_base() {
         let dir = test_dir("extends-single");
@@ -1498,7 +1644,6 @@ unknown_field = true
         let config = PlowConfig::load(&dir.path().join(".plowrc.json")).unwrap();
         assert_eq!(config.rules.unused_files, Severity::Warn);
         assert_eq!(config.entry, vec!["src/index.ts"]);
-        // Unset fields from base still default
         assert_eq!(config.rules.unused_exports, Severity::Error);
     }
 
@@ -1518,9 +1663,7 @@ unknown_field = true
         .unwrap();
 
         let config = PlowConfig::load(&dir.path().join(".plowrc.json")).unwrap();
-        // Overlay overrides base
         assert_eq!(config.rules.unused_files, Severity::Error);
-        // Base value preserved when not overridden
         assert_eq!(config.rules.unused_exports, Severity::Off);
     }
 
@@ -1545,9 +1688,7 @@ unknown_field = true
         .unwrap();
 
         let config = PlowConfig::load(&dir.path().join(".plowrc.json")).unwrap();
-        // grandparent: off -> parent: warn -> child: inherits warn
         assert_eq!(config.rules.unused_files, Severity::Warn);
-        // grandparent: warn, not overridden
         assert_eq!(config.rules.unused_exports, Severity::Warn);
     }
 
@@ -1586,8 +1727,6 @@ unknown_field = true
         );
     }
 
-    // ── sealed: true tests ──────────────────────────────────────────
-
     #[test]
     fn sealed_allows_in_directory_extends() {
         let dir = test_dir("sealed-allows-local");
@@ -1608,12 +1747,29 @@ unknown_field = true
     }
 
     #[test]
+    fn load_rejects_invalid_boundary_coverage_allow_unmatched_glob() {
+        let dir = test_dir("boundary-coverage-invalid-glob");
+        std::fs::write(
+            dir.path().join(".plowrc.json"),
+            r#"{"boundaries":{"coverage":{"allowUnmatched":["[invalid"]}}}"#,
+        )
+        .unwrap();
+
+        let result = PlowConfig::load(&dir.path().join(".plowrc.json"));
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(
+            err_msg.contains("boundaries.coverage.allowUnmatched"),
+            "expected coverage field in error, got: {err_msg}"
+        );
+    }
+
+    #[test]
     fn sealed_rejects_extends_escaping_directory() {
         let dir = test_dir("sealed-rejects-escape");
         let sub = dir.path().join("packages").join("app");
         std::fs::create_dir_all(&sub).unwrap();
 
-        // Base config above the sealed config's directory
         std::fs::write(
             dir.path().join("base.json"),
             r#"{"ignorePatterns": ["dist/**"]}"#,
@@ -1695,7 +1851,6 @@ unknown_field = true
 
     #[test]
     fn sealed_false_allows_escaping_extends() {
-        // Without sealed (or sealed: false), escaping extends works fine
         let dir = test_dir("sealed-false-allows");
         let sub = dir.path().join("packages").join("app");
         std::fs::create_dir_all(&sub).unwrap();
@@ -1725,7 +1880,6 @@ unknown_field = true
             r#"{"ignorePatterns": ["gen/**"]}"#,
         )
         .unwrap();
-        // String form instead of array
         std::fs::write(
             dir.path().join(".plowrc.json"),
             r#"{"extends": "base.json"}"#,
@@ -1748,20 +1902,15 @@ unknown_field = true
         .unwrap();
 
         let config = PlowConfig::load(&dir.path().join(".plowrc.json")).unwrap();
-        // Arrays are replaced, not merged (overlay replaces base)
         assert_eq!(config.entry, vec!["src/b.ts"]);
     }
 
-    // ── npm extends tests ────────────────────────────────────────────
-
-    /// Set up a fake npm package in `node_modules/<name>` under `root`.
     fn create_npm_package(root: &Path, name: &str, config_json: &str) {
         let pkg_dir = root.join("node_modules").join(name);
         std::fs::create_dir_all(&pkg_dir).unwrap();
         std::fs::write(pkg_dir.join(".plowrc.json"), config_json).unwrap();
     }
 
-    /// Set up a fake npm package with `package.json` `main` field.
     fn create_npm_package_with_main(root: &Path, name: &str, main: &str, config_json: &str) {
         let pkg_dir = root.join("node_modules").join(name);
         std::fs::create_dir_all(&pkg_dir).unwrap();
@@ -1927,20 +2076,17 @@ unknown_field = true
         .unwrap();
 
         let config = PlowConfig::load(&dir.path().join(".plowrc.json")).unwrap();
-        // exports takes priority over main
         assert_eq!(config.rules.unused_files, Severity::Warn);
     }
 
     #[test]
     fn extends_npm_walk_up_directories() {
         let dir = test_dir("npm-walkup");
-        // node_modules at root level
         create_npm_package(
             dir.path(),
             "shared-config",
             r#"{"rules": {"unused-files": "warn"}}"#,
         );
-        // Config in a nested subdirectory
         let sub = dir.path().join("packages/app");
         std::fs::create_dir_all(&sub).unwrap();
         std::fs::write(
@@ -1976,7 +2122,6 @@ unknown_field = true
     #[test]
     fn extends_npm_chained_with_relative() {
         let dir = test_dir("npm-chained");
-        // npm package extends a relative file inside itself
         let pkg_dir = dir.path().join("node_modules/my-config");
         std::fs::create_dir_all(&pkg_dir).unwrap();
         std::fs::write(
@@ -2021,7 +2166,6 @@ unknown_field = true
         .unwrap();
 
         let config = PlowConfig::load(&dir.path().join(".plowrc.json")).unwrap();
-        // local-overrides is later in the array, so it wins
         assert_eq!(config.rules.unused_files, Severity::Warn);
     }
 
@@ -2056,7 +2200,6 @@ unknown_field = true
         let dir = test_dir("npm-no-config");
         let pkg_dir = dir.path().join("node_modules/empty-pkg");
         std::fs::create_dir_all(&pkg_dir).unwrap();
-        // Package exists but has no config files and no package.json
         std::fs::write(pkg_dir.join("README.md"), "# empty").unwrap();
 
         std::fs::write(
@@ -2117,7 +2260,6 @@ unknown_field = true
             "plow-config-acme",
             r#"{"rules": {"unused-files": "warn"}}"#,
         );
-        // Space after npm: — should be trimmed and resolve correctly
         std::fs::write(
             dir.path().join(".plowrc.json"),
             r#"{"extends": "npm: plow-config-acme"}"#,
@@ -2153,8 +2295,6 @@ unknown_field = true
         let config = PlowConfig::load(&dir.path().join(".plowrc.json")).unwrap();
         assert_eq!(config.rules.unused_files, Severity::Off);
     }
-
-    // ── parse_npm_specifier unit tests ──────────────────────────────
 
     #[test]
     fn parse_npm_specifier_unscoped() {
@@ -2193,14 +2333,11 @@ unknown_field = true
         );
     }
 
-    // ── npm extends security tests ──────────────────────────────────
-
     #[test]
     fn extends_npm_subpath_traversal_rejected() {
         let dir = test_dir("npm-traversal-sub");
         let pkg_dir = dir.path().join("node_modules/evil-pkg");
         std::fs::create_dir_all(&pkg_dir).unwrap();
-        // Create a file outside the package that the traversal would reach
         std::fs::write(
             dir.path().join("secret.json"),
             r#"{"entry": ["stolen.ts"]}"#,
@@ -2290,7 +2427,6 @@ unknown_field = true
             r#"{"name": "evil-exports", "exports": "../../secret.json"}"#,
         )
         .unwrap();
-        // Create the target file outside the package
         std::fs::write(
             dir.path().join("secret.json"),
             r#"{"entry": ["stolen.ts"]}"#,
@@ -2311,8 +2447,6 @@ unknown_field = true
             "Expected traversal error, got: {err_msg}"
         );
     }
-
-    // ── deep_merge_json unit tests ───────────────────────────────────
 
     #[test]
     fn deep_merge_scalar_overlay_replaces_base() {
@@ -2376,8 +2510,6 @@ unknown_field = true
         assert_eq!(base, serde_json::json!({"a": 1, "b": 2}));
     }
 
-    // ── rule severity parsing via JSON config ────────────────────────
-
     #[test]
     fn rules_severity_error_warn_off_from_json() {
         let json_str = r#"{
@@ -2402,7 +2534,6 @@ unknown_field = true
         }"#;
         let config: PlowConfig = serde_json::from_str(json_str).unwrap();
         assert_eq!(config.rules.unused_files, Severity::Warn);
-        // All other rules default to error
         assert_eq!(config.rules.unused_exports, Severity::Error);
         assert_eq!(config.rules.unused_types, Severity::Error);
         assert_eq!(config.rules.unused_dependencies, Severity::Error);
@@ -2410,16 +2541,12 @@ unknown_field = true
         assert_eq!(config.rules.unlisted_dependencies, Severity::Error);
         assert_eq!(config.rules.duplicate_exports, Severity::Error);
         assert_eq!(config.rules.circular_dependencies, Severity::Error);
-        // type_only_dependencies defaults to warn, not error
         assert_eq!(config.rules.type_only_dependencies, Severity::Warn);
     }
-
-    // ── find_and_load tests ───────────────────────────────────────
 
     #[test]
     fn find_and_load_returns_none_when_no_config() {
         let dir = test_dir("find-none");
-        // Create a .git dir so it stops searching
         std::fs::create_dir(dir.path().join(".git")).unwrap();
 
         let result = PlowConfig::find_and_load(dir.path()).unwrap();
@@ -2448,7 +2575,6 @@ unknown_field = true
         std::fs::write(
             dir.path().join(".plowrc.jsonc"),
             r#"{
-                // jsonc with comments, picked up by auto-discovery
                 "entry": ["src/main.ts"]
             }"#,
         )
@@ -2461,8 +2587,6 @@ unknown_field = true
 
     #[test]
     fn find_and_load_prefers_plowrc_json_over_jsonc() {
-        // First-match-wins: `.plowrc.json` ranks above `.plowrc.jsonc`
-        // in `CONFIG_NAMES`, mirroring tsconfig.json > tsconfig.jsonc precedence.
         let dir = test_dir("find-json-vs-jsonc");
         std::fs::create_dir(dir.path().join(".git")).unwrap();
         std::fs::write(
@@ -2490,11 +2614,7 @@ unknown_field = true
             r#"{"entry": ["from-json.ts"]}"#,
         )
         .unwrap();
-        std::fs::write(
-            dir.path().join("plow.toml"),
-            "entry = [\"from-toml.ts\"]\n",
-        )
-        .unwrap();
+        std::fs::write(dir.path().join("plow.toml"), "entry = [\"from-toml.ts\"]\n").unwrap();
 
         let (config, path) = PlowConfig::find_and_load(dir.path()).unwrap().unwrap();
         assert_eq!(config.entry, vec!["from-json.ts"]);
@@ -2502,14 +2622,128 @@ unknown_field = true
     }
 
     #[test]
+    fn shadowed_config_names_empty_when_single_config() {
+        let dir = test_dir("shadow-single");
+        std::fs::write(dir.path().join(".plowrc.json"), "").unwrap();
+        assert!(shadowed_config_names(dir.path(), 0).is_empty());
+    }
+
+    #[test]
+    fn shadowed_config_names_reports_lower_precedence_toml() {
+        let dir = test_dir("shadow-json-toml");
+        std::fs::write(dir.path().join(".plowrc.json"), "").unwrap();
+        std::fs::write(dir.path().join("plow.toml"), "").unwrap();
+        assert_eq!(shadowed_config_names(dir.path(), 0), vec!["plow.toml"]);
+    }
+
+    #[test]
+    fn shadowed_config_names_reports_jsonc_sibling() {
+        let dir = test_dir("shadow-json-jsonc");
+        std::fs::write(dir.path().join(".plowrc.json"), "").unwrap();
+        std::fs::write(dir.path().join(".plowrc.jsonc"), "").unwrap();
+        assert_eq!(shadowed_config_names(dir.path(), 0), vec![".plowrc.jsonc"]);
+    }
+
+    #[test]
+    fn shadowed_config_names_reports_all_lower_when_four_coexist() {
+        let dir = test_dir("shadow-all-four");
+        for name in CONFIG_NAMES {
+            std::fs::write(dir.path().join(name), "").unwrap();
+        }
+        assert_eq!(
+            shadowed_config_names(dir.path(), 0),
+            vec![".plowrc.jsonc", "plow.toml", ".plow.toml"],
+        );
+    }
+
+    #[test]
+    fn shadowed_config_names_scoped_to_indices_after_winner() {
+        let dir = test_dir("shadow-toml-dottoml");
+        std::fs::write(dir.path().join("plow.toml"), "").unwrap();
+        std::fs::write(dir.path().join(".plow.toml"), "").unwrap();
+        assert_eq!(shadowed_config_names(dir.path(), 2), vec![".plow.toml"]);
+    }
+
+    #[test]
+    fn find_and_load_warns_when_configs_coexist() {
+        let dir = test_dir("coexist-warn");
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+        std::fs::write(
+            dir.path().join(".plowrc.json"),
+            r#"{"entry": ["from-json.ts"]}"#,
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("plow.toml"), "entry = [\"from-toml.ts\"]\n").unwrap();
+
+        let (result, captured) =
+            capture_coexisting_config_warnings(|| PlowConfig::find_and_load(dir.path()));
+
+        let (config, path) = result.unwrap().unwrap();
+        assert_eq!(config.entry, vec!["from-json.ts"]);
+        assert!(path.ends_with(".plowrc.json"));
+
+        assert_eq!(captured.len(), 1);
+        let (chosen, shadowed) = &captured[0];
+        assert_eq!(chosen, ".plowrc.json");
+        assert_eq!(shadowed, &vec!["plow.toml".to_owned()]);
+    }
+
+    #[test]
+    fn find_and_load_does_not_warn_for_single_config() {
+        let dir = test_dir("coexist-none");
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+        std::fs::write(dir.path().join(".plowrc.json"), r#"{"entry": ["only.ts"]}"#).unwrap();
+
+        let (result, captured) =
+            capture_coexisting_config_warnings(|| PlowConfig::find_and_load(dir.path()));
+        assert!(result.unwrap().is_some());
+        assert!(captured.is_empty());
+    }
+
+    #[test]
+    fn find_and_load_warns_per_directory_independently() {
+        let make = |name: &str| {
+            let dir = test_dir(name);
+            std::fs::create_dir(dir.path().join(".git")).unwrap();
+            std::fs::write(dir.path().join(".plowrc.json"), r#"{"entry": ["a.ts"]}"#).unwrap();
+            std::fs::write(dir.path().join("plow.toml"), "entry = [\"a.ts\"]\n").unwrap();
+            dir
+        };
+        let first = make("coexist-dir-a");
+        let second = make("coexist-dir-b");
+
+        let ((), captured) = capture_coexisting_config_warnings(|| {
+            PlowConfig::find_and_load(first.path()).unwrap();
+            PlowConfig::find_and_load(second.path()).unwrap();
+        });
+
+        assert_eq!(captured.len(), 2);
+        assert!(captured.iter().all(|(chosen, shadowed)| {
+            chosen == ".plowrc.json" && shadowed == &vec!["plow.toml".to_owned()]
+        }));
+    }
+
+    #[test]
+    fn explicit_load_does_not_warn_about_coexisting_configs() {
+        let dir = test_dir("coexist-explicit");
+        std::fs::write(
+            dir.path().join(".plowrc.json"),
+            r#"{"entry": ["chosen.ts"]}"#,
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("plow.toml"), "entry = [\"other.ts\"]\n").unwrap();
+
+        let chosen = dir.path().join("plow.toml");
+        let (result, captured) = capture_coexisting_config_warnings(|| PlowConfig::load(&chosen));
+        assert!(result.is_ok());
+        assert!(captured.is_empty());
+    }
+
+    #[test]
     fn find_and_load_finds_plow_toml() {
         let dir = test_dir("find-toml");
         std::fs::create_dir(dir.path().join(".git")).unwrap();
-        std::fs::write(
-            dir.path().join("plow.toml"),
-            "entry = [\"src/index.ts\"]\n",
-        )
-        .unwrap();
+        std::fs::write(dir.path().join("plow.toml"), "entry = [\"src/index.ts\"]\n").unwrap();
 
         let (config, _) = PlowConfig::find_and_load(dir.path()).unwrap().unwrap();
         assert_eq!(config.entry, vec!["src/index.ts"]);
@@ -2520,20 +2754,13 @@ unknown_field = true
         let dir = test_dir("find-git-stop");
         let sub = dir.path().join("sub");
         std::fs::create_dir(&sub).unwrap();
-        // .git marker in root stops search
         std::fs::create_dir(dir.path().join(".git")).unwrap();
-        // Config file above .git should not be found from sub
-        // (sub has no .git or package.json, so it keeps searching up to parent)
-        // But parent has .git, so it stops there without finding config
         let result = PlowConfig::find_and_load(&sub).unwrap();
         assert!(result.is_none());
     }
 
     #[test]
     fn find_and_load_walks_past_package_json_in_monorepo() {
-        // Simulate a pnpm/npm/yarn workspace: root has `.git` + `.plowrc.json`,
-        // sub-package has its own `package.json`. Config search from the
-        // sub-package must walk past its `package.json` and find the root config.
         let dir = test_dir("find-monorepo");
         std::fs::create_dir(dir.path().join(".git")).unwrap();
         std::fs::write(
@@ -2553,8 +2780,6 @@ unknown_field = true
 
     #[test]
     fn find_and_load_sub_package_config_wins_over_root() {
-        // Regression guard: if a monorepo sub-package has its own config,
-        // it must be preferred over the root config (first-match-wins).
         let dir = test_dir("find-monorepo-override");
         std::fs::create_dir(dir.path().join(".git")).unwrap();
         std::fs::write(
@@ -2575,10 +2800,6 @@ unknown_field = true
 
     #[test]
     fn find_and_load_stops_at_git_file_submodule() {
-        // Git submodules / worktrees have `.git` as a file (not a directory)
-        // pointing to the real gitdir. `.exists()` matches both, so submodule
-        // roots correctly stop the walk — config in the parent repo should
-        // NOT leak into a vendored submodule.
         let dir = test_dir("find-git-file");
         std::fs::create_dir(dir.path().join(".git")).unwrap();
         std::fs::write(
@@ -2589,7 +2810,6 @@ unknown_field = true
 
         let submodule = dir.path().join("vendor").join("lib");
         std::fs::create_dir_all(&submodule).unwrap();
-        // Simulate submodule: `.git` as a file pointing to parent's .git/modules
         std::fs::write(submodule.join(".git"), "gitdir: ../../.git/modules/lib\n").unwrap();
 
         let result = PlowConfig::find_and_load(&submodule).unwrap();
@@ -2624,8 +2844,6 @@ unknown_field = true
         assert!(result.is_err());
     }
 
-    // ── load TOML config file ────────────────────────────────────
-
     #[test]
     fn load_toml_config_file() {
         let dir = test_dir("toml-config");
@@ -2652,13 +2870,35 @@ minTokens = 100
         assert_eq!(config.duplicates.min_tokens, 100);
     }
 
-    // ── extends absolute path rejection ──────────────────────────
+    #[test]
+    fn load_toml_config_file_with_health_threshold_override() {
+        let dir = test_dir("toml-health-threshold-override");
+        let config_path = dir.path().join("plow.toml");
+        std::fs::write(
+            &config_path,
+            r#"
+[health]
+thresholdOverrides = [
+  { files = ["src/legacy.ts"], functions = ["legacyFlow"], maxCyclomatic = 30, maxCognitive = 25, maxCrap = 80.5, reason = "legacy migration" }
+]
+"#,
+        )
+        .unwrap();
+
+        let config = PlowConfig::load(&config_path).unwrap();
+        let override_config = &config.health.threshold_overrides[0];
+        assert_eq!(override_config.files, vec!["src/legacy.ts"]);
+        assert_eq!(override_config.functions, vec!["legacyFlow"]);
+        assert_eq!(override_config.max_cyclomatic, Some(30));
+        assert_eq!(override_config.max_cognitive, Some(25));
+        assert_eq!(override_config.max_crap, Some(80.5));
+        assert_eq!(override_config.reason.as_deref(), Some("legacy migration"));
+    }
 
     #[test]
     fn extends_absolute_path_rejected() {
         let dir = test_dir("extends-absolute");
 
-        // Use a platform-appropriate absolute path
         #[cfg(unix)]
         let abs_path = "/absolute/path/config.json";
         #[cfg(windows)]
@@ -2715,8 +2955,6 @@ minTokens = 100
         );
     }
 
-    // ── resolve production mode ─────────────────────────────────
-
     #[test]
     fn resolve_production_mode_disables_dev_deps() {
         let config = PlowConfig {
@@ -2734,12 +2972,9 @@ minTokens = 100
         assert!(resolved.production);
         assert_eq!(resolved.rules.unused_dev_dependencies, Severity::Off);
         assert_eq!(resolved.rules.unused_optional_dependencies, Severity::Off);
-        // Other rules should remain at default (Error)
         assert_eq!(resolved.rules.unused_files, Severity::Error);
         assert_eq!(resolved.rules.unused_exports, Severity::Error);
     }
-
-    // ── include-entry-exports config support (issue #249) ──────
 
     #[test]
     fn include_entry_exports_deserializes_from_camelcase_json() {
@@ -2780,8 +3015,6 @@ minTokens = 100
         assert!(resolved.include_entry_exports);
     }
 
-    // ── config format fallback to TOML for unknown extensions ───
-
     #[test]
     fn config_format_defaults_to_toml_for_unknown() {
         assert!(matches!(
@@ -2793,8 +3026,6 @@ minTokens = 100
             ConfigFormat::Toml
         ));
     }
-
-    // ── deep_merge type coercion ─────────────────────────────────
 
     #[test]
     fn deep_merge_object_over_scalar_replaces() {
@@ -2812,8 +3043,6 @@ minTokens = 100
         assert_eq!(base, serde_json::json!(42));
     }
 
-    // ── extends with non-string/array extends field ──────────────
-
     #[test]
     fn extends_non_string_non_array_ignored() {
         let dir = test_dir("extends-numeric");
@@ -2823,12 +3052,9 @@ minTokens = 100
         )
         .unwrap();
 
-        // extends=42 is neither string nor array, so it's treated as no extends
         let config = PlowConfig::load(&dir.path().join(".plowrc.json")).unwrap();
         assert_eq!(config.entry, vec!["src/index.ts"]);
     }
-
-    // ── extends with multiple bases (later overrides earlier) ────
 
     #[test]
     fn extends_multiple_bases_later_wins() {
@@ -2851,11 +3077,50 @@ minTokens = 100
         .unwrap();
 
         let config = PlowConfig::load(&dir.path().join(".plowrc.json")).unwrap();
-        // base-b is later in the array, so its value should win
         assert_eq!(config.rules.unused_files, Severity::Off);
     }
 
-    // ── config with production flag ──────────────────────────────
+    #[test]
+    fn load_rejects_empty_security_request_receivers() {
+        let dir = test_dir("empty-security-request-receivers");
+        std::fs::write(
+            dir.path().join(".plowrc.json"),
+            r#"{"security": {"requestReceivers": ["req", "  "]}}"#,
+        )
+        .unwrap();
+
+        let result = PlowConfig::load(&dir.path().join(".plowrc.json"));
+        let err = result.expect_err("empty receiver should be rejected");
+        assert!(
+            err.to_string().contains("security.requestReceivers"),
+            "error should name security.requestReceivers: {err}"
+        );
+    }
+
+    #[test]
+    fn resolve_normalizes_security_request_receivers() {
+        let dir = test_dir("normalize-security-request-receivers");
+        std::fs::write(
+            dir.path().join(".plowrc.json"),
+            r#"{"security": {"requestReceivers": [" HttpReq ", "httpreq", "R"]}}"#,
+        )
+        .unwrap();
+
+        let config = PlowConfig::load(&dir.path().join(".plowrc.json"))
+            .unwrap()
+            .resolve(
+                dir.path().to_path_buf(),
+                OutputFormat::Human,
+                1,
+                true,
+                true,
+                None,
+            );
+        assert_eq!(
+            config.security.request_receivers,
+            vec!["httpreq".to_string(), "r".to_string()]
+        );
+    }
 
     #[test]
     fn plow_config_deserialize_production() {
@@ -2869,8 +3134,6 @@ minTokens = 100
         let config: PlowConfig = serde_json::from_str("{}").unwrap();
         assert!(!config.production);
     }
-
-    // ── optional dependency names ────────────────────────────────
 
     #[test]
     fn package_json_optional_dependency_names() {
@@ -2889,8 +3152,6 @@ minTokens = 100
         let pkg: PackageJson = serde_json::from_str(r#"{"name": "test"}"#).unwrap();
         assert!(pkg.optional_dependency_names().is_empty());
     }
-
-    // ── find_config_path ────────────────────────────────────────────
 
     #[test]
     fn find_config_path_returns_plowrc_json() {
@@ -2911,11 +3172,7 @@ minTokens = 100
     fn find_config_path_returns_plow_toml() {
         let dir = test_dir("find-path-toml");
         std::fs::create_dir(dir.path().join(".git")).unwrap();
-        std::fs::write(
-            dir.path().join("plow.toml"),
-            "entry = [\"src/main.ts\"]\n",
-        )
-        .unwrap();
+        std::fs::write(dir.path().join("plow.toml"), "entry = [\"src/main.ts\"]\n").unwrap();
 
         let path = PlowConfig::find_config_path(dir.path());
         assert!(path.is_some());
@@ -2926,11 +3183,7 @@ minTokens = 100
     fn find_config_path_returns_dot_plow_toml() {
         let dir = test_dir("find-path-dot-toml");
         std::fs::create_dir(dir.path().join(".git")).unwrap();
-        std::fs::write(
-            dir.path().join(".plow.toml"),
-            "entry = [\"src/main.ts\"]\n",
-        )
-        .unwrap();
+        std::fs::write(dir.path().join(".plow.toml"), "entry = [\"src/main.ts\"]\n").unwrap();
 
         let path = PlowConfig::find_config_path(dir.path());
         assert!(path.is_some());
@@ -2941,11 +3194,7 @@ minTokens = 100
     fn find_config_path_prefers_json_over_toml() {
         let dir = test_dir("find-path-priority");
         std::fs::create_dir(dir.path().join(".git")).unwrap();
-        std::fs::write(
-            dir.path().join(".plowrc.json"),
-            r#"{"entry": ["json.ts"]}"#,
-        )
-        .unwrap();
+        std::fs::write(dir.path().join(".plowrc.json"), r#"{"entry": ["json.ts"]}"#).unwrap();
         std::fs::write(dir.path().join("plow.toml"), "entry = [\"toml.ts\"]\n").unwrap();
 
         let path = PlowConfig::find_config_path(dir.path());
@@ -2979,8 +3228,6 @@ minTokens = 100
         assert_eq!(path, dir.path().join(".plowrc.json"));
     }
 
-    // ── TOML extends support ────────────────────────────────────────
-
     #[test]
     fn extends_toml_base() {
         let dir = test_dir("extends-toml");
@@ -3000,8 +3247,6 @@ minTokens = 100
         assert_eq!(config.rules.unused_files, Severity::Warn);
         assert_eq!(config.entry, vec!["src/index.ts"]);
     }
-
-    // ── deep_merge_json edge cases ──────────────────────────────────
 
     #[test]
     fn deep_merge_boolean_overlay() {
@@ -3025,19 +3270,14 @@ minTokens = 100
         assert_eq!(base, serde_json::json!({"a": 1, "b": 2}));
     }
 
-    // ── MAX_EXTENDS_DEPTH constant ──────────────────────────────────
-
     #[test]
     fn max_extends_depth_is_reasonable() {
         assert_eq!(MAX_EXTENDS_DEPTH, 10);
     }
 
-    // ── Config names constant ───────────────────────────────────────
-
     #[test]
     fn config_names_has_four_entries() {
         assert_eq!(CONFIG_NAMES.len(), 4);
-        // All names should start with "." or "plow"
         for name in CONFIG_NAMES {
             assert!(
                 name.starts_with('.') || name.starts_with("plow"),
@@ -3045,8 +3285,6 @@ minTokens = 100
             );
         }
     }
-
-    // ── package.json peer dependency names ───────────────────────────
 
     #[test]
     fn package_json_peer_dependency_names() {
@@ -3062,8 +3300,6 @@ minTokens = 100
         assert!(all.contains(&"react-dom".to_string()));
         assert!(all.contains(&"react-native".to_string()));
     }
-
-    // ── package.json scripts field ──────────────────────────────────
 
     #[test]
     fn package_json_scripts_field() {
@@ -3082,8 +3318,6 @@ minTokens = 100
         assert_eq!(scripts.get("build"), Some(&"tsc".to_string()));
         assert_eq!(scripts.get("lint"), Some(&"plow check".to_string()));
     }
-
-    // ── Extends with TOML-to-TOML chain ─────────────────────────────
 
     #[test]
     fn extends_toml_chain() {
@@ -3110,8 +3344,6 @@ minTokens = 100
         assert_eq!(config.rules.unused_files, Severity::Off);
     }
 
-    // ── find_and_load walks up to parent ────────────────────────────
-
     #[test]
     fn find_and_load_walks_up_directories() {
         let dir = test_dir("find-walk-up");
@@ -3122,15 +3354,12 @@ minTokens = 100
             r#"{"entry": ["src/main.ts"]}"#,
         )
         .unwrap();
-        // Create .git in root to stop search there
         std::fs::create_dir(dir.path().join(".git")).unwrap();
 
         let (config, path) = PlowConfig::find_and_load(&sub).unwrap().unwrap();
         assert_eq!(config.entry, vec!["src/main.ts"]);
         assert!(path.ends_with(".plowrc.json"));
     }
-
-    // ── JSON schema generation ──────────────────────────────────────
 
     #[test]
     fn json_schema_contains_entry_field() {
@@ -3143,8 +3372,6 @@ minTokens = 100
             "schema should contain entry property"
         );
     }
-
-    // ── Duplicates config via JSON in PlowConfig ──────────────────
 
     #[test]
     fn plow_config_json_duplicates_all_fields() {
@@ -3185,8 +3412,6 @@ minTokens = 100
         );
     }
 
-    // ── URL extends tests ───────────────────────────────────────────
-
     #[test]
     fn normalize_url_basic() {
         assert_eq!(
@@ -3225,7 +3450,6 @@ minTokens = 100
 
     #[test]
     fn normalize_url_preserves_path_case() {
-        // Path component casing is significant (server-dependent), only scheme+host lowercase.
         assert_eq!(
             normalize_url_for_dedup("https://GitHub.COM/Org/Repo/Plow.json"),
             "https://github.com/Org/Repo/Plow.json"
@@ -3262,7 +3486,6 @@ minTokens = 100
             normalize_url_for_dedup("https://example.com:443/config.json"),
             "https://example.com/config.json"
         );
-        // Non-default port is preserved.
         assert_eq!(
             normalize_url_for_dedup("https://example.com:8443/config.json"),
             "https://example.com:8443/config.json"
@@ -3293,13 +3516,11 @@ minTokens = 100
 
     #[test]
     fn extends_url_circular_detection() {
-        // Verify that the same URL appearing twice in the visited set is detected.
         let mut visited = FxHashSet::default();
         let url = "https://example.com/config.json";
         let normalized = normalize_url_for_dedup(url);
         visited.insert(normalized.clone());
 
-        // Inserting the same normalized URL should return false.
         assert!(
             !visited.insert(normalized),
             "Same URL should be detected as duplicate"
@@ -3308,7 +3529,6 @@ minTokens = 100
 
     #[test]
     fn extends_url_circular_case_insensitive() {
-        // URLs differing only in scheme/host casing should be detected as circular.
         let mut visited = FxHashSet::default();
         visited.insert(normalize_url_for_dedup("https://Example.COM/config.json"));
 
@@ -3327,7 +3547,6 @@ minTokens = 100
         });
         let extends = extract_extends(&mut value);
         assert_eq!(extends, vec!["a.json", "b.json"]);
-        // extends should be removed from the value.
         assert!(value.get("extends").is_none());
         assert!(value.get("entry").is_some());
     }
@@ -3351,17 +3570,12 @@ minTokens = 100
 
     #[test]
     fn url_timeout_default() {
-        // Without the env var set, should return the default.
         let timeout = url_timeout();
-        // We can't assert exact value since the env var might be set in the test environment,
-        // but we can assert it's a reasonable duration.
         assert!(timeout.as_secs() <= 300, "Timeout should be reasonable");
     }
 
     #[test]
     fn extends_url_mixed_with_file_and_npm() {
-        // Test that a config with a mix of file, npm, and URL extends parses correctly
-        // for the non-URL parts, and produces a clear error for the URL part (no server).
         let dir = test_dir("url-mixed");
         std::fs::write(
             dir.path().join("local.json"),
@@ -3404,8 +3618,6 @@ minTokens = 100
             "Expected remediation hint, got: {err_msg}"
         );
     }
-
-    // ── Unknown-rule-name detection wiring (issue #467 phase 1) ──────
 
     #[test]
     fn collect_unknown_rule_keys_flags_top_level_typo() {
@@ -3483,17 +3695,6 @@ minTokens = 100
 
     #[test]
     fn load_wires_warn_on_unknown_rule_keys_into_load_path() {
-        // Wiring regression test: asserts PlowConfig::load actually invokes
-        // the warn pass on the merged value. If a future refactor removes the
-        // `warn_on_unknown_rule_keys` line from `load`, the helper tests still
-        // pass but this capture-based assertion fails because no finding is
-        // pushed onto the thread-local buffer.
-        //
-        // Uses a thread-local capture (not a process-global counter) so that
-        // parallel test execution does not race; each test thread has its own
-        // capture buffer. Uses a unique typo per test invocation so the
-        // process-wide dedupe set does not suppress the finding if another
-        // test happens to load a config with the same typo earlier.
         let dir = test_dir("wiring");
         let path = dir.path().join(".plowrc.json");
         let typo = format!(
@@ -3523,9 +3724,6 @@ minTokens = 100
 
     #[test]
     fn load_with_misspelled_rule_succeeds_and_ignores_typo() {
-        // Phase 1 contract: load succeeds, typo'd rule is silently dropped
-        // (falls back to default severity). Phase 2 will turn this into a
-        // hard error.
         let dir = test_dir("misspelled-rule");
         std::fs::write(
             dir.path().join(".plowrc.json"),
@@ -3536,17 +3734,16 @@ minTokens = 100
         let config = PlowConfig::load(&dir.path().join(".plowrc.json"))
             .expect("load should succeed in phase 1");
 
-        // Typo'd rule had no effect; unused_files stays at its default (Error).
         assert_eq!(config.rules.unused_files, Severity::Error);
     }
-
-    // ── validate_resolved_boundaries (issue #468) ──────────────────────
 
     #[test]
     fn validate_resolved_boundaries_passes_on_valid_config() {
         let dir = test_dir("boundaries-valid");
         let config = PlowConfig {
             boundaries: crate::BoundaryConfig {
+                coverage: crate::BoundaryCoverageConfig::default(),
+                calls: crate::BoundaryCallsConfig::default(),
                 preset: None,
                 zones: vec![
                     crate::BoundaryZone {
@@ -3580,6 +3777,8 @@ minTokens = 100
         let dir = test_dir("boundaries-unknown-zones");
         let config = PlowConfig {
             boundaries: crate::BoundaryConfig {
+                coverage: crate::BoundaryCoverageConfig::default(),
+                calls: crate::BoundaryCallsConfig::default(),
                 preset: None,
                 zones: vec![crate::BoundaryZone {
                     name: "ui".to_string(),
@@ -3609,9 +3808,6 @@ minTokens = 100
 
         assert_eq!(errors.len(), 4, "got: {errors:?}");
 
-        // Every rendered diagnostic carries the offending zone name AND the
-        // rule index so users editing a multi-rule config know which entry to
-        // edit. Verify by rendering and substring-checking each.
         let rendered: Vec<String> = errors.iter().map(ToString::to_string).collect();
         assert!(
             rendered
@@ -3638,6 +3834,8 @@ minTokens = 100
         let dir = test_dir("boundaries-redundant-prefix");
         let config = PlowConfig {
             boundaries: crate::BoundaryConfig {
+                coverage: crate::BoundaryCoverageConfig::default(),
+                calls: crate::BoundaryCallsConfig::default(),
                 preset: None,
                 zones: vec![crate::BoundaryZone {
                     name: "ui".to_string(),
@@ -3654,7 +3852,6 @@ minTokens = 100
             .validate_resolved_boundaries(dir.path())
             .expect_err("redundant root prefix should fail");
         assert_eq!(errors.len(), 1, "got: {errors:?}");
-        // Display preserves the legacy PLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX tag.
         let rendered = errors[0].to_string();
         assert!(rendered.contains("PLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX"));
         assert!(rendered.contains("zone 'ui'"));
@@ -3662,11 +3859,11 @@ minTokens = 100
 
     #[test]
     fn validate_resolved_boundaries_aggregates_unknown_zones_and_root_prefixes() {
-        // One config, two distinct failure classes; the user should see both
-        // in a single diagnostic run instead of fixing one and re-running.
         let dir = test_dir("boundaries-mixed-errors");
         let config = PlowConfig {
             boundaries: crate::BoundaryConfig {
+                coverage: crate::BoundaryCoverageConfig::default(),
+                calls: crate::BoundaryCallsConfig::default(),
                 preset: None,
                 zones: vec![crate::BoundaryZone {
                     name: "ui".to_string(),
@@ -3701,16 +3898,12 @@ minTokens = 100
 
     #[test]
     fn validate_resolved_boundaries_passes_on_bulletproof_preset() {
-        // Bulletproof's authored rule references the logical `features`
-        // group, which is replaced by concrete children only AFTER
-        // `expand_auto_discover` runs. Validation must execute the expansion
-        // first, otherwise the preset always looks like it references an
-        // undefined zone.
         let dir = test_dir("boundaries-bulletproof");
-        // Create a stub `src/features/auth` child so auto-discover finds it.
         std::fs::create_dir_all(dir.path().join("src/features/auth")).unwrap();
         let config = PlowConfig {
             boundaries: crate::BoundaryConfig {
+                coverage: crate::BoundaryCoverageConfig::default(),
+                calls: crate::BoundaryCallsConfig::default(),
                 preset: Some(crate::BoundaryPreset::Bulletproof),
                 zones: vec![],
                 rules: vec![],

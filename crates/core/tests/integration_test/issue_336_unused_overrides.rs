@@ -17,9 +17,7 @@
 
 use std::{fs, path::PathBuf};
 
-use plow_config::{
-    PlowConfig, IgnoreDependencyOverrideRule, OutputFormat, RulesConfig, Severity,
-};
+use plow_config::{IgnoreDependencyOverrideRule, OutputFormat, PlowConfig, RulesConfig, Severity};
 use plow_types::results::{DependencyOverrideMisconfigReason, DependencyOverrideSource};
 use rustc_hash::FxHashSet;
 
@@ -132,14 +130,8 @@ snapshots:
     )
     .expect("write pnpm lockfile");
 
-    let config = PlowConfig::default().resolve(
-        root.to_path_buf(),
-        OutputFormat::Human,
-        4,
-        true,
-        true,
-        None,
-    );
+    let config =
+        PlowConfig::default().resolve(root.to_path_buf(), OutputFormat::Human, 4, true, true, None);
     let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let actual: FxHashSet<&str> = results
@@ -208,8 +200,6 @@ fn ignore_rule_suppresses_unused_override() {
 #[test]
 fn ignore_rule_scoped_by_source_only_affects_matching_source() {
     let root = fixture_path("issue-336-unused-overrides");
-    // Ignore lodash only when declared in package.json (it lives in YAML, so
-    // the suppression should NOT apply).
     let ignore = vec![IgnoreDependencyOverrideRule {
         package: "lodash".to_string(),
         source: Some("package.json".to_string()),
@@ -257,9 +247,6 @@ fn severity_off_short_circuits() {
 
 #[test]
 fn unused_overrides_carry_transitive_hint_on_every_shape() {
-    // Both bare-target AND parent-chain unused findings must carry the
-    // transitive-CVE hint so agents can de-prioritize. Synthesize a tempdir
-    // with one of each shape and confirm the hint fires on both.
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
     fs::write(
@@ -273,14 +260,8 @@ fn unused_overrides_carry_transitive_hint_on_every_shape() {
     )
     .expect("write yaml");
 
-    let config = PlowConfig::default().resolve(
-        root.to_path_buf(),
-        OutputFormat::Human,
-        4,
-        true,
-        true,
-        None,
-    );
+    let config =
+        PlowConfig::default().resolve(root.to_path_buf(), OutputFormat::Human, 4, true, true, None);
     let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert_eq!(results.unused_dependency_overrides.len(), 2);

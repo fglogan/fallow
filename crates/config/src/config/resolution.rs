@@ -18,30 +18,13 @@ use super::rules::{PartialRulesConfig, RulesConfig, Severity};
 use super::used_class_members::UsedClassMemberRule;
 use crate::external_plugin::{ExternalPluginDef, discover_external_plugins};
 
-use super::PlowConfig;
 use super::IgnoreExportsUsedInFileConfig;
+use super::{PlowConfig, SecurityConfig};
 
 /// Process-local dedup state for inter-file rule warnings.
-///
-/// Workspace mode calls `PlowConfig::resolve()` once per package, so a single
-/// top-level config with `overrides.rules.{duplicate-exports,circular-dependency}`
-/// would otherwise emit the same warning N times. The set is keyed on a stable
-/// hash of (rule name, sorted glob list) so logically identical override blocks
-/// dedupe across all package resolves.
-///
-/// The state persists across resolves within a single process. That matches the
-/// CLI's "one warning per invocation" expectation. In long-running hosts
-/// (`plow watch`, the LSP server, NAPI consumers re-using a worker, the MCP
-/// server) the same set survives between re-runs and re-loads, so a user who
-/// edits the config and triggers a re-analysis sees the warning at most once
-/// per process lifetime. That is the documented behavior; restarting the host
-/// re-arms the warning.
 static INTER_FILE_WARN_SEEN: OnceLock<Mutex<FxHashSet<u64>>> = OnceLock::new();
 
 /// Stable hash of `(rule_name, sorted glob list)`.
-///
-/// Sorting deduplicates `["a/*", "b/*"]` against `["b/*", "a/*"]`. The element-
-/// wise hash loop is explicit so the lint sees the sorted Vec as read.
 fn inter_file_warn_key(rule_name: &str, files: &[String]) -> u64 {
     let mut sorted: Vec<&str> = files.iter().map(String::as_str).collect();
     sorted.sort_unstable();
@@ -53,10 +36,7 @@ fn inter_file_warn_key(rule_name: &str, files: &[String]) -> u64 {
     hasher.finish()
 }
 
-/// Returns `true` if this `(rule_name, files)` warning has not yet been recorded
-/// in the current process; `false` if it has already fired (or the mutex was
-/// poisoned, in which case we behave as if the warning had not fired yet so the
-/// user still sees one warning).
+/// Returns `true` if this warning has not yet fired in the current process.
 fn record_inter_file_warn_seen(rule_name: &str, files: &[String]) -> bool {
     let seen = INTER_FILE_WARN_SEEN.get_or_init(|| Mutex::new(FxHashSet::default()));
     let key = inter_file_warn_key(rule_name, files);
@@ -82,11 +62,6 @@ pub struct IgnoreExportRule {
 }
 
 /// `IgnoreExportRule` with the glob pre-compiled into a matcher.
-///
-/// Workspace mode runs `find_unused_exports` and `find_duplicate_exports` once
-/// per package, each of which previously re-compiled the same set of globs from
-/// `ignore_export_rules`. Compiling once at `ResolvedConfig` construction and
-/// reading `&[CompiledIgnoreExportRule]` from both detectors removes that work.
 #[derive(Debug)]
 pub struct CompiledIgnoreExportRule {
     pub matcher: globset::GlobMatcher,
@@ -94,27 +69,12 @@ pub struct CompiledIgnoreExportRule {
 }
 
 /// Rule for suppressing an `unresolved-catalog-reference` finding.
-///
-/// A finding is suppressed when ALL provided fields match the finding:
-/// - `package` matches the consumed package name exactly (case-sensitive).
-/// - `catalog`, if set, matches the referenced catalog name (`"default"` for
-///   bare `catalog:` references; named catalogs use their declared key). When
-///   omitted, any catalog matches.
-/// - `consumer`, if set, is a glob matched against the consumer `package.json`
-///   path relative to the project root. When omitted, any consumer matches.
-///
-/// Typical use cases:
-/// - Staged migrations: catalog entry is being added in a separate PR
-/// - Library-internal placeholder packages whose target catalog isn't ready yet
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct IgnoreCatalogReferenceRule {
-    /// Package name being referenced via the catalog protocol (exact match).
     pub package: String,
-    /// Catalog name to scope the suppression to. `None` matches any catalog.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub catalog: Option<String>,
-    /// Glob (root-relative) for the consumer `package.json`. `None` matches any consumer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub consumer: Option<String>,
 }
@@ -124,14 +84,11 @@ pub struct IgnoreCatalogReferenceRule {
 pub struct CompiledIgnoreCatalogReferenceRule {
     pub package: String,
     pub catalog: Option<String>,
-    /// `None` means "match any consumer path"; `Some` matches only paths the glob accepts.
     pub consumer_matcher: Option<globset::GlobMatcher>,
 }
 
 impl CompiledIgnoreCatalogReferenceRule {
-    /// Whether this rule suppresses an `unresolved-catalog-reference` finding
-    /// for the given (package, catalog, consumer-path) triple. The consumer
-    /// path must be project-root-relative.
+    /// Whether this rule suppresses an `unresolved-catalog-reference` finding.
     #[must_use]
     pub fn matches(&self, package: &str, catalog: &str, consumer_path: &str) -> bool {
         if self.package != package {
@@ -151,27 +108,11 @@ impl CompiledIgnoreCatalogReferenceRule {
     }
 }
 
-/// Rule for suppressing an `unused-dependency-override` or
-/// `misconfigured-dependency-override` finding.
-///
-/// A finding is suppressed when ALL provided fields match the finding:
-/// - `package` matches the override's target package name exactly
-///   (case-sensitive). For parent-chain overrides (`react>react-dom`), the
-///   target is the rightmost segment (`react-dom`).
-/// - `source`, if set, scopes the suppression to overrides declared in that
-///   source file. Accepts `"pnpm-workspace.yaml"` or `"package.json"`.
-///   When omitted, both sources match.
-///
-/// Typical use cases:
-/// - Library-internal CI tooling overrides we cannot drop yet
-/// - Overrides targeting purely-transitive packages (CVE-fix pattern)
+/// Rule for suppressing dependency-override findings.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct IgnoreDependencyOverrideRule {
-    /// Override target package name (exact match; case-sensitive).
     pub package: String,
-    /// Source file scope: `"pnpm-workspace.yaml"` or `"package.json"`.
-    /// `None` matches both sources.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
 }
@@ -180,14 +121,11 @@ pub struct IgnoreDependencyOverrideRule {
 #[derive(Debug)]
 pub struct CompiledIgnoreDependencyOverrideRule {
     pub package: String,
-    /// `None` matches any source; `Some` matches only the named source.
     pub source: Option<String>,
 }
 
 impl CompiledIgnoreDependencyOverrideRule {
-    /// Whether this rule suppresses a dependency-override finding for the
-    /// given (target_package, source_label) pair. `source_label` should be
-    /// `"pnpm-workspace.yaml"` or `"package.json"`.
+    /// Whether this rule suppresses a dependency-override finding.
     #[must_use]
     pub fn matches(&self, package: &str, source_label: &str) -> bool {
         if self.package != package {
@@ -206,9 +144,7 @@ impl CompiledIgnoreDependencyOverrideRule {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfigOverride {
-    /// Glob patterns to match files against (relative to config file location).
     pub files: Vec<String>,
-    /// Partial rules — only specified fields override the base rules.
     #[serde(default)]
     pub rules: PartialRulesConfig,
 }
@@ -230,131 +166,228 @@ pub struct ResolvedConfig {
     pub cache_dir: PathBuf,
     pub threads: usize,
     pub no_cache: bool,
-    /// Resolved on-disk cache cap in megabytes. `None` selects the default
-    /// (`plow_extract::cache::DEFAULT_CACHE_MAX_SIZE`, 256 MB). Computed
-    /// at the CLI layer as `PLOW_CACHE_MAX_SIZE` env var (if set), else
-    /// `cache.maxSizeMb` in the config file. Stored in MB rather than
-    /// bytes so that the config crate has no dependency on
-    /// `plow-extract`; the bytes resolution happens at the callsite
-    /// (`plow_core::lib::analyze_full`).
     pub cache_max_size_mb: Option<u32>,
-    /// Stable u64 hash of extraction-affecting config fields (currently the
-    /// active external plugin names + inline framework definition names).
-    /// Threaded into `CacheStore::load` and `CacheStore::save` so a config
-    /// change discards the stale cache without requiring a `CACHE_VERSION`
-    /// bump. See ADR-009 for the ingredient list and the contract for
-    /// adding new ingredients in the future. Zero when `no_cache` is set
-    /// (the bookkeeping is skipped to avoid unnecessary work when caching
-    /// is disabled).
     pub cache_config_hash: u64,
     pub ignore_dependencies: Vec<String>,
-    /// Pre-compiled raw import specifier patterns for suppressing
-    /// `unresolved-import` findings.
     pub ignore_unresolved_imports: Vec<GlobMatcher>,
     pub ignore_export_rules: Vec<IgnoreExportRule>,
-    /// Pre-compiled glob matchers for `ignoreExports`.
-    ///
-    /// Populated alongside `ignore_export_rules` so detectors that need to test
-    /// "does this file match a configured `ignoreExports` glob?" can read the
-    /// compiled matchers without re-running `globset::Glob::new` per call.
     pub compiled_ignore_exports: Vec<CompiledIgnoreExportRule>,
-    /// Pre-compiled rules for suppressing `unresolved-catalog-reference` findings.
     pub compiled_ignore_catalog_references: Vec<CompiledIgnoreCatalogReferenceRule>,
-    /// Pre-compiled rules for suppressing dependency-override findings (both
-    /// `unused-dependency-override` and `misconfigured-dependency-override`).
     pub compiled_ignore_dependency_overrides: Vec<CompiledIgnoreDependencyOverrideRule>,
-    /// Whether same-file references should suppress unused-export findings.
     pub ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig,
-    /// Class member names that should never be flagged as unused-class-members.
-    /// Union of top-level config and active plugin contributions; merged during
-    /// config resolution so analysis code reads a single list.
     pub used_class_members: Vec<UsedClassMemberRule>,
-    /// Decorator paths the user has opted out of the default skip-all-decorated
-    /// behavior for `unused-class-members`. See `PlowConfig::ignore_decorators`
-    /// for matching semantics. Passed through unchanged from the user config
-    /// (no glob compilation; small set, linear scan at the call site).
     pub ignore_decorators: Vec<String>,
     pub duplicates: DuplicatesConfig,
     pub health: HealthConfig,
     pub rules: RulesConfig,
-    /// Resolved architecture boundary configuration with pre-compiled glob matchers.
     pub boundaries: ResolvedBoundaryConfig,
-    /// Whether production mode is active.
+    /// Rule packs loaded from the `rulePacks` config key, in config order.
+    /// Validated at config load (`load_rule_packs` is also the validation
+    /// gate in the CLI and programmatic entry points); a pack that fails to
+    /// load here is skipped with a `tracing::error!` as defense in depth.
+    pub rule_packs: Vec<crate::rule_pack::RulePackDef>,
     pub production: bool,
-    /// Suppress progress output and non-essential stderr messages.
     pub quiet: bool,
-    /// External plugin definitions (from plugin files + inline framework definitions).
     pub external_plugins: Vec<ExternalPluginDef>,
-    /// Glob patterns for dynamically loaded files (treated as always-used).
     pub dynamically_loaded: Vec<String>,
-    /// Per-file rule overrides with pre-compiled glob matchers.
     pub overrides: Vec<ResolvedOverride>,
-    /// Regression config (passed through from user config, not resolved).
     pub regression: Option<super::RegressionConfig>,
-    /// Audit baseline paths (passed through from user config, not resolved).
     pub audit: super::AuditConfig,
-    /// Optional CODEOWNERS file path (passed through for `--group-by owner`).
     pub codeowners: Option<String>,
-    /// Workspace package name patterns that are public libraries.
-    /// Exported API surface from these packages is not flagged as unused.
     pub public_packages: Vec<String>,
-    /// Feature flag detection configuration.
     pub flags: FlagsConfig,
-    /// Auto-fix behavior settings.
+    pub security: SecurityConfig,
     pub fix: super::FixConfig,
-    /// Module resolver configuration (user-supplied import/export conditions).
     pub resolve: ResolveConfig,
-    /// When true, entry file exports are subject to unused-export detection
-    /// instead of being automatically marked as used. Set via the global CLI flag
-    /// `--include-entry-exports` or via `includeEntryExports: true` in the plow
-    /// config file; the CLI flag ORs with the config value (CLI wins when set).
     pub include_entry_exports: bool,
-    /// When true, framework plugins drop the convention entry patterns they can
-    /// resolve via `auto_imports` (today: Nuxt component directories), so
-    /// genuinely-unreferenced convention files are reported as `unused-file`.
-    /// Auto-import edge synthesis runs regardless of this flag; it only gates the
-    /// entry-pattern removal. Set via `autoImports: true` in the config. See
-    /// issue #704.
     pub auto_imports: bool,
+    /// Source files strictly larger than this many bytes are skipped at
+    /// discovery (never read, parsed, or analyzed), guarding against the
+    /// out-of-memory blowup a single multi-MB generated/vendored/bundled file
+    /// causes (issue #1086). `None` means no limit. Declaration files
+    /// (`.d.ts`/`.d.mts`/`.d.cts`) are exempt regardless of size because they
+    /// are reachability roots for global types. Defaults to
+    /// [`DEFAULT_MAX_FILE_SIZE_MB`] MB; the CLI overrides it post-resolve from
+    /// `--max-file-size` / `PLOW_MAX_FILE_SIZE` (`0` = unlimited).
+    pub max_file_size_bytes: Option<u64>,
 }
 
-/// Compute the cache-invalidation hash over extraction-affecting config
-/// fields. See ADR-009 for the contract: this hash is stored in the cache
-/// header, and a mismatch on load discards the cache.
-///
-/// Today's ingredients (sorted for determinism across runs):
-/// - Active external plugin names. `discover_external_plugins` finalises the
-///   plugin set after merging inline `framework: [...]` definitions, so we
-///   hash the post-merge list.
-///
-/// **Adding a new ingredient.** Any new `ResolvedConfig` field that affects
-/// what extraction emits (e.g. a future "extract source-map references"
-/// toggle) MUST be folded into this hash, otherwise stale caches keep
-/// serving the old extraction output across the config change. The signal
-/// is "field affects extraction output bytes," not "field affects detection
-/// behavior" (detection-only fields like `entry`/`ignorePatterns` belong on
-/// the analysis layer, not in the cache key).
+/// Default per-file size ceiling (in megabytes) for source discovery. A value
+/// chosen so hand-written source effectively never reaches it while generated
+/// API clients, vendored bundles, and minified blobs do. See issue #1086.
+pub const DEFAULT_MAX_FILE_SIZE_MB: u32 = 5;
+
+/// [`DEFAULT_MAX_FILE_SIZE_MB`] expressed in bytes.
+pub const DEFAULT_MAX_FILE_SIZE_BYTES: u64 = DEFAULT_MAX_FILE_SIZE_MB as u64 * 1024 * 1024;
+
+/// Convert a user-supplied megabyte ceiling into the byte limit stored on
+/// [`ResolvedConfig::max_file_size_bytes`]. `Some(0)` means "no limit"
+/// (`None`); any other `Some(n)` is `n` MB in bytes; `None` (unset) keeps the
+/// built-in [`DEFAULT_MAX_FILE_SIZE_BYTES`].
+#[must_use]
+pub fn resolve_max_file_size_bytes(max_file_size_mb: Option<u32>) -> Option<u64> {
+    match max_file_size_mb {
+        None => Some(DEFAULT_MAX_FILE_SIZE_BYTES),
+        Some(0) => None,
+        Some(mb) => Some(u64::from(mb) * 1024 * 1024),
+    }
+}
+
+/// Compute the cache-invalidation hash over extraction-affecting config fields.
 fn compute_cache_config_hash(external_plugins: &[ExternalPluginDef]) -> u64 {
     let mut names: Vec<&str> = external_plugins.iter().map(|p| p.name.as_str()).collect();
     names.sort_unstable();
     let mut hasher = xxhash_rust::xxh3::Xxh3::new();
     for name in names {
-        // Length-prefix each name so `["ab", "c"]` and `["a", "bc"]` hash
-        // distinctly even though the concatenated bytes are identical.
         hasher.update(&(name.len() as u32).to_le_bytes());
         hasher.update(name.as_bytes());
     }
     hasher.digest()
 }
 
+fn resolve_cache_dir(root: &Path, configured: Option<PathBuf>) -> PathBuf {
+    let Some(dir) = configured else {
+        return root.join(".plow");
+    };
+    if dir.is_absolute() {
+        dir
+    } else {
+        root.join(dir)
+    }
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "user glob patterns are validated before config resolution"
+)]
+fn compile_ignore_patterns(ignore_patterns: &[String]) -> GlobSet {
+    let mut ignore_builder = GlobSetBuilder::new();
+    for pattern in ignore_patterns {
+        ignore_builder.add(
+            Glob::new(pattern).expect("ignorePatterns entry was validated at config load time"),
+        );
+    }
+
+    let default_ignores = [
+        "**/node_modules/**",
+        "**/dist/**",
+        "build/**",
+        "**/.git/**",
+        "**/coverage/**",
+        "**/*.min.js",
+        "**/*.min.mjs",
+        "**/*.min.cjs",
+        "**/*.bundle.js",
+    ];
+    for pattern in &default_ignores {
+        ignore_builder.add(Glob::new(pattern).expect("default ignore pattern is valid"));
+    }
+
+    ignore_builder.build().unwrap_or_default()
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "user glob patterns are validated before config resolution"
+)]
+fn compile_ignore_unresolved_imports(patterns: &[String]) -> Vec<GlobMatcher> {
+    patterns
+        .iter()
+        .map(|pattern| {
+            Glob::new(pattern)
+                .expect("ignoreUnresolvedImports entry was validated at config load time")
+                .compile_matcher()
+        })
+        .collect()
+}
+
+fn resolve_rules_for_production(mut rules: RulesConfig, production: bool) -> RulesConfig {
+    if production {
+        rules.unused_dev_dependencies = Severity::Off;
+        rules.unused_optional_dependencies = Severity::Off;
+    }
+    rules
+}
+
+fn resolve_boundaries(
+    mut boundaries: super::boundaries::BoundaryConfig,
+    root: &Path,
+) -> ResolvedBoundaryConfig {
+    if boundaries.preset.is_some() {
+        let source_root = crate::workspace::parse_tsconfig_root_dir(root)
+            .filter(|r| r != "." && !r.starts_with("..") && !std::path::Path::new(r).is_absolute())
+            .unwrap_or_else(|| "src".to_owned());
+        if source_root != "src" {
+            tracing::info!("boundary preset: using rootDir '{source_root}' from tsconfig.json");
+        }
+        boundaries.expand(&source_root);
+    }
+    let logical_groups = boundaries.expand_auto_discover(root);
+    let mut resolved = boundaries.resolve();
+    resolved.logical_groups = logical_groups;
+    resolved
+}
+
+fn warn_inter_file_overrides(rules: &PartialRulesConfig, files: &[String]) {
+    if rules.duplicate_exports.is_some() && record_inter_file_warn_seen("duplicate-exports", files)
+    {
+        let files = files.join(", ");
+        tracing::warn!(
+            "overrides.rules.duplicate-exports has no effect for files matching [{files}]: duplicate-exports is an inter-file rule. Use top-level `ignoreExports` to exclude these files from duplicate-export grouping."
+        );
+    }
+    if rules.circular_dependencies.is_some()
+        && record_inter_file_warn_seen("circular-dependency", files)
+    {
+        let files = files.join(", ");
+        tracing::warn!(
+            "overrides.rules.circular-dependency has no effect for files matching [{files}]: circular-dependency is an inter-file rule. Use a file-level `// plow-ignore-file circular-dependency` comment in one participating file instead."
+        );
+    }
+    if rules.re_export_cycle.is_some() && record_inter_file_warn_seen("re-export-cycle", files) {
+        let files = files.join(", ");
+        tracing::warn!(
+            "overrides.rules.re-export-cycle has no effect for files matching [{files}]: re-export-cycle is an inter-file rule (the cycle spans multiple barrels). Use a file-level `// plow-ignore-file re-export-cycle` comment in one participating file instead, or set `rules.re-export-cycle: off` at the top level."
+        );
+    }
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "override glob patterns are validated before config resolution"
+)]
+fn compile_overrides(overrides: Vec<ConfigOverride>) -> Vec<ResolvedOverride> {
+    overrides
+        .into_iter()
+        .filter_map(|override_entry| {
+            warn_inter_file_overrides(&override_entry.rules, &override_entry.files);
+            let matchers: Vec<globset::GlobMatcher> = override_entry
+                .files
+                .iter()
+                .map(|pattern| {
+                    Glob::new(pattern)
+                        .expect("overrides[].files pattern was validated at config load time")
+                        .compile_matcher()
+                })
+                .collect();
+            if matchers.is_empty() {
+                None
+            } else {
+                Some(ResolvedOverride {
+                    matchers,
+                    rules: override_entry.rules,
+                })
+            }
+        })
+        .collect()
+}
+
 impl PlowConfig {
     /// Resolve into a fully resolved config with compiled globs.
-    ///
-    /// `cache_max_size_mb` is the user's override for the cache cap (env var
-    /// or in-config `cache.maxSizeMb`). When `None`, the cap defaults to
-    /// `plow_extract::cache::DEFAULT_CACHE_MAX_SIZE` (256 MB). Env-var
-    /// precedence is resolved at the CLI layer, so the resolver itself only
-    /// sees the final value.
+    #[expect(
+        clippy::expect_used,
+        reason = "user glob patterns are validated before config resolution"
+    )]
     pub fn resolve(
         self,
         root: PathBuf,
@@ -364,160 +397,29 @@ impl PlowConfig {
         quiet: bool,
         cache_max_size_mb: Option<u32>,
     ) -> ResolvedConfig {
-        // User-supplied patterns are validated by `PlowConfig::load`
-        // (issue #463). Configs constructed in-code (tests, defaults) bypass
-        // load and are assumed to use valid patterns; an invalid pattern here
-        // surfaces as a panic, which is correct for a programming error.
-        let mut ignore_builder = GlobSetBuilder::new();
-        for pattern in &self.ignore_patterns {
-            ignore_builder.add(
-                Glob::new(pattern).expect("ignorePatterns entry was validated at config load time"),
-            );
-        }
+        let compiled_ignore_patterns = compile_ignore_patterns(&self.ignore_patterns);
+        let ignore_unresolved_imports =
+            compile_ignore_unresolved_imports(&self.ignore_unresolved_imports);
+        let cache_dir = resolve_cache_dir(&root, self.cache.dir.clone());
 
-        // Default ignores (hardcoded, known-good patterns).
-        // Note: `build/` is only ignored at the project root (not `**/build/**`)
-        // because nested `build/` directories like `test/build/` may contain source files.
-        let default_ignores = [
-            "**/node_modules/**",
-            "**/dist/**",
-            "build/**",
-            "**/.git/**",
-            "**/coverage/**",
-            "**/*.min.js",
-            "**/*.min.mjs",
-        ];
-        for pattern in &default_ignores {
-            ignore_builder.add(Glob::new(pattern).expect("default ignore pattern is valid"));
-        }
-
-        let compiled_ignore_patterns = ignore_builder.build().unwrap_or_default();
-        let ignore_unresolved_imports: Vec<GlobMatcher> = self
-            .ignore_unresolved_imports
-            .iter()
-            .map(|pattern| {
-                Glob::new(pattern)
-                    .expect("ignoreUnresolvedImports entry was validated at config load time")
-                    .compile_matcher()
-            })
-            .collect();
-        let cache_dir = root.join(".plow");
-
-        let mut rules = self.rules;
-
-        // In production mode, force unused_dev_dependencies and unused_optional_dependencies off
         let production = self.production.global();
-        if production {
-            rules.unused_dev_dependencies = Severity::Off;
-            rules.unused_optional_dependencies = Severity::Off;
-        }
+        let rules = resolve_rules_for_production(self.rules, production);
 
         let mut external_plugins = discover_external_plugins(&root, &self.plugins);
-        // Merge inline framework definitions into external plugins
         external_plugins.extend(self.framework);
 
-        // Expand boundary preset (if configured) before validation.
-        // Detect source root from tsconfig.json, falling back to "src".
-        let mut boundaries = self.boundaries;
-        if boundaries.preset.is_some() {
-            let source_root = crate::workspace::parse_tsconfig_root_dir(&root)
-                .filter(|r| {
-                    r != "." && !r.starts_with("..") && !std::path::Path::new(r).is_absolute()
-                })
-                .unwrap_or_else(|| "src".to_owned());
-            if source_root != "src" {
-                tracing::info!("boundary preset: using rootDir '{source_root}' from tsconfig.json");
-            }
-            boundaries.expand(&source_root);
-        }
-        // MUST run AFTER `expand` and BEFORE `validate_zone_references`. Presets
-        // like Bulletproof emit a rule whose `from` is the logical group name
-        // (`features`) that auto-discovery later replaces with concrete child
-        // zones (`features/auth`, `features/billing`). Moving validation above
-        // expansion makes the preset look like it references undefined zones.
-        //
-        // The returned `logical_groups` records the pre-expansion parent
-        // identity (name, children, the user's verbatim `autoDiscover` paths,
-        // the authored rule, and discovery status). It is stashed onto
-        // `ResolvedBoundaryConfig` further down so `plow list --boundaries
-        // --format json` can surface the user's grouping intent even after
-        // the parent name is flattened out of `zones[]`. Closes issue #373.
-        let logical_groups = boundaries.expand_auto_discover(&root);
+        let rule_packs =
+            crate::rule_pack::load_rule_packs(&root, &self.rule_packs).unwrap_or_else(|errors| {
+                for error in &errors {
+                    tracing::error!("invalid rule pack: {error}");
+                }
+                Vec::new()
+            });
 
-        // Compile architecture boundary config. Validation errors
-        // (`validate_zone_references` + `validate_root_prefixes`) are surfaced
-        // via `PlowConfig::validate_resolved_boundaries` at config load
-        // time (issue #468); by the time `resolve()` runs they have already
-        // exited the process with exit code 2. Test fixtures that bypass the
-        // load path and construct configs in-code are responsible for keeping
-        // their zone references and root prefixes valid.
-        let mut boundaries = boundaries.resolve();
-        // `expand_auto_discover` is the only producer of `logical_groups`;
-        // `resolve()` has no view of the pre-expansion state and leaves the
-        // field empty. Stitch it back together here.
-        boundaries.logical_groups = logical_groups;
+        let boundaries = resolve_boundaries(self.boundaries, &root);
 
-        // Pre-compile override glob matchers
-        let overrides = self
-            .overrides
-            .into_iter()
-            .filter_map(|o| {
-                // Inter-file rules group findings across multiple files (a
-                // single duplicate-exports finding spans N files; a single
-                // circular-dependency finding spans M files in a cycle), so a
-                // per-file `overrides.rules` setting cannot meaningfully turn
-                // them off: the override only fires when the path being looked
-                // up matches, but the finding belongs to a group of paths, not
-                // to one. Warn at load time and point users at the working
-                // escape hatch (`ignoreExports` for duplicates, file-level
-                // `// plow-ignore-file circular-dependency` for cycles).
-                if o.rules.duplicate_exports.is_some()
-                    && record_inter_file_warn_seen("duplicate-exports", &o.files)
-                {
-                    let files = o.files.join(", ");
-                    tracing::warn!(
-                        "overrides.rules.duplicate-exports has no effect for files matching [{files}]: duplicate-exports is an inter-file rule. Use top-level `ignoreExports` to exclude these files from duplicate-export grouping."
-                    );
-                }
-                if o.rules.circular_dependencies.is_some()
-                    && record_inter_file_warn_seen("circular-dependency", &o.files)
-                {
-                    let files = o.files.join(", ");
-                    tracing::warn!(
-                        "overrides.rules.circular-dependency has no effect for files matching [{files}]: circular-dependency is an inter-file rule. Use a file-level `// plow-ignore-file circular-dependency` comment in one participating file instead."
-                    );
-                }
-                if o.rules.re_export_cycle.is_some()
-                    && record_inter_file_warn_seen("re-export-cycle", &o.files)
-                {
-                    let files = o.files.join(", ");
-                    tracing::warn!(
-                        "overrides.rules.re-export-cycle has no effect for files matching [{files}]: re-export-cycle is an inter-file rule (the cycle spans multiple barrels). Use a file-level `// plow-ignore-file re-export-cycle` comment in one participating file instead, or set `rules.re-export-cycle: off` at the top level."
-                    );
-                }
-                let matchers: Vec<globset::GlobMatcher> = o
-                    .files
-                    .iter()
-                    .map(|pattern| {
-                        Glob::new(pattern)
-                            .expect("overrides[].files pattern was validated at config load time")
-                            .compile_matcher()
-                    })
-                    .collect();
-                if matchers.is_empty() {
-                    None
-                } else {
-                    Some(ResolvedOverride {
-                        matchers,
-                        rules: o.rules,
-                    })
-                }
-            })
-            .collect();
+        let overrides = compile_overrides(self.overrides);
 
-        // Compile `ignoreExports` once at resolve time so both `find_unused_exports`
-        // and `find_duplicate_exports` can read pre-built matchers from
-        // `ResolvedConfig`. Patterns were validated at config load time.
         let compiled_ignore_exports: Vec<CompiledIgnoreExportRule> = self
             .ignore_exports
             .iter()
@@ -554,23 +456,17 @@ impl PlowConfig {
             })
             .collect();
 
-        // Resolve the cache cap. Env-var precedence is handled at the CLI
-        // layer (CLI passes either the env-var value or `None`), so here we
-        // just fall back to the in-config `cache.maxSizeMb`. The bytes
-        // conversion happens at the `CacheStore::save` callsite (in
-        // `plow_core`), keeping `plow-config` independent of
-        // `plow-extract`.
         let cache_max_size_mb = cache_max_size_mb.or(self.cache.max_size_mb);
 
-        // Compute the cache config hash. The hash invalidates the cache on
-        // user-driven config changes that affect extraction (currently:
-        // active external plugin names + inline framework definition
-        // names; see ADR-009 for the contract). Skipped under `no_cache`
-        // so the bookkeeping is zero-cost when caching is disabled.
         let cache_config_hash = if no_cache {
             0
         } else {
             compute_cache_config_hash(&external_plugins)
+        };
+
+        let security = SecurityConfig {
+            request_receivers: self.security.normalized_request_receivers(),
+            ..self.security
         };
 
         ResolvedConfig {
@@ -596,6 +492,7 @@ impl PlowConfig {
             health: self.health,
             rules,
             boundaries,
+            rule_packs,
             production,
             quiet,
             external_plugins,
@@ -606,10 +503,12 @@ impl PlowConfig {
             codeowners: self.codeowners,
             public_packages: self.public_packages,
             flags: self.flags,
+            security,
             fix: self.fix,
             resolve: self.resolve,
             include_entry_exports: self.include_entry_exports,
             auto_imports: self.auto_imports,
+            max_file_size_bytes: Some(DEFAULT_MAX_FILE_SIZE_BYTES),
         }
     }
 }
@@ -690,6 +589,7 @@ mod tests {
             boundaries: BoundaryConfig::default(),
             production: false.into(),
             plugins: vec![],
+            rule_packs: vec![],
             dynamically_loaded: vec![],
             overrides: vec![],
             regression: None,
@@ -697,6 +597,7 @@ mod tests {
             codeowners: None,
             public_packages: vec![],
             flags: FlagsConfig::default(),
+            security: SecurityConfig::default(),
             fix: crate::config::FixConfig::default(),
             resolve: ResolveConfig::default(),
             sealed: false,
@@ -739,6 +640,7 @@ mod tests {
             boundaries: BoundaryConfig::default(),
             production: false.into(),
             plugins: vec![],
+            rule_packs: vec![],
             dynamically_loaded: vec![],
             overrides: vec![ConfigOverride {
                 files: vec!["*.test.ts".to_string()],
@@ -752,6 +654,7 @@ mod tests {
             codeowners: None,
             public_packages: vec![],
             flags: FlagsConfig::default(),
+            security: SecurityConfig::default(),
             fix: crate::config::FixConfig::default(),
             resolve: ResolveConfig::default(),
             sealed: false,
@@ -768,12 +671,10 @@ mod tests {
             None,
         );
 
-        // Test file matches override
         let test_rules = resolved.resolve_rules_for_path(Path::new("/project/src/utils.test.ts"));
         assert_eq!(test_rules.unused_exports, Severity::Off);
         assert_eq!(test_rules.unused_files, Severity::Error); // not overridden
 
-        // Non-test file does not match
         let src_rules = resolved.resolve_rules_for_path(Path::new("/project/src/utils.ts"));
         assert_eq!(src_rules.unused_exports, Severity::Error);
     }
@@ -801,6 +702,7 @@ mod tests {
             boundaries: BoundaryConfig::default(),
             production: false.into(),
             plugins: vec![],
+            rule_packs: vec![],
             dynamically_loaded: vec![],
             overrides: vec![
                 ConfigOverride {
@@ -823,6 +725,7 @@ mod tests {
             codeowners: None,
             public_packages: vec![],
             flags: FlagsConfig::default(),
+            security: SecurityConfig::default(),
             fix: crate::config::FixConfig::default(),
             resolve: ResolveConfig::default(),
             sealed: false,
@@ -839,22 +742,15 @@ mod tests {
             None,
         );
 
-        // First override matches *.ts, second matches *.test.ts; second wins
         let rules = resolved.resolve_rules_for_path(Path::new("/project/foo.test.ts"));
         assert_eq!(rules.unused_files, Severity::Off);
 
-        // Non-test .ts file only matches first override
         let rules2 = resolved.resolve_rules_for_path(Path::new("/project/foo.ts"));
         assert_eq!(rules2.unused_files, Severity::Warn);
     }
 
     #[test]
     fn resolve_keeps_inter_file_rule_override_after_warning() {
-        // Setting `overrides.rules.duplicate-exports` for a file glob is a no-op
-        // at finding-time (duplicate-exports groups span multiple files), but the
-        // override must still resolve cleanly so other co-located rule settings
-        // on the same override are honored. The resolver emits a tracing warning;
-        // here we assert the override is still installed for non-inter-file rules.
         let config = PlowConfig {
             schema: None,
             extends: vec![],
@@ -876,6 +772,7 @@ mod tests {
             boundaries: BoundaryConfig::default(),
             production: false.into(),
             plugins: vec![],
+            rule_packs: vec![],
             dynamically_loaded: vec![],
             overrides: vec![ConfigOverride {
                 files: vec!["**/ui/**".to_string()],
@@ -890,6 +787,7 @@ mod tests {
             codeowners: None,
             public_packages: vec![],
             flags: FlagsConfig::default(),
+            security: SecurityConfig::default(),
             fix: crate::config::FixConfig::default(),
             resolve: ResolveConfig::default(),
             sealed: false,
@@ -916,29 +814,22 @@ mod tests {
 
     #[test]
     fn inter_file_warn_dedup_returns_true_only_on_first_key_match() {
-        // Reset shared state so test ordering does not affect the assertions
-        // below. Uses unique glob strings (`__test_dedup_*`) so other tests in
-        // this module that exercise the warn path do not collide.
         reset_inter_file_warn_dedup_for_test();
         let files_a = vec!["__test_dedup_a/*".to_string()];
         let files_b = vec!["__test_dedup_b/*".to_string()];
 
-        // First call fires; subsequent identical calls do not.
         assert!(record_inter_file_warn_seen("duplicate-exports", &files_a));
         assert!(!record_inter_file_warn_seen("duplicate-exports", &files_a));
         assert!(!record_inter_file_warn_seen("duplicate-exports", &files_a));
 
-        // Different rule name is a distinct key.
         assert!(record_inter_file_warn_seen("circular-dependency", &files_a));
         assert!(!record_inter_file_warn_seen(
             "circular-dependency",
             &files_a
         ));
 
-        // Different glob list is a distinct key.
         assert!(record_inter_file_warn_seen("duplicate-exports", &files_b));
 
-        // Order-insensitive glob list collapses to the same key.
         let files_reordered = vec![
             "__test_dedup_b/*".to_string(),
             "__test_dedup_a/*".to_string(),
@@ -960,10 +851,6 @@ mod tests {
 
     #[test]
     fn resolve_called_n_times_dedupes_inter_file_warning_to_one() {
-        // Drive `PlowConfig::resolve()` ten times with identical
-        // `overrides.rules.duplicate-exports` to mirror workspace mode (one
-        // resolve per package). The dedup must surface the warn key as
-        // already-seen on every call after the first.
         reset_inter_file_warn_dedup_for_test();
         let files = vec!["__test_resolve_dedup/**".to_string()];
         let build_config = || PlowConfig {
@@ -987,6 +874,7 @@ mod tests {
             boundaries: BoundaryConfig::default(),
             production: false.into(),
             plugins: vec![],
+            rule_packs: vec![],
             dynamically_loaded: vec![],
             overrides: vec![ConfigOverride {
                 files: files.clone(),
@@ -1000,6 +888,7 @@ mod tests {
             codeowners: None,
             public_packages: vec![],
             flags: FlagsConfig::default(),
+            security: SecurityConfig::default(),
             fix: crate::config::FixConfig::default(),
             resolve: ResolveConfig::default(),
             sealed: false,
@@ -1017,9 +906,6 @@ mod tests {
                 None,
             );
         }
-        // After 10 resolves the dedup state holds the warn key. Asking the
-        // dedup helper for the SAME key returns false (already seen) instead
-        // of true (would fire).
         assert!(
             !record_inter_file_warn_seen("duplicate-exports", &files),
             "warn key for duplicate-exports + __test_resolve_dedup/** should be marked after the first resolve"
@@ -1049,6 +935,7 @@ mod tests {
             boundaries: BoundaryConfig::default(),
             production: production.into(),
             plugins: vec![],
+            rule_packs: vec![],
             dynamically_loaded: vec![],
             overrides: vec![],
             regression: None,
@@ -1056,6 +943,7 @@ mod tests {
             codeowners: None,
             public_packages: vec![],
             flags: FlagsConfig::default(),
+            security: SecurityConfig::default(),
             fix: crate::config::FixConfig::default(),
             resolve: ResolveConfig::default(),
             sealed: false,
@@ -1064,8 +952,6 @@ mod tests {
             cache: CacheConfig::default(),
         }
     }
-
-    // ── Production mode ─────────────────────────────────────────────
 
     #[test]
     fn resolve_production_forces_dev_deps_off() {
@@ -1111,7 +997,6 @@ mod tests {
             true,
             None,
         );
-        // Other rules should remain at their defaults
         assert_eq!(resolved.rules.unused_files, Severity::Error);
         assert_eq!(resolved.rules.unused_exports, Severity::Error);
         assert_eq!(resolved.rules.unused_dependencies, Severity::Error);
@@ -1157,8 +1042,6 @@ mod tests {
         );
         assert!(!resolved2.production);
     }
-
-    // ── Default ignore patterns ─────────────────────────────────────
 
     #[test]
     fn resolve_default_ignores_node_modules() {
@@ -1214,7 +1097,6 @@ mod tests {
             resolved.ignore_patterns.is_match("build/output.js"),
             "root build/ should be ignored"
         );
-        // The pattern is `build/**` (root-only), not `**/build/**`
         assert!(
             !resolved.ignore_patterns.is_match("src/build/helper.ts"),
             "nested build/ should NOT be ignored by default"
@@ -1233,6 +1115,46 @@ mod tests {
         );
         assert!(resolved.ignore_patterns.is_match("vendor/jquery.min.js"));
         assert!(resolved.ignore_patterns.is_match("lib/utils.min.mjs"));
+        assert!(resolved.ignore_patterns.is_match("lib/legacy.min.cjs"));
+        assert!(resolved.ignore_patterns.is_match("public/app.bundle.js"));
+        assert!(
+            resolved
+                .ignore_patterns
+                .is_match("src/vendor/app.bundle.js")
+        );
+        // Hand-written source with a similar name stays analyzed.
+        assert!(!resolved.ignore_patterns.is_match("src/bundle.ts"));
+        assert!(!resolved.ignore_patterns.is_match("src/app.cjs"));
+    }
+
+    #[test]
+    fn resolve_max_file_size_bytes_default_and_unlimited() {
+        // Unset keeps the built-in default.
+        assert_eq!(
+            resolve_max_file_size_bytes(None),
+            Some(DEFAULT_MAX_FILE_SIZE_BYTES)
+        );
+        // `0` means no limit.
+        assert_eq!(resolve_max_file_size_bytes(Some(0)), None);
+        // Any other value is that many megabytes in bytes.
+        assert_eq!(resolve_max_file_size_bytes(Some(2)), Some(2 * 1024 * 1024));
+        assert_eq!(DEFAULT_MAX_FILE_SIZE_MB, 5);
+    }
+
+    #[test]
+    fn resolve_sets_default_max_file_size() {
+        let resolved = make_config(false).resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+            None,
+        );
+        assert_eq!(
+            resolved.max_file_size_bytes,
+            Some(DEFAULT_MAX_FILE_SIZE_BYTES)
+        );
     }
 
     #[test]
@@ -1284,8 +1206,6 @@ mod tests {
         assert!(!resolved.ignore_patterns.is_match("lib/utils.js"));
     }
 
-    // ── Custom ignore patterns ──────────────────────────────────────
-
     #[test]
     fn resolve_custom_ignore_patterns_merged_with_defaults() {
         let mut config = make_config(false);
@@ -1298,17 +1218,13 @@ mod tests {
             true,
             None,
         );
-        // Custom pattern works
         assert!(
             resolved
                 .ignore_patterns
                 .is_match("src/__generated__/types.ts")
         );
-        // Default patterns still work
         assert!(resolved.ignore_patterns.is_match("node_modules/foo/bar.js"));
     }
-
-    // ── Config fields passthrough ───────────────────────────────────
 
     #[test]
     fn resolve_passes_through_entry_patterns() {
@@ -1414,6 +1330,46 @@ mod tests {
     }
 
     #[test]
+    fn resolve_uses_relative_configured_cache_dir_from_root() {
+        let config = PlowConfig {
+            cache: crate::CacheConfig {
+                dir: Some(PathBuf::from(".cache/plow")),
+                ..Default::default()
+            },
+            ..make_config(false)
+        };
+        let resolved = config.resolve(
+            PathBuf::from("/my/project"),
+            OutputFormat::Human,
+            1,
+            false,
+            true,
+            None,
+        );
+        assert_eq!(resolved.cache_dir, PathBuf::from("/my/project/.cache/plow"));
+    }
+
+    #[test]
+    fn resolve_keeps_absolute_configured_cache_dir() {
+        let config = PlowConfig {
+            cache: crate::CacheConfig {
+                dir: Some(PathBuf::from("/tmp/plow-cache")),
+                ..Default::default()
+            },
+            ..make_config(false)
+        };
+        let resolved = config.resolve(
+            PathBuf::from("/my/project"),
+            OutputFormat::Human,
+            1,
+            false,
+            true,
+            None,
+        );
+        assert_eq!(resolved.cache_dir, PathBuf::from("/tmp/plow-cache"));
+    }
+
+    #[test]
     fn resolve_passes_through_thread_count() {
         let resolved = make_config(false).resolve(
             PathBuf::from("/project"),
@@ -1472,15 +1428,9 @@ mod tests {
         assert!(!resolved_with_cache.no_cache);
     }
 
-    // ── Override resolution edge cases ───────────────────────────────
-
     #[test]
     #[should_panic(expected = "validated at config load time")]
     fn resolve_panics_on_unvalidated_invalid_override_glob() {
-        // Per issue #463, overrides[].files are validated by
-        // PlowConfig::load before reaching resolve(). A program that
-        // constructs a config in-code with an invalid pattern has skipped
-        // that validation; resolve() asserts the invariant by panicking.
         let mut config = make_config(false);
         config.overrides = vec![ConfigOverride {
             files: vec!["[invalid".to_string()],
@@ -1553,8 +1503,6 @@ mod tests {
         assert_eq!(resolved.overrides.len(), 2);
     }
 
-    // ── IgnoreExportRule ────────────────────────────────────────────
-
     #[test]
     fn ignore_export_rule_deserialize() {
         let json = r#"{"file": "src/types/*.ts", "exports": ["*"]}"#;
@@ -1591,7 +1539,6 @@ mod tests {
             #[test]
             fn resolved_config_has_default_ignores(production in any::<bool>()) {
                 let resolved = arb_resolved_config(production);
-                // Default patterns include node_modules, dist, build, .git, coverage, *.min.js, *.min.mjs
                 prop_assert!(
                     resolved.ignore_patterns.is_match("node_modules/foo/bar.js"),
                     "Default ignore should match node_modules"
@@ -1629,9 +1576,9 @@ mod tests {
                 );
             }
 
-            /// Cache dir is always root/.plow.
+            /// Default cache dir is root/.plow.
             #[test]
-            fn cache_dir_is_root_plow(dir_suffix in "[a-zA-Z0-9_]{1,20}") {
+            fn cache_dir_defaults_to_root_plow(dir_suffix in "[a-zA-Z0-9_]{1,20}") {
                 let root = PathBuf::from(format!("/project/{dir_suffix}"));
                 let expected_cache = root.join(".plow");
                 let resolved = make_config(false).resolve(
@@ -1644,7 +1591,7 @@ mod tests {
                 );
                 prop_assert_eq!(
                     resolved.cache_dir, expected_cache,
-                    "Cache dir should be root/.plow"
+                    "Default cache dir should be root/.plow"
                 );
             }
 
@@ -1678,8 +1625,6 @@ mod tests {
                     true,
                     true, None,
                 );
-                // Defaults should still be present (the custom pattern cannot
-                // match this path, so only the default **/node_modules/** can)
                 prop_assert!(
                     resolved.ignore_patterns.is_match("node_modules/foo/bar.js"),
                     "Default node_modules ignore should still be active"
@@ -1687,8 +1632,6 @@ mod tests {
             }
         }
     }
-
-    // ── Boundary preset expansion ──────────────────────────────────
 
     #[test]
     fn resolve_expands_boundary_preset() {
@@ -1704,7 +1647,6 @@ mod tests {
             true,
             None,
         );
-        // Preset should have been expanded into zones (no tsconfig → fallback to "src")
         assert_eq!(resolved.boundaries.zones.len(), 3);
         assert_eq!(resolved.boundaries.rules.len(), 3);
         assert_eq!(resolved.boundaries.zones[0].name, "adapters");
@@ -1734,14 +1676,11 @@ mod tests {
             true,
             None,
         );
-        // User zone "domain" replaced preset zone "domain"
         assert_eq!(resolved.boundaries.zones.len(), 3);
-        // The user's pattern should be used for domain zone
         assert_eq!(
             resolved.boundaries.classify_zone("src/core/user.ts"),
             Some("domain")
         );
-        // Original preset pattern should NOT match
         assert_eq!(
             resolved.boundaries.classify_zone("src/domain/user.ts"),
             None

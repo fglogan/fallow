@@ -5,6 +5,7 @@
 //! reference these types without pulling in binary-only dependencies.
 
 mod coverage;
+mod coverage_intelligence;
 mod finding;
 mod grouped;
 mod runtime_coverage;
@@ -14,6 +15,7 @@ mod trends;
 mod vital_signs;
 
 pub use coverage::*;
+pub use coverage_intelligence::*;
 pub use finding::*;
 pub use grouped::*;
 pub use runtime_coverage::*;
@@ -89,6 +91,10 @@ pub struct HealthReport {
     pub findings: Vec<HealthFinding>,
     /// Summary statistics.
     pub summary: HealthSummary,
+    /// Configured threshold override states. Entries are emitted for active
+    /// exceptions, stale exceptions, and full-run no-match cleanup hints.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub threshold_overrides: Vec<ThresholdOverrideState>,
     /// Project-wide vital signs (always computed from available data).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vital_signs: Option<VitalSigns>,
@@ -120,6 +126,9 @@ pub struct HealthReport {
     /// `--runtime-coverage`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime_coverage: Option<RuntimeCoverageReport>,
+    /// Combined coverage, runtime, complexity, and change-scope verdicts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coverage_intelligence: Option<CoverageIntelligenceReport>,
     /// Functions exceeding 60 LOC (very high risk). Only present when unit size
     /// very-high-risk bin >= 3%. Sorted by line count descending.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -156,6 +165,7 @@ impl Default for HealthReport {
         Self {
             findings: vec![],
             summary: HealthSummary::default(),
+            threshold_overrides: vec![],
             vital_signs: None,
             health_score: None,
             file_scores: vec![],
@@ -163,6 +173,7 @@ impl Default for HealthReport {
             hotspots: vec![],
             hotspot_summary: None,
             runtime_coverage: None,
+            coverage_intelligence: None,
             large_functions: vec![],
             targets: vec![],
             target_thresholds: None,
@@ -180,13 +191,14 @@ mod tests {
     fn health_report_skips_empty_collections() {
         let report = HealthReport::default();
         let json = serde_json::to_string(&report).unwrap();
-        // Empty vecs should be omitted due to skip_serializing_if
         assert!(!json.contains("file_scores"));
         assert!(!json.contains("hotspots"));
         assert!(!json.contains("hotspot_summary"));
         assert!(!json.contains("runtime_coverage"));
+        assert!(!json.contains("coverage_intelligence"));
         assert!(!json.contains("large_functions"));
         assert!(!json.contains("targets"));
+        assert!(!json.contains("threshold_overrides"));
         assert!(!json.contains("vital_signs"));
         assert!(!json.contains("health_score"));
     }

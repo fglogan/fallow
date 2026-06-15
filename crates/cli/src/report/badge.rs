@@ -2,6 +2,7 @@
 ///
 /// Generates self-contained SVG badges with embedded Verdana 11px character
 /// width data for accurate text measurement. No external dependencies required.
+use crate::report::sink::outln;
 use std::process::ExitCode;
 
 use crate::health_types::HealthReport;
@@ -125,7 +126,6 @@ fn text_width(s: &str) -> u32 {
     }
     let raw: f64 = s.chars().map(char_width).sum();
     let floored = raw as u32;
-    // Round up to nearest odd number.
     if floored.is_multiple_of(2) {
         floored + 1
     } else {
@@ -157,7 +157,6 @@ fn render_badge(label: &str, message: &str, color: &str) -> String {
     let total_width = left_width + right_width;
     let height: u32 = 20;
 
-    // Text positions in 10x coordinate space (SVG uses transform="scale(.1)").
     let label_margin: u32 = 1;
     let label_x = 10 * (label_margin + label_w / 2 + horiz_padding);
     let label_text_len = 10 * label_w;
@@ -166,18 +165,14 @@ fn render_badge(label: &str, message: &str, color: &str) -> String {
     let msg_x = 10 * (msg_margin + message_w / 2 + horiz_padding);
     let msg_text_len = 10 * message_w;
 
-    // Escape all text content for safe XML interpolation.
     let label = xml_escape(label);
     let message = xml_escape(message);
     let accessible = format!("{label}: {message}");
 
-    // Unique IDs to avoid collisions when multiple badges are inlined on one page.
     let suffix = svg_id_suffix(&label, &message);
     let grad_id = format!("s-{suffix}");
     let clip_id = format!("r-{suffix}");
 
-    // Colors extracted as variables to avoid Rust 2021 prefix-literal conflicts
-    // with `#` inside raw string format arguments.
     let label_bg = "#555";
     let white = "#fff";
     let shadow = "#010101";
@@ -226,7 +221,7 @@ pub fn print_health_badge(report: &HealthReport) -> ExitCode {
     let color = grade_color(score.grade);
     let svg = render_badge("plow", &message, color);
 
-    println!("{svg}");
+    outln!("{svg}");
     ExitCode::SUCCESS
 }
 
@@ -275,7 +270,6 @@ mod tests {
     fn render_badge_unique_ids() {
         let a = render_badge("plow", "A (90)", "#4c1");
         let b = render_badge("plow", "B (76)", "#97ca00");
-        // Extract gradient ID from each badge.
         let extract_id = |svg: &str| -> String {
             let start = svg.find("id=\"s-").unwrap() + 4;
             let end = svg[start..].find('"').unwrap() + start;
@@ -289,7 +283,6 @@ mod tests {
         let short = render_badge("a", "b", "#4c1");
         let long = render_badge("plow health", "100 A", "#4c1");
 
-        // Extract width from the opening svg tag.
         let extract_width = |svg: &str| -> u32 {
             let start = svg.find("width=\"").unwrap() + 7;
             let end = svg[start..].find('"').unwrap() + start;

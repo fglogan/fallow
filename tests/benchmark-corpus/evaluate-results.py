@@ -2,7 +2,7 @@
 """
 Duplication Accuracy Baseline — Precision/Recall Evaluator
 
-Compares fallow dupes JSON output against ground-truth.json to compute:
+Compares plow dupes JSON output against ground-truth.json to compute:
 - Per-mode precision, recall, F1
 - Per-clone-type breakdown
 - False positive analysis
@@ -22,7 +22,7 @@ GROUND_TRUTH = SCRIPT_DIR / "ground-truth.json"
 
 @dataclass
 class DetectedClone:
-    """A clone group from fallow output."""
+    """A clone group from plow output."""
     group_id: int
     instances: list  # list of {file, start_line, end_line, ...}
     token_count: int
@@ -78,7 +78,7 @@ def normalize_path(path: str, root: str) -> str:
 
 
 def load_results(mode: str) -> Optional[dict]:
-    """Load fallow dupes JSON output for a mode."""
+    """Load plow dupes JSON output for a mode."""
     path = RESULTS_DIR / f"dupes-{mode}.json"
     if not path.exists():
         return None
@@ -245,7 +245,7 @@ def main():
     root = detect_root()
 
     print("=" * 72)
-    print("  FALLOW DUPLICATION ACCURACY BASELINE")
+    print("  PLOW DUPLICATION ACCURACY BASELINE")
     print("=" * 72)
     print(f"\nCorpus: {SCRIPT_DIR}")
     print(f"Root detected: {root}")

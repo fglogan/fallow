@@ -5,18 +5,18 @@
   "version": "2.48.1",
   "packageManager": "pnpm@10.33.0",
   "publisher": "plow-rs",
-  "license": "MIT",
+  "license": "LicenseRef-Tempext-Commercial",
   "repository": {
     "type": "git",
-    "url": "https://github.com/plow-rs/plow",
+    "url": "https://github.com/fglogan/genesis-plow",
     "directory": "editors/vscode"
   },
   "icon": "icon.png",
-  "homepage": "https://docs.plow.tools",
+  "homepage": "https://docs.genesis-plow.dev",
   "bugs": {
-    "url": "https://github.com/plow-rs/plow/issues"
+    "url": "https://github.com/fglogan/genesis-plow/issues"
   },
-  "qna": "https://github.com/plow-rs/plow/issues",
+  "qna": "https://github.com/fglogan/genesis-plow/issues",
   "galleryBanner": {
     "color": "#2d2d2d",
     "theme": "dark"
@@ -64,7 +64,7 @@
           ".plowrc.json",
           ".plowrc.jsonc"
         ],
-        "url": "https://raw.githubusercontent.com/plow-rs/plow/main/schema.json"
+        "url": "https://raw.githubusercontent.com/fglogan/genesis-plow/main/schema.json"
       }
     ],
     "commands": [
@@ -72,6 +72,50 @@
         "command": "plow.analyze",
         "title": "Plow: Run Analysis",
         "icon": "$(search)"
+      },
+      {
+        "command": "plow.reloadAnalysis",
+        "title": "Plow: Reload Analysis",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "plow.health.reload",
+        "title": "Plow: Reload Health",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "plow.analyzeSecurity",
+        "title": "Plow: Scan for Security Candidates",
+        "icon": "$(shield)"
+      },
+      {
+        "command": "plow.selectWorkspace",
+        "title": "Plow: Select Workspace Scope...",
+        "icon": "$(layers)"
+      },
+      {
+        "command": "plow.clearWorkspace",
+        "title": "Plow: Clear Workspace Scope (Analyze All)"
+      },
+      {
+        "command": "plow.loadCoverage",
+        "title": "Plow: Load Runtime Coverage",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "plow.reloadCoverage",
+        "title": "Plow: Reload Runtime Coverage",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "plow.clearCoverage",
+        "title": "Plow: Clear Runtime Coverage",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "plow.audit",
+        "title": "Plow: Audit Changed Files",
+        "icon": "$(shield)"
       },
       {
         "command": "plow.fix",
@@ -103,26 +147,52 @@
       },
       {
         "command": "plow.toggleMuteDuplicates",
-        "title": "Plow: Toggle Mute Code-Duplication Findings",
+        "title": "Plow: Toggle Hide Code-Duplication Findings",
         "icon": "$(eye-closed)"
       },
       {
         "command": "plow.toggleAllDiagnostics",
-        "title": "Plow: Toggle Mute All Findings",
+        "title": "Plow: Toggle Hide All Findings",
         "icon": "$(eye-closed)"
       },
       {
         "command": "plow.manageDiagnosticMutes",
-        "title": "Plow: Manage Diagnostic Mutes...",
+        "title": "Plow: Manage Hidden Findings...",
         "icon": "$(filter)"
       },
       {
         "command": "plow.clearDiagnosticMutes",
-        "title": "Plow: Show All Findings (Clear Mutes)"
+        "title": "Plow: Show All Findings"
+      },
+      {
+        "command": "plow.resetDiagnosticFilters",
+        "title": "Plow: Reset Hidden Findings (Restart Server)"
       },
       {
         "command": "plow.muteDiagnosticCategory",
-        "title": "Plow: Mute Diagnostic Category"
+        "title": "Plow: Hide Diagnostic Category"
+      },
+      {
+        "command": "plow.license.activate",
+        "title": "Plow: Activate License",
+        "category": "Plow",
+        "icon": "$(key)"
+      },
+      {
+        "command": "plow.license.status",
+        "title": "Plow: Show License Status",
+        "category": "Plow"
+      },
+      {
+        "command": "plow.license.refresh",
+        "title": "Plow: Refresh License",
+        "category": "Plow",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "plow.license.deactivate",
+        "title": "Plow: Deactivate License",
+        "category": "Plow"
       }
     ],
     "configuration": {
@@ -141,7 +211,7 @@
         "plow.autoDownload": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically download the plow-lsp binary if not found."
+          "description": "Automatically download managed plow-lsp and plow CLI binaries if not found."
         },
         "plow.issueTypes": {
           "type": "object",
@@ -240,12 +310,35 @@
           }
         },
         "plow.duplication.threshold": {
+          "scope": "resource",
           "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "Maximum allowed duplication percentage before the analysis is marked as failing. Set to 0 (the default) for no limit."
+        },
+        "plow.duplication.minTokens": {
+          "scope": "resource",
+          "type": "integer",
+          "default": 50,
+          "minimum": 1,
+          "description": "Minimum token count for a clone before it can be reported as duplicated code."
+        },
+        "plow.duplication.minLines": {
+          "scope": "resource",
+          "type": "integer",
           "default": 5,
           "minimum": 1,
-          "description": "Minimum number of lines for a code block to be reported as a duplicate."
+          "description": "Minimum line count for a clone before it can be reported as duplicated code."
+        },
+        "plow.duplication.minOccurrences": {
+          "scope": "resource",
+          "type": "integer",
+          "default": 2,
+          "minimum": 2,
+          "description": "Minimum number of occurrences (instances of the same clone) before a group is reported. Defaults to 2 (every duplicated pair is reported). Raise to 3 or more to focus on widespread copy-paste worth refactoring and skip context-sensitive pairs."
         },
         "plow.duplication.mode": {
+          "scope": "resource",
           "type": "string",
           "default": "mild",
           "enum": [
@@ -262,15 +355,157 @@
             "Renames variables for semantic matching"
           ]
         },
-        "plow.production": {
+        "plow.duplication.skipLocal": {
+          "scope": "resource",
           "type": "boolean",
           "default": false,
-          "description": "Enable production mode (excludes test/dev files, only production scripts)."
+          "description": "Only report duplicate code that appears across different directories."
+        },
+        "plow.duplication.crossLanguage": {
+          "scope": "resource",
+          "type": "boolean",
+          "default": false,
+          "description": "Compare TypeScript and JavaScript files after stripping TypeScript type annotations."
+        },
+        "plow.duplication.ignoreImports": {
+          "scope": "resource",
+          "type": "boolean",
+          "default": true,
+          "description": "Exclude import declarations from duplicate-code detection. Enabled by default: token-identical sorted import blocks are a formatting artifact, not copy-paste. Set to false to count import blocks as clone candidates again."
+        },
+        "plow.production": {
+          "scope": "resource",
+          "type": "string",
+          "default": "auto",
+          "enum": [
+            "auto",
+            "on",
+            "off"
+          ],
+          "description": "Production mode for the sidebar tree and the editor diagnostics (they stay in sync). Production mode excludes test/dev files and only counts production scripts. Editor-only: CI and `plow check` always report every finding.",
+          "enumDescriptions": [
+            "Defer to the project config (.plowrc.json); the editor does not override it (default)",
+            "Force production mode on",
+            "Force production mode off, even if the project config enables it"
+          ]
+        },
+        "plow.coverage.capturePath": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "markdownDescription": "Path to a local runtime-coverage capture (a file or directory). Relative paths are resolved from the workspace root. Used by the Runtime Coverage view to show hot paths and cleanup candidates via `plow coverage analyze --runtime-coverage`. This is local-only and offline; cloud/continuous monitoring is never invoked. Requires the plow-cov sidecar (and a runtime-coverage license or trial when a license JWT is present): run `plow coverage setup` first. Empty = you will be prompted to pick a capture on first load."
+        },
+        "plow.coverage.top": {
+          "type": "integer",
+          "default": 0,
+          "minimum": 0,
+          "markdownDescription": "Show only the top N hot paths and findings in the Runtime Coverage view (mirrors the CLI's `--top`). Set to 0 (the default) for no limit."
         },
         "plow.changedSince": {
           "type": "string",
           "default": "",
           "markdownDescription": "Show only issues in files changed since the given git ref. Tag your current commit (`git tag plow-baseline`) and set this to the tag name to keep existing issues hidden while flagging new ones in the Problems panel. Mirrors the CLI's `--changed-since`. Empty = full scope."
+        },
+        "plow.health.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the Plow Health view (score and grade, complexity findings, hotspot candidates, refactoring candidates). When off, the Health view stays empty and no extra analysis runs."
+        },
+        "plow.health.hotspots": {
+          "type": "boolean",
+          "default": true,
+          "description": "Include git churn hotspots in the Health view. Hotspot analysis walks git history; disable on very large repositories to keep the Health refresh fast. Has no effect outside a git repository."
+        },
+        "plow.health.topFindings": {
+          "type": "integer",
+          "default": 20,
+          "minimum": 1,
+          "markdownDescription": "Maximum number of complexity findings shown in the Health view (passed to `plow health --top`)."
+        },
+        "plow.health.statusBar": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the project health score and grade in the Plow status bar item."
+        },
+        "plow.health.inlineComplexity": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show a compact complexity lens (`N cyc, N cog`) above functions that exceed Plow Health thresholds. Click the lens to expand or collapse the per-line `+N` breakdown for that function. On by default; the dense per-line text stays hidden until you expand it (or enable `#plow.complexity.afterText#`)."
+        },
+        "plow.complexity.breakdownEnabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show the inline complexity breakdown in the editor: a per-line marker and hover that explain WHY a function scored high (each `else if`, nested `if`, boolean operator, loop, ... with its cyclomatic/cognitive weight), plus a CRAP explanation on the function line. Backed by the Health view's analysis, so the breakdown appears after the Health view first runs."
+        },
+        "plow.complexity.afterText": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Always show the dim per-line `+N` complexity breakdown for every complex function, instead of only the function you expand (via its lens) or select in the Health view. Off by default to keep the editor quiet; hovering a function or its decision-point lines always shows the breakdown in a popup regardless. Inert unless `#plow.complexity.breakdownEnabled#` is enabled."
+        },
+        "plow.complexity.decorationCap": {
+          "type": "integer",
+          "default": 200,
+          "minimum": 1,
+          "markdownDescription": "How many top complexity findings to fetch for inline editor decorations when the breakdown is enabled. Decoupled from `#plow.health.topFindings#` so a complex function open in the editor but outside the Health view's top-N still gets decorated; the tree still shows only `#plow.health.topFindings#`."
+        },
+        "plow.workspace": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Scope Plow's sidebar analysis to a single monorepo workspace package, by name. Empty = analyze the whole project. Use the **Plow: Select Workspace Scope** command (or the layers icon in the status bar) to pick interactively; that per-folder choice overrides this pinned default. Mirrors the CLI `--workspace` flag.",
+          "scope": "resource"
+        },
+        "plow.audit.gate": {
+          "type": "string",
+          "enum": [
+            "new-only",
+            "all"
+          ],
+          "default": "new-only",
+          "enumDescriptions": [
+            "Fail only on findings introduced by the current change set (runs an extra base-snapshot pass).",
+            "Fail on every finding in changed files (no base-snapshot attribution)."
+          ],
+          "markdownDescription": "Which findings affect the audit verdict shown in the editor. Mirrors `plow audit --gate`."
+        },
+        "plow.audit.statusBar.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the audit verdict (pass/warn/fail) for the current change set in the status bar."
+        },
+        "plow.audit.runOnSave": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Re-run the audit verdict automatically when a JS/TS file is saved. Off by default to avoid added latency; the **Plow: Audit Changed Files** command and the status-bar item run it on demand."
+        },
+        "plow.diagnostics.statusBar": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show the **Plow** eye button in the status bar to hide or show all Plow squiggles in the editor with one click. Editor-only; CI and `plow check` still report every finding. Turn this off to remove the button (the **Plow: Toggle Hide All Findings** command still works and can be bound to a key)."
+        },
+        "plow.diagnostics.severity": {
+          "type": "string",
+          "default": "warning",
+          "scope": "application",
+          "enum": [
+            "warning",
+            "information",
+            "hint"
+          ],
+          "enumDescriptions": [
+            "Render Plow diagnostics as warnings, matching the current default.",
+            "Render Plow diagnostics as information.",
+            "Render Plow diagnostics as hints, which VS Code shows without squiggles."
+          ],
+          "markdownDescription": "Render Plow editor diagnostics at the selected VS Code severity. `hint` keeps findings available without squiggles. Editor-only; CI and `plow check` still report every finding."
+        },
+        "plow.diagnostics.mutedCategories": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "resource",
+          "markdownDescription": "Team-shareable baseline of Plow diagnostic categories to hide in the editor, such as `code-duplication` or `stale-suppression`. Commit this in `.vscode/settings.json` to give everyone the same quiet starting point. Per-machine mutes can still hide more or show a baseline-hidden category locally. Editor-only; CI and `plow check` still report every finding."
         },
         "plow.trace.server": {
           "type": "string",
@@ -281,6 +516,21 @@
             "verbose"
           ],
           "description": "Trace level for the LSP server communication."
+        },
+        "plow.security.enabled": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Surface local **security candidates** (`client-server-leak`, the tainted-sink CWE catalogue) from `plow security` in the Security Candidates sidebar view. Off by default. Findings are UNVERIFIED candidates for you or an AI agent to verify, never confirmed vulnerabilities. Enabling this runs a separate `plow security` analysis only when the Security Candidates view is opened, so it does not affect the main sidebar's speed."
+        },
+        "plow.license.showStatusBar": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a Plow license indicator in the status bar, but only when license material is present (active, in grace, or expired). Machines with no license never show the indicator. Disable to remove it entirely and skip the license status probe on activation."
+        },
+        "plow.license.refreshOnStartup": {
+          "type": "boolean",
+          "default": false,
+          "description": "Probe license status once when the extension activates. Off by default so the editor never shells out to plow on startup unless you opt in; the indicator otherwise updates only when you run a Plow license command."
         }
       }
     },
@@ -302,6 +552,18 @@
         {
           "id": "plow.duplicates",
           "name": "Duplicates"
+        },
+        {
+          "id": "plow.health",
+          "name": "Health"
+        },
+        {
+          "id": "plow.security",
+          "name": "Security Candidates"
+        },
+        {
+          "id": "plow.runtimeCoverage",
+          "name": "Runtime Coverage"
         }
       ]
     },
@@ -309,11 +571,88 @@
       "view/title": [
         {
           "command": "plow.analyze",
-          "when": "view == plow.deadCode || view == plow.duplicates",
+          "when": "(view == plow.deadCode || view == plow.duplicates) && !plow.hasAnalyzed",
           "group": "navigation"
+        },
+        {
+          "command": "plow.reloadAnalysis",
+          "when": "(view == plow.deadCode || view == plow.duplicates) && plow.hasAnalyzed",
+          "group": "navigation"
+        },
+        {
+          "command": "plow.health.reload",
+          "when": "view == plow.health",
+          "group": "navigation"
+        },
+        {
+          "command": "plow.analyzeSecurity",
+          "when": "view == plow.security && plow.security.enabled && !plow.hasAnalyzedSecurity",
+          "group": "navigation"
+        },
+        {
+          "command": "plow.analyzeSecurity",
+          "when": "view == plow.security && plow.security.enabled && plow.hasAnalyzedSecurity",
+          "group": "navigation"
+        },
+        {
+          "command": "plow.loadCoverage",
+          "when": "view == plow.runtimeCoverage && !plow.hasCoverage",
+          "group": "navigation"
+        },
+        {
+          "command": "plow.reloadCoverage",
+          "when": "view == plow.runtimeCoverage && plow.hasCoverage",
+          "group": "navigation"
+        },
+        {
+          "command": "plow.clearCoverage",
+          "when": "view == plow.runtimeCoverage && plow.hasCoverage",
+          "group": "navigation"
+        },
+        {
+          "command": "plow.selectWorkspace",
+          "when": "view == plow.deadCode || view == plow.duplicates",
+          "group": "navigation@9"
+        },
+        {
+          "command": "plow.manageDiagnosticMutes",
+          "when": "view == plow.deadCode || view == plow.duplicates",
+          "group": "navigation@10"
+        },
+        {
+          "command": "plow.license.activate",
+          "when": "view == plow.deadCode",
+          "group": "license@1"
+        },
+        {
+          "command": "plow.license.status",
+          "when": "view == plow.deadCode",
+          "group": "license@2"
+        },
+        {
+          "command": "plow.license.refresh",
+          "when": "view == plow.deadCode",
+          "group": "license@3"
+        },
+        {
+          "command": "plow.license.deactivate",
+          "when": "view == plow.deadCode",
+          "group": "license@4"
         }
       ],
       "commandPalette": [
+        {
+          "command": "plow.reloadAnalysis",
+          "when": "false"
+        },
+        {
+          "command": "plow.reloadCoverage",
+          "when": "plow.hasCoverage"
+        },
+        {
+          "command": "plow.clearCoverage",
+          "when": "plow.hasCoverage"
+        },
         {
           "command": "plow.muteDiagnosticCategory",
           "when": "false"
@@ -344,6 +683,41 @@
         "view": "plow.duplicates",
         "contents": "$(check) No code duplication found.",
         "when": "plow.hasAnalyzed"
+      },
+      {
+        "view": "plow.health",
+        "contents": "The Health view is turned off.\nEnable [plow.health.enabled](command:plow.openSettings) to see the project health score, complexity findings, hotspot candidates, and refactoring candidates.",
+        "when": "!plow.health.enabled"
+      },
+      {
+        "view": "plow.health",
+        "contents": "No health results yet.\n[$(refresh) Reload Health](command:plow.health.reload)\nPlow reports a project health score and grade, complexity findings, hotspot candidates, and refactoring candidates. Hotspots and refactoring targets are heuristic suggestions, so verify before acting.",
+        "when": "plow.health.enabled"
+      },
+      {
+        "view": "plow.security",
+        "contents": "Security candidate scanning is off by default.\nEnable [plow.security.enabled](command:plow.openSettings) to scan for security candidates.\nResults are UNVERIFIED candidates to verify, never confirmed vulnerabilities.",
+        "when": "!plow.security.enabled"
+      },
+      {
+        "view": "plow.security",
+        "contents": "No security candidate scan yet.\n[$(shield) Scan for Security Candidates](command:plow.analyzeSecurity)\nResults are UNVERIFIED candidates to verify, never confirmed vulnerabilities.",
+        "when": "plow.security.enabled && !plow.hasAnalyzedSecurity"
+      },
+      {
+        "view": "plow.security",
+        "contents": "$(check) No security candidates found.\nNote: an empty result is not a clean bill of health.",
+        "when": "plow.security.enabled && plow.hasAnalyzedSecurity"
+      },
+      {
+        "view": "plow.runtimeCoverage",
+        "contents": "No runtime coverage loaded. Point Plow at a local capture to see hot paths and cleanup candidates.\n[$(graph) Load Runtime Coverage](command:plow.loadCoverage)\nRuntime coverage is local-only and offline. Requires the plow-cov sidecar (and a runtime-coverage license or trial when a license is present): run `plow coverage setup` first.",
+        "when": "!plow.hasCoverage"
+      },
+      {
+        "view": "plow.runtimeCoverage",
+        "contents": "$(check) No hot paths or cleanup candidates in this capture.",
+        "when": "plow.hasCoverage"
       }
     ],
     "walkthroughs": [
@@ -355,7 +729,7 @@
           {
             "id": "plow.gettingStarted.analyze",
             "title": "Run your first analysis",
-            "description": "Plow analyzes your codebase for unused code, circular dependencies, code duplication, complexity hotspots, and architecture boundary violations.\n\nOpen the Command Palette and run **Plow: Run Analysis**, or click the search icon in the Plow sidebar.\n\n[Run Analysis](command:plow.analyze)",
+            "description": "Plow analyzes your codebase for unused code, circular dependencies, code duplication, complexity hotspots, and architecture boundary violations. If needed, the extension downloads managed plow-lsp and plow CLI binaries on first use.\n\nOpen the Command Palette and run **Plow: Run Analysis**, or click the search icon in the Plow sidebar.\n\n[Run Analysis](command:plow.analyze)",
             "media": {
               "markdown": "media/step-analyze.md"
             },
@@ -403,6 +777,7 @@
   "scripts": {
     "codegen:types": "node ./scripts/codegen-types.mjs",
     "check:codegen": "node ./scripts/codegen-types.mjs --check",
+    "check:dist": "node ./scripts/check-dist-drift.mjs",
     "prebuild": "pnpm run codegen:types",
     "build": "rolldown -c",
     "watch": "rolldown -c --watch",
@@ -424,12 +799,12 @@
     "@types/vscode": "1.96.0",
     "@types/mocha": "10.0.10",
     "@vscode/test-electron": "2.5.2",
-    "@vscode/vsce": "3.9.1",
+    "@vscode/vsce": "3.9.2",
     "json-schema-to-typescript": "15.0.4",
-    "mocha": "11.7.5",
-    "rolldown": "1.0.1",
-    "ovsx": "0.10.12",
+    "mocha": "11.7.6",
+    "rolldown": "1.1.0",
+    "ovsx": "1.0.0",
     "typescript": "6.0.3",
-    "vitest": "4.1.6"
+    "vitest": "4.1.8"
   }
 }

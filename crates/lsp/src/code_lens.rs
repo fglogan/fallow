@@ -1,21 +1,51 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use tower_lsp::lsp_types::{CodeLens, Command, Position, Range, Url};
+use ls_types::{CodeLens, Command, Position, Range, Uri};
 
 use plow_core::results::AnalysisResults;
+
+/// LSP-local inline complexity signal rendered as a code lens.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InlineComplexityFinding {
+    pub path: PathBuf,
+    pub name: String,
+    pub line: u32,
+    pub col: u32,
+    pub cyclomatic: u16,
+    pub cognitive: u16,
+    pub exceeded: InlineComplexityExceeded,
+}
+
+/// Which health complexity threshold(s) a function exceeded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InlineComplexityExceeded {
+    Cyclomatic,
+    Cognitive,
+    CyclomaticAndCognitive,
+}
+
+impl InlineComplexityExceeded {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Cyclomatic => "cyclomatic",
+            Self::Cognitive => "cognitive",
+            Self::CyclomaticAndCognitive => "cyclomatic, cognitive",
+        }
+    }
+}
 
 /// Build Code Lens items for a file showing reference counts above each export declaration.
 pub fn build_code_lenses(
     results: &AnalysisResults,
+    complexity: &[InlineComplexityFinding],
     file_path: &Path,
-    document_uri: &Url,
+    document_uri: &Uri,
 ) -> Vec<CodeLens> {
-    results
+    let mut lenses: Vec<CodeLens> = results
         .export_usages
         .iter()
         .filter(|usage| usage.path == file_path)
         .map(|usage| {
-            // usage.line is 1-based; LSP positions are 0-based
             let line = usage.line.saturating_sub(1);
             let title = if usage.reference_count == 1 {
                 "1 reference".to_string()
@@ -28,12 +58,11 @@ pub fn build_code_lenses(
                 character: usage.col,
             };
 
-            // Build reference Location objects for editor.action.showReferences
             let ref_locations: Vec<serde_json::Value> = usage
                 .reference_locations
                 .iter()
                 .filter_map(|loc| {
-                    let uri = Url::from_file_path(&loc.path).ok()?;
+                    let uri = Uri::from_file_path(&loc.path)?;
                     let ref_line = loc.line.saturating_sub(1);
                     Some(serde_json::json!({
                         "uri": uri.as_str(),
@@ -45,13 +74,18 @@ pub fn build_code_lenses(
                 })
                 .collect();
 
-            // Use editor.action.showReferences when we have reference locations,
-            // fall back to display-only noop otherwise
+            // Delegate to a thin extension-side command rather than the built-in
+            // `editor.action.showReferences`: that built-in validates its args with
+            // `instanceof URI / Position / Location`, which the JSON sent over the
+            // wire (a string URI, a plain position, plain locations) fails with
+            // "argument does not match one of these constraints". The
+            // `plow.showReferences` command in the VS Code extension converts
+            // these into real vscode types and then calls the built-in.
             let (command_name, arguments) = if ref_locations.is_empty() {
                 ("plow.noop".to_string(), None)
             } else {
                 (
-                    "editor.action.showReferences".to_string(),
+                    "plow.showReferences".to_string(),
                     Some(vec![
                         serde_json::json!(document_uri.as_str()),
                         serde_json::json!({
@@ -76,7 +110,39 @@ pub fn build_code_lenses(
                 data: None,
             }
         })
-        .collect()
+        .collect();
+
+    lenses.extend(
+        complexity
+            .iter()
+            .filter(|finding| finding.path == file_path)
+            .map(|finding| {
+                let position = Position {
+                    line: finding.line.saturating_sub(1),
+                    character: finding.col,
+                };
+                CodeLens {
+                    range: Range {
+                        start: position,
+                        end: position,
+                    },
+                    command: Some(Command {
+                        title: format!(
+                            "{} complexity: {} cyc, {} cog ({})",
+                            finding.name,
+                            finding.cyclomatic,
+                            finding.cognitive,
+                            finding.exceeded.label()
+                        ),
+                        command: "plow.noop".to_string(),
+                        arguments: None,
+                    }),
+                    data: None,
+                }
+            }),
+    );
+
+    lenses
 }
 
 #[cfg(test)]
@@ -99,9 +165,9 @@ mod tests {
         let root = test_root();
         let mod_path = root.join("src/mod.ts");
         let results = AnalysisResults::default();
-        let uri = Url::from_file_path(&mod_path).unwrap();
+        let uri = Uri::from_file_path(&mod_path).unwrap();
 
-        let lenses = build_code_lenses(&results, &mod_path, &uri);
+        let lenses = build_code_lenses(&results, &[], &mod_path, &uri);
         assert!(lenses.is_empty());
     }
 
@@ -119,8 +185,8 @@ mod tests {
             reference_locations: vec![],
         });
 
-        let uri = Url::from_file_path(&mod_path).unwrap();
-        let lenses = build_code_lenses(&results, &mod_path, &uri);
+        let uri = Uri::from_file_path(&mod_path).unwrap();
+        let lenses = build_code_lenses(&results, &[], &mod_path, &uri);
         assert!(lenses.is_empty());
     }
 
@@ -138,8 +204,8 @@ mod tests {
             reference_locations: vec![],
         });
 
-        let uri = Url::from_file_path(&utils_path).unwrap();
-        let lenses = build_code_lenses(&results, &utils_path, &uri);
+        let uri = Uri::from_file_path(&utils_path).unwrap();
+        let lenses = build_code_lenses(&results, &[], &utils_path, &uri);
         assert_eq!(lenses.len(), 1);
 
         let cmd = lenses[0].command.as_ref().unwrap();
@@ -160,8 +226,8 @@ mod tests {
             reference_locations: vec![],
         });
 
-        let uri = Url::from_file_path(&utils_path).unwrap();
-        let lenses = build_code_lenses(&results, &utils_path, &uri);
+        let uri = Uri::from_file_path(&utils_path).unwrap();
+        let lenses = build_code_lenses(&results, &[], &utils_path, &uri);
         assert_eq!(lenses.len(), 1);
 
         let cmd = lenses[0].command.as_ref().unwrap();
@@ -182,8 +248,8 @@ mod tests {
             reference_locations: vec![],
         });
 
-        let uri = Url::from_file_path(&utils_path).unwrap();
-        let lenses = build_code_lenses(&results, &utils_path, &uri);
+        let uri = Uri::from_file_path(&utils_path).unwrap();
+        let lenses = build_code_lenses(&results, &[], &utils_path, &uri);
         assert_eq!(lenses.len(), 1);
 
         let cmd = lenses[0].command.as_ref().unwrap();
@@ -204,11 +270,10 @@ mod tests {
             reference_locations: vec![],
         });
 
-        let uri = Url::from_file_path(&utils_path).unwrap();
-        let lenses = build_code_lenses(&results, &utils_path, &uri);
+        let uri = Uri::from_file_path(&utils_path).unwrap();
+        let lenses = build_code_lenses(&results, &[], &utils_path, &uri);
         assert_eq!(lenses.len(), 1);
 
-        // 1-based line 15 → 0-based line 14
         assert_eq!(lenses[0].range.start.line, 14);
         assert_eq!(lenses[0].range.start.character, 4);
         assert_eq!(lenses[0].range.end.line, 14);
@@ -229,8 +294,8 @@ mod tests {
             reference_locations: vec![],
         });
 
-        let uri = Url::from_file_path(&utils_path).unwrap();
-        let lenses = build_code_lenses(&results, &utils_path, &uri);
+        let uri = Uri::from_file_path(&utils_path).unwrap();
+        let lenses = build_code_lenses(&results, &[], &utils_path, &uri);
         assert_eq!(lenses.len(), 1);
 
         let cmd = lenses[0].command.as_ref().unwrap();
@@ -263,29 +328,22 @@ mod tests {
             ],
         });
 
-        let uri = Url::from_file_path(&utils_path).unwrap();
-        let lenses = build_code_lenses(&results, &utils_path, &uri);
+        let uri = Uri::from_file_path(&utils_path).unwrap();
+        let lenses = build_code_lenses(&results, &[], &utils_path, &uri);
         assert_eq!(lenses.len(), 1);
 
         let cmd = lenses[0].command.as_ref().unwrap();
-        assert_eq!(cmd.command, "editor.action.showReferences");
+        assert_eq!(cmd.command, "plow.showReferences");
 
         let args = cmd.arguments.as_ref().unwrap();
         assert_eq!(args.len(), 3);
 
-        // First arg is the document URI
         assert_eq!(args[0], serde_json::json!(uri.as_str()));
-
-        // Second arg is the export position (0-based)
         assert_eq!(args[1]["line"], 4); // 1-based 5 → 0-based 4
         assert_eq!(args[1]["character"], 7);
-
-        // Third arg is the reference locations array
         let ref_locs = args[2].as_array().unwrap();
         assert_eq!(ref_locs.len(), 2);
-
-        // First reference: app.ts line 3 → 0-based 2
-        let app_uri = Url::from_file_path(root.join("src/app.ts")).unwrap();
+        let app_uri = Uri::from_file_path(root.join("src/app.ts")).unwrap();
         assert_eq!(ref_locs[0]["uri"], app_uri.as_str());
         assert_eq!(ref_locs[0]["range"]["start"]["line"], 2);
         assert_eq!(ref_locs[0]["range"]["start"]["character"], 10);
@@ -321,8 +379,8 @@ mod tests {
             reference_locations: vec![],
         });
 
-        let uri = Url::from_file_path(&path).unwrap();
-        let lenses = build_code_lenses(&results, &path, &uri);
+        let uri = Uri::from_file_path(&path).unwrap();
+        let lenses = build_code_lenses(&results, &[], &path, &uri);
         assert_eq!(lenses.len(), 3);
 
         let titles: Vec<&str> = lenses
@@ -343,14 +401,14 @@ mod tests {
         results.export_usages.push(ExportUsage {
             path: edge_path.clone(),
             export_name: "x".to_string(),
-            line: 0, // edge case: 0 saturates to 0
+            line: 0,
             col: 0,
             reference_count: 1,
             reference_locations: vec![],
         });
 
-        let uri = Url::from_file_path(&edge_path).unwrap();
-        let lenses = build_code_lenses(&results, &edge_path, &uri);
+        let uri = Uri::from_file_path(&edge_path).unwrap();
+        let lenses = build_code_lenses(&results, &[], &edge_path, &uri);
         assert_eq!(lenses.len(), 1);
         assert_eq!(lenses[0].range.start.line, 0);
     }
@@ -368,11 +426,10 @@ mod tests {
             reference_count: 2,
             reference_locations: vec![
                 ReferenceLocation {
-                    path: root.join("src/app.ts"), // valid absolute path
+                    path: root.join("src/app.ts"),
                     line: 3,
                     col: 10,
                 },
-                // An empty path won't produce a valid file URI on most platforms
                 ReferenceLocation {
                     path: std::path::PathBuf::new(),
                     line: 1,
@@ -381,17 +438,15 @@ mod tests {
             ],
         });
 
-        let uri = Url::from_file_path(&utils_path).unwrap();
-        let lenses = build_code_lenses(&results, &utils_path, &uri);
+        let uri = Uri::from_file_path(&utils_path).unwrap();
+        let lenses = build_code_lenses(&results, &[], &utils_path, &uri);
         assert_eq!(lenses.len(), 1);
 
         let cmd = lenses[0].command.as_ref().unwrap();
-        // Should still use showReferences because at least one valid location exists
-        assert_eq!(cmd.command, "editor.action.showReferences");
+        assert_eq!(cmd.command, "plow.showReferences");
 
         let args = cmd.arguments.as_ref().unwrap();
         let ref_locs = args[2].as_array().unwrap();
-        // Only the valid path should be in the references
         assert_eq!(ref_locs.len(), 1);
     }
 
@@ -409,11 +464,10 @@ mod tests {
             reference_locations: vec![],
         });
 
-        let uri = Url::from_file_path(&path).unwrap();
-        let lenses = build_code_lenses(&results, &path, &uri);
+        let uri = Uri::from_file_path(&path).unwrap();
+        let lenses = build_code_lenses(&results, &[], &path, &uri);
         assert_eq!(lenses.len(), 1);
 
-        // Code lens range should be a zero-width point (start == end)
         assert_eq!(lenses[0].range.start, lenses[0].range.end);
     }
 
@@ -431,8 +485,8 @@ mod tests {
             reference_locations: vec![],
         });
 
-        let uri = Url::from_file_path(&path).unwrap();
-        let lenses = build_code_lenses(&results, &path, &uri);
+        let uri = Uri::from_file_path(&path).unwrap();
+        let lenses = build_code_lenses(&results, &[], &path, &uri);
         assert!(
             lenses[0].data.is_none(),
             "Code lens data should be None since resolve_provider is false"
@@ -457,15 +511,65 @@ mod tests {
             }],
         });
 
-        let uri = Url::from_file_path(&utils_path).unwrap();
-        let lenses = build_code_lenses(&results, &utils_path, &uri);
+        let uri = Uri::from_file_path(&utils_path).unwrap();
+        let lenses = build_code_lenses(&results, &[], &utils_path, &uri);
 
         let cmd = lenses[0].command.as_ref().unwrap();
         let args = cmd.arguments.as_ref().unwrap();
         let ref_locs = args[2].as_array().unwrap();
 
-        // Reference line should be converted to 0-based (42 -> 41)
         assert_eq!(ref_locs[0]["range"]["start"]["line"], 41);
         assert_eq!(ref_locs[0]["range"]["start"]["character"], 5);
+    }
+
+    #[test]
+    fn complexity_lens_is_anchored_to_function_start() {
+        let root = test_root();
+        let utils_path = root.join("src/utils.ts");
+        let results = AnalysisResults::default();
+        let complexity = vec![InlineComplexityFinding {
+            path: utils_path.clone(),
+            name: "parseConfig".to_string(),
+            line: 12,
+            col: 2,
+            cyclomatic: 31,
+            cognitive: 26,
+            exceeded: InlineComplexityExceeded::CyclomaticAndCognitive,
+        }];
+
+        let uri = Uri::from_file_path(&utils_path).unwrap();
+        let lenses = build_code_lenses(&results, &complexity, &utils_path, &uri);
+
+        assert_eq!(lenses.len(), 1);
+        assert_eq!(lenses[0].range.start.line, 11);
+        assert_eq!(lenses[0].range.start.character, 2);
+        let command = lenses[0].command.as_ref().expect("complexity lens command");
+        assert_eq!(command.command, "plow.noop");
+        assert_eq!(
+            command.title,
+            "parseConfig complexity: 31 cyc, 26 cog (cyclomatic, cognitive)"
+        );
+    }
+
+    #[test]
+    fn complexity_lens_ignores_unrelated_file() {
+        let root = test_root();
+        let utils_path = root.join("src/utils.ts");
+        let other_path = root.join("src/other.ts");
+        let results = AnalysisResults::default();
+        let complexity = vec![InlineComplexityFinding {
+            path: other_path,
+            name: "parseConfig".to_string(),
+            line: 12,
+            col: 2,
+            cyclomatic: 31,
+            cognitive: 26,
+            exceeded: InlineComplexityExceeded::CyclomaticAndCognitive,
+        }];
+
+        let uri = Uri::from_file_path(&utils_path).unwrap();
+        let lenses = build_code_lenses(&results, &complexity, &utils_path, &uri);
+
+        assert!(lenses.is_empty());
     }
 }

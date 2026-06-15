@@ -37,99 +37,100 @@ pub(in crate::report) fn print_performance_human(t: &PipelineTimings) {
 pub(in crate::report) fn build_performance_human_lines(t: &PipelineTimings) -> Vec<String> {
     let mut lines = Vec::new();
 
-    lines.push(String::new());
-    lines.push(
-        "┌─ Pipeline Performance ─────────────────────────────"
-            .dimmed()
-            .to_string(),
-    );
-    lines.push(
-        format!(
-            "│  discover files:   {:>8.1}ms  ({} files)",
-            t.discover_files_ms, t.file_count
-        )
-        .dimmed()
-        .to_string(),
-    );
-    lines.push(
-        format!(
-            "│  workspaces:       {:>8.1}ms  ({} workspaces)",
-            t.workspaces_ms, t.workspace_count
-        )
-        .dimmed()
-        .to_string(),
-    );
-    lines.push(
-        format!("│  plugins:          {:>8.1}ms", t.plugins_ms)
-            .dimmed()
-            .to_string(),
-    );
-    lines.push(
-        format!("│  script analysis:  {:>8.1}ms", t.script_analysis_ms)
-            .dimmed()
-            .to_string(),
-    );
+    push_performance_header(&mut lines);
+    push_discovery_stage_lines(&mut lines, t);
     let cache_detail = if t.cache_hits > 0 {
         format!(", {} cached, {} parsed", t.cache_hits, t.cache_misses)
     } else {
         String::new()
     };
-    lines.push(
-        format!(
+    push_dimmed(
+        &mut lines,
+        &format!(
             "│  parse/extract:    {:>8.1}ms  ({} modules{}){}",
             t.parse_extract_ms,
             t.module_count,
             cache_detail,
             parallel_annotation(t.parse_extract_ms, t.parse_cpu_ms)
-        )
-        .dimmed()
-        .to_string(),
+        ),
     );
-    lines.push(
-        format!("│  cache update:     {:>8.1}ms", t.cache_update_ms)
-            .dimmed()
-            .to_string(),
-    );
-    lines.push(
-        format!(
-            "│  entry points:     {:>8.1}ms  ({} entries)",
-            t.entry_points_ms, t.entry_point_count
-        )
-        .dimmed()
-        .to_string(),
-    );
-    lines.push(
-        format!("│  resolve imports:  {:>8.1}ms", t.resolve_imports_ms)
-            .dimmed()
-            .to_string(),
-    );
-    lines.push(
-        format!("│  build graph:      {:>8.1}ms", t.build_graph_ms)
-            .dimmed()
-            .to_string(),
-    );
-    lines.push(
-        format!("│  analyze:          {:>8.1}ms", t.analyze_ms)
-            .dimmed()
-            .to_string(),
-    );
+    push_analysis_stage_lines(&mut lines, t);
     if let Some(duplication_ms) = t.duplication_ms {
-        // In combined mode (`plow` with no subcommand) duplication runs
-        // CONCURRENTLY with the whole check pipeline via rayon::join, so it
-        // overlaps the stages above rather than following them. It is shown as
-        // an informational overlay and deliberately excluded from `(other)` /
-        // TOTAL, which reconcile the sequential check pipeline. When dupes runs
-        // longer than the check pipeline this row legitimately exceeds TOTAL.
-        lines.push(
-            format!("│  duplication:      {duplication_ms:>8.1}ms  (concurrent)")
-                .dimmed()
-                .to_string(),
+        push_dimmed(
+            &mut lines,
+            &format!("│  duplication:      {duplication_ms:>8.1}ms  (concurrent)"),
         );
     }
-    // `duplication_ms` is excluded: it is a concurrent overlay (see above), and
-    // `total_ms` is the sequential check pipeline's wall-clock, which does not
-    // include the parallel dupes pass.
-    let stages_sum = t.discover_files_ms
+    push_performance_total_lines(&mut lines, t);
+
+    lines
+}
+
+fn push_dimmed(lines: &mut Vec<String>, line: &str) {
+    lines.push(line.dimmed().to_string());
+}
+
+fn push_performance_header(lines: &mut Vec<String>) {
+    lines.push(String::new());
+    push_dimmed(
+        lines,
+        "┌─ Pipeline Performance ─────────────────────────────",
+    );
+}
+
+fn push_discovery_stage_lines(lines: &mut Vec<String>, t: &PipelineTimings) {
+    push_dimmed(
+        lines,
+        &format!(
+            "│  discover files:   {:>8.1}ms  ({} files)",
+            t.discover_files_ms, t.file_count
+        ),
+    );
+    push_dimmed(
+        lines,
+        &format!(
+            "│  workspaces:       {:>8.1}ms  ({} workspaces)",
+            t.workspaces_ms, t.workspace_count
+        ),
+    );
+    push_dimmed(
+        lines,
+        &format!("│  plugins:          {:>8.1}ms", t.plugins_ms),
+    );
+    push_dimmed(
+        lines,
+        &format!("│  script analysis:  {:>8.1}ms", t.script_analysis_ms),
+    );
+}
+
+fn push_analysis_stage_lines(lines: &mut Vec<String>, t: &PipelineTimings) {
+    push_dimmed(
+        lines,
+        &format!("│  cache update:     {:>8.1}ms", t.cache_update_ms),
+    );
+    push_dimmed(
+        lines,
+        &format!(
+            "│  entry points:     {:>8.1}ms  ({} entries)",
+            t.entry_points_ms, t.entry_point_count
+        ),
+    );
+    push_dimmed(
+        lines,
+        &format!("│  resolve imports:  {:>8.1}ms", t.resolve_imports_ms),
+    );
+    push_dimmed(
+        lines,
+        &format!("│  build graph:      {:>8.1}ms", t.build_graph_ms),
+    );
+    push_dimmed(
+        lines,
+        &format!("│  analyze:          {:>8.1}ms", t.analyze_ms),
+    );
+}
+
+fn displayed_stage_sum(t: &PipelineTimings) -> f64 {
+    t.discover_files_ms
         + t.workspaces_ms
         + t.plugins_ms
         + t.script_analysis_ms
@@ -138,34 +139,29 @@ pub(in crate::report) fn build_performance_human_lines(t: &PipelineTimings) -> V
         + t.entry_points_ms
         + t.resolve_imports_ms
         + t.build_graph_ms
-        + t.analyze_ms;
-    lines.push(
-        format!(
+        + t.analyze_ms
+}
+
+fn push_performance_total_lines(lines: &mut Vec<String>, t: &PipelineTimings) {
+    push_dimmed(
+        lines,
+        &format!(
             "│  (other):          {:>8.1}ms",
-            other_ms(t.total_ms, stages_sum)
-        )
-        .dimmed()
-        .to_string(),
+            other_ms(t.total_ms, displayed_stage_sum(t))
+        ),
     );
-    lines.push(
-        "│  ────────────────────────────────────────────────"
-            .dimmed()
-            .to_string(),
-    );
+    push_dimmed(lines, "│  ────────────────────────────────────────────────");
     lines.push(
         format!("│  TOTAL:            {:>8.1}ms", t.total_ms)
             .bold()
             .dimmed()
             .to_string(),
     );
-    lines.push(
-        "└───────────────────────────────────────────────────"
-            .dimmed()
-            .to_string(),
+    push_dimmed(
+        lines,
+        "└───────────────────────────────────────────────────",
     );
     lines.push(String::new());
-
-    lines
 }
 
 pub(in crate::report) fn print_health_performance_human(t: &crate::health_types::HealthTimings) {
@@ -177,26 +173,35 @@ pub(in crate::report) fn print_health_performance_human(t: &crate::health_types:
 fn build_health_performance_lines(t: &crate::health_types::HealthTimings) -> Vec<String> {
     let mut lines = Vec::new();
 
+    push_health_performance_header(&mut lines);
+    push_health_performance_stage_lines(&mut lines, t);
+    push_health_performance_total_lines(&mut lines, t);
+
+    lines
+}
+
+fn push_health_performance_header(lines: &mut Vec<String>) {
     lines.push(String::new());
-    lines.push(
-        "┌─ Health Pipeline Performance ─────────────────────"
-            .dimmed()
-            .to_string(),
+    push_dimmed(
+        lines,
+        "┌─ Health Pipeline Performance ─────────────────────",
     );
-    lines.push(
-        format!("│  config:           {:>8.1}ms", t.config_ms)
-            .dimmed()
-            .to_string(),
+}
+
+fn push_health_performance_stage_lines(
+    lines: &mut Vec<String>,
+    t: &crate::health_types::HealthTimings,
+) {
+    push_dimmed(
+        lines,
+        &format!("│  config:           {:>8.1}ms", t.config_ms),
     );
-    // In combined mode the dead-code (check) pass already discovered and
-    // parsed these files; health reuses that work, so the cost is shown in
-    // the `Pipeline Performance` box above rather than double-counted here.
     let discover_line = if t.shared_parse {
         "│  discover files:   (measured above)".to_string()
     } else {
         format!("│  discover files:   {:>8.1}ms", t.discover_ms)
     };
-    lines.push(discover_line.dimmed().to_string());
+    push_dimmed(lines, &discover_line);
     let parse_line = if t.shared_parse {
         "│  parse/extract:    (measured above)".to_string()
     } else {
@@ -206,48 +211,43 @@ fn build_health_performance_lines(t: &crate::health_types::HealthTimings) -> Vec
             parallel_annotation(t.parse_ms, t.parse_cpu_ms)
         )
     };
-    lines.push(parse_line.dimmed().to_string());
-    lines.push(
-        format!("│  complexity:       {:>8.1}ms", t.complexity_ms)
-            .dimmed()
-            .to_string(),
+    push_dimmed(lines, &parse_line);
+    push_dimmed(
+        lines,
+        &format!("│  complexity:       {:>8.1}ms", t.complexity_ms),
     );
-    lines.push(
-        format!("│  file scores:      {:>8.1}ms", t.file_scores_ms)
-            .dimmed()
-            .to_string(),
+    push_dimmed(
+        lines,
+        &format!("│  file scores:      {:>8.1}ms", t.file_scores_ms),
     );
     let cache_note = if t.git_churn_cache_hit {
         " (cached)"
     } else {
         " (cold)"
     };
-    lines.push(
-        format!(
+    push_dimmed(
+        lines,
+        &format!(
             "│  git churn:        {:>8.1}ms{}",
             t.git_churn_ms, cache_note
-        )
-        .dimmed()
-        .to_string(),
+        ),
     );
-    lines.push(
-        format!("│  hotspots:         {:>8.1}ms", t.hotspots_ms)
-            .dimmed()
-            .to_string(),
+    push_dimmed(
+        lines,
+        &format!("│  hotspots:         {:>8.1}ms", t.hotspots_ms),
     );
-    lines.push(
-        format!("│  duplication:      {:>8.1}ms", t.duplication_ms)
-            .dimmed()
-            .to_string(),
+    push_dimmed(
+        lines,
+        &format!("│  duplication:      {:>8.1}ms", t.duplication_ms),
     );
-    lines.push(
-        format!("│  targets:          {:>8.1}ms", t.targets_ms)
-            .dimmed()
-            .to_string(),
+    push_dimmed(
+        lines,
+        &format!("│  targets:          {:>8.1}ms", t.targets_ms),
     );
-    // Reused stages contribute 0.0 here and are excluded from TOTAL, so the
-    // displayed rows (including this one) sum to TOTAL in every mode.
-    let stages_sum = t.config_ms
+}
+
+fn health_performance_stage_sum(t: &crate::health_types::HealthTimings) -> f64 {
+    t.config_ms
         + t.discover_ms
         + t.parse_ms
         + t.complexity_ms
@@ -255,34 +255,32 @@ fn build_health_performance_lines(t: &crate::health_types::HealthTimings) -> Vec
         + t.git_churn_ms
         + t.hotspots_ms
         + t.duplication_ms
-        + t.targets_ms;
-    lines.push(
-        format!(
+        + t.targets_ms
+}
+
+fn push_health_performance_total_lines(
+    lines: &mut Vec<String>,
+    t: &crate::health_types::HealthTimings,
+) {
+    push_dimmed(
+        lines,
+        &format!(
             "│  (other):          {:>8.1}ms",
-            other_ms(t.total_ms, stages_sum)
-        )
-        .dimmed()
-        .to_string(),
+            other_ms(t.total_ms, health_performance_stage_sum(t))
+        ),
     );
-    lines.push(
-        "│  ────────────────────────────────────────────────"
-            .dimmed()
-            .to_string(),
-    );
+    push_dimmed(lines, "│  ────────────────────────────────────────────────");
     lines.push(
         format!("│  TOTAL:            {:>8.1}ms", t.total_ms)
             .bold()
             .dimmed()
             .to_string(),
     );
-    lines.push(
-        "└───────────────────────────────────────────────────"
-            .dimmed()
-            .to_string(),
+    push_dimmed(
+        lines,
+        "└───────────────────────────────────────────────────",
     );
     lines.push(String::new());
-
-    lines
 }
 
 #[cfg(test)]
@@ -335,7 +333,6 @@ mod tests {
         assert!(text.contains("(other)"));
         assert!(text.contains("TOTAL"));
         assert!(text.contains("102.7"));
-        // parse_cpu_ms == parse_extract_ms here (ratio 1.0), so no annotation.
         assert!(!text.contains("parallel"));
     }
 
@@ -423,10 +420,6 @@ mod tests {
 
     #[test]
     fn combined_duplication_is_concurrent_and_excluded_from_reconciliation() {
-        // Combined mode runs check + dupes via rayon::join, so duplication
-        // overlaps the check pipeline. It is marked (concurrent) and excluded
-        // from (other)/TOTAL, which reconcile the sequential check stages.
-        // Sequential stages sum to 46.8ms; TOTAL 50.0 leaves 3.2ms of glue.
         let mut t = pipeline_timings_with_parse(20.0, 20.0);
         t.total_ms = 50.0;
         t.duplication_ms = Some(500.0); // concurrent, far exceeds TOTAL
@@ -443,7 +436,6 @@ mod tests {
 
     #[test]
     fn parse_stage_annotated_when_cpu_dominates_wall() {
-        // 340ms wall, 5440ms CPU -> ~16x parallelism, well above the floor.
         let text = plain(&build_performance_human_lines(
             &pipeline_timings_with_parse(340.0, 5440.0),
         ));
@@ -455,7 +447,6 @@ mod tests {
 
     #[test]
     fn parse_stage_not_annotated_below_wall_floor() {
-        // Trivial 3ms stage: never annotated even though CPU >> wall.
         let text = plain(&build_performance_human_lines(
             &pipeline_timings_with_parse(3.0, 40.0),
         ));
@@ -467,7 +458,6 @@ mod tests {
 
     #[test]
     fn parse_stage_not_annotated_when_ratio_low() {
-        // Warm/incremental: little real parse work, ratio under threshold.
         let text = plain(&build_performance_human_lines(
             &pipeline_timings_with_parse(50.0, 60.0),
         ));
@@ -502,10 +492,8 @@ mod tests {
             text.matches("(measured above)").count() == 2,
             "discover + parse should both read (measured above): {text}"
         );
-        // The reused stages must not render a misleading 0.0ms number.
         assert!(!text.contains("discover files:      0.0ms"));
         assert!(!text.contains("parse/extract:       0.0ms"));
-        // config is health-loaded, not reused, so it keeps a real number.
         assert!(text.contains("config"));
         assert!(text.contains("(other)"));
     }

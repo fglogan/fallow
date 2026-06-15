@@ -24,7 +24,7 @@ update_optional_deps() {
     pkg.version = '$VERSION';
     if (pkg.optionalDependencies) {
       for (const key of Object.keys(pkg.optionalDependencies)) {
-        if (key.startsWith('@fallow-cli/')) {
+        if (key.startsWith('@plow-cli/')) {
           pkg.optionalDependencies[key] = '$VERSION';
         }
       }
@@ -43,7 +43,7 @@ update_napi_lockfile() {
       lock.packages[''].version = '$VERSION';
       if (lock.packages[''].optionalDependencies) {
         for (const key of Object.keys(lock.packages[''].optionalDependencies)) {
-          if (key.startsWith('@fallow-cli/fallow-node')) {
+          if (key.startsWith('@plow-cli/plow-node')) {
             lock.packages[''].optionalDependencies[key] = '$VERSION';
           }
         }
@@ -77,9 +77,9 @@ update_napi_index_version() {
   "
 }
 
-# Update main fallow package (version + optionalDependencies)
-update_optional_deps "$ROOT/npm/fallow/package.json"
-echo "  Updated fallow/package.json → $VERSION"
+# Update main plow package (version + optionalDependencies)
+update_optional_deps "$ROOT/npm/plow/package.json"
+echo "  Updated plow/package.json → $VERSION"
 
 # Update Node bindings package (version + optionalDependencies)
 update_optional_deps "$ROOT/crates/napi/package.json"
@@ -98,7 +98,7 @@ fi
 # Update platform-specific npm packages
 for pkg in "$ROOT"/npm/*/package.json; do
   case "$pkg" in
-    */fallow/package.json) continue ;; # Already handled above
+    */plow/package.json) continue ;; # Already handled above
   esac
   [ -f "$pkg" ] || continue
   update_version "$pkg"

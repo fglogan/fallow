@@ -1,3 +1,9 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "tests and benches use unwrap and expect to keep fixture setup concise"
+)]
+
 #[path = "common/mod.rs"]
 mod common;
 
@@ -7,16 +13,12 @@ use std::process::Command;
 
 /// Create a unique temp dir for init tests.
 fn init_temp_dir(suffix: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "plow-init-test-{}-{}",
-        std::process::id(),
-        suffix
-    ));
+    let dir =
+        std::env::temp_dir().join(format!("plow-init-test-{}-{}", std::process::id(), suffix));
     if dir.exists() {
         let _ = fs::remove_dir_all(&dir);
     }
     fs::create_dir_all(&dir).unwrap();
-    // init requires a package.json to exist
     fs::write(
         dir.join("package.json"),
         r#"{"name": "init-test", "main": "index.ts"}"#,
@@ -29,10 +31,6 @@ fn init_temp_dir(suffix: &str) -> std::path::PathBuf {
 fn cleanup(dir: &std::path::Path) {
     let _ = fs::remove_dir_all(dir);
 }
-
-// ---------------------------------------------------------------------------
-// Init creates config files
-// ---------------------------------------------------------------------------
 
 #[test]
 fn init_creates_plowrc_json() {

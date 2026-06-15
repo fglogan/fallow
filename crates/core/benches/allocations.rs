@@ -1,3 +1,9 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "tests and benches use unwrap and expect to keep fixture setup concise"
+)]
+
 //! Allocation tracking benchmark using dhat.
 //!
 //! This benchmark measures heap allocation statistics for the plow analysis
@@ -20,10 +26,8 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 mod helpers;
 
 fn main() {
-    // ── Set up a synthetic 100-file project ────────────────────────────
     let (temp_dir, config) = helpers::create_synthetic_project("alloc-bench", 100);
 
-    // ── Profile the analysis pipeline ──────────────────────────────────
     let profiler = dhat::Profiler::builder().testing().build();
 
     let _ = plow_core::analyze(&config);
@@ -31,12 +35,8 @@ fn main() {
     let stats = dhat::HeapStats::get();
     drop(profiler);
 
-    // ── Clean up ───────────────────────────────────────────────────────
     let _ = std::fs::remove_dir_all(&temp_dir);
 
-    // ── Print parseable stats ──────────────────────────────────────────
-    // These keys are read by scripts/alloc-check.sh and stored in
-    // alloc-baseline.json.
     #[expect(
         clippy::print_stdout,
         reason = "intentional bench output for alloc-check.sh"

@@ -11,7 +11,7 @@ expression: redact_health_sarif_version(&json_str)
         "driver": {
           "name": "plow",
           "version": "[VERSION]",
-          "informationUri": "https://github.com/plow-rs/plow",
+          "informationUri": "https://github.com/fglogan/genesis-plow",
           "rules": [
             {
               "id": "plow/high-cyclomatic-complexity",
@@ -167,6 +167,58 @@ expression: redact_health_sarif_version(&json_str)
               "helpUri": "https://docs.genesis-plow.dev/explanations/health#runtime-coverage",
               "defaultConfiguration": {
                 "level": "note"
+              }
+            },
+            {
+              "id": "plow/coverage-intelligence-risky-change",
+              "shortDescription": {
+                "text": "Changed hot path combines high CRAP and low test coverage"
+              },
+              "fullDescription": {
+                "text": "Coverage intelligence combined change scope, runtime hot-path evidence, low test coverage, and high CRAP into a risky-change finding. Add focused tests or split the change before merging."
+              },
+              "helpUri": "https://docs.genesis-plow.dev/explanations/health#coverage-intelligence",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "plow/coverage-intelligence-delete",
+              "shortDescription": {
+                "text": "Static and runtime evidence indicate code can be deleted"
+              },
+              "fullDescription": {
+                "text": "Coverage intelligence combined static unused status, runtime cold evidence, and lack of test reachability into a high-confidence delete recommendation."
+              },
+              "helpUri": "https://docs.genesis-plow.dev/explanations/health#coverage-intelligence",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "plow/coverage-intelligence-review",
+              "shortDescription": {
+                "text": "Cold reachable uncovered code needs owner review"
+              },
+              "fullDescription": {
+                "text": "Coverage intelligence found code that is statically reachable but cold in runtime evidence, uncovered by tests, and ownership-risky. Route it to an owner before changing or deleting it."
+              },
+              "helpUri": "https://docs.genesis-plow.dev/explanations/health#coverage-intelligence",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "plow/coverage-intelligence-refactor",
+              "shortDescription": {
+                "text": "Hot covered code has high CRAP and should be refactored carefully"
+              },
+              "fullDescription": {
+                "text": "Coverage intelligence found hot production code that is covered by tests but still has high CRAP. Refactor carefully while preserving behavior."
+              },
+              "helpUri": "https://docs.genesis-plow.dev/explanations/health#coverage-intelligence",
+              "defaultConfiguration": {
+                "level": "warning"
               }
             }
           ]

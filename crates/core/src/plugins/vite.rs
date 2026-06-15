@@ -5,21 +5,8 @@
 
 use super::config_parser;
 use super::{Plugin, PluginResult};
-use oxc_ast::ast::{
-    Argument, ArrayExpression, ArrayExpressionElement, CallExpression, Expression,
-    ImportDeclarationSpecifier, ObjectExpression, Program, Statement,
-};
 
 const CONFIG_EXPORTS: &[&str] = &["default"];
-const REACT_COMPILER_BABEL_PLUGIN: &str = "babel-plugin-react-compiler";
-const VITE_REACT_PLUGIN_SOURCE: &str = "@vitejs/plugin-react";
-const ROLLDOWN_BABEL_PLUGIN_SOURCE: &str = "@rolldown/plugin-babel";
-
-#[derive(Default)]
-struct ReactCompilerPluginLocals {
-    react_calls: Vec<String>,
-    babel_calls: Vec<String>,
-}
 
 fn additional_data_entry_pattern(
     root: &std::path::Path,
@@ -56,8 +43,6 @@ fn is_additional_data_package_import(
     if local_style_candidate_exists(root, normalized) {
         return false;
     }
-    // Non-relative stylesheet specifiers with no local candidate are package
-    // references, including bare packages like `bootstrap`.
     true
 }
 
@@ -106,12 +91,7 @@ define_plugin!(
     config_patterns: &["vite.config.{ts,js,mts,mjs}"],
     always_used: &["vite.config.{ts,js,mts,mjs}"],
     tooling_dependencies: &["vite", "@vitejs/plugin-react", "@vitejs/plugin-vue"],
-    // Vite plugins create virtual modules with `virtual:` prefix
-    // (e.g., `virtual:pwa-register`, `virtual:emoji-mart-lang-importer`)
     virtual_module_prefixes: &["virtual:"],
-    // Under --include-entry-exports, the default export of vite.config.* is the
-    // entry: Vite's CLI consumes it. Marking it framework-used prevents the
-    // false-positive in #282 (mirrors the vitest fix in #271).
     used_exports: [("vite.config.{ts,js,mts,mjs}", CONFIG_EXPORTS)],
     resolve_config(config_path, source, root) {
         let mut result = PluginResult::default();
@@ -125,12 +105,14 @@ define_plugin!(
             config_parser::extract_vite_react_babel_dependencies(source, config_path),
         );
 
-        for dep in extract_react_compiler_plugin_dependencies(source, config_path) {
-            result.referenced_dependencies.push(dep);
-        }
+        result.referenced_dependencies.extend(super::react_compiler::extract_dependencies(
+            source,
+            config_path,
+            &[&["plugins"]],
+        ));
 
         for (find, replacement) in
-            config_parser::extract_config_aliases(source, config_path, &["resolve", "alias"])
+            config_parser::extract_config_path_aliases(source, config_path, &["resolve", "alias"])
         {
             if let Some(normalized) =
                 config_parser::normalize_config_path(&replacement, config_path, root)
@@ -139,16 +121,8 @@ define_plugin!(
             }
         }
 
-        // Vitest test config is commonly embedded in vite.config.* via
-        // defineConfig({ test: {...}, resolve: { alias } }). The Vitest plugin
-        // never sees this file (its config_patterns are vitest.config.* /
-        // vitest.workspace.* only), so extract the test-block + projects aliases
-        // here. Top-level resolve.alias above stays path-alias-only (no
-        // mock-file entry seeding / dependency credit) to keep pure-Vite
-        // behavior unchanged. See crate::plugins::test_alias.
         super::test_alias::apply_test_block_aliases(&mut result, source, config_path, root);
 
-        // build.rollupOptions.input → entry points (string, array, or object)
         let rollup_input = config_parser::extract_config_string_or_array(
             source,
             config_path,
@@ -156,7 +130,6 @@ define_plugin!(
         );
         result.extend_entry_patterns(rollup_input);
 
-        // build.lib.entry → entry points (string or array)
         let lib_entry = config_parser::extract_config_string_or_array(
             source,
             config_path,
@@ -164,7 +137,6 @@ define_plugin!(
         );
         result.extend_entry_patterns(lib_entry);
 
-        // optimizeDeps.include → referenced dependencies
         let optimize_include = config_parser::extract_config_string_array(
             source,
             config_path,
@@ -176,7 +148,6 @@ define_plugin!(
                 .push(crate::resolve::extract_package_name(dep));
         }
 
-        // optimizeDeps.exclude → referenced dependencies
         let optimize_exclude = config_parser::extract_config_string_array(
             source,
             config_path,
@@ -188,7 +159,6 @@ define_plugin!(
                 .push(crate::resolve::extract_package_name(dep));
         }
 
-        // ssr.external → referenced dependencies
         let ssr_external =
             config_parser::extract_config_string_array(source, config_path, &["ssr", "external"]);
         for dep in &ssr_external {
@@ -197,7 +167,6 @@ define_plugin!(
                 .push(crate::resolve::extract_package_name(dep));
         }
 
-        // ssr.noExternal → referenced dependencies
         let ssr_no_external =
             config_parser::extract_config_string_array(source, config_path, &["ssr", "noExternal"]);
         for dep in &ssr_no_external {
@@ -206,17 +175,6 @@ define_plugin!(
                 .push(crate::resolve::extract_package_name(dep));
         }
 
-        // css.preprocessorOptions.{scss,sass,less,stylus}.additionalData →
-        // SCSS / Sass strings injected at the top of every preprocessed file.
-        // The string body itself is not parsed, but `@use` / `@import` /
-        // `@forward` / `@plugin` directives inside it reference real files that no source
-        // file imports directly. Seed those files as entry points so they do
-        // not get reported as `unused-files`. Function-form `additionalData`
-        // is skipped (out of static-analysis scope) and stylesheet content is
-        // the only string treated as preprocessor source. Specifiers are
-        // stripped of their leading `./` because entry patterns are matched
-        // against project-relative paths via globset (which does not normalize
-        // `./` prefixes). See issue #195 (Case A).
         for preprocessor in ["scss", "sass", "less", "stylus"] {
             let body = config_parser::extract_config_string_or_array(
                 source,
@@ -239,146 +197,6 @@ define_plugin!(
         result
     },
 );
-
-fn extract_react_compiler_plugin_dependencies(source: &str, path: &std::path::Path) -> Vec<String> {
-    config_parser::extract_from_source(source, path, |program| {
-        let config = config_parser::find_config_object_pub(program)?;
-        let plugins = config_parser::property_expr(config, "plugins")
-            .and_then(config_parser::array_expression)?;
-        let locals = collect_react_compiler_plugin_locals(program);
-        let mut deps = Vec::new();
-
-        for element in &plugins.elements {
-            let Some(Expression::CallExpression(call)) = element.as_expression() else {
-                continue;
-            };
-
-            if is_local_call(call, &locals.react_calls) {
-                collect_from_plugin_call_option_path(call, &["babel", "plugins"], &mut deps);
-            } else if is_local_call(call, &locals.babel_calls) {
-                collect_from_plugin_call_option_path(call, &["plugins"], &mut deps);
-                collect_from_plugin_call_option_path(call, &["babel", "plugins"], &mut deps);
-            }
-        }
-
-        (!deps.is_empty()).then_some(deps)
-    })
-    .unwrap_or_default()
-}
-
-fn collect_react_compiler_plugin_locals(program: &Program<'_>) -> ReactCompilerPluginLocals {
-    let mut locals = ReactCompilerPluginLocals::default();
-
-    for stmt in &program.body {
-        let Statement::ImportDeclaration(decl) = stmt else {
-            continue;
-        };
-        let Some(specifiers) = &decl.specifiers else {
-            continue;
-        };
-
-        for specifier in specifiers {
-            match specifier {
-                ImportDeclarationSpecifier::ImportDefaultSpecifier(default)
-                    if decl.source.value == VITE_REACT_PLUGIN_SOURCE =>
-                {
-                    push_unique(&mut locals.react_calls, default.local.name.to_string());
-                }
-                ImportDeclarationSpecifier::ImportSpecifier(specifier)
-                    if decl.source.value == VITE_REACT_PLUGIN_SOURCE
-                        && specifier.imported.name() == "react" =>
-                {
-                    push_unique(&mut locals.react_calls, specifier.local.name.to_string());
-                }
-                ImportDeclarationSpecifier::ImportDefaultSpecifier(default)
-                    if decl.source.value == ROLLDOWN_BABEL_PLUGIN_SOURCE =>
-                {
-                    push_unique(&mut locals.babel_calls, default.local.name.to_string());
-                }
-                ImportDeclarationSpecifier::ImportSpecifier(specifier)
-                    if decl.source.value == ROLLDOWN_BABEL_PLUGIN_SOURCE
-                        && specifier.imported.name() == "babel" =>
-                {
-                    push_unique(&mut locals.babel_calls, specifier.local.name.to_string());
-                }
-                _ => {}
-            }
-        }
-    }
-
-    locals
-}
-
-fn collect_from_plugin_call_option_path(
-    call: &CallExpression<'_>,
-    option_path: &[&str],
-    deps: &mut Vec<String>,
-) {
-    let Some(options) = call
-        .arguments
-        .first()
-        .and_then(Argument::as_expression)
-        .and_then(config_parser::object_expression)
-    else {
-        return;
-    };
-    let Some(plugins) = nested_array_expression(options, option_path) else {
-        return;
-    };
-
-    for plugin_name in collect_babel_plugin_names(plugins) {
-        if super::babel::resolve_babel_plugin_name(&plugin_name) == REACT_COMPILER_BABEL_PLUGIN {
-            push_unique(deps, REACT_COMPILER_BABEL_PLUGIN.to_string());
-        }
-    }
-}
-
-fn nested_array_expression<'a>(
-    obj: &'a ObjectExpression<'a>,
-    path: &[&str],
-) -> Option<&'a ArrayExpression<'a>> {
-    let mut current_obj = obj;
-    for (index, key) in path.iter().enumerate() {
-        let expr = config_parser::property_expr(current_obj, key)?;
-        if index == path.len() - 1 {
-            return config_parser::array_expression(expr);
-        }
-        current_obj = config_parser::object_expression(expr)?;
-    }
-    None
-}
-
-fn collect_babel_plugin_names(plugins: &ArrayExpression<'_>) -> Vec<String> {
-    plugins
-        .elements
-        .iter()
-        .filter_map(|element| {
-            let expr = element.as_expression()?;
-            config_parser::expression_to_string(expr).or_else(|| {
-                let tuple = config_parser::array_expression(expr)?;
-                tuple
-                    .elements
-                    .first()
-                    .and_then(ArrayExpressionElement::as_expression)
-                    .and_then(config_parser::expression_to_string)
-            })
-        })
-        .collect()
-}
-
-fn is_local_call(call: &CallExpression<'_>, locals: &[String]) -> bool {
-    matches!(
-        &call.callee,
-        Expression::Identifier(identifier)
-            if locals.iter().any(|local| local == identifier.name.as_str())
-    )
-}
-
-fn push_unique<T: Eq>(items: &mut Vec<T>, item: T) {
-    if !items.contains(&item) {
-        items.push(item);
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -490,9 +308,6 @@ mod tests {
 
     #[test]
     fn resolve_config_extracts_embedded_test_alias_and_project_resolve_alias() {
-        // The common defineConfig({ test: {...}, resolve: { alias } }) shape in
-        // vite.config.ts: the Vite plugin must extract the Vitest test-block
-        // aliases (the Vitest plugin never sees vite.config.ts).
         let source = r#"
             import { defineConfig } from 'vite';
             export default defineConfig({
@@ -525,8 +340,6 @@ mod tests {
             "test.projects[*].resolve.alias in vite.config must be extracted: {:?}",
             result.path_aliases
         );
-        // The top-level resolve.alias `@`->`./src` stays handled by Vite's own
-        // A-only extraction (path alias, no entry seeding).
         assert!(
             result
                 .path_aliases
@@ -583,10 +396,6 @@ mod tests {
 
     #[test]
     fn resolve_config_rollup_input_evaluates_path_helpers() {
-        // Issue #604: rollupOptions.input values written as path-helper calls
-        // (resolve(__dirname, "..."), path.resolve(...), join(...),
-        // import.meta.dirname equivalents) must be evaluated to project-relative
-        // entry patterns. CSS entries are preserved like any other entry.
         let source = r#"
             import { resolve, join } from "node:path";
             import path from "node:path";
@@ -633,7 +442,6 @@ mod tests {
 
     #[test]
     fn resolve_config_lib_entry_evaluates_path_helper() {
-        // build.lib.entry as a single top-level path-helper call.
         let source = r#"
             import { resolve } from "node:path";
             import { defineConfig } from "vite";
@@ -688,7 +496,7 @@ mod tests {
         assert!(
             result
                 .referenced_dependencies
-                .contains(&REACT_COMPILER_BABEL_PLUGIN.to_string())
+                .contains(&"babel-plugin-react-compiler".to_string())
         );
     }
 
@@ -718,7 +526,7 @@ mod tests {
         assert!(
             result
                 .referenced_dependencies
-                .contains(&REACT_COMPILER_BABEL_PLUGIN.to_string())
+                .contains(&"babel-plugin-react-compiler".to_string())
         );
     }
 
@@ -748,7 +556,32 @@ mod tests {
         assert!(
             result
                 .referenced_dependencies
-                .contains(&REACT_COMPILER_BABEL_PLUGIN.to_string())
+                .contains(&"babel-plugin-react-compiler".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_config_react_compiler_preset_call_references_dependency() {
+        let source = r#"
+            import { defineConfig } from "vite";
+            import react, { reactCompilerPreset } from "@vitejs/plugin-react";
+            import babel from "@rolldown/plugin-babel";
+
+            export default defineConfig({
+                plugins: [react(), babel({ presets: [reactCompilerPreset()] })],
+            });
+        "#;
+        let plugin = VitePlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new("/project/vite.config.ts"),
+            source,
+            std::path::Path::new("/project"),
+        );
+
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&"babel-plugin-react-compiler".to_string())
         );
     }
 
@@ -779,7 +612,7 @@ mod tests {
         assert!(
             !result
                 .referenced_dependencies
-                .contains(&REACT_COMPILER_BABEL_PLUGIN.to_string())
+                .contains(&"babel-plugin-react-compiler".to_string())
         );
     }
 
@@ -812,7 +645,7 @@ mod tests {
         assert!(
             !result
                 .referenced_dependencies
-                .contains(&REACT_COMPILER_BABEL_PLUGIN.to_string())
+                .contains(&"babel-plugin-react-compiler".to_string())
         );
     }
 
@@ -839,7 +672,7 @@ mod tests {
         assert!(
             !result
                 .referenced_dependencies
-                .contains(&REACT_COMPILER_BABEL_PLUGIN.to_string())
+                .contains(&"babel-plugin-react-compiler".to_string())
         );
     }
 

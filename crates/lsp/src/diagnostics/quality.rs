@@ -1,8 +1,8 @@
 use rustc_hash::FxHashMap;
 
-use tower_lsp::lsp_types::{
+use ls_types::{
     CodeDescription, Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, DiagnosticTag,
-    Location, NumberOrString, Position, Range, Url,
+    Location, NumberOrString, Position, Range, Uri,
 };
 
 use plow_core::duplicates::DuplicationReport;
@@ -15,20 +15,19 @@ use super::doc_link;
     reason = "export name lengths are bounded by source size"
 )]
 pub fn push_duplicate_export_diagnostics(
-    map: &mut FxHashMap<Url, Vec<Diagnostic>>,
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
 ) {
     for dup in &results.duplicate_exports {
         let dup = &dup.export;
-        // Build related information linking all duplicate locations together
         for loc in &dup.locations {
-            if let Ok(uri) = Url::from_file_path(&loc.path) {
+            if let Some(uri) = Uri::from_file_path(&loc.path) {
                 let related_info: Vec<DiagnosticRelatedInformation> = dup
                     .locations
                     .iter()
                     .filter(|l| l.path != loc.path)
                     .filter_map(|l| {
-                        let other_uri = Url::from_file_path(&l.path).ok()?;
+                        let other_uri = Uri::from_file_path(&l.path)?;
                         Some(DiagnosticRelatedInformation {
                             location: Location {
                                 uri: other_uri,
@@ -81,19 +80,18 @@ pub fn push_duplicate_export_diagnostics(
     reason = "line/col numbers are bounded by source size"
 )]
 pub fn push_duplication_diagnostics(
-    map: &mut FxHashMap<Url, Vec<Diagnostic>>,
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     duplication: &DuplicationReport,
 ) {
     for group in &duplication.clone_groups {
         for instance in &group.instances {
-            let Ok(inst_uri) = Url::from_file_path(&instance.file) else {
+            let Some(inst_uri) = Uri::from_file_path(&instance.file) else {
                 continue;
             };
 
             let start_line = (instance.start_line as u32).saturating_sub(1);
             let end_line = (instance.end_line as u32).saturating_sub(1);
 
-            // Build related information pointing to other instances in the group
             let related_info: Vec<DiagnosticRelatedInformation> = group
                 .instances
                 .iter()
@@ -101,7 +99,7 @@ pub fn push_duplication_diagnostics(
                     !(other.file == instance.file && other.start_line == instance.start_line)
                 })
                 .filter_map(|other| {
-                    let other_uri = Url::from_file_path(&other.file).ok()?;
+                    let other_uri = Uri::from_file_path(&other.file)?;
                     Some(DiagnosticRelatedInformation {
                         location: Location {
                             uri: other_uri,
@@ -129,14 +127,14 @@ pub fn push_duplication_diagnostics(
                     },
                     end: Position {
                         line: end_line,
-                        // Extend to end of last line to ensure full block is underlined
                         character: u32::MAX,
                     },
                 },
                 severity: Some(DiagnosticSeverity::INFORMATION),
                 source: Some("plow".to_string()),
                 code: Some(NumberOrString::String("code-duplication".to_string())),
-                code_description: Url::parse("https://docs.genesis-plow.dev/explanations/duplication")
+                code_description: "https://docs.genesis-plow.dev/explanations/duplication"
+                    .parse::<Uri>()
                     .ok()
                     .map(|href| CodeDescription { href }),
                 message: format!(
@@ -156,11 +154,11 @@ pub fn push_duplication_diagnostics(
 }
 
 pub fn push_stale_suppression_diagnostics(
-    map: &mut FxHashMap<Url, Vec<Diagnostic>>,
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
 ) {
     for s in &results.stale_suppressions {
-        let Ok(uri) = Url::from_file_path(&s.path) else {
+        let Some(uri) = Uri::from_file_path(&s.path) else {
             continue;
         };
         let line = s.line.saturating_sub(1);
@@ -196,12 +194,12 @@ pub fn push_stale_suppression_diagnostics(
 mod tests {
     use std::path::PathBuf;
 
+    use ls_types::{DiagnosticSeverity, NumberOrString, Uri};
     use plow_core::duplicates::{CloneGroup, CloneInstance, DuplicationReport, DuplicationStats};
     use plow_core::results::{
         AnalysisResults, DuplicateExport, DuplicateExportFinding, DuplicateLocation, UnusedExport,
         UnusedExportFinding, UnusedTypeFinding,
     };
-    use tower_lsp::lsp_types::{DiagnosticSeverity, NumberOrString, Url};
 
     use crate::diagnostics::build_diagnostics;
 
@@ -265,21 +263,17 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        // Both files should have a diagnostic
-        let uri_utils = Url::from_file_path(&utils_path).unwrap();
-        let uri_helpers = Url::from_file_path(&helpers_path).unwrap();
+        let uri_utils = Uri::from_file_path(&utils_path).unwrap();
+        let uri_helpers = Uri::from_file_path(&helpers_path).unwrap();
 
         let utils_diags = &diags[&uri_utils];
         assert_eq!(utils_diags.len(), 1);
         let d = &utils_diags[0];
         assert_eq!(d.severity, Some(DiagnosticSeverity::WARNING));
         assert!(d.message.contains("formatDate"));
-        // line 15 (1-based) → 14 (0-based)
         assert_eq!(d.range.start.line, 14);
         assert_eq!(d.range.start.character, 0);
-        // Range spans the export name
         assert_eq!(d.range.end.character, "formatDate".len() as u32);
-        // Related info points to the other file
         let related = d.related_information.as_ref().unwrap();
         assert_eq!(related.len(), 1);
         assert_eq!(related[0].location.uri, uri_helpers);
@@ -337,8 +331,7 @@ mod tests {
 
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        // File a.ts should have a diagnostic with related info pointing to b.ts
-        let uri_a = Url::from_file_path(root.join("src/a.ts")).unwrap();
+        let uri_a = Uri::from_file_path(root.join("src/a.ts")).unwrap();
         let diags_a = &diags[&uri_a];
         assert_eq!(diags_a.len(), 1);
 
@@ -351,18 +344,15 @@ mod tests {
         assert!(d.message.contains("6 lines"));
         assert!(d.message.contains("2 instances"));
 
-        // Check related info
         let related = d.related_information.as_ref().unwrap();
         assert_eq!(related.len(), 1);
         assert_eq!(related[0].message, "Also duplicated here");
-        let related_uri = Url::from_file_path(root.join("src/b.ts")).unwrap();
+        let related_uri = Uri::from_file_path(root.join("src/b.ts")).unwrap();
         assert_eq!(related[0].location.uri, related_uri);
-        // b.ts start_line = 20 (1-based) → 19 (0-based)
         assert_eq!(related[0].location.range.start.line, 19);
         assert_eq!(related[0].location.range.start.character, 4);
 
-        // File b.ts should have related info pointing to a.ts
-        let uri_b = Url::from_file_path(root.join("src/b.ts")).unwrap();
+        let uri_b = Uri::from_file_path(root.join("src/b.ts")).unwrap();
         let diags_b = &diags[&uri_b];
         assert_eq!(diags_b.len(), 1);
         let related_b = diags_b[0].related_information.as_ref().unwrap();
@@ -404,10 +394,9 @@ mod tests {
         };
 
         let diags = build_diagnostics(&results, &duplication, &root);
-        let uri = Url::from_file_path(root.join("src/only.ts")).unwrap();
+        let uri = Uri::from_file_path(root.join("src/only.ts")).unwrap();
         let d = &diags[&uri][0];
 
-        // Single instance => no "other" instances => no related info
         assert!(d.related_information.is_none());
     }
 
@@ -431,9 +420,8 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(&path).unwrap();
+        let uri = Uri::from_file_path(&path).unwrap();
         let d = &diags[&uri][0];
-        // No other locations to relate to
         assert!(d.related_information.is_none());
     }
 
@@ -443,7 +431,6 @@ mod tests {
         let path = root.join("src/file.ts");
         let mut results = AnalysisResults::default();
 
-        // Add one of each issue type to verify all produce code_description
         results
             .unused_exports
             .push(UnusedExportFinding::with_actions(UnusedExport {
@@ -487,7 +474,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(&path).unwrap();
+        let uri = Uri::from_file_path(&path).unwrap();
         let file_diags = &diags[&uri];
 
         for d in file_diags {
@@ -499,7 +486,7 @@ mod tests {
             let href = &d.code_description.as_ref().unwrap().href;
             assert!(
                 href.as_str().starts_with("https://docs.genesis-plow.dev/"),
-                "Doc link should point to plow docs: {href}"
+                "Doc link should point to plow docs: {href:?}"
             );
         }
     }

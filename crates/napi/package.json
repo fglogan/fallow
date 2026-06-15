@@ -1,6 +1,6 @@
 {
   "name": "@plow-cli/plow-node",
-  "version": "2.83.0",
+  "version": "2.96.0",
   "description": "Native Node.js bindings for plow, codebase intelligence for TypeScript and JavaScript. Finds unused code, duplication, circular dependencies, complexity hotspots, and architecture drift. Optional runtime intelligence layer (Plow Runtime) adds production execution evidence.",
   "main": "index.js",
   "types": "index.d.ts",
@@ -24,15 +24,15 @@
     "complexity",
     "napi"
   ],
-  "license": "MIT",
+  "license": "LicenseRef-Tempext-Commercial",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/plow-rs/plow.git",
+    "url": "git+https://github.com/fglogan/genesis-plow.git",
     "directory": "crates/napi"
   },
-  "homepage": "https://docs.plow.tools",
+  "homepage": "https://docs.genesis-plow.dev",
   "bugs": {
-    "url": "https://github.com/plow-rs/plow/issues"
+    "url": "https://github.com/fglogan/genesis-plow/issues"
   },
   "engines": {
     "node": ">=18"
@@ -64,13 +64,13 @@
     "@napi-rs/cli": "3.6.0"
   },
   "optionalDependencies": {
-    "@plow-cli/plow-node-darwin-arm64": "2.83.0",
-    "@plow-cli/plow-node-darwin-x64": "2.83.0",
-    "@plow-cli/plow-node-linux-arm64-gnu": "2.83.0",
-    "@plow-cli/plow-node-linux-arm64-musl": "2.83.0",
-    "@plow-cli/plow-node-linux-x64-gnu": "2.83.0",
-    "@plow-cli/plow-node-linux-x64-musl": "2.83.0",
-    "@plow-cli/plow-node-win32-arm64-msvc": "2.83.0",
-    "@plow-cli/plow-node-win32-x64-msvc": "2.83.0"
+    "@plow-cli/plow-node-darwin-arm64": "2.96.0",
+    "@plow-cli/plow-node-darwin-x64": "2.96.0",
+    "@plow-cli/plow-node-linux-arm64-gnu": "2.96.0",
+    "@plow-cli/plow-node-linux-arm64-musl": "2.96.0",
+    "@plow-cli/plow-node-linux-x64-gnu": "2.96.0",
+    "@plow-cli/plow-node-linux-x64-musl": "2.96.0",
+    "@plow-cli/plow-node-win32-arm64-msvc": "2.96.0",
+    "@plow-cli/plow-node-win32-x64-msvc": "2.96.0"
   }
 }
