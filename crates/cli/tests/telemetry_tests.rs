@@ -11,7 +11,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use common::{fallow_bin, parse_json};
+use common::{parse_json, plow_bin};
 
 fn git(dir: &Path, args: &[&str]) {
     let output = Command::new("git")
@@ -46,15 +46,15 @@ fn commit_all(dir: &Path, message: &str) {
 
 fn telemetry_command(args: &[&str]) -> common::CommandOutput {
     let home = tempfile::tempdir().expect("temp home");
-    let mut cmd = Command::new(fallow_bin());
+    let mut cmd = Command::new(plow_bin());
     cmd.env_remove("CI")
         .env_remove("GITHUB_ACTIONS")
         .env_remove("GITLAB_CI")
         .env_remove("DO_NOT_TRACK")
-        .env_remove("FALLOW_TELEMETRY")
-        .env_remove("FALLOW_TELEMETRY_DEBUG")
-        .env_remove("FALLOW_TELEMETRY_DISABLED")
-        .env_remove("FALLOW_AGENT_SOURCE")
+        .env_remove("PLOW_TELEMETRY")
+        .env_remove("PLOW_TELEMETRY_DEBUG")
+        .env_remove("PLOW_TELEMETRY_DISABLED")
+        .env_remove("PLOW_AGENT_SOURCE")
         .env("HOME", home.path())
         .env("XDG_CONFIG_HOME", home.path().join(".config"))
         .env("APPDATA", home.path().join("AppData"))
@@ -63,7 +63,7 @@ fn telemetry_command(args: &[&str]) -> common::CommandOutput {
     for arg in args {
         cmd.arg(arg);
     }
-    let output = cmd.output().expect("failed to run fallow binary");
+    let output = cmd.output().expect("failed to run plow binary");
     common::CommandOutput {
         stdout: String::from_utf8_lossy(&output.stdout).to_string(),
         stderr: String::from_utf8_lossy(&output.stderr).to_string(),
@@ -89,15 +89,15 @@ fn non_telemetry_subcommands_still_dispatch_normally() {
     let output = telemetry_command(&["--format", "json", "--quiet", "explain", "unused-exports"]);
     assert_eq!(output.code, 0, "explain should exit 0: {}", output.stderr);
     let json = parse_json(&output);
-    assert_eq!(json["id"].as_str(), Some("fallow/unused-export"));
+    assert_eq!(json["id"].as_str(), Some("plow/unused-export"));
 }
 
 #[test]
 fn telemetry_inspect_preserves_command_stdout_json() {
-    let mut cmd = Command::new(fallow_bin());
+    let mut cmd = Command::new(plow_bin());
     let home = tempfile::tempdir().expect("temp home");
-    cmd.env("FALLOW_TELEMETRY", "inspect")
-        .env("FALLOW_AGENT_SOURCE", "claude-code")
+    cmd.env("PLOW_TELEMETRY", "inspect")
+        .env("PLOW_AGENT_SOURCE", "claude-code")
         .env("HOME", home.path())
         .env("XDG_CONFIG_HOME", home.path().join(".config"))
         .env("APPDATA", home.path().join("AppData"))
@@ -106,7 +106,7 @@ fn telemetry_inspect_preserves_command_stdout_json() {
         .arg("--parent-run")
         .arg("../repo/main")
         .args(["--format", "json", "--quiet"]);
-    let raw = cmd.output().expect("failed to run fallow binary");
+    let raw = cmd.output().expect("failed to run plow binary");
     let output = common::CommandOutput {
         stdout: String::from_utf8_lossy(&raw.stdout).to_string(),
         stderr: String::from_utf8_lossy(&raw.stderr).to_string(),
@@ -134,10 +134,10 @@ fn telemetry_inspect_preserves_command_stdout_json() {
 
 #[test]
 fn telemetry_inspect_reports_safe_followup_fields() {
-    let mut cmd = Command::new(fallow_bin());
+    let mut cmd = Command::new(plow_bin());
     let home = tempfile::tempdir().expect("temp home");
-    cmd.env("FALLOW_TELEMETRY", "inspect")
-        .env("FALLOW_AGENT_SOURCE", "codex")
+    cmd.env("PLOW_TELEMETRY", "inspect")
+        .env("PLOW_AGENT_SOURCE", "codex")
         .env("HOME", home.path())
         .env("XDG_CONFIG_HOME", home.path().join(".config"))
         .env("APPDATA", home.path().join("AppData"))
@@ -146,7 +146,7 @@ fn telemetry_inspect_reports_safe_followup_fields() {
         .arg("--parent-run")
         .arg("tmp_8x7p4k")
         .args(["--format", "json", "--quiet", "explain", "unused-exports"]);
-    let raw = cmd.output().expect("failed to run fallow binary");
+    let raw = cmd.output().expect("failed to run plow binary");
     let output = common::CommandOutput {
         stdout: String::from_utf8_lossy(&raw.stdout).to_string(),
         stderr: String::from_utf8_lossy(&raw.stderr).to_string(),
@@ -168,17 +168,17 @@ fn telemetry_inspect_reports_safe_followup_fields() {
 
 #[test]
 fn invalid_explicit_agent_source_is_ignored() {
-    let mut cmd = Command::new(fallow_bin());
+    let mut cmd = Command::new(plow_bin());
     let home = tempfile::tempdir().expect("temp home");
-    cmd.env("FALLOW_TELEMETRY", "inspect")
-        .env("FALLOW_AGENT_SOURCE", "private-agent-x")
+    cmd.env("PLOW_TELEMETRY", "inspect")
+        .env("PLOW_AGENT_SOURCE", "private-agent-x")
         .env("HOME", home.path())
         .env("XDG_CONFIG_HOME", home.path().join(".config"))
         .env("APPDATA", home.path().join("AppData"))
         .env("RUST_LOG", "")
         .env("NO_COLOR", "1")
         .args(["--format", "json", "--quiet"]);
-    let raw = cmd.output().expect("failed to run fallow binary");
+    let raw = cmd.output().expect("failed to run plow binary");
     let output = common::CommandOutput {
         stdout: String::from_utf8_lossy(&raw.stdout).to_string(),
         stderr: String::from_utf8_lossy(&raw.stderr).to_string(),
@@ -196,7 +196,7 @@ fn invalid_explicit_agent_source_is_ignored() {
     assert!(event.get("agent_source").is_none());
 }
 
-/// Run a fallow command in telemetry inspect mode against `root`, applying
+/// Run a plow command in telemetry inspect mode against `root`, applying
 /// `extra_env`, and return the parsed telemetry event emitted to stderr.
 fn inspect_event_output(
     root: &Path,
@@ -204,16 +204,16 @@ fn inspect_event_output(
     extra_env: &[(&str, &str)],
 ) -> (serde_json::Value, common::CommandOutput) {
     let home = tempfile::tempdir().expect("temp home");
-    let mut cmd = Command::new(fallow_bin());
+    let mut cmd = Command::new(plow_bin());
     cmd.env_remove("CI")
         .env_remove("GITHUB_ACTIONS")
         .env_remove("GITLAB_CI")
         .env_remove("DO_NOT_TRACK")
-        .env_remove("FALLOW_TELEMETRY_DISABLED")
-        .env_remove("FALLOW_AGENT_SOURCE")
-        .env_remove("FALLOW_INTEGRATION_SURFACE")
-        .env_remove("FALLOW_MCP_TOOL")
-        .env("FALLOW_TELEMETRY", "inspect")
+        .env_remove("PLOW_TELEMETRY_DISABLED")
+        .env_remove("PLOW_AGENT_SOURCE")
+        .env_remove("PLOW_INTEGRATION_SURFACE")
+        .env_remove("PLOW_MCP_TOOL")
+        .env("PLOW_TELEMETRY", "inspect")
         .env("HOME", home.path())
         .env("XDG_CONFIG_HOME", home.path().join(".config"))
         .env("APPDATA", home.path().join("AppData"))
@@ -224,7 +224,7 @@ fn inspect_event_output(
     for (key, value) in extra_env {
         cmd.env(key, value);
     }
-    let raw = cmd.output().expect("failed to run fallow binary");
+    let raw = cmd.output().expect("failed to run plow binary");
     let output = common::CommandOutput {
         stdout: String::from_utf8_lossy(&raw.stdout).to_string(),
         stderr: String::from_utf8_lossy(&raw.stderr).to_string(),
@@ -459,7 +459,7 @@ fn dupes_on_clean_project_sets_findings_present_false() {
 fn file_scoped_custom_rules_file_output_are_coarse_context_dimensions() {
     let dir = tempfile::tempdir().expect("temp project");
     write_clean_project(dir.path());
-    let config_path = dir.path().join(".fallowrc.json");
+    let config_path = dir.path().join(".plowrc.json");
     let output_path = dir.path().join("report.json");
     fs::write(
         &config_path,
@@ -815,7 +815,7 @@ fn review_output_reports_comment_limit_truncation() {
     let (event, output) = inspect_event_output(
         dir.path(),
         &["dead-code", "--format", "review-github", "--quiet"],
-        &[("FALLOW_MAX_COMMENTS", "1")],
+        &[("PLOW_MAX_COMMENTS", "1")],
     );
 
     assert_eq!(
@@ -928,8 +928,8 @@ fn mcp_surface_override_tags_event_with_tool() {
         dir.path(),
         &["dupes", "--format", "json", "--quiet"],
         &[
-            ("FALLOW_INTEGRATION_SURFACE", "mcp"),
-            ("FALLOW_MCP_TOOL", "find_dupes"),
+            ("PLOW_INTEGRATION_SURFACE", "mcp"),
+            ("PLOW_MCP_TOOL", "find_dupes"),
         ],
     );
     assert_eq!(
@@ -949,13 +949,13 @@ fn off_allowlist_mcp_tool_is_dropped() {
         dir.path(),
         &["dupes", "--format", "json", "--quiet"],
         &[
-            ("FALLOW_INTEGRATION_SURFACE", "mcp"),
-            ("FALLOW_MCP_TOOL", "/etc/passwd"),
+            ("PLOW_INTEGRATION_SURFACE", "mcp"),
+            ("PLOW_MCP_TOOL", "/etc/passwd"),
         ],
     );
     assert_eq!(event["integration_surface"].as_str(), Some("mcp"));
     assert!(
         event.get("mcp_tool").is_none(),
-        "an off-allowlist FALLOW_MCP_TOOL value must be dropped, never echoed"
+        "an off-allowlist PLOW_MCP_TOOL value must be dropped, never echoed"
     );
 }

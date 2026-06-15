@@ -140,7 +140,7 @@ fn is_package_specifier(specifier: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_config::EntryPointRole;
+    use plow_config::EntryPointRole;
 
     #[test]
     fn activates_from_varlock_dependency_prefix_or_schema_file() {

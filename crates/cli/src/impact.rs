@@ -1,9 +1,9 @@
-//! Fallow Impact: local, opt-in value reporting.
+//! Plow Impact: local, opt-in value reporting.
 
 use std::path::{Path, PathBuf};
 
-use fallow_types::envelope::Meta;
-use fallow_types::results::{ActiveSuppression, AnalysisResults};
+use plow_types::envelope::Meta;
+use plow_types::results::{ActiveSuppression, AnalysisResults};
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
 
@@ -25,7 +25,7 @@ const STORE_FILE: &str = "impact.json";
 /// removes per-project store files whose file mtime is older than N days,
 /// reclaiming stores left behind by deleted repos. Unset / `0` / unparseable
 /// disables the sweep (default: keep every store forever).
-const STORE_MAX_AGE_ENV: &str = "FALLOW_IMPACT_STORE_MAX_AGE_DAYS";
+const STORE_MAX_AGE_ENV: &str = "PLOW_IMPACT_STORE_MAX_AGE_DAYS";
 
 const MAX_RECENT_RESOLVED: usize = 50;
 
@@ -178,7 +178,7 @@ pub struct ImpactStore {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_digest_epoch: Option<u64>,
     /// Repo display name (the git-toplevel BASENAME only, never a full path),
-    /// captured at record time so the cross-repo `fallow impact --all` view can
+    /// captured at record time so the cross-repo `plow impact --all` view can
     /// label rows legibly without reversing the opaque project-key hash. Absent
     /// on pre-v5 stores (rows fall back to the short key) and on stores written
     /// by older builds. v5.
@@ -188,7 +188,7 @@ pub struct ImpactStore {
 
 /// Deserialize-only view of a pre-relocation in-repo store (schema <= 3), whose
 /// `frontier` / `clone_frontier` were FLAT (not worktree-namespaced). Used once
-/// during migration to import a legacy `.fallow/impact.json` into the user
+/// during migration to import a legacy `.plow/impact.json` into the user
 /// store. Every field carries `#[serde(default)]` so any of v1/v2/v3 reads.
 #[derive(Debug, Default, Deserialize)]
 struct LegacyFlatStore {
@@ -258,7 +258,7 @@ impl LegacyFlatStore {
 
 /// Process-global memo of `(project_key, worktree_key)` per analyzed root, so
 /// the git subprocesses that derive them run at most once per root per run
-/// (`fallow audit` is the perf-priority path and `load` is called several
+/// (`plow audit` is the perf-priority path and `load` is called several
 /// times per invocation).
 /// `(project_key, worktree_key, display_name)` for a root.
 type ProjectIdentity = (String, String, Option<String>);
@@ -292,7 +292,7 @@ fn resolve_or_root(resolved: Option<PathBuf>, root: &Path) -> PathBuf {
 
 /// The repo's display name for cross-repo rows: the folder that owns the shared
 /// `.git` (stable across worktrees), else the directory's own basename. This is
-/// a BASENAME only (e.g. `fallow`), never a full path, so persisting it does not
+/// a BASENAME only (e.g. `plow`), never a full path, so persisting it does not
 /// reintroduce the absolute path the store relocation deliberately dropped.
 fn repo_basename(common_or_dir: &Path) -> Option<String> {
     let dir = if common_or_dir.file_name().is_some_and(|n| n == ".git") {
@@ -310,7 +310,7 @@ fn repo_basename(common_or_dir: &Path) -> Option<String> {
 /// so concurrent worktrees do not prune each other's baseline); `display_name`
 /// is the repo's basename for legible cross-repo rows. All three derive from a
 /// single common-dir + toplevel resolution so the git subprocesses run at most
-/// once per root per run (`fallow audit` is the perf-priority path).
+/// once per root per run (`plow audit` is the perf-priority path).
 fn project_identity(root: &Path) -> ProjectIdentity {
     let cache = IDENTITY_CACHE.get_or_init(|| std::sync::Mutex::new(FxHashMap::default()));
     if let Ok(map) = cache.lock()
@@ -319,11 +319,11 @@ fn project_identity(root: &Path) -> ProjectIdentity {
         return found.clone();
     }
     let common = resolve_or_root(
-        fallow_core::changed_files::resolve_git_common_dir(root).ok(),
+        plow_core::changed_files::resolve_git_common_dir(root).ok(),
         root,
     );
     let toplevel = resolve_or_root(
-        fallow_core::changed_files::resolve_git_toplevel(root).ok(),
+        plow_core::changed_files::resolve_git_toplevel(root).ok(),
         root,
     );
     let identity = (
@@ -355,7 +355,7 @@ thread_local! {
     static TEST_FORCE_CI: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-/// Fallow's per-user config dir. Under test it resolves ONLY the per-test
+/// Plow's per-user config dir. Under test it resolves ONLY the per-test
 /// override (or `None` when unset), so a test never reads or writes the real
 /// developer config dir and parallel tests stay isolated.
 fn impact_config_dir() -> Option<PathBuf> {
@@ -398,10 +398,10 @@ fn store_path(root: &Path) -> Option<PathBuf> {
     )
 }
 
-/// Path to a project's legacy in-repo store (`<root>/.fallow/impact.json`),
+/// Path to a project's legacy in-repo store (`<root>/.plow/impact.json`),
 /// read ONCE for migration into the user store, never written.
 fn legacy_store_path(root: &Path) -> PathBuf {
-    root.join(".fallow").join(STORE_FILE)
+    root.join(".plow").join(STORE_FILE)
 }
 
 /// Load the store. Missing or unreadable files fall back to defaults; unreadable
@@ -413,7 +413,7 @@ pub fn load(root: &Path) -> ImpactStore {
     match std::fs::read_to_string(&path) {
         Ok(content) => parse_store(&content, &path),
         // No user-store file yet: attempt a one-time import of a legacy in-repo
-        // `.fallow/impact.json` (pre-relocation). Returns default if none.
+        // `.plow/impact.json` (pre-relocation). Returns default if none.
         Err(_) => migrate_legacy_store(root),
     }
 }
@@ -423,7 +423,7 @@ fn parse_store(content: &str, path: &Path) -> ImpactStore {
         Ok(store) => {
             if store.schema_version > STORE_SCHEMA_VERSION {
                 tracing::warn!(
-                    "fallow impact: store at {} has schema_version {} but this build understands up to {}; reading it as best-effort, fields this build does not know are dropped on the next write. Upgrade fallow to read it fully.",
+                    "plow impact: store at {} has schema_version {} but this build understands up to {}; reading it as best-effort, fields this build does not know are dropped on the next write. Upgrade plow to read it fully.",
                     path.display(),
                     store.schema_version,
                     STORE_SCHEMA_VERSION,
@@ -433,7 +433,7 @@ fn parse_store(content: &str, path: &Path) -> ImpactStore {
         }
         Err(err) => {
             tracing::warn!(
-                "fallow impact: ignoring unreadable store at {} ({err}); run `fallow impact enable` to reset it",
+                "plow impact: ignoring unreadable store at {} ({err}); run `plow impact enable` to reset it",
                 path.display()
             );
             ImpactStore::default()
@@ -453,7 +453,7 @@ fn save(store: &ImpactStore, root: &Path) {
         return;
     }
     if let Ok(json) = serde_json::to_string_pretty(store) {
-        let _ = fallow_config::atomic_write(&path, json.as_bytes());
+        let _ = plow_config::atomic_write(&path, json.as_bytes());
     }
 }
 
@@ -465,7 +465,7 @@ fn lock_path_for(store: &Path) -> PathBuf {
 }
 
 /// Advisory lock serialising the load -> mutate -> save critical section of an
-/// Impact record across concurrent `fallow` processes.
+/// Impact record across concurrent `plow` processes.
 ///
 /// Two worktrees of the same repo collapse to the SAME store key (and SAME
 /// store path), so a pre-commit gate firing in both at once would otherwise
@@ -568,7 +568,7 @@ fn sweep_old_stores(keep_key: &str, max_age: std::time::Duration) {
     }
 }
 
-/// One-time import of a pre-relocation in-repo `.fallow/impact.json` into the
+/// One-time import of a pre-relocation in-repo `.plow/impact.json` into the
 /// user store. The legacy store had a FLAT frontier (schema <= 3); this reads
 /// it via [`LegacyFlatStore`] and wraps the flat frontier under the current
 /// worktree key. The legacy file is left byte-for-byte untouched (it is no
@@ -623,7 +623,7 @@ pub fn disable(root: &Path) -> bool {
     was_enabled
 }
 
-/// A due periodic value digest: the headline counters for "what has fallow
+/// A due periodic value digest: the headline counters for "what has plow
 /// done for you here". Returned by [`take_due_digest`] at most once per
 /// `DIGEST_INTERVAL_SECS` per project.
 #[derive(Debug, Clone, Copy)]
@@ -692,7 +692,7 @@ pub enum EnabledSource {
     Default,
 }
 
-/// The user-global Impact default, stored at `<config-dir>/fallow/impact.json`
+/// The user-global Impact default, stored at `<config-dir>/plow/impact.json`
 /// (sibling to `telemetry.json`). A single toggle: when on, new projects record
 /// without a per-repo `enable`. A per-repo explicit decision always wins.
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -729,7 +729,7 @@ pub fn set_global_default(on: bool) -> bool {
             default_enabled: on,
         };
         if let Ok(json) = serde_json::to_string_pretty(&config) {
-            let _ = fallow_config::atomic_write(&path, json.as_bytes());
+            let _ = plow_config::atomic_write(&path, json.as_bytes());
         }
     }
     was != on
@@ -771,7 +771,7 @@ pub fn resolved_project_key(root: &Path) -> String {
     project_identity(root).0
 }
 
-/// The per-project store directory (`<config-dir>/fallow/impact/`), for the
+/// The per-project store directory (`<config-dir>/plow/impact/`), for the
 /// `impact --all` human discoverability footer. `None` when no config dir.
 #[must_use]
 pub fn store_dir() -> Option<PathBuf> {
@@ -783,7 +783,7 @@ pub fn reset(root: &Path) -> bool {
     store_path(root).is_some_and(|p| std::fs::remove_file(&p).is_ok())
 }
 
-/// Delete the whole per-project impact dir (`<config-dir>/fallow/impact/`).
+/// Delete the whole per-project impact dir (`<config-dir>/plow/impact/`).
 /// Does NOT touch the global default toggle (`impact.json`): a data wipe should
 /// not silently re-disable an opt-in the user made. Returns whether the dir was
 /// present and removed.
@@ -1172,7 +1172,7 @@ fn classify_file_disappearances(input: &mut FileDisappearancesInput<'_>) {
                 continue; // moved to another file this run
             }
             if covered_by(&new_supp_kinds, &pf.kind) {
-                suppressed += 1; // conservative: a fresh fallow-ignore, never a win
+                suppressed += 1; // conservative: a fresh plow-ignore, never a win
             } else {
                 resolved.push(pf.clone());
             }
@@ -1559,13 +1559,13 @@ pub fn collect_complexity_findings(
 /// is stable across pure relocation.
 #[must_use]
 pub fn collect_clone_findings(
-    report: &fallow_core::duplicates::DuplicationReport,
+    report: &plow_core::duplicates::DuplicationReport,
 ) -> Vec<CloneInput> {
     report
         .clone_groups
         .iter()
         .map(|g| CloneInput {
-            fingerprint: fallow_core::duplicates::clone_fingerprint(&g.instances),
+            fingerprint: plow_core::duplicates::clone_fingerprint(&g.instances),
             instance_paths: g.instances.iter().map(|i| i.file.clone()).collect(),
         })
         .collect()
@@ -1622,7 +1622,7 @@ fn direction_for(delta: i64) -> ImpactTrendDirection {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum ImpactReportSchemaVersion {
-    /// First release of the `fallow impact --format json` shape.
+    /// First release of the `plow impact --format json` shape.
     #[serde(rename = "1")]
     V1,
 }
@@ -1630,7 +1630,7 @@ pub enum ImpactReportSchemaVersion {
 /// The rendered impact report, derived purely from the store (no analysis run).
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(feature = "schema", schemars(title = "fallow impact --format json"))]
+#[cfg_attr(feature = "schema", schemars(title = "plow impact --format json"))]
 pub struct ImpactReport {
     /// Output-shape version for this report, so JSON consumers have a
     /// forward-compat signal independent of the on-disk store version. Always
@@ -1658,7 +1658,7 @@ pub struct ImpactReport {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub latest_git_sha: Option<String>,
     /// Counts from the most recent recorded run. These are CHANGED-FILE scoped
-    /// (each record comes from a `fallow audit` run, whose default `new-only`
+    /// (each record comes from a `plow audit` run, whose default `new-only`
     /// gate counts only findings in the changed files of that run), NOT a
     /// whole-project total.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1666,24 +1666,24 @@ pub struct ImpactReport {
     /// Trend between the two most recent records. None until two records exist.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trend: Option<TrendSummary>,
-    /// Counts from the most recent whole-project `fallow` run. WHOLE-PROJECT
+    /// Counts from the most recent whole-project `plow` run. WHOLE-PROJECT
     /// scope (not changed-file), so this is the current issue total across the
     /// whole repo, context next to the actionable changed-file `surfacing`
-    /// count. None until a full `fallow` run has been recorded. v1.6.
+    /// count. None until a full `plow` run has been recorded. v1.6.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_surfacing: Option<ImpactCounts>,
     /// Trend between the two most recent whole-project records. Comparable over
     /// time (same whole-project denominator every run), unlike the changed-file
-    /// `trend`. None until two full `fallow` runs exist. v1.6.
+    /// `trend`. None until two full `plow` runs exist. v1.6.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_trend: Option<TrendSummary>,
     pub containment_count: usize,
     /// Most recent containment events (newest last), capped for display.
     pub recent_containment: Vec<ContainmentEvent>,
-    /// Lifetime count of findings fallow credits as genuinely resolved (code
-    /// removed or refactored, never a `fallow-ignore`). v1.5.
+    /// Lifetime count of findings plow credits as genuinely resolved (code
+    /// removed or refactored, never a `plow-ignore`). v1.5.
     pub resolved_total: usize,
-    /// Lifetime count of findings silenced by a newly-added `fallow-ignore`.
+    /// Lifetime count of findings silenced by a newly-added `plow-ignore`.
     /// Reported as honest context, never as a win. v1.5.
     pub suppressed_total: usize,
     /// Most recent resolution events (newest last), capped for display. v1.5.
@@ -1779,7 +1779,7 @@ pub fn build_report(store: &ImpactStore) -> ImpactReport {
     }
 }
 
-// ----- Cross-repo aggregate view (`fallow impact --all`) -------------------
+// ----- Cross-repo aggregate view (`plow impact --all`) -------------------
 
 /// Independent wire-version for the cross-repo report, on its own cadence (it
 /// versions separately from the per-project `ImpactReportSchemaVersion` and the
@@ -1787,7 +1787,7 @@ pub fn build_report(store: &ImpactStore) -> ImpactReport {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum CrossRepoImpactSchemaVersion {
-    /// First release of the `fallow impact --all --format json` shape.
+    /// First release of the `plow impact --all --format json` shape.
     #[serde(rename = "1")]
     V1,
 }
@@ -1801,7 +1801,7 @@ pub struct CrossRepoTotals {
     pub suppressed_total: usize,
     pub containment_count: usize,
     /// Sum of whole-project issue totals across projects that have a full-run
-    /// baseline, as of EACH project's last full `fallow` run (not a simultaneous
+    /// baseline, as of EACH project's last full `plow` run (not a simultaneous
     /// snapshot).
     pub project_wide_issues: usize,
     pub projects_with_baseline: usize,
@@ -1822,17 +1822,17 @@ pub struct CrossRepoProjectEntry {
     /// whole-project), for the LAST RUN column and the default `recent` sort.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_recorded: Option<String>,
-    /// The full per-project report (identical shape to `fallow impact --format
+    /// The full per-project report (identical shape to `plow impact --format
     /// json`), reused verbatim so the per-project wire contract is the sub-shape.
     pub report: ImpactReport,
 }
 
-/// The cross-repo aggregate report (`fallow impact --all --format json`).
+/// The cross-repo aggregate report (`plow impact --all --format json`).
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
     feature = "schema",
-    schemars(title = "fallow impact --all --format json")
+    schemars(title = "plow impact --all --format json")
 )]
 pub struct CrossRepoImpactReport {
     pub schema_version: CrossRepoImpactSchemaVersion,
@@ -1871,7 +1871,7 @@ fn latest_activity(store: &ImpactStore) -> Option<String> {
     }
 }
 
-/// Enumerate every per-project store in `<config-dir>/fallow/impact/`, returning
+/// Enumerate every per-project store in `<config-dir>/plow/impact/`, returning
 /// `(project_key, store)` pairs plus the count of files that failed to parse.
 /// Read-only; never writes. The global `impact.json` toggle is a sibling FILE of
 /// this dir (one level up), so it is naturally excluded. Corrupt/newer-schema
@@ -2003,9 +2003,9 @@ pub fn aggregate(sort: CrossRepoSort) -> CrossRepoImpactReport {
 
 /// Render the whole-project view for the human report. Deliberately understated
 /// (one count line, one trend line, one caveat) rather than a co-equal header:
-/// the project track advances only on local full `fallow` runs, not CI, so it is
+/// the project track advances only on local full `plow` runs, not CI, so it is
 /// context for the changed-file story above, not the headline. Renders nothing
-/// when no full `fallow` run has been recorded yet.
+/// when no full `plow` run has been recorded yet.
 #[expect(
     clippy::format_push_string,
     reason = "small report renderer; readability over avoiding the extra allocation"
@@ -2015,7 +2015,7 @@ fn render_project_section(out: &mut String, report: &ImpactReport) {
         return;
     };
     out.push_str(&format!(
-        "  WHOLE PROJECT (whole-repo context, not a to-do)\n    {} issue{} across the whole project at your last full `fallow` run\n",
+        "  WHOLE PROJECT (whole-repo context, not a to-do)\n    {} issue{} across the whole project at your last full `plow` run\n",
         s.total_issues,
         plural(s.total_issues),
     ));
@@ -2026,9 +2026,9 @@ fn render_project_section(out: &mut String, report: &ImpactReport) {
             t.previous_total, t.current_total, arrow,
         ));
     } else {
-        out.push_str("    project trend starts after your next full `fallow` run\n");
+        out.push_str("    project trend starts after your next full `plow` run\n");
     }
-    out.push_str("      advances only on your local full `fallow` runs, not CI\n\n");
+    out.push_str("      advances only on your local full `plow` runs, not CI\n\n");
 }
 
 /// Render the report as human-readable text.
@@ -2038,11 +2038,11 @@ fn render_project_section(out: &mut String, report: &ImpactReport) {
 )]
 pub fn render_human(report: &ImpactReport) -> String {
     let mut out = String::new();
-    out.push_str("FALLOW IMPACT\n\n");
+    out.push_str("PLOW IMPACT\n\n");
 
     if !report.enabled {
         out.push_str(
-            "Impact tracking is off. Enable it with `fallow impact enable`, then\n\
+            "Impact tracking is off. Enable it with `plow impact enable`, then\n\
              let your pre-commit gate run a few times to build history.\n",
         );
         return out;
@@ -2050,23 +2050,23 @@ pub fn render_human(report: &ImpactReport) -> String {
 
     if report.enabled_source == EnabledSource::User {
         out.push_str(
-            "Enabled by your user-global default (`fallow impact default on`). Run\n\
-             `fallow impact disable` to opt this project out.\n\n",
+            "Enabled by your user-global default (`plow impact default on`). Run\n\
+             `plow impact disable` to opt this project out.\n\n",
         );
     }
 
     if report.record_count == 0 && report.project_surfacing.is_none() {
         out.push_str(
             "Tracking enabled. No history yet: check back after your next few\n\
-             commits (Impact records each `fallow audit` / pre-commit gate run,\n\
-             and each full `fallow` run for the whole-project view).\n",
+             commits (Impact records each `plow audit` / pre-commit gate run,\n\
+             and each full `plow` run for the whole-project view).\n",
         );
         return out;
     }
 
     if let Some(s) = &report.surfacing {
         out.push_str(&format!(
-            "  LATEST RUN (changed files, act on these now)\n    {} issue{} flagged in your last `fallow audit` run\n",
+            "  LATEST RUN (changed files, act on these now)\n    {} issue{} flagged in your last `plow audit` run\n",
             s.total_issues,
             plural(s.total_issues),
         ));
@@ -2087,14 +2087,14 @@ pub fn render_human(report: &ImpactReport) -> String {
     render_project_section(&mut out, report);
 
     out.push_str(&format!(
-        "  CONTAINED AT COMMIT\n    {} time{} fallow blocked a commit until it was fixed\n",
+        "  CONTAINED AT COMMIT\n    {} time{} plow blocked a commit until it was fixed\n",
         report.containment_count,
         plural(report.containment_count),
     ));
 
     if report.resolved_total > 0 {
         out.push_str(&format!(
-            "\n  RESOLVED\n    {} finding{} you cleared since fallow started tracking\n",
+            "\n  RESOLVED\n    {} finding{} you cleared since plow started tracking\n",
             report.resolved_total,
             plural(report.resolved_total),
         ));
@@ -2108,7 +2108,7 @@ pub fn render_human(report: &ImpactReport) -> String {
         }
     } else if report.attribution_active {
         out.push_str(
-            "\n  RESOLVED\n    none yet; a finding is credited when fallow re-analyzes the\n      file it left (a fix that reverts a file to its base state\n      may not be individually credited)\n",
+            "\n  RESOLVED\n    none yet; a finding is credited when plow re-analyzes the\n      file it left (a fix that reverts a file to its base state\n      may not be individually credited)\n",
         );
     } else {
         out.push_str("\n  RESOLVED\n    resolution tracking starts from your next gate run\n");
@@ -2116,7 +2116,7 @@ pub fn render_human(report: &ImpactReport) -> String {
 
     if report.suppressed_total > 0 {
         out.push_str(&format!(
-            "      {} finding{} you marked intentional (fallow-ignore), not counted as resolved\n",
+            "      {} finding{} you marked intentional (plow-ignore), not counted as resolved\n",
             report.suppressed_total,
             plural(report.suppressed_total),
         ));
@@ -2142,7 +2142,7 @@ pub fn render_human(report: &ImpactReport) -> String {
     }
     out.push_str(
         "Resolution tracking is a local-developer signal: it accrues on your\n\
-         machine across runs, not in CI (fallow never records there).\n",
+         machine across runs, not in CI (plow never records there).\n",
     );
     out
 }
@@ -2150,7 +2150,7 @@ pub fn render_human(report: &ImpactReport) -> String {
 /// Render the report as JSON.
 pub fn render_json(report: &ImpactReport) -> String {
     let value = crate::output_envelope::serialize_root_output(
-        crate::output_envelope::FallowOutput::Impact(report.clone()),
+        crate::output_envelope::PlowOutput::Impact(report.clone()),
     )
     .unwrap_or_else(|_| serde_json::json!({"error":"failed to serialize impact report"}));
     serde_json::to_string_pretty(&value)
@@ -2159,7 +2159,7 @@ pub fn render_json(report: &ImpactReport) -> String {
 
 /// Render the whole-project view for the markdown report. One understated line
 /// plus a trend line when available, matching the human renderer's framing.
-/// Renders nothing when no full `fallow` run has been recorded yet.
+/// Renders nothing when no full `plow` run has been recorded yet.
 #[expect(
     clippy::format_push_string,
     reason = "small report renderer; readability over avoiding the extra allocation"
@@ -2169,7 +2169,7 @@ fn render_project_markdown(out: &mut String, report: &ImpactReport) {
         return;
     };
     out.push_str(&format!(
-        "- **Whole project (whole-repo context, last full `fallow` run):** {} issue{} (dead code {}, complexity {}, duplication {})\n",
+        "- **Whole project (whole-repo context, last full `plow` run):** {} issue{} (dead code {}, complexity {}, duplication {})\n",
         s.total_issues,
         plural(s.total_issues),
         s.dead_code,
@@ -2192,10 +2192,10 @@ fn render_project_markdown(out: &mut String, report: &ImpactReport) {
 )]
 pub fn render_markdown(report: &ImpactReport) -> String {
     let mut out = String::new();
-    out.push_str("## Fallow impact\n\n");
+    out.push_str("## Plow impact\n\n");
 
     if !report.enabled {
-        out.push_str("Impact tracking is off. Run `fallow impact enable` to start.\n");
+        out.push_str("Impact tracking is off. Run `plow impact enable` to start.\n");
         return out;
     }
     if report.record_count == 0 && report.project_surfacing.is_none() {
@@ -2240,7 +2240,7 @@ pub fn render_markdown(report: &ImpactReport) -> String {
     }
     if report.suppressed_total > 0 {
         out.push_str(&format!(
-            "- **Marked intentional:** {} finding{} (`fallow-ignore`), not counted as resolved\n",
+            "- **Marked intentional:** {} finding{} (`plow-ignore`), not counted as resolved\n",
             report.suppressed_total,
             plural(report.suppressed_total),
         ));
@@ -2268,7 +2268,7 @@ pub fn render_markdown(report: &ImpactReport) -> String {
 #[must_use]
 pub fn render_cross_repo_json(report: &CrossRepoImpactReport) -> String {
     let value = crate::output_envelope::serialize_root_output(
-        crate::output_envelope::FallowOutput::ImpactCrossRepo(report.clone()),
+        crate::output_envelope::PlowOutput::ImpactCrossRepo(report.clone()),
     )
     .unwrap_or_else(
         |_| serde_json::json!({"error":"failed to serialize cross-repo impact report"}),
@@ -2306,20 +2306,20 @@ fn row_trend(report: &ImpactReport) -> &'static str {
 #[must_use]
 pub fn render_cross_repo_human(report: &CrossRepoImpactReport, limit: Option<usize>) -> String {
     let mut out = String::new();
-    out.push_str("FALLOW IMPACT (ALL PROJECTS)\n\n");
+    out.push_str("PLOW IMPACT (ALL PROJECTS)\n\n");
 
     if report.project_count == 0 {
         if report.unreadable_count > 0 {
             out.push_str(&format!(
                 "No readable projects: skipped {} unreadable store{} (corrupt, or written by \
-                 a newer fallow). Upgrade fallow to read them.\n",
+                 a newer plow). Upgrade plow to read them.\n",
                 report.unreadable_count,
                 plural(report.unreadable_count),
             ));
         } else {
             out.push_str(
-                "No projects tracked yet. Enable in a repo with `fallow impact enable`, or for \
-                 every project with `fallow impact default on`.\n",
+                "No projects tracked yet. Enable in a repo with `plow impact enable`, or for \
+                 every project with `plow impact default on`.\n",
             );
         }
         return out;
@@ -2417,7 +2417,7 @@ pub fn render_cross_repo_human(report: &CrossRepoImpactReport, limit: Option<usi
 #[must_use]
 pub fn render_cross_repo_markdown(report: &CrossRepoImpactReport) -> String {
     let mut out = String::new();
-    out.push_str("## Fallow impact (all projects)\n\n");
+    out.push_str("## Plow impact (all projects)\n\n");
     if report.project_count == 0 {
         if report.unreadable_count > 0 {
             out.push_str(&format!(
@@ -2771,14 +2771,14 @@ mod tests {
         let root = dir.path();
         enable(root);
         // The user-store relocation means enable never touches the repo: no
-        // .gitignore mutation and no in-repo .fallow/ dir.
+        // .gitignore mutation and no in-repo .plow/ dir.
         assert!(
             !root.join(".gitignore").exists(),
             "enable must not create or modify the repo's .gitignore"
         );
         assert!(
-            !root.join(".fallow").exists(),
-            "enable must not create an in-repo .fallow/ dir"
+            !root.join(".plow").exists(),
+            "enable must not create an in-repo .plow/ dir"
         );
         // The decision IS persisted, in the user store.
         let store = load(root);
@@ -3433,7 +3433,7 @@ mod tests {
 
     /// Record a WHOLE-PROJECT run via the real combined-track recorder
     /// (`record_combined_run` with `Scope::WholeProject`), exercising the same
-    /// path `combined.rs` uses on a full `fallow` run.
+    /// path `combined.rs` uses on a full `plow` run.
     fn run_wp(
         root: &Path,
         findings: Vec<FindingInput>,
@@ -3618,7 +3618,7 @@ mod tests {
         );
         assert!(human.contains("1 issue across the whole project"));
         assert!(
-            human.contains("project trend starts after your next full `fallow` run"),
+            human.contains("project trend starts after your next full `plow` run"),
             "single project record => no trend line, shows the next-run hint"
         );
         assert!(human.contains("Tracking since 2026-05-30"));
@@ -3659,7 +3659,7 @@ mod tests {
             "changed-file section renders before whole-project"
         );
         assert!(human.contains("45 -> 40 (down) across your last two full runs"));
-        assert!(human.contains("advances only on your local full `fallow` runs, not CI"));
+        assert!(human.contains("advances only on your local full `plow` runs, not CI"));
     }
 
     #[test]
@@ -3675,9 +3675,7 @@ mod tests {
         );
         let md = render_markdown(&r);
         assert!(
-            md.contains(
-                "- **Whole project (whole-repo context, last full `fallow` run):** 1 issue"
-            ),
+            md.contains("- **Whole project (whole-repo context, last full `plow` run):** 1 issue"),
             "project-only md must render the labeled whole-project line"
         );
         assert!(
@@ -3787,7 +3785,7 @@ mod tests {
             "resolved_total":2,
             "frontier":{"src/a.ts":{"findings":[{"id":"x","kind":"unused-export","symbol":"foo"}],"suppressions":[]}},
             "containment":[]}"#;
-        std::fs::create_dir_all(root.join(".fallow")).unwrap();
+        std::fs::create_dir_all(root.join(".plow")).unwrap();
         std::fs::write(legacy_store_path(root), legacy).unwrap();
 
         let store = load(root);
@@ -4054,8 +4052,8 @@ mod tests {
     #[test]
     fn lock_path_appends_lock_suffix() {
         assert_eq!(
-            lock_path_for(Path::new("/c/fallow/impact/abc.json")),
-            PathBuf::from("/c/fallow/impact/abc.json.lock")
+            lock_path_for(Path::new("/c/plow/impact/abc.json")),
+            PathBuf::from("/c/plow/impact/abc.json.lock")
         );
     }
 

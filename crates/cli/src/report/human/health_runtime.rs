@@ -58,9 +58,8 @@ pub(super) fn render_runtime_coverage(
         production.watermark,
         Some(crate::health_types::RuntimeCoverageWatermark::LicenseExpiredGrace)
     ) {
-        lines.push(
-            "  license expired grace active; refresh with `fallow license refresh`".to_owned(),
-        );
+        lines
+            .push("  license expired grace active; refresh with `plow license refresh`".to_owned());
     }
     render_capture_quality_warning(lines, production);
     let shown_findings = production.findings.len().min(MAX_FLAT_ITEMS);
@@ -160,6 +159,6 @@ fn render_upgrade_prompt(
             .to_owned(),
     );
     lines.push(
-        "  start a trial: `fallow license activate --trial --email you@company.com`".to_owned(),
+        "  start a trial: `plow license activate --trial --email you@company.com`".to_owned(),
     );
 }

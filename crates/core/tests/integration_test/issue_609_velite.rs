@@ -62,7 +62,7 @@ fn velite_config_content_roots_and_generated_output_are_used() {
     write(root.join("orphan.ts"), "export const orphan = true;\n");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files: Vec<String> = results
         .unused_files

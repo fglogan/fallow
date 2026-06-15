@@ -1,4 +1,4 @@
-use fallow_config::{ResolvedConfig, RulesConfig, Severity};
+use plow_config::{ResolvedConfig, RulesConfig, Severity};
 
 /// Remove issues whose effective severity is `Off` from the results.
 ///
@@ -6,7 +6,7 @@ use fallow_config::{ResolvedConfig, RulesConfig, Severity};
 /// file-scoped issue types. Circular dependencies resolve against every file in
 /// the cycle. Non-file-scoped issues (unused deps, unlisted deps, duplicate
 /// exports) use the base rules only.
-pub fn apply_rules(results: &mut fallow_core::results::AnalysisResults, config: &ResolvedConfig) {
+pub fn apply_rules(results: &mut plow_core::results::AnalysisResults, config: &ResolvedConfig) {
     let rules = &config.rules;
     let has_overrides = !config.overrides.is_empty();
 
@@ -70,7 +70,7 @@ pub fn apply_rules(results: &mut fallow_core::results::AnalysisResults, config: 
 }
 
 fn apply_file_override_rules(
-    results: &mut fallow_core::results::AnalysisResults,
+    results: &mut plow_core::results::AnalysisResults,
     config: &ResolvedConfig,
 ) {
     results
@@ -207,7 +207,7 @@ fn apply_file_override_rules(
     });
 }
 
-fn apply_base_file_rules(results: &mut fallow_core::results::AnalysisResults, rules: &RulesConfig) {
+fn apply_base_file_rules(results: &mut plow_core::results::AnalysisResults, rules: &RulesConfig) {
     if rules.unused_files == Severity::Off {
         results.unused_files.clear();
     }
@@ -268,7 +268,7 @@ fn apply_base_file_rules(results: &mut fallow_core::results::AnalysisResults, ru
 }
 
 fn apply_boundary_override_rules(
-    results: &mut fallow_core::results::AnalysisResults,
+    results: &mut plow_core::results::AnalysisResults,
     config: &ResolvedConfig,
 ) {
     results.boundary_violations.retain(|v| {
@@ -303,7 +303,7 @@ fn apply_boundary_override_rules(
 /// file-scoped issue types to determine if any individual issue has Error
 /// severity. Circular dependencies resolve against every file in the cycle.
 pub fn has_error_severity_issues(
-    results: &fallow_core::results::AnalysisResults,
+    results: &plow_core::results::AnalysisResults,
     rules: &RulesConfig,
     config: Option<&ResolvedConfig>,
 ) -> bool {
@@ -319,7 +319,7 @@ pub fn has_error_severity_issues(
 }
 
 fn has_override_file_scoped_error(
-    results: &fallow_core::results::AnalysisResults,
+    results: &plow_core::results::AnalysisResults,
     config: &ResolvedConfig,
 ) -> bool {
     results
@@ -459,7 +459,7 @@ fn has_override_file_scoped_error(
 }
 
 fn has_default_file_scoped_error(
-    results: &fallow_core::results::AnalysisResults,
+    results: &plow_core::results::AnalysisResults,
     rules: &RulesConfig,
 ) -> bool {
     (rules.unused_files == Severity::Error && !results.unused_files.is_empty())
@@ -498,7 +498,7 @@ fn has_default_file_scoped_error(
 }
 
 fn has_project_level_error(
-    results: &fallow_core::results::AnalysisResults,
+    results: &plow_core::results::AnalysisResults,
     rules: &RulesConfig,
     has_overrides: bool,
 ) -> bool {
@@ -542,7 +542,7 @@ fn has_project_level_error(
         || results
             .policy_violations
             .iter()
-            .any(|v| v.violation.severity == fallow_core::results::PolicyViolationSeverity::Error)
+            .any(|v| v.violation.severity == plow_core::results::PolicyViolationSeverity::Error)
 }
 
 /// Promote all `Warn` severities to `Error` for a single run.
@@ -662,8 +662,8 @@ pub fn promote_warns_to_errors(rules: &mut RulesConfig) {
 /// severity baked by the evaluator, so the rule-level promotion in
 /// [`promote_warns_to_errors`] alone would not flip findings whose rule
 /// explicitly opted down to `warn`; under strict mode every warning fails.
-pub fn promote_policy_finding_warns(results: &mut fallow_core::results::AnalysisResults) {
-    use fallow_core::results::PolicyViolationSeverity;
+pub fn promote_policy_finding_warns(results: &mut plow_core::results::AnalysisResults) {
+    use plow_core::results::PolicyViolationSeverity;
     for finding in &mut results.policy_violations {
         if finding.violation.severity == PolicyViolationSeverity::Warn {
             finding.violation.severity = PolicyViolationSeverity::Error;
@@ -677,8 +677,8 @@ mod tests {
 
     type RuleFieldSetter = fn(&mut RulesConfig);
     type ResultFieldCheck = fn(&AnalysisResults) -> bool;
-    use fallow_core::extract::MemberKind;
-    use fallow_core::results::*;
+    use plow_core::extract::MemberKind;
+    use plow_core::results::*;
     use std::path::PathBuf;
 
     fn make_results() -> AnalysisResults {
@@ -790,7 +790,7 @@ mod tests {
 
     /// Build a minimal ResolvedConfig from a RulesConfig for testing.
     fn config_with_rules(rules: RulesConfig) -> ResolvedConfig {
-        fallow_config::FallowConfig {
+        plow_config::PlowConfig {
             schema: None,
             extends: vec![],
             entry: vec![],
@@ -802,34 +802,34 @@ mod tests {
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
             ignore_dependency_overrides: vec![],
-            ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+            ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             ignore_decorators: vec![],
-            duplicates: fallow_config::DuplicatesConfig::default(),
-            health: fallow_config::HealthConfig::default(),
+            duplicates: plow_config::DuplicatesConfig::default(),
+            health: plow_config::HealthConfig::default(),
             rules,
-            boundaries: fallow_config::BoundaryConfig::default(),
+            boundaries: plow_config::BoundaryConfig::default(),
             production: false.into(),
             plugins: vec![],
             rule_packs: vec![],
             dynamically_loaded: vec![],
             overrides: vec![],
             regression: None,
-            audit: fallow_config::AuditConfig::default(),
+            audit: plow_config::AuditConfig::default(),
             codeowners: None,
             public_packages: vec![],
-            flags: fallow_config::FlagsConfig::default(),
-            security: fallow_config::SecurityConfig::default(),
-            fix: fallow_config::FixConfig::default(),
-            resolve: fallow_config::ResolveConfig::default(),
+            flags: plow_config::FlagsConfig::default(),
+            security: plow_config::SecurityConfig::default(),
+            fix: plow_config::FixConfig::default(),
+            resolve: plow_config::ResolveConfig::default(),
             sealed: false,
             include_entry_exports: false,
             auto_imports: false,
-            cache: fallow_config::CacheConfig::default(),
+            cache: plow_config::CacheConfig::default(),
         }
         .resolve(
             PathBuf::from("/project"),
-            fallow_config::OutputFormat::Human,
+            plow_config::OutputFormat::Human,
             1,
             true,
             true,
@@ -1123,7 +1123,7 @@ mod tests {
 
     /// Build a ResolvedConfig with overrides that turn off unused_exports for test files.
     fn config_with_test_override() -> ResolvedConfig {
-        fallow_config::FallowConfig {
+        plow_config::PlowConfig {
             schema: None,
             extends: vec![],
             entry: vec![],
@@ -1135,32 +1135,32 @@ mod tests {
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
             ignore_dependency_overrides: vec![],
-            ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+            ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             ignore_decorators: vec![],
-            duplicates: fallow_config::DuplicatesConfig::default(),
-            health: fallow_config::HealthConfig::default(),
+            duplicates: plow_config::DuplicatesConfig::default(),
+            health: plow_config::HealthConfig::default(),
             rules: RulesConfig::default(), // all Error
-            boundaries: fallow_config::BoundaryConfig::default(),
+            boundaries: plow_config::BoundaryConfig::default(),
             production: false.into(),
             plugins: vec![],
             rule_packs: vec![],
             dynamically_loaded: vec![],
             regression: None,
-            audit: fallow_config::AuditConfig::default(),
+            audit: plow_config::AuditConfig::default(),
             codeowners: None,
             public_packages: vec![],
-            flags: fallow_config::FlagsConfig::default(),
-            security: fallow_config::SecurityConfig::default(),
-            fix: fallow_config::FixConfig::default(),
-            resolve: fallow_config::ResolveConfig::default(),
+            flags: plow_config::FlagsConfig::default(),
+            security: plow_config::SecurityConfig::default(),
+            fix: plow_config::FixConfig::default(),
+            resolve: plow_config::ResolveConfig::default(),
             sealed: false,
             include_entry_exports: false,
             auto_imports: false,
-            cache: fallow_config::CacheConfig::default(),
-            overrides: vec![fallow_config::ConfigOverride {
+            cache: plow_config::CacheConfig::default(),
+            overrides: vec![plow_config::ConfigOverride {
                 files: vec!["**/*.test.ts".to_string()],
-                rules: fallow_config::PartialRulesConfig {
+                rules: plow_config::PartialRulesConfig {
                     unused_exports: Some(Severity::Off),
                     ..Default::default()
                 },
@@ -1168,7 +1168,7 @@ mod tests {
         }
         .resolve(
             PathBuf::from("/project"),
-            fallow_config::OutputFormat::Human,
+            plow_config::OutputFormat::Human,
             1,
             true,
             true,
@@ -1177,7 +1177,7 @@ mod tests {
     }
 
     fn config_with_circular_override(pattern: &str, severity: Severity) -> ResolvedConfig {
-        fallow_config::FallowConfig {
+        plow_config::PlowConfig {
             schema: None,
             extends: vec![],
             entry: vec![],
@@ -1189,32 +1189,32 @@ mod tests {
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
             ignore_dependency_overrides: vec![],
-            ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+            ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             ignore_decorators: vec![],
-            duplicates: fallow_config::DuplicatesConfig::default(),
-            health: fallow_config::HealthConfig::default(),
+            duplicates: plow_config::DuplicatesConfig::default(),
+            health: plow_config::HealthConfig::default(),
             rules: RulesConfig::default(),
-            boundaries: fallow_config::BoundaryConfig::default(),
+            boundaries: plow_config::BoundaryConfig::default(),
             production: false.into(),
             plugins: vec![],
             rule_packs: vec![],
             dynamically_loaded: vec![],
             regression: None,
-            audit: fallow_config::AuditConfig::default(),
+            audit: plow_config::AuditConfig::default(),
             codeowners: None,
             public_packages: vec![],
-            flags: fallow_config::FlagsConfig::default(),
-            security: fallow_config::SecurityConfig::default(),
-            fix: fallow_config::FixConfig::default(),
-            resolve: fallow_config::ResolveConfig::default(),
+            flags: plow_config::FlagsConfig::default(),
+            security: plow_config::SecurityConfig::default(),
+            fix: plow_config::FixConfig::default(),
+            resolve: plow_config::ResolveConfig::default(),
             sealed: false,
             include_entry_exports: false,
             auto_imports: false,
-            cache: fallow_config::CacheConfig::default(),
-            overrides: vec![fallow_config::ConfigOverride {
+            cache: plow_config::CacheConfig::default(),
+            overrides: vec![plow_config::ConfigOverride {
                 files: vec![pattern.to_string()],
-                rules: fallow_config::PartialRulesConfig {
+                rules: plow_config::PartialRulesConfig {
                     circular_dependencies: Some(severity),
                     ..Default::default()
                 },
@@ -1222,7 +1222,7 @@ mod tests {
         }
         .resolve(
             PathBuf::from("/project"),
-            fallow_config::OutputFormat::Human,
+            plow_config::OutputFormat::Human,
             1,
             true,
             true,
@@ -1231,7 +1231,7 @@ mod tests {
     }
 
     fn config_with_boundary_override(pattern: &str, severity: Severity) -> ResolvedConfig {
-        fallow_config::FallowConfig {
+        plow_config::PlowConfig {
             schema: None,
             extends: vec![],
             entry: vec![],
@@ -1243,32 +1243,32 @@ mod tests {
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
             ignore_dependency_overrides: vec![],
-            ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+            ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             ignore_decorators: vec![],
-            duplicates: fallow_config::DuplicatesConfig::default(),
-            health: fallow_config::HealthConfig::default(),
+            duplicates: plow_config::DuplicatesConfig::default(),
+            health: plow_config::HealthConfig::default(),
             rules: RulesConfig::default(),
-            boundaries: fallow_config::BoundaryConfig::default(),
+            boundaries: plow_config::BoundaryConfig::default(),
             production: false.into(),
             plugins: vec![],
             rule_packs: vec![],
             dynamically_loaded: vec![],
             regression: None,
-            audit: fallow_config::AuditConfig::default(),
+            audit: plow_config::AuditConfig::default(),
             codeowners: None,
             public_packages: vec![],
-            flags: fallow_config::FlagsConfig::default(),
-            security: fallow_config::SecurityConfig::default(),
-            fix: fallow_config::FixConfig::default(),
-            resolve: fallow_config::ResolveConfig::default(),
+            flags: plow_config::FlagsConfig::default(),
+            security: plow_config::SecurityConfig::default(),
+            fix: plow_config::FixConfig::default(),
+            resolve: plow_config::ResolveConfig::default(),
             sealed: false,
             include_entry_exports: false,
             auto_imports: false,
-            cache: fallow_config::CacheConfig::default(),
-            overrides: vec![fallow_config::ConfigOverride {
+            cache: plow_config::CacheConfig::default(),
+            overrides: vec![plow_config::ConfigOverride {
                 files: vec![pattern.to_string()],
-                rules: fallow_config::PartialRulesConfig {
+                rules: plow_config::PartialRulesConfig {
                     boundary_violation: Some(severity),
                     ..Default::default()
                 },
@@ -1276,7 +1276,7 @@ mod tests {
         }
         .resolve(
             PathBuf::from("/project"),
-            fallow_config::OutputFormat::Human,
+            plow_config::OutputFormat::Human,
             1,
             true,
             true,

@@ -4,7 +4,7 @@ use super::common::{create_config, fixture_path};
 fn svelte_typed_prop_member_access_credits_class_members() {
     let root = fixture_path("issue-752-svelte-template-typed-props");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused: Vec<(&str, &str)> = results
         .unused_class_members

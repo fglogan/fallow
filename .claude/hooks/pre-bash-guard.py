@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Pre-Bash guard for fallow agent sessions.
+"""Pre-Bash guard for plow agent sessions.
 
 Detection works on a quote-aware token walk rather than raw-string regex, so a
-command that only *mentions* `fallow`/`git commit` as data (a heredoc, an echo,
+command that only *mentions* `plow`/`git commit` as data (a heredoc, an echo,
 a test fixture) is never flagged, while chained or env-prefixed real invocations
-(`cargo fmt && git commit`, `A=1 git commit`, `cat x | fallow`) still are.
+(`cargo fmt && git commit`, `A=1 git commit`, `cat x | plow`) still are.
 """
 import json
 import os
@@ -20,7 +20,7 @@ SEPARATORS = {";", "&&", "||", "|", "&", "|&"}
 CARGO_NOISY = {"build", "test", "clippy", "doc"}
 # Commands that, in the final pipeline position, bound what reaches the terminal.
 BOUNDING_PAGERS = {"tail", "head", "less", "more", "wc", "grep", "rg"}
-# npm-style wrappers that fetch and run a *different* fallow binary.
+# npm-style wrappers that fetch and run a *different* plow binary.
 WRAPPERS = {"npx", "bunx"}
 ENV_ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
@@ -38,7 +38,7 @@ def main() -> int:
     if not command:
         return 0
 
-    if "SKIP_FALLOW_AGENT_GUARD=1" in command:
+    if "SKIP_PLOW_AGENT_GUARD=1" in command:
         return 0
 
     cwd = Path(str(payload.get("cwd") or os.getcwd())).resolve()
@@ -50,18 +50,18 @@ def main() -> int:
     if commands is None:
         return 0
 
-    if uses_foreign_fallow(commands):
+    if uses_foreign_plow(commands):
         deny(
-            "Use `cargo run --bin fallow --` (builds if needed) or `./target/debug/fallow` "
-            "inside this checkout instead of an installed `fallow`. "
-            "Set `SKIP_FALLOW_AGENT_GUARD=1` only when you intentionally need a different binary."
+            "Use `cargo run --bin plow --` (builds if needed) or `./target/debug/plow` "
+            "inside this checkout instead of an installed `plow`. "
+            "Set `SKIP_PLOW_AGENT_GUARD=1` only when you intentionally need a different binary."
         )
         return 0
 
     if uses_unbounded_workspace_cargo(command, commands):
         deny(
             "Redirect full workspace cargo output to a log and return only the tail, for example "
-            "`cargo test --workspace --all-targets > /tmp/fallow-test.log 2>&1; tail -80 /tmp/fallow-test.log`."
+            "`cargo test --workspace --all-targets > /tmp/plow-test.log 2>&1; tail -80 /tmp/plow-test.log`."
         )
         return 0
 
@@ -71,7 +71,7 @@ def main() -> int:
             deny(
                 "VS Code extension runtime files are staged without the committed dist bundle. "
                 "Run `pnpm --dir editors/vscode run build` and `pnpm --dir editors/vscode run check:dist`, "
-                "or set `SKIP_FALLOW_AGENT_GUARD=1` if this commit is intentionally source-only."
+                "or set `SKIP_PLOW_AGENT_GUARD=1` if this commit is intentionally source-only."
             )
 
     return 0
@@ -99,8 +99,8 @@ def find_repo_root(cwd: Path) -> Path | None:
 def command_positions(command: str) -> list[list[str]] | None:
     """Split a command line into the argv of each pipeline/list segment.
 
-    shlex is quote-aware, so `echo "a && fallow b"` yields a single data token
-    and never a command-position `fallow`. Returns None when the line cannot be
+    shlex is quote-aware, so `echo "a && plow b"` yields a single data token
+    and never a command-position `plow`. Returns None when the line cannot be
     tokenized (an unbalanced quote means we should not guess).
     """
     try:
@@ -130,12 +130,12 @@ def strip_env(segment: list[str]) -> list[str]:
     return segment[index:]
 
 
-def uses_foreign_fallow(commands: list[list[str]]) -> bool:
+def uses_foreign_plow(commands: list[list[str]]) -> bool:
     for argv in commands:
         name = Path(argv[0]).name
-        if name == "fallow" and not is_local_target(argv[0]):
+        if name == "plow" and not is_local_target(argv[0]):
             return True
-        if name in WRAPPERS and len(argv) >= 2 and argv[1] == "fallow":
+        if name in WRAPPERS and len(argv) >= 2 and argv[1] == "plow":
             return True
     return False
 

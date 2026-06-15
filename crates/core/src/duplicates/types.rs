@@ -2,9 +2,9 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 
-use fallow_types::serde_path;
+use plow_types::serde_path;
 
-pub use fallow_config::{DetectionMode, DuplicatesConfig};
+pub use plow_config::{DetectionMode, DuplicatesConfig};
 
 /// A single instance of duplicated code at a specific location.
 #[derive(Debug, Clone, Serialize)]

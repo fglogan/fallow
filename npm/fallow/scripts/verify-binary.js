@@ -1,7 +1,7 @@
-// Ed25519 + SHA-256 binary verification for the fallow npm wrapper.
+// Ed25519 + SHA-256 binary verification for the plow npm wrapper.
 //
 // Verifies each platform binary against a .sig file shipped alongside it in
-// the @fallow-cli/<platform> package, then cross-checks the binary bytes
+// the @plow-cli/<platform> package, then cross-checks the binary bytes
 // against an expected SHA-256 digest. The .sig is produced at release time
 // by `.github/scripts/sign-binary.mjs` using the workflow's
 // ED25519_BINARY_SIGNING_PRIVATE_KEY secret. The matching public key (32 raw
@@ -9,7 +9,7 @@
 // the VS Code extension at editors/vscode/src/download.ts:19-22.
 //
 // SHA-256 digest source (in order of preference, refs #465 and #597):
-//   1. `fallowDigests` field in the platform package's package.json, written
+//   1. `plowDigests` field in the platform package's package.json, written
 //      at release time by the `npm-prep` job. This is the steady-state path:
 //      no network traffic, immune to GitHub API rate limits.
 //   2. Fallback: GitHub Release asset digest via the public REST API. Kept
@@ -19,7 +19,7 @@
 //      that failure mode is what motivated #597.
 //
 // Triggered from scripts/postinstall.js and from the GitHub Action installer
-// at action/scripts/install.sh. The escape hatch FALLOW_SKIP_BINARY_VERIFY=1
+// at action/scripts/install.sh. The escape hatch PLOW_SKIP_BINARY_VERIFY=1
 // is documented in SECURITY.md.
 //
 // No external dependencies: uses node:crypto and node:fs only.
@@ -30,12 +30,12 @@ const https = require("node:https");
 const path = require("node:path");
 const { getPlatformPackage } = require("./platform-package");
 
-const GITHUB_REPO = "fallow-rs/fallow";
+const GITHUB_REPO = "fglogan/genesis-plow";
 const DIGEST_TIMEOUT_MS = 10000;
 
 // 32-byte Ed25519 public key, identical to BINARY_SIGNING_PUBLIC_KEY in
 // editors/vscode/src/download.ts:19-22 and to the ED25519_BINARY_SIGNING_PUBLIC_KEY
-// repo variable on fallow-rs/fallow. Embedded rather than fetched so verification
+// repo variable on fglogan/genesis-plow. Embedded rather than fetched so verification
 // works offline and cannot be silently downgraded by tampering with the network
 // path.
 const EMBEDDED_PUBLIC_KEY = Buffer.from([
@@ -50,7 +50,7 @@ const ED25519_SPKI_HEADER = Buffer.from([
   0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00,
 ]);
 
-const SKIP_ENV = "FALLOW_SKIP_BINARY_VERIFY";
+const SKIP_ENV = "PLOW_SKIP_BINARY_VERIFY";
 
 function buildPublicKey(rawPubKey) {
   if (!Buffer.isBuffer(rawPubKey) || rawPubKey.length !== 32) {
@@ -188,7 +188,7 @@ function httpsJson(url, redirects = 0) {
   return new Promise((resolve, reject) => {
     const request = https.get(
       url,
-      { headers: { "User-Agent": "fallow-binary-verifier" }, timeout: DIGEST_TIMEOUT_MS },
+      { headers: { "User-Agent": "plow-binary-verifier" }, timeout: DIGEST_TIMEOUT_MS },
       (response) => {
         if (
           response.statusCode &&
@@ -263,7 +263,7 @@ function platformPackageDir(pkg, resolveFrom) {
 
 // Read the SHA-256 digest for a binary embedded in the platform package's
 // package.json (written by the npm-prep job at release time as
-// `fallowDigests[<filename>]`). Returns the normalized digest hex or null
+// `plowDigests[<filename>]`). Returns the normalized digest hex or null
 // when the manifest does not exist, cannot be parsed, lacks the field, or
 // the value is malformed. Refs #597.
 function readEmbeddedDigest(manifestPath, binaryFileName) {
@@ -279,7 +279,7 @@ function readEmbeddedDigest(manifestPath, binaryFileName) {
   if (!manifest || typeof manifest !== "object") {
     return null;
   }
-  const digests = manifest.fallowDigests;
+  const digests = manifest.plowDigests;
   if (!digests || typeof digests !== "object") {
     return null;
   }
@@ -294,9 +294,9 @@ function binaryTargetsForPlatform(platformId) {
   const isWindows = typeof platformId === "string" && platformId.startsWith("win32");
   const ext = isWindows ? ".exe" : "";
   return [
-    { binary: `fallow${ext}`, asset: `fallow-${platformId}${ext}` },
-    { binary: `fallow-lsp${ext}`, asset: `fallow-lsp-${platformId}${ext}` },
-    { binary: `fallow-mcp${ext}`, asset: `fallow-mcp-${platformId}${ext}` },
+    { binary: `plow${ext}`, asset: `plow-${platformId}${ext}` },
+    { binary: `plow-lsp${ext}`, asset: `plow-lsp-${platformId}${ext}` },
+    { binary: `plow-mcp${ext}`, asset: `plow-mcp-${platformId}${ext}` },
   ];
 }
 
@@ -389,11 +389,11 @@ function resolvePlatformPackageForVerify(opts) {
     manifestPath,
     pkg,
     version: manifest.version,
-    platformId: pkg.replace(/^@fallow-cli\//, ""),
+    platformId: pkg.replace(/^@plow-cli\//, ""),
   };
 }
 
-// Signed platform binaries ship from fallow 2.77.0 onward (the `.sig` staging
+// Signed platform binaries ship from plow 2.77.0 onward (the `.sig` staging
 // step, the `files` entries, and this verifier all landed in #488, first
 // released in 2.77.0). A resolved version below this epoch has no signature and
 // never will (npm is immutable), so its missing-sig failure is expected and the
@@ -429,7 +429,7 @@ function isPreSigningVersion(version) {
 // version (no signature exists and never will, so the fix is to upgrade the
 // pin) from a >=2.77.0 package whose signature is unexpectedly absent (a
 // tampering signal). Each message gives the CONSTRUCTIVE fix only; the bypass
-// escape hatch (FALLOW_SKIP_BINARY_VERIFY) is owned by the caller's trailer and
+// escape hatch (PLOW_SKIP_BINARY_VERIFY) is owned by the caller's trailer and
 // SECURITY.md, deliberately not surfaced here so a tampering victim is never
 // nudged to bypass and the env is not normalized in CI logs.
 function describeSigMissing(result, version) {
@@ -437,11 +437,11 @@ function describeSigMissing(result, version) {
     return result;
   }
   const message = isPreSigningVersion(version)
-    ? `${result.message}. fallow ${version} predates signed binaries (signatures ship in 2.77.0 ` +
-      `and later), so this package has no signature to verify. Bump the \`fallow\` dependency in ` +
-      `your project's package.json to >=2.77.0 (for example \`npm install fallow@latest\`).`
-    : `${result.message}. fallow ${version} should be signed but its signature is missing; the ` +
-      `platform package may be tampered with or incomplete. Reinstall with \`npm install fallow@latest\` ` +
+    ? `${result.message}. plow ${version} predates signed binaries (signatures ship in 2.77.0 ` +
+      `and later), so this package has no signature to verify. Bump the \`plow\` dependency in ` +
+      `your project's package.json to >=2.77.0 (for example \`npm install plow@latest\`).`
+    : `${result.message}. plow ${version} should be signed but its signature is missing; the ` +
+      `platform package may be tampered with or incomplete. Reinstall with \`npm install plow@latest\` ` +
       `and report it if it persists on a clean install.`;
   return { ...result, message };
 }
@@ -501,7 +501,7 @@ async function verifyOneBinary(target, dir, pkg, manifestPath, verifyFn, digestP
 // a useful error.
 //
 // options:
-//   allowSkipEnv  - if false, ignore FALLOW_SKIP_BINARY_VERIFY. Default true.
+//   allowSkipEnv  - if false, ignore PLOW_SKIP_BINARY_VERIFY. Default true.
 //   dirOverride   - absolute path to a directory containing the binaries.
 //                   Skips platform-package resolution entirely. Test-only
 //                   knob; production call sites must not pass it.
@@ -549,21 +549,21 @@ async function verifyInstalled(options) {
   return { ok: true, package: pkg, version };
 }
 
-// Synchronous variant used by the lazy-verify first-run path in bin/fallow,
-// bin/fallow-lsp, and bin/fallow-mcp. Matches verifyInstalled's result shape
+// Synchronous variant used by the lazy-verify first-run path in bin/plow,
+// bin/plow-lsp, and bin/plow-mcp. Matches verifyInstalled's result shape
 // but never falls back to the GitHub Release API: callers that need network
 // fallback must use the async verifyInstalled instead. This keeps bin-wrapper
 // startup synchronous and bounded.
 //
 // options:
-//   allowSkipEnv   - if false, ignore FALLOW_SKIP_BINARY_VERIFY. Default true.
+//   allowSkipEnv   - if false, ignore PLOW_SKIP_BINARY_VERIFY. Default true.
 //   dirOverride    - test-only directory containing binaries.
 //   verifyFn       - replaces verifyBinaryAt for tests.
 //   digestProvider - sync function ({ assetName, binaryPath, packageName, version })
 //                    returning a sha256 digest string or null. When absent and
 //                    no embedded digest is present, returns a
 //                    `digest-unavailable` error pointing the user at
-//                    `npm install fallow@latest` (the embedded-digest field
+//                    `npm install plow@latest` (the embedded-digest field
 //                    landed in 2.78.1 / #597; pre-#597 platform packages
 //                    cannot be lazily verified). When supplied (tests), used
 //                    in place of the embedded-digest read.
@@ -599,7 +599,7 @@ function verifyInstalledSync(options) {
 
 // Sync counterpart to verifyOneBinary. Different from the async version in
 // three ways: no `await`, the missing-embedded-digest path returns a clear
-// actionable error pointing the user at `npm install fallow@latest` (since
+// actionable error pointing the user at `npm install plow@latest` (since
 // there is no network fallback in lazy mode), and the digestProvider is
 // optional (tests inject one; production callers rely on the embedded digest).
 function verifyOneBinarySync(target, dir, pkg, manifestPath, verifyFn, digestProvider, version) {
@@ -628,8 +628,8 @@ function verifyOneBinarySync(target, dir, pkg, manifestPath, verifyFn, digestPro
       code: "digest-unavailable",
       message:
         `no embedded SHA-256 digest for ${target.binary} in ${pkg} ` +
-        `(platform package predates fallow 2.78.1). ` +
-        `Run \`npm install fallow@latest\` to refresh, or set ${SKIP_ENV}=1 ` +
+        `(platform package predates plow 2.78.1). ` +
+        `Run \`npm install plow@latest\` to refresh, or set ${SKIP_ENV}=1 ` +
         `to bypass verification (logged once per process).`,
       binary: binaryPath,
       package: pkg,

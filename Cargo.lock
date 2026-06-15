@@ -92,7 +92,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -103,7 +103,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -415,7 +415,7 @@ version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "faf9468729b8cbcea668e36183cb69d317348c2e08e994829fb56ebfdfbaac34"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -856,120 +856,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
-]
-
-[[package]]
-name = "fallow-cli"
-version = "2.96.0"
-dependencies = [
- "base64",
- "bitcode",
- "clap",
- "colored",
- "dunce",
- "ed25519-dalek",
- "fallow-config",
- "fallow-core",
- "fallow-cov-protocol",
- "fallow-license",
- "fallow-types",
- "fallow-v8-coverage",
- "globset",
- "http",
- "httpdate",
- "ignore",
- "insta",
- "jsonc-parser",
- "miette",
- "notify",
- "oxc_coverage_instrument",
- "oxc_span",
- "proc-macro2",
- "proptest",
- "rayon",
- "rustc-hash 2.1.2",
- "schemars",
- "semver",
- "serde",
- "serde_json",
- "serde_yaml_ng",
- "sha2 0.11.0",
- "signal-hook",
- "similar 3.1.1",
- "srcmap-sourcemap",
- "syn",
- "tempfile",
- "toml",
- "tracing",
- "tracing-subscriber",
- "ureq",
- "url",
  "windows-sys 0.61.2",
- "xxhash-rust",
-]
-
-[[package]]
-name = "fallow-config"
-version = "2.96.0"
-dependencies = [
- "dunce",
- "fallow-types",
- "glob",
- "globset",
- "jsonc-parser",
- "miette",
- "proptest",
- "rustc-hash 2.1.2",
- "schemars",
- "serde",
- "serde_json",
- "serde_yaml_ng",
- "tempfile",
- "toml",
- "toml_edit",
- "tracing",
- "ureq",
- "xxhash-rust",
-]
-
-[[package]]
-name = "fallow-core"
-version = "2.96.0"
-dependencies = [
- "bitcode",
- "criterion",
- "dhat",
- "dunce",
- "fallow-config",
- "fallow-extract",
- "fallow-graph",
- "fallow-types",
- "glob",
- "globset",
- "ignore",
- "indicatif",
- "oxc_allocator",
- "oxc_ast",
- "oxc_ast_visit",
- "oxc_parser",
- "oxc_semantic",
- "oxc_span",
- "oxc_str",
- "oxc_syntax",
- "proptest",
- "rayon",
- "regex",
- "rustc-hash 2.1.2",
- "schemars",
- "serde",
- "serde_json",
- "serde_yaml_ng",
- "tempfile",
- "toml",
- "tracing",
- "tracing-subscriber",
- "xxhash-rust",
 ]
 
 [[package]]
@@ -981,126 +868,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
-]
-
-[[package]]
-name = "fallow-extract"
-version = "2.96.0"
-dependencies = [
- "bitcode",
- "fallow-cov-protocol",
- "fallow-types",
- "oxc_allocator",
- "oxc_ast",
- "oxc_ast_visit",
- "oxc_parser",
- "oxc_semantic",
- "oxc_span",
- "oxc_str",
- "proptest",
- "rayon",
- "regex",
- "rustc-hash 2.1.2",
- "tracing",
- "xxhash-rust",
-]
-
-[[package]]
-name = "fallow-graph"
-version = "2.96.0"
-dependencies = [
- "dunce",
- "fallow-config",
- "fallow-types",
- "fixedbitset",
- "globset",
- "jsonc-parser",
- "oxc_resolver",
- "oxc_span",
- "proptest",
- "rayon",
- "rustc-hash 2.1.2",
- "serde_json",
- "tempfile",
- "tracing",
-]
-
-[[package]]
-name = "fallow-license"
-version = "2.96.0"
-dependencies = [
- "base64",
- "ed25519-dalek",
- "rand 0.8.6",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "fallow-lsp"
-version = "2.96.0"
-dependencies = [
- "fallow-config",
- "fallow-core",
- "futures",
- "globset",
- "ls-types",
- "rustc-hash 2.1.2",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tower",
- "tower-lsp-server",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "fallow-mcp"
-version = "2.96.0"
-dependencies = [
- "fallow-types",
- "regex",
- "rmcp",
- "rquickjs",
- "schemars",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "fallow-node"
-version = "2.96.0"
-dependencies = [
- "fallow-cli",
- "napi",
- "napi-build",
- "napi-derive",
- "serde_json",
-]
-
-[[package]]
-name = "fallow-types"
-version = "2.96.0"
-dependencies = [
- "bitcode",
- "oxc_span",
- "proptest",
- "schemars",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "fallow-v8-coverage"
-version = "2.96.0"
-dependencies = [
- "proptest",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -2024,7 +1791,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2686,6 +2453,239 @@ dependencies = [
 ]
 
 [[package]]
+name = "plow-cli"
+version = "2.96.0"
+dependencies = [
+ "base64",
+ "bitcode",
+ "clap",
+ "colored",
+ "dunce",
+ "ed25519-dalek",
+ "fallow-cov-protocol",
+ "globset",
+ "http",
+ "httpdate",
+ "ignore",
+ "insta",
+ "jsonc-parser",
+ "miette",
+ "notify",
+ "oxc_coverage_instrument",
+ "oxc_span",
+ "plow-config",
+ "plow-core",
+ "plow-license",
+ "plow-types",
+ "plow-v8-coverage",
+ "proc-macro2",
+ "proptest",
+ "rayon",
+ "rustc-hash 2.1.2",
+ "schemars",
+ "semver",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+ "sha2 0.11.0",
+ "signal-hook",
+ "similar 3.1.1",
+ "srcmap-sourcemap",
+ "syn",
+ "tempfile",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "ureq",
+ "url",
+ "windows-sys 0.61.2",
+ "xxhash-rust",
+]
+
+[[package]]
+name = "plow-config"
+version = "2.96.0"
+dependencies = [
+ "dunce",
+ "glob",
+ "globset",
+ "jsonc-parser",
+ "miette",
+ "plow-types",
+ "proptest",
+ "rustc-hash 2.1.2",
+ "schemars",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+ "tempfile",
+ "toml",
+ "toml_edit",
+ "tracing",
+ "ureq",
+ "xxhash-rust",
+]
+
+[[package]]
+name = "plow-core"
+version = "2.96.0"
+dependencies = [
+ "bitcode",
+ "criterion",
+ "dhat",
+ "dunce",
+ "glob",
+ "globset",
+ "ignore",
+ "indicatif",
+ "oxc_allocator",
+ "oxc_ast",
+ "oxc_ast_visit",
+ "oxc_parser",
+ "oxc_semantic",
+ "oxc_span",
+ "oxc_str",
+ "oxc_syntax",
+ "plow-config",
+ "plow-extract",
+ "plow-graph",
+ "plow-types",
+ "proptest",
+ "rayon",
+ "regex",
+ "rustc-hash 2.1.2",
+ "schemars",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+ "tempfile",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "xxhash-rust",
+]
+
+[[package]]
+name = "plow-extract"
+version = "2.96.0"
+dependencies = [
+ "bitcode",
+ "fallow-cov-protocol",
+ "oxc_allocator",
+ "oxc_ast",
+ "oxc_ast_visit",
+ "oxc_parser",
+ "oxc_semantic",
+ "oxc_span",
+ "oxc_str",
+ "plow-types",
+ "proptest",
+ "rayon",
+ "regex",
+ "rustc-hash 2.1.2",
+ "tracing",
+ "xxhash-rust",
+]
+
+[[package]]
+name = "plow-graph"
+version = "2.96.0"
+dependencies = [
+ "dunce",
+ "fixedbitset",
+ "globset",
+ "jsonc-parser",
+ "oxc_resolver",
+ "oxc_span",
+ "plow-config",
+ "plow-types",
+ "proptest",
+ "rayon",
+ "rustc-hash 2.1.2",
+ "serde_json",
+ "tempfile",
+ "tracing",
+]
+
+[[package]]
+name = "plow-license"
+version = "2.96.0"
+dependencies = [
+ "base64",
+ "ed25519-dalek",
+ "rand 0.8.6",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "plow-lsp"
+version = "2.96.0"
+dependencies = [
+ "futures",
+ "globset",
+ "ls-types",
+ "plow-config",
+ "plow-core",
+ "rustc-hash 2.1.2",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tower",
+ "tower-lsp-server",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "plow-mcp"
+version = "2.96.0"
+dependencies = [
+ "plow-types",
+ "regex",
+ "rmcp",
+ "rquickjs",
+ "schemars",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "plow-node"
+version = "2.96.0"
+dependencies = [
+ "napi",
+ "napi-build",
+ "napi-derive",
+ "plow-cli",
+ "serde_json",
+]
+
+[[package]]
+name = "plow-types"
+version = "2.96.0"
+dependencies = [
+ "bitcode",
+ "oxc_span",
+ "proptest",
+ "schemars",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "plow-v8-coverage"
+version = "2.96.0"
+dependencies = [
+ "proptest",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "portable-atomic"
 version = "1.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3072,7 +3072,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3182,7 +3182,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b55fb86dfd3a2f5f76ea78310a88f96c4ea21a3031f8d212443d56123fd0521"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3565,7 +3565,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3575,7 +3575,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "230a1b821ccbd75b185820a1f1ff7b14d21da1e442e22c0863ea5f08771a8874"
 dependencies = [
  "rustix",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4209,7 +4209,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

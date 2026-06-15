@@ -1,15 +1,15 @@
 # Ecosystem Tests
 
-Tests fallow against real-world open-source TypeScript/JavaScript projects to catch crashes, panics, and regressions that unit tests and fixtures may miss.
+Tests plow against real-world open-source TypeScript/JavaScript projects to catch crashes, panics, and regressions that unit tests and fixtures may miss.
 
 ## What this tests
 
-The script clones popular JS/TS projects (shallow, depth=1), optionally installs their dependencies, and runs `fallow dead-code --format json --quiet` against each one. It distinguishes between:
+The script clones popular JS/TS projects (shallow, depth=1), optionally installs their dependencies, and runs `plow dead-code --format json --quiet` against each one. It distinguishes between:
 
-- **Exit 0** — fallow ran successfully, no issues found (rare for large projects)
-- **Exit 1** — fallow ran successfully, issues found (expected and normal)
-- **Exit 2+** — fallow crashed (panic, parse error, OOM, etc.) — this is a test failure
-- **Timeout** — fallow took longer than 5 minutes on a single project — treated as a crash
+- **Exit 0** — plow ran successfully, no issues found (rare for large projects)
+- **Exit 1** — plow ran successfully, issues found (expected and normal)
+- **Exit 2+** — plow crashed (panic, parse error, OOM, etc.) — this is a test failure
+- **Timeout** — plow took longer than 5 minutes on a single project — treated as a crash
 
 The test passes if no project causes a crash. Finding dead code issues (exit 1) is expected behavior, not a failure.
 
@@ -33,16 +33,16 @@ The test passes if no project causes a crash. Finding dead code issues (exit 1) 
 ## Running locally
 
 ```bash
-# Build and run (builds fallow in release mode first)
+# Build and run (builds plow in release mode first)
 ./tests/ecosystem/run.sh
 
 # Use an existing binary
-./tests/ecosystem/run.sh --fallow-bin ./target/release/fallow
+./tests/ecosystem/run.sh --plow-bin ./target/release/plow
 
 # Or via environment variable
-FALLOW_BIN=./target/release/fallow ./tests/ecosystem/run.sh
+PLOW_BIN=./target/release/plow ./tests/ecosystem/run.sh
 
-# Custom clone directory (default: /tmp/fallow-ecosystem)
+# Custom clone directory (default: /tmp/plow-ecosystem)
 ECOSYSTEM_DIR=~/ecosystem-tests ./tests/ecosystem/run.sh
 ```
 
@@ -76,6 +76,6 @@ The `ecosystem-full.yml` workflow runs:
 - **Weekly** on Sundays at 04:00 UTC (cron schedule)
 - **On demand** via manual workflow_dispatch trigger
 
-It builds fallow in release mode, clones all projects, runs the test script, and uploads JSON results plus per-project stderr logs as artifacts. The workflow fails if any project causes a crash.
+It builds plow in release mode, clones all projects, runs the test script, and uploads JSON results plus per-project stderr logs as artifacts. The workflow fails if any project causes a crash.
 
 There is also a lighter `ecosystem.yml` workflow that runs on push/PR with a smaller set of projects.

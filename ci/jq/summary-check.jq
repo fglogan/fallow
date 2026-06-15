@@ -1,7 +1,7 @@
 # GitLab variant of summary-check.jq
 # Differences from GitHub: no > [!NOTE] / > [!WARNING] / > [!TIP] callouts
 
-def docs(anchor): "https://docs.fallow.tools/explanations/dead-code#" + anchor;
+def docs(anchor): "https://docs.genesis-plow.dev/explanations/dead-code#" + anchor;
 def workspace_context:
   if ((.used_in_workspaces // []) | length) > 0 then
     (.used_in_workspaces | map("`\(.)`") | join(", "))
@@ -19,16 +19,16 @@ def section(name; key; header; fmt):
     "\n<details><summary><strong>\(name) (\($n))</strong></summary>\n\n" +
     header +
     ([.[key][:25][] | fmt] | join("\n")) +
-    (if $n > 25 then "\n\n> \($n - 25) more \u2014 run `fallow` locally for the full list" else "" end) +
+    (if $n > 25 then "\n\n> \($n - 25) more \u2014 run `plow` locally for the full list" else "" end) +
     "\n\n</details>\n"
   else "" end;
 
 if .total_issues == 0 then
-  "# Fallow Analysis\n\n" +
+  "# Plow Analysis\n\n" +
   "> **No issues found** \u00b7 \(.elapsed_ms)ms\n\n" +
   "All exports are used, all dependencies are declared, and no issues were detected."
 else
-  "# Fallow Analysis\n\n" +
+  "# Plow Analysis\n\n" +
   "> :warning: **\(.total_issues) issues** found \u00b7 \(.elapsed_ms)ms\n\n" +
   "| Category | Count |\n|----------|------:|\n" +
   ([
@@ -164,10 +164,10 @@ else
     "| `\(.raw_key // "")` | `\(.raw_value // "")` | `\(.source)` | `\(.path):\(.line)` | \(.reason // "unparsable") |") +
   "\n\n" +
   (if ((.unused_exports // []) + (.unused_dependencies // []) + (.unused_enum_members // [])) | length > 0 then
-    "> :bulb: Run `fallow fix --dry-run` to preview safe auto-fixes.\n"
+    "> :bulb: Run `plow fix --dry-run` to preview safe auto-fixes.\n"
   else "" end) +
   (if (.unused_exports // []) | length > 0 then
-    "> :bulb: Intentionally public? Add [`/** @public */`](https://docs.fallow.tools/configuration/suppression) above exports to preserve them.\n"
+    "> :bulb: Intentionally public? Add [`/** @public */`](https://docs.genesis-plow.dev/configuration/suppression) above exports to preserve them.\n"
   else "" end) +
-  "> :bulb: Add [`// fallow-ignore-next-line`](https://docs.fallow.tools/configuration/suppression) above a line to suppress a specific finding."
+  "> :bulb: Add [`// plow-ignore-next-line`](https://docs.genesis-plow.dev/configuration/suppression) above a line to suppress a specific finding."
 end

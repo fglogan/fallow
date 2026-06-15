@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use fallow_types::discover::FileId;
+use plow_types::discover::FileId;
 
 use crate::parse::parse_source_to_module;
 
@@ -131,10 +131,8 @@ fn astro_template_script_src_has_source_span() {
         .iter()
         .find(|i| i.source == "../scripts/foo.ts")
         .expect("script src import extracted");
-    let (line, _col) = fallow_types::extract::byte_offset_to_line_col(
-        &info.line_offsets,
-        import.source_span.start,
-    );
+    let (line, _col) =
+        plow_types::extract::byte_offset_to_line_col(&info.line_offsets, import.source_span.start);
     assert_eq!(line, 4);
     assert_eq!(
         &source[import.source_span.start as usize..import.source_span.end as usize],
@@ -186,7 +184,7 @@ fn astro_inline_script_import_spans_are_original_source_offsets() {
         .find(|i| i.source == "../scripts/bar")
         .expect("inline script import extracted");
     let (line, _col) =
-        fallow_types::extract::byte_offset_to_line_col(&info.line_offsets, import.span.start);
+        plow_types::extract::byte_offset_to_line_col(&info.line_offsets, import.span.start);
     assert_eq!(line, 6);
     assert_eq!(
         &source[import.source_span.start as usize..import.source_span.end as usize],

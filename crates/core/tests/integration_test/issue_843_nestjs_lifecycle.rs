@@ -8,7 +8,7 @@ use crate::common::{create_config, fixture_path};
 fn nestjs_lifecycle_and_handler_methods_credited_but_genuinely_unused_reported() {
     let root = fixture_path("issue-843-nestjs-lifecycle");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused: Vec<String> = results
         .unused_class_members

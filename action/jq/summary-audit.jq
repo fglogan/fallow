@@ -64,7 +64,7 @@ dead_code_rows as $dead_rows |
 (.complexity.findings // []) as $complex_findings |
 duplication_rows as $dupe_rows |
 
-"## Fallow Audit\n\n" +
+"## Plow Audit\n\n" +
 "> \($verdict | verdict_label) · \(plural($files; "changed file")) · \($elapsed)ms\n\n" +
 "| Category | Findings | Introduced | Inherited |\n|:---------|---------:|-----------:|----------:|\n" +
 "| Dead code | \($dead) | \($attr.dead_code_introduced // 0) | \($attr.dead_code_inherited // 0) |\n" +

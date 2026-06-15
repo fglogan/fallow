@@ -3,7 +3,7 @@
 //! This module keeps the wire envelopes typed while preserving the existing
 //! flattened JSON shape.
 
-use fallow_types::output_health::{
+use plow_types::output_health::{
     HealthFindingAction, HealthFindingActionType, HotspotAction, HotspotActionHeuristic,
     HotspotActionType, RefactoringTargetAction, RefactoringTargetActionType,
 };
@@ -255,7 +255,7 @@ fn build_suppress_action(
     {
         return suppress_file_action(
             "Suppress with an HTML comment at the top of the template",
-            "<!-- fallow-ignore-file complexity -->",
+            "<!-- plow-ignore-file complexity -->",
             "top-of-template",
         );
     }
@@ -295,7 +295,7 @@ fn suppress_line_action(description: &str, placement: &str) -> HealthFindingActi
         auto_fixable: false,
         description: description.to_string(),
         note: None,
-        comment: Some("// fallow-ignore-next-line complexity".to_string()),
+        comment: Some("// plow-ignore-next-line complexity".to_string()),
         placement: Some(placement.to_string()),
         target_path: None,
     }
@@ -650,7 +650,7 @@ fn build_refactoring_target_actions(target: &RefactoringTarget) -> Vec<Refactori
             auto_fixable: false,
             description: "Suppress the underlying complexity finding".to_string(),
             category: None,
-            comment: Some("// fallow-ignore-next-line complexity".to_string()),
+            comment: Some("// plow-ignore-next-line complexity".to_string()),
         });
     }
 
@@ -688,7 +688,7 @@ mod hotspot_target_tests {
     use crate::health_types::scores::{
         ContributorEntry, ContributorIdentifierFormat, OwnershipMetrics, OwnershipState,
     };
-    use fallow_core::churn::ChurnTrend;
+    use plow_core::churn::ChurnTrend;
     use std::path::PathBuf;
 
     fn sample_entry(path: &str) -> HotspotEntry {
@@ -980,7 +980,7 @@ mod hotspot_target_tests {
         );
         assert_eq!(
             finding.actions[1].comment.as_deref(),
-            Some("// fallow-ignore-next-line complexity"),
+            Some("// plow-ignore-next-line complexity"),
         );
     }
 

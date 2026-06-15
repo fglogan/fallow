@@ -289,7 +289,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "fallow-config"
+name = "plow-config"
 version = "2.18.0"
 dependencies = [
  "dunce",
@@ -307,14 +307,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "fallow-core"
+name = "plow-core"
 version = "2.18.0"
 dependencies = [
  "dunce",
- "fallow-config",
- "fallow-extract",
- "fallow-graph",
- "fallow-types",
+ "plow-config",
+ "plow-extract",
+ "plow-graph",
+ "plow-types",
  "glob",
  "globset",
  "ignore",
@@ -334,11 +334,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "fallow-extract"
+name = "plow-extract"
 version = "2.18.0"
 dependencies = [
  "bitcode",
- "fallow-types",
+ "plow-types",
  "oxc_allocator",
  "oxc_ast",
  "oxc_ast_visit",
@@ -353,20 +353,20 @@ dependencies = [
 ]
 
 [[package]]
-name = "fallow-fuzz"
+name = "plow-fuzz"
 version = "0.0.0"
 dependencies = [
- "fallow-core",
+ "plow-core",
  "libfuzzer-sys",
 ]
 
 [[package]]
-name = "fallow-graph"
+name = "plow-graph"
 version = "2.18.0"
 dependencies = [
  "dunce",
- "fallow-config",
- "fallow-types",
+ "plow-config",
+ "plow-types",
  "fixedbitset",
  "globset",
  "oxc_resolver",
@@ -377,7 +377,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "fallow-types"
+name = "plow-types"
 version = "2.18.0"
 dependencies = [
  "bitcode",

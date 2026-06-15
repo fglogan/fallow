@@ -3,13 +3,13 @@
  *
  * Writes the same `.d.ts` to two locations atomically:
  *   - editors/vscode/src/generated/output-contract.d.ts (consumed by the extension)
- *   - npm/fallow/types/output-contract.d.ts (published via `fallow/types` subpath)
+ *   - npm/plow/types/output-contract.d.ts (published via `plow/types` subpath)
  *
  * Both are committed to git. `--check` mode regenerates and diffs against both
  * files; CI fails if either drifts.
  *
- * Run: `pnpm --filter fallow-vscode codegen:types`
- *      `pnpm --filter fallow-vscode check:codegen`
+ * Run: `pnpm --filter plow-vscode codegen:types`
+ *      `pnpm --filter plow-vscode check:codegen`
  */
 import { compile } from "json-schema-to-typescript";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -30,7 +30,7 @@ const SCHEMA_VERSION_SOURCE = resolve(
 );
 const OUT_PATHS = [
   resolve(EXTENSION_ROOT, "src", "generated", "output-contract.d.ts"),
-  resolve(REPO_ROOT, "npm", "fallow", "types", "output-contract.d.ts"),
+  resolve(REPO_ROOT, "npm", "plow", "types", "output-contract.d.ts"),
 ];
 
 const BANNER = `/**
@@ -39,7 +39,7 @@ const BANNER = `/**
  * Generated from \`docs/output-schema.json\` by
  * \`editors/vscode/scripts/codegen-types.mjs\`. The same file is written to
  * \`editors/vscode/src/generated/output-contract.d.ts\` (extension internal) and
- * \`npm/fallow/types/output-contract.d.ts\` (published as \`fallow/types\`).
+ * \`npm/plow/types/output-contract.d.ts\` (published as \`plow/types\`).
  *
  * To change a shape:
  *   1. Edit the Rust struct in \`crates/types/src/results.rs\` (or the
@@ -50,10 +50,10 @@ const BANNER = `/**
  *      \`crates/cli/src/report/json.rs\` enforces only a subset of the
  *      contract (the \`HealthFindingAction\` enum). Field-level drift between
  *      Rust and the schema is currently caught by code review.
- *   3. Run \`pnpm --filter fallow-vscode codegen:types\` from anywhere.
+ *   3. Run \`pnpm --filter plow-vscode codegen:types\` from anywhere.
  *   4. Commit both regenerated files alongside the schema edit.
  *
- * CI runs \`pnpm --filter fallow-vscode check:codegen\` which fails when
+ * CI runs \`pnpm --filter plow-vscode check:codegen\` which fails when
  * either committed file disagrees with what regen would produce.
  */
 /* eslint-disable */
@@ -62,7 +62,7 @@ const BANNER = `/**
 const OPTIONS = {
   // Default for objects whose schema does not declare additionalProperties.
   // The schema is intentionally permissive at validation time (forward-compat
-  // for JSON validators on older fallow versions), but for the TypeScript
+  // for JSON validators on older plow versions), but for the TypeScript
   // contract we want closed shapes: missing-field reads should be a compile
   // error, not silent `unknown`.
   additionalProperties: false,
@@ -84,14 +84,14 @@ const OPTIONS = {
  * Strip `title` (and the root `$id`) from the schema before generation.
  * jstt prefers `title` over the definition key (or the explicit name argument
  * passed to `compile`) when naming generated types: documentary titles like
- * "fallow dead-code --format json" otherwise become mangled names like
- * `FallowDeadCodeFormatJson` (plus a duplicate `CheckOutput`), and the root
- * title "Fallow JSON Output Schemas" otherwise becomes `FallowJSONOutputSchemas`
+ * "plow dead-code --format json" otherwise become mangled names like
+ * `PlowDeadCodeFormatJson` (plus a duplicate `CheckOutput`), and the root
+ * title "Plow JSON Output Schemas" otherwise becomes `PlowJSONOutputSchemas`
  * regardless of the second argument to `compile`.
  *
  * `$id` has the same problem: when the root carries
  * `https://raw.githubusercontent.com/.../output-schema.json`, jstt mangles it
- * into `HttpsRawGithubusercontentComFallowRsFallowMainDocsOutputSchemaJson`.
+ * into `HttpsRawGithubusercontentComPlowRsPlowMainDocsOutputSchemaJson`.
  * The published schema needs `$id` for consumer SHA-pinning, but the TS
  * generation does not, so strip it here. `$comment` is documentary and ignored
  * by jstt; left in place.
@@ -210,7 +210,7 @@ function stripTrailingWhitespace(contents) {
  *      duplicate identifier).
  *   2. Append a `{ name, parent, wrapperOnlyFields, description }` row
  *      below.
- *   3. Regenerate via `pnpm --filter fallow-vscode codegen:types`.
+ *   3. Regenerate via `pnpm --filter plow-vscode codegen:types`.
  */
 const FLATTEN_DEDUPED_ALIASES = [
   {
@@ -269,7 +269,7 @@ const FLATTEN_DEDUPED_ALIASES = [
       " * always carried `actions[]` on every clone group via the legacy\n" +
       " * `inject_dupes_actions` post-pass, so the bare alias matching the\n" +
       " * wrapper shape is the byte-faithful continuation. Consumers that\n" +
-      " * imported `CloneGroup` from `fallow/types` pre-migration continue\n" +
+      " * imported `CloneGroup` from `plow/types` pre-migration continue\n" +
       " * to work via this alias; new code should prefer `CloneGroupFinding`.",
   },
   {
@@ -283,7 +283,7 @@ const FLATTEN_DEDUPED_ALIASES = [
       " * `CloneGroupFinding` rather than bare `CloneGroup`, which matches\n" +
       " * the pre-migration wire shape (the legacy `inject_dupes_actions`\n" +
       " * post-pass injected `actions[]` on every nested group too).\n" +
-      " * Consumers that imported `CloneFamily` from `fallow/types`\n" +
+      " * Consumers that imported `CloneFamily` from `plow/types`\n" +
       " * pre-migration continue to work via this alias; new code should\n" +
       " * prefer `CloneFamilyFinding`.",
   },
@@ -293,8 +293,8 @@ const FLATTEN_DEDUPED_ALIASES = [
     wrapperOnlyFields: [],
     description:
       "Backwards-compat alias for the pre-#409 bare attributed-clone-group\n" +
-      " * name (`fallow dupes --group-by` per-bucket attribution).\n" +
-      " * Consumers that imported `AttributedCloneGroup` from `fallow/types`\n" +
+      " * name (`plow dupes --group-by` per-bucket attribution).\n" +
+      " * Consumers that imported `AttributedCloneGroup` from `plow/types`\n" +
       " * pre-migration continue to work via this alias; new code should\n" +
       " * prefer `AttributedCloneGroupFinding`.",
   },
@@ -310,7 +310,7 @@ const FLATTEN_DEDUPED_ALIASES = [
       " * `CloneGroupFinding` / `CloneFamilyFinding` wrappers instead of\n" +
       " * bare findings (the pre-migration wire ALSO carried `actions[]`\n" +
       " * on each item via the legacy `inject_dupes_actions` post-pass).\n" +
-      " * Consumers that imported `DuplicationReport` from `fallow/types`\n" +
+      " * Consumers that imported `DuplicationReport` from `plow/types`\n" +
       " * pre-migration continue to work via this alias; new code should\n" +
       " * prefer `DupesReportPayload`.",
   },
@@ -320,10 +320,10 @@ const FLATTEN_DEDUPED_ALIASES = [
  * Bare-name backwards-compat aliases for the dead-code findings wrapped by
  * the #384 schema-derive ladder. Each maps the pre-wrapper bare name to its
  * `*Finding` envelope. jstt drops the orphan inner definitions because every
- * field is subsumed by the flattening wrapper, so external `fallow/types`
+ * field is subsumed by the flattening wrapper, so external `plow/types`
  * consumers importing the bare names would break at upgrade time without
  * these aliases. The published v2.x stable surface guarantees the bare
- * names; the kind-tagged `FallowOutput` major bump (#413) will remove them
+ * names; the kind-tagged `PlowOutput` major bump (#413) will remove them
  * after one minor cycle of `@deprecated` JSDoc.
  *
  * Generated under the same "Backwards-compat aliases" section as the
@@ -385,7 +385,7 @@ const BARE_DEAD_CODE_UNION_ALIASES = [
 
 /**
  * Header emitted above the appended aliases so the published
- * `npm/fallow/types/output-contract.d.ts` (and the extension-internal
+ * `npm/plow/types/output-contract.d.ts` (and the extension-internal
  * mirror) carry the alias policy inline. Public-consumer reference lives
  * in `docs/backwards-compatibility.md`; this block is the in-file
  * shorthand for npm consumers grepping their `node_modules`.
@@ -399,7 +399,7 @@ const BACKWARDS_COMPAT_ALIASES_HEADER = `
 // The aliases below map pre-#384 / #408 / #409 bare names to their typed
 // envelope wrappers. The wire shape is byte-identical: each wrapper flattens
 // the bare finding's fields via \`#[serde(flatten)]\` and adds \`actions[]\`
-// (and, where the wrapper participates in \`fallow audit\` attribution, the
+// (and, where the wrapper participates in \`plow audit\` attribution, the
 // optional \`introduced\` flag). Per-alias rationale lives in each alias's
 // JSDoc below.
 //
@@ -407,16 +407,16 @@ const BACKWARDS_COMPAT_ALIASES_HEADER = `
 // inner definitions for \`#[serde(flatten)]\` wrappers (even with
 // \`unreachableDefinitions: true\`), so the bare names disappear from this
 // generated \`.d.ts\` without an explicit alias. External consumers that
-// import the bare names from \`fallow/types\` would break at upgrade time
+// import the bare names from \`plow/types\` would break at upgrade time
 // otherwise.
 //
-// Stability commitment: these aliases ship as part of fallow's v2.x stable
+// Stability commitment: these aliases ship as part of plow's v2.x stable
 // surface. They are scheduled for removal alongside the kind-tagged
-// \`FallowOutput\` major bump (see https://github.com/fallow-rs/fallow/issues/413),
+// \`PlowOutput\` major bump (see https://github.com/fglogan/genesis-plow/issues/413),
 // with a one-minor-cycle deprecation window (\`@deprecated\` JSDoc +
 // CHANGELOG headline) preceding the removal. New code should prefer the
 // \`*Finding\` wrapper names. Full public-consumer policy:
-// https://github.com/fallow-rs/fallow/blob/main/docs/backwards-compatibility.md
+// https://github.com/fglogan/genesis-plow/blob/main/docs/backwards-compatibility.md
 //
 `;
 
@@ -431,7 +431,7 @@ function bareDeadCodeAliasDescription(name, parent) {
     ` * The wire shape is byte-identical: \`${parent}\` flattens the bare\n` +
     ` * finding's fields via \`#[serde(flatten)]\` and adds \`actions[]\` plus\n` +
     ` * the optional audit-mode \`introduced\` flag. Consumers that imported\n` +
-    ` * \`${name}\` from \`fallow/types\` pre-migration continue to work via\n` +
+    ` * \`${name}\` from \`plow/types\` pre-migration continue to work via\n` +
     ` * this alias; new code should prefer \`${parent}\`.`
   );
 }
@@ -447,7 +447,7 @@ function bareDeadCodeUnionAliasDescription(name, parents) {
     ` * that replaced the pre-migration bare union. The wire shape per variant\n` +
     ` * is byte-identical (each wrapper flattens its bare payload and adds\n` +
     ` * \`actions[]\` plus optional \`introduced\`). Consumers that imported\n` +
-    ` * \`${name}\` from \`fallow/types\` pre-migration continue to work via\n` +
+    ` * \`${name}\` from \`plow/types\` pre-migration continue to work via\n` +
     ` * this alias; new code should narrow on the specific wrapper variant.`
   );
 }
@@ -562,7 +562,7 @@ async function generate() {
   flattenRefSiblings(parsed);
   // With the root title stripped, jstt uses the second arg as the name of the
   // top-level union type.
-  const raw_ts = await compile(parsed, "FallowJsonOutput", OPTIONS);
+  const raw_ts = await compile(parsed, "PlowJsonOutput", OPTIONS);
   const version = await readRustSchemaVersion();
   const final = appendDedupedFlattenAliases(
     stripTrailingWhitespace(pinSchemaVersion(raw_ts, version)),
@@ -598,7 +598,7 @@ async function check() {
     process.stderr.write(`  - ${path}\n`);
   }
   process.stderr.write(
-    "Run `pnpm --filter fallow-vscode codegen:types` and commit the result.\n",
+    "Run `pnpm --filter plow-vscode codegen:types` and commit the result.\n",
   );
   return 1;
 }

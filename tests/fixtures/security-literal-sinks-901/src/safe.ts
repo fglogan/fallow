@@ -16,7 +16,7 @@ export function safeForms(): void {
   socket.close();
   crypto.createCipheriv("aes-256-gcm", key, iv);
   fs.chmodSync(file, 0o644);
-  fs.writeFileSync("tmp/fallow-token", token);
+  fs.writeFileSync("tmp/plow-token", token);
   new BrowserWindow({
     webPreferences: {
       nodeIntegration: false,

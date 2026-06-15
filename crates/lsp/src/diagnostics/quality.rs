@@ -5,8 +5,8 @@ use ls_types::{
     Location, NumberOrString, Position, Range, Uri,
 };
 
-use fallow_core::duplicates::DuplicationReport;
-use fallow_core::results::AnalysisResults;
+use plow_core::duplicates::DuplicationReport;
+use plow_core::results::AnalysisResults;
 
 use super::doc_link;
 
@@ -59,7 +59,7 @@ pub fn push_duplicate_export_diagnostics(
                         },
                     },
                     severity: Some(DiagnosticSeverity::WARNING),
-                    source: Some("fallow".to_string()),
+                    source: Some("plow".to_string()),
                     code: Some(NumberOrString::String("duplicate-export".to_string())),
                     code_description: doc_link("duplicate-exports"),
                     message: format!("Duplicate export '{}'", dup.export_name),
@@ -131,9 +131,9 @@ pub fn push_duplication_diagnostics(
                     },
                 },
                 severity: Some(DiagnosticSeverity::INFORMATION),
-                source: Some("fallow".to_string()),
+                source: Some("plow".to_string()),
                 code: Some(NumberOrString::String("code-duplication".to_string())),
-                code_description: "https://docs.fallow.tools/explanations/duplication"
+                code_description: "https://docs.genesis-plow.dev/explanations/duplication"
                     .parse::<Uri>()
                     .ok()
                     .map(|href| CodeDescription { href }),
@@ -180,7 +180,7 @@ pub fn push_stale_suppression_diagnostics(
                 },
             },
             severity: Some(DiagnosticSeverity::HINT),
-            source: Some("fallow".to_string()),
+            source: Some("plow".to_string()),
             code: Some(NumberOrString::String("stale-suppression".to_string())),
             code_description: doc_link("stale-suppressions"),
             message,
@@ -194,12 +194,12 @@ pub fn push_stale_suppression_diagnostics(
 mod tests {
     use std::path::PathBuf;
 
-    use fallow_core::duplicates::{CloneGroup, CloneInstance, DuplicationReport, DuplicationStats};
-    use fallow_core::results::{
+    use ls_types::{DiagnosticSeverity, NumberOrString, Uri};
+    use plow_core::duplicates::{CloneGroup, CloneInstance, DuplicationReport, DuplicationStats};
+    use plow_core::results::{
         AnalysisResults, DuplicateExport, DuplicateExportFinding, DuplicateLocation, UnusedExport,
         UnusedExportFinding, UnusedTypeFinding,
     };
-    use ls_types::{DiagnosticSeverity, NumberOrString, Uri};
 
     use crate::diagnostics::build_diagnostics;
 
@@ -455,16 +455,16 @@ mod tests {
             }));
         results
             .unused_files
-            .push(fallow_core::results::UnusedFileFinding::with_actions(
-                fallow_core::results::UnusedFile { path: path.clone() },
+            .push(plow_core::results::UnusedFileFinding::with_actions(
+                plow_core::results::UnusedFile { path: path.clone() },
             ));
         results.unused_enum_members.push(
-            fallow_core::results::UnusedEnumMemberFinding::with_actions(
-                fallow_core::results::UnusedMember {
+            plow_core::results::UnusedEnumMemberFinding::with_actions(
+                plow_core::results::UnusedMember {
                     path: path.clone(),
                     parent_name: "E".to_string(),
                     member_name: "A".to_string(),
-                    kind: fallow_core::extract::MemberKind::EnumMember,
+                    kind: plow_core::extract::MemberKind::EnumMember,
                     line: 3,
                     col: 0,
                 },
@@ -485,8 +485,8 @@ mod tests {
             );
             let href = &d.code_description.as_ref().unwrap().href;
             assert!(
-                href.as_str().starts_with("https://docs.fallow.tools/"),
-                "Doc link should point to fallow docs: {href:?}"
+                href.as_str().starts_with("https://docs.genesis-plow.dev/"),
+                "Doc link should point to plow docs: {href:?}"
             );
         }
     }

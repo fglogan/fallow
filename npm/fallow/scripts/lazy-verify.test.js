@@ -28,7 +28,7 @@ function ext() {
 }
 
 function binaryNames() {
-  return [`fallow${ext()}`, `fallow-lsp${ext()}`, `fallow-mcp${ext()}`];
+  return [`plow${ext()}`, `plow-lsp${ext()}`, `plow-mcp${ext()}`];
 }
 
 function computeDigestsForDir(dir) {
@@ -42,7 +42,7 @@ function computeDigestsForDir(dir) {
 
 function mkPlatformDir(privateKey, options) {
   const opts = options || {};
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fallow-lazy-test-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "plow-lazy-test-"));
   for (const base of binaryNames()) {
     const binaryPath = path.join(dir, base);
     const content = Buffer.from(`mock ${base}`);
@@ -55,9 +55,9 @@ function mkPlatformDir(privateKey, options) {
   fs.writeFileSync(
     path.join(dir, "package.json"),
     JSON.stringify({
-      name: opts.packageName || "@fallow-cli/test-platform",
+      name: opts.packageName || "@plow-cli/test-platform",
       version: opts.version || "2.81.0",
-      fallowDigests: opts.skipDigests ? undefined : computeDigestsForDir(dir),
+      plowDigests: opts.skipDigests ? undefined : computeDigestsForDir(dir),
     }),
   );
   return dir;
@@ -81,7 +81,7 @@ function captureStderr(t) {
 }
 
 function setupCacheRoot(t) {
-  const cacheRoot = fs.mkdtempSync(path.join(os.tmpdir(), "fallow-lazy-cache-"));
+  const cacheRoot = fs.mkdtempSync(path.join(os.tmpdir(), "plow-lazy-cache-"));
   t.after(() => cleanup(cacheRoot));
   return cacheRoot;
 }
@@ -89,7 +89,7 @@ function setupCacheRoot(t) {
 function baseInput(dir, verifyFn, extras) {
   return {
     platformPkgDir: dir,
-    packageName: "@fallow-cli/test-platform",
+    packageName: "@plow-cli/test-platform",
     manifestPath: path.join(dir, "package.json"),
     verifyFn,
     env: {},
@@ -115,7 +115,7 @@ test("ensureVerified verifies on cache miss and writes the sentinel", (t) => {
   const sentinel = JSON.parse(fs.readFileSync(result.sentinelPath, "utf8"));
   assert.equal(sentinel.schemaVersion, SENTINEL_SCHEMA_VERSION);
   assert.equal(sentinel.packageVersion, "2.81.0");
-  assert.equal(sentinel.packageName, "@fallow-cli/test-platform");
+  assert.equal(sentinel.packageName, "@plow-cli/test-platform");
   assert.equal(Object.keys(sentinel.binaries).length, 3);
 });
 
@@ -153,7 +153,7 @@ test("ensureVerified invalidates sentinel on mtime drift", (t) => {
 
   // Bump the mtime of one binary; sentinel should now be stale.
   const newTime = new Date(Date.now() + 10_000);
-  fs.utimesSync(path.join(dir, `fallow${ext()}`), newTime, newTime);
+  fs.utimesSync(path.join(dir, `plow${ext()}`), newTime, newTime);
 
   let verifyCallCount = 0;
   const result = ensureVerified(
@@ -187,20 +187,20 @@ test("ensureVerified invalidates sentinel on packageVersion drift", (t) => {
 test("ensureVerified invalidates sentinel on packageName drift", (t) => {
   _resetWarningState();
   const { privateKey, rawPub } = makeKeypair();
-  const dir = mkPlatformDir(privateKey, { packageName: "@fallow-cli/x" });
+  const dir = mkPlatformDir(privateKey, { packageName: "@plow-cli/x" });
   t.after(() => cleanup(dir));
 
   ensureVerified({
     ...baseInput(dir, (p) => _verifyWithKey(p, rawPub)),
-    packageName: "@fallow-cli/x",
+    packageName: "@plow-cli/x",
   });
 
   // Now claim a different package name; sentinel becomes stale.
   const result = ensureVerified({
     ...baseInput(dir, (p) => _verifyWithKey(p, rawPub)),
-    packageName: "@fallow-cli/y",
+    packageName: "@plow-cli/y",
   });
-  // Manifest still says @fallow-cli/x, so sentinel validates against manifest
+  // Manifest still says @plow-cli/x, so sentinel validates against manifest
   // but the sentinel was originally written for x. Since we pass packageName=y
   // for the cache lookup but the manifest still says x, the sentinel
   // .packageName=x matches the manifest.name=x. We must rewrite manifest too
@@ -212,14 +212,14 @@ test("ensureVerified invalidates sentinel on packageName drift", (t) => {
       schemaVersion: SENTINEL_SCHEMA_VERSION,
       verifiedAt: new Date().toISOString(),
       packageVersion: "2.81.0",
-      packageName: "@fallow-cli/wrong-name",
+      packageName: "@plow-cli/wrong-name",
       binaries: {
-        [`fallow${ext()}`]: { mtimeMs: fs.statSync(path.join(dir, `fallow${ext()}`)).mtimeMs },
-        [`fallow-lsp${ext()}`]: {
-          mtimeMs: fs.statSync(path.join(dir, `fallow-lsp${ext()}`)).mtimeMs,
+        [`plow${ext()}`]: { mtimeMs: fs.statSync(path.join(dir, `plow${ext()}`)).mtimeMs },
+        [`plow-lsp${ext()}`]: {
+          mtimeMs: fs.statSync(path.join(dir, `plow-lsp${ext()}`)).mtimeMs,
         },
-        [`fallow-mcp${ext()}`]: {
-          mtimeMs: fs.statSync(path.join(dir, `fallow-mcp${ext()}`)).mtimeMs,
+        [`plow-mcp${ext()}`]: {
+          mtimeMs: fs.statSync(path.join(dir, `plow-mcp${ext()}`)).mtimeMs,
         },
       },
     }),
@@ -227,7 +227,7 @@ test("ensureVerified invalidates sentinel on packageName drift", (t) => {
 
   const result2 = ensureVerified({
     ...baseInput(dir, (p) => _verifyWithKey(p, rawPub)),
-    packageName: "@fallow-cli/x",
+    packageName: "@plow-cli/x",
   });
   assert.equal(result2.cached, false);
 });
@@ -266,13 +266,13 @@ test("ensureVerified invalidates sentinel on schemaVersion drift", (t) => {
 test("ensureVerified returns sig-invalid on a tampered signature", (t) => {
   _resetWarningState();
   const { privateKey, rawPub } = makeKeypair();
-  const dir = mkPlatformDir(privateKey, { corruptSigFor: `fallow-lsp${ext()}` });
+  const dir = mkPlatformDir(privateKey, { corruptSigFor: `plow-lsp${ext()}` });
   t.after(() => cleanup(dir));
 
   const result = ensureVerified(baseInput(dir, (p) => _verifyWithKey(p, rawPub)));
   assert.equal(result.ok, false);
   assert.equal(result.code, "sig-invalid");
-  assert.match(result.binary, /fallow-lsp/);
+  assert.match(result.binary, /plow-lsp/);
   // Sentinel must NOT have been written on failure
   assert.equal(fs.existsSync(path.join(dir, SENTINEL_FILENAME)), false);
 });
@@ -286,13 +286,13 @@ test("ensureVerified returns digest-unavailable on a pre-#597 manifest", (t) => 
   const result = ensureVerified(baseInput(dir, (p) => _verifyWithKey(p, rawPub)));
   assert.equal(result.ok, false);
   assert.equal(result.code, "digest-unavailable");
-  assert.match(result.message, /predates fallow 2\.78\.1/);
+  assert.match(result.message, /predates plow 2\.78\.1/);
   assert.match(result.message, new RegExp(SKIP_ENV));
 });
 
 // ---- cache-dir cascade ----------------------------------------------------
 
-test("ensureVerified honors FALLOW_VERIFY_CACHE_DIR when platform pkg dir is non-writable", (t) => {
+test("ensureVerified honors PLOW_VERIFY_CACHE_DIR when platform pkg dir is non-writable", (t) => {
   _resetWarningState();
   if (process.platform === "win32") {
     t.skip("Windows ACL chmod is not portable; covered by sentinel-path tests");
@@ -306,7 +306,7 @@ test("ensureVerified honors FALLOW_VERIFY_CACHE_DIR when platform pkg dir is non
   try {
     const result = ensureVerified({
       ...baseInput(dir, (p) => _verifyWithKey(p, rawPub)),
-      env: { FALLOW_VERIFY_CACHE_DIR: cacheRoot },
+      env: { PLOW_VERIFY_CACHE_DIR: cacheRoot },
     });
     assert.equal(result.ok, true);
     assert.equal(result.cached, false);
@@ -327,19 +327,19 @@ test("ensureVerified emits a single warning when sentinel write fails", (t) => {
   const dir = mkPlatformDir(privateKey);
   const stderr = captureStderr(t);
 
-  // Make platform pkg dir non-writable AND point FALLOW_VERIFY_CACHE_DIR at
+  // Make platform pkg dir non-writable AND point PLOW_VERIFY_CACHE_DIR at
   // a non-existent path. resolveSentinelPath will still find the XDG / home
   // fallback, but we can simulate "every cache location read-only" by giving
   // it a writable dir that we then chmod down right before ensureVerified
   // runs writeSentinel. Simpler: instead of fighting the cascade in env,
-  // simulate write failure via a non-writable FALLOW_VERIFY_CACHE_DIR that
+  // simulate write failure via a non-writable PLOW_VERIFY_CACHE_DIR that
   // PASSES isWritable() but then has its perms revoked between resolve and
   // write. Since that race is hard to script, we test the warn-once helper
   // via a synthetic path that fails the rename atomically: pass a sentinel-
   // chmod-locked dir.
   //
   // The portable shape: chmod the platform pkg dir read-only AND pass a
-  // FALLOW_VERIFY_CACHE_DIR that is a regular file (not a dir). isWritable
+  // PLOW_VERIFY_CACHE_DIR that is a regular file (not a dir). isWritable
   // returns false for both, so resolveSentinelPath falls through to XDG. If
   // the user has no HOME (synthetic env), the cascade returns null. We can
   // achieve this only by injecting both env.HOME='' AND env.XDG_CACHE_HOME=''
@@ -379,13 +379,13 @@ test("ensureVerified emits a single warning when sentinel write fails", (t) => {
   }
 });
 
-// ---- FALLOW_SKIP_BINARY_VERIFY -------------------------------------------
+// ---- PLOW_SKIP_BINARY_VERIFY -------------------------------------------
 
-test("ensureVerified short-circuits when FALLOW_SKIP_BINARY_VERIFY is set", () => {
+test("ensureVerified short-circuits when PLOW_SKIP_BINARY_VERIFY is set", () => {
   _resetWarningState();
   const result = ensureVerified({
     platformPkgDir: "/this/path/does/not/exist",
-    packageName: "@fallow-cli/x",
+    packageName: "@plow-cli/x",
     manifestPath: "/also/missing",
     env: { [SKIP_ENV]: "1" },
   });
@@ -394,9 +394,9 @@ test("ensureVerified short-circuits when FALLOW_SKIP_BINARY_VERIFY is set", () =
   assert.match(result.reason, new RegExp(SKIP_ENV));
 });
 
-// ---- FALLOW_VERIFY_LOG ----------------------------------------------------
+// ---- PLOW_VERIFY_LOG ----------------------------------------------------
 
-test("ensureVerified emits one stderr line per outcome when FALLOW_VERIFY_LOG=1", (t) => {
+test("ensureVerified emits one stderr line per outcome when PLOW_VERIFY_LOG=1", (t) => {
   _resetWarningState();
   const { privateKey, rawPub } = makeKeypair();
   const dir = mkPlatformDir(privateKey);
@@ -406,21 +406,21 @@ test("ensureVerified emits one stderr line per outcome when FALLOW_VERIFY_LOG=1"
   // First invocation: cache miss
   ensureVerified({
     ...baseInput(dir, (p) => _verifyWithKey(p, rawPub)),
-    env: { FALLOW_VERIFY_LOG: "1" },
+    env: { PLOW_VERIFY_LOG: "1" },
   });
   // Second invocation: cache hit
   ensureVerified({
     ...baseInput(dir, (p) => _verifyWithKey(p, rawPub)),
-    env: { FALLOW_VERIFY_LOG: "1" },
+    env: { PLOW_VERIFY_LOG: "1" },
   });
 
-  const logs = stderr.lines.filter((l) => l.startsWith("fallow-verify "));
+  const logs = stderr.lines.filter((l) => l.startsWith("plow-verify "));
   assert.equal(logs.length, 2);
   assert.match(logs[0], /outcome=ok cache=miss/);
   assert.match(logs[1], /outcome=ok cache=hit/);
 });
 
-test("ensureVerified does not log when FALLOW_VERIFY_LOG is unset", (t) => {
+test("ensureVerified does not log when PLOW_VERIFY_LOG is unset", (t) => {
   _resetWarningState();
   const { privateKey, rawPub } = makeKeypair();
   const dir = mkPlatformDir(privateKey);
@@ -428,7 +428,7 @@ test("ensureVerified does not log when FALLOW_VERIFY_LOG is unset", (t) => {
 
   const stderr = captureStderr(t);
   ensureVerified(baseInput(dir, (p) => _verifyWithKey(p, rawPub)));
-  const logs = stderr.lines.filter((l) => l.startsWith("fallow-verify "));
+  const logs = stderr.lines.filter((l) => l.startsWith("plow-verify "));
   assert.equal(logs.length, 0);
 });
 
@@ -450,7 +450,7 @@ test("ensureVerified is idempotent under concurrent first-runs", async (t) => {
   // Sentinel exists and is valid JSON
   const sentinel = JSON.parse(fs.readFileSync(path.join(dir, SENTINEL_FILENAME), "utf8"));
   assert.equal(sentinel.schemaVersion, SENTINEL_SCHEMA_VERSION);
-  assert.equal(sentinel.packageName, "@fallow-cli/test-platform");
+  assert.equal(sentinel.packageName, "@plow-cli/test-platform");
 
   // No leftover .tmp files in the dir
   const files = fs.readdirSync(dir);
@@ -473,11 +473,11 @@ test("ensureVerified rejects a sentinel written for a different install dir", (t
   const { privateKey, rawPub } = makeKeypair();
   const installA = mkPlatformDir(privateKey);
   const installB = mkPlatformDir(privateKey);
-  // Tamper install B's fallow binary AFTER mkPlatformDir wrote a valid sig
+  // Tamper install B's plow binary AFTER mkPlatformDir wrote a valid sig
   // for the original bytes (mkPlatformDir does not expose a corrupt-binary
   // option, so simulate the attack by overwriting bytes here).
-  fs.writeFileSync(path.join(installB, `fallow${ext()}`), Buffer.from("tampered bytes"));
-  const sharedCache = fs.mkdtempSync(path.join(os.tmpdir(), "fallow-shared-cache-"));
+  fs.writeFileSync(path.join(installB, `plow${ext()}`), Buffer.from("tampered bytes"));
+  const sharedCache = fs.mkdtempSync(path.join(os.tmpdir(), "plow-shared-cache-"));
 
   // Force the shared-cache cascade by making both platform pkg dirs
   // non-writable (simulates yarn PnP / Docker layered images / pnpm
@@ -496,7 +496,7 @@ test("ensureVerified rejects a sentinel written for a different install dir", (t
   // platform pkg dir is read-only.
   const resultA = ensureVerified({
     ...baseInput(installA, (p) => _verifyWithKey(p, rawPub)),
-    env: { FALLOW_VERIFY_CACHE_DIR: sharedCache },
+    env: { PLOW_VERIFY_CACHE_DIR: sharedCache },
   });
   assert.equal(resultA.ok, true);
   assert.match(resultA.sentinelPath, new RegExp(sharedCache.replace(/\\/g, "\\\\")));
@@ -517,7 +517,7 @@ test("ensureVerified rejects a sentinel written for a different install dir", (t
       verifyCallCount += 1;
       return _verifyWithKey(p, rawPub);
     }),
-    env: { FALLOW_VERIFY_CACHE_DIR: sharedCache },
+    env: { PLOW_VERIFY_CACHE_DIR: sharedCache },
   });
   assert.equal(resultB.ok, false);
   assert.equal(resultB.code, "sig-invalid");
@@ -535,7 +535,7 @@ test("ensureVerified rejects a sentinel where bytes drift but mtime stays", (t) 
 
   // Tamper the binary in place AND restore the prior mtime, so the mtime
   // pre-filter matches but the bytes do not.
-  const binPath = path.join(dir, `fallow${ext()}`);
+  const binPath = path.join(dir, `plow${ext()}`);
   const before = fs.statSync(binPath);
   fs.writeFileSync(binPath, Buffer.from("tampered"));
   fs.utimesSync(binPath, before.atime, before.mtime);
@@ -552,14 +552,14 @@ test("ensureVerified rejects a sentinel where bytes drift but mtime stays", (t) 
   assert.ok(verifyCallCount > 0, "expected re-verify when bytes diverge from sentinel SHA");
 });
 
-// ---- FALLOW_SKIP_BINARY_VERIFY warning (regression test for documented contract) ----
+// ---- PLOW_SKIP_BINARY_VERIFY warning (regression test for documented contract) ----
 
-test("ensureVerified warns once on stderr when FALLOW_SKIP_BINARY_VERIFY is set", (t) => {
+test("ensureVerified warns once on stderr when PLOW_SKIP_BINARY_VERIFY is set", (t) => {
   _resetWarningState();
   const stderr = captureStderr(t);
   const env = { [SKIP_ENV]: "1" };
-  ensureVerified({ platformPkgDir: "/x", packageName: "@fallow-cli/y", manifestPath: "/z", env });
-  ensureVerified({ platformPkgDir: "/x", packageName: "@fallow-cli/y", manifestPath: "/z", env });
+  ensureVerified({ platformPkgDir: "/x", packageName: "@plow-cli/y", manifestPath: "/z", env });
+  ensureVerified({ platformPkgDir: "/x", packageName: "@plow-cli/y", manifestPath: "/z", env });
   const warnings = stderr.lines.filter(
     (l) => l.includes(`${SKIP_ENV} is set`) && l.includes("verification is skipped"),
   );
@@ -569,5 +569,5 @@ test("ensureVerified warns once on stderr when FALLOW_SKIP_BINARY_VERIFY is set"
 // ---- VERIFY_LOG_ENV export ------------------------------------------------
 
 test("VERIFY_LOG_ENV is exported with the documented name", () => {
-  assert.equal(VERIFY_LOG_ENV, "FALLOW_VERIFY_LOG");
+  assert.equal(VERIFY_LOG_ENV, "PLOW_VERIFY_LOG");
 });

@@ -5,8 +5,8 @@ use std::path::Path;
 use oxc_span::Span;
 
 use crate::*;
-use fallow_types::discover::FileId;
-use fallow_types::extract::{SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason};
+use plow_types::discover::FileId;
+use plow_types::extract::{SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason};
 
 use super::*;
 
@@ -925,7 +925,7 @@ fn cache_load_nonexistent_returns_none() {
 /// Create a unique temporary directory for cache tests.
 fn test_cache_dir(name: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir()
-        .join("fallow_cache_tests")
+        .join("plow_cache_tests")
         .join(name)
         .join(format!("{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -1230,7 +1230,7 @@ fn get_by_path_only_returns_none_for_missing() {
 
 #[test]
 fn retain_paths_removes_stale_entries() {
-    use fallow_types::discover::DiscoveredFile;
+    use plow_types::discover::DiscoveredFile;
     use std::path::PathBuf;
 
     let mut store = CacheStore::new();
@@ -1861,7 +1861,7 @@ fn module_to_cached_roundtrip_suppressions_with_kinds() {
 
 #[test]
 fn module_to_cached_roundtrip_unknown_suppression_kinds() {
-    use fallow_types::suppress::UnknownSuppressionKind;
+    use plow_types::suppress::UnknownSuppressionKind;
 
     let module = ModuleInfo {
         file_id: FileId(0),
@@ -2384,7 +2384,7 @@ fn module_to_cached_roundtrip_unused_import_bindings() {
 
 #[test]
 fn module_to_cached_roundtrip_complexity() {
-    use fallow_types::extract::FunctionComplexity;
+    use plow_types::extract::FunctionComplexity;
 
     let module = ModuleInfo {
         file_id: FileId(0),

@@ -5,7 +5,7 @@ use std::ops::Range;
 use fixedbitset::FixedBitSet;
 use rustc_hash::FxHashSet;
 
-use fallow_types::discover::FileId;
+use plow_types::discover::FileId;
 
 use super::ModuleGraph;
 use super::types::ModuleNode;
@@ -366,8 +366,8 @@ mod tests {
 
     use crate::graph::types::ModuleNode;
     use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
-    use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
-    use fallow_types::extract::{ExportName, ImportInfo, ImportedName, VisibilityTag};
+    use plow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
+    use plow_types::extract::{ExportName, ImportInfo, ImportedName, VisibilityTag};
 
     use super::{
         ModuleGraph, SuccessorMap, canonical_cycle, dfs_find_cycles_from,
@@ -410,7 +410,7 @@ mod tests {
                 ResolvedModule {
                     file_id: FileId(i as u32),
                     path: PathBuf::from(format!("/project/file{i}.ts")),
-                    exports: vec![fallow_types::extract::ExportInfo {
+                    exports: vec![plow_types::extract::ExportInfo {
                         name: ExportName::Named("x".to_string()),
                         local_name: Some("x".to_string()),
                         is_type_only: false,
@@ -1383,7 +1383,7 @@ mod tests {
                 ResolvedModule {
                     file_id: FileId(i as u32),
                     path: PathBuf::from(format!("/project/file{i}.ts")),
-                    exports: vec![fallow_types::extract::ExportInfo {
+                    exports: vec![plow_types::extract::ExportInfo {
                         name: ExportName::Named("x".to_string()),
                         local_name: Some("x".to_string()),
                         is_type_only: false,

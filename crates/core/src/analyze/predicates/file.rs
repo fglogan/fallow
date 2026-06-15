@@ -73,7 +73,7 @@ pub(in crate::analyze) fn is_config_file(path: &std::path::Path) -> bool {
         "react-router.config.",
         "typedoc.",
         "knip.config.",
-        "fallow.config.",
+        "plow.config.",
         "i18next-parser.config.",
         "codegen.config.",
         "graphql.config.",

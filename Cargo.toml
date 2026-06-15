@@ -6,20 +6,20 @@ members = ["crates/*"]
 version = "2.96.0"
 edition = "2024"
 rust-version = "1.92"
-license = "MIT"
-repository = "https://github.com/fallow-rs/fallow"
-homepage = "https://docs.fallow.tools"
-documentation = "https://docs.fallow.tools"
+license = "LicenseRef-Tempext-Commercial"
+repository = "https://github.com/fglogan/genesis-plow"
+homepage = "https://docs.genesis-plow.dev"
+documentation = "https://docs.genesis-plow.dev"
 keywords = ["typescript", "javascript", "lint", "static-analysis", "code-quality"]
 categories = ["command-line-utilities", "development-tools"]
 
 [workspace.dependencies]
-fallow-core = { version = "2.96.0", path = "crates/core" }
-fallow-config = { version = "2.96.0", path = "crates/config" }
-fallow-extract = { version = "2.96.0", path = "crates/extract" }
-fallow-graph = { version = "2.96.0", path = "crates/graph" }
-fallow-types = { version = "2.96.0", path = "crates/types" }
-fallow-cli = { version = "2.96.0", path = "crates/cli" }
+plow-core = { version = "2.96.0", path = "crates/core" }
+plow-config = { version = "2.96.0", path = "crates/config" }
+plow-extract = { version = "2.96.0", path = "crates/extract" }
+plow-graph = { version = "2.96.0", path = "crates/graph" }
+plow-types = { version = "2.96.0", path = "crates/types" }
+plow-cli = { version = "2.96.0", path = "crates/cli" }
 
 # Parsing & analysis
 oxc_allocator = "0.126"
@@ -140,9 +140,9 @@ map_with_unused_argument_over_ranges = "warn" # Use `repeat`/`repeat_with` inste
 
 # Process-spawn ban (method list lives in .clippy.toml). Allowed workspace-wide
 # so the CLI / MCP crates can spawn git worktrees, the coverage sidecar, and
-# subprocesses off the analysis path; fallow-core/extract/graph re-deny it at
+# subprocesses off the analysis path; plow-core/extract/graph re-deny it at
 # their crate root to enforce that the analysis path spawns only `git` via
-# fallow_core::spawn.
+# plow_core::spawn.
 disallowed_methods = "allow"
 
 # Allow common pedantic false positives

@@ -8,8 +8,8 @@ const RUN_BINARY = path.join(__dirname, "run-binary.js");
 // Run a child that installs guardBrokenStdout, then emits a synthetic stdout
 // 'error' with the given code. Node delivers a broken-pipe failure as exactly
 // this event ("Emitted 'error' event on Socket instance"), so emitting it is a
-// faithful reproduction of `fallow --version | head` without needing a live
-// pipe or an installed @fallow-cli platform package. Requiring run-binary.js
+// faithful reproduction of `plow --version | head` without needing a live
+// pipe or an installed @plow-cli platform package. Requiring run-binary.js
 // has no side effects beyond defining functions, so no binary is resolved.
 function runGuardChild(errorCode) {
   const script =
@@ -40,17 +40,17 @@ test("guardBrokenStdout rethrows non-EPIPE stdout errors (exit 1)", () => {
 
 test("isVersionQuery recognizes --version, -V, and -v as the first argument", () => {
   const { isVersionQuery } = require(RUN_BINARY);
-  assert.equal(isVersionQuery(["node", "fallow", "--version"]), true);
-  assert.equal(isVersionQuery(["node", "fallow", "-V"]), true);
+  assert.equal(isVersionQuery(["node", "plow", "--version"]), true);
+  assert.equal(isVersionQuery(["node", "plow", "-V"]), true);
   assert.equal(
-    isVersionQuery(["node", "fallow", "-v"]),
+    isVersionQuery(["node", "plow", "-v"]),
     true,
     "-v must append the verified line too",
   );
-  assert.equal(isVersionQuery(["node", "fallow"]), false);
-  assert.equal(isVersionQuery(["node", "fallow", "dead-code"]), false);
+  assert.equal(isVersionQuery(["node", "plow"]), false);
+  assert.equal(isVersionQuery(["node", "plow", "dead-code"]), false);
   assert.equal(
-    isVersionQuery(["node", "fallow", "dead-code", "-v"]),
+    isVersionQuery(["node", "plow", "dead-code", "-v"]),
     false,
     "-v only counts as the first arg",
   );
@@ -62,13 +62,13 @@ test("describeVerified annotates the resolved version's signing status", () => {
   // Signed-era version: appended as `signed`.
   assert.match(
     describeVerified(ok, "2.83.0"),
-    /verified: yes \(sentinel \/c\/s\); fallow 2\.83\.0 signed/,
+    /verified: yes \(sentinel \/c\/s\); plow 2\.83\.0 signed/,
   );
   // Pre-signing version: the fleet pre-flight signal, most useful on skip.
-  const skipped = { skipped: true, reason: "FALLOW_SKIP_BINARY_VERIFY is set" };
+  const skipped = { skipped: true, reason: "PLOW_SKIP_BINARY_VERIFY is set" };
   assert.match(
     describeVerified(skipped, "2.76.0"),
-    /verified: skipped \(.*\); fallow 2\.76\.0 unsigned \(predates 2\.77\.0\)/,
+    /verified: skipped \(.*\); plow 2\.76\.0 unsigned \(predates 2\.77\.0\)/,
   );
   // Unknown / unreadable version: no annotation, version line stays intact.
   assert.equal(describeVerified(ok, undefined), "verified: yes (sentinel /c/s)");

@@ -29,7 +29,7 @@ const isLicenseState = (value: unknown): value is LicenseState =>
   typeof value === "string" && KNOWN_STATES.has(value);
 
 /**
- * Parse `fallow license <sub> --format json` stdout into a typed status.
+ * Parse `plow license <sub> --format json` stdout into a typed status.
  *
  * Handles the structured-error envelope (`{ error: true, message }`) by
  * surfacing its message as a parse failure, validates that `state` is a known
@@ -39,18 +39,18 @@ const isLicenseState = (value: unknown): value is LicenseState =>
 export const parseLicenseJson = (stdout: string): LicenseParseResult => {
   const trimmed = stdout.trim();
   if (trimmed.length === 0) {
-    return { ok: false, error: "fallow license produced no output." };
+    return { ok: false, error: "plow license produced no output." };
   }
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(trimmed);
   } catch {
-    return { ok: false, error: "Could not parse fallow license output as JSON." };
+    return { ok: false, error: "Could not parse plow license output as JSON." };
   }
 
   if (typeof parsed !== "object" || parsed === null) {
-    return { ok: false, error: "Unexpected fallow license output." };
+    return { ok: false, error: "Unexpected plow license output." };
   }
 
   const record = parsed as Record<string, unknown>;
@@ -59,12 +59,12 @@ export const parseLicenseJson = (stdout: string): LicenseParseResult => {
     const message =
       typeof record.message === "string" && record.message.length > 0
         ? record.message
-        : "fallow license reported an error.";
+        : "plow license reported an error.";
     return { ok: false, error: message };
   }
 
   if (!isLicenseState(record.state)) {
-    return { ok: false, error: "fallow license output is missing a known state." };
+    return { ok: false, error: "plow license output is missing a known state." };
   }
 
   return { ok: true, data: record as unknown as LicenseStatusJson };
@@ -110,9 +110,9 @@ export const escapeMarkdown = escapeMarkdownMultiline;
 
 /**
  * Whether any license material is present, mirroring the source precedence in
- * `fallow_license::load_raw_jwt` (`crates/license/src/lib.rs`): an inline
- * `$FALLOW_LICENSE` JWT, then a `$FALLOW_LICENSE_PATH` file, then the default
- * `~/.fallow/license.jwt`. Pure: the caller supplies the env values, the
+ * `plow_license::load_raw_jwt` (`crates/license/src/lib.rs`): an inline
+ * `$PLOW_LICENSE` JWT, then a `$PLOW_LICENSE_PATH` file, then the default
+ * `~/.plow/license.jwt`. Pure: the caller supplies the env values, the
  * resolved default path, and a file-exists predicate, so this stays
  * unit-testable without touching the real filesystem or process env. Keep the
  * precedence in sync with the Rust loader. Used to keep the license indicator
@@ -130,19 +130,19 @@ export const hasLicenseMaterial = (
   }
   const explicitPath = pathEnv?.trim();
   if (explicitPath !== undefined && explicitPath.length > 0) {
-    // `$FALLOW_LICENSE_PATH` takes over from the default entirely: the Rust
-    // loader does not fall back to `~/.fallow/license.jwt` once it is set.
+    // `$PLOW_LICENSE_PATH` takes over from the default entirely: the Rust
+    // loader does not fall back to `~/.plow/license.jwt` once it is set.
     return fileExists(explicitPath);
   }
   return fileExists(defaultPath);
 };
 
-const PLACEHOLDER_TEXT = "$(key) Fallow License";
+const PLACEHOLDER_TEXT = "$(key) Plow License";
 
 /** Status-bar parts before any probe has run (or when probing is disabled). */
 export const licensePlaceholderParts = (): LicenseStatusBarParts => ({
   text: PLACEHOLDER_TEXT,
-  tooltipMd: "Fallow license status not checked yet.\n\nRun **Fallow: Show License Status**.",
+  tooltipMd: "Plow license status not checked yet.\n\nRun **Plow: Show License Status**.",
   severity: null,
 });
 
@@ -191,37 +191,37 @@ export const licenseStatusBarParts = (status: LicenseStatusJson): LicenseStatusB
         lines.push("Refresh recommended to stay ahead of expiry.");
       }
       return {
-        text: `$(verified) Fallow${tierLabel}`,
-        tooltipMd: ["**Fallow license active**", ...lines].join("\n\n"),
+        text: `$(verified) Plow${tierLabel}`,
+        tooltipMd: ["**Plow license active**", ...lines].join("\n\n"),
         severity: null,
       };
     }
     case "expired_warning":
     case "expired_watermark": {
       const lines = claimsTooltipLines(status);
-      lines.push("Run **Fallow: Refresh License** to renew.");
+      lines.push("Run **Plow: Refresh License** to renew.");
       return {
-        text: "$(warning) Fallow: expired",
-        tooltipMd: ["**Fallow license expired**", ...lines].join("\n\n"),
+        text: "$(warning) Plow: expired",
+        tooltipMd: ["**Plow license expired**", ...lines].join("\n\n"),
         severity: "statusBarItem.warningBackground",
       };
     }
     case "hard_fail": {
       const lines = claimsTooltipLines(status);
-      lines.push("Paid features are blocked. Run **Fallow: Refresh License**.");
+      lines.push("Paid features are blocked. Run **Plow: Refresh License**.");
       return {
-        text: "$(error) Fallow: expired",
-        tooltipMd: ["**Fallow license expired (past grace window)**", ...lines].join("\n\n"),
+        text: "$(error) Plow: expired",
+        tooltipMd: ["**Plow license expired (past grace window)**", ...lines].join("\n\n"),
         severity: "statusBarItem.errorBackground",
       };
     }
     case "missing":
       return {
-        text: "$(key) Fallow: no license",
+        text: "$(key) Plow: no license",
         tooltipMd: [
-          "**No Fallow license active**",
+          "**No Plow license active**",
           "Start a 30-day trial or activate a license token.",
-          "[Activate license](command:fallow.license.activate)",
+          "[Activate license](command:plow.license.activate)",
         ].join("\n\n"),
         severity: null,
       };

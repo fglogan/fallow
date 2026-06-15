@@ -1,11 +1,11 @@
 # Security Agent Verification
 
-`fallow security` is a deterministic candidate producer. It does not call a model, decide exploitability, or emit verified vulnerabilities. Use this recipe when an agent or out-of-core harness should turn raw candidates into verifier-filtered survivors.
+`plow security` is a deterministic candidate producer. It does not call a model, decide exploitability, or emit verified vulnerabilities. Use this recipe when an agent or out-of-core harness should turn raw candidates into verifier-filtered survivors.
 
-The workflow uses three fallow surfaces:
+The workflow uses three plow surfaces:
 
-- `fallow security --format json --surface` for the candidate list and attack-surface inventory.
-- The candidate contract: fallow fills `source_kind`, `sink`, `boundary`, `severity`, and reachability context; the verifier owns `impact`.
+- `plow security --format json --surface` for the candidate list and attack-surface inventory.
+- The candidate contract: plow fills `source_kind`, `sink`, `boundary`, `severity`, and reachability context; the verifier owns `impact`.
 - The MCP `security_candidates` tool for agent edit loops that need the same JSON shape without shelling out directly.
 
 ## CLI Flow
@@ -13,7 +13,7 @@ The workflow uses three fallow surfaces:
 Run the candidate producer with surface inventory enabled:
 
 ```bash
-fallow security --format json --surface --quiet > fallow-security.json
+plow security --format json --surface --quiet > plow-security.json
 ```
 
 The JSON envelope contains:
@@ -24,7 +24,7 @@ The JSON envelope contains:
 - `unresolved_edge_files` and `unresolved_callee_sites`, the in-band blind-spot counters
 - `unresolved_callee_diagnostics`, when present, a bounded sample plus top files and reason counts for unresolved callee blind spots
 
-See [`docs/output-schema.json`](output-schema.json) for the generated fallow output contract. The packet and verdict schemas below are harness-owned conventions, not fields fallow emits.
+See [`docs/output-schema.json`](output-schema.json) for the generated plow output contract. The packet and verdict schemas below are harness-owned conventions, not fields plow emits.
 
 For each `security_findings[]` item, build a verifier packet from these fields:
 
@@ -33,7 +33,7 @@ For each `security_findings[]` item, build a verifier packet from these fields:
 - `severity`, the review-priority tier, not a verified vulnerability verdict
 - `candidate.source_kind`, the deterministic untrusted-input kind or `null`
 - `candidate.sink`, the sink location and catalogue metadata. For URL categories it may include `url_shape` (`fixed-origin-dynamic-path` or `dynamic-origin`) so verifiers can prioritize origin-control cases without parsing evidence prose.
-- `candidate.boundary`, the crossed boundary fallow can derive
+- `candidate.boundary`, the crossed boundary plow can derive
 - `trace`, the structural import-hop trace
 - `taint_flow`, if present
 - `reachability.taint_confidence`, if present, to distinguish `arg-level` from `module-level` source association
@@ -41,7 +41,7 @@ For each `security_findings[]` item, build a verifier packet from these fields:
 - the matching `attack_surface[]` entry, if one has the same sink path and location
 - caller-provided source windows for the sink, trace hops, and source endpoint
 
-Fallow does not read source windows into the security JSON. The verifier harness should collect them from disk after the scan, usually with a small fixed radius such as 20 lines around each location. Keep the window outside fallow output so the core stays deterministic, compact, and provider-neutral. Treat source windows and verifier artifacts as local review material; do not publish private project code or verifier transcripts in release notes, README examples, or public issue comments.
+Plow does not read source windows into the security JSON. The verifier harness should collect them from disk after the scan, usually with a small fixed radius such as 20 lines around each location. Keep the window outside plow output so the core stays deterministic, compact, and provider-neutral. Treat source windows and verifier artifacts as local review material; do not publish private project code or verifier transcripts in release notes, README examples, or public issue comments.
 
 ## MCP Flow
 
@@ -57,7 +57,7 @@ Ask the MCP server for the same scan:
 
 `surface: true` forwards `--surface` and includes the top-level `attack_surface` array. `paths` forwards repeated `--file` flags and is intended for agent edit loops, where only just-edited anchors, trace hops, or source-trace hops should be returned.
 
-The `security_candidates` tool returns unverified candidates. Treat it as evidence for a verification loop, not as permission to edit code. If the repository is large, raise `FALLOW_TIMEOUT_SECS` in the MCP server environment before widening scope.
+The `security_candidates` tool returns unverified candidates. Treat it as evidence for a verification loop, not as permission to edit code. If the repository is large, raise `PLOW_TIMEOUT_SECS` in the MCP server environment before widening scope.
 
 ## Verifier Packet
 
@@ -65,7 +65,7 @@ Normalize each candidate into one packet before prompting a verifier:
 
 ```json
 {
-  "schema_version": "fallow-security-verifier-input/v1",
+  "schema_version": "plow-security-verifier-input/v1",
   "finding_id": "security:...",
   "severity": "high",
   "candidate": {
@@ -96,20 +96,20 @@ Normalize each candidate into one packet before prompting a verifier:
 
 Use the packet to preserve the separation of duties:
 
-- `fallow-security-verifier-input/v1` is a recommended harness convention, not a fallow output schema.
-- Fallow-provided fields are deterministic candidate evidence.
+- `plow-security-verifier-input/v1` is a recommended harness convention, not a plow output schema.
+- Plow-provided fields are deterministic candidate evidence.
 - `source_windows` are caller-collected context.
-- `blind_spots.unresolved_callee_diagnostics` can be copied from the top-level fallow output when a verifier queue wants sample locations for follow-up review. It is bounded metadata, not proof of a vulnerability.
-- The verifier verdict is downstream state and must not be written back into fallow JSON.
+- `blind_spots.unresolved_callee_diagnostics` can be copied from the top-level plow output when a verifier queue wants sample locations for follow-up review. It is bounded metadata, not proof of a vulnerability.
+- The verifier verdict is downstream state and must not be written back into plow JSON.
 
 ## Prompt Contract
 
 Use a prompt that asks the verifier to dismiss candidates aggressively unless the provided evidence supports a real exploit path:
 
 ```text
-You are verifying one fallow security candidate.
+You are verifying one plow security candidate.
 
-Fallow is a deterministic candidate producer, not a vulnerability oracle.
+Plow is a deterministic candidate producer, not a vulnerability oracle.
 Use only the supplied candidate, trace, attack-surface entry, and source windows.
 Do not assume data flow beyond the provided code.
 
@@ -120,7 +120,7 @@ Check:
 4. What concrete impact would remain if the candidate is real?
 5. Is there an existing defensive control that dismisses it?
 
-Return only JSON matching fallow-security-verdict/v1.
+Return only JSON matching plow-security-verdict/v1.
 ```
 
 Pass the packet after the prompt. If `attack_surface.defensive_boundary.verification_prompt` is present, include it as an additional question, not as a verdict.
@@ -131,7 +131,7 @@ The verifier should return a compact verdict object:
 
 ```json
 {
-  "schema_version": "fallow-security-verdict/v1",
+  "schema_version": "plow-security-verdict/v1",
   "finding_id": "security:...",
   "verdict": "survivor",
   "reason": "The request query value reaches execSync without validation.",
@@ -148,7 +148,7 @@ The verifier should return a compact verdict object:
 }
 ```
 
-`fallow-security-verdict/v1` is also harness-owned. Reject extra prose around the JSON object so the survivor renderer can parse the verdict without model-specific cleanup.
+`plow-security-verdict/v1` is also harness-owned. Reject extra prose around the JSON object so the survivor renderer can parse the verdict without model-specific cleanup.
 
 Allowed `verdict` values:
 
@@ -180,11 +180,11 @@ After verification, render only candidates with `verdict: "survivor"` and, optio
 - `taint_flow` or `reachability_trace`
 - verifier `impact`, `reason`, and `fix_direction`
 
-Do not rewrite fallow's original JSON with verdict fields. Store verifier output beside it, keyed by `finding_id`, so reruns can correlate after a rebase without changing the fallow contract.
+Do not rewrite plow's original JSON with verdict fields. Store verifier output beside it, keyed by `finding_id`, so reruns can correlate after a rebase without changing the plow contract.
 
 ## Quality Caveats
 
-Candidate quality depends on the source and trace fidelity in the current fallow version:
+Candidate quality depends on the source and trace fidelity in the current plow version:
 
 - HTTP-input source patterns are receiver-gated to avoid broad `*.query` collisions with unrelated APIs, but framework-specific request aliases can still need verifier judgment.
 - `reachability.taint_confidence` distinguishes `arg-level` from `module-level` source association, and arg-level traces anchor the source read when available. Module-level traces remain ranking evidence, not proof of value flow.

@@ -1,14 +1,14 @@
 # Plugin Authoring Guide
 
-Fallow supports external plugin definitions that let you add framework and tool support without writing Rust code. External plugins provide the same declarative capabilities as built-in plugins.
+Plow supports external plugin definitions that let you add framework and tool support without writing Rust code. External plugins provide the same declarative capabilities as built-in plugins.
 
 ## Quick Start
 
-Create a file named `fallow-plugin-<name>.jsonc` in your project root:
+Create a file named `plow-plugin-<name>.jsonc` in your project root:
 
 ```jsonc
 {
-  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/plugin-schema.json",
+  "$schema": "https://raw.githubusercontent.com/fglogan/genesis-plow/main/plugin-schema.json",
   "name": "my-framework",
   "enablers": ["my-framework"],
   "entryPoints": ["src/routes/**/*.{ts,tsx}"],
@@ -20,7 +20,7 @@ Create a file named `fallow-plugin-<name>.jsonc` in your project root:
 }
 ```
 
-That's it. Fallow automatically discovers `fallow-plugin-*` files in your project root.
+That's it. Plow automatically discovers `plow-plugin-*` files in your project root.
 
 ## Supported Formats
 
@@ -33,7 +33,7 @@ That's it. Fallow automatically discovers `fallow-plugin-*` files in your projec
 All formats use `camelCase` field names. We recommend JSONC for its comment support and `$schema` IDE autocomplete. Generate the schema with:
 
 ```bash
-fallow plugin-schema
+plow plugin-schema
 ```
 
 ## Plugin File Format
@@ -42,7 +42,7 @@ fallow plugin-schema
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `name` | string | Unique plugin name (shown in `fallow list --plugins`) |
+| `name` | string | Unique plugin name (shown in `plow list --plugins`) |
 
 ### Optional
 
@@ -170,34 +170,34 @@ Use `"*"` when every export in matching convention files is consumed by the fram
 
 ## Discovery
 
-Fallow discovers external plugins in this order (first occurrence of a plugin name wins):
+Plow discovers external plugins in this order (first occurrence of a plugin name wins):
 
 1. **Explicit paths** from the `plugins` config field
-2. **`.fallow/plugins/`** directory -- all `*.jsonc`, `*.json`, `*.toml` files
-3. **Project root** -- `fallow-plugin-*.{jsonc,json,toml}` files
+2. **`.plow/plugins/`** directory -- all `*.jsonc`, `*.json`, `*.toml` files
+3. **Project root** -- `plow-plugin-*.{jsonc,json,toml}` files
 
 ### Using the `plugins` config field
 
 Point to specific plugin files or directories:
 
 ```jsonc
-// .fallowrc.json
+// .plowrc.json
 {
   "plugins": [
-    "tools/fallow-plugins/",
+    "tools/plow-plugins/",
     "vendor/my-plugin.jsonc",
     "vendor/another-plugin.json"
   ]
 }
 ```
 
-### Using `.fallow/plugins/`
+### Using `.plow/plugins/`
 
-Place plugin files in `.fallow/plugins/` for automatic discovery:
+Place plugin files in `.plow/plugins/` for automatic discovery:
 
 ```
 my-project/
-  .fallow/
+  .plow/
     plugins/
       my-framework.jsonc
       custom-tool.json
@@ -207,12 +207,12 @@ my-project/
 
 ### Using project root
 
-Name plugin files with the `fallow-plugin-` prefix:
+Name plugin files with the `plow-plugin-` prefix:
 
 ```
 my-project/
-  fallow-plugin-my-framework.jsonc
-  fallow-plugin-custom-tool.json
+  plow-plugin-my-framework.jsonc
+  plow-plugin-custom-tool.json
   src/
   package.json
 ```
@@ -223,7 +223,7 @@ my-project/
 
 ```jsonc
 {
-  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/plugin-schema.json",
+  "$schema": "https://raw.githubusercontent.com/fglogan/genesis-plow/main/plugin-schema.json",
   "name": "react-router",
   "enablers": ["react-router", "@tanstack/react-router"],
   "entryPoints": [
@@ -245,7 +245,7 @@ my-project/
 
 ```jsonc
 {
-  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/plugin-schema.json",
+  "$schema": "https://raw.githubusercontent.com/fglogan/genesis-plow/main/plugin-schema.json",
   "name": "my-cms",
   "enablers": ["@my-cms/core"],
   "entryPoints": ["content/**/*.{ts,tsx}", "schemas/**/*.ts"],
@@ -263,7 +263,7 @@ my-project/
 ```jsonc
 {
   // Internal build system plugin
-  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/plugin-schema.json",
+  "$schema": "https://raw.githubusercontent.com/fglogan/genesis-plow/main/plugin-schema.json",
   "name": "our-build-system",
   "enablers": ["@internal/build"],
   "configPatterns": [
@@ -286,16 +286,16 @@ my-project/
 
 External plugins are plain files -- share them however you share config:
 
-- **Git**: check `fallow-plugin-*` files into your repo
+- **Git**: check `plow-plugin-*` files into your repo
 - **Monorepo**: put shared plugins in a central `tools/` directory and reference via `plugins` config
-- **npm package**: publish a package containing plugin files, then reference them: `plugins = ["node_modules/@my-org/fallow-plugins/"]`
+- **npm package**: publish a package containing plugin files, then reference them: `plugins = ["node_modules/@my-org/plow-plugins/"]`
 
 ## JSON Schema
 
 Generate the JSON Schema for plugin files to enable IDE autocomplete and validation:
 
 ```bash
-fallow plugin-schema > plugin-schema.json
+plow plugin-schema > plugin-schema.json
 ```
 
 Reference it in your plugin files:
@@ -327,7 +327,7 @@ External plugins cover the vast majority of use cases. AST-based config parsing 
 Check that your plugin is detected:
 
 ```bash
-fallow list --plugins
+plow list --plugins
 ```
 
 This shows all active plugins, including external ones.

@@ -6,6 +6,6 @@ fuzz_target!(|data: &[u8]| {
         // Exercise both CSS and SCSS strip pipelines; the first input byte
         // toggles the is_scss flag so the fuzzer covers both branches.
         let is_scss = data.first().copied().unwrap_or(0) & 1 == 1;
-        let _ = fallow_core::extract::extract_css_module_exports(s, is_scss);
+        let _ = plow_core::extract::extract_css_module_exports(s, is_scss);
     }
 });

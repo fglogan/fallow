@@ -1,20 +1,20 @@
 {
-  "name": "fallow",
+  "name": "plow",
   "version": "2.96.0",
-  "description": "Deterministic codebase intelligence for TypeScript and JavaScript. Quality, risk, architecture, dependencies, duplication, and safe cleanup evidence for humans, CI, and agents. Optional runtime intelligence layer (Fallow Runtime) adds production execution evidence. Rust-native, sub-second, zero-config framework support.",
-  "license": "MIT",
+  "description": "Deterministic codebase intelligence for TypeScript and JavaScript. Quality, risk, architecture, dependencies, duplication, and safe cleanup evidence for humans, CI, and agents. Optional runtime intelligence layer (Plow Runtime) adds production execution evidence. Rust-native, sub-second, zero-config framework support.",
+  "license": "LicenseRef-Tempext-Commercial",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/fallow-rs/fallow.git"
+    "url": "git+https://github.com/fglogan/genesis-plow.git"
   },
-  "homepage": "https://docs.fallow.tools",
+  "homepage": "https://docs.genesis-plow.dev",
   "bugs": {
-    "url": "https://github.com/fallow-rs/fallow/issues"
+    "url": "https://github.com/fglogan/genesis-plow/issues"
   },
   "intent": {
     "version": 1,
-    "repo": "fallow-rs/fallow",
-    "docs": "https://docs.fallow.tools"
+    "repo": "fglogan/genesis-plow",
+    "docs": "https://docs.genesis-plow.dev"
   },
   "keywords": [
     "code-intelligence",
@@ -39,9 +39,9 @@
     "node": ">=16"
   },
   "bin": {
-    "fallow": "bin/fallow",
-    "fallow-lsp": "bin/fallow-lsp",
-    "fallow-mcp": "bin/fallow-mcp"
+    "plow": "bin/plow",
+    "plow-lsp": "bin/plow-lsp",
+    "plow-mcp": "bin/plow-mcp"
   },
   "exports": {
     "./types": {
@@ -83,13 +83,13 @@
     "@tanstack/intent": "0.0.41"
   },
   "optionalDependencies": {
-    "@fallow-cli/darwin-arm64": "2.96.0",
-    "@fallow-cli/darwin-x64": "2.96.0",
-    "@fallow-cli/linux-x64-gnu": "2.96.0",
-    "@fallow-cli/linux-arm64-gnu": "2.96.0",
-    "@fallow-cli/linux-x64-musl": "2.96.0",
-    "@fallow-cli/linux-arm64-musl": "2.96.0",
-    "@fallow-cli/win32-arm64-msvc": "2.96.0",
-    "@fallow-cli/win32-x64-msvc": "2.96.0"
+    "@plow-cli/darwin-arm64": "2.96.0",
+    "@plow-cli/darwin-x64": "2.96.0",
+    "@plow-cli/linux-x64-gnu": "2.96.0",
+    "@plow-cli/linux-arm64-gnu": "2.96.0",
+    "@plow-cli/linux-x64-musl": "2.96.0",
+    "@plow-cli/linux-arm64-musl": "2.96.0",
+    "@plow-cli/win32-arm64-msvc": "2.96.0",
+    "@plow-cli/win32-x64-msvc": "2.96.0"
   }
 }

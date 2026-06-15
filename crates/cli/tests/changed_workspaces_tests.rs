@@ -7,7 +7,7 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use common::{parse_json, run_fallow_raw};
+use common::{parse_json, run_plow_raw};
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -110,7 +110,7 @@ fn changed_workspaces_scopes_to_workspaces_with_changes() {
         "ui: add extra",
     );
 
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "check",
         "--root",
         dir.to_str().unwrap(),
@@ -167,7 +167,7 @@ fn changed_workspaces_scopes_to_workspace_with_untracked_file() {
     )
     .unwrap();
 
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "check",
         "--root",
         dir.to_str().unwrap(),
@@ -219,7 +219,7 @@ fn workspace_and_changed_workspaces_are_mutually_exclusive() {
     let tmp = create_monorepo_fixture();
     let dir = tmp.path();
 
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "check",
         "--root",
         dir.to_str().unwrap(),
@@ -246,7 +246,7 @@ fn changed_workspaces_bad_ref_is_hard_error() {
     let tmp = create_monorepo_fixture();
     let dir = tmp.path();
 
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "check",
         "--root",
         dir.to_str().unwrap(),
@@ -282,7 +282,7 @@ fn changed_workspaces_without_monorepo_errors() {
     fs::write(dir.join("src/index.ts"), "export const a = 1;\n").unwrap();
     git_init_and_commit(dir);
 
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "check",
         "--root",
         dir.to_str().unwrap(),
@@ -311,7 +311,7 @@ fn changed_workspaces_root_only_diff_scopes_to_empty() {
         "root: bump",
     );
 
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "check",
         "--root",
         dir.to_str().unwrap(),

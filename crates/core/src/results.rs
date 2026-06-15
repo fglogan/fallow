@@ -1,4 +1,4 @@
-pub use fallow_types::output_dead_code::{
+pub use plow_types::output_dead_code::{
     BoundaryCallViolationFinding, BoundaryCoverageViolationFinding, BoundaryViolationFinding,
     CircularDependencyFinding, DuplicateExportFinding, DynamicSegmentNameConflictFinding,
     EmptyCatalogGroupFinding, InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding,
@@ -12,7 +12,7 @@ pub use fallow_types::output_dead_code::{
     UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
     UnusedTypeFinding,
 };
-pub use fallow_types::results::{
+pub use plow_types::results::{
     ActiveSuppression, AnalysisResults, BoundaryCallViolation, BoundaryCoverageViolation,
     BoundaryViolation, CircularDependency, CircularDependencyEdge, DependencyLocation,
     DependencyOverrideMisconfigReason, DependencyOverrideSource, DuplicateExport,
@@ -38,7 +38,7 @@ mod tests {
 
     use super::*;
     use crate::extract::MemberKind;
-    use fallow_types::output_dead_code::{UnresolvedImportFinding, UnusedFileFinding};
+    use plow_types::output_dead_code::{UnresolvedImportFinding, UnusedFileFinding};
 
     #[test]
     fn empty_results_no_issues() {

@@ -1,12 +1,12 @@
-use fallow_config::{FallowConfig, OutputFormat, RulesConfig, Severity};
+use plow_config::{OutputFormat, PlowConfig, RulesConfig, Severity};
 
 use crate::common::fixture_path;
 
 /// Resolve a fixture with the `mixed-client-server-barrel` rule at `warn` (its
 /// default). The detector is gated on the project declaring `next`, which the
 /// positive fixture's `package.json` does.
-fn fixture_config(name: &str) -> fallow_config::ResolvedConfig {
-    FallowConfig {
+fn fixture_config(name: &str) -> plow_config::ResolvedConfig {
+    PlowConfig {
         rules: RulesConfig {
             mixed_client_server_barrel: Severity::Warn,
             ..RulesConfig::default()
@@ -16,7 +16,7 @@ fn fixture_config(name: &str) -> fallow_config::ResolvedConfig {
     .resolve(fixture_path(name), OutputFormat::Human, 4, true, true, None)
 }
 
-fn barrel_paths(results: &fallow_core::results::AnalysisResults) -> Vec<String> {
+fn barrel_paths(results: &plow_core::results::AnalysisResults) -> Vec<String> {
     results
         .mixed_client_server_barrels
         .iter()
@@ -27,9 +27,9 @@ fn barrel_paths(results: &fallow_core::results::AnalysisResults) -> Vec<String> 
 #[test]
 fn client_and_server_only_barrel_is_flagged_once() {
     let config = fixture_config("mixed-client-server-barrel");
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
-    let offending: Vec<&fallow_core::results::MixedClientServerBarrelFinding> = results
+    let offending: Vec<&plow_core::results::MixedClientServerBarrelFinding> = results
         .mixed_client_server_barrels
         .iter()
         .filter(|f| {
@@ -60,7 +60,7 @@ fn client_plus_plain_util_barrel_is_not_flagged() {
     // component alongside an ordinary undirected utility module must NOT flag.
     // The trigger is client + SERVER-ONLY, never client + plain-util.
     let config = fixture_config("mixed-client-server-barrel");
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         !results.mixed_client_server_barrels.iter().any(|f| f
@@ -80,7 +80,7 @@ fn type_only_client_reexport_alongside_server_is_not_flagged() {
     // no runtime directive context, so a type-only client re-export alongside a
     // server-only value re-export is NOT a client/server mix.
     let config = fixture_config("mixed-client-server-barrel");
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         !results.mixed_client_server_barrels.iter().any(|f| f
@@ -97,7 +97,7 @@ fn type_only_client_reexport_alongside_server_is_not_flagged() {
 #[test]
 fn no_findings_when_next_is_absent() {
     let config = fixture_config("mixed-client-server-barrel-no-next");
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.mixed_client_server_barrels.is_empty(),

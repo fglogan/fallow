@@ -3,9 +3,9 @@
 //! Surfaces malformed `package.json`, unreachable glob matches, missing
 //! tsconfig references, undeclared workspaces, and source files skipped during
 //! source discovery as typed [`WorkspaceDiagnostic`] values. Each diagnostic
-//! also emits a deduplicated `tracing::warn!` so users running fallow with
-//! default tracing filters see the cause of "fallow doesn't see my package" or
-//! "fallow ate all my memory."
+//! also emits a deduplicated `tracing::warn!` so users running plow with
+//! default tracing filters see the cause of "plow doesn't see my package" or
+//! "plow ate all my memory."
 //!
 //! Repeated `GlobMatchedNoPackageJson` diagnostics are aggregated by glob
 //! pattern at emission time so a wide glob matching hundreds of package-less
@@ -61,12 +61,12 @@ pub enum WorkspaceDiagnosticKind {
     /// existing directory.
     TsconfigReferenceDirMissing,
     /// A source file was skipped at discovery because it exceeds the configured
-    /// per-file size limit (`--max-file-size` / `FALLOW_MAX_FILE_SIZE`, default
+    /// per-file size limit (`--max-file-size` / `PLOW_MAX_FILE_SIZE`, default
     /// 5 MB). The file is never read, parsed, or analyzed, guarding against the
     /// out-of-memory blowup a single multi-MB generated/vendored/bundled file
     /// causes (issue #1086). Surfaced by source discovery, not workspace
     /// discovery, but shares this channel so the skip is visible in
-    /// `workspace_diagnostics[]` on `fallow dead-code / dupes / health` JSON.
+    /// `workspace_diagnostics[]` on `plow dead-code / dupes / health` JSON.
     SkippedLargeFile {
         /// On-disk size of the skipped file in bytes.
         size_bytes: u64,
@@ -102,7 +102,7 @@ impl WorkspaceDiagnosticKind {
     /// discovery diagnostics are APPENDED to the registry after config load, so
     /// [`stash_workspace_diagnostics`] must preserve them when it replaces the
     /// workspace-discovery set, otherwise the per-analysis config re-loads in
-    /// combined-mode (`fallow` with no subcommand re-loads config for check,
+    /// combined-mode (`plow` with no subcommand re-loads config for check,
     /// dupes, and health) wipe them before the JSON envelope is built (issue
     /// #1086).
     #[must_use]
@@ -238,7 +238,7 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
         WorkspaceDiagnosticKind::SkippedLargeFile { size_bytes } => format!(
             "Skipped '{display}' ({size}): exceeds the max file size limit. \
              Its imports and exports are not analyzed. Raise the limit with \
-             --max-file-size <MB> (or FALLOW_MAX_FILE_SIZE), or add '{display}' \
+             --max-file-size <MB> (or PLOW_MAX_FILE_SIZE), or add '{display}' \
              to ignorePatterns.",
             size = format_size_mb(*size_bytes)
         ),
@@ -270,7 +270,7 @@ impl std::fmt::Display for WorkspaceLoadError {
             Self::MalformedRootPackageJson { path, error } => write!(
                 f,
                 "root package.json at '{}' is not valid JSON ({error}). \
-                 Fix the syntax before re-running fallow.",
+                 Fix the syntax before re-running plow.",
                 path.display()
             ),
         }
@@ -405,7 +405,7 @@ pub(super) fn emit_diagnostics(root: &Path, diagnostics: &[WorkspaceDiagnostic])
 
     for plan in plan_warnings(root, diagnostics) {
         if should_emit(plan.dedupe_key) {
-            tracing::warn!("fallow: {}", plan.message);
+            tracing::warn!("plow: {}", plan.message);
         }
     }
 }
@@ -505,8 +505,8 @@ pub fn capture_workspace_warnings<F: FnOnce() -> R, R>(body: F) -> (R, Vec<Works
 /// canonical root. Populated by callers that run
 /// [`super::discover_workspaces_with_diagnostics`] and (after config load
 /// completes) by the analysis pipeline's `find_undeclared_workspaces_*`
-/// pass. Consumers (`fallow list --workspaces`, the JSON envelope on
-/// `fallow dead-code / dupes / health`) read via [`workspace_diagnostics_for`].
+/// pass. Consumers (`plow list --workspaces`, the JSON envelope on
+/// `plow dead-code / dupes / health`) read via [`workspace_diagnostics_for`].
 ///
 /// Canonicalisation matches the dedupe-key canonicalisation in
 /// [`plan_warnings`]: two callers on the same physical root coalesce, and
@@ -632,7 +632,7 @@ pub fn workspace_diagnostics_for(root: &Path) -> Vec<WorkspaceDiagnostic> {
 
 /// Directories that are conventionally NOT workspace packages even when a
 /// glob like `packages/*` matches them. Mirrors pnpm/npm/yarn behavior of
-/// silently filtering these out, and extends fallow's existing
+/// silently filtering these out, and extends plow's existing
 /// `should_skip_workspace_scan_dir` list with build artifacts and tooling
 /// caches.
 #[must_use]
@@ -738,7 +738,7 @@ mod tests {
     fn stash_preserves_appended_skipped_large_file_across_restash() {
         // Unique synthetic root so the process-global registry does not collide
         // with sibling tests.
-        let root = Path::new("/fallow-test-1086-stash-preserve");
+        let root = Path::new("/plow-test-1086-stash-preserve");
         let undeclared = || {
             WorkspaceDiagnostic::new(
                 root,
@@ -784,7 +784,7 @@ mod tests {
 
     #[test]
     fn clear_source_discovery_drops_stale_skip_keeps_workspace_diag() {
-        let root = Path::new("/fallow-test-1086-clear-stale");
+        let root = Path::new("/plow-test-1086-clear-stale");
         stash_workspace_diagnostics(
             root,
             vec![WorkspaceDiagnostic::new(

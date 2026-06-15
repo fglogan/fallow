@@ -1,5 +1,5 @@
 //! Single source of truth for the agent-discoverability task-to-command matrix
-//! (R2/R3). One const slice drives four render surfaces: the `fallow schema`
+//! (R2/R3). One const slice drives four render surfaces: the `plow schema`
 //! manifest (`task_matrix`), the `init --agents` AGENTS.md template, the
 //! `hooks install --target agent` managed block, and the root `--help` cheat
 //! sheet. The `scripts/generate-agent-docs.mjs` generator renders the same
@@ -45,61 +45,61 @@ pub struct TaskRow {
 pub const TASK_MATRIX: &[TaskRow] = &[
     TaskRow {
         task: "delete an \"unused\" export or file",
-        command: "fallow dead-code --trace <file>:<export>",
+        command: "plow dead-code --trace <file>:<export>",
         note: None,
         probe: &["dead-code", "--trace", "src/index.ts:foo"],
     },
     TaskRow {
         task: "delete an \"unused\" dependency",
-        command: "fallow dead-code --trace-dependency <name>",
+        command: "plow dead-code --trace-dependency <name>",
         note: None,
         probe: &["dead-code", "--trace-dependency", "lodash"],
     },
     TaskRow {
         task: "commit or open a PR",
-        command: "fallow audit --base <ref>",
+        command: "plow audit --base <ref>",
         note: None,
         probe: &["audit", "--base", "main"],
     },
     TaskRow {
         task: "prioritize refactoring",
-        command: "fallow health --hotspots --targets",
+        command: "plow health --hotspots --targets",
         note: None,
         probe: &["health", "--hotspots", "--targets"],
     },
     TaskRow {
         task: "ask who owns code",
-        command: "fallow health --ownership",
+        command: "plow health --ownership",
         note: None,
         probe: &["health", "--ownership"],
     },
     TaskRow {
         task: "check untested-but-reachable code",
-        command: "fallow health --coverage-gaps",
+        command: "plow health --coverage-gaps",
         note: None,
         probe: &["health", "--coverage-gaps"],
     },
     TaskRow {
         task: "consolidate duplication",
-        command: "fallow dupes --trace dup:<fingerprint>",
+        command: "plow dupes --trace dup:<fingerprint>",
         note: None,
         probe: &["dupes", "--trace", "dup:abc123"],
     },
     TaskRow {
         task: "find feature flags",
-        command: "fallow flags",
+        command: "plow flags",
         note: None,
         probe: &["flags"],
     },
     TaskRow {
         task: "surface security candidates",
-        command: "fallow security",
+        command: "plow security",
         note: None,
         probe: &["security"],
     },
     TaskRow {
         task: "understand a finding",
-        command: "fallow explain <issue-type>",
+        command: "plow explain <issue-type>",
         note: None,
         probe: &["explain", "unused-export"],
     },
@@ -172,8 +172,8 @@ mod tests {
     #[test]
     fn matrix_excludes_mutating_commands() {
         for row in TASK_MATRIX {
-            let after_fallow = row.command.strip_prefix("fallow ").unwrap_or(row.command);
-            let first_token = after_fallow.split_whitespace().next().unwrap_or("");
+            let after_plow = row.command.strip_prefix("plow ").unwrap_or(row.command);
+            let first_token = after_plow.split_whitespace().next().unwrap_or("");
             assert!(
                 !MUTATING_COMMANDS.contains(&first_token),
                 "task matrix row '{}' names mutating command '{first_token}'",

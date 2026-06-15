@@ -411,7 +411,7 @@ fn extract_flat_routes_root_dir(
 }
 
 fn normalize_route_path(raw: &str, base_dir: &Path, root: &Path) -> Option<String> {
-    let synthetic_path = base_dir.join("__fallow__.ts");
+    let synthetic_path = base_dir.join("__plow__.ts");
     config_parser::normalize_config_path(raw, &synthetic_path, root)
 }
 

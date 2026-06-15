@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_config::{PackageJson, ResolvedConfig};
+use plow_config::{PackageJson, ResolvedConfig};
 
 use crate::discover::FileId;
 use crate::graph::ModuleGraph;
@@ -43,7 +43,7 @@ pub fn matches_virtual_prefix(prefix: &str, spec: &str) -> bool {
 
 /// Return `true` if a workspace `package.json` path is covered by `ignorePatterns`.
 ///
-/// Mirrors the source-walker behavior in `fallow_core::discover::walk`: the glob
+/// Mirrors the source-walker behavior in `plow_core::discover::walk`: the glob
 /// is matched against the project-root-relative path so relative patterns like
 /// `**/dist/**` work as users expect. Without this check, workspace discovery
 /// would include build-artifact `package.json` files (e.g., `dist/package.json`
@@ -158,7 +158,7 @@ fn node_modules_package_json(base: &Path, package_name: &str) -> PathBuf {
 /// O(packages * files * workspaces).
 fn collect_workspace_used_packages<'a>(
     graph: &'a ModuleGraph,
-    workspaces: &'a [fallow_config::WorkspaceInfo],
+    workspaces: &'a [plow_config::WorkspaceInfo],
 ) -> FxHashMap<&'a Path, FxHashSet<&'a str>> {
     use rayon::prelude::*;
     let module_workspaces: Vec<Vec<&Path>> = graph
@@ -251,7 +251,7 @@ pub fn collect_unused_for_category(
 /// Build a reverse index from package name to workspace roots that import it.
 fn collect_package_workspace_usage(
     graph: &ModuleGraph,
-    workspaces: &[fallow_config::WorkspaceInfo],
+    workspaces: &[plow_config::WorkspaceInfo],
 ) -> FxHashMap<String, Vec<PathBuf>> {
     let mut usage: FxHashMap<String, Vec<PathBuf>> = FxHashMap::default();
 
@@ -374,14 +374,14 @@ fn script_used_set(
 /// determining whether a dependency is used (mirroring `find_unlisted_dependencies`).
 #[deprecated(
     since = "2.76.0",
-    note = "fallow_core is internal; use fallow_cli::programmatic::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/fallow-core-migration.md and ADR-008."
+    note = "plow_core is internal; use plow_cli::programmatic::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/plow-core-migration.md and ADR-008."
 )]
 pub fn find_unused_dependencies(
     graph: &ModuleGraph,
     pkg: &PackageJson,
     config: &ResolvedConfig,
     plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
-    workspaces: &[fallow_config::WorkspaceInfo],
+    workspaces: &[plow_config::WorkspaceInfo],
 ) -> (
     Vec<UnusedDependency>,
     Vec<UnusedDependency>,
@@ -509,7 +509,7 @@ struct WorkspaceUnusedDependencyInputs<'a> {
 }
 
 fn collect_workspace_unused_dependencies<'a>(
-    ws: &'a fallow_config::WorkspaceInfo,
+    ws: &'a plow_config::WorkspaceInfo,
     inputs: &WorkspaceUnusedDependencyInputs<'a>,
 ) -> (
     Vec<UnusedDependency>,
@@ -549,7 +549,7 @@ fn collect_workspace_unused_dependencies<'a>(
 }
 
 fn read_workspace_package(
-    ws: &fallow_config::WorkspaceInfo,
+    ws: &plow_config::WorkspaceInfo,
     config: &ResolvedConfig,
 ) -> Option<(PathBuf, String, PackageJson)> {
     let ws_pkg_path = ws.root.join("package.json");
@@ -678,7 +678,7 @@ pub fn find_type_only_dependencies(
     graph: &ModuleGraph,
     pkg: &PackageJson,
     config: &ResolvedConfig,
-    workspaces: &[fallow_config::WorkspaceInfo],
+    workspaces: &[plow_config::WorkspaceInfo],
 ) -> Vec<TypeOnlyDependency> {
     let root_pkg_path = config.root.join("package.json");
     let root_pkg_content = read_pkg_json_content(&root_pkg_path);
@@ -730,7 +730,7 @@ pub fn find_test_only_dependencies(
     graph: &ModuleGraph,
     pkg: &PackageJson,
     config: &ResolvedConfig,
-    workspaces: &[fallow_config::WorkspaceInfo],
+    workspaces: &[plow_config::WorkspaceInfo],
 ) -> Vec<TestOnlyDependency> {
     let test_globs = {
         let mut builder = globset::GlobSetBuilder::new();
@@ -1003,7 +1003,7 @@ fn package_imports_are_all_npm_scheme(
 }
 
 fn workspace_dependency_map(
-    workspaces: &[fallow_config::WorkspaceInfo],
+    workspaces: &[plow_config::WorkspaceInfo],
     config: &ResolvedConfig,
 ) -> Vec<(PathBuf, FxHashSet<String>)> {
     let mut ws_dep_map = Vec::new();
@@ -1045,7 +1045,7 @@ pub fn find_unlisted_dependencies(
     graph: &ModuleGraph,
     pkg: &PackageJson,
     config: &ResolvedConfig,
-    workspaces: &[fallow_config::WorkspaceInfo],
+    workspaces: &[plow_config::WorkspaceInfo],
     plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
     resolved_modules: &[ResolvedModule],
     line_offsets_by_file: &LineOffsetsMap<'_>,

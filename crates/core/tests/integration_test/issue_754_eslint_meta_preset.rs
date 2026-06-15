@@ -10,7 +10,7 @@
 
 use super::common::{create_config, fixture_path};
 
-fn unused_dev_deps(results: &fallow_core::results::AnalysisResults) -> Vec<&str> {
+fn unused_dev_deps(results: &plow_core::results::AnalysisResults) -> Vec<&str> {
     results
         .unused_dev_dependencies
         .iter()
@@ -22,7 +22,7 @@ fn unused_dev_deps(results: &fallow_core::results::AnalysisResults) -> Vec<&str>
 fn preset_declared_plugins_are_credited() {
     let root = fixture_path("issue-754-eslint-meta-preset");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused = unused_dev_deps(&results);
 
     assert!(
@@ -41,7 +41,7 @@ fn preset_declared_plugins_are_credited() {
 fn plugin_not_declared_by_preset_stays_flagged() {
     let root = fixture_path("issue-754-eslint-meta-preset");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused = unused_dev_deps(&results);
 
     assert!(
@@ -55,7 +55,7 @@ fn plugin_not_declared_by_preset_stays_flagged() {
 fn preset_non_eslint_dependency_stays_flagged() {
     let root = fixture_path("issue-754-eslint-meta-preset");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused = unused_dev_deps(&results);
 
     assert!(

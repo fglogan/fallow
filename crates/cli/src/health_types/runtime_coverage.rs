@@ -1,10 +1,10 @@
 use std::fmt;
 use std::path::PathBuf;
 
-use fallow_types::serde_path;
+use plow_types::serde_path;
 
 /// Runtime coverage JSON contract version. This is scoped to the
-/// `runtime_coverage` block and is independent of the top-level fallow
+/// `runtime_coverage` block and is independent of the top-level plow
 /// JSON `schema_version`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -16,7 +16,7 @@ pub enum RuntimeCoverageSchemaVersion {
 }
 
 /// Top-level verdict for the whole runtime-coverage report. Mirrors
-/// `fallow_cov_protocol::ReportVerdict`. The verdict is the SINGLE most
+/// `plow_cov_protocol::ReportVerdict`. The verdict is the SINGLE most
 /// actionable finding; for the full set of findings see
 /// [`RuntimeCoverageReport::signals`]. The verdict promotes `hot-path-touched`
 /// above `cold-code-detected` in PR-review context (when the CLI was
@@ -88,7 +88,7 @@ impl fmt::Display for RuntimeCoverageReportVerdict {
 }
 
 /// Protocol-level per-function runtime coverage verdict derived from the
-/// decision table in fallow-cov-protocol. The CLI's `runtime_coverage.findings`
+/// decision table in plow-cov-protocol. The CLI's `runtime_coverage.findings`
 /// array omits `active` entries even though the underlying enum still includes
 /// it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -221,13 +221,13 @@ impl fmt::Display for RuntimeCoverageDataSource {
     }
 }
 
-/// Summary block mirroring `fallow_cov_protocol::Summary` (0.3 shape).
+/// Summary block mirroring `plow_cov_protocol::Summary` (0.3 shape).
 #[derive(Debug, Clone, Default, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RuntimeCoverageSummary {
     /// Runtime evidence source used for this report. Local mode reads a
     /// supplied runtime coverage artifact; cloud mode pulls the latest
-    /// fallow.cloud runtime context after explicit opt-in.
+    /// plow.cloud runtime context after explicit opt-in.
     pub data_source: RuntimeCoverageDataSource,
     /// Timestamp of the newest runtime payload included in the report. Null for
     /// local single-capture artifacts that do not carry cloud receipt metadata.
@@ -280,7 +280,7 @@ pub struct RuntimeCoverageCaptureQuality {
     pub untracked_ratio_percent: f64,
 }
 
-/// Supporting evidence for a finding (mirrors `fallow_cov_protocol::Evidence`).
+/// Supporting evidence for a finding (mirrors `plow_cov_protocol::Evidence`).
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RuntimeCoverageEvidence {
@@ -308,14 +308,14 @@ pub struct RuntimeCoverageEvidence {
 /// Suggested follow-up action for a runtime coverage finding.
 pub struct RuntimeCoverageAction {
     /// Action identifier, normalized to `type` in JSON output. Known values
-    /// emitted by `fallow coverage analyze`: `delete-cold-code`
+    /// emitted by `plow coverage analyze`: `delete-cold-code`
     /// (verdict=safe_to_delete), `review-runtime` (verdict=review_required).
     /// The sidecar may emit additional protocol-specific identifiers;
     /// consumers should treat unknown values as forward-compat extensions.
     #[serde(rename = "type")]
     pub kind: String,
     pub description: String,
-    /// Whether fallow can apply this action automatically.
+    /// Whether plow can apply this action automatically.
     pub auto_fixable: bool,
 }
 
@@ -330,12 +330,12 @@ pub struct RuntimeCoverageMessage {
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RuntimeCoverageFinding {
-    /// Per-finding suppression key of the form `fallow:prod:<hash>` (first 8 hex
+    /// Per-finding suppression key of the form `plow:prod:<hash>` (first 8 hex
     /// of SHA-256(file + function + line + 'prod')). Hashes the current line, so
     /// it changes when the function moves. Use this to suppress one finding.
     pub id: String,
-    /// Cross-surface join key of the form `fallow:fn:<hash>`
-    /// (`fallow_cov_protocol::function_identity_id`, hashes file + name +
+    /// Cross-surface join key of the form `plow:fn:<hash>`
+    /// (`plow_cov_protocol::function_identity_id`, hashes file + name +
     /// start_line). The same function shares ONE value across findings, hot
     /// paths, blast-radius, and importance entries (the per-finding `id` uses a
     /// per-surface salt, so it differs by surface), and across V8, Istanbul,
@@ -348,7 +348,7 @@ pub struct RuntimeCoverageFinding {
     #[cfg_attr(feature = "schema", schemars(default))]
     pub stable_id: Option<String>,
     /// Content digest of the function's full-span source slice
-    /// (`fallow_cov_protocol::source_hash_for`: first 8 bytes of SHA-256 as 16
+    /// (`plow_cov_protocol::source_hash_for`: first 8 bytes of SHA-256 as 16
     /// lowercase hex). Unlike `stable_id`, this is stable across line moves: a
     /// moved-but-unedited function keeps the same value, so baselines can
     /// suppress it after a pure line shift. `null` when the producing surface
@@ -379,9 +379,9 @@ pub struct RuntimeCoverageFinding {
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RuntimeCoverageHotPath {
-    /// Stable content-hash ID of the form `fallow:hot:<hash>`.
+    /// Stable content-hash ID of the form `plow:hot:<hash>`.
     pub id: String,
-    /// Cross-surface join key (`fallow:fn:<hash>`) for the hot function. Stable
+    /// Cross-surface join key (`plow:fn:<hash>`) for the hot function. Stable
     /// across line moves; shared with the same function's findings / blast /
     /// importance entries. `null` when no `FunctionIdentity` was supplied.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -395,7 +395,7 @@ pub struct RuntimeCoverageHotPath {
     /// 1-indexed line number the function starts on.
     pub line: u32,
     /// 1-indexed line the function ends on (inclusive). Mirrors
-    /// `fallow_cov_protocol::HotPath::end_line` (added in protocol 0.5).
+    /// `plow_cov_protocol::HotPath::end_line` (added in protocol 0.5).
     /// Older 0.4-shape sidecars omit the field on the wire; serde defaults
     /// to `0`, which the line-overlap filter MUST treat as a single-line
     /// range (`line..=line`) rather than a span.
@@ -444,9 +444,9 @@ impl fmt::Display for RuntimeCoverageRiskBand {
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RuntimeCoverageBlastRadiusEntry {
-    /// Stable content-hash ID of the form `fallow:blast:<hash>`.
+    /// Stable content-hash ID of the form `plow:blast:<hash>`.
     pub id: String,
-    /// Cross-surface join key (`fallow:fn:<hash>`) for the function. Stable
+    /// Cross-surface join key (`plow:fn:<hash>`) for the function. Stable
     /// across line moves; shared with the same function's findings / hot-path /
     /// importance entries. `null` when no `FunctionIdentity` was supplied.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -473,9 +473,9 @@ pub struct RuntimeCoverageBlastRadiusEntry {
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RuntimeCoverageImportanceEntry {
-    /// Stable content-hash ID of the form `fallow:importance:<hash>`.
+    /// Stable content-hash ID of the form `plow:importance:<hash>`.
     pub id: String,
-    /// Cross-surface join key (`fallow:fn:<hash>`) for the function. Stable
+    /// Cross-surface join key (`plow:fn:<hash>`) for the function. Stable
     /// across line moves; shared with the same function's findings / hot-path /
     /// blast-radius entries. `null` when no `FunctionIdentity` was supplied.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -505,13 +505,13 @@ pub struct RuntimeCoverageImportanceEntry {
 #[derive(Debug, Clone, Default, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 /// Runtime coverage findings merged into the health report or emitted by
-/// `fallow coverage analyze`. Present in health output when --runtime-coverage
+/// `plow coverage analyze`. Present in health output when --runtime-coverage
 /// is used. Shape mirrors the runtime coverage JSON contract; cloud mode
 /// fetches runtime facts explicitly and merges them locally with AST/static
 /// analysis.
 pub struct RuntimeCoverageReport {
     /// Runtime coverage JSON contract version. This is scoped to the
-    /// `runtime_coverage` block and is independent of the top-level fallow
+    /// `runtime_coverage` block and is independent of the top-level plow
     /// JSON `schema_version`.
     pub schema_version: RuntimeCoverageSchemaVersion,
     /// Single most actionable runtime-coverage signal under the current

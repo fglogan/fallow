@@ -1,5 +1,5 @@
-use fallow_config::ResolvedConfig;
-use fallow_types::results::BoundaryCoverageViolation;
+use plow_config::ResolvedConfig;
+use plow_types::results::BoundaryCoverageViolation;
 
 use crate::graph::ModuleGraph;
 use crate::suppress::{IssueKind, SuppressionContext};

@@ -5,13 +5,13 @@ expression: json_str
 [
   {
     "type": "issue",
-    "check_name": "fallow/unused-export",
+    "check_name": "plow/unused-export",
     "description": "Re-export 'reExported' is never imported by other modules",
     "categories": [
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "551a4bfe2be74003",
+    "fingerprint": "086c644864d841b0",
     "location": {
       "path": "src/index.ts",
       "lines": {

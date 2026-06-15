@@ -8,7 +8,7 @@ const links = [
     id: 'source',
     label: 'View page source',
     icon: 'i-simple-icons-github',
-    to: 'https://github.com/fallow-rs/fallow'
+    to: 'https://github.com/fglogan/genesis-plow'
   },
   {
     id: 'plain-string',

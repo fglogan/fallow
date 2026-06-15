@@ -1,7 +1,7 @@
 use std::process::ExitCode;
 
 use clap::CommandFactory;
-use fallow_types::mcp_manifest::{MCP_TOOLS, RUNTIME_COVERAGE_LICENSE_NOTE};
+use plow_types::mcp_manifest::{MCP_TOOLS, RUNTIME_COVERAGE_LICENSE_NOTE};
 
 use crate::Cli;
 use crate::explain::{
@@ -62,8 +62,8 @@ pub fn build_cli_schema(cmd: &clap::Command) -> serde_json::Value {
         "default_behavior": "Runs all analyses (check + dupes + health). Use --only/--skip to select.",
         "issue_types": issue_types_schema(),
         "suppression_comments": {
-            "next_line": "// fallow-ignore-next-line [issue-type]",
-            "file": "// fallow-ignore-file [issue-type]",
+            "next_line": "// plow-ignore-next-line [issue-type]",
+            "file": "// plow-ignore-file [issue-type]",
             "note": "Omit [issue-type] to suppress all issue types. Unknown tokens are silently ignored."
         },
         "output_formats": ["human", "json", "sarif", "compact", "markdown", "codeclimate", "gitlab-codequality", "pr-comment-github", "pr-comment-gitlab", "review-github", "review-gitlab", "badge"],
@@ -143,9 +143,9 @@ fn issue_type_row(rule: &RuleDef, command: &str) -> serde_json::Value {
     let meta = issue_type_meta(bare_id, command);
     let suppress_comment = meta.suppress.map(|(token, file_level)| {
         if file_level {
-            format!("// fallow-ignore-file {token}")
+            format!("// plow-ignore-file {token}")
         } else {
-            format!("// fallow-ignore-next-line {token}")
+            format!("// plow-ignore-next-line {token}")
         }
     });
     serde_json::json!({
@@ -247,7 +247,7 @@ fn apply_source_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
             m.filter_flag = Some("--duplicate-exports");
             m.suppress = Some(("duplicate-export", true));
             m.note = Some(
-                "fallow fix can add an ignoreExports rule to the fallow config instead of editing source",
+                "plow fix can add an ignoreExports rule to the plow config instead of editing source",
             );
         }
         "stale-suppression" => {
@@ -387,7 +387,7 @@ fn health_issue_meta(bare_id: &str) -> IssueTypeMeta {
         | "coverage-intelligence-review"
         | "coverage-intelligence-refactor" => {
             m.freemium = true;
-            m.note = Some("Produced by fallow coverage analyze");
+            m.note = Some("Produced by plow coverage analyze");
         }
         _ => {}
     }
@@ -399,11 +399,11 @@ fn standalone_issue_meta(bare_id: &str) -> IssueTypeMeta {
     match bare_id {
         "code-duplication" => {
             m.suppress = Some(("code-duplication", false));
-            m.note = Some("Reported by fallow dupes (and bare fallow / fallow audit)");
+            m.note = Some("Reported by plow dupes (and bare plow / plow audit)");
         }
         "feature-flag" => {
             m.suppress = Some(("feature-flag", false));
-            m.note = Some("Reported by fallow flags");
+            m.note = Some("Reported by plow flags");
         }
         _ => {}
     }
@@ -451,17 +451,17 @@ fn mcp_tools_schema() -> serde_json::Value {
         })
         .collect();
     serde_json::json!({
-        "server": "fallow-mcp",
+        "server": "plow-mcp",
         "note": "key_params is a curated subset; the live MCP input schemas (list_tools) are authoritative for the full parameter list",
         "tools": tools,
     })
 }
 
 fn plugins_schema() -> serde_json::Value {
-    let names = fallow_core::plugins::registry::builtin_plugin_names();
+    let names = plow_core::plugins::registry::builtin_plugin_names();
     serde_json::json!({
         "count": names.len(),
-        "note": "Built-in framework plugins, auto-activated when their enabler dependency is present; run fallow list --plugins for the set active in a specific project",
+        "note": "Built-in framework plugins, auto-activated when their enabler dependency is present; run plow list --plugins for the set active in a specific project",
         "names": names,
     })
 }
@@ -472,151 +472,148 @@ fn plugins_schema() -> serde_json::Value {
 /// feature.
 const ENVIRONMENT_VARIABLES: &[(&str, &str)] = &[
     (
-        "FALLOW_FORMAT",
+        "PLOW_FORMAT",
         "Default output format (json/human/sarif/compact/markdown/codeclimate/gitlab-codequality/pr-comment-github/pr-comment-gitlab/review-github/review-gitlab/badge). CLI --format flag overrides this.",
     ),
     (
-        "FALLOW_QUIET",
+        "PLOW_QUIET",
         "Set to \"1\" or \"true\" to suppress progress output. CLI --quiet flag overrides this.",
     ),
     (
-        "FALLOW_PRODUCTION",
+        "PLOW_PRODUCTION",
         "Set to true/false to override production mode for all analyses.",
     ),
     (
-        "FALLOW_PRODUCTION_DEAD_CODE",
+        "PLOW_PRODUCTION_DEAD_CODE",
         "Set to true/false to override production mode for dead-code analysis.",
     ),
     (
-        "FALLOW_PRODUCTION_HEALTH",
+        "PLOW_PRODUCTION_HEALTH",
         "Set to true/false to override production mode for health analysis.",
     ),
     (
-        "FALLOW_PRODUCTION_DUPES",
+        "PLOW_PRODUCTION_DUPES",
         "Set to true/false to override production mode for duplication analysis.",
     ),
     (
-        "FALLOW_REVIEW_GUIDANCE",
+        "PLOW_REVIEW_GUIDANCE",
         "Set to true to append collapsed guidance blocks to review-github/review-gitlab inline comment bodies.",
     ),
     (
-        "FALLOW_SUMMARY_SCOPE",
+        "PLOW_SUMMARY_SCOPE",
         "Summary scope for pr-comment-github/pr-comment-gitlab: all (default) keeps project-level dependency/catalog/override findings outside the diff filter; diff applies the diff filter to them too. Inline review comments are unaffected.",
     ),
     (
-        "FALLOW_DIFF_CONTEXT",
+        "PLOW_DIFF_CONTEXT",
         "Line radius around changed diff lines when scoping findings to a diff in the review/PR-comment formats (default 3).",
     ),
     (
-        "FALLOW_BOT_LOGIN",
-        "Bot or token username treated as fallow's own when reconciling existing PR/MR comments in review-github/review-gitlab. Required when posting with a personal access token (the author then carries a human identity).",
+        "PLOW_BOT_LOGIN",
+        "Bot or token username treated as plow's own when reconciling existing PR/MR comments in review-github/review-gitlab. Required when posting with a personal access token (the author then carries a human identity).",
     ),
     (
-        "FALLOW_API_RETRIES",
+        "PLOW_API_RETRIES",
         "Maximum HTTP attempts for review-comment reconciliation API calls (default 3).",
     ),
     (
-        "FALLOW_API_RETRY_DELAY",
+        "PLOW_API_RETRY_DELAY",
         "Floor delay in seconds between HTTP retry attempts (default 2); a server-supplied Retry-After overrides it on 429 responses.",
     ),
     (
-        "FALLOW_CACHE_DIR",
-        "Directory for fallow's persistent analysis cache. Relative paths resolve from the project root and override cache.dir.",
+        "PLOW_CACHE_DIR",
+        "Directory for plow's persistent analysis cache. Relative paths resolve from the project root and override cache.dir.",
     ),
     (
-        "FALLOW_CACHE_MAX_SIZE",
+        "PLOW_CACHE_MAX_SIZE",
         "Extraction cache size cap in megabytes (default 256). Wins over the cache.maxSizeMb config field.",
     ),
     (
-        "FALLOW_EXTENDS_TIMEOUT_SECS",
+        "PLOW_EXTENDS_TIMEOUT_SECS",
         "Timeout in seconds for fetching https:// configs referenced via the extends field (default 5).",
     ),
     (
-        "FALLOW_COVERAGE",
+        "PLOW_COVERAGE",
         "Path to Istanbul coverage data (coverage-final.json) for accurate per-function CRAP scores. CLI --coverage flag overrides this.",
     ),
     (
-        "FALLOW_MAX_FILE_SIZE",
+        "PLOW_MAX_FILE_SIZE",
         "Per-file size ceiling in megabytes for source discovery (default 5; 0 = no limit). CLI --max-file-size flag overrides this.",
     ),
     (
-        "FALLOW_AUDIT_BASE",
-        "Pins the fallow audit comparison base ref when no --base/--changed-since is passed (e.g. upstream/main).",
+        "PLOW_AUDIT_BASE",
+        "Pins the plow audit comparison base ref when no --base/--changed-since is passed (e.g. upstream/main).",
     ),
     (
-        "FALLOW_AUDIT_CACHE_MAX_AGE_DAYS",
+        "PLOW_AUDIT_CACHE_MAX_AGE_DAYS",
         "GC threshold in days for reusable audit base-snapshot caches (default 30; 0 disables the sweep).",
     ),
     (
-        "FALLOW_IMPACT_STORE_MAX_AGE_DAYS",
-        "GC threshold in days for per-project fallow impact stores; a recorded run reclaims stores older than this (unset/0 keeps every store forever).",
+        "PLOW_IMPACT_STORE_MAX_AGE_DAYS",
+        "GC threshold in days for per-project plow impact stores; a recorded run reclaims stores older than this (unset/0 keeps every store forever).",
     ),
     (
-        "FALLOW_ROOT",
+        "PLOW_ROOT",
         "Project root used by the review-github/review-gitlab renderers to read source for suggestion blocks. Set it alongside --root when rendering review formats outside the bundled CI integrations.",
     ),
     (
-        "FALLOW_LICENSE",
+        "PLOW_LICENSE",
         "License JWT (full string) for the paid runtime intelligence layer; intended for shared CI runners.",
     ),
+    ("PLOW_LICENSE_PATH", "File path containing the license JWT."),
     (
-        "FALLOW_LICENSE_PATH",
-        "File path containing the license JWT.",
-    ),
-    (
-        "FALLOW_LICENSE_SKEW_TOLERANCE_SECONDS",
+        "PLOW_LICENSE_SKEW_TOLERANCE_SECONDS",
         "Clock-skew tolerance applied to the license JWT's iat claim (default 86400).",
     ),
     (
-        "FALLOW_COV_BIN",
-        "Explicit path override for the fallow-cov runtime-coverage sidecar binary.",
+        "PLOW_COV_BIN",
+        "Explicit path override for the plow-cov runtime-coverage sidecar binary.",
     ),
     (
-        "FALLOW_COV_BINARY_PATH",
-        "Secondary explicit path override for the fallow-cov sidecar, checked after FALLOW_COV_BIN (air-gapped installs, distro-packaged sidecars, shared Docker images).",
+        "PLOW_COV_BINARY_PATH",
+        "Secondary explicit path override for the plow-cov sidecar, checked after PLOW_COV_BIN (air-gapped installs, distro-packaged sidecars, shared Docker images).",
     ),
     (
-        "FALLOW_RUNTIME_COVERAGE_SOURCE",
-        "Set to cloud to select cloud runtime coverage in fallow coverage analyze without passing --cloud.",
+        "PLOW_RUNTIME_COVERAGE_SOURCE",
+        "Set to cloud to select cloud runtime coverage in plow coverage analyze without passing --cloud.",
     ),
     (
-        "FALLOW_REPO",
-        "owner/repo fallback for fallow coverage analyze --cloud when --repo is not passed (otherwise parsed from the git origin remote).",
+        "PLOW_REPO",
+        "owner/repo fallback for plow coverage analyze --cloud when --repo is not passed (otherwise parsed from the git origin remote).",
     ),
     (
-        "FALLOW_API_URL",
-        "Base URL override for fallow cloud API calls (license refresh, trial, coverage uploads).",
+        "PLOW_API_URL",
+        "Base URL override for plow cloud API calls (license refresh, trial, coverage uploads).",
     ),
     (
-        "FALLOW_API_KEY",
-        "fallow cloud bearer token for coverage upload commands.",
+        "PLOW_API_KEY",
+        "plow cloud bearer token for coverage upload commands.",
     ),
     (
-        "FALLOW_CA_BUNDLE",
-        "Path to a PEM certificate bundle for fallow cloud and provider HTTP calls (replaces the default WebPKI roots).",
+        "PLOW_CA_BUNDLE",
+        "Path to a PEM certificate bundle for plow cloud and provider HTTP calls (replaces the default WebPKI roots).",
     ),
     (
-        "FALLOW_UPDATE_CHECK",
+        "PLOW_UPDATE_CHECK",
         "Set to off/0/false to disable the human-TTY upgrade nudge and its background version check.",
     ),
     (
-        "FALLOW_SUGGESTIONS",
+        "PLOW_SUGGESTIONS",
         "Set to off/0/false/no/disabled to suppress the next_steps[] array of read-only follow-up commands in JSON output (and the human Next: line). Useful for CI consumers that snapshot-diff raw --format json output. Default on.",
     ),
     (
-        "FALLOW_TELEMETRY",
+        "PLOW_TELEMETRY",
         "Opt-in telemetry mode: off, on, or inspect (print the payload to stderr without sending). Telemetry is off by default.",
     ),
     (
-        "FALLOW_TELEMETRY_DISABLED",
-        "Admin/fleet kill switch: truthy values hard-disable telemetry and refuse fallow telemetry enable.",
+        "PLOW_TELEMETRY_DISABLED",
+        "Admin/fleet kill switch: truthy values hard-disable telemetry and refuse plow telemetry enable.",
     ),
     (
-        "FALLOW_TELEMETRY_DEBUG",
-        "Truthy values alias FALLOW_TELEMETRY=inspect.",
+        "PLOW_TELEMETRY_DEBUG",
+        "Truthy values alias PLOW_TELEMETRY=inspect.",
     ),
     (
-        "FALLOW_AGENT_SOURCE",
+        "PLOW_AGENT_SOURCE",
         "Normalized agent vendor for telemetry classification (e.g. claude_code, codex, cursor). Only read when telemetry is on.",
     ),
     (
@@ -624,28 +621,28 @@ const ENVIRONMENT_VARIABLES: &[(&str, &str)] = &[
         "Honored as a top-precedence telemetry kill switch (consoledonottrack.com convention).",
     ),
     (
-        "FALLOW_BIN",
-        "Path to the fallow binary (used by the fallow-mcp server to spawn the CLI).",
+        "PLOW_BIN",
+        "Path to the plow binary (used by the plow-mcp server to spawn the CLI).",
     ),
     (
-        "FALLOW_TIMEOUT_SECS",
+        "PLOW_TIMEOUT_SECS",
         "MCP server: per-tool-call CLI subprocess timeout in seconds (default 120). Raise for long runs like production coverage on large dumps.",
     ),
     (
-        "FALLOW_DIFF_FILE",
+        "PLOW_DIFF_FILE",
         "MCP server: path to a unified diff that scopes all findings by changed line.",
     ),
     (
-        "FALLOW_CHANGED_SINCE",
+        "PLOW_CHANGED_SINCE",
         "MCP server: git ref that scopes file discovery for analysis tools.",
     ),
     (
-        "FALLOW_INTEGRATION_SURFACE",
+        "PLOW_INTEGRATION_SURFACE",
         "Telemetry integration_surface override for non-CLI surfaces (mcp/lsp/vscode/napi/programmatic). Set by the MCP server on the CLI it spawns.",
     ),
     (
-        "FALLOW_MCP_TOOL",
-        "Telemetry mcp_tool dimension, validated against the MCP tool-name allowlist. Set by the MCP server alongside FALLOW_INTEGRATION_SURFACE=mcp.",
+        "PLOW_MCP_TOOL",
+        "Telemetry mcp_tool dimension, validated against the MCP tool-name allowlist. Set by the MCP server alongside PLOW_INTEGRATION_SURFACE=mcp.",
     ),
 ];
 
@@ -698,7 +695,7 @@ fn build_arg_schema(arg: &clap::Arg) -> serde_json::Value {
 
 #[cfg(test)]
 mod tests {
-    use fallow_types::suppress::{DEAD_CODE_FILTER_FLAGS, IssueKind, KNOWN_ISSUE_KIND_NAMES};
+    use plow_types::suppress::{DEAD_CODE_FILTER_FLAGS, IssueKind, KNOWN_ISSUE_KIND_NAMES};
     use rustc_hash::FxHashSet;
 
     use super::*;
@@ -724,16 +721,16 @@ mod tests {
     fn schema_includes_environment_variables() {
         let schema = schema();
         let env_vars = &schema["environment_variables"];
-        assert!(env_vars["FALLOW_FORMAT"].is_string());
-        assert!(env_vars["FALLOW_QUIET"].is_string());
-        assert!(env_vars["FALLOW_CACHE_DIR"].is_string());
-        assert!(env_vars["FALLOW_BIN"].is_string());
-        assert!(env_vars["FALLOW_CACHE_MAX_SIZE"].is_string());
-        assert!(env_vars["FALLOW_TELEMETRY"].is_string());
-        assert!(env_vars["FALLOW_AUDIT_BASE"].is_string());
-        assert!(env_vars["FALLOW_IMPACT_STORE_MAX_AGE_DAYS"].is_string());
-        assert!(env_vars["FALLOW_TIMEOUT_SECS"].is_string());
-        assert!(env_vars["FALLOW_SUGGESTIONS"].is_string());
+        assert!(env_vars["PLOW_FORMAT"].is_string());
+        assert!(env_vars["PLOW_QUIET"].is_string());
+        assert!(env_vars["PLOW_CACHE_DIR"].is_string());
+        assert!(env_vars["PLOW_BIN"].is_string());
+        assert!(env_vars["PLOW_CACHE_MAX_SIZE"].is_string());
+        assert!(env_vars["PLOW_TELEMETRY"].is_string());
+        assert!(env_vars["PLOW_AUDIT_BASE"].is_string());
+        assert!(env_vars["PLOW_IMPACT_STORE_MAX_AGE_DAYS"].is_string());
+        assert!(env_vars["PLOW_TIMEOUT_SECS"].is_string());
+        assert!(env_vars["PLOW_SUGGESTIONS"].is_string());
         assert!(env_vars["DO_NOT_TRACK"].is_string());
     }
 
@@ -742,38 +739,38 @@ mod tests {
     #[test]
     fn environment_variables_exclude_internal_plumbing() {
         const EXCLUDED: &[(&str, &str)] = &[
-            ("FALLOW_TEST_SIGNAL_HELPER", "test harness only"),
-            ("FALLOW_STUB_MODE", "test harness only"),
+            ("PLOW_TEST_SIGNAL_HELPER", "test harness only"),
+            ("PLOW_STUB_MODE", "test harness only"),
             (
-                "FALLOW_RAYON_STACK_PROBE_CHILD",
+                "PLOW_RAYON_STACK_PROBE_CHILD",
                 "internal child-process marker",
             ),
             (
-                "FALLOW_PROGRAMMATIC_SHARED_DIFF_CHILD",
+                "PLOW_PROGRAMMATIC_SHARED_DIFF_CHILD",
                 "internal child-process marker",
             ),
             (
-                "FALLOW_GITLAB_BASE_SHA",
+                "PLOW_GITLAB_BASE_SHA",
                 "set by the bundled GitLab CI template, not user-configured",
             ),
             (
-                "FALLOW_GITLAB_START_SHA",
+                "PLOW_GITLAB_START_SHA",
                 "set by the bundled GitLab CI template, not user-configured",
             ),
             (
-                "FALLOW_GITLAB_HEAD_SHA",
+                "PLOW_GITLAB_HEAD_SHA",
                 "set by the bundled GitLab CI template, not user-configured",
             ),
             (
-                "FALLOW_COMMENT_ID",
+                "PLOW_COMMENT_ID",
                 "set by the bundled Action/CI scripts, not user-configured",
             ),
             (
-                "FALLOW_MAX_COMMENTS",
+                "PLOW_MAX_COMMENTS",
                 "set by the bundled Action/CI scripts, not user-configured",
             ),
             (
-                "FALLOW_DIFF_FILTER",
+                "PLOW_DIFF_FILTER",
                 "set by the bundled Action/CI scripts, not user-configured",
             ),
         ];
@@ -801,7 +798,7 @@ mod tests {
     #[test]
     fn schema_has_name_and_version() {
         let schema = schema();
-        assert_eq!(schema["name"], "fallow");
+        assert_eq!(schema["name"], "plow");
         assert!(schema["version"].is_string());
         assert_eq!(schema["manifest_version"], "1");
     }
@@ -927,8 +924,8 @@ mod tests {
             );
             if let Some(comment) = comment.as_str() {
                 assert!(
-                    comment.starts_with("// fallow-ignore-next-line ")
-                        || comment.starts_with("// fallow-ignore-file "),
+                    comment.starts_with("// plow-ignore-next-line ")
+                        || comment.starts_with("// plow-ignore-file "),
                     "unexpected suppress_comment shape: {comment}"
                 );
                 let token = comment.split_whitespace().last().unwrap();
@@ -1021,7 +1018,7 @@ mod tests {
     fn mcp_tools_block_lists_every_manifest_tool() {
         let schema = schema();
         let block = &schema["mcp_tools"];
-        assert_eq!(block["server"], "fallow-mcp");
+        assert_eq!(block["server"], "plow-mcp");
         let tools = block["tools"].as_array().unwrap();
         assert_eq!(tools.len(), MCP_TOOLS.len());
         for tool in tools {
@@ -1065,7 +1062,7 @@ mod tests {
         assert_eq!(names.len(), count);
         assert_eq!(
             count,
-            fallow_core::plugins::registry::builtin_plugin_names().len()
+            plow_core::plugins::registry::builtin_plugin_names().len()
         );
         assert!(count >= 110, "plugin registry shrank unexpectedly");
     }
@@ -1158,7 +1155,7 @@ mod tests {
             if row.probe.is_empty() {
                 continue;
             }
-            let argv = std::iter::once("fallow").chain(row.probe.iter().copied());
+            let argv = std::iter::once("plow").chain(row.probe.iter().copied());
             Cli::try_parse_from(argv).unwrap_or_else(|e| {
                 panic!(
                     "task matrix probe {:?} for command '{}' does not parse: {e}",
@@ -1174,8 +1171,8 @@ mod tests {
     #[test]
     fn task_matrix_excludes_mutating_commands() {
         for row in crate::task_matrix::TASK_MATRIX {
-            let after_fallow = row.command.strip_prefix("fallow ").unwrap_or(row.command);
-            let first_token = after_fallow.split_whitespace().next().unwrap_or("");
+            let after_plow = row.command.strip_prefix("plow ").unwrap_or(row.command);
+            let first_token = after_plow.split_whitespace().next().unwrap_or("");
             assert!(
                 !crate::task_matrix::MUTATING_COMMANDS.contains(&first_token),
                 "task matrix command '{}' names mutating token '{first_token}'",

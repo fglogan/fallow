@@ -16,8 +16,8 @@
 //!   must still report.
 //!
 //! These tests use the shared `create_config(root)` helper which builds a
-//! `FallowConfig` with `entry: vec![]` and DOES NOT read the fixture's
-//! `.fallowrc.json`. The fixtures keep a `.fallowrc.json` for documentation
+//! `PlowConfig` with `entry: vec![]` and DOES NOT read the fixture's
+//! `.plowrc.json`. The fixtures keep a `.plowrc.json` for documentation
 //! and for anyone running the binary against the fixture directly, but the
 //! tests exercise the graph-level `.d.ts -> entry-point` auto-promotion path
 //! (see `ModuleGraph::build_with_reachability_roots`) which makes the fixes
@@ -25,7 +25,7 @@
 
 use super::common::{create_config, fixture_path};
 
-fn unused_file_names(results: &fallow_types::results::AnalysisResults) -> Vec<String> {
+fn unused_file_names(results: &plow_types::results::AnalysisResults) -> Vec<String> {
     results
         .unused_files
         .iter()
@@ -42,7 +42,7 @@ fn unused_file_names(results: &fallow_types::results::AnalysisResults) -> Vec<St
         .collect()
 }
 
-fn unresolved_specifiers(results: &fallow_types::results::AnalysisResults) -> Vec<String> {
+fn unresolved_specifiers(results: &plow_types::results::AnalysisResults) -> Vec<String> {
     results
         .unresolved_imports
         .iter()
@@ -54,7 +54,7 @@ fn unresolved_specifiers(results: &fallow_types::results::AnalysisResults) -> Ve
 fn auto_imports_dts_typeof_import_traces_target_file() {
     let root = fixture_path("issue-396-auto-imports");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let names = unused_file_names(&results);
     assert!(
@@ -68,7 +68,7 @@ fn auto_imports_dts_typeof_import_traces_target_file() {
 fn components_dts_typeof_import_traces_target_file() {
     let root = fixture_path("issue-397-vue-components");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let names = unused_file_names(&results);
     assert!(
@@ -82,7 +82,7 @@ fn components_dts_typeof_import_traces_target_file() {
 fn new_url_dot_slash_does_not_produce_unresolved_import() {
     let root = fixture_path("issue-399-new-url");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let specifiers = unresolved_specifiers(&results);
     assert!(
@@ -116,7 +116,7 @@ fn new_url_dot_slash_does_not_produce_unresolved_import() {
 fn new_url_directory_target_does_not_produce_unresolved_import() {
     let root = fixture_path("issue-840-new-url-directory");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let specifiers = unresolved_specifiers(&results);
     assert!(

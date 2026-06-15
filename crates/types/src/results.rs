@@ -29,7 +29,7 @@ use crate::suppress::{IssueKind, closest_known_kind_name};
 /// Summary of detected entry points, grouped by discovery source.
 ///
 /// Used to surface entry-point detection status in human and JSON output,
-/// so library authors can verify that fallow found the right entry points.
+/// so library authors can verify that plow found the right entry points.
 #[derive(Debug, Clone, Default)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct EntryPointSummary {
@@ -45,8 +45,8 @@ pub struct EntryPointSummary {
 /// # Examples
 ///
 /// ```
-/// use fallow_types::output_dead_code::UnusedFileFinding;
-/// use fallow_types::results::{AnalysisResults, UnusedFile};
+/// use plow_types::output_dead_code::UnusedFileFinding;
+/// use plow_types::results::{AnalysisResults, UnusedFile};
 /// use std::path::PathBuf;
 ///
 /// let mut results = AnalysisResults::default();
@@ -272,8 +272,8 @@ pub struct AnalysisResults {
     pub suppression_count: usize,
     /// Suppression comments present in analyzed files this run (every present
     /// marker, all kinds, not only consumed ones). Internal: read in-process by
-    /// `fallow impact` to distinguish a genuinely resolved finding from one
-    /// silenced by a `fallow-ignore`. Skipped during serialization, like
+    /// `plow impact` to distinguish a genuinely resolved finding from one
+    /// silenced by a `plow-ignore`. Skipped during serialization, like
     /// [`Self::suppression_count`], so the public JSON output contract is
     /// unchanged.
     #[serde(skip)]
@@ -285,29 +285,29 @@ pub struct AnalysisResults {
     /// Local security candidates (e.g. `client-server-leak`). CANDIDATES for
     /// downstream agent verification, NOT verified vulnerabilities. Off by
     /// default; populated only when the corresponding `security_*` rule is
-    /// enabled (forced on by `fallow security`). Excluded from `total_issues`
+    /// enabled (forced on by `plow security`). Excluded from `total_issues`
     /// and skipped during serialization so they never surface under bare
-    /// `fallow` or the `audit` gate; the `fallow security` command reads this
+    /// `plow` or the `audit` gate; the `plow security` command reads this
     /// field and emits its own envelope. Mirrors [`Self::feature_flags`].
     #[serde(skip)]
     pub security_findings: Vec<SecurityFinding>,
     /// In-band blind-spot count: number of `"use client"` files whose transitive
     /// import cone contains a dynamic `import()` the reachability BFS cannot
-    /// follow. Surfaced by `fallow security` so a leak hidden behind an
+    /// follow. Surfaced by `plow security` so a leak hidden behind an
     /// unresolved edge is never silently reported as "clean". Skipped during
     /// serialization like [`Self::security_findings`].
     #[serde(skip)]
     pub security_unresolved_edge_files: usize,
     /// In-band blind-spot count: number of sink-shaped nodes the catalogue
     /// detector could not flatten to a static callee path (dynamic dispatch,
-    /// computed members, aliased bindings). Surfaced by `fallow security` so an
+    /// computed members, aliased bindings). Surfaced by `plow security` so an
     /// empty catalogue result with a non-zero count is not reported as "clean".
     /// Skipped during serialization like [`Self::security_findings`].
     #[serde(skip)]
     pub security_unresolved_callee_sites: usize,
     /// Location samples for sink-shaped nodes the catalogue detector could not
     /// flatten to a static callee path. Skipped during default serialization;
-    /// `fallow security` summarizes this metadata in its own envelope.
+    /// `plow security` summarizes this metadata in its own envelope.
     #[serde(skip)]
     pub security_unresolved_callee_diagnostics: Vec<SecurityUnresolvedCalleeDiagnostic>,
     /// Usage counts for all exports across the project. Used by the LSP for Code Lens.
@@ -332,8 +332,8 @@ impl AnalysisResults {
     /// # Examples
     ///
     /// ```
-    /// use fallow_types::output_dead_code::{UnresolvedImportFinding, UnusedFileFinding};
-    /// use fallow_types::results::{AnalysisResults, UnresolvedImport, UnusedFile};
+    /// use plow_types::output_dead_code::{UnresolvedImportFinding, UnusedFileFinding};
+    /// use plow_types::results::{AnalysisResults, UnresolvedImport, UnusedFile};
     /// use std::path::PathBuf;
     ///
     /// let mut results = AnalysisResults::default();
@@ -955,7 +955,7 @@ pub struct PrivateTypeLeak {
 }
 
 /// A `"use client"` file that exports a Next.js server-only / route-segment
-/// config name. Next.js rejects this combination at build time; fallow catches
+/// config name. Next.js rejects this combination at build time; plow catches
 /// it statically before the build runs.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -978,7 +978,7 @@ pub struct InvalidClientExport {
 /// A barrel file that re-exports BOTH a `"use client"` origin module AND a
 /// server-only origin module. Importing one name from such a barrel drags the
 /// other's directive context across the React Server Components boundary (the
-/// Next.js App Router footgun); fallow catches it statically.
+/// Next.js App Router footgun); plow catches it statically.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MixedClientServerBarrel {
@@ -1134,7 +1134,7 @@ pub struct UnusedComponentEmit {
 
 /// Two or more Next.js App Router route files that resolve to the SAME URL
 /// within one app-root. Next.js fails the build ("You cannot have two parallel
-/// pages that resolve to the same path"); fallow catches it statically and
+/// pages that resolve to the same path"); plow catches it statically and
 /// names every colliding file at once. One finding is emitted per colliding
 /// file; `conflicting_paths` lists the sibling files that share the URL.
 #[derive(Debug, Clone, Serialize)]
@@ -1161,7 +1161,7 @@ pub struct RouteCollision {
 /// position using different param spellings (`[id]` vs `[slug]`, or `[...x]`
 /// vs `[[...x]]`). Next.js throws "You cannot use different slug names for the
 /// same dynamic path" at dev / production RUNTIME when the position is hit;
-/// `next build` does NOT catch it, so fallow's static catch surfaces a route
+/// `next build` does NOT catch it, so plow's static catch surfaces a route
 /// that would otherwise pass CI and crash at request time. One finding is
 /// emitted per involved file.
 #[derive(Debug, Clone, Serialize)]
@@ -1215,7 +1215,7 @@ pub struct UnusedDependency {
 /// # Examples
 ///
 /// ```
-/// use fallow_types::results::DependencyLocation;
+/// use plow_types::results::DependencyLocation;
 ///
 /// // All three variants are constructible
 /// let loc = DependencyLocation::Dependencies;
@@ -1426,7 +1426,7 @@ pub enum TaintConfidence {
 /// untrusted-source module above isolated helpers or scripts.
 ///
 /// This is a relative-ordering signal, NOT a `confidence` or `signal_strength`
-/// score: fallow does not prove the path is exploitable.
+/// score: plow does not prove the path is exploitable.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityReachability {
@@ -1468,7 +1468,7 @@ pub struct SecurityReachability {
     pub crosses_boundary: bool,
 }
 
-/// Dead-code cross-link attached to a security candidate when fallow's dead-code
+/// Dead-code cross-link attached to a security candidate when plow's dead-code
 /// pass reports the same anchor as removable code.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -1546,7 +1546,7 @@ pub struct SecurityCandidateSink {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub callee: Option<String>,
     /// URL construction shape for SSRF and open-redirect style candidates when
-    /// fallow can classify whether the origin is fixed or dynamic. Absent for
+    /// plow can classify whether the origin is fixed or dynamic. Absent for
     /// non-URL sinks and unclassified URL expressions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url_shape: Option<SecurityUrlShape>,
@@ -1566,14 +1566,14 @@ pub struct SecurityZoneCrossing {
 /// The boundary slot of a [`SecurityCandidate`]: which structural boundaries the
 /// candidate's flow crosses. A flow that crosses a client/server or module
 /// boundary is a stronger review target than a self-contained one; the boundary
-/// is fallow's structural signal over a pure source-sink match.
+/// is plow's structural signal over a pure source-sink match.
 ///
 /// Two further boundary kinds are RESERVED for a follow-up and are deliberately
 /// absent here rather than emitted as always-false: `export_visibility` (is the
 /// sink on a publicly-exported symbol?) and a package boundary (does the flow
 /// cross an npm-package edge?). Both need new graph derivation that does not
 /// exist today; emitting them as `false` would misreport "we checked and it does
-/// not cross" when fallow has not checked at all.
+/// not cross" when plow has not checked at all.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityCandidateBoundary {
@@ -1607,7 +1607,7 @@ pub struct SecurityNetworkContext {
     pub destination: Option<String>,
 }
 
-/// An agent-actionable candidate record on a [`SecurityFinding`]. fallow fills
+/// An agent-actionable candidate record on a [`SecurityFinding`]. plow fills
 /// `source_kind`, `sink`, and `boundary`. The exploitability IMPACT is
 /// deliberately NOT a field: `severity` on the parent finding is only a
 /// review-priority tier, while deciding exploitability remains the consuming
@@ -1706,7 +1706,7 @@ pub enum SecurityRuntimeState {
 }
 
 /// Runtime coverage context attached to a security candidate when
-/// `fallow security --runtime-coverage` is supplied.
+/// `plow security --runtime-coverage` is supplied.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityRuntimeContext {
@@ -1769,7 +1769,7 @@ pub struct SecurityDefensiveBoundary {
     pub verification_prompt: String,
 }
 
-/// One untrusted entry to reachable sink path for `fallow security --surface`.
+/// One untrusted entry to reachable sink path for `plow security --surface`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityAttackSurfaceEntry {
@@ -1785,9 +1785,9 @@ pub struct SecurityAttackSurfaceEntry {
 }
 
 /// A local security CANDIDATE for downstream agent verification, NOT a verified
-/// vulnerability. Emitted only by `fallow security`, never under bare `fallow`
+/// vulnerability. Emitted only by `plow security`, never under bare `plow`
 /// or the `audit` gate. There is deliberately no `confidence` or
-/// `signal_strength` field: fallow does not prove exploitability, so the trace
+/// `signal_strength` field: plow does not prove exploitability, so the trace
 /// (its hops and length) is the only honest signal.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -1826,7 +1826,7 @@ pub struct SecurityFinding {
     /// (`req.query`, `process.argv`, message-event `data`, etc.). `true` ranks
     /// the candidate higher and annotates the evidence; `false` does NOT
     /// suppress the finding (the association is conservative, never a proof, and
-    /// fallow prefers false-negatives over false-positives). Always `false` for
+    /// plow prefers false-negatives over false-positives). Always `false` for
     /// `ClientServerLeak`. Skipped from JSON when `false` for output stability.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub source_backed: bool,
@@ -1845,15 +1845,15 @@ pub struct SecurityFinding {
     /// exploitability and does not change gates.
     pub severity: SecuritySeverity,
     /// Structural import-hop trace from the client boundary to the secret source.
-    /// The hop count is the uncalibrated signal; fallow does not prove the path
+    /// The hop count is the uncalibrated signal; plow does not prove the path
     /// is exploitable.
     pub trace: Vec<TraceHop>,
     /// Machine-actionable next steps. Always emitted (possibly empty for
     /// forward-compat). For security candidates this is a single file-level
     /// suppress hint (`auto_fixable: false`); there is no auto-fix because
-    /// verification is the agent's job, not fallow's.
+    /// verification is the agent's job, not plow's.
     pub actions: Vec<IssueAction>,
-    /// Dead-code cross-link when the same sink candidate sits in code fallow also
+    /// Dead-code cross-link when the same sink candidate sits in code plow also
     /// reports as removable. Agents should verify the dead-code finding and delete
     /// the code instead of hardening the sink when deletion is safe.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1866,7 +1866,7 @@ pub struct SecurityFinding {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reachability: Option<SecurityReachability>,
     /// Agent-actionable candidate record: the untrusted input kind, the sink,
-    /// and the boundary the flow crosses. fallow fills these three slots; the
+    /// and the boundary the flow crosses. plow fills these three slots; the
     /// exploitability verdict is the agent's job and is not a field here. Always
     /// present.
     pub candidate: SecurityCandidate,
@@ -1875,11 +1875,11 @@ pub struct SecurityFinding {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub taint_flow: Option<SecurityTaintFlow>,
     /// Production runtime coverage context for the function enclosing this
-    /// security sink. Present only when `fallow security --runtime-coverage`
+    /// security sink. Present only when `plow security --runtime-coverage`
     /// runs and the candidate is a `tainted-sink`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime: Option<SecurityRuntimeContext>,
-    /// Internal projection used by `fallow security --surface`. The CLI strips
+    /// Internal projection used by `plow security --surface`. The CLI strips
     /// this from per-finding JSON and promotes it to the top-level
     /// `attack_surface` field only when requested.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1933,8 +1933,8 @@ pub struct EmptyCatalogGroup {
 /// at a catalog which does not declare the consumed package.
 ///
 /// `pnpm install` errors at install time with `ERR_PNPM_CATALOG_ENTRY_NOT_FOUND_FOR_CATALOG_PROTOCOL`
-/// when this happens. fallow surfaces it statically so the failure is caught at
-/// `fallow dead-code` time, before any install.
+/// when this happens. plow surfaces it statically so the failure is caught at
+/// `plow dead-code` time, before any install.
 ///
 /// The default catalog (bare `catalog:` references the top-level `catalog:` map)
 /// uses `catalog_name: "default"`. Named catalogs (`catalog:react17`) use the
@@ -2339,7 +2339,7 @@ pub struct PolicyViolation {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum SuppressionOrigin {
-    /// A `// fallow-ignore-next-line` or `// fallow-ignore-file` comment.
+    /// A `// plow-ignore-next-line` or `// plow-ignore-file` comment.
     Comment {
         /// The issue kind token from the comment (e.g., "unused-exports"), or None for blanket.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2348,7 +2348,7 @@ pub enum SuppressionOrigin {
         is_file_level: bool,
         /// Whether `issue_kind` parses to a known `IssueKind`. False when the
         /// token is a typo or refers to a kind that was renamed or removed in
-        /// a newer fallow release. JSON consumers (CI annotations, MCP agents,
+        /// a newer plow release. JSON consumers (CI annotations, MCP agents,
         /// VS Code) branch on this to choose the right next-step text.
         /// Omitted from the wire when `true` so producers that have not yet
         /// adopted the field stay byte-compatible. See issue #449.
@@ -2421,9 +2421,9 @@ impl StaleSuppression {
                 ..
             } => {
                 let directive = if *is_file_level {
-                    "fallow-ignore-file"
+                    "plow-ignore-file"
                 } else {
-                    "fallow-ignore-next-line"
+                    "plow-ignore-next-line"
                 };
                 match issue_kind {
                     Some(kind) => format!("// {directive} {kind}"),
@@ -2458,10 +2458,10 @@ impl StaleSuppression {
                 match issue_kind {
                     Some(kind) if !*kind_known => match closest_known_kind_name(kind) {
                         Some(suggestion) => format!(
-                            "'{kind}' is not a recognized fallow issue kind. Did you mean '{suggestion}'? Other tokens on this line still apply."
+                            "'{kind}' is not a recognized plow issue kind. Did you mean '{suggestion}'? Other tokens on this line still apply."
                         ),
                         None => format!(
-                            "'{kind}' is not a recognized fallow issue kind. Other tokens on this line still apply."
+                            "'{kind}' is not a recognized plow issue kind. Other tokens on this line still apply."
                         ),
                     },
                     Some(kind) => format!("no {kind} issue found {scope}"),
@@ -2511,9 +2511,9 @@ impl StaleSuppression {
 
 /// A suppression comment present in an analyzed file this run.
 ///
-/// This is the "active-suppression state" the Fallow Impact value report needs
+/// This is the "active-suppression state" the Plow Impact value report needs
 /// to tell a genuinely resolved finding (the code was fixed) from one merely
-/// silenced by a newly-added `fallow-ignore`. It captures every PRESENT marker,
+/// silenced by a newly-added `plow-ignore`. It captures every PRESENT marker,
 /// not only the ones a detector consumed: complexity and code-duplication
 /// suppressions are consumed in the CLI layer rather than the core suppression
 /// context, so presence is the single uniform signal that covers all impact
@@ -2521,7 +2521,7 @@ impl StaleSuppression {
 /// suppression that newly appeared between two recorded runs. It is internal:
 /// never serialized into the public JSON output schema (the field on
 /// [`AnalysisResults`] is `#[serde(skip)]`), only read in-process by
-/// `fallow impact`.
+/// `plow impact`.
 #[derive(Debug, Clone)]
 pub struct ActiveSuppression {
     /// Absolute path to the file carrying the suppression comment.
@@ -2529,8 +2529,8 @@ pub struct ActiveSuppression {
     /// The suppressed issue kind in kebab-case (e.g. `"unused-export"`), or
     /// `None` for a blanket marker that suppresses every kind on its target.
     pub kind: Option<String>,
-    /// Whether this is a `fallow-ignore-file` (file-level) marker rather than a
-    /// `fallow-ignore-next-line` marker.
+    /// Whether this is a `plow-ignore-file` (file-level) marker rather than a
+    /// `plow-ignore-next-line` marker.
     pub is_file_level: bool,
 }
 

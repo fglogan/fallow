@@ -2,8 +2,8 @@ use crate::report::sink::{out, outln};
 use std::fmt::Write;
 use std::path::Path;
 
-use fallow_core::duplicates::DuplicationReport;
-use fallow_core::results::{
+use plow_core::duplicates::DuplicationReport;
+use plow_core::results::{
     AnalysisResults, UnresolvedCatalogReferenceFinding, UnusedCatalogEntryFinding,
     UnusedClassMemberFinding, UnusedDependencyOverrideFinding, UnusedEnumMemberFinding,
     UnusedExport, UnusedExportFinding, UnusedMember, UnusedStoreMemberFinding, UnusedTypeFinding,
@@ -33,11 +33,11 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
     let mut out = String::new();
 
     if total == 0 {
-        out.push_str("## Fallow: no issues found\n");
+        out.push_str("## Plow: no issues found\n");
         return out;
     }
 
-    let _ = write!(out, "## Fallow: {total} issue{} found\n\n", plural(total));
+    let _ = write!(out, "## Plow: {total} issue{} found\n\n", plural(total));
 
     markdown_section(&mut out, &results.unused_files, "Unused files", |file| {
         vec![format!("- `{}`", rel(&file.file.path))]
@@ -321,7 +321,7 @@ fn push_markdown_graph_sections(
 }
 
 fn format_markdown_circular_dependency(
-    cycle: &fallow_core::results::CircularDependencyFinding,
+    cycle: &plow_core::results::CircularDependencyFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     let chain: Vec<String> = cycle.cycle.files.iter().map(|p| rel(p)).collect();
@@ -346,13 +346,13 @@ fn format_markdown_circular_dependency(
 }
 
 fn format_markdown_re_export_cycle(
-    cycle: &fallow_core::results::ReExportCycleFinding,
+    cycle: &plow_core::results::ReExportCycleFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     let chain: Vec<String> = cycle.cycle.files.iter().map(|p| rel(p)).collect();
     let kind_tag = match cycle.cycle.kind {
-        fallow_core::results::ReExportCycleKind::SelfLoop => " *(self-loop)*",
-        fallow_core::results::ReExportCycleKind::MultiNode => "",
+        plow_core::results::ReExportCycleKind::SelfLoop => " *(self-loop)*",
+        plow_core::results::ReExportCycleKind::MultiNode => "",
     };
     vec![format!(
         "- {}{}",
@@ -366,7 +366,7 @@ fn format_markdown_re_export_cycle(
 }
 
 fn format_markdown_boundary_violation(
-    v: &fallow_core::results::BoundaryViolationFinding,
+    v: &plow_core::results::BoundaryViolationFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -380,7 +380,7 @@ fn format_markdown_boundary_violation(
 }
 
 fn format_markdown_boundary_coverage(
-    v: &fallow_core::results::BoundaryCoverageViolationFinding,
+    v: &plow_core::results::BoundaryCoverageViolationFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -391,7 +391,7 @@ fn format_markdown_boundary_coverage(
 }
 
 fn format_markdown_boundary_call(
-    v: &fallow_core::results::BoundaryCallViolationFinding,
+    v: &plow_core::results::BoundaryCallViolationFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -405,7 +405,7 @@ fn format_markdown_boundary_call(
 }
 
 fn format_markdown_policy_violation(
-    v: &fallow_core::results::PolicyViolationFinding,
+    v: &plow_core::results::PolicyViolationFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -424,7 +424,7 @@ fn format_markdown_policy_violation(
 }
 
 fn format_markdown_invalid_client_export(
-    e: &fallow_core::results::InvalidClientExportFinding,
+    e: &plow_core::results::InvalidClientExportFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -437,7 +437,7 @@ fn format_markdown_invalid_client_export(
 }
 
 fn format_markdown_mixed_client_server_barrel(
-    b: &fallow_core::results::MixedClientServerBarrelFinding,
+    b: &plow_core::results::MixedClientServerBarrelFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -450,7 +450,7 @@ fn format_markdown_mixed_client_server_barrel(
 }
 
 fn format_markdown_misplaced_directive(
-    d: &fallow_core::results::MisplacedDirectiveFinding,
+    d: &plow_core::results::MisplacedDirectiveFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -462,7 +462,7 @@ fn format_markdown_misplaced_directive(
 }
 
 fn format_markdown_unprovided_inject(
-    i: &fallow_core::results::UnprovidedInjectFinding,
+    i: &plow_core::results::UnprovidedInjectFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -475,7 +475,7 @@ fn format_markdown_unprovided_inject(
 }
 
 fn format_markdown_unrendered_component(
-    c: &fallow_core::results::UnrenderedComponentFinding,
+    c: &plow_core::results::UnrenderedComponentFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -487,7 +487,7 @@ fn format_markdown_unrendered_component(
 }
 
 fn format_markdown_unused_component_prop(
-    p: &fallow_core::results::UnusedComponentPropFinding,
+    p: &plow_core::results::UnusedComponentPropFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -499,7 +499,7 @@ fn format_markdown_unused_component_prop(
 }
 
 fn format_markdown_unused_component_emit(
-    e: &fallow_core::results::UnusedComponentEmitFinding,
+    e: &plow_core::results::UnusedComponentEmitFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -511,7 +511,7 @@ fn format_markdown_unused_component_emit(
 }
 
 fn format_markdown_unused_server_action(
-    a: &fallow_core::results::UnusedServerActionFinding,
+    a: &plow_core::results::UnusedServerActionFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -523,7 +523,7 @@ fn format_markdown_unused_server_action(
 }
 
 fn format_markdown_route_collision(
-    c: &fallow_core::results::RouteCollisionFinding,
+    c: &plow_core::results::RouteCollisionFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -535,7 +535,7 @@ fn format_markdown_route_collision(
 }
 
 fn format_markdown_dynamic_segment_name_conflict(
-    c: &fallow_core::results::DynamicSegmentNameConflictFinding,
+    c: &plow_core::results::DynamicSegmentNameConflictFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -672,14 +672,11 @@ pub(super) fn print_grouped_markdown(groups: &[ResultGroup], root: &Path) {
     let total: usize = groups.iter().map(|g| g.results.total_issues()).sum();
 
     if total == 0 {
-        outln!("## Fallow: no issues found");
+        outln!("## Plow: no issues found");
         return;
     }
 
-    outln!(
-        "## Fallow: {total} issue{} found (grouped)\n",
-        plural(total)
-    );
+    outln!("## Plow: {total} issue{} found (grouped)\n", plural(total));
 
     for group in groups {
         let count = group.results.total_issues();
@@ -703,7 +700,7 @@ pub(super) fn print_grouped_markdown(groups: &[ResultGroup], root: &Path) {
         }
         let body = build_markdown(&group.results, root);
         let sections = body
-            .strip_prefix("## Fallow: no issues found\n")
+            .strip_prefix("## Plow: no issues found\n")
             .or_else(|| body.find("\n\n").map(|pos| &body[pos + 2..]))
             .unwrap_or(&body);
         out!("{sections}");
@@ -716,7 +713,7 @@ fn format_export(e: &UnusedExport) -> String {
 }
 
 fn format_private_type_leak(
-    entry: &fallow_types::output_dead_code::PrivateTypeLeakFinding,
+    entry: &plow_types::output_dead_code::PrivateTypeLeakFinding,
 ) -> String {
     let e = &entry.leak;
     format!(
@@ -829,14 +826,14 @@ pub fn build_duplication_markdown(report: &DuplicationReport, root: &Path) -> St
     let mut out = String::new();
 
     if report.clone_groups.is_empty() {
-        out.push_str("## Fallow: no code duplication found\n");
+        out.push_str("## Plow: no code duplication found\n");
         return out;
     }
 
     let stats = &report.stats;
     let _ = write!(
         out,
-        "## Fallow: {} clone group{} found ({:.1}% duplication)\n\n",
+        "## Plow: {} clone group{} found ({:.1}% duplication)\n\n",
         stats.clone_groups,
         plural(stats.clone_groups),
         stats.duplication_percentage,
@@ -932,7 +929,7 @@ pub fn build_health_markdown(report: &crate::health_types::HealthReport, root: &
         if report.vital_signs.is_none() {
             let _ = write!(
                 out,
-                "## Fallow: no functions exceed complexity thresholds\n\n\
+                "## Plow: no functions exceed complexity thresholds\n\n\
                  **{}** functions analyzed (max cyclomatic: {}, max cognitive: {}, max CRAP: {:.1})\n",
                 report.summary.functions_analyzed,
                 report.summary.max_cyclomatic_threshold,
@@ -1237,13 +1234,13 @@ fn write_findings_section(
     if shown < count {
         let _ = write!(
             out,
-            "## Fallow: {count} high complexity function{} ({shown} shown)\n\n",
+            "## Plow: {count} high complexity function{} ({shown} shown)\n\n",
             plural(count),
         );
     } else {
         let _ = write!(
             out,
-            "## Fallow: {count} high complexity function{}\n\n",
+            "## Plow: {count} high complexity function{}\n\n",
             plural(count),
         );
     }
@@ -1655,7 +1652,7 @@ fn write_metric_legend(out: &mut String, report: &crate::health_types::HealthRep
         out.push_str("- **Confidence**: recommendation reliability (high = deterministic analysis, medium = heuristic, low = git-dependent)\n");
     }
     out.push_str(
-        "\n[Full metric reference](https://docs.fallow.tools/explanations/metrics)\n\n</details>\n",
+        "\n[Full metric reference](https://docs.genesis-plow.dev/explanations/metrics)\n\n</details>\n",
     );
 }
 
@@ -1663,11 +1660,11 @@ fn write_metric_legend(out: &mut String, report: &crate::health_types::HealthRep
 mod tests {
     use super::*;
     use crate::report::test_helpers::sample_results;
-    use fallow_core::duplicates::{
+    use plow_core::duplicates::{
         CloneFamily, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats,
         RefactoringKind, RefactoringSuggestion,
     };
-    use fallow_core::results::*;
+    use plow_core::results::*;
     use std::path::PathBuf;
 
     #[test]
@@ -1675,7 +1672,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
         let md = build_markdown(&results, &root);
-        assert_eq!(md, "## Fallow: no issues found\n");
+        assert_eq!(md, "## Plow: no issues found\n");
     }
 
     #[test]
@@ -1684,7 +1681,7 @@ mod tests {
         let results = sample_results(&root);
         let md = build_markdown(&results, &root);
         assert!(md.starts_with(&format!(
-            "## Fallow: {} issues found\n",
+            "## Plow: {} issues found\n",
             results.total_issues()
         )));
     }
@@ -1825,7 +1822,7 @@ mod tests {
                 path: root.join("src/dead.ts"),
             }));
         let md = build_markdown(&results, &root);
-        assert!(md.starts_with("## Fallow: 1 issue found\n"));
+        assert!(md.starts_with("## Plow: 1 issue found\n"));
     }
 
     #[test]
@@ -1888,7 +1885,7 @@ mod tests {
         let report = DuplicationReport::default();
         let root = PathBuf::from("/project");
         let md = build_duplication_markdown(&report, &root);
-        assert_eq!(md, "## Fallow: no code duplication found\n");
+        assert_eq!(md, "## Plow: no code duplication found\n");
     }
 
     #[test]
@@ -2034,7 +2031,7 @@ mod tests {
             ..Default::default()
         };
         let md = build_health_markdown(&report, &root);
-        assert!(md.contains("## Fallow: 1 high complexity function\n"));
+        assert!(md.contains("## Plow: 1 high complexity function\n"));
         assert!(md.contains("| File | Function |"));
         assert!(md.contains("`src/utils.ts:42`"));
         assert!(md.contains("`parseExpression`"));
@@ -2071,7 +2068,7 @@ mod tests {
                     ..Default::default()
                 },
                 findings: vec![CoverageIntelligenceFinding {
-                    id: "fallow:coverage-intel:abc123".to_owned(),
+                    id: "plow:coverage-intel:abc123".to_owned(),
                     path: root.join("src/dead.ts"),
                     identity: Some("deadPath".to_owned()),
                     line: 9,
@@ -2079,7 +2076,7 @@ mod tests {
                     signals: vec![CoverageIntelligenceSignal::RuntimeCold],
                     recommendation: CoverageIntelligenceRecommendation::DeleteAfterConfirmingOwner,
                     confidence: CoverageIntelligenceConfidence::High,
-                    related_ids: vec!["fallow:prod:deadbeef".to_owned()],
+                    related_ids: vec!["plow:prod:deadbeef".to_owned()],
                     evidence: CoverageIntelligenceEvidence {
                         match_confidence: CoverageIntelligenceMatchConfidence::Direct,
                         ..Default::default()
@@ -2096,7 +2093,7 @@ mod tests {
 
         let md = build_health_markdown(&report, &root);
         assert!(md.contains("## Coverage Intelligence"));
-        assert!(md.contains("fallow:coverage-intel:abc123"));
+        assert!(md.contains("plow:coverage-intel:abc123"));
         assert!(md.contains("delete-after-confirming-owner"));
         assert!(md.contains("runtime_cold"));
 
@@ -2426,7 +2423,7 @@ mod tests {
                 path: root.join("src/b.ts"),
             }));
         let md = build_markdown(&results, &root);
-        assert!(md.starts_with("## Fallow: 2 issues found\n"));
+        assert!(md.starts_with("## Plow: 2 issues found\n"));
     }
 
     #[test]
@@ -2641,7 +2638,7 @@ mod tests {
                     lines_deleted: 200,
                     complexity_density: 1.2,
                     fan_in: 10,
-                    trend: fallow_core::churn::ChurnTrend::Accelerating,
+                    trend: plow_core::churn::ChurnTrend::Accelerating,
                     ownership: None,
                     is_test_path: false,
                 }
@@ -2854,7 +2851,7 @@ mod tests {
                     lines_deleted: 50,
                     complexity_density: 0.5,
                     fan_in: 3,
-                    trend: fallow_core::churn::ChurnTrend::Stable,
+                    trend: plow_core::churn::ChurnTrend::Stable,
                     ownership: None,
                     is_test_path: false,
                 }

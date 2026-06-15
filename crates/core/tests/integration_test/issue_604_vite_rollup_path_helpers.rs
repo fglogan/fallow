@@ -2,11 +2,11 @@
 //! calls (`resolve(__dirname, "src/app.ts")`, `path.resolve(...)`, `join(...)`)
 //! must be evaluated and seeded as entry points, including CSS inputs. Files
 //! referenced only this way were previously reported as `unused-files` until the
-//! user duplicated the entry list into `.fallowrc`.
+//! user duplicated the entry list into `.plowrc`.
 
 use super::common::{create_config, fixture_path};
 
-fn unused_file_names(results: &fallow_types::results::AnalysisResults) -> Vec<String> {
+fn unused_file_names(results: &plow_types::results::AnalysisResults) -> Vec<String> {
     results
         .unused_files
         .iter()
@@ -27,7 +27,7 @@ fn unused_file_names(results: &fallow_types::results::AnalysisResults) -> Vec<St
 fn vite_rollup_input_path_helpers_seed_entry_points() {
     let root = fixture_path("issue-604-vite-rollup-path-helpers");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let names = unused_file_names(&results);
 

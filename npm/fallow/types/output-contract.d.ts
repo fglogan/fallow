@@ -4,7 +4,7 @@
  * Generated from `docs/output-schema.json` by
  * `editors/vscode/scripts/codegen-types.mjs`. The same file is written to
  * `editors/vscode/src/generated/output-contract.d.ts` (extension internal) and
- * `npm/fallow/types/output-contract.d.ts` (published as `fallow/types`).
+ * `npm/plow/types/output-contract.d.ts` (published as `plow/types`).
  *
  * To change a shape:
  *   1. Edit the Rust struct in `crates/types/src/results.rs` (or the
@@ -15,22 +15,22 @@
  *      `crates/cli/src/report/json.rs` enforces only a subset of the
  *      contract (the `HealthFindingAction` enum). Field-level drift between
  *      Rust and the schema is currently caught by code review.
- *   3. Run `pnpm --filter fallow-vscode codegen:types` from anywhere.
+ *   3. Run `pnpm --filter plow-vscode codegen:types` from anywhere.
  *   4. Commit both regenerated files alongside the schema edit.
  *
- * CI runs `pnpm --filter fallow-vscode check:codegen` which fails when
+ * CI runs `pnpm --filter plow-vscode check:codegen` which fails when
  * either committed file disagrees with what regen would produce.
  */
 /* eslint-disable */
 
 
 /**
- * Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator (for example `dead-code`, `dead-code-grouped`, `health`, `dupes`, `combined`, `audit`, `explain`, `impact`, `security`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `review-envelope`, and `review-reconcile`). Consumers should branch on `kind` instead of probing for unique field presence. `--legacy-envelope` removes only the document-root `kind` for one compatibility cycle. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array.
+ * Schemas for the JSON output of plow commands. Object-shaped envelopes covered by the `PlowOutput` contract carry a top-level `kind` discriminator (for example `dead-code`, `dead-code-grouped`, `health`, `dupes`, `combined`, `audit`, `explain`, `impact`, `security`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `review-envelope`, and `review-reconcile`). Consumers should branch on `kind` instead of probing for unique field presence. `--legacy-envelope` removes only the document-root `kind` for one compatibility cycle. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array.
  */
-export type FallowJsonOutput = (FallowOutput | CodeClimateOutput)
+export type PlowJsonOutput = (PlowOutput | CodeClimateOutput)
 /**
- * Typed root of every fallow JSON envelope shape that serializes as a JSON
- * object and participates in the documented `FallowOutput` contract. The
+ * Typed root of every plow JSON envelope shape that serializes as a JSON
+ * object and participates in the documented `PlowOutput` contract. The
  * schema derived from this enum drives the document-root `oneOf` in
  * `docs/output-schema.json`.
  *
@@ -45,9 +45,9 @@ export type FallowJsonOutput = (FallowOutput | CodeClimateOutput)
  *   (`#[serde(transparent)]`) per the Code Climate / GitLab Code Quality
  *   spec; `#[serde(tag = ...)]` cannot internally tag a non-object
  *   variant and wrapping the array would break the spec. The root schema
- *   carries it as a sibling `oneOf` branch alongside `FallowOutput`.
+ *   carries it as a sibling `oneOf` branch alongside `PlowOutput`.
  */
-export type FallowOutput = ((AuditOutput & {
+export type PlowOutput = ((AuditOutput & {
 kind: "audit"
 }) | (ExplainOutput & {
 kind: "explain"
@@ -89,7 +89,7 @@ kind: "combined"
  * changes, enum-variant removals, semantic changes to existing fields) DO
  * bump. To detect newly-added fields without a bump, check field presence via
  * JSON-key existence rather than gating on the version. v4 was introduced
- * alongside fallow-cov-protocol 0.2 (per-finding verdict, stable IDs, evidence
+ * alongside plow-cov-protocol 0.2 (per-finding verdict, stable IDs, evidence
  * block, renamed summary fields); v5 introduced health_score formula_version 2
  * with scale-invariant scoring semantics; v6 widened `AddToConfigAction.value`
  * from a scalar string to `oneOf: [string, array]` so the new `ignoreExports`
@@ -103,7 +103,7 @@ kind: "combined"
  */
 export type SchemaVersion = 7
 /**
- * Fallow CLI version that produced this envelope. Renders to the JSON wire as
+ * Plow CLI version that produced this envelope. Renders to the JSON wire as
  * a bare string (e.g. `"2.74.0"`).
  */
 export type ToolVersion = string
@@ -131,7 +131,7 @@ export type AuditGate = ("new-only" | "all")
  * Every action variant carries an `auto_fixable: bool` field. The value is
  * evaluated PER FINDING, not per action type: the same action type may
  * appear with `auto_fixable: true` on one finding and `auto_fixable: false`
- * on another, depending on per-instance guards in the `fallow fix` applier.
+ * on another, depending on per-instance guards in the `plow fix` applier.
  * Agents that filter on `auto_fixable: true` must branch on the bool of
  * each individual finding's action, not on the action `type` alone.
  *
@@ -139,20 +139,20 @@ export type AuditGate = ("new-only" | "all")
  *
  * - `remove-catalog-entry` (`unused-catalog-entries`): `true` only when the
  *   finding's `hardcoded_consumers` array is empty. When a workspace
- *   package still pins a hardcoded version of the same package, `fallow fix`
+ *   package still pins a hardcoded version of the same package, `plow fix`
  *   skips the entry to avoid breaking `pnpm install`, and the action is
  *   emitted with `auto_fixable: false`.
  * - `remove-dependency` vs `move-dependency` (dependency findings): when the
  *   finding's `used_in_workspaces` array is non-empty, the primary action
- *   flips to `move-dependency` with `auto_fixable: false` (`fallow fix` will
+ *   flips to `move-dependency` with `auto_fixable: false` (`plow fix` will
  *   not remove a dependency that another workspace imports). On findings
  *   without cross-workspace consumers the action stays `remove-dependency`
  *   with `auto_fixable: true`.
  * - `add-to-config` for `ignoreExports` (`duplicate-exports`): `true` when
- *   `fallow fix` can safely apply the action without further user setup.
- *   That is: a fallow config file exists on disk, OR no config exists AND
+ *   `plow fix` can safely apply the action without further user setup.
+ *   That is: a plow config file exists on disk, OR no config exists AND
  *   the working directory is NOT inside a monorepo subpackage (in which
- *   case the applier creates `.fallowrc.json` from `fallow init`'s
+ *   case the applier creates `.plowrc.json` from `plow init`'s
  *   framework-aware scaffolding and layers the new rules on top).
  *   `false` inside a monorepo subpackage with no workspace-root config
  *   (the applier refuses to fragment per-package configs across the
@@ -198,7 +198,7 @@ export type AddToConfigValue = (string | IgnoreExportsRule[] | {
 [k: string]: unknown
 })
 /**
- * Audit-mode marker emitted on each finding when `fallow audit --format json`
+ * Audit-mode marker emitted on each finding when `plow audit --format json`
  * runs with a base ref. `true` means the finding's structural key was not
  * present at the base ref (introduced by the current changeset); `false`
  * means it was inherited.
@@ -213,7 +213,7 @@ export type AuditIntroduced = boolean
  * # Examples
  *
  * ```
- * use fallow_types::results::DependencyLocation;
+ * use plow_types::results::DependencyLocation;
  *
  * // All three variants are constructible
  * let loc = DependencyLocation::Dependencies;
@@ -260,7 +260,7 @@ is_file_level: boolean
 /**
  * Whether `issue_kind` parses to a known `IssueKind`. False when the
  * token is a typo or refers to a kind that was renamed or removed in
- * a newer fallow release. JSON consumers (CI annotations, MCP agents,
+ * a newer plow release. JSON consumers (CI annotations, MCP agents,
  * VS Code) branch on this to choose the right next-step text.
  * Omitted from the wire when `true` so producers that have not yet
  * adopted the field stay byte-compatible. See issue #449.
@@ -444,13 +444,13 @@ export type HotspotActionType = ("refactor-file" | "add-tests" | "low-bus-factor
 export type HotspotActionHeuristic = "directory-deepest"
 /**
  * Runtime coverage JSON contract version. This is scoped to the
- * `runtime_coverage` block and is independent of the top-level fallow
+ * `runtime_coverage` block and is independent of the top-level plow
  * JSON `schema_version`.
  */
 export type RuntimeCoverageSchemaVersion = "1"
 /**
  * Top-level verdict for the whole runtime-coverage report. Mirrors
- * `fallow_cov_protocol::ReportVerdict`. The verdict is the SINGLE most
+ * `plow_cov_protocol::ReportVerdict`. The verdict is the SINGLE most
  * actionable finding; for the full set of findings see
  * [`RuntimeCoverageReport::signals`]. The verdict promotes `hot-path-touched`
  * above `cold-code-detected` in PR-review context (when the CLI was
@@ -475,7 +475,7 @@ export type RuntimeCoverageSignal = ("license-expired-grace" | "cold-code-detect
 export type RuntimeCoverageDataSource = ("local" | "cloud")
 /**
  * Protocol-level per-function runtime coverage verdict derived from the
- * decision table in fallow-cov-protocol. The CLI's `runtime_coverage.findings`
+ * decision table in plow-cov-protocol. The CLI's `runtime_coverage.findings`
  * array omits `active` entries even though the underlying enum still includes
  * it.
  */
@@ -496,7 +496,7 @@ export type RuntimeCoverageRiskBand = ("low" | "medium" | "high")
 export type RuntimeCoverageWatermark = ("trial-expired" | "license-expired-grace" | "unknown")
 /**
  * Coverage-intelligence JSON contract version. Scoped to the
- * `coverage_intelligence` block and independent of the top-level fallow
+ * `coverage_intelligence` block and independent of the top-level plow
  * JSON `schema_version`.
  */
 export type CoverageIntelligenceSchemaVersion = "1"
@@ -585,7 +585,7 @@ export type GitLabReviewPositionType = "text"
 /**
  * Schema-version discriminator for the review envelope.
  */
-export type ReviewEnvelopeSchema = ("fallow-review-envelope/v1" | "fallow-review-envelope/v2")
+export type ReviewEnvelopeSchema = ("plow-review-envelope/v1" | "plow-review-envelope/v2")
 /**
  * Review-envelope provider tag.
  */
@@ -598,7 +598,7 @@ export type ReviewCheckConclusion = ("success" | "neutral" | "failure")
 /**
  * Schema-version discriminator for the review reconcile envelope.
  */
-export type ReviewReconcileSchema = "fallow-review-reconcile/v1"
+export type ReviewReconcileSchema = "plow-review-reconcile/v1"
 export type CoverageSetupSchemaVersion = "1"
 export type CoverageSetupFramework = ("nextjs" | "nestjs" | "nuxt" | "sveltekit" | "astro" | "remix" | "vite" | "plain_node" | "unknown")
 export type CoverageSetupPackageManager = ("npm" | "pnpm" | "yarn" | "bun")
@@ -642,7 +642,7 @@ export type ImpactTrendDirection = ("improving" | "declining" | "stable")
  */
 export type CrossRepoImpactSchemaVersion = "1"
 /**
- * The `fallow security --format json` schema version. Independently versioned
+ * The `plow security --format json` schema version. Independently versioned
  * from the main contract, mirroring `ImpactReportSchemaVersion`.
  */
 export type SecuritySchemaVersion = ("1" | "2" | "3" | "4" | "5" | "6" | "7")
@@ -654,7 +654,7 @@ export type SecuritySchemaVersion = ("1" | "2" | "3" | "4" | "5" | "6" | "7")
  */
 export type Severity = ("error" | "warn" | "off")
 /**
- * Gate mode for `fallow security --gate <mode>`.
+ * Gate mode for `plow security --gate <mode>`.
  */
 export type SecurityGateMode = ("new" | "newly-reachable")
 /**
@@ -721,14 +721,14 @@ export type CodeClimateIssueKind = "issue"
  */
 export type CodeClimateSeverity = ("info" | "minor" | "major" | "critical" | "blocker")
 /**
- * Envelope emitted by `fallow --format codeclimate` and
- * `fallow --format gitlab-codequality`. GitLab Code Quality consumes the
+ * Envelope emitted by `plow --format codeclimate` and
+ * `plow --format gitlab-codequality`. GitLab Code Quality consumes the
  * same shape. The wire form is a bare JSON array, not an object.
  */
 export type CodeClimateOutput = CodeClimateIssue[]
 
 /**
- * `fallow audit --format json` envelope.
+ * `plow audit --format json` envelope.
  */
 export interface AuditOutput {
 schema_version: SchemaVersion
@@ -739,8 +739,8 @@ changed_files_count: number
 base_ref: string
 /**
  * Human-readable provenance of `base_ref`, e.g. `merge-base with
- * origin/main`, `local main`, or `FALLOW_AUDIT_BASE=upstream/main`.
- * Present when the base was auto-detected or set via `FALLOW_AUDIT_BASE`;
+ * origin/main`, `local main`, or `PLOW_AUDIT_BASE=upstream/main`.
+ * Present when the base was auto-detected or set via `PLOW_AUDIT_BASE`;
  * absent for an explicit `--base` (the ref the user typed is already
  * self-describing).
  */
@@ -865,7 +865,7 @@ description?: (string | null)
 docs?: (string | null)
 }
 /**
- * Envelope emitted by `fallow dead-code --format json` (plus the `check`
+ * Envelope emitted by `plow dead-code --format json` (plus the `check`
  * block inside the combined and audit envelopes).
  *
  * The body is the full `AnalysisResults` flattened into the envelope so
@@ -1141,11 +1141,11 @@ _meta?: (Meta | null)
 workspace_diagnostics?: WorkspaceDiagnostic[]
 /**
  * Read-only follow-up commands computed from this run's findings, emitted
- * at the JSON root so an agent acting on the output is pointed at fallow's
+ * at the JSON root so an agent acting on the output is pointed at plow's
  * adjacent verification capabilities (trace, complexity breakdown, audit,
  * workspace scoping). Each command is runnable as-is and never mutating;
  * see [`NextStep`] for both contracts. Omitted when empty or when
- * `FALLOW_SUGGESTIONS=off`; does NOT contribute to `total_issues`.
+ * `PLOW_SUGGESTIONS=off`; does NOT contribute to `total_issues`.
  */
 next_steps?: NextStep[]
 }
@@ -1359,7 +1359,7 @@ introduced?: (AuditIntroduced | null)
 export interface FixAction {
 type: FixActionType
 /**
- * Whether `fallow fix` can apply this fix automatically. Evaluated PER
+ * Whether `plow fix` can apply this fix automatically. Evaluated PER
  * FINDING, not per action type: the same `type` may carry
  * `auto_fixable: true` on one finding and `auto_fixable: false` on
  * another when per-instance guards in the applier discriminate (e.g.
@@ -1410,10 +1410,10 @@ auto_fixable: boolean
 description: string
 /**
  * The inline comment to place above the line (e.g.,
- * `// fallow-ignore-next-line unused-export`). When multiple
+ * `// plow-ignore-next-line unused-export`). When multiple
  * suppressible findings share the same path and line, this may contain a
  * comma-separated issue-kind list such as
- * `// fallow-ignore-next-line unused-export, complexity`.
+ * `// plow-ignore-next-line unused-export, complexity`.
  */
 comment: string
 /**
@@ -1437,24 +1437,24 @@ auto_fixable: boolean
 description: string
 /**
  * The file-level comment to place at the top of the file (e.g.,
- * `// fallow-ignore-file unused-file`).
+ * `// plow-ignore-file unused-file`).
  */
 comment: string
 }
 /**
- * Edit a fallow config file (`.fallowrc.json`, `fallow.toml`, etc.) to
+ * Edit a plow config file (`.plowrc.json`, `plow.toml`, etc.) to
  * add the offending value to an `ignore*` rule.
  */
 export interface AddToConfigAction {
 type: AddToConfigKind
 /**
- * True when `fallow fix` can apply this config action automatically.
+ * True when `plow fix` can apply this config action automatically.
  * Evaluated PER FINDING, not per action type: `ignoreExports`
- * duplicate-export actions are auto-fixable when `fallow fix` can
- * safely write the rule, which today means EITHER a fallow config
+ * duplicate-export actions are auto-fixable when `plow fix` can
+ * safely write the rule, which today means EITHER a plow config
  * file already exists OR no config exists and the working directory
  * is NOT inside a monorepo subpackage (in which case the applier
- * creates `.fallowrc.json` from `fallow init`'s framework-aware
+ * creates `.plowrc.json` from `plow init`'s framework-aware
  * scaffolding). The action is `false` inside a monorepo subpackage
  * with no workspace-root config because the applier refuses to
  * fragment per-package configs across the monorepo. Older scalar
@@ -1469,7 +1469,7 @@ auto_fixable: boolean
  */
 description: string
 /**
- * The fallow config key to add the value to (e.g.,
+ * The plow config key to add the value to (e.g.,
  * `ignoreDependencies`).
  */
 config_key: string
@@ -1478,7 +1478,7 @@ value: AddToConfigValue
  * Optional URL pointing at a stable JSON Schema fragment that describes
  * the shape of `value`. Agents that intend to validate `value` before
  * writing it into a user's config can fetch the linked schema and run
- * it against `value`. The URL is a JSON Pointer fragment into fallow's
+ * it against `value`. The URL is a JSON Pointer fragment into plow's
  * main config schema (e.g.
  * `schema.json#/properties/ignoreExports` for the ignoreExports
  * action, or `schema.json#/properties/ignoreDependencies/items` for
@@ -1488,7 +1488,7 @@ value: AddToConfigValue
 value_schema?: (string | null)
 }
 /**
- * Single `ignoreExports` rule entry. The fallow config accepts an array of
+ * Single `ignoreExports` rule entry. The plow config accepts an array of
  * these under the `ignoreExports` key.
  */
 export interface IgnoreExportsRule {
@@ -2137,7 +2137,7 @@ col: number
  * typed `actions` array (`refactor-re-export-cycle` informational primary
  * plus `suppress-file` secondary; cycles are file-scoped so a single
  * file-level suppression on the alphabetically-first member breaks the
- * cycle, and no `// fallow-ignore-next-line` form makes sense because the
+ * cycle, and no `// plow-ignore-next-line` form makes sense because the
  * diagnostic is anchored at line 1 col 0 of each member).
  */
 export interface ReExportCycleFinding {
@@ -3053,18 +3053,18 @@ exceeded: boolean
 reason?: (string | null)
 }
 /**
- * A read-only follow-up command fallow surfaces from the current findings,
+ * A read-only follow-up command plow surfaces from the current findings,
  * emitted as the top-level `next_steps` array on each command's JSON envelope.
  *
- * `next_steps` exists to point agents and humans sideways to fallow's adjacent
+ * `next_steps` exists to point agents and humans sideways to plow's adjacent
  * verification capabilities (trace, complexity breakdown, audit, workspace
  * scoping) that telemetry shows agents rarely discover, because they act on the
  * output in front of them rather than on reference docs.
  *
  * ## Two hard contracts
  *
- * 1. **Read-only.** A `next_step` NEVER suggests `fallow fix` or any mutating
- *    command. Fallow surfaces evidence and verification paths; deciding and
+ * 1. **Read-only.** A `next_step` NEVER suggests `plow fix` or any mutating
+ *    command. Plow surfaces evidence and verification paths; deciding and
  *    applying the remediation is the agent's job.
  * 2. **Runnable, placeholder-free.** `command` is always runnable as-is. It
  *    never contains an angle-bracket placeholder (`<...>`); finding-derived
@@ -3100,7 +3100,7 @@ command: string
 reason: string
 }
 /**
- * Wire-shape payload for `fallow dupes --format json` (the body that
+ * Wire-shape payload for `plow dupes --format json` (the body that
  * flattens into [`crate::output_envelope::DupesOutput`] and is also
  * emitted under the `dupes` / `duplication` key inside the combined and
  * audit envelopes).
@@ -3152,7 +3152,7 @@ token_count: number
 line_count: number
 /**
  * Stable content fingerprint, usually `dup:<8hex>` and widened on rare
- * report collisions. Addressable via `fallow dupes --trace dup:<fp>` (and
+ * report collisions. Addressable via `plow dupes --trace dup:<fp>` (and
  * the `trace_clone` MCP tool) to deep-dive this group; shown alongside
  * each group in the human listing.
  */
@@ -3216,7 +3216,7 @@ fragment: string
 export interface CloneGroupAction {
 type: CloneGroupActionType
 /**
- * Whether `fallow fix` can auto-apply this action. Both variants are
+ * Whether `plow fix` can auto-apply this action. Both variants are
  * manual today; the field is non-singleton so a future auto-applier
  * does not need a schema change.
  */
@@ -3227,7 +3227,7 @@ auto_fixable: boolean
 description: string
 /**
  * The inline comment to insert (e.g.,
- * `// fallow-ignore-next-line code-duplication`). Present on
+ * `// plow-ignore-next-line code-duplication`). Present on
  * `suppress-line`; absent on `extract-shared`.
  */
 comment?: (string | null)
@@ -3241,7 +3241,7 @@ comment?: (string | null)
  * [`CloneGroupFinding`] wrapper too (so every nested clone group gets its
  * own `actions[]` array, matching the legacy post-pass behavior; see issue
  * #393 regression test). The wire shape stays byte-identical to the
- * previous post-pass output. No `introduced` field because `fallow audit`
+ * previous post-pass output. No `introduced` field because `plow audit`
  * attributes clone groups (not families) when running against a base ref.
  */
 export interface CloneFamilyFinding {
@@ -3299,7 +3299,7 @@ estimated_savings: number
 export interface CloneFamilyAction {
 type: CloneFamilyActionType
 /**
- * Whether `fallow fix` can auto-apply this action. All three variants
+ * Whether `plow fix` can auto-apply this action. All three variants
  * are manual today.
  */
 auto_fixable: boolean
@@ -3314,7 +3314,7 @@ description: string
 note?: (string | null)
 /**
  * The inline comment to insert (e.g.,
- * `// fallow-ignore-next-line code-duplication`). Present on
+ * `// plow-ignore-next-line code-duplication`). Present on
  * `suppress-line` only.
  */
 comment?: (string | null)
@@ -3593,12 +3593,12 @@ max_crap: number
  * `comment` plus `placement`, and the coverage-leaning actions
  * (`add-tests`, `increase-coverage`) carry only `note`.
  *
- * [`ComplexityViolation`]: ../../fallow-cli/src/health_types/scores.rs
+ * [`ComplexityViolation`]: ../../plow-cli/src/health_types/scores.rs
  */
 export interface HealthFindingAction {
 type: HealthFindingActionType
 /**
- * Whether `fallow fix` can auto-apply this action. Today every health
+ * Whether `plow fix` can auto-apply this action. Today every health
  * finding action is manual, but the field is non-singleton so a future
  * auto-applier (e.g., an LLM-driven `refactor-function` worker) does
  * not need a schema change.
@@ -3616,8 +3616,8 @@ description: string
 note?: (string | null)
 /**
  * The inline comment to insert (e.g.,
- * `// fallow-ignore-next-line complexity` or
- * `<!-- fallow-ignore-file complexity -->`). Present on
+ * `// plow-ignore-next-line complexity` or
+ * `<!-- plow-ignore-file complexity -->`). Present on
  * `suppress-line` and `suppress-file` action variants.
  */
 comment?: (string | null)
@@ -3948,16 +3948,16 @@ actions: UntestedFileAction[]
  * `build_untested_file_actions` emits a two-entry array on every
  * untested-file item: an `add-tests` primary action (scaffold tests for
  * the runtime file) and a `suppress-file` action
- * (`// fallow-ignore-file coverage-gaps`). Both variants share the same
+ * (`// plow-ignore-file coverage-gaps`). Both variants share the same
  * struct shape; the field that is populated (`note` for `add-tests`,
  * `comment` for `suppress-file`) depends on the `kind`.
  *
- * [`UntestedFile`]: ../../fallow-cli/src/health_types/coverage.rs
+ * [`UntestedFile`]: ../../plow-cli/src/health_types/coverage.rs
  */
 export interface UntestedFileAction {
 type: UntestedFileActionType
 /**
- * Whether `fallow fix` can auto-apply this action. Today both
+ * Whether `plow fix` can auto-apply this action. Today both
  * variants are manual.
  */
 auto_fixable: boolean
@@ -3972,7 +3972,7 @@ description: string
 note?: (string | null)
 /**
  * The file-level comment to insert. Present on `suppress-file`
- * (`// fallow-ignore-file coverage-gaps`). Absent on `add-tests`.
+ * (`// plow-ignore-file coverage-gaps`). Absent on `add-tests`.
  */
 comment?: (string | null)
 }
@@ -4011,16 +4011,16 @@ actions: UntestedExportAction[]
  * `build_untested_export_actions` emits a two-entry array on every
  * untested-export item: an `add-test-import` primary action (import the
  * export from a test-reachable module) and a `suppress-file` action
- * (`// fallow-ignore-file coverage-gaps`). The export-specific variant
+ * (`// plow-ignore-file coverage-gaps`). The export-specific variant
  * `add-test-import` reflects that a test-reachable reference chain, not
  * just any test coverage, is what closes the gap.
  *
- * [`UntestedExport`]: ../../fallow-cli/src/health_types/coverage.rs
+ * [`UntestedExport`]: ../../plow-cli/src/health_types/coverage.rs
  */
 export interface UntestedExportAction {
 type: UntestedExportActionType
 /**
- * Whether `fallow fix` can auto-apply this action. Today both
+ * Whether `plow fix` can auto-apply this action. Today both
  * variants are manual.
  */
 auto_fixable: boolean
@@ -4036,7 +4036,7 @@ description: string
 note?: (string | null)
 /**
  * The file-level comment to insert. Present on `suppress-file`
- * (`// fallow-ignore-file coverage-gaps`). Absent on
+ * (`// plow-ignore-file coverage-gaps`). Absent on
  * `add-test-import`.
  */
 comment?: (string | null)
@@ -4106,12 +4106,12 @@ commits: number
  * `ownership-drift`) are appended only when `--ownership` is active AND
  * the corresponding signal fires for the hotspot.
  *
- * [`HotspotEntry`]: ../../fallow-cli/src/health_types/scores.rs
+ * [`HotspotEntry`]: ../../plow-cli/src/health_types/scores.rs
  */
 export interface HotspotAction {
 type: HotspotActionType
 /**
- * Whether `fallow fix` can auto-apply this action. Today every
+ * Whether `plow fix` can auto-apply this action. Today every
  * hotspot action is manual.
  */
 auto_fixable: boolean
@@ -4147,7 +4147,7 @@ shallow_clone: boolean
 }
 /**
  * Runtime coverage findings merged into the health report or emitted by
- * `fallow coverage analyze`. Present in health output when --runtime-coverage
+ * `plow coverage analyze`. Present in health output when --runtime-coverage
  * is used. Shape mirrors the runtime coverage JSON contract; cloud mode
  * fetches runtime facts explicitly and merges them locally with AST/static
  * analysis.
@@ -4194,7 +4194,7 @@ watermark?: (RuntimeCoverageWatermark | null)
 warnings?: RuntimeCoverageMessage[]
 }
 /**
- * Summary block mirroring `fallow_cov_protocol::Summary` (0.3 shape).
+ * Summary block mirroring `plow_cov_protocol::Summary` (0.3 shape).
  */
 export interface RuntimeCoverageSummary {
 data_source: RuntimeCoverageDataSource
@@ -4276,14 +4276,14 @@ untracked_ratio_percent: number
 }
 export interface RuntimeCoverageFinding {
 /**
- * Per-finding suppression key of the form `fallow:prod:<hash>` (first 8 hex
+ * Per-finding suppression key of the form `plow:prod:<hash>` (first 8 hex
  * of SHA-256(file + function + line + 'prod')). Hashes the current line, so
  * it changes when the function moves. Use this to suppress one finding.
  */
 id: string
 /**
- * Cross-surface join key of the form `fallow:fn:<hash>`
- * (`fallow_cov_protocol::function_identity_id`, hashes file + name +
+ * Cross-surface join key of the form `plow:fn:<hash>`
+ * (`plow_cov_protocol::function_identity_id`, hashes file + name +
  * start_line). The same function shares ONE value across findings, hot
  * paths, blast-radius, and importance entries (the per-finding `id` uses a
  * per-surface salt, so it differs by surface), and across V8, Istanbul,
@@ -4296,7 +4296,7 @@ id: string
 stable_id?: (string | null)
 /**
  * Content digest of the function's full-span source slice
- * (`fallow_cov_protocol::source_hash_for`: first 8 bytes of SHA-256 as 16
+ * (`plow_cov_protocol::source_hash_for`: first 8 bytes of SHA-256 as 16
  * lowercase hex). Unlike `stable_id`, this is stable across line moves: a
  * moved-but-unedited function keeps the same value, so baselines can
  * suppress it after a pure line shift. `null` when the producing surface
@@ -4329,7 +4329,7 @@ evidence: RuntimeCoverageEvidence
 actions?: RuntimeCoverageAction[]
 }
 /**
- * Supporting evidence for a finding (mirrors `fallow_cov_protocol::Evidence`).
+ * Supporting evidence for a finding (mirrors `plow_cov_protocol::Evidence`).
  */
 export interface RuntimeCoverageEvidence {
 /**
@@ -4367,7 +4367,7 @@ deployments_observed: number
 export interface RuntimeCoverageAction {
 /**
  * Action identifier, normalized to `type` in JSON output. Known values
- * emitted by `fallow coverage analyze`: `delete-cold-code`
+ * emitted by `plow coverage analyze`: `delete-cold-code`
  * (verdict=safe_to_delete), `review-runtime` (verdict=review_required).
  * The sidecar may emit additional protocol-specific identifiers;
  * consumers should treat unknown values as forward-compat extensions.
@@ -4375,17 +4375,17 @@ export interface RuntimeCoverageAction {
 type: string
 description: string
 /**
- * Whether fallow can apply this action automatically.
+ * Whether plow can apply this action automatically.
  */
 auto_fixable: boolean
 }
 export interface RuntimeCoverageHotPath {
 /**
- * Stable content-hash ID of the form `fallow:hot:<hash>`.
+ * Stable content-hash ID of the form `plow:hot:<hash>`.
  */
 id: string
 /**
- * Cross-surface join key (`fallow:fn:<hash>`) for the hot function. Stable
+ * Cross-surface join key (`plow:fn:<hash>`) for the hot function. Stable
  * across line moves; shared with the same function's findings / blast /
  * importance entries. `null` when no `FunctionIdentity` was supplied.
  */
@@ -4404,7 +4404,7 @@ function: string
 line: number
 /**
  * 1-indexed line the function ends on (inclusive). Mirrors
- * `fallow_cov_protocol::HotPath::end_line` (added in protocol 0.5).
+ * `plow_cov_protocol::HotPath::end_line` (added in protocol 0.5).
  * Older 0.4-shape sidecars omit the field on the wire; serde defaults
  * to `0`, which the line-overlap filter MUST treat as a single-line
  * range (`line..=line`) rather than a span.
@@ -4427,11 +4427,11 @@ actions?: RuntimeCoverageAction[]
 }
 export interface RuntimeCoverageBlastRadiusEntry {
 /**
- * Stable content-hash ID of the form `fallow:blast:<hash>`.
+ * Stable content-hash ID of the form `plow:blast:<hash>`.
  */
 id: string
 /**
- * Cross-surface join key (`fallow:fn:<hash>`) for the function. Stable
+ * Cross-surface join key (`plow:fn:<hash>`) for the function. Stable
  * across line moves; shared with the same function's findings / hot-path /
  * importance entries. `null` when no `FunctionIdentity` was supplied.
  */
@@ -4465,11 +4465,11 @@ risk_band: RuntimeCoverageRiskBand
 }
 export interface RuntimeCoverageImportanceEntry {
 /**
- * Stable content-hash ID of the form `fallow:importance:<hash>`.
+ * Stable content-hash ID of the form `plow:importance:<hash>`.
  */
 id: string
 /**
- * Cross-surface join key (`fallow:fn:<hash>`) for the function. Stable
+ * Cross-surface join key (`plow:fn:<hash>`) for the function. Stable
  * across line moves; shared with the same function's findings / hot-path /
  * blast-radius entries. `null` when no `FunctionIdentity` was supplied.
  */
@@ -4541,7 +4541,7 @@ skipped_ambiguous_matches: number
  */
 export interface CoverageIntelligenceFinding {
 /**
- * Stable finding ID of the form `fallow:coverage-intel:<hash>`.
+ * Stable finding ID of the form `plow:coverage-intel:<hash>`.
  */
 id: string
 /**
@@ -4588,7 +4588,7 @@ export interface CoverageIntelligenceAction {
 type: string
 description: string
 /**
- * Whether fallow can apply this action automatically.
+ * Whether plow can apply this action automatically.
  */
 auto_fixable: boolean
 }
@@ -4787,12 +4787,12 @@ fingerprint: string
  * the target's `evidence.complex_functions` back to the matching
  * `ComplexityViolation` and read placement from THAT action instead.
  *
- * [`RefactoringTarget`]: ../../fallow-cli/src/health_types/targets.rs
+ * [`RefactoringTarget`]: ../../plow-cli/src/health_types/targets.rs
  */
 export interface RefactoringTargetAction {
 type: RefactoringTargetActionType
 /**
- * Whether `fallow fix` can auto-apply this action. Today both
+ * Whether `plow fix` can auto-apply this action. Today both
  * variants are manual.
  */
 auto_fixable: boolean
@@ -4805,7 +4805,7 @@ description: string
 /**
  * Recommendation category for `apply-refactoring` actions. Mirrors
  * the parent target's
- * [`category`](../../fallow-cli/src/health_types/targets.rs.html)
+ * [`category`](../../plow-cli/src/health_types/targets.rs.html)
  * field so consumers can route on the action alone.
  */
 category?: (string | null)
@@ -4968,12 +4968,12 @@ reason: string
 scope: string
 }
 /**
- * Envelope emitted by `fallow explain <issue-type> --format json`.
+ * Envelope emitted by `plow explain <issue-type> --format json`.
  *
  * Standalone rule explanation. This command does not run project analysis
  * and intentionally returns a compact object without `schema_version` /
  * `version` metadata; consumers that need those should call any other
- * fallow JSON-producing command.
+ * plow JSON-producing command.
  */
 export interface ExplainOutput {
 id: string
@@ -4985,7 +4985,7 @@ how_to_fix: string
 docs: string
 }
 /**
- * Envelope emitted by `fallow --format review-github` / `review-gitlab`.
+ * Envelope emitted by `plow --format review-github` / `review-gitlab`.
  */
 export interface ReviewEnvelopeOutput {
 event?: (ReviewEnvelopeEvent | null)
@@ -5045,7 +5045,7 @@ provider: ReviewProvider
 check_conclusion?: (ReviewCheckConclusion | null)
 }
 /**
- * Envelope emitted by `fallow ci reconcile-review --format json`. Used by
+ * Envelope emitted by `plow ci reconcile-review --format json`. Used by
  * CI integrations to drive comment carry-over and stale-comment cleanup
  * across PR / MR revisions.
  */
@@ -5070,7 +5070,7 @@ failed_fingerprints?: string[]
 unapplied_fingerprints?: string[]
 }
 /**
- * `fallow coverage setup --json` envelope.
+ * `plow coverage setup --json` envelope.
  */
 export interface CoverageSetupOutput {
 schema_version: CoverageSetupSchemaVersion
@@ -5115,7 +5115,7 @@ runtime_coverage: RuntimeCoverageReport
 _meta?: (Meta | null)
 }
 /**
- * Envelope emitted by `fallow list --boundaries --format json`. Surfaces
+ * Envelope emitted by `plow list --boundaries --format json`. Surfaces
  * the architecture boundary zones, rules, and (issue #373) the user's
  * pre-expansion `autoDiscover` logical groups so consumers can render
  * grouping intent that `expand_auto_discover` would otherwise flatten out
@@ -5188,7 +5188,7 @@ allow: string[]
 allow_type_only?: string[]
 }
 /**
- * `fallow workspaces --format json` envelope.
+ * `plow workspaces --format json` envelope.
  */
 export interface WorkspacesOutput {
 /**
@@ -5208,7 +5208,7 @@ workspaces: WorkspaceInfo[]
 workspace_diagnostics: WorkspaceDiagnostic[]
 }
 /**
- * One workspace package emitted by `fallow workspaces --format json`.
+ * One workspace package emitted by `plow workspaces --format json`.
  */
 export interface WorkspaceInfo {
 /**
@@ -5228,7 +5228,7 @@ path: string
 is_internal_dependency: boolean
 }
 /**
- * Envelope emitted by `fallow health --format json` (plus the `health` block
+ * Envelope emitted by `plow health --format json` (plus the `health` block
  * inside the combined and audit envelopes).
  *
  * The body is `HealthReport` flattened into the envelope so every report
@@ -5432,7 +5432,7 @@ targets?: RefactoringTargetFinding[]
 actions_meta?: (HealthActionsMeta | null)
 }
 /**
- * Wire-shape payload for `fallow dupes --format json` (the body that
+ * Wire-shape payload for `plow dupes --format json` (the body that
  * flattens into [`crate::output_envelope::DupesOutput`] and is also
  * emitted under the `dupes` / `duplication` key inside the combined and
  * audit envelopes).
@@ -5514,10 +5514,10 @@ clone_families: CloneFamilyFinding[]
 }
 /**
  * Wire-shape envelope for an [`AttributedCloneGroup`] finding (per-bucket
- * duplication attribution emitted under `fallow dupes --group-by`).
+ * duplication attribution emitted under `plow dupes --group-by`).
  * Flattens the attributed group and carries the same typed
  * `CloneGroupAction` array as [`CloneGroupFinding`]; no `introduced`
- * field because `fallow audit` does not run on grouped output.
+ * field because `plow audit` does not run on grouped output.
  */
 export interface AttributedCloneGroupFinding {
 /**
@@ -5534,7 +5534,7 @@ line_count: number
 instances: AttributedInstance[]
 /**
  * Stable content fingerprint, usually `dup:<8hex>` and widened on rare
- * report collisions. Addressable via `fallow dupes --trace dup:<fp>`.
+ * report collisions. Addressable via `plow dupes --trace dup:<fp>`.
  * Computed from the group's instances, so it matches the top-level
  * `clone_groups[].fingerprint` for the same clone.
  */
@@ -5585,7 +5585,7 @@ fragment: string
 owner: string
 }
 /**
- * Envelope emitted by `fallow dead-code --group-by ... --format json`.
+ * Envelope emitted by `plow dead-code --group-by ... --format json`.
  *
  * Issues are partitioned into resolver buckets (CODEOWNERS team, directory
  * prefix, workspace package, or GitLab CODEOWNERS section) instead of flat
@@ -5889,7 +5889,7 @@ first_recorded?: (string | null)
 latest_git_sha?: (string | null)
 /**
  * Counts from the most recent recorded run. These are CHANGED-FILE scoped
- * (each record comes from a `fallow audit` run, whose default `new-only`
+ * (each record comes from a `plow audit` run, whose default `new-only`
  * gate counts only findings in the changed files of that run), NOT a
  * whole-project total.
  */
@@ -5899,16 +5899,16 @@ surfacing?: (ImpactCounts | null)
  */
 trend?: (TrendSummary | null)
 /**
- * Counts from the most recent whole-project `fallow` run. WHOLE-PROJECT
+ * Counts from the most recent whole-project `plow` run. WHOLE-PROJECT
  * scope (not changed-file), so this is the current issue total across the
  * whole repo, context next to the actionable changed-file `surfacing`
- * count. None until a full `fallow` run has been recorded. v1.6.
+ * count. None until a full `plow` run has been recorded. v1.6.
  */
 project_surfacing?: (ImpactCounts | null)
 /**
  * Trend between the two most recent whole-project records. Comparable over
  * time (same whole-project denominator every run), unlike the changed-file
- * `trend`. None until two full `fallow` runs exist. v1.6.
+ * `trend`. None until two full `plow` runs exist. v1.6.
  */
 project_trend?: (TrendSummary | null)
 containment_count: number
@@ -5917,12 +5917,12 @@ containment_count: number
  */
 recent_containment: ContainmentEvent[]
 /**
- * Lifetime count of findings fallow credits as genuinely resolved (code
- * removed or refactored, never a `fallow-ignore`). v1.5.
+ * Lifetime count of findings plow credits as genuinely resolved (code
+ * removed or refactored, never a `plow-ignore`). v1.5.
  */
 resolved_total: number
 /**
- * Lifetime count of findings silenced by a newly-added `fallow-ignore`.
+ * Lifetime count of findings silenced by a newly-added `plow-ignore`.
  * Reported as honest context, never as a win. v1.5.
  */
 suppressed_total: number
@@ -5985,7 +5985,7 @@ git_sha?: (string | null)
 timestamp: string
 }
 /**
- * The cross-repo aggregate report (`fallow impact --all --format json`).
+ * The cross-repo aggregate report (`plow impact --all --format json`).
  */
 export interface CrossRepoImpactReport {
 schema_version: CrossRepoImpactSchemaVersion
@@ -6016,7 +6016,7 @@ suppressed_total: number
 containment_count: number
 /**
  * Sum of whole-project issue totals across projects that have a full-run
- * baseline, as of EACH project's last full `fallow` run (not a simultaneous
+ * baseline, as of EACH project's last full `plow` run (not a simultaneous
  * snapshot).
  */
 project_wide_issues: number
@@ -6044,7 +6044,7 @@ last_recorded?: (string | null)
 report: ImpactReport
 }
 /**
- * The `fallow security --format json` envelope. `FallowOutput` discriminates it
+ * The `plow security --format json` envelope. `PlowOutput` discriminates it
  * by the `kind: "security"` tag; the optional `gate` block is additive and is
  * not part of that discrimination.
  */
@@ -6092,7 +6092,7 @@ unresolved_callee_sites: number
 unresolved_callee_diagnostics?: (SecurityUnresolvedCalleeDiagnostics | null)
 }
 /**
- * Allowlisted config context for `fallow security --format json`.
+ * Allowlisted config context for `plow security --format json`.
  */
 export interface SecurityOutputConfig {
 rules: SecurityOutputRulesConfig
@@ -6129,9 +6129,9 @@ new_count: number
 }
 /**
  * A local security CANDIDATE for downstream agent verification, NOT a verified
- * vulnerability. Emitted only by `fallow security`, never under bare `fallow`
+ * vulnerability. Emitted only by `plow security`, never under bare `plow`
  * or the `audit` gate. There is deliberately no `confidence` or
- * `signal_strength` field: fallow does not prove exploitability, so the trace
+ * `signal_strength` field: plow does not prove exploitability, so the trace
  * (its hops and length) is the only honest signal.
  */
 export interface SecurityFinding {
@@ -6180,14 +6180,14 @@ evidence: string
  * (`req.query`, `process.argv`, message-event `data`, etc.). `true` ranks
  * the candidate higher and annotates the evidence; `false` does NOT
  * suppress the finding (the association is conservative, never a proof, and
- * fallow prefers false-negatives over false-positives). Always `false` for
+ * plow prefers false-negatives over false-positives). Always `false` for
  * `ClientServerLeak`. Skipped from JSON when `false` for output stability.
  */
 source_backed?: boolean
 severity: SecuritySeverity
 /**
  * Structural import-hop trace from the client boundary to the secret source.
- * The hop count is the uncalibrated signal; fallow does not prove the path
+ * The hop count is the uncalibrated signal; plow does not prove the path
  * is exploitable.
  */
 trace: TraceHop[]
@@ -6195,11 +6195,11 @@ trace: TraceHop[]
  * Machine-actionable next steps. Always emitted (possibly empty for
  * forward-compat). For security candidates this is a single file-level
  * suppress hint (`auto_fixable: false`); there is no auto-fix because
- * verification is the agent's job, not fallow's.
+ * verification is the agent's job, not plow's.
  */
 actions: IssueAction[]
 /**
- * Dead-code cross-link when the same sink candidate sits in code fallow also
+ * Dead-code cross-link when the same sink candidate sits in code plow also
  * reports as removable. Agents should verify the dead-code finding and delete
  * the code instead of hardening the sink when deletion is safe.
  */
@@ -6220,12 +6220,12 @@ candidate: SecurityCandidate
 taint_flow?: (SecurityTaintFlow | null)
 /**
  * Production runtime coverage context for the function enclosing this
- * security sink. Present only when `fallow security --runtime-coverage`
+ * security sink. Present only when `plow security --runtime-coverage`
  * runs and the candidate is a `tainted-sink`.
  */
 runtime?: (SecurityRuntimeContext | null)
 /**
- * Internal projection used by `fallow security --surface`. The CLI strips
+ * Internal projection used by `plow security --surface`. The CLI strips
  * this from per-finding JSON and promotes it to the top-level
  * `attack_surface` field only when requested.
  */
@@ -6254,7 +6254,7 @@ col: number
 role: TraceHopRole
 }
 /**
- * Dead-code cross-link attached to a security candidate when fallow's dead-code
+ * Dead-code cross-link attached to a security candidate when plow's dead-code
  * pass reports the same anchor as removable code.
  */
 export interface SecurityDeadCodeContext {
@@ -6280,7 +6280,7 @@ guidance: string
  * untrusted-source module above isolated helpers or scripts.
  *
  * This is a relative-ordering signal, NOT a `confidence` or `signal_strength`
- * score: fallow does not prove the path is exploitable.
+ * score: plow does not prove the path is exploitable.
  */
 export interface SecurityReachability {
 /**
@@ -6331,7 +6331,7 @@ blast_radius: number
 crosses_boundary: boolean
 }
 /**
- * An agent-actionable candidate record on a [`SecurityFinding`]. fallow fills
+ * An agent-actionable candidate record on a [`SecurityFinding`]. plow fills
  * `source_kind`, `sink`, and `boundary`. The exploitability IMPACT is
  * deliberately NOT a field: `severity` on the parent finding is only a
  * review-priority tier, while deciding exploitability remains the consuming
@@ -6400,7 +6400,7 @@ cwe?: (number | null)
 callee?: (string | null)
 /**
  * URL construction shape for SSRF and open-redirect style candidates when
- * fallow can classify whether the origin is fixed or dynamic. Absent for
+ * plow can classify whether the origin is fixed or dynamic. Absent for
  * non-URL sinks and unclassified URL expressions.
  */
 url_shape?: (SecurityUrlShape | null)
@@ -6409,14 +6409,14 @@ url_shape?: (SecurityUrlShape | null)
  * The boundary slot of a [`SecurityCandidate`]: which structural boundaries the
  * candidate's flow crosses. A flow that crosses a client/server or module
  * boundary is a stronger review target than a self-contained one; the boundary
- * is fallow's structural signal over a pure source-sink match.
+ * is plow's structural signal over a pure source-sink match.
  *
  * Two further boundary kinds are RESERVED for a follow-up and are deliberately
  * absent here rather than emitted as always-false: `export_visibility` (is the
  * sink on a publicly-exported symbol?) and a package boundary (does the flow
  * cross an npm-package edge?). Both need new graph derivation that does not
  * exist today; emitting them as `false` would misreport "we checked and it does
- * not cross" when fallow has not checked at all.
+ * not cross" when plow has not checked at all.
  */
 export interface SecurityCandidateBoundary {
 /**
@@ -6515,7 +6515,7 @@ cross_module_hops: number
 }
 /**
  * Runtime coverage context attached to a security candidate when
- * `fallow security --runtime-coverage` is supplied.
+ * `plow security --runtime-coverage` is supplied.
  */
 export interface SecurityRuntimeContext {
 state: SecurityRuntimeState
@@ -6541,7 +6541,7 @@ stable_id?: (string | null)
 evidence?: (string | null)
 }
 /**
- * One untrusted entry to reachable sink path for `fallow security --surface`.
+ * One untrusted entry to reachable sink path for `plow security --surface`.
  */
 export interface SecurityAttackSurfaceEntry {
 source: TaintEndpoint
@@ -6590,7 +6590,7 @@ col: number
 callee: string
 }
 /**
- * Bounded unresolved-callee diagnostics for `fallow security --format json`.
+ * Bounded unresolved-callee diagnostics for `plow security --format json`.
  */
 export interface SecurityUnresolvedCalleeDiagnostics {
 /**
@@ -6657,7 +6657,7 @@ reason: SkippedSecurityCalleeReason
 count: number
 }
 /**
- * Compact `fallow security --summary --format json` payload. Uses the same
+ * Compact `plow security --summary --format json` payload. Uses the same
  * `kind: "security"` discriminator as the full payload, but omits candidate
  * arrays and exposes only aggregate counts.
  */
@@ -6677,7 +6677,7 @@ gate?: (SecurityGate | null)
 summary: SecuritySummary
 }
 /**
- * Aggregate counts for `fallow security --summary --format json`.
+ * Aggregate counts for `plow security --summary --format json`.
  */
 export interface SecuritySummary {
 /**
@@ -6739,7 +6739,7 @@ runtime_unknown: number
 not_collected: number
 }
 /**
- * Bare `fallow --format json` envelope.
+ * Bare `plow --format json` envelope.
  */
 export interface CombinedOutput {
 schema_version: SchemaVersion
@@ -6838,7 +6838,7 @@ export type RefactoringTarget = Omit<RefactoringTargetFinding, "actions">;
 // The aliases below map pre-#384 / #408 / #409 bare names to their typed
 // envelope wrappers. The wire shape is byte-identical: each wrapper flattens
 // the bare finding's fields via `#[serde(flatten)]` and adds `actions[]`
-// (and, where the wrapper participates in `fallow audit` attribution, the
+// (and, where the wrapper participates in `plow audit` attribution, the
 // optional `introduced` flag). Per-alias rationale lives in each alias's
 // JSDoc below.
 //
@@ -6846,16 +6846,16 @@ export type RefactoringTarget = Omit<RefactoringTargetFinding, "actions">;
 // inner definitions for `#[serde(flatten)]` wrappers (even with
 // `unreachableDefinitions: true`), so the bare names disappear from this
 // generated `.d.ts` without an explicit alias. External consumers that
-// import the bare names from `fallow/types` would break at upgrade time
+// import the bare names from `plow/types` would break at upgrade time
 // otherwise.
 //
-// Stability commitment: these aliases ship as part of fallow's v2.x stable
+// Stability commitment: these aliases ship as part of plow's v2.x stable
 // surface. They are scheduled for removal alongside the kind-tagged
-// `FallowOutput` major bump (see https://github.com/fallow-rs/fallow/issues/413),
+// `PlowOutput` major bump (see https://github.com/fglogan/genesis-plow/issues/413),
 // with a one-minor-cycle deprecation window (`@deprecated` JSDoc +
 // CHANGELOG headline) preceding the removal. New code should prefer the
 // `*Finding` wrapper names. Full public-consumer policy:
-// https://github.com/fallow-rs/fallow/blob/main/docs/backwards-compatibility.md
+// https://github.com/fglogan/genesis-plow/blob/main/docs/backwards-compatibility.md
 //
 
 /**
@@ -6867,7 +6867,7 @@ export type RefactoringTarget = Omit<RefactoringTargetFinding, "actions">;
  * always carried `actions[]` on every clone group via the legacy
  * `inject_dupes_actions` post-pass, so the bare alias matching the
  * wrapper shape is the byte-faithful continuation. Consumers that
- * imported `CloneGroup` from `fallow/types` pre-migration continue
+ * imported `CloneGroup` from `plow/types` pre-migration continue
  * to work via this alias; new code should prefer `CloneGroupFinding`.
  */
 export type CloneGroup = CloneGroupFinding;
@@ -6879,7 +6879,7 @@ export type CloneGroup = CloneGroupFinding;
  * `CloneGroupFinding` rather than bare `CloneGroup`, which matches
  * the pre-migration wire shape (the legacy `inject_dupes_actions`
  * post-pass injected `actions[]` on every nested group too).
- * Consumers that imported `CloneFamily` from `fallow/types`
+ * Consumers that imported `CloneFamily` from `plow/types`
  * pre-migration continue to work via this alias; new code should
  * prefer `CloneFamilyFinding`.
  */
@@ -6887,8 +6887,8 @@ export type CloneFamily = CloneFamilyFinding;
 
 /**
  * Backwards-compat alias for the pre-#409 bare attributed-clone-group
- * name (`fallow dupes --group-by` per-bucket attribution).
- * Consumers that imported `AttributedCloneGroup` from `fallow/types`
+ * name (`plow dupes --group-by` per-bucket attribution).
+ * Consumers that imported `AttributedCloneGroup` from `plow/types`
  * pre-migration continue to work via this alias; new code should
  * prefer `AttributedCloneGroupFinding`.
  */
@@ -6902,7 +6902,7 @@ export type AttributedCloneGroup = AttributedCloneGroupFinding;
  * `CloneGroupFinding` / `CloneFamilyFinding` wrappers instead of
  * bare findings (the pre-migration wire ALSO carried `actions[]`
  * on each item via the legacy `inject_dupes_actions` post-pass).
- * Consumers that imported `DuplicationReport` from `fallow/types`
+ * Consumers that imported `DuplicationReport` from `plow/types`
  * pre-migration continue to work via this alias; new code should
  * prefer `DupesReportPayload`.
  */
@@ -6913,7 +6913,7 @@ export type DuplicationReport = DupesReportPayload;
  * The wire shape is byte-identical: `BoundaryViolationFinding` flattens the bare
  * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
  * the optional audit-mode `introduced` flag. Consumers that imported
- * `BoundaryViolation` from `fallow/types` pre-migration continue to work via
+ * `BoundaryViolation` from `plow/types` pre-migration continue to work via
  * this alias; new code should prefer `BoundaryViolationFinding`.
  */
 export type BoundaryViolation = BoundaryViolationFinding;
@@ -6923,7 +6923,7 @@ export type BoundaryViolation = BoundaryViolationFinding;
  * The wire shape is byte-identical: `CircularDependencyFinding` flattens the bare
  * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
  * the optional audit-mode `introduced` flag. Consumers that imported
- * `CircularDependency` from `fallow/types` pre-migration continue to work via
+ * `CircularDependency` from `plow/types` pre-migration continue to work via
  * this alias; new code should prefer `CircularDependencyFinding`.
  */
 export type CircularDependency = CircularDependencyFinding;
@@ -6933,7 +6933,7 @@ export type CircularDependency = CircularDependencyFinding;
  * The wire shape is byte-identical: `DuplicateExportFinding` flattens the bare
  * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
  * the optional audit-mode `introduced` flag. Consumers that imported
- * `DuplicateExport` from `fallow/types` pre-migration continue to work via
+ * `DuplicateExport` from `plow/types` pre-migration continue to work via
  * this alias; new code should prefer `DuplicateExportFinding`.
  */
 export type DuplicateExport = DuplicateExportFinding;
@@ -6943,7 +6943,7 @@ export type DuplicateExport = DuplicateExportFinding;
  * The wire shape is byte-identical: `EmptyCatalogGroupFinding` flattens the bare
  * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
  * the optional audit-mode `introduced` flag. Consumers that imported
- * `EmptyCatalogGroup` from `fallow/types` pre-migration continue to work via
+ * `EmptyCatalogGroup` from `plow/types` pre-migration continue to work via
  * this alias; new code should prefer `EmptyCatalogGroupFinding`.
  */
 export type EmptyCatalogGroup = EmptyCatalogGroupFinding;
@@ -6953,7 +6953,7 @@ export type EmptyCatalogGroup = EmptyCatalogGroupFinding;
  * The wire shape is byte-identical: `MisconfiguredDependencyOverrideFinding` flattens the bare
  * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
  * the optional audit-mode `introduced` flag. Consumers that imported
- * `MisconfiguredDependencyOverride` from `fallow/types` pre-migration continue to work via
+ * `MisconfiguredDependencyOverride` from `plow/types` pre-migration continue to work via
  * this alias; new code should prefer `MisconfiguredDependencyOverrideFinding`.
  */
 export type MisconfiguredDependencyOverride = MisconfiguredDependencyOverrideFinding;
@@ -6963,7 +6963,7 @@ export type MisconfiguredDependencyOverride = MisconfiguredDependencyOverrideFin
  * The wire shape is byte-identical: `PrivateTypeLeakFinding` flattens the bare
  * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
  * the optional audit-mode `introduced` flag. Consumers that imported
- * `PrivateTypeLeak` from `fallow/types` pre-migration continue to work via
+ * `PrivateTypeLeak` from `plow/types` pre-migration continue to work via
  * this alias; new code should prefer `PrivateTypeLeakFinding`.
  */
 export type PrivateTypeLeak = PrivateTypeLeakFinding;
@@ -6973,7 +6973,7 @@ export type PrivateTypeLeak = PrivateTypeLeakFinding;
  * The wire shape is byte-identical: `ReExportCycleFinding` flattens the bare
  * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
  * the optional audit-mode `introduced` flag. Consumers that imported
- * `ReExportCycle` from `fallow/types` pre-migration continue to work via
+ * `ReExportCycle` from `plow/types` pre-migration continue to work via
  * this alias; new code should prefer `ReExportCycleFinding`.
  */
 export type ReExportCycle = ReExportCycleFinding;
@@ -6983,7 +6983,7 @@ export type ReExportCycle = ReExportCycleFinding;
  * The wire shape is byte-identical: `TestOnlyDependencyFinding` flattens the bare
  * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
  * the optional audit-mode `introduced` flag. Consumers that imported
- * `TestOnlyDependency` from `fallow/types` pre-migration continue to work via
+ * `TestOnlyDependency` from `plow/types` pre-migration continue to work via
  * this alias; new code should prefer `TestOnlyDependencyFinding`.
  */
 export type TestOnlyDependency = TestOnlyDependencyFinding;
@@ -6993,7 +6993,7 @@ export type TestOnlyDependency = TestOnlyDependencyFinding;
  * The wire shape is byte-identical: `TypeOnlyDependencyFinding` flattens the bare
  * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
  * the optional audit-mode `introduced` flag. Consumers that imported
- * `TypeOnlyDependency` from `fallow/types` pre-migration continue to work via
+ * `TypeOnlyDependency` from `plow/types` pre-migration continue to work via
  * this alias; new code should prefer `TypeOnlyDependencyFinding`.
  */
 export type TypeOnlyDependency = TypeOnlyDependencyFinding;
@@ -7003,7 +7003,7 @@ export type TypeOnlyDependency = TypeOnlyDependencyFinding;
  * The wire shape is byte-identical: `UnlistedDependencyFinding` flattens the bare
  * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
  * the optional audit-mode `introduced` flag. Consumers that imported
- * `UnlistedDependency` from `fallow/types` pre-migration continue to work via
+ * `UnlistedDependency` from `plow/types` pre-migration continue to work via
  * this alias; new code should prefer `UnlistedDependencyFinding`.
  */
 export type UnlistedDependency = UnlistedDependencyFinding;
@@ -7013,7 +7013,7 @@ export type UnlistedDependency = UnlistedDependencyFinding;
  * The wire shape is byte-identical: `UnresolvedCatalogReferenceFinding` flattens the bare
  * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
  * the optional audit-mode `introduced` flag. Consumers that imported
- * `UnresolvedCatalogReference` from `fallow/types` pre-migration continue to work via
+ * `UnresolvedCatalogReference` from `plow/types` pre-migration continue to work via
  * this alias; new code should prefer `UnresolvedCatalogReferenceFinding`.
  */
 export type UnresolvedCatalogReference = UnresolvedCatalogReferenceFinding;
@@ -7023,7 +7023,7 @@ export type UnresolvedCatalogReference = UnresolvedCatalogReferenceFinding;
  * The wire shape is byte-identical: `UnresolvedImportFinding` flattens the bare
  * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
  * the optional audit-mode `introduced` flag. Consumers that imported
- * `UnresolvedImport` from `fallow/types` pre-migration continue to work via
+ * `UnresolvedImport` from `plow/types` pre-migration continue to work via
  * this alias; new code should prefer `UnresolvedImportFinding`.
  */
 export type UnresolvedImport = UnresolvedImportFinding;
@@ -7033,7 +7033,7 @@ export type UnresolvedImport = UnresolvedImportFinding;
  * The wire shape is byte-identical: `UnusedCatalogEntryFinding` flattens the bare
  * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
  * the optional audit-mode `introduced` flag. Consumers that imported
- * `UnusedCatalogEntry` from `fallow/types` pre-migration continue to work via
+ * `UnusedCatalogEntry` from `plow/types` pre-migration continue to work via
  * this alias; new code should prefer `UnusedCatalogEntryFinding`.
  */
 export type UnusedCatalogEntry = UnusedCatalogEntryFinding;
@@ -7043,7 +7043,7 @@ export type UnusedCatalogEntry = UnusedCatalogEntryFinding;
  * The wire shape is byte-identical: `UnusedDependencyOverrideFinding` flattens the bare
  * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
  * the optional audit-mode `introduced` flag. Consumers that imported
- * `UnusedDependencyOverride` from `fallow/types` pre-migration continue to work via
+ * `UnusedDependencyOverride` from `plow/types` pre-migration continue to work via
  * this alias; new code should prefer `UnusedDependencyOverrideFinding`.
  */
 export type UnusedDependencyOverride = UnusedDependencyOverrideFinding;
@@ -7053,7 +7053,7 @@ export type UnusedDependencyOverride = UnusedDependencyOverrideFinding;
  * The wire shape is byte-identical: `UnusedExportFinding` flattens the bare
  * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
  * the optional audit-mode `introduced` flag. Consumers that imported
- * `UnusedExport` from `fallow/types` pre-migration continue to work via
+ * `UnusedExport` from `plow/types` pre-migration continue to work via
  * this alias; new code should prefer `UnusedExportFinding`.
  */
 export type UnusedExport = UnusedExportFinding;
@@ -7063,7 +7063,7 @@ export type UnusedExport = UnusedExportFinding;
  * The wire shape is byte-identical: `UnusedFileFinding` flattens the bare
  * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
  * the optional audit-mode `introduced` flag. Consumers that imported
- * `UnusedFile` from `fallow/types` pre-migration continue to work via
+ * `UnusedFile` from `plow/types` pre-migration continue to work via
  * this alias; new code should prefer `UnusedFileFinding`.
  */
 export type UnusedFile = UnusedFileFinding;
@@ -7074,7 +7074,7 @@ export type UnusedFile = UnusedFileFinding;
  * that replaced the pre-migration bare union. The wire shape per variant
  * is byte-identical (each wrapper flattens its bare payload and adds
  * `actions[]` plus optional `introduced`). Consumers that imported
- * `UnusedDependency` from `fallow/types` pre-migration continue to work via
+ * `UnusedDependency` from `plow/types` pre-migration continue to work via
  * this alias; new code should narrow on the specific wrapper variant.
  */
 export type UnusedDependency = UnusedDependencyFinding | UnusedDevDependencyFinding | UnusedOptionalDependencyFinding;
@@ -7085,7 +7085,7 @@ export type UnusedDependency = UnusedDependencyFinding | UnusedDevDependencyFind
  * that replaced the pre-migration bare union. The wire shape per variant
  * is byte-identical (each wrapper flattens its bare payload and adds
  * `actions[]` plus optional `introduced`). Consumers that imported
- * `UnusedMember` from `fallow/types` pre-migration continue to work via
+ * `UnusedMember` from `plow/types` pre-migration continue to work via
  * this alias; new code should narrow on the specific wrapper variant.
  */
 export type UnusedMember = UnusedClassMemberFinding | UnusedEnumMemberFinding | UnusedStoreMemberFinding;

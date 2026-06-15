@@ -1,5 +1,5 @@
 .DS_Store
-.fallow/
+.plow/
 .git/
 .github/**/*.log
 .internal/
@@ -12,7 +12,7 @@ dead-code.md
 dupes.md
 health.md
 node_modules/
-npm/fallow/skills/
+npm/plow/skills/
 quality/
 reference/
 summary.md

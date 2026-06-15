@@ -1,8 +1,8 @@
-# Fallow is a one-shot CLI. Use `docker compose run --rm fallow ...`.
+# Plow is a one-shot CLI. Use `docker compose run --rm plow ...`.
 # Do not deploy it as an always-on service unless you override the command.
 services:
-  fallow:
-    image: fallow:local
+  plow:
+    image: plow:local
     working_dir: /workspace
     volumes:
       - .:/workspace

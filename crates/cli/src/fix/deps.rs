@@ -1,8 +1,8 @@
 use rustc_hash::FxHashMap;
 use std::path::Path;
 
-use fallow_config::OutputFormat;
-use fallow_core::results::UnusedDependency;
+use plow_config::OutputFormat;
+use plow_core::results::UnusedDependency;
 
 use super::plan::{CapturedHashes, FixPlan};
 
@@ -12,7 +12,7 @@ use super::plan::{CapturedHashes, FixPlan};
 /// re-read and reparsed here, so the hash check is a no-op.
 pub(super) fn apply_dependency_fixes(
     root: &Path,
-    results: &fallow_core::results::AnalysisResults,
+    results: &plow_core::results::AnalysisResults,
     hashes: &CapturedHashes,
     plan: &mut FixPlan,
     output: OutputFormat,
@@ -122,7 +122,7 @@ mod tests {
 
     fn run_fix_deps(
         root: &Path,
-        results: &fallow_core::results::AnalysisResults,
+        results: &plow_core::results::AnalysisResults,
         output: OutputFormat,
         dry_run: bool,
         fixes: &mut Vec<serde_json::Value>,
@@ -145,11 +145,11 @@ mod tests {
             r#"{"dependencies": {"lodash": "^4.0.0"}, "devDependencies": {"jest": "^29.0.0"}}"#;
         std::fs::write(&pkg_path, original).unwrap();
 
-        let mut results = fallow_core::results::AnalysisResults::default();
+        let mut results = plow_core::results::AnalysisResults::default();
         results.unused_dependencies.push(
-            fallow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
+            plow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
                 package_name: "lodash".into(),
-                location: fallow_core::results::DependencyLocation::Dependencies,
+                location: plow_core::results::DependencyLocation::Dependencies,
                 path: pkg_path.clone(),
                 line: 5,
                 used_in_workspaces: Vec::new(),
@@ -176,11 +176,11 @@ mod tests {
         )
         .unwrap();
 
-        let mut results = fallow_core::results::AnalysisResults::default();
+        let mut results = plow_core::results::AnalysisResults::default();
         results.unused_dependencies.push(
-            fallow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
+            plow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
                 package_name: "lodash".into(),
-                location: fallow_core::results::DependencyLocation::Dependencies,
+                location: plow_core::results::DependencyLocation::Dependencies,
                 path: pkg_path.clone(),
                 line: 5,
                 used_in_workspaces: Vec::new(),
@@ -210,11 +210,11 @@ mod tests {
         )
         .unwrap();
 
-        let mut results = fallow_core::results::AnalysisResults::default();
+        let mut results = plow_core::results::AnalysisResults::default();
         results.unused_dependencies.push(
-            fallow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
+            plow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
                 package_name: "lodash-es".into(),
-                location: fallow_core::results::DependencyLocation::Dependencies,
+                location: plow_core::results::DependencyLocation::Dependencies,
                 path: pkg_path.clone(),
                 line: 5,
                 used_in_workspaces: vec![root.join("packages/consumer")],
@@ -237,7 +237,7 @@ mod tests {
     fn dependency_fix_empty_results_returns_early() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        let results = fallow_core::results::AnalysisResults::default();
+        let results = plow_core::results::AnalysisResults::default();
         let mut fixes = Vec::new();
         let had_error = run_fix_deps(root, &results, OutputFormat::Human, false, &mut fixes);
         assert!(!had_error);
@@ -255,11 +255,11 @@ mod tests {
         )
         .unwrap();
 
-        let mut results = fallow_core::results::AnalysisResults::default();
+        let mut results = plow_core::results::AnalysisResults::default();
         results.unused_dev_dependencies.push(
-            fallow_core::results::UnusedDevDependencyFinding::with_actions(UnusedDependency {
+            plow_core::results::UnusedDevDependencyFinding::with_actions(UnusedDependency {
                 package_name: "jest".into(),
-                location: fallow_core::results::DependencyLocation::DevDependencies,
+                location: plow_core::results::DependencyLocation::DevDependencies,
                 path: pkg_path.clone(),
                 line: 3,
                 used_in_workspaces: Vec::new(),
@@ -291,11 +291,11 @@ mod tests {
         )
         .unwrap();
 
-        let mut results = fallow_core::results::AnalysisResults::default();
+        let mut results = plow_core::results::AnalysisResults::default();
         results.unused_optional_dependencies.push(
-            fallow_core::results::UnusedOptionalDependencyFinding::with_actions(UnusedDependency {
+            plow_core::results::UnusedOptionalDependencyFinding::with_actions(UnusedDependency {
                 package_name: "sharp".into(),
-                location: fallow_core::results::DependencyLocation::OptionalDependencies,
+                location: plow_core::results::DependencyLocation::OptionalDependencies,
                 path: pkg_path.clone(),
                 line: 3,
                 used_in_workspaces: Vec::new(),
@@ -324,20 +324,20 @@ mod tests {
         )
         .unwrap();
 
-        let mut results = fallow_core::results::AnalysisResults::default();
+        let mut results = plow_core::results::AnalysisResults::default();
         results.unused_dependencies.push(
-            fallow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
+            plow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
                 package_name: "lodash".into(),
-                location: fallow_core::results::DependencyLocation::Dependencies,
+                location: plow_core::results::DependencyLocation::Dependencies,
                 path: pkg_path.clone(),
                 line: 3,
                 used_in_workspaces: Vec::new(),
             }),
         );
         results.unused_dev_dependencies.push(
-            fallow_core::results::UnusedDevDependencyFinding::with_actions(UnusedDependency {
+            plow_core::results::UnusedDevDependencyFinding::with_actions(UnusedDependency {
                 package_name: "jest".into(),
-                location: fallow_core::results::DependencyLocation::DevDependencies,
+                location: plow_core::results::DependencyLocation::DevDependencies,
                 path: pkg_path.clone(),
                 line: 5,
                 used_in_workspaces: Vec::new(),
@@ -364,11 +364,11 @@ mod tests {
         let pkg_path = root.join("package.json");
         std::fs::write(&pkg_path, r#"{"dependencies": {"lodash": "^4.0.0"}}"#).unwrap();
 
-        let mut results = fallow_core::results::AnalysisResults::default();
+        let mut results = plow_core::results::AnalysisResults::default();
         results.unused_dependencies.push(
-            fallow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
+            plow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
                 package_name: "lodash".into(),
-                location: fallow_core::results::DependencyLocation::Dependencies,
+                location: plow_core::results::DependencyLocation::Dependencies,
                 path: pkg_path.clone(),
                 line: 3,
                 used_in_workspaces: Vec::new(),
@@ -393,11 +393,11 @@ mod tests {
         let original = r#"{"dependencies": {"react": "^18.0.0"}}"#;
         std::fs::write(&pkg_path, original).unwrap();
 
-        let mut results = fallow_core::results::AnalysisResults::default();
+        let mut results = plow_core::results::AnalysisResults::default();
         results.unused_dependencies.push(
-            fallow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
+            plow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
                 package_name: "nonexistent".into(),
-                location: fallow_core::results::DependencyLocation::Dependencies,
+                location: plow_core::results::DependencyLocation::Dependencies,
                 path: pkg_path,
                 line: 3,
                 used_in_workspaces: Vec::new(),
@@ -419,11 +419,11 @@ mod tests {
         let original = r#"{"dependencies": {"lodash": "^4.0.0"}}"#;
         std::fs::write(&pkg_path, original).unwrap();
 
-        let mut results = fallow_core::results::AnalysisResults::default();
+        let mut results = plow_core::results::AnalysisResults::default();
         results.unused_dependencies.push(
-            fallow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
+            plow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
                 package_name: "lodash".into(),
-                location: fallow_core::results::DependencyLocation::Dependencies,
+                location: plow_core::results::DependencyLocation::Dependencies,
                 path: pkg_path.clone(),
                 line: 3,
                 used_in_workspaces: Vec::new(),
@@ -445,11 +445,11 @@ mod tests {
         let pkg_path = root.join("package.json");
         std::fs::write(&pkg_path, "not valid json").unwrap();
 
-        let mut results = fallow_core::results::AnalysisResults::default();
+        let mut results = plow_core::results::AnalysisResults::default();
         results.unused_dependencies.push(
-            fallow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
+            plow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
                 package_name: "lodash".into(),
-                location: fallow_core::results::DependencyLocation::Dependencies,
+                location: plow_core::results::DependencyLocation::Dependencies,
                 path: pkg_path,
                 line: 3,
                 used_in_workspaces: Vec::new(),
@@ -469,11 +469,11 @@ mod tests {
         let root = dir.path();
         let pkg_path = root.join("package.json"); // Does not exist
 
-        let mut results = fallow_core::results::AnalysisResults::default();
+        let mut results = plow_core::results::AnalysisResults::default();
         results.unused_dependencies.push(
-            fallow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
+            plow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
                 package_name: "lodash".into(),
-                location: fallow_core::results::DependencyLocation::Dependencies,
+                location: plow_core::results::DependencyLocation::Dependencies,
                 path: pkg_path,
                 line: 3,
                 used_in_workspaces: Vec::new(),
@@ -495,11 +495,11 @@ mod tests {
         let original = r#"{"name": "test"}"#;
         std::fs::write(&pkg_path, original).unwrap();
 
-        let mut results = fallow_core::results::AnalysisResults::default();
+        let mut results = plow_core::results::AnalysisResults::default();
         results.unused_dependencies.push(
-            fallow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
+            plow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
                 package_name: "lodash".into(),
-                location: fallow_core::results::DependencyLocation::Dependencies,
+                location: plow_core::results::DependencyLocation::Dependencies,
                 path: pkg_path,
                 line: 3,
                 used_in_workspaces: Vec::new(),
@@ -524,11 +524,11 @@ mod tests {
         )
         .unwrap();
 
-        let mut results = fallow_core::results::AnalysisResults::default();
+        let mut results = plow_core::results::AnalysisResults::default();
         results.unused_dependencies.push(
-            fallow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
+            plow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
                 package_name: "lodash".into(),
-                location: fallow_core::results::DependencyLocation::Dependencies,
+                location: plow_core::results::DependencyLocation::Dependencies,
                 path: pkg_path.clone(),
                 line: 3,
                 used_in_workspaces: Vec::new(),

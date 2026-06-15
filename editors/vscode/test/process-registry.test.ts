@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// execFallow lives in commands.ts, which imports vscode, config, binary-utils,
+// execPlow lives in commands.ts, which imports vscode, config, binary-utils,
 // and download at module load. Stub them so the module imports under vitest;
 // the registry test only exercises the spawn primitive, not CLI resolution.
 vi.mock("vscode", () => ({
@@ -57,14 +57,14 @@ vi.mock("../src/download.js", () => ({
   getExtensionVersion: () => null,
 }));
 
-import { execFallow } from "../src/commands.js";
+import { execPlow } from "../src/commands.js";
 import { activeChildCount, killActiveChildren } from "../src/process-registry.js";
 
 describe("process-registry", () => {
   let dir = "";
 
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), "fallow-vscode-registry-"));
+    dir = await mkdtemp(join(tmpdir(), "plow-vscode-registry-"));
   });
 
   afterEach(async () => {
@@ -83,14 +83,14 @@ describe("process-registry", () => {
     );
     await chmod(script, 0o755);
 
-    await expect(execFallow(process.execPath, [script], dir)).resolves.toBe("done");
+    await expect(execPlow(process.execPath, [script], dir)).resolves.toBe("done");
     // The close handler unregisters the child, so the registry is empty again.
     expect(activeChildCount()).toBe(0);
   });
 
   it("killActiveChildren terminates an in-flight child mid-run", async () => {
     // A child that would otherwise run far longer than the test: killing it via
-    // the registry must make execFallow settle (close fires with a signal),
+    // the registry must make execPlow settle (close fires with a signal),
     // proving deactivate() can reap an orphaned analysis.
     const script = join(dir, "sleep.js");
     await writeFile(
@@ -103,7 +103,7 @@ describe("process-registry", () => {
     );
     await chmod(script, 0o755);
 
-    const pending = execFallow(process.execPath, [script], dir);
+    const pending = execPlow(process.execPath, [script], dir);
 
     // Wait until the spawn has registered before reaping.
     await vi.waitFor(() => {
@@ -113,7 +113,7 @@ describe("process-registry", () => {
     killActiveChildren();
     expect(activeChildCount()).toBe(0);
 
-    // The killed child closes via a signal, which execFallow surfaces as a
+    // The killed child closes via a signal, which execPlow surfaces as a
     // signal-exit rejection rather than hanging the promise.
     await expect(pending).rejects.toThrow(/signal/);
   });

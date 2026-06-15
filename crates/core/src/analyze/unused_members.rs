@@ -1,5 +1,5 @@
-use fallow_config::{ScopedUsedClassMemberRule, UsedClassMemberRule};
 use globset::GlobMatcher;
+use plow_config::{ScopedUsedClassMemberRule, UsedClassMemberRule};
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::Path;
@@ -658,7 +658,7 @@ impl AngularTemplateRefContext<'_, '_> {
 }
 
 fn component_instance_bindings(
-    class_heritage: &[fallow_types::extract::ClassHeritageInfo],
+    class_heritage: &[plow_types::extract::ClassHeritageInfo],
 ) -> FxHashMap<&str, &str> {
     class_heritage
         .iter()
@@ -673,7 +673,7 @@ fn component_instance_bindings(
 
 struct MemberHeritageContext<'a> {
     class_heritage_by_export: FxHashMap<ExportKey, (Option<String>, Vec<String>)>,
-    class_heritage_by_file: FxHashMap<FileId, &'a [fallow_types::extract::ClassHeritageInfo]>,
+    class_heritage_by_file: FxHashMap<FileId, &'a [plow_types::extract::ClassHeritageInfo]>,
     token_to_interface: FxHashMap<ExportKey, &'a str>,
     implementers_by_name: FxHashMap<&'a str, Vec<ExportKey>>,
     interface_to_implementers: FxHashMap<ExportKey, Vec<ExportKey>>,
@@ -782,7 +782,7 @@ fn propagate_angular_template_member_accesses(
 
 struct AngularTemplateChainContext<'a, 'b> {
     graph: &'b ModuleGraph,
-    class_heritage_by_file: &'b FxHashMap<FileId, &'a [fallow_types::extract::ClassHeritageInfo]>,
+    class_heritage_by_file: &'b FxHashMap<FileId, &'a [plow_types::extract::ClassHeritageInfo]>,
     chain_accesses: &'b FxHashMap<FileId, Vec<(&'b str, &'b str)>>,
     token_to_interface: &'b FxHashMap<ExportKey, &'a str>,
     implementers_by_name: &'b FxHashMap<&'a str, Vec<ExportKey>>,
@@ -1738,9 +1738,9 @@ fn propagate_class_inheritance(
 
 #[deprecated(
     since = "2.76.0",
-    note = "fallow_core is internal; use fallow_cli::programmatic::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/fallow-core-migration.md and ADR-008."
+    note = "plow_core is internal; use plow_cli::programmatic::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/plow-core-migration.md and ADR-008."
 )]
-#[allow(dead_code, reason = "kept for the deprecated fallow_core helper API")]
+#[allow(dead_code, reason = "kept for the deprecated plow_core helper API")]
 pub fn find_unused_members(
     graph: &ModuleGraph,
     resolved_modules: &[ResolvedModule],
@@ -2113,7 +2113,7 @@ fn record_seen_ignore_decorators(graph: &ModuleGraph, ignore_decorators: &Ignore
 fn build_interface_to_implementers(
     graph: &ModuleGraph,
     resolved_modules: &[ResolvedModule],
-    class_heritage_by_file: &FxHashMap<FileId, &[fallow_types::extract::ClassHeritageInfo]>,
+    class_heritage_by_file: &FxHashMap<FileId, &[plow_types::extract::ClassHeritageInfo]>,
 ) -> FxHashMap<ExportKey, Vec<ExportKey>> {
     let mut interface_to_implementers: FxHashMap<ExportKey, Vec<ExportKey>> = FxHashMap::default();
     for resolved in resolved_modules {
@@ -2217,9 +2217,9 @@ mod tests {
     };
     use crate::graph::{ExportSymbol, ModuleGraph, SymbolReference};
     use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
-    use fallow_config::{ScopedUsedClassMemberRule, UsedClassMemberRule};
-    use fallow_types::extract::ClassHeritageInfo;
     use oxc_span::Span;
+    use plow_config::{ScopedUsedClassMemberRule, UsedClassMemberRule};
+    use plow_types::extract::ClassHeritageInfo;
     use std::path::PathBuf;
 
     #[expect(

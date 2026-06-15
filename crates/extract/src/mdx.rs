@@ -13,7 +13,7 @@ use oxc_span::SourceType;
 use crate::ModuleInfo;
 use crate::source_map::{ExtractionResult, SfcExtractor};
 use crate::visitor::ModuleInfoExtractor;
-use fallow_types::discover::FileId;
+use plow_types::discover::FileId;
 
 struct MdxExtractor;
 
@@ -145,7 +145,7 @@ pub(crate) fn is_mdx_file(path: &Path) -> bool {
 /// Parse an MDX file by extracting import/export statements.
 pub(crate) fn parse_mdx_to_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleInfo {
     let parsed_suppressions = crate::suppress::parse_suppressions_from_source(source);
-    let line_offsets = fallow_types::extract::compute_line_offsets(source);
+    let line_offsets = plow_types::extract::compute_line_offsets(source);
     let extraction = MdxExtractor.extract(source).into_iter().next();
 
     if let Some(statements) = extraction {
@@ -458,7 +458,7 @@ import { Visible } from './Visible'
 
     #[test]
     fn mdx_empty_source_returns_empty_module() {
-        let info = parse_mdx_to_module(fallow_types::discover::FileId(0), "", 0);
+        let info = parse_mdx_to_module(plow_types::discover::FileId(0), "", 0);
         assert!(info.imports.is_empty());
         assert!(info.exports.is_empty());
     }
@@ -466,7 +466,7 @@ import { Visible } from './Visible'
     #[test]
     fn mdx_only_prose_returns_empty_module() {
         let info = parse_mdx_to_module(
-            fallow_types::discover::FileId(0),
+            plow_types::discover::FileId(0),
             "# Title\n\nSome text.\n",
             0,
         );

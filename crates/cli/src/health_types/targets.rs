@@ -198,7 +198,7 @@ pub struct TargetEvidence {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DirectCallerEvidence {
     /// File that directly imports the target.
-    #[serde(serialize_with = "fallow_types::serde_path::serialize")]
+    #[serde(serialize_with = "plow_types::serde_path::serialize")]
     pub path: std::path::PathBuf,
     /// Symbols imported from the target by this file.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -222,7 +222,7 @@ pub struct DirectCallerSymbolEvidence {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CloneSiblingEvidence {
     /// File containing the sibling clone instance.
-    #[serde(serialize_with = "fallow_types::serde_path::serialize")]
+    #[serde(serialize_with = "plow_types::serde_path::serialize")]
     pub path: std::path::PathBuf,
     /// 1-based start line of the sibling clone.
     pub start_line: usize,
@@ -248,7 +248,7 @@ pub struct EvidenceFunction {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RefactoringTarget {
     /// Absolute file path (stripped to relative in output).
-    #[serde(serialize_with = "fallow_types::serde_path::serialize")]
+    #[serde(serialize_with = "plow_types::serde_path::serialize")]
     pub path: std::path::PathBuf,
     /// Priority score (0–100, higher = more urgent).
     pub priority: f64,

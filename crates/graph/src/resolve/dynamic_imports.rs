@@ -16,8 +16,8 @@ use std::path::{Path, PathBuf};
 
 use oxc_span::Span;
 
-use fallow_types::discover::{DiscoveredFile, FileId};
-use fallow_types::extract::{DynamicImportInfo, DynamicImportPattern, ImportInfo, ImportedName};
+use plow_types::discover::{DiscoveredFile, FileId};
+use plow_types::extract::{DynamicImportInfo, DynamicImportPattern, ImportInfo, ImportedName};
 
 use super::ResolveResult;
 use super::ResolvedImport;

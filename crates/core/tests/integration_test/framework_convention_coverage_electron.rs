@@ -5,7 +5,7 @@ use super::framework_convention_coverage_common::collect_unused_files;
 fn electron_vite_rollup_input_entries_keep_renderer_and_preload_trees_alive() {
     let root = fixture_path("issue-600-electron-vite-rollup-input");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files = collect_unused_files(&root, &results);
 

@@ -8,10 +8,10 @@ use super::{MigrationWarning, string_or_array};
 type JsonMap = Map<String, Value>;
 
 /// Docs URL surfaced as a suggestion when a knip rule key is completely
-/// unknown to fallow (typo, future knip rule, or an issue type the migrator
+/// unknown to plow (typo, future knip rule, or an issue type the migrator
 /// has not yet catalogued). Users follow it to either fix the typo or report
 /// the missing mapping.
-pub(super) const MIGRATION_DOCS_URL: &str = "https://docs.fallow.tools/migration/from-knip";
+pub(super) const MIGRATION_DOCS_URL: &str = "https://docs.genesis-plow.dev/migration/from-knip";
 
 /// Emit a `MigrationWarning` for one rule-key-equivalent input that the
 /// migrator did not translate. Used by `migrate_rules`, `migrate_exclude`, and
@@ -24,7 +24,7 @@ fn warn_unmapped_rule_key(context: &str, key: &str, warnings: &mut Vec<Migration
         warnings.push(MigrationWarning {
             source: "knip",
             field: format!("{context}.{key}"),
-            message: format!("issue type `{key}` has no fallow equivalent"),
+            message: format!("issue type `{key}` has no plow equivalent"),
             suggestion: None,
         });
     } else {
@@ -39,7 +39,7 @@ fn warn_unmapped_rule_key(context: &str, key: &str, warnings: &mut Vec<Migration
     }
 }
 
-/// Migrate a string-or-array field from knip to a fallow config field.
+/// Migrate a string-or-array field from knip to a plow config field.
 pub(super) fn migrate_simple_field(
     obj: &JsonMap,
     src_key: &str,
@@ -57,7 +57,7 @@ pub(super) fn migrate_simple_field(
     }
 }
 
-/// Migrate knip `rules` to fallow `rules`, warning about unmappable rule names.
+/// Migrate knip `rules` to plow `rules`, warning about unmappable rule names.
 pub(super) fn migrate_rules(
     rules_val: &Value,
     config: &mut JsonMap,
@@ -67,13 +67,13 @@ pub(super) fn migrate_rules(
         return;
     };
 
-    let mut fallow_rules = Map::new();
-    for (knip_name, fallow_name) in KNIP_RULE_MAP {
+    let mut plow_rules = Map::new();
+    for (knip_name, plow_name) in KNIP_RULE_MAP {
         if let Some(severity_val) = rules_obj.get(*knip_name)
             && let Some(severity_str) = severity_val.as_str()
         {
-            fallow_rules.insert(
-                (*fallow_name).to_string(),
+            plow_rules.insert(
+                (*plow_name).to_string(),
                 Value::String(severity_str.to_string()),
             );
         }
@@ -86,12 +86,12 @@ pub(super) fn migrate_rules(
         warn_unmapped_rule_key("rules", key, warnings);
     }
 
-    if !fallow_rules.is_empty() {
-        config.insert("rules".to_string(), Value::Object(fallow_rules));
+    if !plow_rules.is_empty() {
+        config.insert("rules".to_string(), Value::Object(plow_rules));
     }
 }
 
-/// Migrate knip `exclude` — set excluded issue types to `"off"` in fallow rules.
+/// Migrate knip `exclude` — set excluded issue types to `"off"` in plow rules.
 pub(super) fn migrate_exclude(
     excluded: &[String],
     config: &mut JsonMap,
@@ -105,15 +105,15 @@ pub(super) fn migrate_exclude(
     };
 
     for knip_name in excluded {
-        if let Some((_, fallow_name)) = KNIP_RULE_MAP.iter().find(|(k, _)| k == knip_name) {
-            rules_obj.insert((*fallow_name).to_string(), Value::String("off".to_string()));
+        if let Some((_, plow_name)) = KNIP_RULE_MAP.iter().find(|(k, _)| k == knip_name) {
+            rules_obj.insert((*plow_name).to_string(), Value::String("off".to_string()));
         } else {
             warn_unmapped_rule_key("exclude", knip_name, warnings);
         }
     }
 }
 
-/// Migrate knip `include` — set non-included issue types to `"off"` in fallow rules.
+/// Migrate knip `include` — set non-included issue types to `"off"` in plow rules.
 pub(super) fn migrate_include(
     included: &[String],
     config: &mut JsonMap,
@@ -126,10 +126,10 @@ pub(super) fn migrate_include(
         return;
     };
 
-    for (knip_name, fallow_name) in KNIP_RULE_MAP {
+    for (knip_name, plow_name) in KNIP_RULE_MAP {
         if !included.iter().any(|i| i == knip_name) {
             rules_obj
-                .entry((*fallow_name).to_string())
+                .entry((*plow_name).to_string())
                 .or_insert_with(|| Value::String("off".to_string()));
         }
     }
@@ -155,7 +155,7 @@ pub(super) fn migrate_ignore_deps(
                 warnings.push(MigrationWarning {
                     source: "knip",
                     field: "ignoreDependencies".to_string(),
-                    message: format!("regex pattern `{d}` skipped (fallow uses exact strings)"),
+                    message: format!("regex pattern `{d}` skipped (plow uses exact strings)"),
                     suggestion: Some("add each dependency name explicitly".to_string()),
                 });
                 false
@@ -172,7 +172,7 @@ pub(super) fn migrate_ignore_deps(
     }
 }
 
-/// Migrate knip `ignoreExportsUsedInFile` to fallow.
+/// Migrate knip `ignoreExportsUsedInFile` to plow.
 pub(super) fn migrate_ignore_exports_used_in_file(
     value: &Value,
     config: &mut JsonMap,
@@ -208,7 +208,7 @@ pub(super) fn migrate_ignore_exports_used_in_file(
     }
 }
 
-/// Warn about knip fields that have no fallow equivalent.
+/// Warn about knip fields that have no plow equivalent.
 pub(super) fn warn_unmappable_fields(obj: &JsonMap, warnings: &mut Vec<MigrationWarning>) {
     for (field, message, suggestion) in KNIP_UNMAPPABLE_FIELDS {
         if obj.contains_key(*field) {
@@ -222,7 +222,7 @@ pub(super) fn warn_unmappable_fields(obj: &JsonMap, warnings: &mut Vec<Migration
     }
 }
 
-/// Warn about knip plugin-specific config keys that are auto-detected in fallow.
+/// Warn about knip plugin-specific config keys that are auto-detected in plow.
 pub(super) fn warn_plugin_keys(obj: &JsonMap, warnings: &mut Vec<MigrationWarning>) {
     for key in obj.keys() {
         if KNIP_PLUGIN_KEYS.contains(&key.as_str()) {
@@ -230,11 +230,10 @@ pub(super) fn warn_plugin_keys(obj: &JsonMap, warnings: &mut Vec<MigrationWarnin
                 source: "knip",
                 field: key.clone(),
                 message: format!(
-                    "plugin config `{key}` is auto-detected by fallow's built-in plugins"
+                    "plugin config `{key}` is auto-detected by plow's built-in plugins"
                 ),
                 suggestion: Some(
-                    "remove this section; fallow detects framework config automatically"
-                        .to_string(),
+                    "remove this section; plow detects framework config automatically".to_string(),
                 ),
             });
         }
@@ -335,7 +334,7 @@ mod tests {
         assert!(!config.contains_key("rules"));
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].field, "rules.binaries");
-        assert!(warnings[0].message.contains("no fallow equivalent"));
+        assert!(warnings[0].message.contains("no plow equivalent"));
     }
 
     #[test]
@@ -351,7 +350,7 @@ mod tests {
         assert!(warnings[0].message.contains("unknown knip issue type"));
         let suggestion = warnings[0].suggestion.as_deref().unwrap_or("");
         assert!(
-            suggestion.contains("docs.fallow.tools/migration/from-knip"),
+            suggestion.contains("docs.genesis-plow.dev/migration/from-knip"),
             "expected docs URL in suggestion, got: {suggestion}"
         );
     }

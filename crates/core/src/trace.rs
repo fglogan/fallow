@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use fallow_types::serde_path;
+use plow_types::serde_path;
 use rustc_hash::FxHashSet;
 use serde::Serialize;
 
@@ -368,7 +368,7 @@ pub fn trace_file(graph: &ModuleGraph, root: &Path, file_path: &str) -> Option<F
 /// through scripts.
 #[expect(
     clippy::implicit_hasher,
-    reason = "fallow standardizes on FxHashSet across the workspace"
+    reason = "plow standardizes on FxHashSet across the workspace"
 )]
 #[must_use]
 pub fn trace_dependency(
@@ -443,7 +443,7 @@ pub struct CloneTrace {
 #[derive(Debug, Serialize)]
 pub struct TracedCloneGroup {
     /// Stable content fingerprint, usually `dup:<8hex>` and widened on rare
-    /// report collisions; addressable via `fallow dupes --trace dup:<fp>` and
+    /// report collisions; addressable via `plow dupes --trace dup:<fp>` and
     /// shown in the `dupes` listing.
     pub fingerprint: String,
     pub token_count: usize,
@@ -1118,14 +1118,14 @@ mod tests {
     /// Regression for the MCP e2e `trace_export` / `trace_file` Windows
     /// failures: the MCP layer passes forward-slashed user input
     /// (`src/utils.ts`) but `module_path` on Windows uses backslash
-    /// separators (`D:\a\fallow\...\src\utils.ts`). The byte-level
+    /// separators (`D:\a\plow\...\src\utils.ts`). The byte-level
     /// equality check missed every match. The helper now normalises
     /// both sides to forward slashes before comparing.
     #[test]
     fn path_matches_normalises_windows_module_path_against_posix_user_path() {
-        let root = Path::new(r"D:\a\fallow\fallow\tests\fixtures\basic-project");
+        let root = Path::new(r"D:\a\plow\plow\tests\fixtures\basic-project");
         let module_path =
-            PathBuf::from(r"D:\a\fallow\fallow\tests\fixtures\basic-project\src\utils.ts");
+            PathBuf::from(r"D:\a\plow\plow\tests\fixtures\basic-project\src\utils.ts");
         assert!(path_matches(&module_path, root, "src/utils.ts"));
         assert!(path_matches(&module_path, root, r"src\utils.ts"));
     }
@@ -1134,7 +1134,7 @@ mod tests {
     fn path_matches_ends_with_fallback_handles_mixed_separators() {
         let root = Path::new("/some/other/root");
         let module_path =
-            PathBuf::from(r"D:\a\fallow\fallow\tests\fixtures\basic-project\src\utils.ts");
+            PathBuf::from(r"D:\a\plow\plow\tests\fixtures\basic-project\src\utils.ts");
         assert!(path_matches(&module_path, root, "src/utils.ts"));
     }
 

@@ -43,15 +43,15 @@ jobs:
           node-version: 20
 
       - name: Run action with SARIF format
-        id: fallow
+        id: plow
         uses: ./
         env:
           # These smoke jobs run the checked-out Action against the currently
           # published npm package. During the PR window before a release, the
           # verifier can be newer than published platform packages and fail on
           # missing .sig files. The fail-closed verifier path is covered by
-          # action/tests/run.sh and npm/fallow/scripts/verify-binary.test.js.
-          FALLOW_SKIP_BINARY_VERIFY: "1"
+          # action/tests/run.sh and npm/plow/scripts/verify-binary.test.js.
+          PLOW_SKIP_BINARY_VERIFY: "1"
         with:
           root: tests/fixtures/basic-project
           format: sarif
@@ -59,8 +59,8 @@ jobs:
 
       - name: Verify SARIF output exists and is valid
         env:
-          SARIF_PATH: ${{ steps.fallow.outputs.sarif }}
-          ISSUES: ${{ steps.fallow.outputs.issues }}
+          SARIF_PATH: ${{ steps.plow.outputs.sarif }}
+          ISSUES: ${{ steps.plow.outputs.issues }}
         run: |
           if [ ! -f "$SARIF_PATH" ]; then
             echo "::error::SARIF output file not found"
@@ -101,10 +101,10 @@ jobs:
           node-version: 20
 
       - name: Run action with JSON format
-        id: fallow
+        id: plow
         uses: ./
         env:
-          FALLOW_SKIP_BINARY_VERIFY: "1"
+          PLOW_SKIP_BINARY_VERIFY: "1"
         with:
           command: dead-code
           root: tests/fixtures/basic-project
@@ -113,8 +113,8 @@ jobs:
 
       - name: Verify JSON results
         env:
-          RESULTS_PATH: ${{ steps.fallow.outputs.results }}
-          ISSUES: ${{ steps.fallow.outputs.issues }}
+          RESULTS_PATH: ${{ steps.plow.outputs.results }}
+          ISSUES: ${{ steps.plow.outputs.issues }}
         run: |
           if [ ! -f "$RESULTS_PATH" ]; then
             echo "::error::Results output file not found"
@@ -168,10 +168,10 @@ jobs:
           EOF
 
       - name: Run action against clean project
-        id: fallow
+        id: plow
         uses: ./
         env:
-          FALLOW_SKIP_BINARY_VERIFY: "1"
+          PLOW_SKIP_BINARY_VERIFY: "1"
         with:
           root: /tmp/clean-project
           format: json
@@ -180,8 +180,8 @@ jobs:
 
       - name: Verify zero issues
         env:
-          ISSUES: ${{ steps.fallow.outputs.issues }}
-          RESULTS_PATH: ${{ steps.fallow.outputs.results }}
+          ISSUES: ${{ steps.plow.outputs.issues }}
+          RESULTS_PATH: ${{ steps.plow.outputs.results }}
         run: |
           if [ "$ISSUES" != "0" ]; then
             echo "::error::Expected 0 issues for clean project, got: $ISSUES"
@@ -205,10 +205,10 @@ jobs:
           node-version: 20
 
       - name: Run action with dupes command
-        id: fallow
+        id: plow
         uses: ./
         env:
-          FALLOW_SKIP_BINARY_VERIFY: "1"
+          PLOW_SKIP_BINARY_VERIFY: "1"
         with:
           command: dupes
           root: tests/fixtures/duplicate-code
@@ -217,8 +217,8 @@ jobs:
 
       - name: Verify dupes JSON results
         env:
-          RESULTS_PATH: ${{ steps.fallow.outputs.results }}
-          ISSUES: ${{ steps.fallow.outputs.issues }}
+          RESULTS_PATH: ${{ steps.plow.outputs.results }}
+          ISSUES: ${{ steps.plow.outputs.issues }}
         run: |
           if [ ! -f "$RESULTS_PATH" ]; then
             echo "::error::Results output file not found"
@@ -256,10 +256,10 @@ jobs:
           node-version: 20
 
       - name: Run action with fix command
-        id: fallow
+        id: plow
         uses: ./
         env:
-          FALLOW_SKIP_BINARY_VERIFY: "1"
+          PLOW_SKIP_BINARY_VERIFY: "1"
         with:
           command: fix
           root: tests/fixtures/basic-project
@@ -269,8 +269,8 @@ jobs:
 
       - name: Verify fix JSON results
         env:
-          RESULTS_PATH: ${{ steps.fallow.outputs.results }}
-          ISSUES: ${{ steps.fallow.outputs.issues }}
+          RESULTS_PATH: ${{ steps.plow.outputs.results }}
+          ISSUES: ${{ steps.plow.outputs.issues }}
         run: |
           if [ ! -f "$RESULTS_PATH" ]; then
             echo "::error::Results output file not found"
@@ -307,10 +307,10 @@ jobs:
           node-version: 20
 
       - name: Run action with dead-code command
-        id: fallow
+        id: plow
         uses: ./
         env:
-          FALLOW_SKIP_BINARY_VERIFY: "1"
+          PLOW_SKIP_BINARY_VERIFY: "1"
         with:
           command: dead-code
           root: tests/fixtures/basic-project
@@ -319,8 +319,8 @@ jobs:
 
       - name: Verify dead-code alias produces valid output
         env:
-          RESULTS_PATH: ${{ steps.fallow.outputs.results }}
-          ISSUES: ${{ steps.fallow.outputs.issues }}
+          RESULTS_PATH: ${{ steps.plow.outputs.results }}
+          ISSUES: ${{ steps.plow.outputs.issues }}
         run: |
           if [ ! -f "$RESULTS_PATH" ]; then
             echo "::error::Results file not found"
@@ -346,10 +346,10 @@ jobs:
           node-version: 20
 
       - name: Run action with no command (bare invocation)
-        id: fallow
+        id: plow
         uses: ./
         env:
-          FALLOW_SKIP_BINARY_VERIFY: "1"
+          PLOW_SKIP_BINARY_VERIFY: "1"
         with:
           root: tests/fixtures/basic-project
           format: json
@@ -357,8 +357,8 @@ jobs:
 
       - name: Verify combined JSON structure
         env:
-          RESULTS_PATH: ${{ steps.fallow.outputs.results }}
-          ISSUES: ${{ steps.fallow.outputs.issues }}
+          RESULTS_PATH: ${{ steps.plow.outputs.results }}
+          ISSUES: ${{ steps.plow.outputs.issues }}
         run: |
           if [ ! -f "$RESULTS_PATH" ]; then
             echo "::error::Results file not found"
@@ -394,10 +394,10 @@ jobs:
           node-version: 20
 
       - name: Run action with PR comment
-        id: fallow
+        id: plow
         uses: ./
         env:
-          FALLOW_SKIP_BINARY_VERIFY: "1"
+          PLOW_SKIP_BINARY_VERIFY: "1"
         with:
           root: tests/fixtures/basic-project
           format: json
@@ -413,12 +413,12 @@ jobs:
         run: |
           COMMENTS=$(gh api \
             "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
-            --jq '[.[] | select(.body | contains("<!-- fallow-id: action-smoke-test -->"))] | length')
+            --jq '[.[] | select(.body | contains("<!-- plow-id: action-smoke-test -->"))] | length')
           if [ "$COMMENTS" -eq 0 ]; then
-            echo "::error::Expected a fallow PR comment but found none"
+            echo "::error::Expected a plow PR comment but found none"
             exit 1
           fi
-          echo "Found $COMMENTS fallow comment(s)"
+          echo "Found $COMMENTS plow comment(s)"
 
       - name: Clean up smoke-test comment
         if: always()
@@ -428,7 +428,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           gh api "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
-            --jq '.[] | select(.body | contains("<!-- fallow-id: action-smoke-test -->")) | .id' |
+            --jq '.[] | select(.body | contains("<!-- plow-id: action-smoke-test -->")) | .id' |
             while read -r COMMENT_ID; do
               [ -n "$COMMENT_ID" ] || continue
               gh api --method DELETE "repos/${GH_REPO}/issues/comments/${COMMENT_ID}"

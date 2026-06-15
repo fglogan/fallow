@@ -6,8 +6,8 @@
 //! barrel chain, a no-directive control, package self-reference exports, and a
 //! dynamic-import blind-spot file.
 
-use fallow_config::Severity;
-use fallow_core::results::{AnalysisResults, SecurityFindingKind, TraceHopRole};
+use plow_config::Severity;
+use plow_core::results::{AnalysisResults, SecurityFindingKind, TraceHopRole};
 
 use super::common::{create_config, create_config_with_rules, fixture_path};
 
@@ -16,7 +16,7 @@ fn analyze_with_security() -> AnalysisResults {
     let config = create_config_with_rules(root, |rules| {
         rules.security_client_server_leak = Severity::Warn;
     });
-    fallow_core::analyze(&config).expect("analysis should succeed")
+    plow_core::analyze(&config).expect("analysis should succeed")
 }
 
 /// Returns true when any finding is anchored on a file whose path ends with `suffix`.
@@ -246,7 +246,7 @@ fn package_self_reference_import_condition_does_not_visit_server_entry() {
 #[test]
 fn file_level_suppression_opts_out() {
     // suppressed-client.tsx leaks but carries a file-level
-    // `// fallow-ignore-file security-client-server-leak`, so it is not flagged.
+    // `// plow-ignore-file security-client-server-leak`, so it is not flagged.
     let results = analyze_with_security();
     assert!(
         !anchored_on(&results, "src/suppressed-client.tsx"),
@@ -370,7 +370,7 @@ fn plain_shared_util_is_not_flagged() {
 fn ssr_false_dynamic_import_to_server_is_not_flagged() {
     // Capability A ssr:false guard: a "use client" file reaching a server-only
     // module (node:fs) ONLY through next/dynamic(() => import('./server-mod'),
-    // { ssr: false }) produces NO finding. fallow's arrow-wrapped dynamic-import
+    // { ssr: false }) produces NO finding. plow's arrow-wrapped dynamic-import
     // detection DOES resolve next/dynamic to a static graph edge (it credits the
     // default export), so the ssr:false edge IS in the cone and is explicitly
     // excluded by the BFS via the captured ssr:false import span.
@@ -531,7 +531,7 @@ fn server_only_import_is_off_by_default() {
     let root = fixture_path("security-client-server-leak");
     let config = create_config(root);
     assert_eq!(config.rules.security_client_server_leak, Severity::Off);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     assert!(
         !results
             .security_findings
@@ -544,13 +544,13 @@ fn server_only_import_is_off_by_default() {
 #[test]
 fn default_off_emits_no_security_findings() {
     // Criterion 5 (core half): with the rule at its default `off`, bare
-    // `fallow_core::analyze` (the engine behind bare `fallow` and `audit`)
+    // `plow_core::analyze` (the engine behind bare `plow` and `audit`)
     // produces zero security findings. The field is also `#[serde(skip)]`, so
     // it never reaches JSON output regardless.
     let root = fixture_path("security-client-server-leak");
     let config = create_config(root);
     assert_eq!(config.rules.security_client_server_leak, Severity::Off);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     assert!(
         results.security_findings.is_empty(),
         "default-off rule must not populate security_findings"

@@ -122,7 +122,7 @@ pub struct ModuleInfo {
     /// `el.innerHTML = DOMPurify.sanitize(input)`.
     pub sanitized_sink_args: Vec<SanitizedSinkArg>,
     /// Known defensive control call sites found in this module. Consumed only by
-    /// the `fallow security --surface` agent JSON path.
+    /// the `plow security --surface` agent JSON path.
     pub security_control_sites: Vec<SecurityControlSite>,
     /// Statically flattenable callee paths invoked in this module, deduped per
     /// unique path (first occurrence wins). Consumed by the
@@ -996,7 +996,7 @@ pub struct MemberInfo {
     /// Whether this member has decorators (e.g., `@Column()`, `@Inject()`).
     /// Decorated members are used by frameworks at runtime and should not be
     /// flagged as unused class members, unless every decorator on the member
-    /// is opted out via `FallowConfig.ignore_decorators`.
+    /// is opted out via `PlowConfig.ignore_decorators`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub has_decorator: bool,
     /// Full dotted path of each decorator on this member, in source order.
@@ -1272,7 +1272,7 @@ pub struct DynamicImportInfo {
     /// The local variable name for `const x = await import(...)`.
     /// Used for namespace import narrowing via member access tracking.
     pub local_name: Option<String>,
-    /// True when this dynamic import was synthesised by fallow rather than appearing in user source.
+    /// True when this dynamic import was synthesised by plow rather than appearing in user source.
     pub is_speculative: bool,
 }
 

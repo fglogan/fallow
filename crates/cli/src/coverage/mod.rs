@@ -1,12 +1,12 @@
-//! `fallow coverage` - runtime coverage onboarding and inventory upload.
+//! `plow coverage` - runtime coverage onboarding and inventory upload.
 //!
 //! Today the subtree holds four commands:
 //!
 //! - `setup`: resumable first-run state machine (optional license + sidecar
-//!   + recipe + auto-handoff to `fallow health --runtime-coverage`).
+//!   + recipe + auto-handoff to `plow health --runtime-coverage`).
 //! - `analyze`: focused runtime coverage analysis. Local mode reads a coverage
-//!   artifact; cloud mode explicitly fetches runtime facts from fallow cloud.
-//! - `upload-inventory`: push a static function inventory to fallow cloud,
+//!   artifact; cloud mode explicitly fetches runtime facts from plow cloud.
+//! - `upload-inventory`: push a static function inventory to plow cloud,
 //!   unlocking the `untracked` filter on the dashboard by pairing runtime
 //!   coverage data with the AST view of "every function that exists".
 //! - `upload-source-maps`: push build source maps so bundled runtime coverage
@@ -19,10 +19,10 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
-use fallow_config::{OutputFormat, PackageJson, WorkspaceInfo, atomic_write, discover_workspaces};
-use fallow_core::git_env::clear_ambient_git_env;
-use fallow_license::{DEFAULT_HARD_FAIL_DAYS, LicenseStatus};
-use fallow_types::serde_path;
+use plow_config::{OutputFormat, PackageJson, WorkspaceInfo, atomic_write, discover_workspaces};
+use plow_core::git_env::clear_ambient_git_env;
+use plow_license::{DEFAULT_HARD_FAIL_DAYS, LicenseStatus};
+use plow_types::serde_path;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -40,25 +40,25 @@ mod upload_inventory;
 mod upload_source_maps;
 mod upload_static_findings;
 
-const COVERAGE_DOCS_URL: &str = "https://docs.fallow.tools/analysis/runtime-coverage";
+const COVERAGE_DOCS_URL: &str = "https://docs.genesis-plow.dev/analysis/runtime-coverage";
 const SETUP_STATE_SCHEMA_VERSION: u8 = 1;
 
-/// Subcommands for `fallow coverage`.
+/// Subcommands for `plow coverage`.
 #[derive(Debug, Clone)]
 pub enum CoverageSubcommand {
     /// Resumable first-run setup flow.
     Setup(SetupArgs),
     /// Analyze runtime coverage from a local artifact or explicit cloud source.
     Analyze(AnalyzeArgs),
-    /// Upload a static function inventory to fallow cloud.
+    /// Upload a static function inventory to plow cloud.
     UploadInventory(UploadInventoryArgs),
-    /// Upload JavaScript source maps to fallow cloud.
+    /// Upload JavaScript source maps to plow cloud.
     UploadSourceMaps(UploadSourceMapsArgs),
-    /// Upload static dead-code findings to fallow cloud.
+    /// Upload static dead-code findings to plow cloud.
     UploadStaticFindings(UploadStaticFindingsArgs),
 }
 
-/// Context shared by `fallow coverage` subcommands.
+/// Context shared by `plow coverage` subcommands.
 pub struct RunContext<'a> {
     pub root: &'a Path,
     pub config_path: &'a Option<PathBuf>,
@@ -69,7 +69,7 @@ pub struct RunContext<'a> {
     pub explain: bool,
 }
 
-/// Arguments for `fallow coverage setup`.
+/// Arguments for `plow coverage setup`.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SetupArgs {
     /// Accept all prompts automatically.
@@ -150,10 +150,10 @@ impl PackageManager {
 
     const fn install_args(self) -> (&'static str, &'static [&'static str]) {
         match self {
-            Self::Npm => ("npm", &["install", "--save-dev", "@fallow-cli/fallow-cov"]),
-            Self::Pnpm => ("pnpm", &["add", "-D", "@fallow-cli/fallow-cov"]),
-            Self::Yarn => ("yarn", &["add", "-D", "@fallow-cli/fallow-cov"]),
-            Self::Bun => ("bun", &["add", "-d", "@fallow-cli/fallow-cov"]),
+            Self::Npm => ("npm", &["install", "--save-dev", "@plow-cli/plow-cov"]),
+            Self::Pnpm => ("pnpm", &["add", "-D", "@plow-cli/plow-cov"]),
+            Self::Yarn => ("yarn", &["add", "-D", "@plow-cli/plow-cov"]),
+            Self::Bun => ("bun", &["add", "-d", "@plow-cli/plow-cov"]),
         }
     }
 
@@ -259,7 +259,7 @@ impl Default for CoverageSetupState {
 impl CoverageSetupLock {
     fn try_acquire(root: &Path) -> Result<Self, String> {
         let lock_path = setup_lock_path(root);
-        ensure_fallow_dir(root)?;
+        ensure_plow_dir(root)?;
         let file = OpenOptions::new()
             .create(true)
             .truncate(false)
@@ -269,7 +269,7 @@ impl CoverageSetupLock {
         match file.try_lock() {
             Ok(()) => Ok(Self { _file: file }),
             Err(std::fs::TryLockError::WouldBlock) => Err(format!(
-                "another fallow coverage setup is already running for this project. \
+                "another plow coverage setup is already running for this project. \
                  The advisory lock is at {}; retry after that process finishes.",
                 display_relative(root, &lock_path)
             )),
@@ -328,7 +328,7 @@ impl CoverageSetupContext {
     }
 }
 
-/// Dispatch a `fallow coverage <sub>` invocation.
+/// Dispatch a `plow coverage <sub>` invocation.
 pub fn run(subcommand: CoverageSubcommand, ctx: &RunContext<'_>) -> ExitCode {
     match subcommand {
         CoverageSubcommand::Setup(args) => run_setup(args, ctx.root),
@@ -342,15 +342,15 @@ pub fn run(subcommand: CoverageSubcommand, ctx: &RunContext<'_>) -> ExitCode {
 }
 
 fn setup_state_path(root: &Path) -> PathBuf {
-    root.join(".fallow").join("setup.json")
+    root.join(".plow").join("setup.json")
 }
 
 fn setup_lock_path(root: &Path) -> PathBuf {
-    root.join(".fallow").join("setup.lock")
+    root.join(".plow").join("setup.lock")
 }
 
-fn ensure_fallow_dir(root: &Path) -> Result<(), String> {
-    let dir = root.join(".fallow");
+fn ensure_plow_dir(root: &Path) -> Result<(), String> {
+    let dir = root.join(".plow");
     std::fs::create_dir_all(&dir)
         .map_err(|err| format!("failed to create {}: {err}", dir.display()))
 }
@@ -364,14 +364,14 @@ fn load_setup_state(root: &Path) -> CoverageSetupState {
         Ok(state) if state.schema_version == SETUP_STATE_SCHEMA_VERSION => state,
         Ok(_) => {
             eprintln!(
-                "fallow coverage setup: ignoring incompatible setup state at {}",
+                "plow coverage setup: ignoring incompatible setup state at {}",
                 display_relative(root, &path)
             );
             CoverageSetupState::default()
         }
         Err(err) => {
             eprintln!(
-                "fallow coverage setup: ignoring unreadable setup state at {}: {err}",
+                "plow coverage setup: ignoring unreadable setup state at {}: {err}",
                 display_relative(root, &path)
             );
             CoverageSetupState::default()
@@ -380,7 +380,7 @@ fn load_setup_state(root: &Path) -> CoverageSetupState {
 }
 
 fn save_setup_state(root: &Path, state: &CoverageSetupState) -> Result<(), String> {
-    ensure_fallow_dir(root)?;
+    ensure_plow_dir(root)?;
     let path = setup_state_path(root);
     let content = serde_json::to_vec_pretty(state)
         .map_err(|err| format!("failed to serialize {}: {err}", path.display()))?;
@@ -389,11 +389,11 @@ fn save_setup_state(root: &Path, state: &CoverageSetupState) -> Result<(), Strin
 }
 
 fn mark_setup_completed(state: &mut CoverageSetupState) {
-    state.completed_at = Some(fallow_license::current_unix_seconds());
+    state.completed_at = Some(plow_license::current_unix_seconds());
 }
 
 fn license_status_is_setup_acceptable(
-    status: &Result<LicenseStatus, fallow_license::LicenseError>,
+    status: &Result<LicenseStatus, plow_license::LicenseError>,
 ) -> bool {
     matches!(
         status,
@@ -404,7 +404,7 @@ fn license_status_is_setup_acceptable(
 }
 
 fn active_license_fingerprint() -> Option<String> {
-    let jwt = fallow_license::load_raw_jwt().ok().flatten()?;
+    let jwt = plow_license::load_raw_jwt().ok().flatten()?;
     if jwt.is_empty() {
         return None;
     }
@@ -413,7 +413,7 @@ fn active_license_fingerprint() -> Option<String> {
 
 fn license_state_is_current(
     state: &CoverageSetupState,
-    status: &Result<LicenseStatus, fallow_license::LicenseError>,
+    status: &Result<LicenseStatus, plow_license::LicenseError>,
 ) -> bool {
     if !license_status_is_setup_acceptable(status) {
         return false;
@@ -428,7 +428,7 @@ fn record_current_license_state(state: &mut CoverageSetupState) {
     if let Some(fingerprint) = active_license_fingerprint() {
         state.license = Some(SetupLicenseState {
             fingerprint,
-            updated_at: fallow_license::current_unix_seconds(),
+            updated_at: plow_license::current_unix_seconds(),
         });
     } else {
         state.license = None;
@@ -453,7 +453,7 @@ fn sidecar_state_is_current(state: &CoverageSetupState, root: &Path) -> bool {
 }
 
 fn sidecar_env_override_is_set() -> bool {
-    ["FALLOW_COV_BIN", "FALLOW_COV_BINARY_PATH"]
+    ["PLOW_COV_BIN", "PLOW_COV_BINARY_PATH"]
         .iter()
         .any(|key| std::env::var_os(key).is_some_and(|value| !value.is_empty()))
 }
@@ -464,7 +464,7 @@ fn record_sidecar_state(state: &mut CoverageSetupState, path: PathBuf) -> Result
     state.sidecar = Some(SetupSidecarState {
         path,
         checksum,
-        updated_at: fallow_license::current_unix_seconds(),
+        updated_at: plow_license::current_unix_seconds(),
     });
     Ok(())
 }
@@ -499,7 +499,7 @@ fn record_recipe_state(
         path,
         checksum: hash_bytes(contents.as_bytes()),
         context_fingerprint: setup_context_fingerprint(context),
-        updated_at: fallow_license::current_unix_seconds(),
+        updated_at: plow_license::current_unix_seconds(),
     });
 }
 
@@ -544,7 +544,7 @@ fn run_setup(args: SetupArgs, root: &Path) -> ExitCode {
     let _lock = match CoverageSetupLock::try_acquire(root) {
         Ok(lock) => lock,
         Err(message) => {
-            eprintln!("fallow coverage setup: {message}");
+            eprintln!("plow coverage setup: {message}");
             return ExitCode::from(2);
         }
     };
@@ -568,7 +568,7 @@ fn run_setup(args: SetupArgs, root: &Path) -> ExitCode {
 
     mark_setup_completed(&mut setup_state);
     if let Err(message) = save_setup_state(root, &setup_state) {
-        eprintln!("fallow coverage setup: {message}");
+        eprintln!("plow coverage setup: {message}");
         return ExitCode::from(2);
     }
 
@@ -576,9 +576,9 @@ fn run_setup(args: SetupArgs, root: &Path) -> ExitCode {
 }
 
 fn print_setup_intro(root: &Path) {
-    println!("fallow coverage setup");
+    println!("plow coverage setup");
     println!();
-    println!("What \"runtime coverage\" means: fallow looks at which functions actually");
+    println!("What \"runtime coverage\" means: plow looks at which functions actually");
     println!("ran in your deployed app, so it can say \"this code is never called\" with");
     println!("proof, not just \"this code has no static references.\"");
     println!(
@@ -594,7 +594,7 @@ fn run_setup_license_step(
     setup_state: &mut CoverageSetupState,
 ) -> Result<(), ExitCode> {
     let key = license::verifying_key().map_err(|message| setup_error_exit(&message, 2))?;
-    let license_state = fallow_license::load_and_verify(&key, DEFAULT_HARD_FAIL_DAYS);
+    let license_state = plow_license::load_and_verify(&key, DEFAULT_HARD_FAIL_DAYS);
     if license_state_is_current(setup_state, &license_state) {
         println!("Step 1/4: License check... ok (resumed).");
         return Ok(());
@@ -603,7 +603,7 @@ fn run_setup_license_step(
     if let Some(exit) = handle_license_step(root, args, &license_state) {
         return Err(exit);
     }
-    let license_state = fallow_license::load_and_verify(&key, DEFAULT_HARD_FAIL_DAYS);
+    let license_state = plow_license::load_and_verify(&key, DEFAULT_HARD_FAIL_DAYS);
     if license_status_is_setup_acceptable(&license_state) {
         record_current_license_state(setup_state);
         save_setup_state(root, setup_state).map_err(|message| setup_error_exit(&message, 2))?;
@@ -682,7 +682,7 @@ fn run_setup_final_step(
             display_relative(root, &coverage_path)
         );
         println!(
-            "Running fallow health --runtime-coverage {} ...",
+            "Running plow health --runtime-coverage {} ...",
             display_relative(root, &coverage_path)
         );
         let exit = run_health_analysis(root, &coverage_path);
@@ -703,7 +703,7 @@ fn run_setup_final_step(
 }
 
 fn setup_error_exit(message: &str, code: u8) -> ExitCode {
-    eprintln!("fallow coverage setup: {message}");
+    eprintln!("plow coverage setup: {message}");
     ExitCode::from(code)
 }
 
@@ -712,7 +712,7 @@ fn run_setup_json(root: &Path, explain: bool) -> ExitCode {
     let stdout = std::io::stdout();
     let mut handle = stdout.lock();
     if let Err(err) = serde_json::to_writer_pretty(&mut handle, &payload) {
-        eprintln!("fallow coverage setup: failed to write JSON output: {err}");
+        eprintln!("plow coverage setup: failed to write JSON output: {err}");
         return ExitCode::from(2);
     }
     println!();
@@ -726,7 +726,7 @@ fn run_setup_json(root: &Path, explain: bool) -> ExitCode {
 fn build_setup_json(root: &Path, explain: bool) -> serde_json::Value {
     let envelope = build_setup_envelope(root, explain);
     crate::output_envelope::serialize_root_output(
-        crate::output_envelope::FallowOutput::CoverageSetup(envelope),
+        crate::output_envelope::PlowOutput::CoverageSetup(envelope),
     )
     .expect("CoverageSetupOutput serializes infallibly")
 }
@@ -779,7 +779,7 @@ fn build_setup_envelope(root: &Path, explain: bool) -> crate::output_envelope::C
         members: member_values,
         config_written: None,
         commands: vec![
-            package_manager.add_runtime_package_command("@fallow-cli/beacon"),
+            package_manager.add_runtime_package_command("@plow-cli/beacon"),
             package_manager.install_command(),
         ],
         files_to_edit,
@@ -788,8 +788,8 @@ fn build_setup_envelope(root: &Path, explain: bool) -> crate::output_envelope::C
         next_steps: vec![
             "Add the snippets to your application.".to_owned(),
             "Deploy with the beacon enabled.".to_owned(),
-            "Run fallow health --runtime-coverage ./coverage --format json after collecting a local capture.".to_owned(),
-            "Set FALLOW_API_KEY in CI before running fallow coverage upload-inventory.".to_owned(),
+            "Run plow health --runtime-coverage ./coverage --format json after collecting a local capture.".to_owned(),
+            "Set PLOW_API_KEY in CI before running plow coverage upload-inventory.".to_owned(),
         ],
         warnings,
         meta: if explain {
@@ -897,55 +897,55 @@ fn snippets_to_typed(
 
 const NEXT_INSTRUMENTATION_SNIPPET: &str = r#"export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
-    const { createNodeBeacon } = await import("@fallow-cli/beacon");
+    const { createNodeBeacon } = await import("@plow-cli/beacon");
     const beacon = createNodeBeacon({
-      apiKey: process.env.FALLOW_API_KEY,
-      projectId: process.env.FALLOW_PROJECT_ID ?? "my-app",
-      endpoint: process.env.FALLOW_API_URL ?? "https://api.fallow.cloud",
-      transport: process.env.FALLOW_TRANSPORT === "fs" ? "fs" : "http",
-      writeToDir: process.env.FALLOW_WRITE_TO_DIR,
+      apiKey: process.env.PLOW_API_KEY,
+      projectId: process.env.PLOW_PROJECT_ID ?? "my-app",
+      endpoint: process.env.PLOW_API_URL ?? "https://api.plow.cloud",
+      transport: process.env.PLOW_TRANSPORT === "fs" ? "fs" : "http",
+      writeToDir: process.env.PLOW_WRITE_TO_DIR,
     });
     beacon.start();
   }
 }
 "#;
 
-const NODE_BEACON_SNIPPET: &str = r#"import { createNodeBeacon } from "@fallow-cli/beacon";
+const NODE_BEACON_SNIPPET: &str = r#"import { createNodeBeacon } from "@plow-cli/beacon";
 
-const fallowBeacon = createNodeBeacon({
-  apiKey: process.env.FALLOW_API_KEY,
-  projectId: process.env.FALLOW_PROJECT_ID ?? "my-app",
-  endpoint: process.env.FALLOW_API_URL ?? "https://api.fallow.cloud",
-  transport: process.env.FALLOW_TRANSPORT === "fs" ? "fs" : "http",
-  writeToDir: process.env.FALLOW_WRITE_TO_DIR,
+const plowBeacon = createNodeBeacon({
+  apiKey: process.env.PLOW_API_KEY,
+  projectId: process.env.PLOW_PROJECT_ID ?? "my-app",
+  endpoint: process.env.PLOW_API_URL ?? "https://api.plow.cloud",
+  transport: process.env.PLOW_TRANSPORT === "fs" ? "fs" : "http",
+  writeToDir: process.env.PLOW_WRITE_TO_DIR,
 });
 
-fallowBeacon.start();
+plowBeacon.start();
 "#;
 
 const NUXT_SERVER_PLUGIN_SNIPPET: &str = r#"export default defineNitroPlugin(async () => {
-  const { createNodeBeacon } = await import("@fallow-cli/beacon");
+  const { createNodeBeacon } = await import("@plow-cli/beacon");
   const beacon = createNodeBeacon({
-    apiKey: process.env.FALLOW_API_KEY,
-    projectId: process.env.FALLOW_PROJECT_ID ?? "my-app",
-    endpoint: process.env.FALLOW_API_URL ?? "https://api.fallow.cloud",
-    transport: process.env.FALLOW_TRANSPORT === "fs" ? "fs" : "http",
-    writeToDir: process.env.FALLOW_WRITE_TO_DIR,
+    apiKey: process.env.PLOW_API_KEY,
+    projectId: process.env.PLOW_PROJECT_ID ?? "my-app",
+    endpoint: process.env.PLOW_API_URL ?? "https://api.plow.cloud",
+    transport: process.env.PLOW_TRANSPORT === "fs" ? "fs" : "http",
+    writeToDir: process.env.PLOW_WRITE_TO_DIR,
   });
   beacon.start();
 });
 "#;
 
-const BROWSER_BEACON_SNIPPET: &str = r#"import { createBrowserBeacon } from "@fallow-cli/beacon/browser";
+const BROWSER_BEACON_SNIPPET: &str = r#"import { createBrowserBeacon } from "@plow-cli/beacon/browser";
 
-const fallowBeacon = createBrowserBeacon({
-  apiKey: import.meta.env.VITE_FALLOW_API_KEY,
-  projectId: import.meta.env.VITE_FALLOW_PROJECT_ID ?? "my-app",
-  endpoint: import.meta.env.VITE_FALLOW_API_URL ?? "https://api.fallow.cloud",
+const plowBeacon = createBrowserBeacon({
+  apiKey: import.meta.env.VITE_PLOW_API_KEY,
+  projectId: import.meta.env.VITE_PLOW_PROJECT_ID ?? "my-app",
+  endpoint: import.meta.env.VITE_PLOW_API_URL ?? "https://api.plow.cloud",
   sampleRate: 0.01,
 });
 
-fallowBeacon.start();
+plowBeacon.start();
 "#;
 
 fn setup_snippet(
@@ -978,7 +978,7 @@ fn setup_snippets(context: &CoverageSetupContext) -> Vec<SetupSnippet> {
         )],
         FrameworkKind::Nuxt => vec![setup_snippet(
             "Nuxt server plugin",
-            "server/plugins/fallow.ts",
+            "server/plugins/plow.ts",
             "Start the Node runtime beacon when the Nuxt server boots.",
             NUXT_SERVER_PLUGIN_SNIPPET,
         )],
@@ -1017,7 +1017,7 @@ fn setup_snippets(context: &CoverageSetupContext) -> Vec<SetupSnippet> {
 
 fn dockerfile_snippet_string(context: &CoverageSetupContext) -> Option<String> {
     if context.framework.runtime_targets().contains(&"node") {
-        Some("ENV FALLOW_TRANSPORT=fs\nENV FALLOW_WRITE_TO_DIR=/tmp/fallow-coverage".to_owned())
+        Some("ENV PLOW_TRANSPORT=fs\nENV PLOW_WRITE_TO_DIR=/tmp/plow-coverage".to_owned())
     } else {
         None
     }
@@ -1039,7 +1039,7 @@ fn setup_json_warnings(root: &Path, context: &CoverageSetupContext) -> Vec<Strin
     warnings
 }
 
-/// Nudge the user toward `fallow coverage upload-inventory`. The runtime
+/// Nudge the user toward `plow coverage upload-inventory`. The runtime
 /// beacon gives the dashboard `called` / `never_called`; the static inventory
 /// upload gives it `untracked` (functions that exist but runtime never parsed).
 /// Without this hint, trial users finish setup with no signal that the
@@ -1048,14 +1048,14 @@ fn print_upload_inventory_hint() {
     println!();
     println!("Next, in CI, upload the static function inventory so the dashboard's");
     println!("Untracked filter lights up:");
-    println!("  fallow coverage upload-inventory");
-    println!("Set FALLOW_API_KEY on the runner. See {COVERAGE_DOCS_URL} for the full CI snippet.");
+    println!("  plow coverage upload-inventory");
+    println!("Set PLOW_API_KEY on the runner. See {COVERAGE_DOCS_URL} for the full CI snippet.");
 }
 
 fn handle_license_step(
     root: &Path,
     args: SetupArgs,
-    license_state: &Result<LicenseStatus, fallow_license::LicenseError>,
+    license_state: &Result<LicenseStatus, plow_license::LicenseError>,
 ) -> Option<ExitCode> {
     match license_state {
         Ok(
@@ -1089,13 +1089,13 @@ fn offer_trial_if_needed(root: &Path, args: SetupArgs) -> Option<ExitCode> {
     let accepted = match confirm_default_no(prompt, args) {
         Ok(accepted) => accepted,
         Err(message) => {
-            eprintln!("fallow coverage setup: {message}");
+            eprintln!("plow coverage setup: {message}");
             return Some(ExitCode::from(2));
         }
     };
     if !accepted {
         println!(
-            "  -> For continuous monitoring, run: fallow license activate --trial --email you@company.com"
+            "  -> For continuous monitoring, run: plow license activate --trial --email you@company.com"
         );
         return None;
     }
@@ -1104,7 +1104,7 @@ fn offer_trial_if_needed(root: &Path, args: SetupArgs) -> Option<ExitCode> {
         Ok(Some(email)) => email,
         Ok(None) => return None,
         Err(message) => {
-            eprintln!("fallow coverage setup: {message}");
+            eprintln!("plow coverage setup: {message}");
             return Some(ExitCode::from(2));
         }
     };
@@ -1122,7 +1122,7 @@ fn offer_trial_if_needed(root: &Path, args: SetupArgs) -> Option<ExitCode> {
             None
         }
         Err(message) => {
-            eprintln!("fallow coverage setup: {message}");
+            eprintln!("plow coverage setup: {message}");
             Some(ExitCode::from(7))
         }
     }
@@ -1142,21 +1142,21 @@ fn handle_sidecar_step(
             println!("Step 2/4: Sidecar check... not installed.");
             println!("  -> {message}");
             let install_command = package_manager.map_or_else(
-                || "npm install -g @fallow-cli/fallow-cov".to_owned(),
+                || "npm install -g @plow-cli/plow-cov".to_owned(),
                 PackageManager::install_command,
             );
             let prompt = if let Some(package_manager) = package_manager {
                 format!(
-                    "  -> Install @fallow-cli/fallow-cov with {}? [Y/n] ",
+                    "  -> Install @plow-cli/plow-cov with {}? [Y/n] ",
                     package_manager.label()
                 )
             } else {
-                "  -> Install @fallow-cli/fallow-cov globally via npm? [Y/n] ".to_owned()
+                "  -> Install @plow-cli/plow-cov globally via npm? [Y/n] ".to_owned()
             };
             let accepted = match confirm(prompt, args) {
                 Ok(accepted) => accepted,
                 Err(message) => {
-                    eprintln!("fallow coverage setup: {message}");
+                    eprintln!("plow coverage setup: {message}");
                     return Some(ExitCode::from(2));
                 }
             };
@@ -1175,7 +1175,7 @@ fn handle_sidecar_step(
                     None
                 }
                 Err(message) => {
-                    eprintln!("fallow coverage setup: {message}");
+                    eprintln!("plow coverage setup: {message}");
                     Some(ExitCode::from(4))
                 }
             }
@@ -1225,13 +1225,13 @@ fn confirm_with_default(
 
 fn prompt_email(args: SetupArgs) -> Result<Option<String>, String> {
     if args.non_interactive {
-        println!("  -> Run: fallow license activate --trial --email you@company.com");
+        println!("  -> Run: plow license activate --trial --email you@company.com");
         return Ok(None);
     }
     if args.yes {
         let Some(email) = default_trial_email() else {
             println!(
-                "  -> Unable to infer an email address for --yes. Run: fallow license activate --trial --email <addr>"
+                "  -> Unable to infer an email address for --yes. Run: plow license activate --trial --email <addr>"
             );
             return Ok(None);
         };
@@ -1306,7 +1306,7 @@ fn print_trial_status(status: &LicenseStatus) {
 }
 
 fn default_license_display(root: &Path) -> String {
-    display_relative(root, &fallow_license::default_license_path())
+    display_relative(root, &plow_license::default_license_path())
 }
 
 fn install_sidecar(
@@ -1320,9 +1320,9 @@ fn install_sidecar(
         } else {
             (
                 "npm",
-                &["install", "-g", "@fallow-cli/fallow-cov"][..],
+                &["install", "-g", "@plow-cli/plow-cov"][..],
                 root,
-                "npm install -g @fallow-cli/fallow-cov".to_owned(),
+                "npm install -g @plow-cli/plow-cov".to_owned(),
             )
         };
 
@@ -1340,7 +1340,7 @@ fn install_sidecar(
 
     runtime_coverage::discover_sidecar(Some(root)).map_err(|_| {
         format!(
-            "sidecar install finished but fallow still could not find fallow-cov. Checked project-local node_modules/.bin, {}, and PATH",
+            "sidecar install finished but plow still could not find plow-cov. Checked project-local node_modules/.bin, {}, and PATH",
             runtime_coverage::canonical_sidecar_path().display()
         )
     })
@@ -1686,7 +1686,7 @@ fn recipe_contents(context: &CoverageSetupContext) -> String {
             context.run_command()
         ));
         lines.push("4. Exercise the routes or jobs you care about.".to_owned());
-        lines.push("5. Stop the app and run: `fallow coverage setup`".to_owned());
+        lines.push("5. Stop the app and run: `plow coverage setup`".to_owned());
         "6"
     } else {
         lines.push(format!(
@@ -1694,12 +1694,12 @@ fn recipe_contents(context: &CoverageSetupContext) -> String {
             context.run_command()
         ));
         lines.push("3. Exercise the app traffic you want to analyze.".to_owned());
-        lines.push("4. Stop the process and run: `fallow coverage setup`".to_owned());
+        lines.push("4. Stop the process and run: `plow coverage setup`".to_owned());
         "5"
     };
     lines.push(format!(
         "{final_step}. In CI, after the build, run \
-         `fallow coverage upload-inventory` with `FALLOW_API_KEY` set. The \
+         `plow coverage upload-inventory` with `PLOW_API_KEY` set. The \
          upload is what enables the dashboard's Untracked filter (functions \
          that exist but runtime coverage never parsed). Runtime coverage alone \
          only answers `called` vs `never_called`; the static inventory adds \
@@ -1739,7 +1739,7 @@ fn run_health_analysis(root: &Path, coverage_path: &Path) -> ExitCode {
     let current_exe = match std::env::current_exe() {
         Ok(path) => path,
         Err(err) => {
-            eprintln!("fallow coverage setup: failed to resolve current executable: {err}");
+            eprintln!("plow coverage setup: failed to resolve current executable: {err}");
             return ExitCode::from(2);
         }
     };
@@ -1754,7 +1754,7 @@ fn run_health_analysis(root: &Path, coverage_path: &Path) -> ExitCode {
     let status = match crate::signal::scoped_child::status(&mut command) {
         Ok(status) => status,
         Err(err) => {
-            eprintln!("fallow coverage setup: failed to run health analysis: {err}");
+            eprintln!("plow coverage setup: failed to run health analysis: {err}");
             return ExitCode::from(2);
         }
     };
@@ -1810,8 +1810,8 @@ mod tests {
         record_sidecar_state, run_setup, setup_context_fingerprint, setup_state_path,
         sidecar_state_is_current, write_recipe,
     };
-    use fallow_config::PackageJson;
-    use fallow_license::LicenseStatus;
+    use plow_config::PackageJson;
+    use plow_license::LicenseStatus;
     use std::path::{Path, PathBuf};
     use tempfile::tempdir;
 
@@ -1890,7 +1890,7 @@ mod tests {
         );
         assert_eq!(
             PackageManager::Npm.install_command(),
-            "npm install --save-dev @fallow-cli/fallow-cov"
+            "npm install --save-dev @plow-cli/plow-cov"
         );
         assert_eq!(PackageManager::Npm.run_script("build"), "npm run build");
         assert_eq!(PackageManager::Npm.exec_binary("vite", &[]), "npx vite");
@@ -1902,7 +1902,7 @@ mod tests {
         );
         assert_eq!(
             PackageManager::Pnpm.install_command(),
-            "pnpm add -D @fallow-cli/fallow-cov"
+            "pnpm add -D @plow-cli/plow-cov"
         );
         assert_eq!(PackageManager::Pnpm.run_script("build"), "pnpm build");
         assert_eq!(
@@ -1917,7 +1917,7 @@ mod tests {
         );
         assert_eq!(
             PackageManager::Yarn.install_command(),
-            "yarn add -D @fallow-cli/fallow-cov"
+            "yarn add -D @plow-cli/plow-cov"
         );
         assert_eq!(PackageManager::Yarn.run_script("build"), "yarn build");
         assert_eq!(
@@ -1932,7 +1932,7 @@ mod tests {
         );
         assert_eq!(
             PackageManager::Bun.install_command(),
-            "bun add -d @fallow-cli/fallow-cov"
+            "bun add -d @plow-cli/plow-cov"
         );
         assert_eq!(PackageManager::Bun.run_script("build"), "bun run build");
         assert_eq!(
@@ -2274,10 +2274,10 @@ mod tests {
         };
         let recipe = recipe_contents(&context);
         assert!(
-            recipe.contains("fallow coverage upload-inventory"),
+            recipe.contains("plow coverage upload-inventory"),
             "recipe missing upload-inventory CI instruction:\n{recipe}"
         );
-        assert!(recipe.contains("FALLOW_API_KEY"));
+        assert!(recipe.contains("PLOW_API_KEY"));
     }
 
     #[test]
@@ -2291,7 +2291,7 @@ mod tests {
             node_entry_path: "src/server.ts".to_owned(),
         };
         let recipe = recipe_contents(&context);
-        assert!(recipe.contains("fallow coverage upload-inventory"));
+        assert!(recipe.contains("plow coverage upload-inventory"));
     }
 
     #[test]
@@ -2313,8 +2313,8 @@ mod tests {
             payload["runtime_targets"],
             serde_json::json!(["node", "browser"])
         );
-        assert_eq!(payload["commands"][0], "pnpm add @fallow-cli/beacon");
-        assert_eq!(payload["commands"][1], "pnpm add -D @fallow-cli/fallow-cov");
+        assert_eq!(payload["commands"][0], "pnpm add @plow-cli/beacon");
+        assert_eq!(payload["commands"][1], "pnpm add -D @plow-cli/plow-cov");
         assert_eq!(payload["files_to_edit"][0]["path"], "instrumentation.ts");
         assert!(
             payload["snippets"][0]["content"]
@@ -2326,7 +2326,7 @@ mod tests {
             "JSON setup must not write the human recipe"
         );
         assert!(
-            !dir.path().join(".fallow").exists(),
+            !dir.path().join(".plow").exists(),
             "JSON setup must not write setup state or lock files"
         );
     }
@@ -2344,14 +2344,14 @@ mod tests {
         );
 
         assert_eq!(exit, std::process::ExitCode::SUCCESS);
-        assert!(!dir.path().join(".fallow").exists());
+        assert!(!dir.path().join(".plow").exists());
         assert!(!dir.path().join("docs/collect-coverage.md").exists());
     }
 
     #[test]
     fn corrupt_setup_state_falls_back_to_default() {
         let dir = tempdir().expect("tempdir should be created");
-        std::fs::create_dir_all(dir.path().join(".fallow")).expect(".fallow should be created");
+        std::fs::create_dir_all(dir.path().join(".plow")).expect(".plow should be created");
         std::fs::write(setup_state_path(dir.path()), "{not json")
             .expect("corrupt setup state should be written");
 
@@ -2480,8 +2480,8 @@ mod tests {
         let err = super::CoverageSetupLock::try_acquire(dir.path())
             .expect_err("second lock should report contention");
 
-        assert!(err.contains("another fallow coverage setup is already running"));
-        assert!(err.replace('\\', "/").contains(".fallow/setup.lock"));
+        assert!(err.contains("another plow coverage setup is already running"));
+        assert!(err.replace('\\', "/").contains(".plow/setup.lock"));
     }
 
     #[cfg(unix)]
@@ -2556,7 +2556,7 @@ mod tests {
         assert_eq!(payload["schema_version"], "1");
         assert_eq!(
             payload["_meta"]["docs_url"],
-            "https://docs.fallow.tools/cli/coverage#agent-readable-json"
+            "https://docs.genesis-plow.dev/cli/coverage#agent-readable-json"
         );
         assert!(
             payload["_meta"]["field_definitions"]
@@ -2574,9 +2574,9 @@ mod tests {
         let bin_dir = root.join("node_modules").join(".bin");
         std::fs::create_dir_all(&bin_dir).expect("sidecar bin dir should be created");
         let path = if cfg!(windows) {
-            bin_dir.join("fallow-cov.cmd")
+            bin_dir.join("plow-cov.cmd")
         } else {
-            bin_dir.join("fallow-cov")
+            bin_dir.join("plow-cov")
         };
         std::fs::write(&path, bytes).expect("sidecar should be written");
         path

@@ -155,7 +155,7 @@ fn dep_in_subset(subset: &crate::health::SubsetFilter<'_>, dep_path: &std::path:
     reason = "line count is bounded by source file size"
 )]
 pub(super) fn aggregate_complexity(
-    module: &fallow_core::extract::ModuleInfo,
+    module: &plow_core::extract::ModuleInfo,
 ) -> (u32, u32, usize, u32) {
     let cyc: u32 = module
         .complexity
@@ -181,7 +181,7 @@ pub(super) fn aggregate_complexity(
 /// value exports.
 pub(super) fn compute_dead_code_ratio(
     path: &std::path::Path,
-    exports: &[fallow_core::graph::ExportSymbol],
+    exports: &[plow_core::graph::ExportSymbol],
     unused_files: &rustc_hash::FxHashSet<&std::path::Path>,
     unused_exports_by_path: &rustc_hash::FxHashMap<&std::path::Path, usize>,
 ) -> f64 {
@@ -224,7 +224,7 @@ pub(super) const CRAP_THRESHOLD: f64 = 30.0;
     reason = "cc * cc + cc matches the CRAP formula specification"
 )]
 fn compute_crap_scores_binary(
-    complexity: &[fallow_types::extract::FunctionComplexity],
+    complexity: &[plow_types::extract::FunctionComplexity],
     is_test_reachable: bool,
 ) -> (f64, usize) {
     if complexity.is_empty() {
@@ -299,7 +299,7 @@ pub(super) struct IstanbulCrapResult {
     reason = "cc * cc + cc matches the CRAP formula specification"
 )]
 fn compute_crap_scores_istanbul(
-    complexity: &[fallow_types::extract::FunctionComplexity],
+    complexity: &[plow_types::extract::FunctionComplexity],
     file_coverage: Option<&IstanbulFileCoverage>,
     is_test_reachable: bool,
 ) -> IstanbulCrapResult {
@@ -392,7 +392,7 @@ pub(super) struct EstimatedCrapResult {
 }
 
 fn compute_crap_scores_estimated(
-    complexity: &[fallow_types::extract::FunctionComplexity],
+    complexity: &[plow_types::extract::FunctionComplexity],
     test_referenced_exports: &rustc_hash::FxHashSet<String>,
     is_test_reachable: bool,
     coverage_source: crate::health_types::CoverageSource,
@@ -484,13 +484,13 @@ pub(super) struct TemplateInheritContext {
 /// Templates with zero non-test `.ts` owners receive no entry, so the
 /// scoring loop falls through to the existing path unchanged.
 fn build_template_inherit_contexts(
-    graph: &fallow_core::graph::ModuleGraph,
+    graph: &plow_core::graph::ModuleGraph,
     module_by_id: &rustc_hash::FxHashMap<
-        fallow_core::discover::FileId,
-        &fallow_core::extract::ModuleInfo,
+        plow_core::discover::FileId,
+        &plow_core::extract::ModuleInfo,
     >,
-    file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
-) -> rustc_hash::FxHashMap<fallow_core::discover::FileId, TemplateInheritContext> {
+    file_paths: &rustc_hash::FxHashMap<plow_core::discover::FileId, &std::path::PathBuf>,
+) -> rustc_hash::FxHashMap<plow_core::discover::FileId, TemplateInheritContext> {
     let mut out = rustc_hash::FxHashMap::default();
     for node in &graph.modules {
         let Some(path) = file_paths.get(&node.file_id) else {
@@ -582,8 +582,8 @@ fn build_template_inherit_contexts(
 /// This is the per-function signal: if an export named "foo" has a reference from
 /// a test-reachable module, the function "foo" is considered directly tested.
 fn build_test_referenced_exports(
-    exports: &[fallow_core::graph::ExportSymbol],
-    graph_modules: &[fallow_core::graph::ModuleNode],
+    exports: &[plow_core::graph::ExportSymbol],
+    graph_modules: &[plow_core::graph::ModuleNode],
 ) -> rustc_hash::FxHashSet<String> {
     let mut set = rustc_hash::FxHashSet::default();
     for export in exports {
@@ -593,7 +593,7 @@ fn build_test_referenced_exports(
         let has_test_ref = export.references.iter().any(|reference| {
             graph_modules
                 .get(reference.from_file.0 as usize)
-                .is_some_and(fallow_core::graph::ModuleNode::is_test_reachable)
+                .is_some_and(plow_core::graph::ModuleNode::is_test_reachable)
         });
         if has_test_ref {
             set.insert(export.name.to_string());
@@ -603,8 +603,8 @@ fn build_test_referenced_exports(
 }
 
 fn collect_direct_callers(
-    graph: &fallow_core::graph::ModuleGraph,
-    file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
+    graph: &plow_core::graph::ModuleGraph,
+    file_paths: &rustc_hash::FxHashMap<plow_core::discover::FileId, &std::path::PathBuf>,
 ) -> rustc_hash::FxHashMap<std::path::PathBuf, Vec<DirectCallerEvidence>> {
     let mut callers_by_target = rustc_hash::FxHashMap::default();
     for node in &graph.modules {
@@ -662,14 +662,14 @@ const ANONYMOUS_FALLBACK_MAX_COLUMN_DRIFT: u32 = 16;
 /// derived from Istanbul `coverage-final.json`.
 pub(super) struct IstanbulFileCoverage {
     /// Per-function coverage percentages, keyed by (name, line, col). Lines
-    /// are 1-based and columns are 0-based, matching both fallow's
+    /// are 1-based and columns are 0-based, matching both plow's
     /// `FunctionComplexity` positions and Istanbul `Position`s.
     ///
     /// Istanbul producers are not consistent about `FnEntry.line`: some use
     /// the declaration line, while others use the body start. The loader
     /// therefore indexes both the producer's effective line and
     /// `decl.start`, so multiline TypeScript signatures still match the
-    /// function start that fallow extracts.
+    /// function start that plow extracts.
     functions: rustc_hash::FxHashMap<(String, u32, u32), f64>,
 }
 
@@ -685,7 +685,7 @@ impl IstanbulFileCoverage {
     ///    Bail only if two candidates tie on distance, which would be
     ///    genuinely ambiguous.
     ///
-    /// Step 3 covers arrow-function exports where fallow extracts the binding
+    /// Step 3 covers arrow-function exports where plow extracts the binding
     /// identifier (`const myHandler = () => {...}` yields `myHandler`) while
     /// Istanbul records the function as anonymous. `load_istanbul_coverage`
     /// indexes declaration aliases so standard Istanbul producers still
@@ -796,7 +796,7 @@ pub(super) fn auto_detect_coverage(root: &std::path::Path) -> Option<std::path::
     candidates.into_iter().find(|p| p.is_file())
 }
 
-/// Resolve a relative path against the fallow project root. Returns `path`
+/// Resolve a relative path against the plow project root. Returns `path`
 /// unchanged when it is absolute or `project_root` is `None`. Matches the
 /// convention every other path-shaped CLI input uses, so a monorepo CI run
 /// invoked from the workspace root with `--root sub-project` finds
@@ -925,7 +925,7 @@ fn effective_istanbul_fn_line(fn_entry: &oxc_coverage_instrument::FnEntry) -> u3
 
 /// Effective 0-based start column for an Istanbul function entry. `FnEntry`
 /// has no top-level `column` field, so we always read it off
-/// `decl.start.column`. Both fallow's `FunctionComplexity.col` and Istanbul's
+/// `decl.start.column`. Both plow's `FunctionComplexity.col` and Istanbul's
 /// `Position::column` are 0-based, so they match directly.
 fn effective_istanbul_fn_col(fn_entry: &oxc_coverage_instrument::FnEntry) -> u32 {
     fn_entry.decl.start.column
@@ -977,7 +977,7 @@ fn compute_function_statement_coverage(
 /// Type-only exports (interfaces, type aliases) are intentionally excluded ---
 /// they are a different concern than unused functions/components.
 pub(super) fn count_unused_exports_by_path(
-    unused_exports: &[fallow_core::results::UnusedExportFinding],
+    unused_exports: &[plow_core::results::UnusedExportFinding],
 ) -> rustc_hash::FxHashMap<&std::path::Path, usize> {
     let mut map: rustc_hash::FxHashMap<&std::path::Path, usize> = rustc_hash::FxHashMap::default();
     for exp in unused_exports {
@@ -1095,10 +1095,10 @@ fn compare_file_score_triage(a: &FileHealthScore, b: &FileHealthScore) -> std::c
 /// so this function does not need to re-run the analysis pipeline. Complexity
 /// density is derived from the already-parsed modules.
 pub(super) fn compute_file_scores(
-    modules: &[fallow_core::extract::ModuleInfo],
-    file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
+    modules: &[plow_core::extract::ModuleInfo],
+    file_paths: &rustc_hash::FxHashMap<plow_core::discover::FileId, &std::path::PathBuf>,
     changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
-    analysis_output: fallow_core::AnalysisOutput,
+    analysis_output: plow_core::AnalysisOutput,
     istanbul_coverage: Option<&IstanbulCoverage>,
     root: &std::path::Path,
 ) -> Result<FileScoreOutput, String> {
@@ -1264,7 +1264,7 @@ pub(super) fn compute_file_scores(
 
 fn record_entry_point(
     entry_points: &mut rustc_hash::FxHashSet<std::path::PathBuf>,
-    node: &fallow_core::graph::ModuleNode,
+    node: &plow_core::graph::ModuleNode,
     path: &std::path::Path,
 ) {
     if node.is_entry_point() {
@@ -1274,7 +1274,7 @@ fn record_entry_point(
 
 fn record_unused_file_export_names(
     path: &std::path::Path,
-    exports: &[fallow_core::graph::ExportSymbol],
+    exports: &[plow_core::graph::ExportSymbol],
     unused_files: &rustc_hash::FxHashSet<&std::path::Path>,
     unused_export_names: &mut rustc_hash::FxHashMap<std::path::PathBuf, Vec<String>>,
 ) {
@@ -1333,9 +1333,9 @@ impl FileScoreCrap {
 }
 
 fn compute_file_score_crap(
-    node: &fallow_core::graph::ModuleNode,
-    module: Option<&fallow_core::extract::ModuleInfo>,
-    graph: &fallow_core::graph::ModuleGraph,
+    node: &plow_core::graph::ModuleNode,
+    module: Option<&plow_core::extract::ModuleInfo>,
+    graph: &plow_core::graph::ModuleGraph,
     template_inherit: Option<&TemplateInheritContext>,
     istanbul_coverage: Option<&IstanbulCoverage>,
     path: &std::path::Path,
@@ -1344,9 +1344,9 @@ fn compute_file_score_crap(
         return FileScoreCrap::empty();
     };
 
-    let is_coverage_suppressed = fallow_core::suppress::is_file_suppressed(
+    let is_coverage_suppressed = plow_core::suppress::is_file_suppressed(
         &module.suppressions,
-        fallow_types::suppress::IssueKind::CoverageGaps,
+        plow_types::suppress::IssueKind::CoverageGaps,
     );
     let is_test_reachable = node.is_test_reachable() || is_coverage_suppressed;
     let resolution = resolve_crap_coverage(template_inherit, istanbul_coverage, path);
@@ -1364,7 +1364,7 @@ fn compute_file_score_crap(
 }
 
 fn compute_template_inherited_crap(
-    module: &fallow_core::extract::ModuleInfo,
+    module: &plow_core::extract::ModuleInfo,
     inherit_ctx: &TemplateInheritContext,
 ) -> FileScoreCrap {
     FileScoreCrap::estimated(compute_crap_scores_estimated(
@@ -1376,7 +1376,7 @@ fn compute_template_inherited_crap(
 }
 
 fn compute_istanbul_file_crap(
-    module: &fallow_core::extract::ModuleInfo,
+    module: &plow_core::extract::ModuleInfo,
     file_coverage: Option<&IstanbulFileCoverage>,
     is_test_reachable: bool,
 ) -> FileScoreCrap {
@@ -1388,9 +1388,9 @@ fn compute_istanbul_file_crap(
 }
 
 fn compute_static_file_crap(
-    module: &fallow_core::extract::ModuleInfo,
-    exports: &[fallow_core::graph::ExportSymbol],
-    graph_modules: &[fallow_core::graph::ModuleNode],
+    module: &plow_core::extract::ModuleInfo,
+    exports: &[plow_core::graph::ExportSymbol],
+    graph_modules: &[plow_core::graph::ModuleNode],
     is_test_reachable: bool,
 ) -> FileScoreCrap {
     let test_refs = build_test_referenced_exports(exports, graph_modules);
@@ -1448,15 +1448,15 @@ fn build_file_health_score(
 
 struct FileScoreCoverageSetup<'a> {
     module_by_id:
-        rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a fallow_core::extract::ModuleInfo>,
+        rustc_hash::FxHashMap<plow_core::discover::FileId, &'a plow_core::extract::ModuleInfo>,
     coverage: CoverageGapData,
 }
 
 fn prepare_file_score_coverage_setup<'a>(
-    modules: &'a [fallow_core::extract::ModuleInfo],
-    file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
-    results: &fallow_core::results::AnalysisResults,
-    graph: &fallow_core::graph::ModuleGraph,
+    modules: &'a [plow_core::extract::ModuleInfo],
+    file_paths: &rustc_hash::FxHashMap<plow_core::discover::FileId, &std::path::PathBuf>,
+    results: &plow_core::results::AnalysisResults,
+    graph: &plow_core::graph::ModuleGraph,
     root: &std::path::Path,
 ) -> FileScoreCoverageSetup<'a> {
     let module_by_id: rustc_hash::FxHashMap<_, _> =
@@ -1479,7 +1479,7 @@ fn prepare_file_score_coverage_setup<'a>(
 }
 
 fn collect_circular_files(
-    results: &fallow_core::results::AnalysisResults,
+    results: &plow_core::results::AnalysisResults,
 ) -> rustc_hash::FxHashSet<std::path::PathBuf> {
     results
         .circular_dependencies
@@ -1489,8 +1489,8 @@ fn collect_circular_files(
 }
 
 fn collect_top_complex_fns(
-    modules: &[fallow_core::extract::ModuleInfo],
-    file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
+    modules: &[plow_core::extract::ModuleInfo],
+    file_paths: &rustc_hash::FxHashMap<plow_core::discover::FileId, &std::path::PathBuf>,
 ) -> rustc_hash::FxHashMap<std::path::PathBuf, Vec<(String, u32, u16)>> {
     let mut top_complex_fns = rustc_hash::FxHashMap::default();
     for module in modules {
@@ -1515,7 +1515,7 @@ fn collect_top_complex_fns(
 }
 
 fn collect_cycle_members(
-    results: &fallow_core::results::AnalysisResults,
+    results: &plow_core::results::AnalysisResults,
 ) -> rustc_hash::FxHashMap<std::path::PathBuf, Vec<std::path::PathBuf>> {
     let mut cycle_members: rustc_hash::FxHashMap<std::path::PathBuf, Vec<std::path::PathBuf>> =
         rustc_hash::FxHashMap::default();
@@ -1542,7 +1542,7 @@ fn collect_cycle_members(
 }
 
 fn collect_unused_export_names(
-    results: &fallow_core::results::AnalysisResults,
+    results: &plow_core::results::AnalysisResults,
 ) -> rustc_hash::FxHashMap<std::path::PathBuf, Vec<String>> {
     let mut unused_export_names: rustc_hash::FxHashMap<std::path::PathBuf, Vec<String>> =
         rustc_hash::FxHashMap::default();
@@ -1556,9 +1556,9 @@ fn collect_unused_export_names(
 }
 
 fn build_analysis_counts_snapshot(
-    graph: &fallow_core::graph::ModuleGraph,
-    file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
-    results: &fallow_core::results::AnalysisResults,
+    graph: &plow_core::graph::ModuleGraph,
+    file_paths: &rustc_hash::FxHashMap<plow_core::discover::FileId, &std::path::PathBuf>,
+    results: &plow_core::results::AnalysisResults,
     unused_deps: usize,
 ) -> AnalysisCountsSnapshot {
     let mut module_export_counts = rustc_hash::FxHashMap::with_capacity_and_hasher(
@@ -1757,7 +1757,7 @@ mod tests {
         let unused_files = rustc_hash::FxHashSet::default();
         let unused_map = rustc_hash::FxHashMap::default();
         let path = std::path::Path::new("/src/foo.ts");
-        let exports: Vec<fallow_core::graph::ExportSymbol> = vec![];
+        let exports: Vec<plow_core::graph::ExportSymbol> = vec![];
 
         let ratio = compute_dead_code_ratio(path, &exports, &unused_files, &unused_map);
         assert!((ratio).abs() < f64::EPSILON);
@@ -1770,7 +1770,7 @@ mod tests {
         let path = std::path::Path::new("/src/foo.ts");
         unused_files.insert(path);
         let unused_map = rustc_hash::FxHashMap::default();
-        let exports: Vec<fallow_core::graph::ExportSymbol> = vec![];
+        let exports: Vec<plow_core::graph::ExportSymbol> = vec![];
 
         let ratio = compute_dead_code_ratio(path, &exports, &unused_files, &unused_map);
         assert!((ratio - 1.0).abs() < f64::EPSILON);
@@ -1782,38 +1782,38 @@ mod tests {
         let path = std::path::Path::new("/src/foo.ts");
 
         let exports = vec![
-            fallow_core::graph::ExportSymbol {
-                name: fallow_core::extract::ExportName::Named("a".into()),
+            plow_core::graph::ExportSymbol {
+                name: plow_core::extract::ExportName::Named("a".into()),
                 is_type_only: false,
                 is_side_effect_used: false,
-                visibility: fallow_core::extract::VisibilityTag::None,
+                visibility: plow_core::extract::VisibilityTag::None,
                 span: oxc_span::Span::empty(0),
                 references: vec![],
                 members: vec![],
             },
-            fallow_core::graph::ExportSymbol {
-                name: fallow_core::extract::ExportName::Named("b".into()),
+            plow_core::graph::ExportSymbol {
+                name: plow_core::extract::ExportName::Named("b".into()),
                 is_type_only: false,
                 is_side_effect_used: false,
-                visibility: fallow_core::extract::VisibilityTag::None,
+                visibility: plow_core::extract::VisibilityTag::None,
                 span: oxc_span::Span::empty(0),
                 references: vec![],
                 members: vec![],
             },
-            fallow_core::graph::ExportSymbol {
-                name: fallow_core::extract::ExportName::Named("c".into()),
+            plow_core::graph::ExportSymbol {
+                name: plow_core::extract::ExportName::Named("c".into()),
                 is_type_only: false,
                 is_side_effect_used: false,
-                visibility: fallow_core::extract::VisibilityTag::None,
+                visibility: plow_core::extract::VisibilityTag::None,
                 span: oxc_span::Span::empty(0),
                 references: vec![],
                 members: vec![],
             },
-            fallow_core::graph::ExportSymbol {
-                name: fallow_core::extract::ExportName::Named("MyType".into()),
+            plow_core::graph::ExportSymbol {
+                name: plow_core::extract::ExportName::Named("MyType".into()),
                 is_type_only: true,
                 is_side_effect_used: false,
-                visibility: fallow_core::extract::VisibilityTag::None,
+                visibility: plow_core::extract::VisibilityTag::None,
                 span: oxc_span::Span::empty(0),
                 references: vec![],
                 members: vec![],
@@ -1833,11 +1833,11 @@ mod tests {
         let unused_files = rustc_hash::FxHashSet::default();
         let path = std::path::Path::new("/src/types.ts");
 
-        let exports = vec![fallow_core::graph::ExportSymbol {
-            name: fallow_core::extract::ExportName::Named("Foo".into()),
+        let exports = vec![plow_core::graph::ExportSymbol {
+            name: plow_core::extract::ExportName::Named("Foo".into()),
             is_type_only: true,
             is_side_effect_used: false,
-            visibility: fallow_core::extract::VisibilityTag::None,
+            visibility: plow_core::extract::VisibilityTag::None,
             span: oxc_span::Span::empty(0),
             references: vec![],
             members: vec![],
@@ -1850,8 +1850,8 @@ mod tests {
 
     #[test]
     fn aggregate_complexity_empty_module() {
-        let module = fallow_core::extract::ModuleInfo {
-            file_id: fallow_core::discover::FileId(0),
+        let module = plow_core::extract::ModuleInfo {
+            file_id: plow_core::discover::FileId(0),
             exports: vec![],
             imports: vec![],
             re_exports: vec![],
@@ -1913,8 +1913,8 @@ mod tests {
 
     #[test]
     fn aggregate_complexity_single_function() {
-        let module = fallow_core::extract::ModuleInfo {
-            file_id: fallow_core::discover::FileId(0),
+        let module = plow_core::extract::ModuleInfo {
+            file_id: plow_core::discover::FileId(0),
             exports: vec![],
             imports: vec![],
             re_exports: vec![],
@@ -1964,7 +1964,7 @@ mod tests {
             has_dynamic_emit: false,
             has_emit_whole_object_use: false,
             line_offsets: vec![0, 10, 20, 30, 40], // 5 lines
-            complexity: vec![fallow_types::extract::FunctionComplexity {
+            complexity: vec![plow_types::extract::FunctionComplexity {
                 name: "doStuff".into(),
                 line: 1,
                 col: 0,
@@ -1986,8 +1986,8 @@ mod tests {
 
     #[test]
     fn aggregate_complexity_multiple_functions() {
-        let module = fallow_core::extract::ModuleInfo {
-            file_id: fallow_core::discover::FileId(0),
+        let module = plow_core::extract::ModuleInfo {
+            file_id: plow_core::discover::FileId(0),
             exports: vec![],
             imports: vec![],
             re_exports: vec![],
@@ -2038,7 +2038,7 @@ mod tests {
             has_emit_whole_object_use: false,
             line_offsets: vec![0, 10, 20], // 3 lines
             complexity: vec![
-                fallow_types::extract::FunctionComplexity {
+                plow_types::extract::FunctionComplexity {
                     name: "a".into(),
                     line: 1,
                     col: 0,
@@ -2049,7 +2049,7 @@ mod tests {
                     source_hash: None,
                     contributions: Vec::new(),
                 },
-                fallow_types::extract::FunctionComplexity {
+                plow_types::extract::FunctionComplexity {
                     name: "b".into(),
                     line: 2,
                     col: 0,
@@ -2072,7 +2072,7 @@ mod tests {
 
     #[test]
     fn count_unused_exports_empty() {
-        let exports: Vec<fallow_core::results::UnusedExportFinding> = vec![];
+        let exports: Vec<plow_core::results::UnusedExportFinding> = vec![];
         let map = count_unused_exports_by_path(&exports);
         assert!(map.is_empty());
     }
@@ -2080,8 +2080,8 @@ mod tests {
     #[test]
     fn count_unused_exports_groups_by_path() {
         let exports = vec![
-            fallow_core::results::UnusedExportFinding::with_actions(
-                fallow_core::results::UnusedExport {
+            plow_core::results::UnusedExportFinding::with_actions(
+                plow_core::results::UnusedExport {
                     path: std::path::PathBuf::from("/src/a.ts"),
                     export_name: "foo".into(),
                     is_type_only: false,
@@ -2091,8 +2091,8 @@ mod tests {
                     is_re_export: false,
                 },
             ),
-            fallow_core::results::UnusedExportFinding::with_actions(
-                fallow_core::results::UnusedExport {
+            plow_core::results::UnusedExportFinding::with_actions(
+                plow_core::results::UnusedExport {
                     path: std::path::PathBuf::from("/src/a.ts"),
                     export_name: "bar".into(),
                     is_type_only: false,
@@ -2102,8 +2102,8 @@ mod tests {
                     is_re_export: false,
                 },
             ),
-            fallow_core::results::UnusedExportFinding::with_actions(
-                fallow_core::results::UnusedExport {
+            plow_core::results::UnusedExportFinding::with_actions(
+                plow_core::results::UnusedExport {
                     path: std::path::PathBuf::from("/src/b.ts"),
                     export_name: "baz".into(),
                     is_type_only: false,
@@ -2125,20 +2125,20 @@ mod tests {
         let path = std::path::Path::new("/src/foo.ts");
 
         let exports = vec![
-            fallow_core::graph::ExportSymbol {
-                name: fallow_core::extract::ExportName::Named("a".into()),
+            plow_core::graph::ExportSymbol {
+                name: plow_core::extract::ExportName::Named("a".into()),
                 is_type_only: false,
                 is_side_effect_used: false,
-                visibility: fallow_core::extract::VisibilityTag::None,
+                visibility: plow_core::extract::VisibilityTag::None,
                 span: oxc_span::Span::empty(0),
                 references: vec![],
                 members: vec![],
             },
-            fallow_core::graph::ExportSymbol {
-                name: fallow_core::extract::ExportName::Named("b".into()),
+            plow_core::graph::ExportSymbol {
+                name: plow_core::extract::ExportName::Named("b".into()),
                 is_type_only: false,
                 is_side_effect_used: false,
-                visibility: fallow_core::extract::VisibilityTag::None,
+                visibility: plow_core::extract::VisibilityTag::None,
                 span: oxc_span::Span::empty(0),
                 references: vec![],
                 members: vec![],
@@ -2158,11 +2158,11 @@ mod tests {
         let unused_files = rustc_hash::FxHashSet::default();
         let path = std::path::Path::new("/src/foo.ts");
 
-        let exports = vec![fallow_core::graph::ExportSymbol {
-            name: fallow_core::extract::ExportName::Named("a".into()),
+        let exports = vec![plow_core::graph::ExportSymbol {
+            name: plow_core::extract::ExportName::Named("a".into()),
             is_type_only: false,
             is_side_effect_used: false,
-            visibility: fallow_core::extract::VisibilityTag::None,
+            visibility: plow_core::extract::VisibilityTag::None,
             span: oxc_span::Span::empty(0),
             references: vec![],
             members: vec![],
@@ -2181,11 +2181,11 @@ mod tests {
         let unused_files = rustc_hash::FxHashSet::default();
         let path = std::path::Path::new("/src/clean.ts");
 
-        let exports = vec![fallow_core::graph::ExportSymbol {
-            name: fallow_core::extract::ExportName::Named("used".into()),
+        let exports = vec![plow_core::graph::ExportSymbol {
+            name: plow_core::extract::ExportName::Named("used".into()),
             is_type_only: false,
             is_side_effect_used: false,
-            visibility: fallow_core::extract::VisibilityTag::None,
+            visibility: plow_core::extract::VisibilityTag::None,
             span: oxc_span::Span::empty(0),
             references: vec![],
             members: vec![],
@@ -2235,8 +2235,8 @@ mod tests {
 
     #[test]
     fn count_unused_exports_single_file_single_export() {
-        let exports = vec![fallow_core::results::UnusedExportFinding::with_actions(
-            fallow_core::results::UnusedExport {
+        let exports = vec![plow_core::results::UnusedExportFinding::with_actions(
+            plow_core::results::UnusedExport {
                 path: std::path::PathBuf::from("/src/only.ts"),
                 export_name: "lonely".into(),
                 is_type_only: false,
@@ -2256,28 +2256,28 @@ mod tests {
 
     /// Helper to build a minimal `ModuleGraph` from scratch.
     fn build_test_graph(
-        files: &[fallow_core::discover::DiscoveredFile],
+        files: &[plow_core::discover::DiscoveredFile],
         entry_point_paths: &[std::path::PathBuf],
-        resolved_modules: &[fallow_core::resolve::ResolvedModule],
-    ) -> fallow_core::graph::ModuleGraph {
-        let entry_points: Vec<fallow_core::discover::EntryPoint> = entry_point_paths
+        resolved_modules: &[plow_core::resolve::ResolvedModule],
+    ) -> plow_core::graph::ModuleGraph {
+        let entry_points: Vec<plow_core::discover::EntryPoint> = entry_point_paths
             .iter()
-            .map(|p| fallow_core::discover::EntryPoint {
+            .map(|p| plow_core::discover::EntryPoint {
                 path: p.clone(),
-                source: fallow_core::discover::EntryPointSource::PackageJsonMain,
+                source: plow_core::discover::EntryPointSource::PackageJsonMain,
             })
             .collect();
-        fallow_core::graph::ModuleGraph::build(resolved_modules, &entry_points, files)
+        plow_core::graph::ModuleGraph::build(resolved_modules, &entry_points, files)
     }
 
     /// Helper to create a `ModuleInfo` with given complexity and line count.
     fn make_module_info(
         file_id: u32,
         line_count: usize,
-        functions: Vec<fallow_types::extract::FunctionComplexity>,
-    ) -> fallow_core::extract::ModuleInfo {
-        fallow_core::extract::ModuleInfo {
-            file_id: fallow_core::discover::FileId(file_id),
+        functions: Vec<plow_types::extract::FunctionComplexity>,
+    ) -> plow_core::extract::ModuleInfo {
+        plow_core::extract::ModuleInfo {
+            file_id: plow_core::discover::FileId(file_id),
             exports: vec![],
             imports: vec![],
             re_exports: vec![],
@@ -2438,13 +2438,13 @@ mod tests {
 
     #[test]
     fn compute_file_scores_empty_graph() {
-        let files: Vec<fallow_core::discover::DiscoveredFile> = vec![];
+        let files: Vec<plow_core::discover::DiscoveredFile> = vec![];
         let graph = build_test_graph(&files, &[], &[]);
-        let modules: Vec<fallow_core::extract::ModuleInfo> = vec![];
+        let modules: Vec<plow_core::extract::ModuleInfo> = vec![];
         let file_paths = rustc_hash::FxHashMap::default();
 
-        let output = fallow_core::AnalysisOutput {
-            results: fallow_types::results::AnalysisResults::default(),
+        let output = plow_core::AnalysisOutput {
+            results: plow_types::results::AnalysisResults::default(),
             timings: None,
             graph: Some(graph),
             modules: None,
@@ -2472,11 +2472,11 @@ mod tests {
 
     #[test]
     fn compute_file_scores_no_graph_returns_error() {
-        let modules: Vec<fallow_core::extract::ModuleInfo> = vec![];
+        let modules: Vec<plow_core::extract::ModuleInfo> = vec![];
         let file_paths = rustc_hash::FxHashMap::default();
 
-        let output = fallow_core::AnalysisOutput {
-            results: fallow_types::results::AnalysisResults::default(),
+        let output = plow_core::AnalysisOutput {
+            results: plow_types::results::AnalysisResults::default(),
             timings: None,
             graph: None,
             modules: None,
@@ -2503,20 +2503,20 @@ mod tests {
     #[test]
     fn compute_file_scores_single_file_with_function() {
         let path_a = std::path::PathBuf::from("/src/a.ts");
-        let files = vec![fallow_core::discover::DiscoveredFile {
-            id: fallow_core::discover::FileId(0),
+        let files = vec![plow_core::discover::DiscoveredFile {
+            id: plow_core::discover::FileId(0),
             path: path_a.clone(),
             size_bytes: 100,
         }];
 
-        let resolved_modules = vec![fallow_core::resolve::ResolvedModule {
-            file_id: fallow_core::discover::FileId(0),
+        let resolved_modules = vec![plow_core::resolve::ResolvedModule {
+            file_id: plow_core::discover::FileId(0),
             path: path_a.clone(),
-            exports: vec![fallow_types::extract::ExportInfo {
-                name: fallow_core::extract::ExportName::Named("foo".into()),
+            exports: vec![plow_types::extract::ExportInfo {
+                name: plow_core::extract::ExportName::Named("foo".into()),
                 local_name: None,
                 is_type_only: false,
-                visibility: fallow_core::extract::VisibilityTag::None,
+                visibility: plow_core::extract::VisibilityTag::None,
                 span: oxc_span::Span::empty(0),
                 members: vec![],
                 is_side_effect_used: false,
@@ -2530,7 +2530,7 @@ mod tests {
         let modules = vec![make_module_info(
             0,
             10,
-            vec![fallow_types::extract::FunctionComplexity {
+            vec![plow_types::extract::FunctionComplexity {
                 name: "foo".into(),
                 line: 1,
                 col: 0,
@@ -2544,13 +2544,13 @@ mod tests {
         )];
 
         let mut file_paths: rustc_hash::FxHashMap<
-            fallow_core::discover::FileId,
+            plow_core::discover::FileId,
             &std::path::PathBuf,
         > = rustc_hash::FxHashMap::default();
-        file_paths.insert(fallow_core::discover::FileId(0), &files[0].path);
+        file_paths.insert(plow_core::discover::FileId(0), &files[0].path);
 
-        let output = fallow_core::AnalysisOutput {
-            results: fallow_types::results::AnalysisResults::default(),
+        let output = plow_core::AnalysisOutput {
+            results: plow_types::results::AnalysisResults::default(),
             timings: None,
             graph: Some(graph),
             modules: None,
@@ -2584,14 +2584,14 @@ mod tests {
     #[test]
     fn compute_file_scores_excludes_barrel_files() {
         let path_a = std::path::PathBuf::from("/src/index.ts");
-        let files = vec![fallow_core::discover::DiscoveredFile {
-            id: fallow_core::discover::FileId(0),
+        let files = vec![plow_core::discover::DiscoveredFile {
+            id: plow_core::discover::FileId(0),
             path: path_a.clone(),
             size_bytes: 50,
         }];
 
-        let resolved_modules = vec![fallow_core::resolve::ResolvedModule {
-            file_id: fallow_core::discover::FileId(0),
+        let resolved_modules = vec![plow_core::resolve::ResolvedModule {
+            file_id: plow_core::discover::FileId(0),
             path: path_a.clone(),
             ..Default::default()
         }];
@@ -2601,13 +2601,13 @@ mod tests {
         let modules = vec![make_module_info(0, 5, vec![])];
 
         let mut file_paths: rustc_hash::FxHashMap<
-            fallow_core::discover::FileId,
+            plow_core::discover::FileId,
             &std::path::PathBuf,
         > = rustc_hash::FxHashMap::default();
-        file_paths.insert(fallow_core::discover::FileId(0), &files[0].path);
+        file_paths.insert(plow_core::discover::FileId(0), &files[0].path);
 
-        let output = fallow_core::AnalysisOutput {
-            results: fallow_types::results::AnalysisResults::default(),
+        let output = plow_core::AnalysisOutput {
+            results: plow_types::results::AnalysisResults::default(),
             timings: None,
             graph: Some(graph),
             modules: None,
@@ -2633,26 +2633,26 @@ mod tests {
         let path_a = std::path::PathBuf::from("/src/a.ts");
         let path_b = std::path::PathBuf::from("/src/b.ts");
         let files = vec![
-            fallow_core::discover::DiscoveredFile {
-                id: fallow_core::discover::FileId(0),
+            plow_core::discover::DiscoveredFile {
+                id: plow_core::discover::FileId(0),
                 path: path_a.clone(),
                 size_bytes: 100,
             },
-            fallow_core::discover::DiscoveredFile {
-                id: fallow_core::discover::FileId(1),
+            plow_core::discover::DiscoveredFile {
+                id: plow_core::discover::FileId(1),
                 path: path_b.clone(),
                 size_bytes: 100,
             },
         ];
 
         let resolved_modules = vec![
-            fallow_core::resolve::ResolvedModule {
-                file_id: fallow_core::discover::FileId(0),
+            plow_core::resolve::ResolvedModule {
+                file_id: plow_core::discover::FileId(0),
                 path: path_a,
                 ..Default::default()
             },
-            fallow_core::resolve::ResolvedModule {
-                file_id: fallow_core::discover::FileId(1),
+            plow_core::resolve::ResolvedModule {
+                file_id: plow_core::discover::FileId(1),
                 path: path_b.clone(),
                 ..Default::default()
             },
@@ -2664,7 +2664,7 @@ mod tests {
             make_module_info(
                 0,
                 10,
-                vec![fallow_types::extract::FunctionComplexity {
+                vec![plow_types::extract::FunctionComplexity {
                     name: "fn_a".into(),
                     line: 1,
                     col: 0,
@@ -2679,7 +2679,7 @@ mod tests {
             make_module_info(
                 1,
                 10,
-                vec![fallow_types::extract::FunctionComplexity {
+                vec![plow_types::extract::FunctionComplexity {
                     name: "fn_b".into(),
                     line: 1,
                     col: 0,
@@ -2694,18 +2694,18 @@ mod tests {
         ];
 
         let mut file_paths: rustc_hash::FxHashMap<
-            fallow_core::discover::FileId,
+            plow_core::discover::FileId,
             &std::path::PathBuf,
         > = rustc_hash::FxHashMap::default();
-        file_paths.insert(fallow_core::discover::FileId(0), &files[0].path);
-        file_paths.insert(fallow_core::discover::FileId(1), &files[1].path);
+        file_paths.insert(plow_core::discover::FileId(0), &files[0].path);
+        file_paths.insert(plow_core::discover::FileId(1), &files[1].path);
 
         let path_b_check = std::path::PathBuf::from("/src/b.ts");
         let mut changed = rustc_hash::FxHashSet::default();
         changed.insert(path_b);
 
-        let output = fallow_core::AnalysisOutput {
-            results: fallow_types::results::AnalysisResults::default(),
+        let output = plow_core::AnalysisOutput {
+            results: plow_types::results::AnalysisResults::default(),
             timings: None,
             graph: Some(graph),
             modules: None,
@@ -2732,26 +2732,26 @@ mod tests {
         let path_a = std::path::PathBuf::from("/src/a.ts");
         let path_b = std::path::PathBuf::from("/src/b.ts");
         let files = vec![
-            fallow_core::discover::DiscoveredFile {
-                id: fallow_core::discover::FileId(0),
+            plow_core::discover::DiscoveredFile {
+                id: plow_core::discover::FileId(0),
                 path: path_a.clone(),
                 size_bytes: 100,
             },
-            fallow_core::discover::DiscoveredFile {
-                id: fallow_core::discover::FileId(1),
+            plow_core::discover::DiscoveredFile {
+                id: plow_core::discover::FileId(1),
                 path: path_b.clone(),
                 size_bytes: 100,
             },
         ];
 
         let resolved_modules = vec![
-            fallow_core::resolve::ResolvedModule {
-                file_id: fallow_core::discover::FileId(0),
+            plow_core::resolve::ResolvedModule {
+                file_id: plow_core::discover::FileId(0),
                 path: path_a.clone(),
                 ..Default::default()
             },
-            fallow_core::resolve::ResolvedModule {
-                file_id: fallow_core::discover::FileId(1),
+            plow_core::resolve::ResolvedModule {
+                file_id: plow_core::discover::FileId(1),
                 path: path_b,
                 ..Default::default()
             },
@@ -2763,7 +2763,7 @@ mod tests {
             make_module_info(
                 0,
                 10,
-                vec![fallow_types::extract::FunctionComplexity {
+                vec![plow_types::extract::FunctionComplexity {
                     name: "complex_fn".into(),
                     line: 1,
                     col: 0,
@@ -2778,7 +2778,7 @@ mod tests {
             make_module_info(
                 1,
                 100,
-                vec![fallow_types::extract::FunctionComplexity {
+                vec![plow_types::extract::FunctionComplexity {
                     name: "simple_fn".into(),
                     line: 1,
                     col: 0,
@@ -2793,14 +2793,14 @@ mod tests {
         ];
 
         let mut file_paths: rustc_hash::FxHashMap<
-            fallow_core::discover::FileId,
+            plow_core::discover::FileId,
             &std::path::PathBuf,
         > = rustc_hash::FxHashMap::default();
-        file_paths.insert(fallow_core::discover::FileId(0), &files[0].path);
-        file_paths.insert(fallow_core::discover::FileId(1), &files[1].path);
+        file_paths.insert(plow_core::discover::FileId(0), &files[0].path);
+        file_paths.insert(plow_core::discover::FileId(1), &files[1].path);
 
-        let output = fallow_core::AnalysisOutput {
-            results: fallow_types::results::AnalysisResults::default(),
+        let output = plow_core::AnalysisOutput {
+            results: plow_types::results::AnalysisResults::default(),
             timings: None,
             graph: Some(graph),
             modules: None,
@@ -2826,20 +2826,20 @@ mod tests {
     #[test]
     fn compute_file_scores_with_unused_file_populates_evidence() {
         let path_a = std::path::PathBuf::from("/src/unused.ts");
-        let files = vec![fallow_core::discover::DiscoveredFile {
-            id: fallow_core::discover::FileId(0),
+        let files = vec![plow_core::discover::DiscoveredFile {
+            id: plow_core::discover::FileId(0),
             path: path_a.clone(),
             size_bytes: 100,
         }];
 
-        let resolved_modules = vec![fallow_core::resolve::ResolvedModule {
-            file_id: fallow_core::discover::FileId(0),
+        let resolved_modules = vec![plow_core::resolve::ResolvedModule {
+            file_id: plow_core::discover::FileId(0),
             path: path_a.clone(),
-            exports: vec![fallow_types::extract::ExportInfo {
-                name: fallow_core::extract::ExportName::Named("orphan".into()),
+            exports: vec![plow_types::extract::ExportInfo {
+                name: plow_core::extract::ExportName::Named("orphan".into()),
                 local_name: None,
                 is_type_only: false,
-                visibility: fallow_core::extract::VisibilityTag::None,
+                visibility: plow_core::extract::VisibilityTag::None,
                 span: oxc_span::Span::empty(0),
                 members: vec![],
                 is_side_effect_used: false,
@@ -2853,7 +2853,7 @@ mod tests {
         let modules = vec![make_module_info(
             0,
             10,
-            vec![fallow_types::extract::FunctionComplexity {
+            vec![plow_types::extract::FunctionComplexity {
                 name: "orphan".into(),
                 line: 1,
                 col: 0,
@@ -2867,21 +2867,21 @@ mod tests {
         )];
 
         let mut file_paths: rustc_hash::FxHashMap<
-            fallow_core::discover::FileId,
+            plow_core::discover::FileId,
             &std::path::PathBuf,
         > = rustc_hash::FxHashMap::default();
-        file_paths.insert(fallow_core::discover::FileId(0), &files[0].path);
+        file_paths.insert(plow_core::discover::FileId(0), &files[0].path);
 
-        let mut results = fallow_types::results::AnalysisResults::default();
+        let mut results = plow_types::results::AnalysisResults::default();
         results.unused_files.push(
-            fallow_types::output_dead_code::UnusedFileFinding::with_actions(
-                fallow_types::results::UnusedFile {
+            plow_types::output_dead_code::UnusedFileFinding::with_actions(
+                plow_types::results::UnusedFile {
                     path: path_a.clone(),
                 },
             ),
         );
 
-        let output = fallow_core::AnalysisOutput {
+        let output = plow_core::AnalysisOutput {
             results,
             timings: None,
             graph: Some(graph),
@@ -2911,14 +2911,14 @@ mod tests {
     #[test]
     fn compute_file_scores_tracks_top_complex_functions() {
         let path_a = std::path::PathBuf::from("/src/complex.ts");
-        let files = vec![fallow_core::discover::DiscoveredFile {
-            id: fallow_core::discover::FileId(0),
+        let files = vec![plow_core::discover::DiscoveredFile {
+            id: plow_core::discover::FileId(0),
             path: path_a.clone(),
             size_bytes: 500,
         }];
 
-        let resolved_modules = vec![fallow_core::resolve::ResolvedModule {
-            file_id: fallow_core::discover::FileId(0),
+        let resolved_modules = vec![plow_core::resolve::ResolvedModule {
+            file_id: plow_core::discover::FileId(0),
             path: path_a.clone(),
             ..Default::default()
         }];
@@ -2929,7 +2929,7 @@ mod tests {
             0,
             50,
             vec![
-                fallow_types::extract::FunctionComplexity {
+                plow_types::extract::FunctionComplexity {
                     name: "high".into(),
                     line: 1,
                     col: 0,
@@ -2940,7 +2940,7 @@ mod tests {
                     source_hash: None,
                     contributions: Vec::new(),
                 },
-                fallow_types::extract::FunctionComplexity {
+                plow_types::extract::FunctionComplexity {
                     name: "medium".into(),
                     line: 11,
                     col: 0,
@@ -2951,7 +2951,7 @@ mod tests {
                     source_hash: None,
                     contributions: Vec::new(),
                 },
-                fallow_types::extract::FunctionComplexity {
+                plow_types::extract::FunctionComplexity {
                     name: "low".into(),
                     line: 21,
                     col: 0,
@@ -2962,7 +2962,7 @@ mod tests {
                     source_hash: None,
                     contributions: Vec::new(),
                 },
-                fallow_types::extract::FunctionComplexity {
+                plow_types::extract::FunctionComplexity {
                     name: "trivial".into(),
                     line: 31,
                     col: 0,
@@ -2977,13 +2977,13 @@ mod tests {
         )];
 
         let mut file_paths: rustc_hash::FxHashMap<
-            fallow_core::discover::FileId,
+            plow_core::discover::FileId,
             &std::path::PathBuf,
         > = rustc_hash::FxHashMap::default();
-        file_paths.insert(fallow_core::discover::FileId(0), &files[0].path);
+        file_paths.insert(plow_core::discover::FileId(0), &files[0].path);
 
-        let output = fallow_core::AnalysisOutput {
-            results: fallow_types::results::AnalysisResults::default(),
+        let output = plow_core::AnalysisOutput {
+            results: plow_types::results::AnalysisResults::default(),
             timings: None,
             graph: Some(graph),
             modules: None,
@@ -3017,26 +3017,26 @@ mod tests {
         let path_a = std::path::PathBuf::from("/src/a.ts");
         let path_b = std::path::PathBuf::from("/src/b.ts");
         let files = vec![
-            fallow_core::discover::DiscoveredFile {
-                id: fallow_core::discover::FileId(0),
+            plow_core::discover::DiscoveredFile {
+                id: plow_core::discover::FileId(0),
                 path: path_a.clone(),
                 size_bytes: 100,
             },
-            fallow_core::discover::DiscoveredFile {
-                id: fallow_core::discover::FileId(1),
+            plow_core::discover::DiscoveredFile {
+                id: plow_core::discover::FileId(1),
                 path: path_b.clone(),
                 size_bytes: 100,
             },
         ];
 
         let resolved_modules = vec![
-            fallow_core::resolve::ResolvedModule {
-                file_id: fallow_core::discover::FileId(0),
+            plow_core::resolve::ResolvedModule {
+                file_id: plow_core::discover::FileId(0),
                 path: path_a.clone(),
                 ..Default::default()
             },
-            fallow_core::resolve::ResolvedModule {
-                file_id: fallow_core::discover::FileId(1),
+            plow_core::resolve::ResolvedModule {
+                file_id: plow_core::discover::FileId(1),
                 path: path_b.clone(),
                 ..Default::default()
             },
@@ -3048,7 +3048,7 @@ mod tests {
             make_module_info(
                 0,
                 10,
-                vec![fallow_types::extract::FunctionComplexity {
+                vec![plow_types::extract::FunctionComplexity {
                     name: "fn_a".into(),
                     line: 1,
                     col: 0,
@@ -3063,7 +3063,7 @@ mod tests {
             make_module_info(
                 1,
                 10,
-                vec![fallow_types::extract::FunctionComplexity {
+                vec![plow_types::extract::FunctionComplexity {
                     name: "fn_b".into(),
                     line: 1,
                     col: 0,
@@ -3078,16 +3078,16 @@ mod tests {
         ];
 
         let mut file_paths: rustc_hash::FxHashMap<
-            fallow_core::discover::FileId,
+            plow_core::discover::FileId,
             &std::path::PathBuf,
         > = rustc_hash::FxHashMap::default();
-        file_paths.insert(fallow_core::discover::FileId(0), &files[0].path);
-        file_paths.insert(fallow_core::discover::FileId(1), &files[1].path);
+        file_paths.insert(plow_core::discover::FileId(0), &files[0].path);
+        file_paths.insert(plow_core::discover::FileId(1), &files[1].path);
 
-        let mut results = fallow_types::results::AnalysisResults::default();
+        let mut results = plow_types::results::AnalysisResults::default();
         results.circular_dependencies.push(
-            fallow_types::output_dead_code::CircularDependencyFinding::with_actions(
-                fallow_types::results::CircularDependency {
+            plow_types::output_dead_code::CircularDependencyFinding::with_actions(
+                plow_types::results::CircularDependency {
                     files: vec![path_a.clone(), path_b.clone()],
                     length: 2,
                     line: 1,
@@ -3098,7 +3098,7 @@ mod tests {
             ),
         );
 
-        let output = fallow_core::AnalysisOutput {
+        let output = plow_core::AnalysisOutput {
             results,
             timings: None,
             graph: Some(graph),
@@ -3129,31 +3129,31 @@ mod tests {
     #[test]
     fn compute_file_scores_analysis_counts_unused_exports_and_types() {
         let path_a = std::path::PathBuf::from("/src/a.ts");
-        let files = vec![fallow_core::discover::DiscoveredFile {
-            id: fallow_core::discover::FileId(0),
+        let files = vec![plow_core::discover::DiscoveredFile {
+            id: plow_core::discover::FileId(0),
             path: path_a.clone(),
             size_bytes: 100,
         }];
 
-        let resolved_modules = vec![fallow_core::resolve::ResolvedModule {
-            file_id: fallow_core::discover::FileId(0),
+        let resolved_modules = vec![plow_core::resolve::ResolvedModule {
+            file_id: plow_core::discover::FileId(0),
             path: path_a.clone(),
             exports: vec![
-                fallow_types::extract::ExportInfo {
-                    name: fallow_core::extract::ExportName::Named("foo".into()),
+                plow_types::extract::ExportInfo {
+                    name: plow_core::extract::ExportName::Named("foo".into()),
                     local_name: None,
                     is_type_only: false,
-                    visibility: fallow_core::extract::VisibilityTag::None,
+                    visibility: plow_core::extract::VisibilityTag::None,
                     span: oxc_span::Span::empty(0),
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
                 },
-                fallow_types::extract::ExportInfo {
-                    name: fallow_core::extract::ExportName::Named("bar".into()),
+                plow_types::extract::ExportInfo {
+                    name: plow_core::extract::ExportName::Named("bar".into()),
                     local_name: None,
                     is_type_only: false,
-                    visibility: fallow_core::extract::VisibilityTag::None,
+                    visibility: plow_core::extract::VisibilityTag::None,
                     span: oxc_span::Span::empty(0),
                     members: vec![],
                     is_side_effect_used: false,
@@ -3168,7 +3168,7 @@ mod tests {
         let mut module = make_module_info(
             0,
             10,
-            vec![fallow_types::extract::FunctionComplexity {
+            vec![plow_types::extract::FunctionComplexity {
                 name: "fn_a".into(),
                 line: 1,
                 col: 0,
@@ -3181,21 +3181,21 @@ mod tests {
             }],
         );
         module.exports = vec![
-            fallow_types::extract::ExportInfo {
-                name: fallow_core::extract::ExportName::Named("foo".into()),
+            plow_types::extract::ExportInfo {
+                name: plow_core::extract::ExportName::Named("foo".into()),
                 local_name: None,
                 is_type_only: false,
-                visibility: fallow_core::extract::VisibilityTag::None,
+                visibility: plow_core::extract::VisibilityTag::None,
                 span: oxc_span::Span::empty(0),
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
             },
-            fallow_types::extract::ExportInfo {
-                name: fallow_core::extract::ExportName::Named("bar".into()),
+            plow_types::extract::ExportInfo {
+                name: plow_core::extract::ExportName::Named("bar".into()),
                 local_name: None,
                 is_type_only: false,
-                visibility: fallow_core::extract::VisibilityTag::None,
+                visibility: plow_core::extract::VisibilityTag::None,
                 span: oxc_span::Span::empty(0),
                 members: vec![],
                 is_side_effect_used: false,
@@ -3205,15 +3205,15 @@ mod tests {
         let modules = vec![module];
 
         let mut file_paths: rustc_hash::FxHashMap<
-            fallow_core::discover::FileId,
+            plow_core::discover::FileId,
             &std::path::PathBuf,
         > = rustc_hash::FxHashMap::default();
-        file_paths.insert(fallow_core::discover::FileId(0), &files[0].path);
+        file_paths.insert(plow_core::discover::FileId(0), &files[0].path);
 
-        let mut results = fallow_types::results::AnalysisResults::default();
+        let mut results = plow_types::results::AnalysisResults::default();
         results.unused_exports.push(
-            fallow_types::output_dead_code::UnusedExportFinding::with_actions(
-                fallow_types::results::UnusedExport {
+            plow_types::output_dead_code::UnusedExportFinding::with_actions(
+                plow_types::results::UnusedExport {
                     path: path_a.clone(),
                     export_name: "foo".into(),
                     is_type_only: false,
@@ -3225,8 +3225,8 @@ mod tests {
             ),
         );
         results.unused_types.push(
-            fallow_types::output_dead_code::UnusedTypeFinding::with_actions(
-                fallow_types::results::UnusedExport {
+            plow_types::output_dead_code::UnusedTypeFinding::with_actions(
+                plow_types::results::UnusedExport {
                     path: path_a,
                     export_name: "MyType".into(),
                     is_type_only: true,
@@ -3238,10 +3238,10 @@ mod tests {
             ),
         );
         results.unused_dependencies.push(
-            fallow_types::output_dead_code::UnusedDependencyFinding::with_actions(
-                fallow_types::results::UnusedDependency {
+            plow_types::output_dead_code::UnusedDependencyFinding::with_actions(
+                plow_types::results::UnusedDependency {
                     package_name: "lodash".into(),
-                    location: fallow_types::results::DependencyLocation::Dependencies,
+                    location: plow_types::results::DependencyLocation::Dependencies,
                     path: std::path::PathBuf::from("/package.json"),
                     line: 1,
                     used_in_workspaces: Vec::new(),
@@ -3249,7 +3249,7 @@ mod tests {
             ),
         );
 
-        let output = fallow_core::AnalysisOutput {
+        let output = plow_core::AnalysisOutput {
             results,
             timings: None,
             graph: Some(graph),
@@ -3277,41 +3277,41 @@ mod tests {
     #[test]
     fn total_exports_counts_graph_modules_not_extraction_modules() {
         let path_a = std::path::PathBuf::from("/src/a.ts");
-        let files = vec![fallow_core::discover::DiscoveredFile {
-            id: fallow_core::discover::FileId(0),
+        let files = vec![plow_core::discover::DiscoveredFile {
+            id: plow_core::discover::FileId(0),
             path: path_a.clone(),
             size_bytes: 100,
         }];
 
-        let resolved_modules = vec![fallow_core::resolve::ResolvedModule {
-            file_id: fallow_core::discover::FileId(0),
+        let resolved_modules = vec![plow_core::resolve::ResolvedModule {
+            file_id: plow_core::discover::FileId(0),
             path: path_a.clone(),
             exports: vec![
-                fallow_types::extract::ExportInfo {
-                    name: fallow_core::extract::ExportName::Named("foo".into()),
+                plow_types::extract::ExportInfo {
+                    name: plow_core::extract::ExportName::Named("foo".into()),
                     local_name: None,
                     is_type_only: false,
-                    visibility: fallow_core::extract::VisibilityTag::None,
+                    visibility: plow_core::extract::VisibilityTag::None,
                     span: oxc_span::Span::empty(0),
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
                 },
-                fallow_types::extract::ExportInfo {
-                    name: fallow_core::extract::ExportName::Named("bar".into()),
+                plow_types::extract::ExportInfo {
+                    name: plow_core::extract::ExportName::Named("bar".into()),
                     local_name: None,
                     is_type_only: false,
-                    visibility: fallow_core::extract::VisibilityTag::None,
+                    visibility: plow_core::extract::VisibilityTag::None,
                     span: oxc_span::Span::empty(0),
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
                 },
-                fallow_types::extract::ExportInfo {
-                    name: fallow_core::extract::ExportName::Named("baz".into()),
+                plow_types::extract::ExportInfo {
+                    name: plow_core::extract::ExportName::Named("baz".into()),
                     local_name: None,
                     is_type_only: false,
-                    visibility: fallow_core::extract::VisibilityTag::None,
+                    visibility: plow_core::extract::VisibilityTag::None,
                     span: oxc_span::Span::new(0, 0),
                     members: vec![],
                     is_side_effect_used: false,
@@ -3326,7 +3326,7 @@ mod tests {
         let mut module = make_module_info(
             0,
             10,
-            vec![fallow_types::extract::FunctionComplexity {
+            vec![plow_types::extract::FunctionComplexity {
                 name: "fn_a".into(),
                 line: 1,
                 col: 0,
@@ -3339,21 +3339,21 @@ mod tests {
             }],
         );
         module.exports = vec![
-            fallow_types::extract::ExportInfo {
-                name: fallow_core::extract::ExportName::Named("foo".into()),
+            plow_types::extract::ExportInfo {
+                name: plow_core::extract::ExportName::Named("foo".into()),
                 local_name: None,
                 is_type_only: false,
-                visibility: fallow_core::extract::VisibilityTag::None,
+                visibility: plow_core::extract::VisibilityTag::None,
                 span: oxc_span::Span::empty(0),
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
             },
-            fallow_types::extract::ExportInfo {
-                name: fallow_core::extract::ExportName::Named("bar".into()),
+            plow_types::extract::ExportInfo {
+                name: plow_core::extract::ExportName::Named("bar".into()),
                 local_name: None,
                 is_type_only: false,
-                visibility: fallow_core::extract::VisibilityTag::None,
+                visibility: plow_core::extract::VisibilityTag::None,
                 span: oxc_span::Span::empty(0),
                 members: vec![],
                 is_side_effect_used: false,
@@ -3363,16 +3363,16 @@ mod tests {
         let modules = vec![module];
 
         let mut file_paths: rustc_hash::FxHashMap<
-            fallow_core::discover::FileId,
+            plow_core::discover::FileId,
             &std::path::PathBuf,
         > = rustc_hash::FxHashMap::default();
-        file_paths.insert(fallow_core::discover::FileId(0), &files[0].path);
+        file_paths.insert(plow_core::discover::FileId(0), &files[0].path);
 
-        let mut results = fallow_types::results::AnalysisResults::default();
+        let mut results = plow_types::results::AnalysisResults::default();
         for name in ["foo", "bar", "baz"] {
             results.unused_exports.push(
-                fallow_types::output_dead_code::UnusedExportFinding::with_actions(
-                    fallow_types::results::UnusedExport {
+                plow_types::output_dead_code::UnusedExportFinding::with_actions(
+                    plow_types::results::UnusedExport {
                         path: path_a.clone(),
                         export_name: name.into(),
                         is_type_only: false,
@@ -3385,7 +3385,7 @@ mod tests {
             );
         }
 
-        let output = fallow_core::AnalysisOutput {
+        let output = plow_core::AnalysisOutput {
             results,
             timings: None,
             graph: Some(graph),
@@ -3411,14 +3411,14 @@ mod tests {
     #[test]
     fn compute_file_scores_module_not_in_file_paths_skipped() {
         let path_a = std::path::PathBuf::from("/src/a.ts");
-        let files = vec![fallow_core::discover::DiscoveredFile {
-            id: fallow_core::discover::FileId(0),
+        let files = vec![plow_core::discover::DiscoveredFile {
+            id: plow_core::discover::FileId(0),
             path: path_a.clone(),
             size_bytes: 100,
         }];
 
-        let resolved_modules = vec![fallow_core::resolve::ResolvedModule {
-            file_id: fallow_core::discover::FileId(0),
+        let resolved_modules = vec![plow_core::resolve::ResolvedModule {
+            file_id: plow_core::discover::FileId(0),
             path: path_a,
             ..Default::default()
         }];
@@ -3428,7 +3428,7 @@ mod tests {
         let modules = vec![make_module_info(
             0,
             10,
-            vec![fallow_types::extract::FunctionComplexity {
+            vec![plow_types::extract::FunctionComplexity {
                 name: "fn_a".into(),
                 line: 1,
                 col: 0,
@@ -3441,11 +3441,11 @@ mod tests {
             }],
         )];
 
-        let file_paths: rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf> =
+        let file_paths: rustc_hash::FxHashMap<plow_core::discover::FileId, &std::path::PathBuf> =
             rustc_hash::FxHashMap::default();
 
-        let output = fallow_core::AnalysisOutput {
-            results: fallow_types::results::AnalysisResults::default(),
+        let output = plow_core::AnalysisOutput {
+            results: plow_types::results::AnalysisResults::default(),
             timings: None,
             graph: Some(graph),
             modules: None,
@@ -3469,14 +3469,14 @@ mod tests {
     #[test]
     fn compute_file_scores_mi_rounded_to_one_decimal() {
         let path_a = std::path::PathBuf::from("/src/a.ts");
-        let files = vec![fallow_core::discover::DiscoveredFile {
-            id: fallow_core::discover::FileId(0),
+        let files = vec![plow_core::discover::DiscoveredFile {
+            id: plow_core::discover::FileId(0),
             path: path_a.clone(),
             size_bytes: 100,
         }];
 
-        let resolved_modules = vec![fallow_core::resolve::ResolvedModule {
-            file_id: fallow_core::discover::FileId(0),
+        let resolved_modules = vec![plow_core::resolve::ResolvedModule {
+            file_id: plow_core::discover::FileId(0),
             path: path_a.clone(),
             ..Default::default()
         }];
@@ -3486,7 +3486,7 @@ mod tests {
         let modules = vec![make_module_info(
             0,
             100,
-            vec![fallow_types::extract::FunctionComplexity {
+            vec![plow_types::extract::FunctionComplexity {
                 name: "fn".into(),
                 line: 1,
                 col: 0,
@@ -3500,13 +3500,13 @@ mod tests {
         )];
 
         let mut file_paths: rustc_hash::FxHashMap<
-            fallow_core::discover::FileId,
+            plow_core::discover::FileId,
             &std::path::PathBuf,
         > = rustc_hash::FxHashMap::default();
-        file_paths.insert(fallow_core::discover::FileId(0), &files[0].path);
+        file_paths.insert(plow_core::discover::FileId(0), &files[0].path);
 
-        let output = fallow_core::AnalysisOutput {
-            results: fallow_types::results::AnalysisResults::default(),
+        let output = plow_core::AnalysisOutput {
+            results: plow_types::results::AnalysisResults::default(),
             timings: None,
             graph: Some(graph),
             modules: None,
@@ -3532,41 +3532,41 @@ mod tests {
     #[test]
     fn compute_file_scores_value_export_counts_tracked() {
         let path_a = std::path::PathBuf::from("/src/a.ts");
-        let files = vec![fallow_core::discover::DiscoveredFile {
-            id: fallow_core::discover::FileId(0),
+        let files = vec![plow_core::discover::DiscoveredFile {
+            id: plow_core::discover::FileId(0),
             path: path_a.clone(),
             size_bytes: 100,
         }];
 
-        let resolved_modules = vec![fallow_core::resolve::ResolvedModule {
-            file_id: fallow_core::discover::FileId(0),
+        let resolved_modules = vec![plow_core::resolve::ResolvedModule {
+            file_id: plow_core::discover::FileId(0),
             path: path_a.clone(),
             exports: vec![
-                fallow_types::extract::ExportInfo {
-                    name: fallow_core::extract::ExportName::Named("a".into()),
+                plow_types::extract::ExportInfo {
+                    name: plow_core::extract::ExportName::Named("a".into()),
                     local_name: None,
                     is_type_only: false,
-                    visibility: fallow_core::extract::VisibilityTag::None,
+                    visibility: plow_core::extract::VisibilityTag::None,
                     span: oxc_span::Span::empty(0),
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
                 },
-                fallow_types::extract::ExportInfo {
-                    name: fallow_core::extract::ExportName::Named("b".into()),
+                plow_types::extract::ExportInfo {
+                    name: plow_core::extract::ExportName::Named("b".into()),
                     local_name: None,
                     is_type_only: false,
-                    visibility: fallow_core::extract::VisibilityTag::None,
+                    visibility: plow_core::extract::VisibilityTag::None,
                     span: oxc_span::Span::empty(0),
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
                 },
-                fallow_types::extract::ExportInfo {
-                    name: fallow_core::extract::ExportName::Named("T".into()),
+                plow_types::extract::ExportInfo {
+                    name: plow_core::extract::ExportName::Named("T".into()),
                     local_name: None,
                     is_type_only: true,
-                    visibility: fallow_core::extract::VisibilityTag::None,
+                    visibility: plow_core::extract::VisibilityTag::None,
                     span: oxc_span::Span::empty(0),
                     members: vec![],
                     is_side_effect_used: false,
@@ -3581,7 +3581,7 @@ mod tests {
         let modules = vec![make_module_info(
             0,
             10,
-            vec![fallow_types::extract::FunctionComplexity {
+            vec![plow_types::extract::FunctionComplexity {
                 name: "fn_a".into(),
                 line: 1,
                 col: 0,
@@ -3595,13 +3595,13 @@ mod tests {
         )];
 
         let mut file_paths: rustc_hash::FxHashMap<
-            fallow_core::discover::FileId,
+            plow_core::discover::FileId,
             &std::path::PathBuf,
         > = rustc_hash::FxHashMap::default();
-        file_paths.insert(fallow_core::discover::FileId(0), &files[0].path);
+        file_paths.insert(plow_core::discover::FileId(0), &files[0].path);
 
-        let output = fallow_core::AnalysisOutput {
-            results: fallow_types::results::AnalysisResults::default(),
+        let output = plow_core::AnalysisOutput {
+            results: plow_types::results::AnalysisResults::default(),
             timings: None,
             graph: Some(graph),
             modules: None,
@@ -3625,14 +3625,14 @@ mod tests {
     #[test]
     fn compute_file_scores_top_complex_fns_zero_cognitive_excluded() {
         let path_a = std::path::PathBuf::from("/src/simple.ts");
-        let files = vec![fallow_core::discover::DiscoveredFile {
-            id: fallow_core::discover::FileId(0),
+        let files = vec![plow_core::discover::DiscoveredFile {
+            id: plow_core::discover::FileId(0),
             path: path_a.clone(),
             size_bytes: 100,
         }];
 
-        let resolved_modules = vec![fallow_core::resolve::ResolvedModule {
-            file_id: fallow_core::discover::FileId(0),
+        let resolved_modules = vec![plow_core::resolve::ResolvedModule {
+            file_id: plow_core::discover::FileId(0),
             path: path_a.clone(),
             ..Default::default()
         }];
@@ -3642,7 +3642,7 @@ mod tests {
         let modules = vec![make_module_info(
             0,
             10,
-            vec![fallow_types::extract::FunctionComplexity {
+            vec![plow_types::extract::FunctionComplexity {
                 name: "trivial".into(),
                 line: 1,
                 col: 0,
@@ -3656,13 +3656,13 @@ mod tests {
         )];
 
         let mut file_paths: rustc_hash::FxHashMap<
-            fallow_core::discover::FileId,
+            plow_core::discover::FileId,
             &std::path::PathBuf,
         > = rustc_hash::FxHashMap::default();
-        file_paths.insert(fallow_core::discover::FileId(0), &files[0].path);
+        file_paths.insert(plow_core::discover::FileId(0), &files[0].path);
 
-        let output = fallow_core::AnalysisOutput {
-            results: fallow_types::results::AnalysisResults::default(),
+        let output = plow_core::AnalysisOutput {
+            results: plow_types::results::AnalysisResults::default(),
             timings: None,
             graph: Some(graph),
             modules: None,
@@ -3683,8 +3683,8 @@ mod tests {
         assert!(!result.top_complex_fns.contains_key(&path_a));
     }
 
-    fn make_fn_complexity(cyclomatic: u16) -> fallow_types::extract::FunctionComplexity {
-        fallow_types::extract::FunctionComplexity {
+    fn make_fn_complexity(cyclomatic: u16) -> plow_types::extract::FunctionComplexity {
+        plow_types::extract::FunctionComplexity {
             name: "test_fn".into(),
             line: 1,
             col: 0,
@@ -3889,12 +3889,12 @@ mod tests {
         assert_eq!(above, 0);
     }
 
-    fn make_export(name: &str, is_type_only: bool) -> fallow_core::graph::ExportSymbol {
-        fallow_core::graph::ExportSymbol {
-            name: fallow_types::extract::ExportName::Named(name.into()),
+    fn make_export(name: &str, is_type_only: bool) -> plow_core::graph::ExportSymbol {
+        plow_core::graph::ExportSymbol {
+            name: plow_types::extract::ExportName::Named(name.into()),
             is_type_only,
             is_side_effect_used: false,
-            visibility: fallow_core::extract::VisibilityTag::None,
+            visibility: plow_core::extract::VisibilityTag::None,
             span: oxc_span::Span::default(),
             references: vec![],
             members: vec![],
@@ -4302,16 +4302,16 @@ mod tests {
 
     #[test]
     fn build_test_refs_empty() {
-        let exports: Vec<fallow_core::graph::ExportSymbol> = vec![];
-        let modules: Vec<fallow_core::graph::ModuleNode> = vec![];
+        let exports: Vec<plow_core::graph::ExportSymbol> = vec![];
+        let modules: Vec<plow_core::graph::ModuleNode> = vec![];
         let refs = build_test_referenced_exports(&exports, &modules);
         assert!(refs.is_empty());
     }
 
     #[test]
     fn build_test_refs_empty_inputs() {
-        let exports: Vec<fallow_core::graph::ExportSymbol> = vec![];
-        let modules: Vec<fallow_core::graph::ModuleNode> = vec![];
+        let exports: Vec<plow_core::graph::ExportSymbol> = vec![];
+        let modules: Vec<plow_core::graph::ModuleNode> = vec![];
         let refs = build_test_referenced_exports(&exports, &modules);
         assert!(refs.is_empty());
     }
@@ -4430,7 +4430,7 @@ mod tests {
     /// Regression for issue #561: `Path::is_absolute` on Windows requires a
     /// drive letter, so a POSIX-style `--coverage-root /ci/workspace` (the
     /// shape Linux-CI-generated Istanbul data uses) was rejected with exit 2
-    /// when fallow ran on Windows. The prefix-strip in `load_istanbul_coverage`
+    /// when plow ran on Windows. The prefix-strip in `load_istanbul_coverage`
     /// is component-wise and works on root-anchored POSIX paths regardless of
     /// host OS, so the validator must accept `has_root` rather than
     /// `is_absolute`.

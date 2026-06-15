@@ -5,13 +5,13 @@ expression: json_str
 [
   {
     "type": "issue",
-    "check_name": "fallow/unused-optional-dependency",
+    "check_name": "plow/unused-optional-dependency",
     "description": "Package 'fsevents' is in optionalDependencies but never imported",
     "categories": [
       "Bug Risk"
     ],
     "severity": "minor",
-    "fingerprint": "66616a09b329d842",
+    "fingerprint": "5ce60c2d71e2d6ad",
     "location": {
       "path": "package.json",
       "lines": {

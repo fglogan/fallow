@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use rustc_hash::FxHashSet;
 
-use fallow_config::{ExternalPluginDef, PackageJson, PluginDetection, UsedClassMemberRule};
+use plow_config::{ExternalPluginDef, PackageJson, PluginDetection, UsedClassMemberRule};
 
 use crate::discover::SOURCE_EXTENSIONS;
 

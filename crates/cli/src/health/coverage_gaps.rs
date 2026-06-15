@@ -27,11 +27,11 @@ pub(super) fn build_coverage_summary(
 }
 
 pub(super) fn compute_coverage_gaps(
-    graph: &fallow_core::graph::ModuleGraph,
-    file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
+    graph: &plow_core::graph::ModuleGraph,
+    file_paths: &rustc_hash::FxHashMap<plow_core::discover::FileId, &std::path::PathBuf>,
     module_by_id: &rustc_hash::FxHashMap<
-        fallow_core::discover::FileId,
-        &fallow_core::extract::ModuleInfo,
+        plow_core::discover::FileId,
+        &plow_core::extract::ModuleInfo,
     >,
     unused_exports: &rustc_hash::FxHashSet<(&std::path::Path, String)>,
     root: &std::path::Path,
@@ -61,9 +61,9 @@ pub(super) fn compute_coverage_gaps(
 
         let module = module_by_id.get(&node.file_id);
         if module.is_some_and(|m| {
-            fallow_core::suppress::is_file_suppressed(
+            plow_core::suppress::is_file_suppressed(
                 &m.suppressions,
-                fallow_types::suppress::IssueKind::CoverageGaps,
+                plow_types::suppress::IssueKind::CoverageGaps,
             )
         }) {
             continue;
@@ -103,7 +103,7 @@ pub(super) fn compute_coverage_gaps(
                 continue;
             }
 
-            let (line, col) = fallow_types::extract::byte_offset_to_line_col(
+            let (line, col) = plow_types::extract::byte_offset_to_line_col(
                 &module.line_offsets,
                 export.span.start,
             );

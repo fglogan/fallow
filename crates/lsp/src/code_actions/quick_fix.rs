@@ -8,7 +8,7 @@ use std::path::Path;
 #[allow(clippy::wildcard_imports, reason = "many LSP types used")]
 use ls_types::*;
 
-use fallow_core::results::AnalysisResults;
+use plow_core::results::AnalysisResults;
 
 use crate::diagnostics::FIRST_LINE_RANGE;
 
@@ -42,7 +42,7 @@ fn leading_identifier(s: &str) -> &str {
 /// with the declared identifier in well-formed source.
 ///
 /// The set of keywords stripped covers the prefix shape of every named
-/// `export <decl>` form fallow's analyzer reports as an unused export:
+/// `export <decl>` form plow's analyzer reports as an unused export:
 /// `const`, `let`, `var`, `function`, `function*`, `class`, `type`,
 /// `interface`, `enum`, `namespace`, plus the modifier keywords `async`,
 /// `abstract`, and `declare`. Anything beyond this prefix is the identifier
@@ -135,11 +135,11 @@ pub fn build_remove_export_actions(
     let types_iter = results.unused_types.iter().map(|f| &f.export);
     for (exports, msg_prefix) in [
         (
-            Box::new(exports_iter) as Box<dyn Iterator<Item = &fallow_core::results::UnusedExport>>,
+            Box::new(exports_iter) as Box<dyn Iterator<Item = &plow_core::results::UnusedExport>>,
             "Export",
         ),
         (
-            Box::new(types_iter) as Box<dyn Iterator<Item = &fallow_core::results::UnusedExport>>,
+            Box::new(types_iter) as Box<dyn Iterator<Item = &plow_core::results::UnusedExport>>,
             "Type export",
         ),
     ] {
@@ -214,7 +214,7 @@ pub fn build_remove_export_actions(
                         },
                     },
                     severity: Some(DiagnosticSeverity::HINT),
-                    source: Some("fallow".to_string()),
+                    source: Some("plow".to_string()),
                     message: format!("{msg_prefix} '{}' is unused", export.export_name),
                     tags: Some(vec![DiagnosticTag::UNNECESSARY]),
                     ..Default::default()
@@ -361,7 +361,7 @@ pub fn build_remove_catalog_entry_actions(
                     },
                 },
                 severity: Some(DiagnosticSeverity::WARNING),
-                source: Some("fallow".to_string()),
+                source: Some("plow".to_string()),
                 code: Some(NumberOrString::String("unused-catalog-entry".to_string())),
                 message: diagnostic_message,
                 tags: Some(vec![DiagnosticTag::UNNECESSARY]),
@@ -383,7 +383,7 @@ pub fn build_remove_catalog_entry_actions(
 /// needed (the parent `catalogs:` map keeps its other named-catalog
 /// siblings, or, if this was the only one, the user can remove the
 /// remaining `catalogs:` header by hand). Same conservative policy as the
-/// CLI `fallow fix` path in `crates/cli/src/fix/catalog.rs`.
+/// CLI `plow fix` path in `crates/cli/src/fix/catalog.rs`.
 ///
 /// The default catalog (top-level `catalog:`) is intentionally never
 /// flagged by the detector, so this function never offers to delete it.
@@ -481,7 +481,7 @@ pub fn build_remove_empty_catalog_group_actions(
                     },
                 },
                 severity: Some(DiagnosticSeverity::WARNING),
-                source: Some("fallow".to_string()),
+                source: Some("plow".to_string()),
                 code: Some(NumberOrString::String("empty-catalog-group".to_string())),
                 message: diagnostic_message,
                 tags: Some(vec![DiagnosticTag::UNNECESSARY]),
@@ -525,7 +525,7 @@ fn line_matches_catalog_key(line: &str, entry_name: &str) -> bool {
 /// Compute the end line index (exclusive) for a catalog entry whose key
 /// sits on `start_idx`. This mirrors the CLI's forward object-form entry
 /// scan, but intentionally does not delete leading comments; LSP quick fixes
-/// stay conservative even when `fallow fix` uses the default
+/// stay conservative even when `plow fix` uses the default
 /// `fix.catalog.deletePrecedingComments = "auto"` policy.
 fn compute_catalog_deletion_end(lines: &[&str], start_idx: usize) -> usize {
     let entry_indent = lines[start_idx].bytes().take_while(|&b| b == b' ').count();
@@ -687,7 +687,7 @@ pub fn build_delete_file_actions(
             diagnostics: Some(vec![Diagnostic {
                 range: FIRST_LINE_RANGE,
                 severity: Some(DiagnosticSeverity::WARNING),
-                source: Some("fallow".to_string()),
+                source: Some("plow".to_string()),
                 code: Some(NumberOrString::String("unused-file".to_string())),
                 message: "File is not reachable from any entry point".to_string(),
                 tags: Some(vec![DiagnosticTag::UNNECESSARY]),
@@ -705,7 +705,7 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    use fallow_core::results::{UnusedExport, UnusedFile, UnusedFileFinding, UnusedTypeFinding};
+    use plow_core::results::{UnusedExport, UnusedFile, UnusedFileFinding, UnusedTypeFinding};
 
     fn test_root() -> PathBuf {
         if cfg!(windows) {
@@ -733,8 +733,8 @@ mod tests {
         name: &str,
         line: u32,
         col: u32,
-    ) -> fallow_core::results::UnusedExportFinding {
-        fallow_core::results::UnusedExportFinding::with_actions(UnusedExport {
+    ) -> plow_core::results::UnusedExportFinding {
+        plow_core::results::UnusedExportFinding::with_actions(UnusedExport {
             path: path.to_path_buf(),
             export_name: name.to_string(),
             is_type_only: false,
@@ -909,7 +909,7 @@ mod tests {
         assert_eq!(diags.len(), 1);
         assert_eq!(diags[0].message, "Type export 'MyType' is unused");
         assert_eq!(diags[0].severity, Some(DiagnosticSeverity::HINT));
-        assert_eq!(diags[0].source, Some("fallow".to_string()));
+        assert_eq!(diags[0].source, Some("plow".to_string()));
         assert_eq!(diags[0].tags, Some(vec![DiagnosticTag::UNNECESSARY]));
     }
 
@@ -1235,7 +1235,7 @@ mod tests {
 
         assert_eq!(diag.range, FIRST_LINE_RANGE);
         assert_eq!(diag.severity, Some(DiagnosticSeverity::WARNING));
-        assert_eq!(diag.source, Some("fallow".to_string()));
+        assert_eq!(diag.source, Some("plow".to_string()));
         assert_eq!(
             diag.code,
             Some(NumberOrString::String("unused-file".to_string()))
@@ -1314,7 +1314,7 @@ mod tests {
         assert!(delete_ca.title.contains("Delete"));
     }
 
-    use fallow_core::results::{UnusedCatalogEntry, UnusedCatalogEntryFinding};
+    use plow_core::results::{UnusedCatalogEntry, UnusedCatalogEntryFinding};
 
     fn make_catalog_entry(
         name: &str,
@@ -1690,7 +1690,7 @@ mod tests {
         assert_eq!(compute_catalog_deletion_end(&lines, 1), 4);
     }
 
-    use fallow_core::results::{EmptyCatalogGroup, EmptyCatalogGroupFinding};
+    use plow_core::results::{EmptyCatalogGroup, EmptyCatalogGroupFinding};
 
     fn make_empty_group(name: &str, line: u32) -> EmptyCatalogGroupFinding {
         EmptyCatalogGroupFinding::with_actions(EmptyCatalogGroup {
@@ -1736,7 +1736,7 @@ mod tests {
 
         let diag = &ca.diagnostics.as_ref().unwrap()[0];
         assert_eq!(diag.severity, Some(DiagnosticSeverity::WARNING));
-        assert_eq!(diag.source, Some("fallow".to_string()));
+        assert_eq!(diag.source, Some("plow".to_string()));
         assert_eq!(
             diag.code,
             Some(NumberOrString::String("empty-catalog-group".to_string()))

@@ -4,7 +4,7 @@ use super::common::{create_config, fixture_path};
 fn graphql_hash_imports_keep_documents_reachable() {
     let root = fixture_path("graphql-imports");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files: Vec<String> = results
         .unused_files

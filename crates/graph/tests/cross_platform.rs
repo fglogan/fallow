@@ -4,7 +4,7 @@
     reason = "tests and benches use unwrap and expect to keep fixture setup concise"
 )]
 
-//! Cross-platform path handling tests for the fallow-graph crate.
+//! Cross-platform path handling tests for the plow-graph crate.
 //!
 //! Exercises path separator normalization, case sensitivity, unicode paths,
 //! long paths, relative path resolution, and dotfile/hidden directory handling.
@@ -13,8 +13,8 @@ use std::ffi::OsStr;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
-use fallow_graph::resolve::{extract_package_name, is_path_alias};
-use fallow_types::discover::{DiscoveredFile, FileId};
+use plow_graph::resolve::{extract_package_name, is_path_alias};
+use plow_types::discover::{DiscoveredFile, FileId};
 use rustc_hash::FxHashMap;
 
 #[test]

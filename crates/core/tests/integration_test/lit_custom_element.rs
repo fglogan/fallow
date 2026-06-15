@@ -4,7 +4,7 @@ use crate::common::{create_config, fixture_path};
 fn lit_custom_element_class_exports_credited_through_decorator_and_define() {
     let root = fixture_path("lit-custom-element");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -54,7 +54,7 @@ fn lit_custom_element_class_exports_credited_through_decorator_and_define() {
 fn lit_lifecycle_methods_not_flagged_but_genuinely_unused_methods_are() {
     let root = fixture_path("lit-custom-element");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused: Vec<String> = results
         .unused_class_members

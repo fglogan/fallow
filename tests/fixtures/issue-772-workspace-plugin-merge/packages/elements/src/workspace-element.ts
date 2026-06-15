@@ -14,7 +14,7 @@ export class WorkspaceElement extends LitElement {
 
   firstUpdated() {
     // Lit-specific lifecycle method, called reflectively by the framework.
-    // Unlike render(), firstUpdated is NOT in fallow's built-in React/native
+    // Unlike render(), firstUpdated is NOT in plow's built-in React/native
     // lifecycle lists, so crediting it depends ENTIRELY on the Lit plugin's
     // heritage-scoped allowlist surviving the workspace merge (issue #772).
     this.requestUpdate();

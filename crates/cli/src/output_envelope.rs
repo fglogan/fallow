@@ -1,17 +1,17 @@
 //! Typed envelope structs for the JSON output contract.
 //!
-//! This module is the schema-side source of truth for fallow's top-level JSON
+//! This module is the schema-side source of truth for plow's top-level JSON
 //! envelopes.
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use fallow_core::results::AnalysisResults;
-use fallow_types::envelope::{
+use plow_core::results::AnalysisResults;
+use plow_types::envelope::{
     BaselineDeltas, BaselineMatch, CheckSummary, ElapsedMs, EntryPoints, Meta, RegressionResult,
     SchemaVersion, TelemetryMeta, ToolVersion,
 };
-use fallow_types::output::NextStep;
+use plow_types::output::NextStep;
 use serde::Serialize;
 
 use crate::audit::{AuditAttribution, AuditSummary, AuditVerdict};
@@ -56,12 +56,12 @@ fn telemetry_analysis_run_id() -> Option<String> {
         .and_then(|id| id.clone())
 }
 
-pub fn serialize_root_output(output: FallowOutput) -> Result<serde_json::Value, serde_json::Error> {
+pub fn serialize_root_output(output: PlowOutput) -> Result<serde_json::Value, serde_json::Error> {
     serialize_root_output_with_mode(output, EnvelopeMode::current())
 }
 
 pub fn serialize_root_output_without_telemetry(
-    output: FallowOutput,
+    output: PlowOutput,
 ) -> Result<serde_json::Value, serde_json::Error> {
     let mut value = serde_json::to_value(output)?;
     if EnvelopeMode::current() == EnvelopeMode::Legacy {
@@ -71,7 +71,7 @@ pub fn serialize_root_output_without_telemetry(
 }
 
 pub fn serialize_root_output_with_mode(
-    output: FallowOutput,
+    output: PlowOutput,
     mode: EnvelopeMode,
 ) -> Result<serde_json::Value, serde_json::Error> {
     let mut value = serde_json::to_value(output)?;
@@ -122,10 +122,10 @@ pub fn apply_root_kind(value: &mut serde_json::Value, kind: &'static str) {
         );
     }
 }
-/// `fallow coverage setup --json` envelope.
+/// `plow coverage setup --json` envelope.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(feature = "schema", schemars(title = "fallow coverage setup --json"))]
+#[cfg_attr(feature = "schema", schemars(title = "plow coverage setup --json"))]
 pub struct CoverageSetupOutput {
     pub schema_version: CoverageSetupSchemaVersion,
     pub framework_detected: CoverageSetupFramework,
@@ -215,10 +215,10 @@ pub struct CoverageSetupSnippet {
     pub content: String,
 }
 
-/// `fallow audit --format json` envelope.
+/// `plow audit --format json` envelope.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(feature = "schema", schemars(title = "fallow audit --format json"))]
+#[cfg_attr(feature = "schema", schemars(title = "plow audit --format json"))]
 #[allow(
     dead_code,
     reason = "schema-source-of-truth: audit.rs still builds the wire via serde_json::json!; this struct locks the schema shape via the drift gate. Migration is a follow-up to issue #384 items 3a/3b/3c."
@@ -231,8 +231,8 @@ pub struct AuditOutput {
     pub changed_files_count: u32,
     pub base_ref: String,
     /// Human-readable provenance of `base_ref`, e.g. `merge-base with
-    /// origin/main`, `local main`, or `FALLOW_AUDIT_BASE=upstream/main`.
-    /// Present when the base was auto-detected or set via `FALLOW_AUDIT_BASE`;
+    /// origin/main`, `local main`, or `PLOW_AUDIT_BASE=upstream/main`.
+    /// Present when the base was auto-detected or set via `PLOW_AUDIT_BASE`;
     /// absent for an explicit `--base` (the ref the user typed is already
     /// self-describing).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -266,12 +266,12 @@ pub enum AuditCommand {
     Audit,
 }
 
-/// Bare `fallow --format json` envelope.
+/// Bare `plow --format json` envelope.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
     feature = "schema",
-    schemars(title = "fallow --format json (bare, combined)")
+    schemars(title = "plow --format json (bare, combined)")
 )]
 pub struct CombinedOutput {
     pub schema_version: SchemaVersion,
@@ -315,7 +315,7 @@ pub enum CoverageAnalyzeSchemaVersion {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
     feature = "schema",
-    schemars(title = "fallow coverage analyze --format json")
+    schemars(title = "plow coverage analyze --format json")
 )]
 pub struct CoverageAnalyzeOutput {
     pub schema_version: CoverageAnalyzeSchemaVersion,
@@ -328,7 +328,7 @@ pub struct CoverageAnalyzeOutput {
 
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(feature = "schema", schemars(title = "fallow dupes --format json"))]
+#[cfg_attr(feature = "schema", schemars(title = "plow dupes --format json"))]
 pub struct DupesOutput {
     pub schema_version: SchemaVersion,
     pub version: ToolVersion,
@@ -351,14 +351,14 @@ pub struct DupesOutput {
     /// envelope so single-command consumers see it without having to look at
     /// a separate top-level field.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub workspace_diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
+    pub workspace_diagnostics: Vec<plow_config::WorkspaceDiagnostic>,
     /// Read-only follow-up commands computed from this run's findings. See
     /// [`CheckOutput::next_steps`] for the contract.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub next_steps: Vec<NextStep>,
 }
 
-/// Envelope emitted by `fallow dead-code --format json` (plus the `check`
+/// Envelope emitted by `plow dead-code --format json` (plus the `check`
 /// block inside the combined and audit envelopes).
 ///
 /// The body is the full `AnalysisResults` flattened into the envelope so
@@ -369,7 +369,7 @@ pub struct DupesOutput {
 /// JSON layer always emits.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(feature = "schema", schemars(title = "fallow dead-code --format json"))]
+#[cfg_attr(feature = "schema", schemars(title = "plow dead-code --format json"))]
 pub struct CheckOutput {
     pub schema_version: SchemaVersion,
     pub version: ToolVersion,
@@ -389,18 +389,18 @@ pub struct CheckOutput {
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub workspace_diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
+    pub workspace_diagnostics: Vec<plow_config::WorkspaceDiagnostic>,
     /// Read-only follow-up commands computed from this run's findings, emitted
-    /// at the JSON root so an agent acting on the output is pointed at fallow's
+    /// at the JSON root so an agent acting on the output is pointed at plow's
     /// adjacent verification capabilities (trace, complexity breakdown, audit,
     /// workspace scoping). Each command is runnable as-is and never mutating;
     /// see [`NextStep`] for both contracts. Omitted when empty or when
-    /// `FALLOW_SUGGESTIONS=off`; does NOT contribute to `total_issues`.
+    /// `PLOW_SUGGESTIONS=off`; does NOT contribute to `total_issues`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub next_steps: Vec<NextStep>,
 }
 
-/// Envelope emitted by `fallow dead-code --group-by ... --format json`.
+/// Envelope emitted by `plow dead-code --group-by ... --format json`.
 ///
 /// Issues are partitioned into resolver buckets (CODEOWNERS team, directory
 /// prefix, workspace package, or GitLab CODEOWNERS section) instead of flat
@@ -410,9 +410,7 @@ pub struct CheckOutput {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
     feature = "schema",
-    schemars(
-        title = "fallow dead-code --group-by <owner|directory|package|section> --format json"
-    )
+    schemars(title = "plow dead-code --group-by <owner|directory|package|section> --format json")
 )]
 pub struct CheckGroupedOutput {
     pub schema_version: SchemaVersion,
@@ -443,7 +441,7 @@ pub struct CheckGroupedEntry {
     pub results: AnalysisResults,
 }
 
-/// Envelope emitted by `fallow health --format json` (plus the `health` block
+/// Envelope emitted by `plow health --format json` (plus the `health` block
 /// inside the combined and audit envelopes).
 ///
 /// The body is `HealthReport` flattened into the envelope so every report
@@ -456,7 +454,7 @@ pub struct CheckGroupedEntry {
 /// documents the field and serde populates it natively.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(feature = "schema", schemars(title = "fallow health --format json"))]
+#[cfg_attr(feature = "schema", schemars(title = "plow health --format json"))]
 pub struct HealthOutput {
     pub schema_version: SchemaVersion,
     pub version: ToolVersion,
@@ -470,24 +468,24 @@ pub struct HealthOutput {
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub workspace_diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
+    pub workspace_diagnostics: Vec<plow_config::WorkspaceDiagnostic>,
     /// Read-only follow-up commands computed from this run's findings. See
     /// [`CheckOutput::next_steps`] for the contract.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub next_steps: Vec<NextStep>,
 }
 
-/// Envelope emitted by `fallow explain <issue-type> --format json`.
+/// Envelope emitted by `plow explain <issue-type> --format json`.
 ///
 /// Standalone rule explanation. This command does not run project analysis
 /// and intentionally returns a compact object without `schema_version` /
 /// `version` metadata; consumers that need those should call any other
-/// fallow JSON-producing command.
+/// plow JSON-producing command.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
     feature = "schema",
-    schemars(title = "fallow explain <issue-type> --format json")
+    schemars(title = "plow explain <issue-type> --format json")
 )]
 pub struct ExplainOutput {
     pub id: String,
@@ -499,14 +497,14 @@ pub struct ExplainOutput {
     pub docs: String,
 }
 
-/// Envelope emitted by `fallow --format codeclimate` and
-/// `fallow --format gitlab-codequality`. GitLab Code Quality consumes the
+/// Envelope emitted by `plow --format codeclimate` and
+/// `plow --format gitlab-codequality`. GitLab Code Quality consumes the
 /// same shape. The wire form is a bare JSON array, not an object.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
     feature = "schema",
-    schemars(title = "fallow --format codeclimate / gitlab-codequality")
+    schemars(title = "plow --format codeclimate / gitlab-codequality")
 )]
 #[serde(transparent)]
 #[allow(
@@ -549,7 +547,7 @@ pub enum CodeClimateSeverity {
     /// coverage match arms).
     #[allow(
         dead_code,
-        reason = "schema-source-of-truth: documents the full CodeClimate severity spec; runtime never produces this variant today, but the schema needs it so consumers can validate against either fallow output or a third-party CodeClimate emitter without spec divergence."
+        reason = "schema-source-of-truth: documents the full CodeClimate severity spec; runtime never produces this variant today, but the schema needs it so consumers can validate against either plow output or a third-party CodeClimate emitter without spec divergence."
     )]
     Info,
     /// Minor finding.
@@ -562,7 +560,7 @@ pub enum CodeClimateSeverity {
     /// mappings; not produced by the current runtime path.
     #[allow(
         dead_code,
-        reason = "schema-source-of-truth: documents the full CodeClimate severity spec; runtime never produces this variant today, but the schema needs it so consumers can validate against either fallow output or a third-party CodeClimate emitter without spec divergence."
+        reason = "schema-source-of-truth: documents the full CodeClimate severity spec; runtime never produces this variant today, but the schema needs it so consumers can validate against either plow output or a third-party CodeClimate emitter without spec divergence."
     )]
     Blocker,
 }
@@ -586,12 +584,12 @@ pub struct CodeClimateLines {
     pub begin: u32,
 }
 
-/// Envelope emitted by `fallow --format review-github` / `review-gitlab`.
+/// Envelope emitted by `plow --format review-github` / `review-gitlab`.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
     feature = "schema",
-    schemars(title = "fallow --format review-github / review-gitlab")
+    schemars(title = "plow --format review-github / review-gitlab")
 )]
 pub struct ReviewEnvelopeOutput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -620,8 +618,7 @@ pub fn default_marker_regex_flags() -> String {
 }
 
 /// Canonical v2 marker-regex literal.
-pub const MARKER_REGEX_V2: &str =
-    r"^<!-- fallow-fingerprint:v2: ((?:[a-z]+:)?[0-9a-f]{16}) -->\s*$";
+pub const MARKER_REGEX_V2: &str = r"^<!-- plow-fingerprint:v2: ((?:[a-z]+:)?[0-9a-f]{16}) -->\s*$";
 
 /// Canonical v2 marker-regex flags.
 pub const MARKER_REGEX_FLAGS_V2: &str = "m";
@@ -758,7 +755,7 @@ pub enum ReviewEnvelopeSchema {
     /// future Deserialize derive can still parse v1 captures (e.g. from
     /// committed snapshots predating the issue #528 migration) without
     /// erroring on an unknown variant.
-    #[serde(rename = "fallow-review-envelope/v1")]
+    #[serde(rename = "plow-review-envelope/v1")]
     #[allow(
         dead_code,
         reason = "kept for forward-compat with v1 historical inputs once Deserialize is derived"
@@ -772,12 +769,12 @@ pub enum ReviewEnvelopeSchema {
     /// changes, so the bundled skip-if-fingerprint-exists wrappers
     /// correctly re-post on content change), (4) UTF-8-safe body
     /// truncation at the GitLab/GitHub note-size floor (65,536 bytes)
-    /// with paired `truncated: bool` + `<!-- fallow-truncated -->`
+    /// with paired `truncated: bool` + `<!-- plow-truncated -->`
     /// signals, (5) `:v2:`-namespaced marker shape
-    /// (`<!-- fallow-fingerprint:v2: <fingerprint> -->`) preventing v1
+    /// (`<!-- plow-fingerprint:v2: <fingerprint> -->`) preventing v1
     /// marker collision and user-paste spoofing, and (6) diff-aware
     /// `position.old_path` for renamed files on GitLab.
-    #[serde(rename = "fallow-review-envelope/v2")]
+    #[serde(rename = "plow-review-envelope/v2")]
     V2,
 }
 
@@ -806,14 +803,14 @@ pub enum ReviewCheckConclusion {
     Failure,
 }
 
-/// Envelope emitted by `fallow ci reconcile-review --format json`. Used by
+/// Envelope emitted by `plow ci reconcile-review --format json`. Used by
 /// CI integrations to drive comment carry-over and stale-comment cleanup
 /// across PR / MR revisions.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
     feature = "schema",
-    schemars(title = "fallow ci reconcile-review --format json")
+    schemars(title = "plow ci reconcile-review --format json")
 )]
 pub struct ReviewReconcileOutput {
     pub schema: ReviewReconcileSchema,
@@ -844,7 +841,7 @@ pub struct ReviewReconcileOutput {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum ReviewReconcileSchema {
     /// First release of the review reconcile format.
-    #[serde(rename = "fallow-review-reconcile/v1")]
+    #[serde(rename = "plow-review-reconcile/v1")]
     V1,
 }
 
@@ -862,7 +859,7 @@ pub enum GroupByMode {
     Package,
     Section,
 }
-/// Envelope emitted by `fallow list --boundaries --format json`. Surfaces
+/// Envelope emitted by `plow list --boundaries --format json`. Surfaces
 /// the architecture boundary zones, rules, and (issue #373) the user's
 /// pre-expansion `autoDiscover` logical groups so consumers can render
 /// grouping intent that `expand_auto_discover` would otherwise flatten out
@@ -871,7 +868,7 @@ pub enum GroupByMode {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
     feature = "schema",
-    schemars(title = "fallow list --boundaries --format json")
+    schemars(title = "plow list --boundaries --format json")
 )]
 #[allow(
     dead_code,
@@ -881,13 +878,10 @@ pub struct ListBoundariesOutput {
     pub boundaries: BoundariesListing,
 }
 
-/// `fallow workspaces --format json` envelope.
+/// `plow workspaces --format json` envelope.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(
-    feature = "schema",
-    schemars(title = "fallow workspaces --format json")
-)]
+#[cfg_attr(feature = "schema", schemars(title = "plow workspaces --format json"))]
 pub struct WorkspacesOutput {
     /// Number of workspace package entries in `workspaces`.
     pub workspace_count: usize,
@@ -897,10 +891,10 @@ pub struct WorkspacesOutput {
     /// Workspace discovery diagnostics produced while reading workspace
     /// declarations. Present for compatibility with the current wire contract,
     /// even when empty.
-    pub workspace_diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
+    pub workspace_diagnostics: Vec<plow_config::WorkspaceDiagnostic>,
 }
 
-/// One workspace package emitted by `fallow workspaces --format json`.
+/// One workspace package emitted by `plow workspaces --format json`.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct WorkspaceInfo {
@@ -975,11 +969,11 @@ pub struct BoundariesListLogicalGroup {
     pub name: String,
     pub children: Vec<String>,
     pub auto_discover: Vec<String>,
-    pub status: fallow_config::LogicalGroupStatus,
+    pub status: plow_config::LogicalGroupStatus,
     pub source_zone_index: usize,
     pub file_count: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub authored_rule: Option<fallow_config::AuthoredRule>,
+    pub authored_rule: Option<plow_config::AuthoredRule>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fallback_zone: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -990,8 +984,8 @@ pub struct BoundariesListLogicalGroup {
     pub child_source_indices: Vec<usize>,
 }
 
-/// Typed root of every fallow JSON envelope shape that serializes as a JSON
-/// object and participates in the documented `FallowOutput` contract. The
+/// Typed root of every plow JSON envelope shape that serializes as a JSON
+/// object and participates in the documented `PlowOutput` contract. The
 /// schema derived from this enum drives the document-root `oneOf` in
 /// `docs/output-schema.json`.
 ///
@@ -1006,91 +1000,91 @@ pub struct BoundariesListLogicalGroup {
 ///   (`#[serde(transparent)]`) per the Code Climate / GitLab Code Quality
 ///   spec; `#[serde(tag = ...)]` cannot internally tag a non-object
 ///   variant and wrapping the array would break the spec. The root schema
-///   carries it as a sibling `oneOf` branch alongside `FallowOutput`.
+///   carries it as a sibling `oneOf` branch alongside `PlowOutput`.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
     feature = "schema",
-    schemars(title = "fallow --format json (typed root)")
+    schemars(title = "plow --format json (typed root)")
 )]
 #[serde(tag = "kind")]
 #[allow(
     dead_code,
     reason = "some variants are schema-emit only, but runtime roots serialize through this enum where practical"
 )]
-pub enum FallowOutput {
-    /// `fallow audit --format json`. Required `command: "audit"` singleton
+pub enum PlowOutput {
+    /// `plow audit --format json`. Required `command: "audit"` singleton
     /// plus `verdict` and `summary`.
     #[serde(rename = "audit")]
     Audit(AuditOutput),
-    /// `fallow explain <issue-type> --format json`. Required `id`, `name`,
+    /// `plow explain <issue-type> --format json`. Required `id`, `name`,
     /// `rationale`, `example`, `how_to_fix`, `docs`; no `schema_version`.
     #[serde(rename = "explain")]
     Explain(ExplainOutput),
-    /// `fallow --format review-github` / `--format review-gitlab`. Required
+    /// `plow --format review-github` / `--format review-gitlab`. Required
     /// `body`, `comments`, `meta`; no `schema_version`.
     #[serde(rename = "review-envelope")]
     ReviewEnvelope(ReviewEnvelopeOutput),
-    /// `fallow ci reconcile-review --format json`. Required `schema`
+    /// `plow ci reconcile-review --format json`. Required `schema`
     /// singleton plus `provider`, `comments`, and the various
     /// `*_fingerprints` arrays.
     #[serde(rename = "review-reconcile")]
     ReviewReconcile(ReviewReconcileOutput),
-    /// `fallow coverage setup --json`. Required `schema_version` singleton
+    /// `plow coverage setup --json`. Required `schema_version` singleton
     /// plus `framework_detected`, `members`, `commands`, `snippets`.
     #[serde(rename = "coverage-setup")]
     CoverageSetup(CoverageSetupOutput),
-    /// `fallow coverage analyze --format json`. Required
+    /// `plow coverage analyze --format json`. Required
     /// `schema_version: "1"` singleton plus `version`, `elapsed_ms`,
     /// `runtime_coverage`.
     #[serde(rename = "coverage-analyze")]
     CoverageAnalyze(CoverageAnalyzeOutput),
-    /// `fallow list --boundaries --format json`. Required `boundaries`
+    /// `plow list --boundaries --format json`. Required `boundaries`
     /// sub-object; no `schema_version`.
     #[serde(rename = "list-boundaries")]
     ListBoundaries(ListBoundariesOutput),
-    /// `fallow workspaces --format json`. Required `workspace_count`,
+    /// `plow workspaces --format json`. Required `workspace_count`,
     /// `workspaces`, and `workspace_diagnostics`.
     #[serde(rename = "list-workspaces")]
     Workspaces(WorkspacesOutput),
-    /// `fallow health --format json`. Required `report: HealthReport`.
+    /// `plow health --format json`. Required `report: HealthReport`.
     #[serde(rename = "health")]
     Health(HealthOutput),
-    /// `fallow dupes --format json`. Required `report: DupesReportPayload`
+    /// `plow dupes --format json`. Required `report: DupesReportPayload`
     /// (typed wrapper payload carrying `clone_groups[]: CloneGroupFinding`
     /// and `clone_families[]: CloneFamilyFinding`).
     #[serde(rename = "dupes")]
     Dupes(DupesOutput),
-    /// `fallow dead-code --format json --group-by <mode>`. Required `grouped_by`
+    /// `plow dead-code --format json --group-by <mode>`. Required `grouped_by`
     /// plus a `groups` array.
     #[serde(rename = "dead-code-grouped")]
     CheckGrouped(CheckGroupedOutput),
-    /// `fallow impact --format json`. Required `enabled`, `record_count`,
+    /// `plow impact --format json`. Required `enabled`, `record_count`,
     /// `containment_count`, `recent_containment`; no global `schema_version`,
     /// `command`, `total_issues`, or `report`.
     #[serde(rename = "impact")]
     Impact(crate::impact::ImpactReport),
-    /// `fallow impact --all --format json`. Required `project_count`,
+    /// `plow impact --all --format json`. Required `project_count`,
     /// `tracked_count`, `totals`, `projects`; the cross-repo roll-up. Each
     /// `projects[]` entry embeds a per-project `report` (the same shape as the
     /// `impact` variant). Independently versioned via `CrossRepoImpactSchemaVersion`.
     #[serde(rename = "impact-cross-repo")]
     ImpactCrossRepo(crate::impact::CrossRepoImpactReport),
-    /// `fallow security --summary --format json`. Required `summary`; no
+    /// `plow security --summary --format json`. Required `summary`; no
     /// per-finding arrays.
     #[serde(rename = "security")]
     SecuritySummary(crate::security::SecuritySummaryOutput),
-    /// `fallow security --format json`. Required `security_findings`,
+    /// `plow security --format json`. Required `security_findings`,
     /// `unresolved_edge_files`, and `unresolved_callee_sites`; ordered before the
     /// broader variants because the `security_findings` discriminator is uniquely
     /// present here.
     #[serde(rename = "security")]
     Security(crate::security::SecurityOutput),
-    /// `fallow dead-code --format json`.
+    /// `plow dead-code --format json`.
     /// Required `total_issues` plus `summary: CheckSummary`.
     #[serde(rename = "dead-code")]
     Check(CheckOutput),
-    /// Bare `fallow --format json` (combined dead-code + dupes + health).
+    /// Bare `plow --format json` (combined dead-code + dupes + health).
     /// Required `schema_version`, `version`, and `elapsed_ms`, with optional
     /// `check`, `dupes`, and `health` subreports.
     #[serde(rename = "combined")]
@@ -1099,7 +1093,7 @@ pub enum FallowOutput {
 
 #[cfg(test)]
 mod tests {
-    use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
+    use plow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
 
     use super::*;
 
@@ -1142,7 +1136,7 @@ mod tests {
     fn root_output_serializes_kind_by_default() {
         let _guard = TelemetryRunIdGuard::set(None);
         let value = serialize_root_output_with_mode(
-            FallowOutput::Combined(combined_output()),
+            PlowOutput::Combined(combined_output()),
             EnvelopeMode::Tagged,
         )
         .expect("combined root should serialize");
@@ -1155,7 +1149,7 @@ mod tests {
     fn legacy_mode_removes_only_root_kind() {
         let _guard = TelemetryRunIdGuard::set(None);
         let value = serialize_root_output_with_mode(
-            FallowOutput::Combined(combined_output()),
+            PlowOutput::Combined(combined_output()),
             EnvelopeMode::Legacy,
         )
         .expect("combined root should serialize");
@@ -1177,7 +1171,7 @@ mod tests {
     fn root_output_attaches_telemetry_meta() {
         let _guard = TelemetryRunIdGuard::set(Some("run_test123"));
         let value = serialize_root_output_with_mode(
-            FallowOutput::Combined(combined_output()),
+            PlowOutput::Combined(combined_output()),
             EnvelopeMode::Tagged,
         )
         .expect("combined root should serialize");
@@ -1203,7 +1197,7 @@ mod tests {
 
         let _guard = TelemetryRunIdGuard::set(Some("run_test123"));
         let value =
-            serialize_root_output_with_mode(FallowOutput::Combined(output), EnvelopeMode::Tagged)
+            serialize_root_output_with_mode(PlowOutput::Combined(output), EnvelopeMode::Tagged)
                 .expect("combined root should serialize");
 
         assert_eq!(

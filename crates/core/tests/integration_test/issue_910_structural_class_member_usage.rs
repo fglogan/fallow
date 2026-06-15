@@ -4,7 +4,7 @@ use super::common::{create_config, fixture_path};
 fn structural_class_member_usage_credits_only_called_members() {
     let root = fixture_path("issue-910-structural-class-member-usage");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_members: Vec<String> = results
         .unused_class_members

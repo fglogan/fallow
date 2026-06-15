@@ -296,12 +296,12 @@ fn project_info_args_only_root() {
 #[test]
 fn project_info_args_only_config() {
     let params = ProjectInfoParams {
-        config: Some(".fallowrc.json".to_string()),
+        config: Some(".plowrc.json".to_string()),
         ..Default::default()
     };
     let args = build_project_info_args(&params);
     assert!(args.contains(&"--config".to_string()));
-    assert!(args.contains(&".fallowrc.json".to_string()));
+    assert!(args.contains(&".plowrc.json".to_string()));
     assert!(!args.contains(&"--root".to_string()));
 }
 
@@ -651,7 +651,7 @@ fn health_args_save_snapshot_whitespace_only_passes_value() {
 fn health_args_with_all_options_including_targets_and_snapshot() {
     let params = HealthParams {
         root: Some("/project".to_string()),
-        config: Some("fallow.toml".to_string()),
+        config: Some("plow.toml".to_string()),
         max_cyclomatic: Some(25),
         max_cognitive: Some(15),
         max_crap: Some(30.0),

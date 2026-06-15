@@ -9,487 +9,487 @@ expression: redact_sarif_version(&json_str)
     {
       "tool": {
         "driver": {
-          "name": "fallow",
+          "name": "plow",
           "version": "[VERSION]",
-          "informationUri": "https://github.com/fallow-rs/fallow",
+          "informationUri": "https://github.com/fglogan/genesis-plow",
           "rules": [
             {
-              "id": "fallow/unused-file",
+              "id": "plow/unused-file",
               "shortDescription": {
                 "text": "File is not reachable from any entry point"
               },
               "fullDescription": {
                 "text": "Source files that are not imported by any other module and are not entry points (scripts, tests, configs). These files can safely be deleted. Detection uses graph reachability from configured entry points."
               },
-              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-files",
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#unused-files",
               "defaultConfiguration": {
                 "level": "error"
               }
             },
             {
-              "id": "fallow/unused-export",
+              "id": "plow/unused-export",
               "shortDescription": {
                 "text": "Export is never imported"
               },
               "fullDescription": {
                 "text": "Named exports that are never imported by any other module in the project. Includes both direct exports and re-exports through barrel files. The export may still be used locally within the same file."
               },
-              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-exports",
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#unused-exports",
               "defaultConfiguration": {
                 "level": "error"
               }
             },
             {
-              "id": "fallow/unused-type",
+              "id": "plow/unused-type",
               "shortDescription": {
                 "text": "Type export is never imported"
               },
               "fullDescription": {
                 "text": "Type-only exports (interfaces, type aliases, enums used only as types) that are never imported. These do not generate runtime code but add maintenance burden."
               },
-              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-types",
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#unused-types",
               "defaultConfiguration": {
                 "level": "error"
               }
             },
             {
-              "id": "fallow/private-type-leak",
+              "id": "plow/private-type-leak",
               "shortDescription": {
                 "text": "Exported signature references a private type"
               },
               "fullDescription": {
                 "text": "Exported values or types whose public TypeScript signature references a same-file type declaration that is not exported. Consumers cannot name that private type directly, so the backing type should be exported or removed from the public signature."
               },
-              "helpUri": "https://docs.fallow.tools/explanations/dead-code#private-type-leaks",
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#private-type-leaks",
               "defaultConfiguration": {
                 "level": "none"
               }
             },
             {
-              "id": "fallow/unused-dependency",
+              "id": "plow/unused-dependency",
               "shortDescription": {
                 "text": "Dependency listed but never imported"
               },
               "fullDescription": {
                 "text": "Packages listed in dependencies that are never imported or required by any source file. Framework plugins and CLI tools may be false positives; use the ignore_dependencies config to suppress."
               },
-              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-dependencies",
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#unused-dependencies",
               "defaultConfiguration": {
                 "level": "error"
               }
             },
             {
-              "id": "fallow/unused-dev-dependency",
+              "id": "plow/unused-dev-dependency",
               "shortDescription": {
                 "text": "Dev dependency listed but never imported"
               },
               "fullDescription": {
                 "text": "Packages listed in devDependencies that are never imported by test files, config files, or scripts. Build tools and jest presets that are referenced only in config may appear as false positives."
               },
-              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-devdependencies",
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#unused-devdependencies",
               "defaultConfiguration": {
                 "level": "warning"
               }
             },
             {
-              "id": "fallow/unused-optional-dependency",
+              "id": "plow/unused-optional-dependency",
               "shortDescription": {
                 "text": "Optional dependency listed but never imported"
               },
               "fullDescription": {
                 "text": "Packages listed in optionalDependencies that are never imported. Optional dependencies are typically platform-specific; verify they are not needed on any supported platform before removing."
               },
-              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-optionaldependencies",
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#unused-optionaldependencies",
               "defaultConfiguration": {
                 "level": "warning"
               }
             },
             {
-              "id": "fallow/type-only-dependency",
+              "id": "plow/type-only-dependency",
               "shortDescription": {
                 "text": "Production dependency only used via type-only imports"
               },
               "fullDescription": {
                 "text": "Production dependencies that are only imported via `import type` statements. These can be moved to devDependencies since they generate no runtime code and are stripped during compilation."
               },
-              "helpUri": "https://docs.fallow.tools/explanations/dead-code#type-only-dependencies",
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#type-only-dependencies",
               "defaultConfiguration": {
                 "level": "warning"
               }
             },
             {
-              "id": "fallow/test-only-dependency",
+              "id": "plow/test-only-dependency",
               "shortDescription": {
                 "text": "Production dependency only imported by test files"
               },
               "fullDescription": {
                 "text": "Production dependencies that are only imported from test files. These can usually move to devDependencies because production entry points do not require them at runtime."
               },
-              "helpUri": "https://docs.fallow.tools/explanations/dead-code#test-only-dependencies",
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#test-only-dependencies",
               "defaultConfiguration": {
                 "level": "warning"
               }
             },
             {
-              "id": "fallow/unused-enum-member",
+              "id": "plow/unused-enum-member",
               "shortDescription": {
                 "text": "Enum member is never referenced"
               },
               "fullDescription": {
                 "text": "Enum members that are never referenced in the codebase. Uses scope-aware binding analysis to track all references including computed access patterns."
               },
-              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-enum-members",
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#unused-enum-members",
               "defaultConfiguration": {
                 "level": "error"
               }
             },
             {
-              "id": "fallow/unused-class-member",
+              "id": "plow/unused-class-member",
               "shortDescription": {
                 "text": "Class member is never referenced"
               },
               "fullDescription": {
                 "text": "Class methods and properties that are never referenced outside the class. Private members are checked within the class scope; public members are checked project-wide."
               },
-              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-class-members",
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#unused-class-members",
               "defaultConfiguration": {
                 "level": "error"
               }
             },
             {
-              "id": "fallow/unused-store-member",
+              "id": "plow/unused-store-member",
               "shortDescription": {
                 "text": "Store member is never accessed by any consumer"
               },
               "fullDescription": {
                 "text": "Pinia store members (a `state` / `getters` / `actions` key, or a setup-store returned key) declared but never accessed by any consumer project-wide. The store binding is imported (so the module is reachable) yet a specific member is dead. Defaults to warn, not error: a store has an open declaration surface (plugins, dynamic dispatch) so confidence is lower. Activates only when pinia or @pinia/nuxt is a declared dependency."
               },
-              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-store-members",
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#unused-store-members",
               "defaultConfiguration": {
                 "level": "warning"
               }
             },
             {
-              "id": "fallow/unresolved-import",
+              "id": "plow/unresolved-import",
               "shortDescription": {
                 "text": "Import could not be resolved"
               },
               "fullDescription": {
                 "text": "Import specifiers that could not be resolved to a file on disk. Common causes: deleted files, typos in paths, missing path aliases in tsconfig, or uninstalled packages."
               },
-              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unresolved-imports",
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#unresolved-imports",
               "defaultConfiguration": {
                 "level": "error"
               }
             },
             {
-              "id": "fallow/unlisted-dependency",
+              "id": "plow/unlisted-dependency",
               "shortDescription": {
                 "text": "Dependency used but not in package.json"
               },
               "fullDescription": {
                 "text": "Packages that are imported in source code but not listed in package.json. These work by accident (hoisted from another workspace package or transitive dep) and will break in strict package managers."
               },
-              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unlisted-dependencies",
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#unlisted-dependencies",
               "defaultConfiguration": {
                 "level": "error"
               }
             },
             {
-              "id": "fallow/duplicate-export",
+              "id": "plow/duplicate-export",
               "shortDescription": {
                 "text": "Export name appears in multiple modules"
               },
               "fullDescription": {
                 "text": "The same export name is defined in multiple modules. Consumers may import from the wrong module, leading to subtle bugs. Consider renaming or consolidating."
               },
-              "helpUri": "https://docs.fallow.tools/explanations/dead-code#duplicate-exports",
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#duplicate-exports",
               "defaultConfiguration": {
                 "level": "error"
               }
             },
             {
-              "id": "fallow/circular-dependency",
+              "id": "plow/circular-dependency",
               "shortDescription": {
                 "text": "Circular dependency chain detected"
               },
               "fullDescription": {
                 "text": "A cycle in the module import graph. Circular dependencies cause undefined behavior with CommonJS (partial modules) and initialization ordering issues with ESM. Break cycles by extracting shared code."
               },
-              "helpUri": "https://docs.fallow.tools/explanations/dead-code#circular-dependencies",
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#circular-dependencies",
               "defaultConfiguration": {
                 "level": "error"
               }
             },
             {
-              "id": "fallow/re-export-cycle",
+              "id": "plow/re-export-cycle",
               "shortDescription": {
                 "text": "Two or more barrel files re-export from each other in a loop"
               },
               "fullDescription": {
                 "text": "A barrel file re-exports from another barrel that ultimately re-exports back. When this happens, imports from any file in the loop may silently come up empty, because the re-export chain has no terminating module to resolve names against. To fix this: open any one file in the loop and remove the `export * from` (or `export { ... } from`) statement that points back into the cycle. Any single removal will break the cycle and restore working re-exports. A self-loop (a single barrel re-exporting from itself, often a rename leftover) is reported under the same rule with kind `self-loop`."
               },
-              "helpUri": "https://docs.fallow.tools/explanations/dead-code#re-export-cycles",
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#re-export-cycles",
               "defaultConfiguration": {
                 "level": "warning"
               }
             },
             {
-              "id": "fallow/boundary-violation",
+              "id": "plow/boundary-violation",
               "shortDescription": {
                 "text": "Import crosses a configured architecture boundary"
               },
               "fullDescription": {
                 "text": "A module imports from a zone that its configured boundary rules do not allow. Boundary checks help keep layered architecture, feature slices, and package ownership rules enforceable."
               },
-              "helpUri": "https://docs.fallow.tools/explanations/dead-code#boundary-violations",
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#boundary-violations",
               "defaultConfiguration": {
                 "level": "error"
               }
             },
             {
-              "id": "fallow/boundary-coverage",
+              "id": "plow/boundary-coverage",
               "shortDescription": {
                 "text": "Source file matches no configured architecture boundary zone"
               },
               "fullDescription": {
                 "text": "A reachable source file is not assigned to any configured boundary zone while boundaries.coverage.requireAllFiles is enabled. Add the file to a zone pattern, move it under an existing zone, or allow-list generated and intentionally unzoned paths with boundaries.coverage.allowUnmatched."
               },
-              "helpUri": "https://docs.fallow.tools/explanations/dead-code#boundary-violations",
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#boundary-violations",
               "defaultConfiguration": {
                 "level": "error"
               }
             },
             {
-              "id": "fallow/boundary-call-violation",
+              "id": "plow/boundary-call-violation",
               "shortDescription": {
                 "text": "Zoned file calls a callee its zone forbids"
               },
               "fullDescription": {
                 "text": "A file classified into a boundary zone calls a callee matching one of the zone's boundaries.calls.forbidden patterns. The check is syntactic: it matches the written callee path and the import-resolved canonical path, and it only applies to files classified into a zone. Move the call behind an allowed abstraction, or adjust the zone's forbidden patterns if the rule was wrong."
               },
-              "helpUri": "https://docs.fallow.tools/explanations/dead-code#boundary-violations",
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#boundary-violations",
               "defaultConfiguration": {
                 "level": "error"
               }
             },
             {
-              "id": "fallow/policy-violation",
+              "id": "plow/policy-violation",
               "shortDescription": {
                 "text": "Banned call or import matched a rule-pack rule"
               },
               "fullDescription": {
                 "text": "A call site or import matched a banned-call or banned-import rule from a configured rule pack (the rulePacks config key). Packs are pure declarative data; the check is syntactic and does not follow aliased or re-bound callees, and import matching uses the raw specifier. Replace the banned usage per the rule's message, scope the rule with files/exclude globs, or adjust its severity."
               },
-              "helpUri": "https://docs.fallow.tools/explanations/dead-code#policy-violations",
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#policy-violations",
               "defaultConfiguration": {
                 "level": "warning"
               }
             },
             {
-              "id": "fallow/invalid-client-export",
+              "id": "plow/invalid-client-export",
               "shortDescription": {
                 "text": "\"use client\" file exports a server-only / route-config name"
               },
               "fullDescription": {
                 "text": "A file carrying the `\"use client\"` directive also exports a Next.js server-only or route-segment config name (such as `metadata`, `generateMetadata`, `revalidate`, `generateStaticParams`, or a route HTTP method like `GET`/`POST`). Next.js rejects this combination at build time. Move the server-only export to a non-client module (a server component, a `route.ts`, or a separate config file), or remove the `\"use client\"` directive if the module does not need to be a client boundary. The check runs only when the project declares `next`."
               },
-              "helpUri": "https://docs.fallow.tools/explanations/dead-code#invalid-client-exports",
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#invalid-client-exports",
               "defaultConfiguration": {
                 "level": "warning"
               }
             },
             {
-              "id": "fallow/mixed-client-server-barrel",
+              "id": "plow/mixed-client-server-barrel",
               "shortDescription": {
                 "text": "Barrel re-exports both a \"use client\" module and a server-only module"
               },
               "fullDescription": {
                 "text": "A barrel file (a module whose exports are `export ... from` re-exports) forwards a name from a `\"use client\"` module alongside a name from a server-only module (one carrying `\"use server\"`, importing the `server-only` package, or importing a server-only Next.js API such as `next/headers`). Importing one name from such a barrel drags the other's directive context across the React Server Components boundary, the documented Next.js App Router footgun. Type-only re-exports are ignored (erased at build), and a barrel re-exporting a client module alongside an ordinary undirected utility does NOT flag. To fix: split the barrel so client and server-only modules are re-exported from separate entry points. The check runs only when the project declares `next`."
               },
-              "helpUri": "https://docs.fallow.tools/explanations/dead-code#mixed-client-server-barrels",
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#mixed-client-server-barrels",
               "defaultConfiguration": {
                 "level": "warning"
               }
             },
             {
-              "id": "fallow/misplaced-directive",
+              "id": "plow/misplaced-directive",
               "shortDescription": {
                 "text": "\"use client\" / \"use server\" directive is not in the leading position and is ignored"
               },
               "fullDescription": {
                 "text": "A `\"use client\"` or `\"use server\"` directive string appears as an expression statement after a non-directive statement (an `import`, a `const`). React Server Components bundlers only honor a directive in the leading prologue, before any other statement; once any statement precedes it the string is parsed as an ordinary expression and SILENTLY IGNORED. The intended client/server boundary never takes effect, so the file is treated as a server module. To fix: move the directive to the very top of the file, above every import. The check runs only when the project declares `next`."
               },
-              "helpUri": "https://docs.fallow.tools/explanations/dead-code#misplaced-directives",
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#misplaced-directives",
               "defaultConfiguration": {
                 "level": "warning"
               }
             },
             {
-              "id": "fallow/unprovided-inject",
+              "id": "plow/unprovided-inject",
               "shortDescription": {
                 "text": "inject() / getContext() reads a key that no provide() / setContext() supplies"
               },
               "fullDescription": {
                 "text": "A Vue `inject(KEY)` or Svelte `getContext(KEY)` reads a dependency-injection key (an imported or module-local symbol) that no matching `provide(KEY)` / `setContext(KEY)` supplies anywhere in the project. The read resolves to undefined at runtime, surfaced only at render. To fix: add a matching provider for the key, or remove the dead inject. Defaults to warn, not error: a provider may live outside the analyzed graph (an app-level provide registered elsewhere, a plugin, a host application). String-literal keys and keys imported from a package are abstained."
               },
-              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unprovided-injects",
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#unprovided-injects",
               "defaultConfiguration": {
                 "level": "warning"
               }
             },
             {
-              "id": "fallow/unrendered-component",
+              "id": "plow/unrendered-component",
               "shortDescription": {
                 "text": "A Vue / Svelte component is reachable through a barrel but rendered nowhere"
               },
               "fullDescription": {
                 "text": "A Vue or Svelte single-file component (the default export of a `.vue` / `.svelte` file) is reachable in the module graph (a barrel re-exports it) but instantiated NOWHERE in the project: no `<Tag>`, no `:is` / `this=` binding, no `components` / `app.component` registration, no `h()` / auto-import use, and no script value-read. It survives unused-file (the barrel keeps it reachable) and unused-export (the re-export counts as a use), yet no file actually renders it. To fix: render the component somewhere, or delete it and drop the dead re-export. Defaults to warn, not error: a component can be rendered reflectively (a dynamic `<component :is>` resolved from a non-literal value), so analyzer confidence is lower. Components that are themselves entry points (route pages, layouts, `App.vue`) and components re-exported from a non-private package entry point are abstained."
               },
-              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unrendered-components",
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#unrendered-components",
               "defaultConfiguration": {
                 "level": "warning"
               }
             },
             {
-              "id": "fallow/unused-component-prop",
+              "id": "plow/unused-component-prop",
               "shortDescription": {
                 "text": "A Vue <script setup> defineProps prop is referenced nowhere in its own component"
               },
               "fullDescription": {
                 "text": "A Vue `<script setup>` defineProps declared prop that is referenced nowhere in its own component (neither script nor template). vue-tsc / Volar check caller-side prop correctness, not this in-component dead-input direction. Conservative: abstains on `$attrs` fallthrough, whole-object props use, defineExpose, defineModel, and imported prop-type aliases. Default warn; suppress or remove the prop."
               },
-              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-component-props",
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#unused-component-props",
               "defaultConfiguration": {
                 "level": "warning"
               }
             },
             {
-              "id": "fallow/unused-component-emit",
+              "id": "plow/unused-component-emit",
               "shortDescription": {
                 "text": "A Vue <script setup> defineEmits event is emitted nowhere in its own component"
               },
               "fullDescription": {
                 "text": "A Vue `<script setup>` defineEmits declared event that is emitted nowhere in its own component (no `emit('<name>')` call). vue-tsc / Volar check caller-side emit correctness, not this in-component dead-output direction. Conservative: abstains on `$attrs` fallthrough, whole-object emit use, defineExpose, defineModel, and imported emit-type aliases. Default warn; suppress or remove the emit."
               },
-              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-component-emits",
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#unused-component-emits",
               "defaultConfiguration": {
                 "level": "warning"
               }
             },
             {
-              "id": "fallow/unused-server-action",
+              "id": "plow/unused-server-action",
               "shortDescription": {
                 "text": "A Next.js Server Action exported from a \"use server\" file is referenced by no code in the project"
               },
               "fullDescription": {
                 "text": "A Next.js Server Action (an export of a `\"use server\"` file) that no code in the project references: no import-and-call, no `action={fn}` JSX binding, no `<form action={fn}>`. This is the cross-graph \"declared but zero consumers\" direction, reclassified out of `unused-export` for `\"use server\"` files so the finding carries the action-specific signal. eslint-plugin-next is single-file and cannot see cross-file usage. It does NOT mean the endpoint is unreachable: Next.js still registers a generated action id, so it stays POST-able; it means no project code references it (likely forgotten or dead, and a candidate for removal to shrink surface area). Default warn; wire the action to a consumer or remove it. The check runs only when the project declares `next`."
               },
-              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-server-actions",
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#unused-server-actions",
               "defaultConfiguration": {
                 "level": "warning"
               }
             },
             {
-              "id": "fallow/route-collision",
+              "id": "plow/route-collision",
               "shortDescription": {
                 "text": "Two or more Next.js App Router route files resolve to the same URL"
               },
               "fullDescription": {
-                "text": "Two or more App Router route files (a `page` or a `route` handler) resolve to the SAME URL within one app-root. Route groups `(name)` and parallel slots `@name` do not change the URL, so `app/(marketing)/about/page.tsx` and `app/(shop)/about/page.tsx` both own `/about`. Next.js fails the build (\"You cannot have two parallel pages that resolve to the same path\") because a URL can have at most one owner, whether a Page or a Route Handler. fallow surfaces every colliding file at once; the build error names only one. Buckets are scoped per app-root (per workspace package), so a monorepo with several independent Next apps sharing a path is not flagged. Files under a private `_folder` or an intercepting marker `(.)`/`(..)`/`(...)` are excluded. There is no safe auto-fix: move or merge one of the files so each URL has a single owner. The check runs only when the project declares `next`."
+                "text": "Two or more App Router route files (a `page` or a `route` handler) resolve to the SAME URL within one app-root. Route groups `(name)` and parallel slots `@name` do not change the URL, so `app/(marketing)/about/page.tsx` and `app/(shop)/about/page.tsx` both own `/about`. Next.js fails the build (\"You cannot have two parallel pages that resolve to the same path\") because a URL can have at most one owner, whether a Page or a Route Handler. plow surfaces every colliding file at once; the build error names only one. Buckets are scoped per app-root (per workspace package), so a monorepo with several independent Next apps sharing a path is not flagged. Files under a private `_folder` or an intercepting marker `(.)`/`(..)`/`(...)` are excluded. There is no safe auto-fix: move or merge one of the files so each URL has a single owner. The check runs only when the project declares `next`."
               },
-              "helpUri": "https://docs.fallow.tools/explanations/dead-code#route-collisions",
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#route-collisions",
               "defaultConfiguration": {
                 "level": "error"
               }
             },
             {
-              "id": "fallow/dynamic-segment-name-conflict",
+              "id": "plow/dynamic-segment-name-conflict",
               "shortDescription": {
                 "text": "Sibling Next.js dynamic route segments use different slug names at the same position"
               },
               "fullDescription": {
-                "text": "Two or more sibling dynamic route segments at the same App Router tree position use different param spellings (`[id]` vs `[slug]`, or a catch-all `[...x]` vs an optional catch-all `[[...x]]`). Next.js throws \"You cannot use different slug names for the same dynamic path\" at dev and production runtime when the position is hit, because one position must resolve to a single param name. `next build` does NOT catch this (the build succeeds), so CI passes while the route crashes on its first request; fallow's static catch closes that gap. Route groups are transparent to the position and parallel slots fork it, so only genuinely-sibling segments conflict. To fix: rename the dynamic segments at the position to one consistent slug name. The check runs only when the project declares `next`."
+                "text": "Two or more sibling dynamic route segments at the same App Router tree position use different param spellings (`[id]` vs `[slug]`, or a catch-all `[...x]` vs an optional catch-all `[[...x]]`). Next.js throws \"You cannot use different slug names for the same dynamic path\" at dev and production runtime when the position is hit, because one position must resolve to a single param name. `next build` does NOT catch this (the build succeeds), so CI passes while the route crashes on its first request; plow's static catch closes that gap. Route groups are transparent to the position and parallel slots fork it, so only genuinely-sibling segments conflict. To fix: rename the dynamic segments at the position to one consistent slug name. The check runs only when the project declares `next`."
               },
-              "helpUri": "https://docs.fallow.tools/explanations/dead-code#dynamic-segment-name-conflicts",
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#dynamic-segment-name-conflicts",
               "defaultConfiguration": {
                 "level": "warning"
               }
             },
             {
-              "id": "fallow/stale-suppression",
+              "id": "plow/stale-suppression",
               "shortDescription": {
                 "text": "Suppression comment or tag no longer matches any issue"
               },
               "fullDescription": {
-                "text": "A fallow-ignore-next-line, fallow-ignore-file, or @expected-unused suppression that no longer matches any active issue. The underlying problem was fixed but the suppression was left behind. Remove it to keep the codebase clean."
+                "text": "A plow-ignore-next-line, plow-ignore-file, or @expected-unused suppression that no longer matches any active issue. The underlying problem was fixed but the suppression was left behind. Remove it to keep the codebase clean."
               },
-              "helpUri": "https://docs.fallow.tools/explanations/dead-code#stale-suppressions",
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#stale-suppressions",
               "defaultConfiguration": {
                 "level": "warning"
               }
             },
             {
-              "id": "fallow/unused-catalog-entry",
+              "id": "plow/unused-catalog-entry",
               "shortDescription": {
                 "text": "Catalog entry in pnpm-workspace.yaml not referenced by any workspace package"
               },
               "fullDescription": {
-                "text": "An entry in the `catalog:` or `catalogs:` section of pnpm-workspace.yaml that no workspace package.json references via the `catalog:` protocol. Catalog entries are leftover dependency metadata once a package is removed from every consumer; delete the entry to keep the catalog truthful. See also: fallow/unresolved-catalog-reference (the inverse: consumer references a catalog that does not declare the package)."
+                "text": "An entry in the `catalog:` or `catalogs:` section of pnpm-workspace.yaml that no workspace package.json references via the `catalog:` protocol. Catalog entries are leftover dependency metadata once a package is removed from every consumer; delete the entry to keep the catalog truthful. See also: plow/unresolved-catalog-reference (the inverse: consumer references a catalog that does not declare the package)."
               },
-              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-catalog-entries",
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#unused-catalog-entries",
               "defaultConfiguration": {
                 "level": "warning"
               }
             },
             {
-              "id": "fallow/empty-catalog-group",
+              "id": "plow/empty-catalog-group",
               "shortDescription": {
                 "text": "Named catalog group in pnpm-workspace.yaml has no entries"
               },
               "fullDescription": {
                 "text": "A named group under `catalogs:` in pnpm-workspace.yaml has no package entries. Empty named groups are leftover catalog structure after the last entry is removed. The top-level `catalog:` map is intentionally ignored because some projects keep it as a stable hook."
               },
-              "helpUri": "https://docs.fallow.tools/explanations/dead-code#empty-catalog-groups",
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#empty-catalog-groups",
               "defaultConfiguration": {
                 "level": "warning"
               }
             },
             {
-              "id": "fallow/unresolved-catalog-reference",
+              "id": "plow/unresolved-catalog-reference",
               "shortDescription": {
                 "text": "package.json references a catalog that does not declare the package"
               },
               "fullDescription": {
-                "text": "A workspace package.json declares a dependency with the `catalog:` or `catalog:<name>` protocol, but the catalog has no entry for that package. `pnpm install` will fail with ERR_PNPM_CATALOG_ENTRY_NOT_FOUND_FOR_CATALOG_PROTOCOL. To fix: add the package to the named catalog, switch the reference to a different catalog that does declare it, or remove the reference and pin a hardcoded version. Scope: the detector scans `dependencies`, `devDependencies`, `peerDependencies`, and `optionalDependencies` in every workspace `package.json`. See also: fallow/unused-catalog-entry (the inverse: catalog entries no consumer references)."
+                "text": "A workspace package.json declares a dependency with the `catalog:` or `catalog:<name>` protocol, but the catalog has no entry for that package. `pnpm install` will fail with ERR_PNPM_CATALOG_ENTRY_NOT_FOUND_FOR_CATALOG_PROTOCOL. To fix: add the package to the named catalog, switch the reference to a different catalog that does declare it, or remove the reference and pin a hardcoded version. Scope: the detector scans `dependencies`, `devDependencies`, `peerDependencies`, and `optionalDependencies` in every workspace `package.json`. See also: plow/unused-catalog-entry (the inverse: catalog entries no consumer references)."
               },
-              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unresolved-catalog-references",
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#unresolved-catalog-references",
               "defaultConfiguration": {
                 "level": "error"
               }
             },
             {
-              "id": "fallow/unused-dependency-override",
+              "id": "plow/unused-dependency-override",
               "shortDescription": {
                 "text": "pnpm.overrides entry targets a package not declared or resolved"
               },
               "fullDescription": {
-                "text": "An entry in `pnpm-workspace.yaml`'s `overrides:` section, or the root `package.json`'s `pnpm.overrides` block, whose target package is not declared by any workspace package and is not present in `pnpm-lock.yaml`. Override entries linger after their target package leaves the resolved dependency tree. For projects without a readable lockfile, fallow falls back to workspace package.json manifests and keeps a `hint` so transitive CVE pins can be reviewed before removal. To fix: delete the entry, refresh `pnpm-lock.yaml` if it is stale, or add the entry to `ignoreDependencyOverrides` when the override is intentionally retained. See also: fallow/misconfigured-dependency-override."
+                "text": "An entry in `pnpm-workspace.yaml`'s `overrides:` section, or the root `package.json`'s `pnpm.overrides` block, whose target package is not declared by any workspace package and is not present in `pnpm-lock.yaml`. Override entries linger after their target package leaves the resolved dependency tree. For projects without a readable lockfile, plow falls back to workspace package.json manifests and keeps a `hint` so transitive CVE pins can be reviewed before removal. To fix: delete the entry, refresh `pnpm-lock.yaml` if it is stale, or add the entry to `ignoreDependencyOverrides` when the override is intentionally retained. See also: plow/misconfigured-dependency-override."
               },
-              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-dependency-overrides",
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#unused-dependency-overrides",
               "defaultConfiguration": {
                 "level": "warning"
               }
             },
             {
-              "id": "fallow/misconfigured-dependency-override",
+              "id": "plow/misconfigured-dependency-override",
               "shortDescription": {
                 "text": "pnpm.overrides entry has an unparsable key or value"
               },
               "fullDescription": {
-                "text": "An entry in `pnpm-workspace.yaml`'s `overrides:` or `package.json`'s `pnpm.overrides` whose key or value does not parse as a valid pnpm override spec. Common shapes: empty key, empty value, malformed version selector on the target (`@types/react@<<18`), unbalanced parent matcher (`react>`), or unsupported `npm:alias@` syntax in the version (only the `-`, `$ref`, and `npm:alias` pnpm idioms are allowed). pnpm rejects the workspace at install time with a parser error. To fix: correct the key/value shape, or remove the entry. See also: fallow/unused-dependency-override."
+                "text": "An entry in `pnpm-workspace.yaml`'s `overrides:` or `package.json`'s `pnpm.overrides` whose key or value does not parse as a valid pnpm override spec. Common shapes: empty key, empty value, malformed version selector on the target (`@types/react@<<18`), unbalanced parent matcher (`react>`), or unsupported `npm:alias@` syntax in the version (only the `-`, `$ref`, and `npm:alias` pnpm idioms are allowed). pnpm rejects the workspace at install time with a parser error. To fix: correct the key/value shape, or remove the entry. See also: plow/unused-dependency-override."
               },
-              "helpUri": "https://docs.fallow.tools/explanations/dead-code#misconfigured-dependency-overrides",
+              "helpUri": "https://docs.genesis-plow.dev/explanations/dead-code#misconfigured-dependency-overrides",
               "defaultConfiguration": {
                 "level": "error"
               }
@@ -499,7 +499,7 @@ expression: redact_sarif_version(&json_str)
       },
       "results": [
         {
-          "ruleId": "fallow/unused-file",
+          "ruleId": "plow/unused-file",
           "level": "error",
           "message": {
             "text": "File is not reachable from any entry point"
@@ -514,8 +514,8 @@ expression: redact_sarif_version(&json_str)
             }
           ],
           "partialFingerprints": {
-            "tools.fallow.fingerprint/v1": "5244a7d48544e258",
-            "primaryLocationLineHash/v1": "5244a7d48544e258"
+            "tools.plow.fingerprint/v1": "509b40b2352e7b8b",
+            "primaryLocationLineHash/v1": "509b40b2352e7b8b"
           }
         }
       ]

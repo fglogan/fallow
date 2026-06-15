@@ -161,9 +161,7 @@ mod tests {
     use super::*;
     use crate::duplicates::CloneGroup;
     use crate::results::{UnusedExport, UnusedFile};
-    use fallow_types::output_dead_code::{
-        UnusedExportFinding, UnusedFileFinding, UnusedTypeFinding,
-    };
+    use plow_types::output_dead_code::{UnusedExportFinding, UnusedFileFinding, UnusedTypeFinding};
 
     fn make_instance(file: &str, start: usize, end: usize) -> CloneInstance {
         CloneInstance {

@@ -3,8 +3,8 @@ use std::path::Path;
 
 use ls_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position, Range};
 
-use fallow_core::duplicates::DuplicationReport;
-use fallow_core::results::{AnalysisResults, SecurityFindingKind};
+use plow_core::duplicates::DuplicationReport;
+use plow_core::results::{AnalysisResults, SecurityFindingKind};
 
 use crate::diagnostics::security::security_label;
 use crate::markdown::format_inline_code;
@@ -77,7 +77,7 @@ pub fn build_hover(
 /// vertical report: it leads with the candidate kind + the honest confidence
 /// signals (`source_backed`, `reachable_from_entry`), then evidence, then a
 /// one-line blast-radius summary, the kind-appropriate next step, and a pointer
-/// to the full trace (`fallow security --file`). The multi-hop traces stay out
+/// to the full trace (`plow security --file`). The multi-hop traces stay out
 /// of the hover. Every user-controlled string goes through `format_inline_code`
 /// (never backslash-escaped) so a crafted evidence/path string cannot leak
 /// markdown or a `command:` URI.
@@ -100,7 +100,7 @@ fn check_security(
 
         let label = security_label(finding);
         let mut value = format!(
-            "**fallow** security candidate: {} (unverified, verify before acting)",
+            "**plow** security candidate: {} (unverified, verify before acting)",
             format_inline_code(&label),
         );
 
@@ -158,7 +158,7 @@ fn check_security(
         let _ = write!(
             value,
             "\n\nFull trace: run {} or see the security docs.",
-            format_inline_code(&format!("fallow security --file {basename}")),
+            format_inline_code(&format!("plow security --file {basename}")),
         );
 
         return Some(Hover {
@@ -195,7 +195,7 @@ fn check_unused_file(results: &AnalysisResults, file_path: &Path) -> Option<Hove
     Some(Hover {
         contents: HoverContents::Markup(MarkupContent {
             kind: MarkupKind::Markdown,
-            value: "**fallow**: This file is not imported by any other file and is not reachable \
+            value: "**plow**: This file is not imported by any other file and is not reachable \
                     from any entry point."
                 .to_string(),
         }),
@@ -218,12 +218,12 @@ fn check_unused_export(
     for (exports, kind_label) in [
         (
             Box::new(unused_exports_iter)
-                as Box<dyn Iterator<Item = &fallow_core::results::UnusedExport>>,
+                as Box<dyn Iterator<Item = &plow_core::results::UnusedExport>>,
             "Export",
         ),
         (
             Box::new(unused_types_iter)
-                as Box<dyn Iterator<Item = &fallow_core::results::UnusedExport>>,
+                as Box<dyn Iterator<Item = &plow_core::results::UnusedExport>>,
             "Type export",
         ),
     ] {
@@ -241,7 +241,7 @@ fn check_unused_export(
             }
 
             let value = format!(
-                "**fallow**: {kind_label} {} is not imported by any other file.",
+                "**plow**: {kind_label} {} is not imported by any other file.",
                 format_inline_code(&export.export_name),
             );
 
@@ -301,7 +301,7 @@ fn check_used_export(
         };
 
         let mut value = format!(
-            "**fallow**: Export {} is used by {} {ref_word}",
+            "**plow**: Export {} is used by {} {ref_word}",
             format_inline_code(&usage.export_name),
             usage.reference_count,
         );
@@ -366,15 +366,15 @@ fn check_unused_member(
     let store_iter = results.unused_store_members.iter().map(|f| &f.member);
     for (members, kind_label) in [
         (
-            Box::new(enum_iter) as Box<dyn Iterator<Item = &fallow_core::results::UnusedMember>>,
+            Box::new(enum_iter) as Box<dyn Iterator<Item = &plow_core::results::UnusedMember>>,
             "Enum member",
         ),
         (
-            Box::new(class_iter) as Box<dyn Iterator<Item = &fallow_core::results::UnusedMember>>,
+            Box::new(class_iter) as Box<dyn Iterator<Item = &plow_core::results::UnusedMember>>,
             "Class member",
         ),
         (
-            Box::new(store_iter) as Box<dyn Iterator<Item = &fallow_core::results::UnusedMember>>,
+            Box::new(store_iter) as Box<dyn Iterator<Item = &plow_core::results::UnusedMember>>,
             "Store member",
         ),
     ] {
@@ -393,7 +393,7 @@ fn check_unused_member(
 
             let qualified = format!("{}.{}", member.parent_name, member.member_name);
             let value = format!(
-                "**fallow**: {kind_label} {} is never used outside its declaration.",
+                "**plow**: {kind_label} {} is never used outside its declaration.",
                 format_inline_code(&qualified),
             );
 
@@ -444,7 +444,7 @@ fn check_unrendered_component(
         }
 
         let value = format!(
-            "**fallow**: Component {} is reachable but rendered nowhere in this project.",
+            "**plow**: Component {} is reachable but rendered nowhere in this project.",
             format_inline_code(&c.component_name),
         );
 
@@ -494,7 +494,7 @@ fn check_unused_component_prop(
         }
 
         let value = format!(
-            "**fallow**: Prop {} is declared but referenced nowhere in this component.",
+            "**plow**: Prop {} is declared but referenced nowhere in this component.",
             format_inline_code(&p.prop_name),
         );
 
@@ -544,7 +544,7 @@ fn check_unused_component_emit(
         }
 
         let value = format!(
-            "**fallow**: Emit {} is declared but emitted nowhere in this component.",
+            "**plow**: Emit {} is declared but emitted nowhere in this component.",
             format_inline_code(&e.emit_name),
         );
 
@@ -594,7 +594,7 @@ fn check_unused_server_action(
         }
 
         let value = format!(
-            "**fallow**: Server action {} is exported from a \"use server\" file but no code in this project references it.",
+            "**plow**: Server action {} is exported from a \"use server\" file but no code in this project references it.",
             format_inline_code(&a.action_name),
         );
 
@@ -643,7 +643,7 @@ fn check_unresolved_import(
         }
 
         let value = format!(
-            "**fallow**: Cannot resolve import {}. The module may be missing, misspelled, \
+            "**plow**: Cannot resolve import {}. The module may be missing, misspelled, \
              or not installed.",
             format_inline_code(&import.import.specifier),
         );
@@ -700,7 +700,7 @@ fn check_duplication(
             };
 
             let mut value = format!(
-                "**fallow**: Duplicated code block ({} lines, {} tokens). \
+                "**plow**: Duplicated code block ({} lines, {} tokens). \
                  {other_count} other {instance_word}",
                 group.line_count, group.token_count,
             );
@@ -764,9 +764,9 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    use fallow_core::duplicates::{CloneGroup, CloneInstance, DuplicationStats};
-    use fallow_core::extract::MemberKind;
-    use fallow_core::results::{
+    use plow_core::duplicates::{CloneGroup, CloneInstance, DuplicationStats};
+    use plow_core::extract::MemberKind;
+    use plow_core::results::{
         ExportUsage, ReferenceLocation, SecuritySeverity, UnresolvedImport,
         UnresolvedImportFinding, UnusedClassMemberFinding, UnusedEnumMemberFinding, UnusedExport,
         UnusedExportFinding, UnusedFile, UnusedFileFinding, UnusedMember, UnusedStoreMemberFinding,
@@ -1753,13 +1753,13 @@ mod tests {
         assert!(build_hover(&results, &duplication, &path_b, pos).is_none());
     }
 
-    fn tainted_sink_finding(path: PathBuf) -> fallow_core::results::SecurityFinding {
-        fallow_core::results::SecurityFinding {
+    fn tainted_sink_finding(path: PathBuf) -> plow_core::results::SecurityFinding {
+        plow_core::results::SecurityFinding {
             finding_id: String::new(),
-            candidate: fallow_core::results::SecurityCandidate::default(),
+            candidate: plow_core::results::SecurityCandidate::default(),
             taint_flow: None,
             attack_surface: None,
-            kind: fallow_core::results::SecurityFindingKind::TaintedSink,
+            kind: plow_core::results::SecurityFindingKind::TaintedSink,
             category: Some("dangerous-html".to_string()),
             cwe: Some(79),
             path,
@@ -1772,7 +1772,7 @@ mod tests {
             trace: vec![],
             actions: vec![],
             dead_code: None,
-            reachability: Some(fallow_core::results::SecurityReachability {
+            reachability: Some(plow_core::results::SecurityReachability {
                 reachable_from_entry: true,
                 reachable_from_untrusted_source: false,
                 taint_confidence: None,
@@ -1809,7 +1809,7 @@ mod tests {
         assert!(value.contains("dangerouslySetInnerHTML"));
         assert!(value.contains("blast radius 4"));
         assert!(value.contains("Next:"));
-        assert!(value.contains("fallow security --file render.ts"));
+        assert!(value.contains("plow security --file render.ts"));
         let range = hover.range.unwrap();
         assert_eq!(range.start.line, 7);
         assert_eq!(range.start.character, 6);

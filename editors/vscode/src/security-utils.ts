@@ -1,8 +1,8 @@
 import type { SecurityFinding, SecurityOutput, TraceHopRole } from "./types.js";
 
 /**
- * Options for building the `fallow security` argument vector. These mirror the
- * subset of CLI globals that `fallow security` accepts; `--production` and the
+ * Options for building the `plow security` argument vector. These mirror the
+ * subset of CLI globals that `plow security` accepts; `--production` and the
  * `--dupes-*` flags are deliberately NOT included because the CLI rejects them
  * with exit 2 under the `security` subcommand (see `unsupported_security_global`
  * in `crates/cli/src/main.rs`). This divergence from `buildAnalysisArgs` is the
@@ -14,7 +14,7 @@ export interface SecurityArgsOptions {
   /**
    * Monorepo workspace scope (a package name). When a non-empty string,
    * forwarded as `--workspace <name>` so the Security Candidates view honors the
-   * selected workspace. `--workspace` is a global flag accepted by `fallow
+   * selected workspace. `--workspace` is a global flag accepted by `plow
    * security` (unlike `--production` / `--dupes-*`, which it rejects). Mirrors
    * the workspace forwarding in `buildAnalysisArgs`.
    */
@@ -22,10 +22,10 @@ export interface SecurityArgsOptions {
 }
 
 /**
- * Build the argument vector for the standalone `fallow security --format json`
+ * Build the argument vector for the standalone `plow security --format json`
  * run that backs the Security Candidates view. Kept pure (no VS Code / config
  * access) so the flag-forwarding rules can be unit-tested. Never emits
- * `--production` or any `--dupes-*` flag, which `fallow security` rejects.
+ * `--production` or any `--dupes-*` flag, which `plow security` rejects.
  */
 export const buildSecurityArgs = (options: SecurityArgsOptions): string[] => {
   const args = ["security", "--format", "json", "--quiet"];
@@ -96,8 +96,8 @@ export const hopRoleLabel = (role: TraceHopRole): string => {
 
 /**
  * Detect a clap "unrecognized subcommand" error for `security`, raised when the
- * resolved CLI predates the `fallow security` command. Lets the caller degrade
- * to a one-line "update fallow" warning instead of surfacing a raw stderr blob.
+ * resolved CLI predates the `plow security` command. Lets the caller degrade
+ * to a one-line "update plow" warning instead of surfacing a raw stderr blob.
  * Handles modern clap (`unrecognized subcommand 'security'`) and the legacy
  * phrasing (`The subcommand 'security' wasn't recognized`). Unrelated errors
  * return false so genuine failures stay loud.

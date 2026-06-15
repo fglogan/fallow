@@ -398,12 +398,12 @@ fn coverage_intelligence_id(input: &FindingInput) -> String {
     if let Some(preferred) = input
         .related_ids
         .iter()
-        .find(|id| id.starts_with("fallow:fn:") || id.len() == 16)
+        .find(|id| id.starts_with("plow:fn:") || id.len() == 16)
     {
         key.push('|');
         key.push_str(preferred);
     }
-    format!("fallow:coverage-intel:{:016x}", xxh3_64(key.as_bytes()))
+    format!("plow:coverage-intel:{:016x}", xxh3_64(key.as_bytes()))
 }
 
 fn action_description(
@@ -809,7 +809,7 @@ mod tests {
             ]),
             recommendation: CoverageIntelligenceRecommendation::RefactorCarefullyKeepBehavior,
             confidence: CoverageIntelligenceConfidence::Medium,
-            related_ids: vec!["fallow:fn:abc".to_owned()],
+            related_ids: vec!["plow:fn:abc".to_owned()],
             evidence: CoverageIntelligenceEvidence::default(),
         };
         let mut b = a.clone();
@@ -882,7 +882,7 @@ mod tests {
             summary: RuntimeCoverageSummary::default(),
             findings: vec![],
             hot_paths: vec![RuntimeCoverageHotPath {
-                id: "fallow:hot:deadbeef".to_owned(),
+                id: "plow:hot:deadbeef".to_owned(),
                 stable_id: None,
                 path: PathBuf::from(path),
                 function: function.to_owned(),
@@ -908,8 +908,8 @@ mod tests {
             signals: vec![crate::health_types::RuntimeCoverageSignal::ColdCodeDetected],
             summary: RuntimeCoverageSummary::default(),
             findings: vec![RuntimeCoverageFinding {
-                id: "fallow:prod:deadbeef".to_owned(),
-                stable_id: Some("fallow:fn:deadbeef".to_owned()),
+                id: "plow:prod:deadbeef".to_owned(),
+                stable_id: Some("plow:fn:deadbeef".to_owned()),
                 source_hash: Some("feedfacefeedface".to_owned()),
                 path: PathBuf::from(path),
                 function: function.to_owned(),
@@ -946,8 +946,8 @@ mod tests {
             signals: vec![crate::health_types::RuntimeCoverageSignal::ColdCodeDetected],
             summary: RuntimeCoverageSummary::default(),
             findings: vec![RuntimeCoverageFinding {
-                id: "fallow:prod:review001".to_owned(),
-                stable_id: Some("fallow:fn:review001".to_owned()),
+                id: "plow:prod:review001".to_owned(),
+                stable_id: Some("plow:fn:review001".to_owned()),
                 source_hash: Some("feedfacefeedface".to_owned()),
                 path: PathBuf::from(path),
                 function: function.to_owned(),
@@ -998,7 +998,7 @@ mod tests {
                 lines_deleted: 20,
                 complexity_density: 0.5,
                 fan_in: 3,
-                trend: fallow_core::churn::ChurnTrend::Stable,
+                trend: plow_core::churn::ChurnTrend::Stable,
                 ownership: Some(OwnershipMetrics {
                     bus_factor: 1,
                     contributor_count: 1,

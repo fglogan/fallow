@@ -1,6 +1,6 @@
 use std::fs;
 
-use fallow_config::{FallowConfig, OutputFormat, RulesConfig};
+use plow_config::{OutputFormat, PlowConfig, RulesConfig};
 
 use super::common::{create_config, fixture_path};
 
@@ -8,7 +8,7 @@ use super::common::{create_config, fixture_path};
 fn vitest_mocks_specifiers_not_flagged_as_unlisted_dep() {
     let root = fixture_path("vitest-mocks-virtual");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unlisted_names: Vec<&str> = results
         .unlisted_dependencies
@@ -26,7 +26,7 @@ fn vitest_mocks_specifiers_not_flagged_as_unlisted_dep() {
 fn vitest_mocks_scoped_specifiers_not_flagged_in_workspace_monorepo() {
     let root = fixture_path("vitest-mocks-workspace");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unlisted_names: Vec<&str> = results
         .unlisted_dependencies
@@ -50,7 +50,7 @@ fn vitest_mocks_scoped_specifiers_not_flagged_in_workspace_monorepo() {
 fn unlisted_dependencies_detected() {
     let root = fixture_path("unlisted-deps");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unlisted_names: Vec<&str> = results
         .unlisted_dependencies
@@ -84,7 +84,7 @@ fn unlisted_re_export_dependency_reports_re_export_line() {
     .expect("write source");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let finding = results
         .unlisted_dependencies
         .iter()
@@ -99,7 +99,7 @@ fn unlisted_re_export_dependency_reports_re_export_line() {
 fn unresolved_imports_detected() {
     let root = fixture_path("unresolved-imports");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unresolved_specifiers: Vec<&str> = results
         .unresolved_imports
@@ -139,7 +139,7 @@ fn ignore_unresolved_imports_config_suppresses_matching_specifiers() {
     )
     .expect("write package.json");
     fs::write(
-        root.join(".fallowrc.json"),
+        root.join(".plowrc.json"),
         r#"{
   "ignoreUnresolvedImports": [
     "@example/icons",
@@ -148,7 +148,7 @@ fn ignore_unresolved_imports_config_suppresses_matching_specifiers() {
   ]
 }"#,
     )
-    .expect("write fallow config");
+    .expect("write plow config");
     fs::write(
         root.join("node_modules/@example/icons/package.json"),
         r#"{
@@ -173,11 +173,11 @@ export const main = () => [Icon, metadata, generated, local];
     )
     .expect("write source");
 
-    let (loaded, _) = FallowConfig::find_and_load(root)
+    let (loaded, _) = PlowConfig::find_and_load(root)
         .expect("config discovery should succeed")
         .expect("fixture config should be discovered");
     let config = loaded.resolve(root.to_path_buf(), OutputFormat::Human, 4, true, true, None);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unresolved_specifiers: Vec<&str> = results
         .unresolved_imports
         .iter()
@@ -195,7 +195,7 @@ export const main = () => [Icon, metadata, generated, local];
 fn unused_dev_dependency_detected() {
     let root = fixture_path("unused-dev-deps");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_dev_dep_names: Vec<&str> = results
         .unused_dev_dependencies
@@ -213,7 +213,7 @@ fn unused_dev_dependency_detected() {
 fn unused_optional_dependency_detected() {
     let root = fixture_path("optional-deps");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_optional_dep_names: Vec<&str> = results
         .unused_optional_dependencies
@@ -255,7 +255,7 @@ fn napi_rs_optional_prebuild_dependencies_are_not_reported() {
     fs::write(root.join("src/index.ts"), "export const value = 1;\n").expect("write source");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused_optional_dep_names: Vec<&str> = results
         .unused_optional_dependencies
         .iter()
@@ -320,7 +320,7 @@ fn napi_rs_optional_prebuild_dependencies_are_not_reported_in_workspaces() {
     .expect("write source");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused_optional_dep_names: Vec<&str> = results
         .unused_optional_dependencies
         .iter()
@@ -393,7 +393,7 @@ fn napi_rs_optional_prebuild_credits_are_workspace_scoped() {
         .expect("write other source");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.unused_optional_dependencies.iter().any(|dep| {
@@ -417,7 +417,7 @@ fn napi_rs_optional_prebuild_credits_are_workspace_scoped() {
 fn unused_workspace_dependency_reports_other_workspace_usage() {
     let root = fixture_path("cross-workspace-dependency-context");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let dep = results
         .unused_dependencies
@@ -486,7 +486,7 @@ fn peer_dependency_of_used_installed_package_is_not_unused() {
     .expect("write react-dom package");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused_dep_names: Vec<&str> = results
         .unused_dependencies
         .iter()
@@ -545,7 +545,7 @@ fn peer_dependency_of_parent_installed_package_is_not_unused() {
     .expect("write react-dom client");
 
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused_dep_names: Vec<&str> = results
         .unused_dependencies
         .iter()
@@ -566,7 +566,7 @@ fn peer_dependency_of_parent_installed_package_is_not_unused() {
 fn subpath_imports_resolve_correctly() {
     let root = fixture_path("subpath-imports");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.unresolved_imports.is_empty(),
@@ -603,7 +603,7 @@ fn subpath_imports_resolve_correctly() {
 fn package_imports_missing_dist_resolve_to_source() {
     let root = fixture_path("package-imports-missing-dist");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unresolved_specifiers: Vec<&str> = results
         .unresolved_imports
@@ -694,7 +694,7 @@ fn package_imports_external_targets_credit_dependency_usage() {
     .expect("write source");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unresolved_specifiers: Vec<&str> = results
         .unresolved_imports
         .iter()
@@ -785,7 +785,7 @@ fn issue_1008_pnpm_workspace_dependency_imported_from_subpackage_root() {
         .expect("symlink workspace package");
 
     let config = create_config(consumer);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused_dep_names: Vec<&str> = results
         .unused_dependencies
         .iter()
@@ -839,7 +839,7 @@ fn package_imports_array_fallback_resolves_reachable_target() {
     .expect("write feature");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unresolved_specifiers: Vec<&str> = results
         .unresolved_imports
         .iter()
@@ -886,7 +886,7 @@ fn package_exports_array_fallback_resolves_self_package_source() {
     .expect("write feature");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unresolved_specifiers: Vec<&str> = results
         .unresolved_imports
         .iter()
@@ -908,7 +908,7 @@ fn package_exports_array_fallback_resolves_self_package_source() {
 #[test]
 fn ignore_patterns_applied_to_workspace_package_json_for_unused_deps() {
     let root = fixture_path("ignore-patterns-workspace-package-json");
-    let config = FallowConfig {
+    let config = PlowConfig {
         schema: None,
         extends: vec![],
         entry: vec![],
@@ -920,34 +920,34 @@ fn ignore_patterns_applied_to_workspace_package_json_for_unused_deps() {
         ignore_exports: vec![],
         ignore_catalog_references: vec![],
         ignore_dependency_overrides: vec![],
-        ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+        ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
-        duplicates: fallow_config::DuplicatesConfig::default(),
-        health: fallow_config::HealthConfig::default(),
+        duplicates: plow_config::DuplicatesConfig::default(),
+        health: plow_config::HealthConfig::default(),
         rules: RulesConfig::default(),
-        boundaries: fallow_config::BoundaryConfig::default(),
+        boundaries: plow_config::BoundaryConfig::default(),
         production: false.into(),
         plugins: vec![],
         rule_packs: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
-        audit: fallow_config::AuditConfig::default(),
+        audit: plow_config::AuditConfig::default(),
         codeowners: None,
         public_packages: vec![],
-        flags: fallow_config::FlagsConfig::default(),
-        security: fallow_config::SecurityConfig::default(),
-        fix: fallow_config::FixConfig::default(),
-        resolve: fallow_config::ResolveConfig::default(),
+        flags: plow_config::FlagsConfig::default(),
+        security: plow_config::SecurityConfig::default(),
+        fix: plow_config::FixConfig::default(),
+        resolve: plow_config::ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
         auto_imports: false,
-        cache: fallow_config::CacheConfig::default(),
+        cache: plow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None);
 
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let dist_findings: Vec<String> = results
         .unused_dependencies

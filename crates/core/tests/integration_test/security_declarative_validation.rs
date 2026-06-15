@@ -1,7 +1,7 @@
 //! Integration tests for declarative validation controls (#1094).
 
-use fallow_config::Severity;
-use fallow_core::results::{AnalysisResults, SecurityFindingKind};
+use plow_config::Severity;
+use plow_core::results::{AnalysisResults, SecurityFindingKind};
 
 use super::common::{create_config_with_rules, fixture_path};
 
@@ -10,7 +10,7 @@ fn analyze_fixture(name: &str) -> AnalysisResults {
     let config = create_config_with_rules(root, |rules| {
         rules.security_sink = Severity::Warn;
     });
-    fallow_core::analyze(&config).expect("analysis should succeed")
+    plow_core::analyze(&config).expect("analysis should succeed")
 }
 
 #[test]
@@ -28,7 +28,7 @@ fn trpc_input_validation_surfaces_as_defensive_boundary_control() {
 
     assert!(surface.defensive_boundary.controls.iter().any(|control| {
         control.callee == "trpc.procedure.input"
-            && control.kind == fallow_types::extract::SecurityControlKind::Validation
+            && control.kind == plow_types::extract::SecurityControlKind::Validation
     }));
     assert!(
         surface

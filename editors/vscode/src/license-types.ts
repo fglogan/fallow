@@ -1,5 +1,5 @@
 /**
- * Types for `fallow license <sub> --format json` output. The license JSON
+ * Types for `plow license <sub> --format json` output. The license JSON
  * shape is not part of `docs/output-schema.json` (it is not a finding /
  * duplication type), so these stay hand-written, mirroring `fix-types.ts`.
  *
@@ -33,7 +33,7 @@ export type LicenseKind =
   | "license-deactivate";
 
 /**
- * Parsed `fallow license <sub> --format json` success envelope. `tier`,
+ * Parsed `plow license <sub> --format json` success envelope. `tier`,
  * `seats`, and the expiry fields are `null` on the states that carry no
  * verified claims (`hard_fail` keeps claims but blocks features; `missing`
  * has none). `message` is the single human-facing sentence the UI shows
@@ -63,7 +63,7 @@ export interface LicenseStatusJson {
 
 /**
  * Structured JSON error envelope the CLI emits on stdout under `--format
- * json` (shared shape across fallow commands).
+ * json` (shared shape across plow commands).
  */
 export interface LicenseErrorJson {
   readonly error: true;

@@ -19,7 +19,7 @@ use oxc_semantic::ScopeFlags;
 use oxc_span::GetSpan;
 use oxc_span::Span;
 
-use fallow_types::extract::{
+use plow_types::extract::{
     ComplexityContribution, ComplexityContributionKind, ComplexityMetric, FunctionComplexity,
 };
 
@@ -74,7 +74,7 @@ impl<'a> ComplexityVisitor<'a> {
         let start = span.start as usize;
         let end = span.end as usize;
         let slice = self.source.get(start..end)?;
-        Some(fallow_cov_protocol::source_hash_for(slice.as_bytes()))
+        Some(plow_cov_protocol::source_hash_for(slice.as_bytes()))
     }
 
     fn push_function(&mut self, name: String, span: Span, param_count: u8) {
@@ -93,9 +93,9 @@ impl<'a> ComplexityVisitor<'a> {
     fn pop_function(&mut self) {
         if let Some(frame) = self.stack.pop() {
             let (line, col) =
-                fallow_types::extract::byte_offset_to_line_col(self.line_offsets, frame.span.start);
+                plow_types::extract::byte_offset_to_line_col(self.line_offsets, frame.span.start);
             let end_line =
-                fallow_types::extract::byte_offset_to_line_col(self.line_offsets, frame.span.end).0;
+                plow_types::extract::byte_offset_to_line_col(self.line_offsets, frame.span.end).0;
             let source_hash = self.source_hash_for_span(frame.span);
             self.results.push(FunctionComplexity {
                 name: frame.name,
@@ -123,7 +123,7 @@ impl<'a> ComplexityVisitor<'a> {
         nesting: u16,
     ) {
         let (line, col) =
-            fallow_types::extract::byte_offset_to_line_col(self.line_offsets, span.start);
+            plow_types::extract::byte_offset_to_line_col(self.line_offsets, span.start);
         if let Some(frame) = self.stack.last_mut() {
             frame.contributions.push(ComplexityContribution {
                 line,
@@ -549,10 +549,10 @@ pub fn compute_complexity(
 #[cfg(all(test, not(miri)))]
 mod tests {
     use super::*;
-    use fallow_types::extract::compute_line_offsets;
     use oxc_allocator::Allocator;
     use oxc_parser::Parser;
     use oxc_span::SourceType;
+    use plow_types::extract::compute_line_offsets;
 
     fn analyze(source: &str) -> Vec<FunctionComplexity> {
         let allocator = Allocator::default();

@@ -9,7 +9,7 @@
 //! Opt-in is automatic: both `security-sink` and `security-client-server-leak`
 //! rules default to `off`, the LSP reuses the project config, so
 //! `security_findings` is empty (and this block produces zero diagnostics)
-//! unless the user raises a rule to `warn`/`error` in their fallow config.
+//! unless the user raises a rule to `warn`/`error` in their plow config.
 
 use rustc_hash::FxHashMap;
 
@@ -17,14 +17,14 @@ use ls_types::{
     CodeDescription, Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range, Uri,
 };
 
-use fallow_core::results::{AnalysisResults, SecurityFinding, SecurityFindingKind};
+use plow_core::results::{AnalysisResults, SecurityFinding, SecurityFindingKind};
 
 /// Documentation page for the security candidate surface. The dead-code
 /// `DOCS_BASE` in `super` points at the dead-code explanation; security has its
 /// own CLI page, so this block uses a dedicated link.
-const SECURITY_DOCS_URL: &str = "https://docs.fallow.tools/cli/security";
+const SECURITY_DOCS_URL: &str = "https://docs.genesis-plow.dev/cli/security";
 
-/// The `// fallow-ignore-file` / `// fallow-ignore-next-line` suppression token
+/// The `// plow-ignore-file` / `// plow-ignore-next-line` suppression token
 /// for a security finding's kind. One token per kind covers all catalogue
 /// categories (mirrors `IssueKind::SecuritySink` / `SecurityClientServerLeak`).
 pub fn security_token(kind: SecurityFindingKind) -> &'static str {
@@ -44,7 +44,7 @@ pub fn security_label(finding: &SecurityFinding) -> String {
             let title = finding
                 .category
                 .as_deref()
-                .and_then(fallow_core::analyze::security_catalogue_title)
+                .and_then(plow_core::analyze::security_catalogue_title)
                 .or(finding.category.as_deref())
                 .unwrap_or("tainted-sink");
             match finding.cwe {
@@ -109,7 +109,7 @@ pub fn security_diagnostic(finding: &SecurityFinding) -> Diagnostic {
             },
         },
         severity: Some(DiagnosticSeverity::INFORMATION),
-        source: Some("fallow".to_string()),
+        source: Some("plow".to_string()),
         code: Some(NumberOrString::String(
             security_token(finding.kind).to_string(),
         )),
@@ -141,7 +141,7 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    use fallow_core::results::{
+    use plow_core::results::{
         SecurityFinding, SecurityFindingKind, SecurityReachability, SecuritySeverity,
         TaintConfidence,
     };
@@ -157,7 +157,7 @@ mod tests {
     fn tainted_sink(path: PathBuf) -> SecurityFinding {
         SecurityFinding {
             finding_id: String::new(),
-            candidate: fallow_core::results::SecurityCandidate::default(),
+            candidate: plow_core::results::SecurityCandidate::default(),
             taint_flow: None,
             attack_surface: None,
             kind: SecurityFindingKind::TaintedSink,
@@ -189,7 +189,7 @@ mod tests {
     fn client_server_leak(path: PathBuf) -> SecurityFinding {
         SecurityFinding {
             finding_id: String::new(),
-            candidate: fallow_core::results::SecurityCandidate::default(),
+            candidate: plow_core::results::SecurityCandidate::default(),
             taint_flow: None,
             attack_surface: None,
             kind: SecurityFindingKind::ClientServerLeak,
@@ -225,7 +225,7 @@ mod tests {
         assert_eq!(diags.len(), 1);
         let d = &diags[0];
         assert_eq!(d.severity, Some(DiagnosticSeverity::INFORMATION));
-        assert_eq!(d.source, Some("fallow".to_string()));
+        assert_eq!(d.source, Some("plow".to_string()));
         assert_eq!(
             d.code,
             Some(NumberOrString::String("security-sink".to_string()))

@@ -7,7 +7,7 @@
           {
             "type": "command",
             "command": "root=$(git rev-parse --show-toplevel 2>/dev/null || pwd); python3 \"$root/.claude/hooks/pre-bash-guard.py\"",
-            "statusMessage": "Checking fallow agent command guard..."
+            "statusMessage": "Checking plow agent command guard..."
           },
           {
             "type": "command",

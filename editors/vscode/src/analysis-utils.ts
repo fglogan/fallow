@@ -1,16 +1,16 @@
-import type { DuplicationMode, FallowCheckResult, FallowDupesResult } from "./types.js";
+import type { DuplicationMode, PlowCheckResult, PlowDupesResult } from "./types.js";
 
 /**
  * Analysis flags that did not exist in every CLI release the extension may
  * resolve, mapped to the first CLI version that accepts them. The extension and
- * the `fallow` binary are versioned and resolved independently (PATH,
+ * the `plow` binary are versioned and resolved independently (PATH,
  * node_modules/.bin, managed download, or a deliberately pinned binary), so a
  * newer extension can drive an older CLI. These flags are gated by version up
  * front and, as a backstop, are the ONLY flags `planDegradation` will strip
  * after a spawn failure. Anything else that a binary rejects stays loud.
  */
 const VERSION_GATED_FLAGS: Readonly<Record<string, string>> = {
-  // `--no-production` (force production OFF, the `fallow.production: "off"`
+  // `--no-production` (force production OFF, the `plow.production: "off"`
   // state) is new in 2.90.0; older CLIs only know `--production`. Gated so an
   // old pinned CLI degrades to deferring to the project config instead of
   // spawn-failing (issue #1055).
@@ -112,7 +112,7 @@ export const compareVersions = (a: string, b: string): number => {
 };
 
 /**
- * Build the argument vector for the combined `fallow` analysis run that backs
+ * Build the argument vector for the combined `plow` analysis run that backs
  * the sidebar. Kept pure (no config/VS Code access) so flag-forwarding rules
  * can be unit-tested. Returns the argv plus any version-gated flags that were
  * omitted because the resolved CLI is too old, so the caller can tell the user
@@ -271,7 +271,7 @@ export const planDegradation = (
   return { kind: "retry", args: reduced, dropped: offending };
 };
 
-export const countCheckIssues = (result: FallowCheckResult | null): number => {
+export const countCheckIssues = (result: PlowCheckResult | null): number => {
   if (!result) {
     return 0;
   }
@@ -306,7 +306,7 @@ export const countCheckIssues = (result: FallowCheckResult | null): number => {
   );
 };
 
-export const countDuplicationGroups = (result: FallowDupesResult | null): number => {
+export const countDuplicationGroups = (result: PlowDupesResult | null): number => {
   if (!result) {
     return 0;
   }
@@ -329,14 +329,14 @@ const formatDuplicationPercentage = (value: number): string => {
 };
 
 export const buildCleanAnalysisSummary = (
-  check: FallowCheckResult | null,
-  dupes: FallowDupesResult | null,
+  check: PlowCheckResult | null,
+  dupes: PlowDupesResult | null,
 ): CleanAnalysisSummary => {
   if (!check) {
     return {
-      notification: "Fallow: analysis completed, but no dead-code summary was available.",
+      notification: "Plow: analysis completed, but no dead-code summary was available.",
       outputLines: [
-        "Fallow analysis summary:",
+        "Plow analysis summary:",
         "- Dead code: summary unavailable.",
         "- Duplication: summary unavailable.",
       ],
@@ -346,9 +346,9 @@ export const buildCleanAnalysisSummary = (
   if (!dupes) {
     return {
       notification:
-        "Fallow: no dead-code issues found in analyzed JS/TS files. Duplication summary unavailable.",
+        "Plow: no dead-code issues found in analyzed JS/TS files. Duplication summary unavailable.",
       outputLines: [
-        "Fallow analysis summary:",
+        "Plow analysis summary:",
         "- Dead code: no issues found in analyzed JS/TS files.",
         "- Duplication: summary unavailable.",
       ],
@@ -358,9 +358,9 @@ export const buildCleanAnalysisSummary = (
   const files = formatAnalyzedFiles(dupes.stats.total_files);
   const pct = formatDuplicationPercentage(dupes.stats.duplication_percentage);
   return {
-    notification: `Fallow: no issues found in analyzed JS/TS files (${files}).`,
+    notification: `Plow: no issues found in analyzed JS/TS files (${files}).`,
     outputLines: [
-      "Fallow analysis summary:",
+      "Plow analysis summary:",
       "- Dead code: no issues found in analyzed JS/TS files.",
       `- Duplication: no duplicate-code groups found across ${files} (${pct} duplicated lines).`,
     ],

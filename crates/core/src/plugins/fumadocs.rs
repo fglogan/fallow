@@ -5,12 +5,12 @@
 
 use std::path::Path;
 
-use fallow_graph::resolve::extract_package_name;
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{Argument, CallExpression, Expression, ObjectExpression, ObjectPropertyKind};
 use oxc_ast_visit::{Visit, walk};
 use oxc_parser::Parser;
 use oxc_span::SourceType;
+use plow_graph::resolve::extract_package_name;
 
 use super::{Plugin, PluginResult, config_parser};
 

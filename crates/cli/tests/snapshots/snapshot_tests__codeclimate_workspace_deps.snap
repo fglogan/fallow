@@ -5,13 +5,13 @@ expression: json_str
 [
   {
     "type": "issue",
-    "check_name": "fallow/unused-dependency",
+    "check_name": "plow/unused-dependency",
     "description": "Package 'lodash' is in dependencies but never imported",
     "categories": [
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "1d04d08d81daf650",
+    "fingerprint": "e2e2b90970ca2c99",
     "location": {
       "path": "packages/ui/package.json",
       "lines": {

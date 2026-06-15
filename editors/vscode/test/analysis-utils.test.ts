@@ -8,7 +8,7 @@ import {
   planDegradation,
   stripArgument,
 } from "../src/analysis-utils.js";
-import type { FallowCheckResult, FallowDupesResult } from "../src/types.js";
+import type { PlowCheckResult, PlowDupesResult } from "../src/types.js";
 
 const baseOptions = {
   // `undefined` is the "auto"/defer state: no production flag is forwarded.
@@ -27,7 +27,7 @@ const baseOptions = {
   cliVersion: null,
 };
 
-const emptyCheck = (): FallowCheckResult => ({
+const emptyCheck = (): PlowCheckResult => ({
   schema_version: 7,
   version: "0.0.0-test",
   elapsed_ms: 0,
@@ -78,7 +78,7 @@ const dupesResult = (
   cloneGroups: number,
   totalFiles: number,
   duplicationPercentage: number,
-): FallowDupesResult => ({
+): PlowDupesResult => ({
   clone_groups: [],
   clone_families: [],
   stats: {
@@ -219,11 +219,11 @@ describe("buildAnalysisArgs", () => {
       ...baseOptions,
       production: true,
       changedSince: "main",
-      configPath: "/abs/.fallowrc.json",
+      configPath: "/abs/.plowrc.json",
     });
     expect(args).toContain("--production");
     expect(args[args.indexOf("--changed-since") + 1]).toBe("main");
-    expect(args[args.indexOf("--config") + 1]).toBe("/abs/.fallowrc.json");
+    expect(args[args.indexOf("--config") + 1]).toBe("/abs/.plowrc.json");
   });
 
   it("forwards neither production flag when deferring to the project config (#1055)", () => {
@@ -270,10 +270,10 @@ describe("buildCleanAnalysisSummary", () => {
     const summary = buildCleanAnalysisSummary(emptyCheck(), dupesResult(0, 63, 0));
 
     expect(summary.notification).toBe(
-      "Fallow: no issues found in analyzed JS/TS files (63 analyzed JS/TS files).",
+      "Plow: no issues found in analyzed JS/TS files (63 analyzed JS/TS files).",
     );
     expect(summary.outputLines).toEqual([
-      "Fallow analysis summary:",
+      "Plow analysis summary:",
       "- Dead code: no issues found in analyzed JS/TS files.",
       "- Duplication: no duplicate-code groups found across 63 analyzed JS/TS files (0% duplicated lines).",
     ]);
@@ -283,7 +283,7 @@ describe("buildCleanAnalysisSummary", () => {
     const summary = buildCleanAnalysisSummary(emptyCheck(), null);
 
     expect(summary.notification).toBe(
-      "Fallow: no dead-code issues found in analyzed JS/TS files. Duplication summary unavailable.",
+      "Plow: no dead-code issues found in analyzed JS/TS files. Duplication summary unavailable.",
     );
     expect(summary.outputLines).toContain("- Duplication: summary unavailable.");
   });
@@ -292,7 +292,7 @@ describe("buildCleanAnalysisSummary", () => {
     const summary = buildCleanAnalysisSummary(null, null);
 
     expect(summary.notification).toBe(
-      "Fallow: analysis completed, but no dead-code summary was available.",
+      "Plow: analysis completed, but no dead-code summary was available.",
     );
     expect(summary.outputLines).toContain("- Dead code: summary unavailable.");
   });
@@ -341,7 +341,7 @@ describe("parseUnexpectedArgument", () => {
   });
 
   it("returns null for unrelated failures", () => {
-    expect(parseUnexpectedArgument("fallow exited with code 101: panic")).toBeNull();
+    expect(parseUnexpectedArgument("plow exited with code 101: panic")).toBeNull();
   });
 
   it("ignores a positional unexpected argument that is not a flag", () => {
@@ -404,7 +404,7 @@ describe("planDegradation", () => {
   });
 
   it("rethrows unrelated failures", () => {
-    expect(planDegradation("fallow exited with code 101: panic", argv)).toEqual({
+    expect(planDegradation("plow exited with code 101: panic", argv)).toEqual({
       kind: "rethrow",
     });
   });

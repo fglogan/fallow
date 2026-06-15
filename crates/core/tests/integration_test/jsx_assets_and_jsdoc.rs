@@ -7,14 +7,14 @@
 //! JSDoc type-reference coverage on a normal JavaScript side-effect import so
 //! it no longer depends on JSX asset reachability.
 
-use fallow_types::results::AnalysisResults;
+use plow_types::results::AnalysisResults;
 
 use super::common::{create_config, fixture_path};
 
 fn analyze_fixture() -> AnalysisResults {
     let root = fixture_path("jsx-assets-and-jsdoc");
     let config = create_config(root);
-    fallow_core::analyze(&config).expect("analysis should succeed")
+    plow_core::analyze(&config).expect("analysis should succeed")
 }
 
 #[test]

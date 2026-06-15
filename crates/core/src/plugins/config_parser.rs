@@ -4,12 +4,12 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_extract::visitor::extract_import_from_callable;
 use oxc_allocator::Allocator;
 #[allow(clippy::wildcard_imports, reason = "many AST types used")]
 use oxc_ast::ast::*;
 use oxc_parser::Parser;
 use oxc_span::SourceType;
+use plow_extract::visitor::extract_import_from_callable;
 use rustc_hash::FxHashSet;
 
 /// Extract all import source specifiers from JS/TS source code.

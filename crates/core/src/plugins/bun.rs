@@ -167,10 +167,7 @@ preload = ["./src/test-preload.ts"]
     #[test]
     fn bun_test_entries_have_test_role() {
         let plugin = BunPlugin;
-        assert_eq!(
-            plugin.entry_point_role(),
-            fallow_config::EntryPointRole::Test
-        );
+        assert_eq!(plugin.entry_point_role(), plow_config::EntryPointRole::Test);
     }
 
     #[test]

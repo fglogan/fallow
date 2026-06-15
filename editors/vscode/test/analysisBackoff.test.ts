@@ -50,13 +50,13 @@ describe("AnalysisFailureBackoff", () => {
 describe("buildAnalysisProcessEnv", () => {
   it("adds the default max-file-size ceiling when the user has not configured one", () => {
     expect(buildAnalysisProcessEnv({})).toEqual({
-      FALLOW_MAX_FILE_SIZE: ANALYSIS_DEFAULT_MAX_FILE_SIZE_MB,
+      PLOW_MAX_FILE_SIZE: ANALYSIS_DEFAULT_MAX_FILE_SIZE_MB,
     });
   });
 
   it("preserves an explicit user max-file-size ceiling", () => {
-    expect(buildAnalysisProcessEnv({ FALLOW_MAX_FILE_SIZE: "2" })).toEqual({
-      FALLOW_MAX_FILE_SIZE: "2",
+    expect(buildAnalysisProcessEnv({ PLOW_MAX_FILE_SIZE: "2" })).toEqual({
+      PLOW_MAX_FILE_SIZE: "2",
     });
   });
 });

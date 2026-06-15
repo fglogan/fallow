@@ -7,14 +7,14 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use common::{CommandOutput, fallow_bin, parse_json, run_fallow};
+use common::{CommandOutput, parse_json, plow_bin, run_plow};
 
 use std::fs;
 use std::process::Command;
 
-/// Run `fallow list` with the given args and return structured output.
+/// Run `plow list` with the given args and return structured output.
 fn run_list(fixture: &str, args: &[&str]) -> CommandOutput {
-    run_fallow("list", fixture, args)
+    run_plow("list", fixture, args)
 }
 
 fn write_project_with_invalid_tanstack_route_ignore_pattern(root: &std::path::Path) {
@@ -52,15 +52,15 @@ export default {
     .expect("write vite config");
 }
 
-fn run_fallow_combined_in_root(root: &std::path::Path, args: &[&str]) -> CommandOutput {
-    let output = Command::new(fallow_bin())
+fn run_plow_combined_in_root(root: &std::path::Path, args: &[&str]) -> CommandOutput {
+    let output = Command::new(plow_bin())
         .arg("--root")
         .arg(root)
         .args(args)
         .env("RUST_LOG", "")
         .env("NO_COLOR", "1")
         .output()
-        .expect("failed to run fallow binary");
+        .expect("failed to run plow binary");
 
     CommandOutput {
         stdout: String::from_utf8_lossy(&output.stdout).to_string(),
@@ -746,7 +746,7 @@ fn combined_json_errors_on_invalid_plugin_regex() {
     let dir = tempfile::tempdir().expect("create temp dir");
     write_project_with_invalid_tanstack_route_ignore_pattern(dir.path());
 
-    let output = run_fallow_combined_in_root(dir.path(), &["--format", "json", "--quiet"]);
+    let output = run_plow_combined_in_root(dir.path(), &["--format", "json", "--quiet"]);
 
     assert_eq!(output.code, 2, "stderr: {}", output.stderr);
     let json = parse_json(&output);
@@ -780,7 +780,7 @@ fn list_plugins_json_errors_on_invalid_plugin_regex() {
     let dir = tempfile::tempdir().expect("create temp dir");
     write_project_with_invalid_tanstack_route_ignore_pattern(dir.path());
 
-    let output = run_fallow_combined_in_root(
+    let output = run_plow_combined_in_root(
         dir.path(),
         &["list", "--plugins", "--format", "json", "--quiet"],
     );
@@ -908,14 +908,14 @@ fn list_production_mode_flag_accepted() {
 
 #[test]
 fn list_invalid_root_returns_error() {
-    let bin = fallow_bin();
+    let bin = plow_bin();
     let output = Command::new(&bin)
         .arg("list")
         .arg("--root")
         .arg("/nonexistent/path/that/does/not/exist")
         .env("RUST_LOG", "")
         .output()
-        .expect("failed to run fallow binary");
+        .expect("failed to run plow binary");
 
     assert_ne!(
         output.status.code().unwrap_or(0),

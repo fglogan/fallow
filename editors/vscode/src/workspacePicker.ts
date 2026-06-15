@@ -1,5 +1,5 @@
 // VS Code injects this module into the extension host at runtime.
-// fallow-ignore-next-line unlisted-dependency
+// plow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
 import { getWorkspaceScope } from "./config.js";
 import {
@@ -21,14 +21,14 @@ export { parseWorkspacesOutput } from "./workspacePicker-utils.js";
 /**
  * `workspaceState` key holding the picker's per-folder workspace-scope
  * override (a package name). Absent / empty = fall back to the
- * `fallow.workspace` setting, then to whole-project.
+ * `plow.workspace` setting, then to whole-project.
  */
-const WORKSPACE_STATE_KEY = "fallow.workspaceScope";
+const WORKSPACE_STATE_KEY = "plow.workspaceScope";
 
 let pickerItem: vscode.StatusBarItem | null = null;
 
 /**
- * The most recent `fallow workspaces` output observed this session, used to
+ * The most recent `plow workspaces` output observed this session, used to
  * decide whether the picker is worth showing (hidden on single-package repos,
  * n2). `null` means "not yet probed" and keeps the item shown so it stays
  * reachable until a probe resolves.
@@ -36,7 +36,7 @@ let pickerItem: vscode.StatusBarItem | null = null;
 let lastWorkspacesOutput: WorkspacesOutput | null = null;
 
 /**
- * Per-session cache of `fallow workspaces` output keyed by binary path. The
+ * Per-session cache of `plow workspaces` output keyed by binary path. The
  * package list does not change within a session for a given binary, so probe
  * once on first picker open and reuse; a "Refresh" QuickPick entry busts it.
  * Mirrors `cliVersionCache` in `commands.ts`.
@@ -49,14 +49,14 @@ const getWorkspaceStateOverride = (context: vscode.ExtensionContext): string =>
 
 /**
  * Resolve the effective workspace scope: `workspaceState` override (picker)
- * wins, else the `fallow.workspace` setting, else whole-project.
+ * wins, else the `plow.workspace` setting, else whole-project.
  */
 export const resolveActiveWorkspaceScope = (context: vscode.ExtensionContext): string =>
   resolveWorkspaceScope(getWorkspaceStateOverride(context), getWorkspaceScope());
 
 /**
  * The scope that remains in effect once the picker override is cleared: the
- * `fallow.workspace` setting still scopes the analysis when pinned. Empty means
+ * `plow.workspace` setting still scopes the analysis when pinned. Empty means
  * truly whole-project. Used to phrase the clear toast honestly (the override no
  * longer wins, but a pinned setting still scopes).
  */
@@ -79,9 +79,9 @@ export const getCachedWorkspacesOutput = (binaryPath: string): WorkspacesOutput 
   workspacesCache.get(binaryPath);
 
 export const createWorkspacePicker = (context: vscode.ExtensionContext): vscode.StatusBarItem => {
-  // Priority 49 sits just to the right of the main Fallow status item (50).
+  // Priority 49 sits just to the right of the main Plow status item (50).
   pickerItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 49);
-  pickerItem.command = "fallow.selectWorkspace";
+  pickerItem.command = "plow.selectWorkspace";
   refreshWorkspacePicker(context);
   return pickerItem;
 };
@@ -90,7 +90,7 @@ export const createWorkspacePicker = (context: vscode.ExtensionContext): vscode.
  * Show or hide the picker based on the resolved workspaces list. A
  * single-package repo (or one whose workspaces could not be listed) gets no
  * picker, since scoping is meaningless there. `null` keeps it shown (the list
- * was not probed, e.g. older CLI). Called after a lazy `fallow workspaces`
+ * was not probed, e.g. older CLI). Called after a lazy `plow workspaces`
  * probe so the picker never appears on a repo that can never use it (n2).
  */
 export const applyWorkspaceVisibility = (output: WorkspacesOutput | null): void => {
@@ -146,7 +146,7 @@ const toQuickPickItems = (rows: ReadonlyArray<WorkspaceQuickPickItem>): Workspac
 
 /**
  * Show the workspace-scope QuickPick and persist the user's choice to
- * `workspaceState`. `loadWorkspaces` performs the (cached) `fallow workspaces`
+ * `workspaceState`. `loadWorkspaces` performs the (cached) `plow workspaces`
  * probe; `onScopeChange` is invoked after a real change so the caller can
  * re-render the picker and re-run analysis. Returns the chosen scope, or
  * undefined when the user dismissed the picker without changing anything.
@@ -162,7 +162,7 @@ export const showWorkspacePicker = async (
     const output = await loadWorkspaces(forceRefresh);
     if (!output) {
       void vscode.window.showWarningMessage(
-        "Fallow: could not list workspaces. Ensure this is a monorepo and the fallow CLI is available (see the Fallow output channel).",
+        "Plow: could not list workspaces. Ensure this is a monorepo and the plow CLI is available (see the Plow output channel).",
       );
       return undefined;
     }
@@ -170,7 +170,7 @@ export const showWorkspacePicker = async (
     const partitioned = partitionWorkspaces(output.workspaces);
     if (partitioned.real.length === 0 && partitioned.internal.length === 0) {
       void vscode.window.showInformationMessage(
-        "Fallow: no workspace packages found. Scoping applies to monorepos with multiple packages.",
+        "Plow: no workspace packages found. Scoping applies to monorepos with multiple packages.",
       );
       return undefined;
     }
@@ -178,7 +178,7 @@ export const showWorkspacePicker = async (
     const picked = await vscode.window.showQuickPick(
       toQuickPickItems(buildWorkspaceQuickPickItems(partitioned, active)),
       {
-        title: "Fallow: Select Workspace Scope",
+        title: "Plow: Select Workspace Scope",
         placeHolder:
           active === CLEAR_WORKSPACE_SCOPE
             ? "Analyzing the whole project. Pick a package to scope."
@@ -202,12 +202,12 @@ export const showWorkspacePicker = async (
     await context.workspaceState.update(WORKSPACE_STATE_KEY, next);
     onScopeChange();
 
-    // On clear, report the ACTUAL residual scope: a pinned `fallow.workspace`
+    // On clear, report the ACTUAL residual scope: a pinned `plow.workspace`
     // setting still scopes the analysis, so "whole project" would be false.
     const message =
       next === CLEAR_WORKSPACE_SCOPE
         ? clearedScopeToast(resolveResidualScope())
-        : `Fallow: scoped to ${next}.`;
+        : `Plow: scoped to ${next}.`;
     void vscode.window.showInformationMessage(`${message} ${WORKSPACE_SCOPE_DISCLOSURE}`);
     return next;
   };
@@ -224,11 +224,11 @@ export const clearWorkspaceScope = async (context: vscode.ExtensionContext): Pro
   const residual = resolveResidualScope();
   if (previous === CLEAR_WORKSPACE_SCOPE) {
     // No picker override to clear. Report the residual scope honestly: a pinned
-    // `fallow.workspace` setting still scopes the analysis.
+    // `plow.workspace` setting still scopes the analysis.
     const message =
       residual === CLEAR_WORKSPACE_SCOPE
-        ? "Fallow: already analyzing the whole project."
-        : `Fallow: no picker override to clear; still scoped to ${residual} via the fallow.workspace setting.`;
+        ? "Plow: already analyzing the whole project."
+        : `Plow: no picker override to clear; still scoped to ${residual} via the plow.workspace setting.`;
     void vscode.window.showInformationMessage(message);
     return false;
   }

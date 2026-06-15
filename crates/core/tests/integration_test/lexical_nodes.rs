@@ -11,7 +11,7 @@ use super::common::{create_config, fixture_path};
 fn lexical_node_lifecycle_members_are_credited_but_real_dead_members_survive() {
     let root = fixture_path("lexical-nodes");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_members: Vec<String> = results
         .unused_class_members

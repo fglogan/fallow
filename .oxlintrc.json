@@ -4,7 +4,7 @@
     "**/node_modules/**",
     "**/dist/**",
     "**/target/**",
-    "**/.fallow/**",
+    "**/.plow/**",
     "**/coverage/**",
     "**/.cache/**",
     "**/*.min.js",
@@ -18,8 +18,8 @@
     "editors/vscode/dist/**",
     "editors/vscode/out/**",
     "editors/vscode/src/generated/**",
-    "npm/fallow/types/**",
-    "npm/fallow/skills/**",
+    "npm/plow/types/**",
+    "npm/plow/skills/**",
     "crates/napi/types/**",
     "crates/napi/index.js",
     "crates/napi/index.d.ts",
@@ -73,7 +73,7 @@
       }
     },
     {
-      "files": ["npm/fallow/bin/*"],
+      "files": ["npm/plow/bin/*"],
       "rules": {
         "unicorn/prefer-node-protocol": "off"
       }

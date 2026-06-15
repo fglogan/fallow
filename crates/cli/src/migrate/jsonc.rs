@@ -10,7 +10,7 @@ pub(super) fn generate_jsonc(result: &MigrationResult) -> String {
     let mut output = String::new();
     output.push_str("{\n");
     output.push_str(
-        "  \"$schema\": \"https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json\",\n",
+        "  \"$schema\": \"https://raw.githubusercontent.com/fglogan/genesis-plow/main/schema.json\",\n",
     );
 
     let obj = result

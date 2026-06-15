@@ -1,6 +1,6 @@
 /**
  * Tree-view category labels. The kebab-case `IssueCategory` keys mirror
- * fallow's rule names and the VS Code setting `fallow.issueTypes.*` keys.
+ * plow's rule names and the VS Code setting `plow.issueTypes.*` keys.
  * These are UI strings, not part of the JSON output contract.
  */
 

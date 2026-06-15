@@ -4,8 +4,8 @@ use super::common::{create_config, fixture_path};
 fn static_factory_method_credits_instance_members_across_files() {
     let root = fixture_path("issue-346-static-factory-method");
     let mut config = create_config(root);
-    config.rules.unused_class_members = fallow_config::Severity::Error;
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    config.rules.unused_class_members = plow_config::Severity::Error;
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused: Vec<String> = results
         .unused_class_members

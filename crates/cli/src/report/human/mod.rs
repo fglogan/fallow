@@ -52,7 +52,7 @@ pub(super) fn print_explain_tip_if_tty(has_findings: bool, quiet: bool) {
     {
         println!(
             "{}",
-            "Tip: run `fallow explain <issue label>`; spaces and hyphens both work, e.g. `fallow explain unused files`."
+            "Tip: run `plow explain <issue label>`; spaces and hyphens both work, e.g. `plow explain unused files`."
                 .dimmed()
         );
         println!();
@@ -74,125 +74,125 @@ fn section_footer_text(title: &str) -> Option<(&'static str, &'static str)> {
     match title {
         "Unused files" => Some((
             "Files not reachable from any entry point",
-            "https://docs.fallow.tools/explanations/dead-code#unused-files",
+            "https://docs.genesis-plow.dev/explanations/dead-code#unused-files",
         )),
         "Unused exports" => Some((
             "Exported symbols with no known consumers",
-            "https://docs.fallow.tools/explanations/dead-code#unused-exports",
+            "https://docs.genesis-plow.dev/explanations/dead-code#unused-exports",
         )),
         "Unused type exports" => Some((
             "Type exports with no known consumers",
-            "https://docs.fallow.tools/explanations/dead-code#unused-types",
+            "https://docs.genesis-plow.dev/explanations/dead-code#unused-types",
         )),
         "Private type leaks" => Some((
             "Exported signatures that reference same-file private types",
-            "https://docs.fallow.tools/explanations/dead-code#private-type-leaks",
+            "https://docs.genesis-plow.dev/explanations/dead-code#private-type-leaks",
         )),
         "Unused dependencies" => Some((
             "Listed in dependencies but never imported",
-            "https://docs.fallow.tools/explanations/dead-code#unused-dependencies",
+            "https://docs.genesis-plow.dev/explanations/dead-code#unused-dependencies",
         )),
         "Unused devDependencies" => Some((
             "Listed in devDependencies but never imported or referenced",
-            "https://docs.fallow.tools/explanations/dead-code#unused-dependencies",
+            "https://docs.genesis-plow.dev/explanations/dead-code#unused-dependencies",
         )),
         "Unused optionalDependencies" => Some((
             "Listed in optionalDependencies but never imported",
-            "https://docs.fallow.tools/explanations/dead-code#unused-dependencies",
+            "https://docs.genesis-plow.dev/explanations/dead-code#unused-dependencies",
         )),
         "Unused enum members" => Some((
             "Enum members never referenced outside their declaration",
-            "https://docs.fallow.tools/explanations/dead-code#unused-enum-members",
+            "https://docs.genesis-plow.dev/explanations/dead-code#unused-enum-members",
         )),
         "Unused class members" => Some((
             "Class methods or properties never referenced outside their class",
-            "https://docs.fallow.tools/explanations/dead-code#unused-class-members",
+            "https://docs.genesis-plow.dev/explanations/dead-code#unused-class-members",
         )),
         "Unused store members" => Some((
             "Store state or actions never accessed by any consumer",
-            "https://docs.fallow.tools/explanations/dead-code#unused-store-members",
+            "https://docs.genesis-plow.dev/explanations/dead-code#unused-store-members",
         )),
         "Unresolved imports" => Some((
-            "Import paths that could not be resolved \u{2014} check for missing packages or broken paths. Framework-specific imports may need a plugin: https://docs.fallow.tools/plugins",
-            "https://docs.fallow.tools/explanations/dead-code#unresolved-imports",
+            "Import paths that could not be resolved \u{2014} check for missing packages or broken paths. Framework-specific imports may need a plugin: https://docs.genesis-plow.dev/plugins",
+            "https://docs.genesis-plow.dev/explanations/dead-code#unresolved-imports",
         )),
         "Unlisted dependencies" => Some((
             "Packages imported in code but missing from package.json",
-            "https://docs.fallow.tools/explanations/dead-code#unlisted-dependencies",
+            "https://docs.genesis-plow.dev/explanations/dead-code#unlisted-dependencies",
         )),
         "Duplicate exports" => Some((
             "Same export name defined in multiple files; barrel re-exports may resolve ambiguously",
-            "https://docs.fallow.tools/explanations/dead-code#duplicate-exports",
+            "https://docs.genesis-plow.dev/explanations/dead-code#duplicate-exports",
         )),
         "Circular dependencies" => Some((
             "Import cycles that can cause initialization failures and prevent tree-shaking",
-            "https://docs.fallow.tools/explanations/dead-code#circular-dependencies",
+            "https://docs.genesis-plow.dev/explanations/dead-code#circular-dependencies",
         )),
         "Boundary violations" => Some((
             "Imports that cross defined architecture zone boundaries",
-            "https://docs.fallow.tools/explanations/dead-code#boundary-violations",
+            "https://docs.genesis-plow.dev/explanations/dead-code#boundary-violations",
         )),
         "Stale suppressions" => Some((
             "Suppression comments or JSDoc tags that no longer match any issue",
-            "https://docs.fallow.tools/explanations/dead-code#stale-suppressions",
+            "https://docs.genesis-plow.dev/explanations/dead-code#stale-suppressions",
         )),
         "Unused catalog entries" => Some((
             "pnpm-workspace.yaml catalog entries not referenced by any workspace package via the `catalog:` protocol",
-            "https://docs.fallow.tools/explanations/dead-code#unused-catalog-entries",
+            "https://docs.genesis-plow.dev/explanations/dead-code#unused-catalog-entries",
         )),
         "Unresolved catalog references" => Some((
             "package.json `catalog:` / `catalog:<name>` references whose catalog does not declare the package (pnpm install will error)",
-            "https://docs.fallow.tools/explanations/dead-code#unresolved-catalog-references",
+            "https://docs.genesis-plow.dev/explanations/dead-code#unresolved-catalog-references",
         )),
         "Unused dependency overrides" => Some((
             "pnpm `overrides:` entries whose target package is not declared by any workspace package or resolved in pnpm-lock.yaml",
-            "https://docs.fallow.tools/explanations/dead-code#unused-dependency-overrides",
+            "https://docs.genesis-plow.dev/explanations/dead-code#unused-dependency-overrides",
         )),
         "Misconfigured dependency overrides" => Some((
             "pnpm `overrides:` entries with an unparsable key or empty value (pnpm install will error)",
-            "https://docs.fallow.tools/explanations/dead-code#misconfigured-dependency-overrides",
+            "https://docs.genesis-plow.dev/explanations/dead-code#misconfigured-dependency-overrides",
         )),
         "Invalid client exports" => Some((
             "Server-only or route-config exports in a \"use client\" file (Next.js rejects this at build time)",
-            "https://docs.fallow.tools/explanations/dead-code#invalid-client-exports",
+            "https://docs.genesis-plow.dev/explanations/dead-code#invalid-client-exports",
         )),
         "Mixed client/server barrels" => Some((
             "Barrel re-exports both a \"use client\" module and a server-only module (one import drags the other's directive across the boundary)",
-            "https://docs.fallow.tools/explanations/dead-code#mixed-client-server-barrels",
+            "https://docs.genesis-plow.dev/explanations/dead-code#mixed-client-server-barrels",
         )),
         "Misplaced directives" => Some((
             "A \"use client\" / \"use server\" directive sits below an import, so the RSC bundler ignores it (move it above every import)",
-            "https://docs.fallow.tools/explanations/dead-code#misplaced-directives",
+            "https://docs.genesis-plow.dev/explanations/dead-code#misplaced-directives",
         )),
         "Unprovided injects" => Some((
             "A Vue inject / Svelte getContext whose key is provided nowhere in the project, so at runtime it returns undefined",
-            "https://docs.fallow.tools/explanations/dead-code#unprovided-injects",
+            "https://docs.genesis-plow.dev/explanations/dead-code#unprovided-injects",
         )),
         "Unrendered components" => Some((
             "A Vue / Svelte component reachable through a barrel but rendered nowhere in the project (render it somewhere or remove it)",
-            "https://docs.fallow.tools/explanations/dead-code#unrendered-components",
+            "https://docs.genesis-plow.dev/explanations/dead-code#unrendered-components",
         )),
         "Unused component props" => Some((
             "A Vue <script setup> defineProps prop referenced nowhere inside its own component (remove it or use it)",
-            "https://docs.fallow.tools/explanations/dead-code#unused-component-props",
+            "https://docs.genesis-plow.dev/explanations/dead-code#unused-component-props",
         )),
         "Unused component emits" => Some((
             "A Vue <script setup> defineEmits event emitted nowhere inside its own component (remove it or emit it)",
-            "https://docs.fallow.tools/explanations/dead-code#unused-component-emits",
+            "https://docs.genesis-plow.dev/explanations/dead-code#unused-component-emits",
         )),
         "Unused server actions" => Some((
             "A Next.js Server Action exported from a \"use server\" file that no code in the project references (wire it to a consumer or remove it)",
-            "https://docs.fallow.tools/explanations/dead-code#unused-server-actions",
+            "https://docs.genesis-plow.dev/explanations/dead-code#unused-server-actions",
         )),
         t if t.starts_with("Type-only") => Some((
             "Dependencies only used for type imports \u{2014} consider moving to devDependencies",
-            "https://docs.fallow.tools/explanations/dead-code#type-only-dependencies",
+            "https://docs.genesis-plow.dev/explanations/dead-code#type-only-dependencies",
         )),
         _ => None,
     }
 }
 
-/// Map section title to the corresponding fallow-ignore rule name.
+/// Map section title to the corresponding plow-ignore rule name.
 fn section_suppress_rule(title: &str) -> Option<&'static str> {
     match title {
         "Unused files" => Some("unused-files"),
@@ -241,7 +241,7 @@ fn is_yaml_comment_only(rule: &str) -> bool {
 /// at all (e.g., `unresolved-catalog-reference` lives in `package.json`), or
 /// whose findings can live in either YAML or JSON (`*-dependency-override`),
 /// so an inline suppression mechanism would be format-dependent. Suppression
-/// for these MUST go through a fallow config entry.
+/// for these MUST go through a plow config entry.
 fn is_config_only_suppression(rule: &str) -> bool {
     matches!(
         rule,
@@ -256,16 +256,16 @@ fn is_config_only_suppression(rule: &str) -> bool {
 fn config_only_suppression_hint(rule: &str) -> &'static str {
     match rule {
         "unresolved-catalog-reference" => {
-            "To suppress: add an entry to ignoreCatalogReferences in your fallow config"
+            "To suppress: add an entry to ignoreCatalogReferences in your plow config"
         }
         "unused-dependency-override" | "misconfigured-dependency-override" => {
-            "To suppress: add an entry to ignoreDependencyOverrides in your fallow config"
+            "To suppress: add an entry to ignoreDependencyOverrides in your plow config"
         }
-        _ => "To suppress: add an override in your fallow config",
+        _ => "To suppress: add an override in your plow config",
     }
 }
 
-/// Categories that support `fallow fix --dry-run` auto-fix.
+/// Categories that support `plow fix --dry-run` auto-fix.
 fn is_auto_fixable(title: &str) -> bool {
     matches!(
         title,
@@ -296,22 +296,19 @@ fn push_section_footer_impl(lines: &mut Vec<String>, title: &str, item_count: us
     }
     if item_count >= 3 {
         if is_auto_fixable(title) {
-            lines.push(format!(
-                "  {}",
-                "To auto-fix: fallow fix --dry-run".dimmed()
-            ));
+            lines.push(format!("  {}", "To auto-fix: plow fix --dry-run".dimmed()));
         }
         if let Some(rule) = section_suppress_rule(title) {
             let comment = if rollup {
-                "To suppress a directory: add to ignorePatterns in .fallowrc.json".to_string()
+                "To suppress a directory: add to ignorePatterns in .plowrc.json".to_string()
             } else if is_file_level_only(rule) {
-                format!("To suppress: // fallow-ignore-file {rule}")
+                format!("To suppress: // plow-ignore-file {rule}")
             } else if is_yaml_comment_only(rule) {
-                format!("To suppress: # fallow-ignore-next-line {rule}")
+                format!("To suppress: # plow-ignore-next-line {rule}")
             } else if is_config_only_suppression(rule) {
                 config_only_suppression_hint(rule).to_string()
             } else {
-                format!("To suppress: // fallow-ignore-next-line {rule}")
+                format!("To suppress: // plow-ignore-next-line {rule}")
             };
             lines.push(format!("  {}", comment.dimmed()));
         }

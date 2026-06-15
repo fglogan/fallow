@@ -1,4 +1,4 @@
-//! Deep-dive helpers for the `fallow dupes --trace` inspector: a stable
+//! Deep-dive helpers for the `plow dupes --trace` inspector: a stable
 //! content fingerprint that addresses a clone group across runs, a group-level
 //! refactoring suggestion, and a best-effort "dominant identifier" name for the
 //! extracted function.

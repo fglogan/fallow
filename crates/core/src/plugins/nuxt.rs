@@ -14,9 +14,9 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_config::{AutoImportKind, AutoImportRule};
-use fallow_types::discover::FileId;
-use fallow_types::extract::ExportName;
+use plow_config::{AutoImportKind, AutoImportRule};
+use plow_types::discover::FileId;
+use plow_types::extract::ExportName;
 
 use super::config_parser;
 use super::{Plugin, PluginResult};
@@ -762,7 +762,7 @@ fn collect_script_auto_imports(dir: &Path, recursive: bool, rules: &mut Vec<Auto
         let Ok(source) = std::fs::read_to_string(&path) else {
             continue;
         };
-        let module = fallow_extract::parse_source_to_module(FileId(0), &path, &source, 0, false);
+        let module = plow_extract::parse_source_to_module(FileId(0), &path, &source, 0, false);
         let default_name = derive_script_default_name(&path);
         for export in module.exports {
             match export.name {

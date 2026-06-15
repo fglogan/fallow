@@ -1,6 +1,6 @@
 use std::process::ExitCode;
 
-use fallow_config::OutputFormat;
+use plow_config::OutputFormat;
 
 use crate::output_envelope::{WorkspaceInfo, WorkspacesOutput};
 use crate::report::format_display_path;
@@ -43,7 +43,7 @@ pub fn run_list(opts: &ListOptions<'_>) -> ExitCode {
 
     let need_files = needs_file_discovery(opts.files, show_all, opts.entry_points, opts.boundaries);
     let discovered = if need_files {
-        Some(fallow_core::discover::discover_files_with_plugin_scopes(
+        Some(plow_core::discover::discover_files_with_plugin_scopes(
             &config,
         ))
     } else {
@@ -96,24 +96,24 @@ pub fn run_list(opts: &ListOptions<'_>) -> ExitCode {
 
 fn collect_list_entry_points(
     opts: &ListOptions<'_>,
-    config: &fallow_config::ResolvedConfig,
+    config: &plow_config::ResolvedConfig,
     show_all: bool,
-    discovered: Option<&[fallow_types::discover::DiscoveredFile]>,
-    plugin_result: Option<&fallow_core::plugins::AggregatedPluginResult>,
-) -> Option<Vec<fallow_core::discover::EntryPoint>> {
+    discovered: Option<&[plow_types::discover::DiscoveredFile]>,
+    plugin_result: Option<&plow_core::plugins::AggregatedPluginResult>,
+) -> Option<Vec<plow_core::discover::EntryPoint>> {
     if !(opts.entry_points || show_all) {
         return None;
     }
     let disc = discovered?;
-    let mut entries = fallow_core::discover::discover_entry_points(config, disc);
-    let workspaces = fallow_config::discover_workspaces(opts.root);
+    let mut entries = plow_core::discover::discover_entry_points(config, disc);
+    let workspaces = plow_config::discover_workspaces(opts.root);
     for ws in &workspaces {
         let ws_entries =
-            fallow_core::discover::discover_workspace_entry_points(&ws.root, config, disc);
+            plow_core::discover::discover_workspace_entry_points(&ws.root, config, disc);
         entries.extend(ws_entries);
     }
     if let Some(pr) = plugin_result {
-        let plugin_entries = fallow_core::discover::discover_plugin_entry_points(pr, config, disc);
+        let plugin_entries = plow_core::discover::discover_plugin_entry_points(pr, config, disc);
         entries.extend(plugin_entries);
     }
     Some(entries)
@@ -121,13 +121,13 @@ fn collect_list_entry_points(
 
 fn collect_list_workspace_data(
     opts: &ListOptions<'_>,
-    config: &fallow_config::ResolvedConfig,
+    config: &plow_config::ResolvedConfig,
     show_all: bool,
 ) -> Result<Option<WorkspaceData>, ExitCode> {
     if !(opts.workspaces || show_all) {
         return Ok(None);
     }
-    match fallow_config::discover_workspaces_with_diagnostics(opts.root, &config.ignore_patterns) {
+    match plow_config::discover_workspaces_with_diagnostics(opts.root, &config.ignore_patterns) {
         Ok((workspaces, mut diagnostics)) => {
             append_undeclared_workspace_diagnostics(
                 opts.root,
@@ -146,11 +146,11 @@ fn collect_list_workspace_data(
 
 fn append_undeclared_workspace_diagnostics(
     root: &std::path::Path,
-    config: &fallow_config::ResolvedConfig,
-    workspaces: &[fallow_config::WorkspaceInfo],
-    diagnostics: &mut Vec<fallow_config::WorkspaceDiagnostic>,
+    config: &plow_config::ResolvedConfig,
+    workspaces: &[plow_config::WorkspaceInfo],
+    diagnostics: &mut Vec<plow_config::WorkspaceDiagnostic>,
 ) {
-    let undeclared = fallow_config::find_undeclared_workspaces_with_ignores(
+    let undeclared = plow_config::find_undeclared_workspaces_with_ignores(
         root,
         workspaces,
         &config.ignore_patterns,
@@ -190,15 +190,15 @@ const fn needs_file_discovery(
 
 fn collect_plugin_result(
     opts: &ListOptions<'_>,
-    config: &fallow_config::ResolvedConfig,
+    config: &plow_config::ResolvedConfig,
     show_all: bool,
-) -> Result<Option<fallow_core::plugins::AggregatedPluginResult>, ExitCode> {
+) -> Result<Option<plow_core::plugins::AggregatedPluginResult>, ExitCode> {
     if !(opts.plugins || opts.entry_points || show_all) {
         return Ok(None);
     }
-    let disc = fallow_core::discover::discover_files_with_plugin_scopes(config);
+    let disc = plow_core::discover::discover_files_with_plugin_scopes(config);
     let file_paths: Vec<std::path::PathBuf> = disc.iter().map(|f| f.path.clone()).collect();
-    let registry = fallow_core::plugins::PluginRegistry::new(config.external_plugins.clone());
+    let registry = plow_core::plugins::PluginRegistry::new(config.external_plugins.clone());
     let mut result = run_package_plugins(
         &registry,
         &opts.root.join("package.json"),
@@ -212,31 +212,31 @@ fn collect_plugin_result(
 }
 
 fn run_package_plugins(
-    registry: &fallow_core::plugins::PluginRegistry,
+    registry: &plow_core::plugins::PluginRegistry,
     package_path: &std::path::Path,
     root: &std::path::Path,
     file_paths: &[std::path::PathBuf],
     output: OutputFormat,
-) -> Result<Option<fallow_core::plugins::AggregatedPluginResult>, ExitCode> {
-    let Ok(pkg) = fallow_config::PackageJson::load(package_path) else {
+) -> Result<Option<plow_core::plugins::AggregatedPluginResult>, ExitCode> {
+    let Ok(pkg) = plow_config::PackageJson::load(package_path) else {
         return Ok(None);
     };
     registry
         .try_run(&pkg, root, file_paths)
         .map(Some)
         .map_err(|errors| {
-            let message = fallow_core::plugins::registry::format_plugin_regex_errors(&errors);
+            let message = plow_core::plugins::registry::format_plugin_regex_errors(&errors);
             crate::error::emit_error(&message, 2, output)
         })
 }
 
 fn merge_workspace_plugins(
     opts: &ListOptions<'_>,
-    registry: &fallow_core::plugins::PluginRegistry,
+    registry: &plow_core::plugins::PluginRegistry,
     file_paths: &[std::path::PathBuf],
-    result: &mut fallow_core::plugins::AggregatedPluginResult,
+    result: &mut plow_core::plugins::AggregatedPluginResult,
 ) -> Result<(), ExitCode> {
-    for ws in &fallow_config::discover_workspaces(opts.root) {
+    for ws in &plow_config::discover_workspaces(opts.root) {
         let Some(ws_result) = run_package_plugins(
             registry,
             &ws.root.join("package.json"),
@@ -260,9 +260,9 @@ fn merge_workspace_plugins(
 struct ListJsonInput<'a> {
     opts: &'a ListOptions<'a>,
     show_all: bool,
-    plugin_result: Option<&'a fallow_core::plugins::AggregatedPluginResult>,
-    discovered: Option<&'a [fallow_core::discover::DiscoveredFile]>,
-    entry_points: Option<&'a [fallow_core::discover::EntryPoint]>,
+    plugin_result: Option<&'a plow_core::plugins::AggregatedPluginResult>,
+    discovered: Option<&'a [plow_core::discover::DiscoveredFile]>,
+    entry_points: Option<&'a [plow_core::discover::EntryPoint]>,
     boundary_data: Option<&'a BoundaryData>,
     workspace_data: Option<&'a WorkspaceData>,
 }
@@ -376,9 +376,9 @@ fn workspace_data_to_output(root: &std::path::Path, ws: &WorkspaceData) -> Works
 struct ListHumanInput<'a> {
     opts: &'a ListOptions<'a>,
     show_all: bool,
-    plugin_result: Option<&'a fallow_core::plugins::AggregatedPluginResult>,
-    discovered: Option<&'a [fallow_core::discover::DiscoveredFile]>,
-    entry_points: Option<&'a [fallow_core::discover::EntryPoint]>,
+    plugin_result: Option<&'a plow_core::plugins::AggregatedPluginResult>,
+    discovered: Option<&'a [plow_core::discover::DiscoveredFile]>,
+    entry_points: Option<&'a [plow_core::discover::EntryPoint]>,
     boundary_data: Option<&'a BoundaryData>,
     workspace_data: Option<&'a WorkspaceData>,
 }
@@ -432,7 +432,7 @@ fn print_list_human(input: &ListHumanInput<'_>) {
 /// Human-mode render for the workspaces section.
 ///
 /// When the user opted into `--workspaces` explicitly (or via the
-/// `fallow workspaces` alias), the renderer always emits SOMETHING so the
+/// `plow workspaces` alias), the renderer always emits SOMETHING so the
 /// user is not staring at silence on a non-monorepo. When the section is
 /// rendered as part of the implicit show-all default, an empty result stays
 /// silent to avoid noise on single-package projects.
@@ -476,8 +476,8 @@ fn print_workspace_data_human(root: &std::path::Path, ws: &WorkspaceData, explic
 /// produced during discovery (malformed package.json, unreachable glob
 /// matches, missing tsconfig references, undeclared workspaces).
 struct WorkspaceData {
-    workspaces: Vec<fallow_config::WorkspaceInfo>,
-    diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
+    workspaces: Vec<plow_config::WorkspaceInfo>,
+    diagnostics: Vec<plow_config::WorkspaceDiagnostic>,
 }
 
 struct BoundaryData {
@@ -498,7 +498,7 @@ struct RuleInfo {
     allow: Vec<String>,
 }
 
-/// View-model mirror of [`fallow_config::LogicalGroup`] with the summed
+/// View-model mirror of [`plow_config::LogicalGroup`] with the summed
 /// `file_count` derived from `zones[]`. The config-layer type stops at
 /// "what did the user write?"; this struct adds the analytical view "how
 /// many files does the group reach?" so the JSON consumer (Sankey
@@ -507,10 +507,10 @@ struct LogicalGroupInfo {
     name: String,
     children: Vec<String>,
     auto_discover: Vec<String>,
-    authored_rule: Option<fallow_config::AuthoredRule>,
+    authored_rule: Option<plow_config::AuthoredRule>,
     fallback_zone: Option<String>,
     source_zone_index: usize,
-    status: fallow_config::LogicalGroupStatus,
+    status: plow_config::LogicalGroupStatus,
     /// Sum of `file_count` across `children` PLUS the fallback zone's
     /// `file_count` when present. The two halves are kept separately in
     /// [`Self::child_file_count`] and [`Self::fallback_file_count`] so the
@@ -524,20 +524,20 @@ struct LogicalGroupInfo {
     fallback_file_count: usize,
     /// Parent zone indices merged into this group when the user declared
     /// the same parent name twice. Mirrors
-    /// [`fallow_config::LogicalGroup::merged_from`].
+    /// [`plow_config::LogicalGroup::merged_from`].
     merged_from: Option<Vec<usize>>,
     /// Parent zone's `root` (subtree scope) as the user authored it.
-    /// Mirrors [`fallow_config::LogicalGroup::original_zone_root`].
+    /// Mirrors [`plow_config::LogicalGroup::original_zone_root`].
     original_zone_root: Option<String>,
     /// Parallel to `children`: source path indices. Empty when only one
     /// `auto_discover` path was authored. Mirrors
-    /// [`fallow_config::LogicalGroup::child_source_indices`].
+    /// [`plow_config::LogicalGroup::child_source_indices`].
     child_source_indices: Vec<usize>,
 }
 
 fn compute_boundary_data(
-    config: &fallow_config::ResolvedConfig,
-    discovered: Option<&[fallow_core::discover::DiscoveredFile]>,
+    config: &plow_config::ResolvedConfig,
+    discovered: Option<&[plow_core::discover::DiscoveredFile]>,
 ) -> BoundaryData {
     let boundaries = &config.boundaries;
 
@@ -686,9 +686,9 @@ fn boundary_data_to_json(bd: &BoundaryData) -> serde_json::Value {
 
 fn logical_group_info_to_json(g: &LogicalGroupInfo) -> serde_json::Value {
     let status = match g.status {
-        fallow_config::LogicalGroupStatus::Ok => "ok",
-        fallow_config::LogicalGroupStatus::Empty => "empty",
-        fallow_config::LogicalGroupStatus::InvalidPath => "invalid_path",
+        plow_config::LogicalGroupStatus::Ok => "ok",
+        plow_config::LogicalGroupStatus::Empty => "empty",
+        plow_config::LogicalGroupStatus::InvalidPath => "invalid_path",
     };
     let mut entry = serde_json::Map::new();
     entry.insert("name".to_string(), serde_json::json!(g.name));
@@ -782,15 +782,15 @@ fn print_boundary_data_human(bd: &BoundaryData) {
         eprintln!("\nLogical groups:");
         let mut ordered: Vec<&LogicalGroupInfo> = bd.logical_groups.iter().collect();
         ordered.sort_by_key(|g| match g.status {
-            fallow_config::LogicalGroupStatus::InvalidPath => 0,
-            fallow_config::LogicalGroupStatus::Empty => 1,
-            fallow_config::LogicalGroupStatus::Ok => 2,
+            plow_config::LogicalGroupStatus::InvalidPath => 0,
+            plow_config::LogicalGroupStatus::Empty => 1,
+            plow_config::LogicalGroupStatus::Ok => 2,
         });
         for g in ordered {
             let status_suffix = match g.status {
-                fallow_config::LogicalGroupStatus::Ok => String::new(),
-                fallow_config::LogicalGroupStatus::Empty => " (empty)".to_owned(),
-                fallow_config::LogicalGroupStatus::InvalidPath => " (invalid path)".to_owned(),
+                plow_config::LogicalGroupStatus::Ok => String::new(),
+                plow_config::LogicalGroupStatus::Empty => " (empty)".to_owned(),
+                plow_config::LogicalGroupStatus::InvalidPath => " (invalid path)".to_owned(),
             };
             let file_count_render = if g.fallback_zone.is_some() {
                 format!(
@@ -987,13 +987,13 @@ mod tests {
                 name: "features".to_string(),
                 children: vec!["features/auth".to_string(), "features/billing".to_string()],
                 auto_discover: vec!["./src/features/".to_string()],
-                authored_rule: Some(fallow_config::AuthoredRule {
+                authored_rule: Some(plow_config::AuthoredRule {
                     allow: vec!["shared".to_string()],
                     allow_type_only: vec!["types".to_string()],
                 }),
                 fallback_zone: None,
                 source_zone_index: 1,
-                status: fallow_config::LogicalGroupStatus::Ok,
+                status: plow_config::LogicalGroupStatus::Ok,
                 file_count: 8,
                 child_file_count: 8,
                 fallback_file_count: 0,
@@ -1027,12 +1027,9 @@ mod tests {
     #[test]
     fn boundary_json_logical_group_status_serializations() {
         for (status, expected) in [
-            (fallow_config::LogicalGroupStatus::Ok, "ok"),
-            (fallow_config::LogicalGroupStatus::Empty, "empty"),
-            (
-                fallow_config::LogicalGroupStatus::InvalidPath,
-                "invalid_path",
-            ),
+            (plow_config::LogicalGroupStatus::Ok, "ok"),
+            (plow_config::LogicalGroupStatus::Empty, "empty"),
+            (plow_config::LogicalGroupStatus::InvalidPath, "invalid_path"),
         ] {
             let bd = BoundaryData {
                 zones: vec![],
@@ -1075,7 +1072,7 @@ mod tests {
                 authored_rule: None,
                 fallback_zone: Some("features".to_string()),
                 source_zone_index: 0,
-                status: fallow_config::LogicalGroupStatus::Empty,
+                status: plow_config::LogicalGroupStatus::Empty,
                 file_count: 2,
                 child_file_count: 0,
                 fallback_file_count: 2,
@@ -1098,13 +1095,13 @@ mod tests {
                 name: "features".to_string(),
                 children: vec![],
                 auto_discover: vec!["src/features".to_string()],
-                authored_rule: Some(fallow_config::AuthoredRule {
+                authored_rule: Some(plow_config::AuthoredRule {
                     allow: vec!["shared".to_string()],
                     allow_type_only: vec![],
                 }),
                 fallback_zone: None,
                 source_zone_index: 0,
-                status: fallow_config::LogicalGroupStatus::Empty,
+                status: plow_config::LogicalGroupStatus::Empty,
                 file_count: 0,
                 child_file_count: 0,
                 fallback_file_count: 0,
@@ -1132,7 +1129,7 @@ mod tests {
                 authored_rule: None,
                 fallback_zone: None,
                 source_zone_index: 0,
-                status: fallow_config::LogicalGroupStatus::Ok,
+                status: plow_config::LogicalGroupStatus::Ok,
                 file_count: 0,
                 child_file_count: 0,
                 fallback_file_count: 0,
@@ -1160,7 +1157,7 @@ mod tests {
                 authored_rule: None,
                 fallback_zone: None,
                 source_zone_index: 0,
-                status: fallow_config::LogicalGroupStatus::Ok,
+                status: plow_config::LogicalGroupStatus::Ok,
                 file_count: 0,
                 child_file_count: 0,
                 fallback_file_count: 0,
@@ -1189,7 +1186,7 @@ mod tests {
                 authored_rule: None,
                 fallback_zone: None,
                 source_zone_index: 0,
-                status: fallow_config::LogicalGroupStatus::Ok,
+                status: plow_config::LogicalGroupStatus::Ok,
                 file_count: 0,
                 child_file_count: 0,
                 fallback_file_count: 0,

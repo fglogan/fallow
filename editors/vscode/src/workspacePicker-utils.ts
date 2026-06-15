@@ -7,7 +7,7 @@ import type { WorkspaceInfo, WorkspacesOutput } from "./types.js";
 
 /**
  * The synthetic name persisted to `workspaceState` / read from the
- * `fallow.workspace` setting that represents "analyze the whole project".
+ * `plow.workspace` setting that represents "analyze the whole project".
  * Empty string is the inert default, identical to today's behavior.
  */
 export const CLEAR_WORKSPACE_SCOPE = "";
@@ -43,7 +43,7 @@ const parseWorkspaceDiagnostics = (value: unknown): WorkspacesOutput["workspace_
 };
 
 /**
- * Parse `fallow workspaces --format json` stdout into the typed envelope.
+ * Parse `plow workspaces --format json` stdout into the typed envelope.
  * Returns null on empty input, invalid JSON, or a payload missing the
  * `workspaces` array, so the caller can show an actionable message rather
  * than throw. Malformed individual entries are dropped, not fatal.
@@ -182,11 +182,11 @@ export const buildWorkspaceQuickPickItems = (
 
 /**
  * The status-bar label for the picker item. Unscoped reads
- * `$(layers) Fallow: All`; a scoped selection reads `$(layers) <pkg>`.
+ * `$(layers) Plow: All`; a scoped selection reads `$(layers) <pkg>`.
  * Pure so it can be unit-tested without a status-bar mock.
  */
 export const renderWorkspaceStatusBarText = (active: string): string =>
-  active === CLEAR_WORKSPACE_SCOPE ? "$(layers) Fallow: All" : `$(layers) ${active}`;
+  active === CLEAR_WORKSPACE_SCOPE ? "$(layers) Plow: All" : `$(layers) ${active}`;
 
 /**
  * Disclosure appended to the picker tooltip and select/clear toasts. The scope
@@ -201,12 +201,12 @@ export const WORKSPACE_SCOPE_DISCLOSURE =
 /** Tooltip for the picker status-bar item. Neutral copy: it scopes, not judges. */
 export const renderWorkspaceStatusBarTooltip = (active: string): string =>
   active === CLEAR_WORKSPACE_SCOPE
-    ? `Fallow: analyzing the whole project. Click to scope to a single workspace. ${WORKSPACE_SCOPE_DISCLOSURE}`
-    : `Fallow: scoped to ${active}. Click to change or clear the scope. ${WORKSPACE_SCOPE_DISCLOSURE}`;
+    ? `Plow: analyzing the whole project. Click to scope to a single workspace. ${WORKSPACE_SCOPE_DISCLOSURE}`
+    : `Plow: scoped to ${active}. Click to change or clear the scope. ${WORKSPACE_SCOPE_DISCLOSURE}`;
 
 /**
  * Resolve the effective workspace scope. A per-folder `workspaceState`
- * override (set via the picker) wins; otherwise the `fallow.workspace`
+ * override (set via the picker) wins; otherwise the `plow.workspace`
  * setting provides a pinned default; empty means whole-project. Mirrors the
  * `changedSince` precedent. `undefined` for either input is treated as unset.
  */
@@ -227,7 +227,7 @@ export const resolveWorkspaceScope = (
  * The info-toast text shown after the user clears the picker override.
  *
  * Clearing the override does not always reach whole-project: a pinned
- * `fallow.workspace` setting still scopes the analysis. So the message reports
+ * `plow.workspace` setting still scopes the analysis. So the message reports
  * the ACTUAL residual scope. `residualScope` is the scope after the override is
  * cleared, i.e. `resolveWorkspaceScope("", settingScope)`: empty means
  * whole-project, a non-empty value is the still-pinned setting. Pure so the
@@ -235,5 +235,5 @@ export const resolveWorkspaceScope = (
  */
 export const clearedScopeToast = (residualScope: string): string =>
   residualScope === CLEAR_WORKSPACE_SCOPE
-    ? "Fallow: scope cleared. Analyzing the whole project."
-    : `Fallow: cleared the picker override; still scoped to ${residualScope} via the fallow.workspace setting.`;
+    ? "Plow: scope cleared. Analyzing the whole project."
+    : `Plow: cleared the picker override; still scoped to ${residualScope} via the plow.workspace setting.`;

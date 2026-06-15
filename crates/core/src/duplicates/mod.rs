@@ -97,7 +97,7 @@ struct DuplicationTokenizeContext<'a> {
     default_skip_counts: &'a [AtomicUsize],
     token_cache: Option<&'a TokenCache>,
     token_cache_mode: TokenCacheMode,
-    normalization: fallow_config::ResolvedNormalization,
+    normalization: plow_config::ResolvedNormalization,
     strip_types: bool,
     skip_imports: bool,
 }
@@ -158,7 +158,7 @@ pub fn find_duplicates_cached_with_default_ignore_skips(
 /// materializing duplicate groups that cannot appear in the scoped report.
 #[expect(
     clippy::implicit_hasher,
-    reason = "fallow uses FxHashSet for changed-file sets throughout analysis"
+    reason = "plow uses FxHashSet for changed-file sets throughout analysis"
 )]
 pub fn find_duplicates_touching_files(
     root: &Path,
@@ -173,7 +173,7 @@ pub fn find_duplicates_touching_files(
 /// for files skipped by built-in duplicates ignores.
 #[expect(
     clippy::implicit_hasher,
-    reason = "fallow uses FxHashSet for changed-file sets throughout analysis"
+    reason = "plow uses FxHashSet for changed-file sets throughout analysis"
 )]
 pub fn find_duplicates_touching_files_with_default_ignore_skips(
     root: &Path,
@@ -188,7 +188,7 @@ pub fn find_duplicates_touching_files_with_default_ignore_skips(
 /// Run focused duplication detection with the persistent token cache enabled.
 #[expect(
     clippy::implicit_hasher,
-    reason = "fallow uses FxHashSet for changed-file sets throughout analysis"
+    reason = "plow uses FxHashSet for changed-file sets throughout analysis"
 )]
 pub fn find_duplicates_touching_files_cached(
     root: &Path,
@@ -204,7 +204,7 @@ pub fn find_duplicates_touching_files_cached(
 /// metadata for files skipped by built-in duplicates ignores.
 #[expect(
     clippy::implicit_hasher,
-    reason = "fallow uses FxHashSet for changed-file sets throughout analysis"
+    reason = "plow uses FxHashSet for changed-file sets throughout analysis"
 )]
 pub fn find_duplicates_touching_files_cached_with_default_ignore_skips(
     root: &Path,
@@ -237,7 +237,7 @@ fn find_duplicates_inner(
         .unwrap_or_default();
 
     let normalization =
-        fallow_config::ResolvedNormalization::resolve(config.mode, &config.normalization);
+        plow_config::ResolvedNormalization::resolve(config.mode, &config.normalization);
 
     let strip_types = config.cross_language;
     let skip_imports = config.ignore_imports;
@@ -725,7 +725,7 @@ export function validateInput(data: string): boolean {
             min_lines: 2,
             ..DuplicatesConfig::default()
         };
-        let cache_root = dir.path().join(".fallow");
+        let cache_root = dir.path().join(".plow");
 
         let report = find_duplicates_cached(dir.path(), &files, &config, &cache_root);
 
@@ -847,7 +847,7 @@ export function processData(input: string): string {
     return mapped.join(", ");
 }
 "#;
-        let suppressed_code = format!("// fallow-ignore-file code-duplication\n{code}");
+        let suppressed_code = format!("// plow-ignore-file code-duplication\n{code}");
 
         std::fs::write(src_dir.join("original.ts"), code).expect("write original");
         std::fs::write(src_dir.join("suppressed.ts"), &suppressed_code).expect("write suppressed");
@@ -1021,7 +1021,7 @@ export function shared(input: string): string {
     return mapped.join(", ");
 }
 "#;
-        let suppressed = format!("// fallow-ignore-file code-duplication\n{block}");
+        let suppressed = format!("// plow-ignore-file code-duplication\n{block}");
 
         let a = src_dir.join("a.ts");
         let b = src_dir.join("b.ts");

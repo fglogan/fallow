@@ -4,7 +4,7 @@ set -euo pipefail
 # Post inline MR discussions with rich markdown formatting and suggestion blocks
 # Required env: GITLAB_TOKEN, CI_API_V4_URL, CI_PROJECT_ID,
 #   CI_MERGE_REQUEST_IID, CI_COMMIT_SHA, CI_MERGE_REQUEST_DIFF_BASE_SHA,
-#   FALLOW_COMMAND, FALLOW_ROOT, MAX_COMMENTS
+#   PLOW_COMMAND, PLOW_ROOT, MAX_COMMENTS
 
 MAX="${MAX_COMMENTS:-50}"
 if ! [[ "$MAX" =~ ^[0-9]+$ ]]; then
@@ -13,7 +13,7 @@ if ! [[ "$MAX" =~ ^[0-9]+$ ]]; then
 fi
 
 # Reject path traversal in root
-if [[ "${FALLOW_ROOT:-}" =~ \.\. ]]; then
+if [[ "${PLOW_ROOT:-}" =~ \.\. ]]; then
   echo "ERROR: root input contains path traversal sequence"
   exit 2
 fi
@@ -34,27 +34,27 @@ DISCUSSIONS_URL="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${CI_
 # Initialize two sidecar markers so downstream jobs always see definitive
 # values. GitLab CI lacks an equivalent of $GITHUB_OUTPUT for cross-job
 # propagation; these greppable text files serve the same role when added to
-# `artifacts: paths:`. `fallow-skip-reason.txt` is `pagination_failure` only
+# `artifacts: paths:`. `plow-skip-reason.txt` is `pagination_failure` only
 # when the inline-review POST is actually skipped (multi-discussion abort);
-# `fallow-dedup-lookup-failed.txt` is `true` on any dedup-lookup failure
+# `plow-dedup-lookup-failed.txt` is `true` on any dedup-lookup failure
 # (including the summary-only path where we post a potential duplicate).
 #
 # IMPORTANT: comment.sh runs BEFORE review.sh in the default template
 # (ci/gitlab-ci.yml). If comment.sh hit its dedup-lookup failure path it
-# already wrote `true` to fallow-dedup-lookup-failed.txt; reinitializing
+# already wrote `true` to plow-dedup-lookup-failed.txt; reinitializing
 # unconditionally here would clobber that value and hide the degraded
 # state from downstream jobs. Only initialize each marker when the file
 # does not already exist.
-[ -f fallow-skip-reason.txt ] || printf 'none\n' > fallow-skip-reason.txt
-[ -f fallow-dedup-lookup-failed.txt ] || printf 'false\n' > fallow-dedup-lookup-failed.txt
+[ -f plow-skip-reason.txt ] || printf 'none\n' > plow-skip-reason.txt
+[ -f plow-dedup-lookup-failed.txt ] || printf 'false\n' > plow-dedup-lookup-failed.txt
 
 # Track mktemp files so an EXIT trap cleans them up on signal or early exit.
-_FALLOW_TMPS=()
-trap 'rm -f "${_FALLOW_TMPS[@]:-}"' EXIT
+_PLOW_TMPS=()
+trap 'rm -f "${_PLOW_TMPS[@]:-}"' EXIT
 
 curl_retry() {
-  local attempts="${FALLOW_API_RETRIES:-3}"
-  local delay="${FALLOW_API_RETRY_DELAY:-2}"
+  local attempts="${PLOW_API_RETRIES:-3}"
+  local delay="${PLOW_API_RETRY_DELAY:-2}"
   local attempt=1
   local err out
   err=$(mktemp)
@@ -115,7 +115,7 @@ curl_paginate() {
 }
 
 load_gitlab_diff_refs() {
-  if [ -n "${FALLOW_GITLAB_BASE_SHA:-}" ] && [ -n "${FALLOW_GITLAB_HEAD_SHA:-}" ]; then
+  if [ -n "${PLOW_GITLAB_BASE_SHA:-}" ] && [ -n "${PLOW_GITLAB_HEAD_SHA:-}" ]; then
     return 0
   fi
   local diff_refs=""
@@ -127,26 +127,26 @@ load_gitlab_diff_refs() {
       diff_refs=""
     }
   if [ -n "$diff_refs" ] && echo "$diff_refs" | jq -e '.base_sha and .head_sha' > /dev/null 2>&1; then
-    export FALLOW_GITLAB_BASE_SHA
-    export FALLOW_GITLAB_START_SHA
-    export FALLOW_GITLAB_HEAD_SHA
-    FALLOW_GITLAB_BASE_SHA=$(echo "$diff_refs" | jq -r '.base_sha')
-    FALLOW_GITLAB_START_SHA=$(echo "$diff_refs" | jq -r '.start_sha // .base_sha')
-    FALLOW_GITLAB_HEAD_SHA=$(echo "$diff_refs" | jq -r '.head_sha')
+    export PLOW_GITLAB_BASE_SHA
+    export PLOW_GITLAB_START_SHA
+    export PLOW_GITLAB_HEAD_SHA
+    PLOW_GITLAB_BASE_SHA=$(echo "$diff_refs" | jq -r '.base_sha')
+    PLOW_GITLAB_START_SHA=$(echo "$diff_refs" | jq -r '.start_sha // .base_sha')
+    PLOW_GITLAB_HEAD_SHA=$(echo "$diff_refs" | jq -r '.head_sha')
   else
-    export FALLOW_GITLAB_BASE_SHA="${FALLOW_GITLAB_BASE_SHA:-${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}}"
-    export FALLOW_GITLAB_START_SHA="${FALLOW_GITLAB_START_SHA:-${FALLOW_GITLAB_BASE_SHA:-}}"
-    export FALLOW_GITLAB_HEAD_SHA="${FALLOW_GITLAB_HEAD_SHA:-${CI_COMMIT_SHA:-}}"
+    export PLOW_GITLAB_BASE_SHA="${PLOW_GITLAB_BASE_SHA:-${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}}"
+    export PLOW_GITLAB_START_SHA="${PLOW_GITLAB_START_SHA:-${PLOW_GITLAB_BASE_SHA:-}}"
+    export PLOW_GITLAB_HEAD_SHA="${PLOW_GITLAB_HEAD_SHA:-${CI_COMMIT_SHA:-}}"
   fi
 }
 
-render_with_fallow() {
+render_with_plow() {
   local format=$1
   local output=$2
-  [ -f fallow-analysis-args.sh ] || return 1
+  [ -f plow-analysis-args.sh ] || return 1
   # shellcheck disable=SC1091
-  source fallow-analysis-args.sh
-  local args=("${FALLOW_ANALYSIS_ARGS[@]}")
+  source plow-analysis-args.sh
+  local args=("${PLOW_ANALYSIS_ARGS[@]}")
   local replaced=false
   for i in "${!args[@]}"; do
     if [ "${args[$i]}" = "--format" ] && [ $((i + 1)) -lt "${#args[@]}" ]; then
@@ -158,74 +158,74 @@ render_with_fallow() {
   if [ "$replaced" != "true" ]; then
     args+=(--format "$format")
   fi
-  if [ -z "${FALLOW_DIFF_FILE:-}" ] && [ -n "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}" ]; then
-    if git diff "${CI_MERGE_REQUEST_DIFF_BASE_SHA}..HEAD" > fallow-mr.diff 2>fallow-mr-diff-stderr.log; then
-      export FALLOW_DIFF_FILE="$PWD/fallow-mr.diff"
+  if [ -z "${PLOW_DIFF_FILE:-}" ] && [ -n "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}" ]; then
+    if git diff "${CI_MERGE_REQUEST_DIFF_BASE_SHA}..HEAD" > plow-mr.diff 2>plow-mr-diff-stderr.log; then
+      export PLOW_DIFF_FILE="$PWD/plow-mr.diff"
     else
       echo "WARNING: Failed to fetch MR diff; diff filter disabled, reporting all findings"
-      rm -f fallow-mr.diff
+      rm -f plow-mr.diff
     fi
   fi
   load_gitlab_diff_refs
-  export FALLOW_DIFF_FILTER="${FALLOW_DIFF_FILTER:-added}"
-  FALLOW_MAX_COMMENTS="$MAX" fallow "${args[@]}" > "$output" 2> fallow-review-stderr.log || true
-  # Surface fallow's structured-error envelope before the schema check so the
+  export PLOW_DIFF_FILTER="${PLOW_DIFF_FILTER:-added}"
+  PLOW_MAX_COMMENTS="$MAX" plow "${args[@]}" > "$output" 2> plow-review-stderr.log || true
+  # Surface plow's structured-error envelope before the schema check so the
   # CLI message lands in the GitLab job log rather than a generic warning.
   if jq -e '.error == true' "$output" > /dev/null 2>&1; then
-    echo "WARNING: fallow render failed: $(jq -r '.message // "unknown error"' "$output")"
+    echo "WARNING: plow render failed: $(jq -r '.message // "unknown error"' "$output")"
     return 1
   fi
   # Accept both v1 (historical) and v2 (issue #528) schema markers so a
-  # consumer running an older bundled template against a newer fallow binary
-  # continues to render. Future-tolerant: any `fallow-review-envelope/v<N>`
+  # consumer running an older bundled template against a newer plow binary
+  # continues to render. Future-tolerant: any `plow-review-envelope/v<N>`
   # passes, on the assumption that the back-compat fields (`body`,
   # `comments[].{body,position}`) remain in every future version.
   jq -e '
-    (.meta.schema | test("^fallow-review-envelope/v[0-9]+$"))
+    (.meta.schema | test("^plow-review-envelope/v[0-9]+$"))
     and .meta.provider == "gitlab"
     and (.body | type == "string")
-    and (.body | contains("<!-- fallow-review -->"))
+    and (.body | contains("<!-- plow-review -->"))
     and (.comments | type == "array")
   ' "$output" > /dev/null 2>&1
 }
 
-if render_with_fallow review-gitlab fallow-review.json; then
+if render_with_plow review-gitlab plow-review.json; then
   reconcile_review() {
-    if fallow ci reconcile-review \
+    if plow ci reconcile-review \
       --provider gitlab \
       --mr "$CI_MERGE_REQUEST_IID" \
       --project-id "$CI_PROJECT_ID" \
       --api-url "$CI_API_V4_URL" \
-      --envelope fallow-review.json > fallow-review-reconcile.json 2> fallow-review-reconcile-stderr.log; then
-      if jq -e '(.apply_errors // []) | length > 0' fallow-review-reconcile.json > /dev/null 2>&1; then
-        HINT=$(jq -r '.apply_hint // "refresh provider state and rerun the job"' fallow-review-reconcile.json)
-        echo "WARNING: fallow reconcile-review apply incomplete: $HINT"
+      --envelope plow-review.json > plow-review-reconcile.json 2> plow-review-reconcile-stderr.log; then
+      if jq -e '(.apply_errors // []) | length > 0' plow-review-reconcile.json > /dev/null 2>&1; then
+        HINT=$(jq -r '.apply_hint // "refresh provider state and rerun the job"' plow-review-reconcile.json)
+        echo "WARNING: plow reconcile-review apply incomplete: $HINT"
       fi
     else
       echo "WARNING: Failed to reconcile resolved review discussions"
     fi
   }
 
-  TOTAL=$(jq '.comments | length' fallow-review.json)
+  TOTAL=$(jq '.comments | length' plow-review.json)
   if [ "$TOTAL" -eq 0 ]; then
-    BODY=$(jq -r '.body' fallow-review.json)
+    BODY=$(jq -r '.body' plow-review.json)
     # Summary-only path: dedup-lookup failure means we cannot find an
     # existing body note. Posting a fresh one (potential duplicate) beats
     # a missing summary, which is silently broken from the MR author's
     # view. The WARNING + sidecar artifact still surface the degradation.
     _NOTE_LOOKUP_TMP=$(mktemp); _NOTE_LOOKUP_ERR=$(mktemp)
-    _FALLOW_TMPS+=("$_NOTE_LOOKUP_TMP" "$_NOTE_LOOKUP_ERR")
+    _PLOW_TMPS+=("$_NOTE_LOOKUP_TMP" "$_NOTE_LOOKUP_ERR")
     if curl_paginate --header "${AUTH_HEADER}" "${NOTES_URL}?per_page=100" \
          > "$_NOTE_LOOKUP_TMP" 2> "$_NOTE_LOOKUP_ERR"; then
-      EXISTING_NOTE_ID=$(jq -r '.[] | select(.body | contains("<!-- fallow-review -->")) | .id' "$_NOTE_LOOKUP_TMP" \
+      EXISTING_NOTE_ID=$(jq -r '.[] | select(.body | contains("<!-- plow-review -->")) | .id' "$_NOTE_LOOKUP_TMP" \
         | head -1)
     else
       EXISTING_NOTE_ID=""
       _STDERR_HEAD=$(head -3 "$_NOTE_LOOKUP_ERR" | tr '\n' ' ')
-      echo "WARNING: fallow: failed to look up existing MR summary note; posting a new one (may duplicate). stderr: ${_STDERR_HEAD} Re-run the job to retry. If persistent, verify GITLAB_TOKEN scopes (api, read_api)." >&2
+      echo "WARNING: plow: failed to look up existing MR summary note; posting a new one (may duplicate). stderr: ${_STDERR_HEAD} Re-run the job to retry. If persistent, verify GITLAB_TOKEN scopes (api, read_api)." >&2
       # Summary-only path: the post proceeds anyway, so do NOT flip
-      # fallow-skip-reason.txt. Mark dedup-lookup-failed instead.
-      printf 'true\n' > fallow-dedup-lookup-failed.txt
+      # plow-skip-reason.txt. Mark dedup-lookup-failed instead.
+      printf 'true\n' > plow-dedup-lookup-failed.txt
     fi
     if [ -n "$EXISTING_NOTE_ID" ]; then
       curl_retry \
@@ -258,11 +258,11 @@ if render_with_fallow review-gitlab fallow-review.json; then
   # and warrants a loud CI failure (exit 1); 5xx / 429 / network blips
   # warrant exit 0 since a re-run may succeed.
   _DEDUP_TMP=$(mktemp); _DEDUP_ERR=$(mktemp)
-  _FALLOW_TMPS+=("$_DEDUP_TMP" "$_DEDUP_ERR")
+  _PLOW_TMPS+=("$_DEDUP_TMP" "$_DEDUP_ERR")
   if curl_paginate --header "${AUTH_HEADER}" "${DISCUSSIONS_URL}?per_page=100" \
        > "$_DEDUP_TMP" 2> "$_DEDUP_ERR"; then
-    # Extract fingerprints from both v1 (`<!-- fallow-fingerprint: <fp> -->`)
-    # and v2 (`<!-- fallow-fingerprint:v2: <fp> -->`) marker shapes so dedup
+    # Extract fingerprints from both v1 (`<!-- plow-fingerprint: <fp> -->`)
+    # and v2 (`<!-- plow-fingerprint:v2: <fp> -->`) marker shapes so dedup
     # idempotency survives the issue #528 migration. v2 markers use the
     # `:v2:` namespace; the v1 substring would otherwise capture `v2:` as the
     # fingerprint instead of the actual hex string. Two sed expressions, sort
@@ -270,15 +270,15 @@ if render_with_fallow review-gitlab fallow-review.json; then
     # construction today, defensive).
     EXISTING_FPS=$(jq -r '.[].notes[].body? // empty' "$_DEDUP_TMP" \
       | sed -n \
-        -e 's/.*fallow-fingerprint:v2: \([^ ]*\) .*/\1/p' \
-        -e 's/.*fallow-fingerprint: \([^ ]*\) .*/\1/p' \
+        -e 's/.*plow-fingerprint:v2: \([^ ]*\) .*/\1/p' \
+        -e 's/.*plow-fingerprint: \([^ ]*\) .*/\1/p' \
       | sort -u \
       | jq -R -s 'split("\n") | map(select(length > 0))')
   else
     _STDERR_HEAD=$(head -3 "$_DEDUP_ERR" | tr '\n' ' ')
-    echo "WARNING: fallow: failed to fetch existing MR discussions; skipping inline review to avoid duplicates. stderr: ${_STDERR_HEAD} Re-run the job to retry. If persistent, verify GITLAB_TOKEN scopes (api, read_api)." >&2
-    printf 'pagination_failure\n' > fallow-skip-reason.txt
-    printf 'true\n' > fallow-dedup-lookup-failed.txt
+    echo "WARNING: plow: failed to fetch existing MR discussions; skipping inline review to avoid duplicates. stderr: ${_STDERR_HEAD} Re-run the job to retry. If persistent, verify GITLAB_TOKEN scopes (api, read_api)." >&2
+    printf 'pagination_failure\n' > plow-skip-reason.txt
+    printf 'true\n' > plow-dedup-lookup-failed.txt
     # 4xx (auth, scope, permission) is a configuration error: a re-run
     # will not help, so escalate to exit 1 for loud CI failure. Exclude
     # 429 explicitly: it is the rate-limited variant and is transient
@@ -288,7 +288,7 @@ if render_with_fallow review-gitlab fallow-review.json; then
     # `bash review.sh || echo "WARNING: ..."`, which swallows exit 1.
     # Operators who want strict CI gating on 4xx should remove the
     # `|| echo` from their gitlab-ci.yml, or gate on
-    # `fallow-skip-reason.txt` and `fallow-dedup-lookup-failed.txt`
+    # `plow-skip-reason.txt` and `plow-dedup-lookup-failed.txt`
     # in a downstream job.
     if grep -qE 'HTTP 4[0-9][0-9]|error: 4[0-9][0-9]' "$_DEDUP_ERR" \
         && ! grep -qE 'HTTP 429|error: 429|rate.limit' "$_DEDUP_ERR"; then
@@ -298,17 +298,17 @@ if render_with_fallow review-gitlab fallow-review.json; then
   fi
   jq --argjson existing "${EXISTING_FPS:-[]}" '
     .comments |= map(select((.fingerprint as $fp | $existing | index($fp)) | not))
-  ' fallow-review.json > fallow-review-new.json
-  NEW_TOTAL=$(jq '.comments | length' fallow-review-new.json)
+  ' plow-review.json > plow-review-new.json
+  NEW_TOTAL=$(jq '.comments | length' plow-review-new.json)
   if [ "$NEW_TOTAL" -eq 0 ]; then
     reconcile_review
     echo "No new review comments to post"
     exit 0
   fi
 
-  BASE_SHA="${FALLOW_GITLAB_BASE_SHA:-}"
-  START_SHA="${FALLOW_GITLAB_START_SHA:-$BASE_SHA}"
-  HEAD_SHA="${FALLOW_GITLAB_HEAD_SHA:-}"
+  BASE_SHA="${PLOW_GITLAB_BASE_SHA:-}"
+  START_SHA="${PLOW_GITLAB_START_SHA:-$BASE_SHA}"
+  HEAD_SHA="${PLOW_GITLAB_HEAD_SHA:-}"
 
   POSTED=0
   SKIPPED=0
@@ -328,7 +328,7 @@ if render_with_fallow review-gitlab fallow-review.json; then
         "${NOTES_URL}" > /dev/null 2>&1 \
         && POSTED=$((POSTED + 1)) || SKIPPED=$((SKIPPED + 1))
     fi
-  done < <(jq -c '.comments[]' fallow-review-new.json)
+  done < <(jq -c '.comments[]' plow-review-new.json)
   echo "Posted ${POSTED} inline comments, skipped ${SKIPPED}"
   reconcile_review
   exit 0

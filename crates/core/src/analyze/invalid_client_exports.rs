@@ -4,7 +4,7 @@
 //! Next.js rejects a client-boundary module (`"use client"` directive) that
 //! also exports a server-only or route-segment config name such as `metadata`,
 //! `generateMetadata`, `revalidate`, or a route HTTP method (`GET`, `POST`,
-//! ...). The framework throws a build error for this combination; fallow
+//! ...). The framework throws a build error for this combination; plow
 //! catches it statically before the build runs.
 //!
 //! The detector is gated on the project declaring `next` as a dependency (see
@@ -14,7 +14,7 @@
 
 use rustc_hash::FxHashMap;
 
-use fallow_types::extract::{ExportName, ModuleInfo};
+use plow_types::extract::{ExportName, ModuleInfo};
 
 use crate::discover::FileId;
 use crate::graph::ModuleGraph;
@@ -75,7 +75,7 @@ const ILLEGAL_CLIENT_EXPORTS: &[&str] = &[
 /// default export is never reported (it is the client component itself).
 /// Suppression is routed through [`SuppressionContext`] with
 /// [`IssueKind::InvalidClientExport`] so a
-/// `// fallow-ignore-next-line invalid-client-export` comment works and is
+/// `// plow-ignore-next-line invalid-client-export` comment works and is
 /// recorded as consumed.
 #[must_use]
 pub fn find_invalid_client_exports(

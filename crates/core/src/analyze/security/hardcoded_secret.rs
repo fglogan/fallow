@@ -6,12 +6,12 @@
 
 use rustc_hash::FxHashMap;
 
-use fallow_types::extract::{ModuleInfo, SinkLiteralValue, SinkShape};
-use fallow_types::results::{
+use plow_types::extract::{ModuleInfo, SinkLiteralValue, SinkShape};
+use plow_types::results::{
     SecurityCandidate, SecurityCandidateBoundary, SecurityCandidateSink, SecurityFinding,
     SecurityFindingKind, SecuritySeverity, TraceHop, TraceHopRole,
 };
-use fallow_types::suppress::IssueKind;
+use plow_types::suppress::IssueKind;
 
 use super::tainted_sink::{CategoryFilter, build_actions, is_low_value_anchor};
 use super::{LineOffsetsMap, byte_offset_to_line_col};

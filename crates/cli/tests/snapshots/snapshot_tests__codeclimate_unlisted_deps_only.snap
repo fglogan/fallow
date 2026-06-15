@@ -5,13 +5,13 @@ expression: json_str
 [
   {
     "type": "issue",
-    "check_name": "fallow/unlisted-dependency",
+    "check_name": "plow/unlisted-dependency",
     "description": "Package 'chalk' is imported but not listed in package.json",
     "categories": [
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "e12b911cefa8959d",
+    "fingerprint": "a9c13fc2f98abb9e",
     "location": {
       "path": "src/logger.ts",
       "lines": {

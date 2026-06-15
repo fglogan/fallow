@@ -7,7 +7,7 @@
 //! are not reported as `unused-class-member`. Each rule is scoped to the
 //! relevant Nest interface so unrelated classes are unaffected.
 
-use fallow_config::{ScopedUsedClassMemberRule, UsedClassMemberRule};
+use plow_config::{ScopedUsedClassMemberRule, UsedClassMemberRule};
 
 use super::Plugin;
 

@@ -2,10 +2,10 @@ use std::process::Command;
 
 #[test]
 fn version_flag_exits_without_starting_stdio_server() {
-    let output = Command::new(env!("CARGO_BIN_EXE_fallow-mcp"))
+    let output = Command::new(env!("CARGO_BIN_EXE_plow-mcp"))
         .arg("--version")
         .output()
-        .unwrap_or_else(|err| panic!("failed to run fallow-mcp --version: {err}"));
+        .unwrap_or_else(|err| panic!("failed to run plow-mcp --version: {err}"));
 
     assert!(
         output.status.success(),
@@ -15,7 +15,7 @@ fn version_flag_exits_without_starting_stdio_server() {
     let stdout =
         String::from_utf8(output.stdout).unwrap_or_else(|err| panic!("invalid stdout: {err}"));
     assert!(
-        stdout.starts_with("fallow-mcp "),
+        stdout.starts_with("plow-mcp "),
         "unexpected version stdout: {stdout:?}"
     );
     assert!(

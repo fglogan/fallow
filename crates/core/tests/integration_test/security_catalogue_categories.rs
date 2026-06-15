@@ -11,9 +11,9 @@
 //! Findings are CANDIDATES for downstream agent verification, NOT verified
 //! vulnerabilities.
 
-use fallow_config::Severity;
-use fallow_core::results::{AnalysisResults, SecurityFinding, SecurityFindingKind};
-use fallow_types::extract::SecurityUrlShape;
+use plow_config::Severity;
+use plow_core::results::{AnalysisResults, SecurityFinding, SecurityFindingKind};
+use plow_types::extract::SecurityUrlShape;
 
 use super::common::{create_config, create_config_with_rules, fixture_path};
 
@@ -22,14 +22,14 @@ fn analyze_with_security_sink(fixture: &str) -> AnalysisResults {
     let config = create_config_with_rules(root, |rules| {
         rules.security_sink = Severity::Warn;
     });
-    fallow_core::analyze(&config).expect("analysis should succeed")
+    plow_core::analyze(&config).expect("analysis should succeed")
 }
 
 fn analyze_default_off(fixture: &str) -> AnalysisResults {
     let root = fixture_path(fixture);
     let config = create_config(root);
     assert_eq!(config.rules.security_sink, Severity::Off);
-    fallow_core::analyze(&config).expect("analysis should succeed")
+    plow_core::analyze(&config).expect("analysis should succeed")
 }
 
 /// Find a tainted-sink candidate anchored on a path suffix and assert it carries

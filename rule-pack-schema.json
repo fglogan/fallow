@@ -1,11 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "RulePackDef",
-  "description": "A declarative rule pack loaded from a standalone JSON or JSONC file listed\nin the `rulePacks` config key.\n\nRule packs are pure data: loading a pack never executes project code. They\nencode project-specific policy (banned calls, banned imports) evaluated\nover fallow's static extraction data, reporting as `policy-violation`\nfindings.\n\n```jsonc\n{\n  \"$schema\": \"https://raw.githubusercontent.com/fallow-rs/fallow/main/rule-pack-schema.json\",\n  \"version\": 1,\n  \"name\": \"team-policy\",\n  \"description\": \"House rules for the platform team\",\n  \"rules\": [\n    {\n      \"id\": \"no-child-process\",\n      \"kind\": \"banned-call\",\n      \"callees\": [\"child_process.*\"],\n      \"message\": \"Use the sandboxed runner instead.\",\n      \"severity\": \"error\"\n    },\n    {\n      \"id\": \"no-moment\",\n      \"kind\": \"banned-import\",\n      \"specifiers\": [\"moment\"],\n      \"message\": \"Use date-fns.\"\n    }\n  ]\n}\n```",
+  "description": "A declarative rule pack loaded from a standalone JSON or JSONC file listed\nin the `rulePacks` config key.\n\nRule packs are pure data: loading a pack never executes project code. They\nencode project-specific policy (banned calls, banned imports) evaluated\nover plow's static extraction data, reporting as `policy-violation`\nfindings.\n\n```jsonc\n{\n  \"$schema\": \"https://raw.githubusercontent.com/fglogan/genesis-plow/main/rule-pack-schema.json\",\n  \"version\": 1,\n  \"name\": \"team-policy\",\n  \"description\": \"House rules for the platform team\",\n  \"rules\": [\n    {\n      \"id\": \"no-child-process\",\n      \"kind\": \"banned-call\",\n      \"callees\": [\"child_process.*\"],\n      \"message\": \"Use the sandboxed runner instead.\",\n      \"severity\": \"error\"\n    },\n    {\n      \"id\": \"no-moment\",\n      \"kind\": \"banned-import\",\n      \"specifiers\": [\"moment\"],\n      \"message\": \"Use date-fns.\"\n    }\n  ]\n}\n```",
   "type": "object",
   "properties": {
     "version": {
-      "description": "Pack format version. Must be `1`; the field exists so future rule\nkinds can be added without breaking older fallow builds silently.",
+      "description": "Pack format version. Must be `1`; the field exists so future rule\nkinds can be added without breaking older plow builds silently.",
       "type": "integer",
       "format": "uint32",
       "minimum": 0

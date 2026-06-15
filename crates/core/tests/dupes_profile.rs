@@ -5,17 +5,17 @@
 )]
 
 //! Quick profiling harness for clone detection steps.
-//! Run with: cargo test -p fallow-core --test dupes_profile --release -- --nocapture
+//! Run with: cargo test -p plow-core --test dupes_profile --release -- --nocapture
 //!
-//! For step-level timing: FALLOW_PROFILE=1 cargo test -p fallow-core --test dupes_profile --release -- --nocapture
+//! For step-level timing: PLOW_PROFILE=1 cargo test -p plow-core --test dupes_profile --release -- --nocapture
 
 use std::path::PathBuf;
 use std::time::Instant;
 
-use fallow_core::duplicates::detect::CloneDetector;
-use fallow_core::duplicates::normalize::HashedToken;
-use fallow_core::duplicates::tokenize::{FileTokens, SourceToken, TokenKind};
 use oxc_span::Span;
+use plow_core::duplicates::detect::CloneDetector;
+use plow_core::duplicates::normalize::HashedToken;
+use plow_core::duplicates::tokenize::{FileTokens, SourceToken, TokenKind};
 
 fn make_hashed_tokens(hashes: &[u64]) -> Vec<HashedToken> {
     hashes
@@ -130,7 +130,7 @@ fn profile_scenario(name: &str, data: &DupeInput, runs: usize) {
 
 #[test]
 fn profile_dupe_detection() {
-    if std::env::var("FALLOW_PROFILE").is_ok() {
+    if std::env::var("PLOW_PROFILE").is_ok() {
         tracing_subscriber::fmt()
             .with_max_level(tracing::Level::DEBUG)
             .with_target(false)

@@ -4,16 +4,16 @@ use std::path::Path;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use fallow_core::duplicates::DuplicationReport;
-use fallow_core::results::AnalysisResults;
-use fallow_types::envelope::{CheckSummary, ElapsedMs, EntryPoints, SchemaVersion, ToolVersion};
+use plow_core::duplicates::DuplicationReport;
+use plow_core::results::AnalysisResults;
+use plow_types::envelope::{CheckSummary, ElapsedMs, EntryPoints, SchemaVersion, ToolVersion};
 
 use super::{emit_json, normalize_uri};
 use crate::explain;
 use crate::output_dupes::DupesReportPayload;
 use crate::output_envelope::{
-    CheckGroupedEntry, CheckGroupedOutput, CheckOutput, DupesOutput, FallowOutput, GroupByMode,
-    HealthOutput, serialize_root_output,
+    CheckGroupedEntry, CheckGroupedOutput, CheckOutput, DupesOutput, GroupByMode, HealthOutput,
+    PlowOutput, serialize_root_output,
 };
 use crate::report::grouping::{OwnershipResolver, ResultGroup};
 
@@ -123,7 +123,7 @@ pub(super) fn print_grouped_json(input: &PrintGroupedJsonInput<'_>) -> ExitCode 
         ),
     };
 
-    let mut output = match serialize_root_output(FallowOutput::CheckGrouped(envelope)) {
+    let mut output = match serialize_root_output(PlowOutput::CheckGrouped(envelope)) {
         Ok(value) => value,
         Err(e) => {
             eprintln!("Error: failed to serialize grouped results: {e}");
@@ -154,7 +154,7 @@ pub(crate) const SCHEMA_VERSION: u32 = 7;
 
 #[allow(
     dead_code,
-    reason = "used by the fallow-cli library target for embedders, but dead in the binary target"
+    reason = "used by the plow-cli library target for embedders, but dead in the binary target"
 )]
 pub fn build_json(
     results: &AnalysisResults,
@@ -182,7 +182,7 @@ pub fn build_json_with_config_fixable(
         crate::report::suggestions::setup_pointer_applicable(root),
         crate::report::suggestions::due_impact_digest(root),
     );
-    let mut output = serialize_root_output(FallowOutput::Check(envelope))?;
+    let mut output = serialize_root_output(PlowOutput::Check(envelope))?;
     postprocess_check_json(&mut output, root);
     Ok(output)
 }
@@ -422,7 +422,7 @@ fn rewrite_suppress_line_actions(
             if let Some(anchor) = suppression_anchor(map)
                 && let Some(kinds) = anchors.get(&anchor)
             {
-                let comment = format!("// fallow-ignore-next-line {}", kinds.join(", "));
+                let comment = format!("// plow-ignore-next-line {}", kinds.join(", "));
                 if let Some(actions) = map
                     .get_mut("actions")
                     .and_then(serde_json::Value::as_array_mut)
@@ -467,7 +467,7 @@ fn suppress_line_comment(action: &serde_json::Value) -> Option<&str> {
 
 fn parse_suppress_line_comment(comment: &str) -> Vec<String> {
     comment
-        .strip_prefix("// fallow-ignore-next-line ")
+        .strip_prefix("// plow-ignore-next-line ")
         .map(|rest| {
             rest.split(|c: char| c == ',' || c.is_whitespace())
                 .filter(|token| !token.is_empty())
@@ -563,7 +563,7 @@ pub fn build_health_json(
             crate::report::suggestions::due_impact_digest(root),
         ),
     };
-    let mut output = serialize_root_output(FallowOutput::Health(envelope))?;
+    let mut output = serialize_root_output(PlowOutput::Health(envelope))?;
     let root_prefix = format!("{}/", root.display());
     strip_root_prefix(&mut output, &root_prefix);
     if explain {
@@ -611,7 +611,7 @@ pub fn build_grouped_health_json(
             crate::report::suggestions::due_impact_digest(root),
         ),
     };
-    let mut output = serialize_root_output(FallowOutput::Health(envelope))?;
+    let mut output = serialize_root_output(PlowOutput::Health(envelope))?;
     strip_root_prefix(&mut output, &root_prefix);
 
     let group_values: Vec<serde_json::Value> = grouping
@@ -676,7 +676,7 @@ pub fn build_duplication_json(
         workspace_diagnostics: crate::runtime_support::workspace_diagnostics_for(root),
         next_steps,
     };
-    let mut output = serialize_root_output(FallowOutput::Dupes(envelope))?;
+    let mut output = serialize_root_output(PlowOutput::Dupes(envelope))?;
     let root_prefix = format!("{}/", root.display());
     strip_root_prefix(&mut output, &root_prefix);
 
@@ -729,7 +729,7 @@ pub fn build_grouped_duplication_json(
         workspace_diagnostics: crate::runtime_support::workspace_diagnostics_for(root),
         next_steps,
     };
-    let mut output = serialize_root_output(FallowOutput::Dupes(envelope))?;
+    let mut output = serialize_root_output(PlowOutput::Dupes(envelope))?;
     strip_root_prefix(&mut output, &root_prefix);
 
     let group_values: Vec<serde_json::Value> = grouping
@@ -803,8 +803,8 @@ mod tests {
         RuntimeCoverageWatermark,
     };
     use crate::report::test_helpers::sample_results;
-    use fallow_core::extract::MemberKind;
-    use fallow_core::results::*;
+    use plow_core::extract::MemberKind;
+    use plow_core::results::*;
     use std::path::PathBuf;
     use std::time::Duration;
 
@@ -876,7 +876,7 @@ mod tests {
                     }),
                 },
                 findings: vec![RuntimeCoverageFinding {
-                    id: "fallow:prod:deadbeef".to_owned(),
+                    id: "plow:prod:deadbeef".to_owned(),
                     stable_id: None,
                     path: root.join("src/cold.ts"),
                     function: "coldPath".to_owned(),
@@ -901,7 +901,7 @@ mod tests {
                     source_hash: None,
                 }],
                 hot_paths: vec![RuntimeCoverageHotPath {
-                    id: "fallow:hot:cafebabe".to_owned(),
+                    id: "plow:hot:cafebabe".to_owned(),
                     stable_id: None,
                     path: root.join("src/hot.ts"),
                     function: "hotPath".to_owned(),
@@ -955,7 +955,7 @@ mod tests {
         let finding = &output["runtime_coverage"]["findings"][0];
         assert_eq!(finding["path"], "src/cold.ts");
         assert_eq!(finding["verdict"], "review_required");
-        assert_eq!(finding["id"], "fallow:prod:deadbeef");
+        assert_eq!(finding["id"], "plow:prod:deadbeef");
         assert_eq!(finding["actions"][0]["type"], "review-deletion");
         let hot_path = &output["runtime_coverage"]["hot_paths"][0];
         assert_eq!(hot_path["path"], "src/hot.ts");
@@ -1463,7 +1463,7 @@ mod tests {
     fn duplicate_export_add_to_config_is_auto_fixable_when_config_exists() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        std::fs::write(root.join(".fallowrc.json"), "{}\n").unwrap();
+        std::fs::write(root.join(".plowrc.json"), "{}\n").unwrap();
         let mut results = AnalysisResults::default();
         results
             .duplicate_exports
@@ -2030,7 +2030,7 @@ mod tests {
         assert_eq!(actions[1]["type"], "suppress-line");
         assert_eq!(
             actions[1]["comment"],
-            "// fallow-ignore-next-line unused-export"
+            "// plow-ignore-next-line unused-export"
         );
     }
 
@@ -2058,7 +2058,7 @@ mod tests {
         assert_eq!(action["value"], "src/middleware/error.ts");
         assert_eq!(
             action["description"],
-            "Add \"src/middleware/error.ts\" to boundaries.coverage.allowUnmatched in fallow config"
+            "Add \"src/middleware/error.ts\" to boundaries.coverage.allowUnmatched in plow config"
         );
     }
 
@@ -2094,11 +2094,11 @@ mod tests {
         let type_actions = output["unused_types"][0]["actions"].as_array().unwrap();
         assert_eq!(
             export_actions[1]["comment"],
-            "// fallow-ignore-next-line unused-export, unused-type"
+            "// plow-ignore-next-line unused-export, unused-type"
         );
         assert_eq!(
             type_actions[1]["comment"],
-            "// fallow-ignore-next-line unused-export, unused-type"
+            "// plow-ignore-next-line unused-export, unused-type"
         );
     }
 
@@ -2114,7 +2114,7 @@ mod tests {
                         {
                             "type": "suppress-line",
                             "auto_fixable": false,
-                            "comment": "// fallow-ignore-next-line unused-export"
+                            "comment": "// plow-ignore-next-line unused-export"
                         }
                     ]
                 }]
@@ -2128,7 +2128,7 @@ mod tests {
                         {
                             "type": "suppress-line",
                             "auto_fixable": false,
-                            "comment": "// fallow-ignore-next-line complexity"
+                            "comment": "// plow-ignore-next-line complexity"
                         }
                     ]
                 }]
@@ -2139,11 +2139,11 @@ mod tests {
 
         assert_eq!(
             output["dead_code"]["unused_exports"][0]["actions"][1]["comment"],
-            "// fallow-ignore-next-line unused-export, complexity"
+            "// plow-ignore-next-line unused-export, complexity"
         );
         assert_eq!(
             output["complexity"]["findings"][0]["actions"][1]["comment"],
-            "// fallow-ignore-next-line unused-export, complexity"
+            "// plow-ignore-next-line unused-export, complexity"
         );
     }
 
@@ -2163,7 +2163,7 @@ mod tests {
         assert_eq!(actions[0]["auto_fixable"], false);
         assert!(actions[0]["note"].is_string());
         assert_eq!(actions[1]["type"], "suppress-file");
-        assert_eq!(actions[1]["comment"], "// fallow-ignore-file unused-file");
+        assert_eq!(actions[1]["comment"], "// plow-ignore-file unused-file");
     }
 
     #[test]
@@ -2419,10 +2419,7 @@ mod tests {
                 .contains("processData")
         );
         assert_eq!(actions[1]["type"], "suppress-line");
-        assert_eq!(
-            actions[1]["comment"],
-            "// fallow-ignore-next-line complexity"
-        );
+        assert_eq!(actions[1]["comment"], "// plow-ignore-next-line complexity");
     }
 
     #[test]
@@ -2468,10 +2465,7 @@ mod tests {
 
         let suppress = &actions[1];
         assert_eq!(suppress["type"], "suppress-file");
-        assert_eq!(
-            suppress["comment"],
-            "<!-- fallow-ignore-file complexity -->"
-        );
+        assert_eq!(suppress["comment"], "<!-- plow-ignore-file complexity -->");
         assert_eq!(suppress["placement"], "top-of-template");
     }
 
@@ -2805,7 +2799,7 @@ mod tests {
             !narrow_actions.iter().any(|a| {
                 matches!(
                     a.kind,
-                    fallow_types::output_health::HealthFindingActionType::RefactorFunction
+                    plow_types::output_health::HealthFindingActionType::RefactorFunction
                 )
             }),
             "default band should not refactor a CRAP-only finding 6 below max cyclomatic"
@@ -2814,7 +2808,7 @@ mod tests {
             wide_actions.iter().any(|a| {
                 matches!(
                     a.kind,
-                    fallow_types::output_health::HealthFindingActionType::RefactorFunction
+                    plow_types::output_health::HealthFindingActionType::RefactorFunction
                 )
             }),
             "configured wider band should emit the secondary refactor action"

@@ -1,11 +1,11 @@
-//! fallow-core is the internal implementation crate behind the `fallow`
+//! plow-core is the internal implementation crate behind the `plow`
 //! analyzer. External embedders should consume the curated programmatic
-//! surface at `fallow_cli::programmatic` (e.g. `detect_dead_code`,
+//! surface at `plow_cli::programmatic` (e.g. `detect_dead_code`,
 //! `detect_boundary_violations`, `detect_duplication`, `compute_complexity`,
 //! `compute_health`); each returns a `serde_json::Value` matching the CLI's
 //! `--format json` shape plus structured `ProgrammaticError` with the CLI's
-//! exit-code ladder. See `decisions/008-fallow-core-internal-policy.md` for
-//! the policy, and `docs/fallow-core-migration.md` for the function-by-function
+//! exit-code ladder. See `decisions/008-plow-core-internal-policy.md` for
+//! the policy, and `docs/plow-core-migration.md` for the function-by-function
 //! migration map. Items in this crate may change in any release, including
 //! patch releases; a subsequent minor will flip `publish = false` so the crate
 //! is no longer fetchable from crates.io.
@@ -40,15 +40,15 @@ pub(crate) mod spawn;
 pub mod suppress;
 pub mod trace;
 
-pub use fallow_graph::graph;
-pub use fallow_graph::project;
-pub use fallow_graph::resolve;
+pub use plow_graph::graph;
+pub use plow_graph::project;
+pub use plow_graph::resolve;
 
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use errors::FallowError;
-use fallow_config::{
+use errors::PlowError;
+use plow_config::{
     EntryPointRole, PackageJson, ResolvedConfig, discover_workspaces,
     find_undeclared_workspaces_with_ignores,
 };
@@ -58,7 +58,7 @@ use rustc_hash::FxHashSet;
 use trace::PipelineTimings;
 
 const UNDECLARED_WORKSPACE_WARNING_PREVIEW: usize = 5;
-type LoadedWorkspacePackage<'a> = (&'a fallow_config::WorkspaceInfo, PackageJson);
+type LoadedWorkspacePackage<'a> = (&'a plow_config::WorkspaceInfo, PackageJson);
 
 fn record_graph_package_usage(
     graph: &mut graph::ModuleGraph,
@@ -94,7 +94,7 @@ fn workspace_package_name<'a>(
 fn credit_workspace_package_usage(
     graph: &mut graph::ModuleGraph,
     resolved: &[resolve::ResolvedModule],
-    workspaces: &[fallow_config::WorkspaceInfo],
+    workspaces: &[plow_config::WorkspaceInfo],
 ) {
     if workspaces.is_empty() {
         return;
@@ -157,7 +157,7 @@ pub struct AnalysisOutput {
     /// "used vs unused" instead of returning false-negatives for script-only deps.
     pub script_used_packages: rustc_hash::FxHashSet<String>,
     /// xxh3 content hash of every parsed source file, keyed by absolute path.
-    /// Used by `fallow fix` to detect on-disk drift between the in-process
+    /// Used by `plow fix` to detect on-disk drift between the in-process
     /// analysis read and the per-file write; if the file's current hash
     /// differs from the captured value, the fix for that file is skipped
     /// with a clear diagnostic and exit 2. The hash is the same value
@@ -195,8 +195,8 @@ fn update_cache(
 
 /// Resolve `config.cache_max_size_mb` into bytes, falling back to the
 /// extract crate's `DEFAULT_CACHE_MAX_SIZE`. Lives at this layer (not on
-/// `ResolvedConfig`) because `fallow-config` does not depend on
-/// `fallow-extract`; the bytes conversion is owned by the cache callsite.
+/// `ResolvedConfig`) because `plow-config` does not depend on
+/// `plow-extract`; the bytes conversion is owned by the cache callsite.
 /// Public so CLI subcommands that load the cache directly (`flags`,
 /// `health`, `coverage analyze`) can call it without re-deriving the
 /// same fallback policy.
@@ -223,7 +223,7 @@ fn file_mtime_and_size(path: &std::path::Path) -> (u64, u64) {
 
 fn format_undeclared_workspace_warning(
     root: &Path,
-    undeclared: &[fallow_config::WorkspaceDiagnostic],
+    undeclared: &[plow_config::WorkspaceDiagnostic],
 ) -> Option<String> {
     if undeclared.is_empty() {
         return None;
@@ -277,7 +277,7 @@ fn format_undeclared_workspace_warning(
 
 fn warn_undeclared_workspaces(
     root: &Path,
-    workspaces_vec: &[fallow_config::WorkspaceInfo],
+    workspaces_vec: &[plow_config::WorkspaceInfo],
     ignore_patterns: &globset::GlobSet,
     quiet: bool,
 ) {
@@ -286,7 +286,7 @@ fn warn_undeclared_workspaces(
         return;
     }
 
-    let existing = fallow_config::workspace_diagnostics_for(root);
+    let existing = plow_config::workspace_diagnostics_for(root);
     let already_flagged: rustc_hash::FxHashSet<PathBuf> = existing
         .iter()
         .map(|d| dunce::canonicalize(&d.path).unwrap_or_else(|_| d.path.clone()))
@@ -302,7 +302,7 @@ fn warn_undeclared_workspaces(
         return;
     }
 
-    fallow_config::append_workspace_diagnostics(root, undeclared.clone());
+    plow_config::append_workspace_diagnostics(root, undeclared.clone());
 
     if !quiet && let Some(message) = format_undeclared_workspace_warning(root, &undeclared) {
         tracing::warn!("{message}");
@@ -316,9 +316,9 @@ fn warn_undeclared_workspaces(
 /// Returns an error if file discovery, parsing, or analysis fails.
 #[deprecated(
     since = "2.76.0",
-    note = "fallow_core is internal; use fallow_cli::programmatic::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/fallow-core-migration.md and ADR-008."
+    note = "plow_core is internal; use plow_cli::programmatic::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/plow-core-migration.md and ADR-008."
 )]
-pub fn analyze(config: &ResolvedConfig) -> Result<AnalysisResults, FallowError> {
+pub fn analyze(config: &ResolvedConfig) -> Result<AnalysisResults, PlowError> {
     let output = analyze_full(config, false, false, false, false)?;
     Ok(output.results)
 }
@@ -330,9 +330,9 @@ pub fn analyze(config: &ResolvedConfig) -> Result<AnalysisResults, FallowError> 
 /// Returns an error if file discovery, parsing, or analysis fails.
 #[deprecated(
     since = "2.76.0",
-    note = "fallow_core is internal; use fallow_cli::programmatic::detect_dead_code instead. NOTE: export-usage collection is not exposed in the programmatic surface today. See docs/fallow-core-migration.md and ADR-008."
+    note = "plow_core is internal; use plow_cli::programmatic::detect_dead_code instead. NOTE: export-usage collection is not exposed in the programmatic surface today. See docs/plow-core-migration.md and ADR-008."
 )]
-pub fn analyze_with_usages(config: &ResolvedConfig) -> Result<AnalysisResults, FallowError> {
+pub fn analyze_with_usages(config: &ResolvedConfig) -> Result<AnalysisResults, PlowError> {
     let output = analyze_full(config, false, true, false, false)?;
     Ok(output.results)
 }
@@ -349,11 +349,11 @@ pub fn analyze_with_usages(config: &ResolvedConfig) -> Result<AnalysisResults, F
 /// Returns an error if file discovery, parsing, or analysis fails.
 #[deprecated(
     since = "2.90.0",
-    note = "fallow_core is internal; use fallow_cli::programmatic::detect_dead_code and `compute_complexity` instead. NOTE: this combined LSP-only typed surface is not exposed externally. See docs/fallow-core-migration.md and ADR-008."
+    note = "plow_core is internal; use plow_cli::programmatic::detect_dead_code and `compute_complexity` instead. NOTE: this combined LSP-only typed surface is not exposed externally. See docs/plow-core-migration.md and ADR-008."
 )]
 pub fn analyze_with_usages_and_complexity(
     config: &ResolvedConfig,
-) -> Result<AnalysisOutput, FallowError> {
+) -> Result<AnalysisOutput, PlowError> {
     analyze_full(config, false, true, true, true)
 }
 
@@ -364,14 +364,14 @@ pub fn analyze_with_usages_and_complexity(
 /// Returns an error if file discovery, parsing, or analysis fails.
 #[deprecated(
     since = "2.76.0",
-    note = "fallow_core is internal; use fallow_cli::programmatic::detect_dead_code instead. NOTE: trace timings are not exposed in the programmatic surface today; use `fallow dead-code --performance` for CLI-side timings. See docs/fallow-core-migration.md and ADR-008."
+    note = "plow_core is internal; use plow_cli::programmatic::detect_dead_code instead. NOTE: trace timings are not exposed in the programmatic surface today; use `plow dead-code --performance` for CLI-side timings. See docs/plow-core-migration.md and ADR-008."
 )]
-pub fn analyze_with_trace(config: &ResolvedConfig) -> Result<AnalysisOutput, FallowError> {
+pub fn analyze_with_trace(config: &ResolvedConfig) -> Result<AnalysisOutput, PlowError> {
     analyze_full(config, true, false, false, false)
 }
 
 /// Run the full analysis pipeline and return the full `AnalysisOutput`, including
-/// `file_hashes` (used by `fallow fix` to detect on-disk drift between analysis
+/// `file_hashes` (used by `plow fix` to detect on-disk drift between analysis
 /// and per-file write). Graphs and modules are NOT retained; the only difference
 /// from `analyze` is that the caller can access `AnalysisOutput.file_hashes`.
 ///
@@ -380,9 +380,9 @@ pub fn analyze_with_trace(config: &ResolvedConfig) -> Result<AnalysisOutput, Fal
 /// Returns an error if file discovery, parsing, or analysis fails.
 #[deprecated(
     since = "2.76.0",
-    note = "fallow_core is internal; the CLI fix command uses this via the workspace path dependency. External embedders should use fallow_cli::programmatic::detect_dead_code. See docs/fallow-core-migration.md and ADR-008."
+    note = "plow_core is internal; the CLI fix command uses this via the workspace path dependency. External embedders should use plow_cli::programmatic::detect_dead_code. See docs/plow-core-migration.md and ADR-008."
 )]
-pub fn analyze_with_file_hashes(config: &ResolvedConfig) -> Result<AnalysisOutput, FallowError> {
+pub fn analyze_with_file_hashes(config: &ResolvedConfig) -> Result<AnalysisOutput, PlowError> {
     analyze_full(config, false, false, false, false)
 }
 
@@ -397,13 +397,13 @@ pub fn analyze_with_file_hashes(config: &ResolvedConfig) -> Result<AnalysisOutpu
 /// Returns an error if file discovery, parsing, or analysis fails.
 #[deprecated(
     since = "2.76.0",
-    note = "fallow_core is internal; use fallow_cli::programmatic::detect_dead_code instead. NOTE: combined-mode module retention is not exposed in the programmatic surface today. See docs/fallow-core-migration.md and ADR-008."
+    note = "plow_core is internal; use plow_cli::programmatic::detect_dead_code instead. NOTE: combined-mode module retention is not exposed in the programmatic surface today. See docs/plow-core-migration.md and ADR-008."
 )]
 pub fn analyze_retaining_modules(
     config: &ResolvedConfig,
     need_complexity: bool,
     retain_graph: bool,
-) -> Result<AnalysisOutput, FallowError> {
+) -> Result<AnalysisOutput, PlowError> {
     analyze_full(config, retain_graph, false, need_complexity, true)
 }
 
@@ -412,9 +412,9 @@ fn new_analysis_progress(config: &ResolvedConfig) -> progress::AnalysisProgress 
         && std::io::IsTerminal::is_terminal(&std::io::stderr())
         && matches!(
             config.output,
-            fallow_config::OutputFormat::Human
-                | fallow_config::OutputFormat::Compact
-                | fallow_config::OutputFormat::Markdown
+            plow_config::OutputFormat::Human
+                | plow_config::OutputFormat::Compact
+                | plow_config::OutputFormat::Markdown
         );
     progress::AnalysisProgress::new(show_progress)
 }
@@ -429,9 +429,7 @@ fn warn_missing_node_modules(config: &ResolvedConfig) {
     );
 }
 
-fn discover_analysis_workspaces(
-    config: &ResolvedConfig,
-) -> (Vec<fallow_config::WorkspaceInfo>, f64) {
+fn discover_analysis_workspaces(config: &ResolvedConfig) -> (Vec<plow_config::WorkspaceInfo>, f64) {
     let t = Instant::now();
     let workspaces = discover_workspaces(&config.root);
     let workspaces_ms = t.elapsed().as_secs_f64() * 1000.0;
@@ -452,7 +450,7 @@ fn discover_analysis_workspaces(
 /// Run the analysis pipeline using pre-parsed modules, skipping the parsing stage.
 ///
 /// This avoids re-parsing files when the caller already has a `ParseResult` (e.g., from
-/// `fallow_core::extract::parse_all_files`). Discovery, plugins, scripts, entry points,
+/// `plow_core::extract::parse_all_files`). Discovery, plugins, scripts, entry points,
 /// import resolution, graph construction, and dead code detection still run normally.
 /// The graph is always retained (needed for file scores). Caller-owned modules
 /// are borrowed and are not compacted by this API.
@@ -466,13 +464,13 @@ fn discover_analysis_workspaces(
 )]
 #[deprecated(
     since = "2.76.0",
-    note = "fallow_core is internal; use fallow_cli::programmatic::detect_dead_code instead. NOTE: pre-parsed module reuse is not exposed in the programmatic surface today. See docs/fallow-core-migration.md and ADR-008."
+    note = "plow_core is internal; use plow_cli::programmatic::detect_dead_code instead. NOTE: pre-parsed module reuse is not exposed in the programmatic surface today. See docs/plow-core-migration.md and ADR-008."
 )]
 pub fn analyze_with_parse_result(
     config: &ResolvedConfig,
     modules: &[extract::ModuleInfo],
-) -> Result<AnalysisOutput, FallowError> {
-    let _span = tracing::info_span!("fallow_analyze_with_parse_result").entered();
+) -> Result<AnalysisOutput, PlowError> {
+    let _span = tracing::info_span!("plow_analyze_with_parse_result").entered();
     let pipeline_start = Instant::now();
 
     let progress = new_analysis_progress(config);
@@ -542,7 +540,7 @@ pub fn analyze_with_parse_result(
     progress.set_stage("analyzing...");
     #[expect(
         deprecated,
-        reason = "ADR-008 keeps workspace path-dependency calls while warning external fallow-core consumers"
+        reason = "ADR-008 keeps workspace path-dependency calls while warning external plow-core consumers"
     )]
     let mut result = analyze::find_dead_code_full(
         &graph,
@@ -603,8 +601,8 @@ fn analyze_full(
     collect_usages: bool,
     need_complexity: bool,
     retain_modules: bool,
-) -> Result<AnalysisOutput, FallowError> {
-    let _span = tracing::info_span!("fallow_analyze").entered();
+) -> Result<AnalysisOutput, PlowError> {
+    let _span = tracing::info_span!("plow_analyze").entered();
     let pipeline_start = Instant::now();
 
     let progress = new_analysis_progress(config);
@@ -688,7 +686,7 @@ fn analyze_full(
     progress.set_stage("analyzing...");
     #[expect(
         deprecated,
-        reason = "ADR-008 keeps workspace path-dependency calls while warning external fallow-core consumers"
+        reason = "ADR-008 keeps workspace path-dependency calls while warning external plow-core consumers"
     )]
     let mut result = analyze::find_dead_code_full(
         &graph,
@@ -895,7 +893,7 @@ fn update_parse_cache_if_enabled(
 fn resolve_analysis_imports(
     modules: &[extract::ModuleInfo],
     files: &[discover::DiscoveredFile],
-    workspaces: &[fallow_config::WorkspaceInfo],
+    workspaces: &[plow_config::WorkspaceInfo],
     plugin_result: &plugins::AggregatedPluginResult,
     config: &ResolvedConfig,
 ) -> Vec<resolve::ResolvedModule> {
@@ -925,7 +923,7 @@ fn build_analysis_graph(
     entry_points: &discover::CategorizedEntryPoints,
     files: &[discover::DiscoveredFile],
     modules: &[extract::ModuleInfo],
-    workspaces: &[fallow_config::WorkspaceInfo],
+    workspaces: &[plow_config::WorkspaceInfo],
 ) -> graph::ModuleGraph {
     let mut graph = graph::ModuleGraph::build_with_reachability_roots(
         resolved,
@@ -1021,7 +1019,7 @@ fn load_root_package_json(config: &ResolvedConfig) -> Option<PackageJson> {
 }
 
 fn load_workspace_packages(
-    workspaces: &[fallow_config::WorkspaceInfo],
+    workspaces: &[plow_config::WorkspaceInfo],
 ) -> Vec<LoadedWorkspacePackage<'_>> {
     workspaces
         .iter()
@@ -1035,7 +1033,7 @@ fn load_workspace_packages(
 
 fn analyze_all_scripts(
     config: &ResolvedConfig,
-    workspaces: &[fallow_config::WorkspaceInfo],
+    workspaces: &[plow_config::WorkspaceInfo],
     root_pkg: Option<&PackageJson>,
     workspace_pkgs: &[LoadedWorkspacePackage<'_>],
     plugin_result: &mut plugins::AggregatedPluginResult,
@@ -1180,7 +1178,7 @@ fn analyze_all_scripts(
 fn discover_all_entry_points(
     config: &ResolvedConfig,
     files: &[discover::DiscoveredFile],
-    workspaces: &[fallow_config::WorkspaceInfo],
+    workspaces: &[plow_config::WorkspaceInfo],
     root_pkg: Option<&PackageJson>,
     workspace_pkgs: &[LoadedWorkspacePackage<'_>],
     plugin_result: &plugins::AggregatedPluginResult,
@@ -1300,10 +1298,10 @@ fn append_workspace_package_file_asset_patterns(
 fn run_plugins(
     config: &ResolvedConfig,
     files: &[discover::DiscoveredFile],
-    workspaces: &[fallow_config::WorkspaceInfo],
+    workspaces: &[plow_config::WorkspaceInfo],
     root_pkg: Option<&PackageJson>,
     workspace_pkgs: &[LoadedWorkspacePackage<'_>],
-) -> Result<plugins::AggregatedPluginResult, FallowError> {
+) -> Result<plugins::AggregatedPluginResult, PlowError> {
     let registry = plugins::PluginRegistry::new(config.external_plugins.clone());
     let file_paths: Vec<std::path::PathBuf> = files.iter().map(|f| f.path.clone()).collect();
     let root_config_search_roots = collect_config_search_roots(&config.root, &file_paths);
@@ -1322,7 +1320,7 @@ fn run_plugins(
                 config.production,
             )
             .map_err(|errors| {
-                FallowError::config(plugins::registry::format_plugin_regex_errors(&errors))
+                PlowError::config(plugins::registry::format_plugin_regex_errors(&errors))
             })?
     } else {
         plugins::AggregatedPluginResult::default()
@@ -1386,7 +1384,7 @@ fn run_plugins(
         }
     }
     if !regex_errors.is_empty() {
-        return Err(FallowError::config(
+        return Err(PlowError::config(
             plugins::registry::format_plugin_regex_errors(&regex_errors),
         ));
     }
@@ -1404,7 +1402,7 @@ fn run_plugins(
 fn gate_auto_import_entry_patterns(
     result: &mut plugins::AggregatedPluginResult,
     config: &ResolvedConfig,
-    workspaces: &[fallow_config::WorkspaceInfo],
+    workspaces: &[plow_config::WorkspaceInfo],
 ) {
     if !config.auto_imports {
         return;
@@ -1485,9 +1483,9 @@ fn collect_config_search_roots(
 /// Returns an error if config loading, file discovery, parsing, or analysis fails.
 #[deprecated(
     since = "2.76.0",
-    note = "fallow_core is internal; use fallow_cli::programmatic::detect_dead_code instead (build a `DeadCodeOptions { analysis: AnalysisOptions { root, ..default() }, ..default() }`). See docs/fallow-core-migration.md and ADR-008."
+    note = "plow_core is internal; use plow_cli::programmatic::detect_dead_code instead (build a `DeadCodeOptions { analysis: AnalysisOptions { root, ..default() }, ..default() }`). See docs/plow-core-migration.md and ADR-008."
 )]
-pub fn analyze_project(root: &Path) -> Result<AnalysisResults, FallowError> {
+pub fn analyze_project(root: &Path) -> Result<AnalysisResults, PlowError> {
     let config = default_config(root);
     #[expect(
         deprecated,
@@ -1506,22 +1504,21 @@ pub fn analyze_project(root: &Path) -> Result<AnalysisResults, FallowError> {
 pub fn config_for_project(
     root: &Path,
     config_path: Option<&Path>,
-) -> Result<(ResolvedConfig, Option<std::path::PathBuf>), FallowError> {
+) -> Result<(ResolvedConfig, Option<std::path::PathBuf>), PlowError> {
     let user_config = if let Some(path) = config_path {
         Some((
-            fallow_config::FallowConfig::load(path)
-                .map_err(|e| FallowError::config(format!("{e:#}")))?,
+            plow_config::PlowConfig::load(path).map_err(|e| PlowError::config(format!("{e:#}")))?,
             path.to_path_buf(),
         ))
     } else {
-        fallow_config::FallowConfig::find_and_load(root).map_err(FallowError::config)?
+        plow_config::PlowConfig::find_and_load(root).map_err(PlowError::config)?
     };
 
     let config = match user_config {
         Some((mut config, path)) => {
             let dead_code_production = config
                 .production
-                .for_analysis(fallow_config::ProductionAnalysis::DeadCode);
+                .for_analysis(plow_config::ProductionAnalysis::DeadCode);
             config.production = dead_code_production.into();
             config
                 .validate_resolved_boundaries(root)
@@ -1531,20 +1528,20 @@ pub fn config_for_project(
                         .map(ToString::to_string)
                         .collect::<Vec<_>>()
                         .join("\n  - ");
-                    FallowError::config(format!("invalid boundary configuration:\n  - {joined}"))
+                    PlowError::config(format!("invalid boundary configuration:\n  - {joined}"))
                 })?;
-            fallow_config::load_rule_packs(root, &config.rule_packs).map_err(|errors| {
+            plow_config::load_rule_packs(root, &config.rule_packs).map_err(|errors| {
                 let joined = errors
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>()
                     .join("\n  - ");
-                FallowError::config(format!("invalid rule pack:\n  - {joined}"))
+                PlowError::config(format!("invalid rule pack:\n  - {joined}"))
             })?;
             (
                 config.resolve(
                     root.to_path_buf(),
-                    fallow_config::OutputFormat::Human,
+                    plow_config::OutputFormat::Human,
                     num_cpus(),
                     false,
                     true, // quiet: LSP/programmatic callers don't need progress bars
@@ -1554,9 +1551,9 @@ pub fn config_for_project(
             )
         }
         None => (
-            fallow_config::FallowConfig::default().resolve(
+            plow_config::PlowConfig::default().resolve(
                 root.to_path_buf(),
-                fallow_config::OutputFormat::Human,
+                plow_config::OutputFormat::Human,
                 num_cpus(),
                 false,
                 true,
@@ -1582,9 +1579,9 @@ pub fn config_for_project(
 pub(crate) fn default_config(root: &Path) -> ResolvedConfig {
     config_for_project(root, None).map_or_else(
         |_| {
-            fallow_config::FallowConfig::default().resolve(
+            plow_config::PlowConfig::default().resolve(
                 root.to_path_buf(),
-                fallow_config::OutputFormat::Human,
+                plow_config::OutputFormat::Human,
                 num_cpus(),
                 false,
                 true,
@@ -1607,7 +1604,7 @@ mod tests {
     };
     use std::path::{Path, PathBuf};
 
-    use fallow_config::{WorkspaceDiagnostic, WorkspaceDiagnosticKind};
+    use plow_config::{WorkspaceDiagnostic, WorkspaceDiagnosticKind};
 
     fn diag(root: &Path, relative: &str) -> WorkspaceDiagnostic {
         WorkspaceDiagnostic::new(
@@ -1681,12 +1678,12 @@ mod tests {
     #[test]
     fn bucket_files_by_workspace_uses_workspace_relative_paths() {
         let root = PathBuf::from("/repo");
-        let ui = fallow_config::WorkspaceInfo {
+        let ui = plow_config::WorkspaceInfo {
             root: root.join("apps/ui"),
             name: "ui".to_string(),
             is_internal_dependency: false,
         };
-        let api = fallow_config::WorkspaceInfo {
+        let api = plow_config::WorkspaceInfo {
             root: root.join("apps/api"),
             name: "api".to_string(),
             is_internal_dependency: false,
@@ -1694,14 +1691,14 @@ mod tests {
         let workspace_pkgs = vec![
             (
                 &ui,
-                fallow_config::PackageJson {
+                plow_config::PackageJson {
                     name: Some("ui".to_string()),
                     ..Default::default()
                 },
             ),
             (
                 &api,
-                fallow_config::PackageJson {
+                plow_config::PackageJson {
                     name: Some("api".to_string()),
                     ..Default::default()
                 },
@@ -1750,17 +1747,17 @@ mod tests {
         std::fs::write(pkg_good.join("package.json"), r#"{"name": "good"}"#).unwrap();
         std::fs::write(pkg_bad.join("package.json"), r"{,").unwrap();
 
-        let (workspaces, diagnostics) = fallow_config::discover_workspaces_with_diagnostics(
+        let (workspaces, diagnostics) = plow_config::discover_workspaces_with_diagnostics(
             dir.path(),
             &globset::GlobSet::empty(),
         )
         .expect("root package.json is valid");
         assert_eq!(workspaces.len(), 1, "only the valid workspace discovers");
-        fallow_config::stash_workspace_diagnostics(dir.path(), diagnostics);
+        plow_config::stash_workspace_diagnostics(dir.path(), diagnostics);
 
         warn_undeclared_workspaces(dir.path(), &workspaces, &globset::GlobSet::empty(), false);
 
-        let diagnostics = fallow_config::workspace_diagnostics_for(dir.path());
+        let diagnostics = plow_config::workspace_diagnostics_for(dir.path());
         let mut malformed = 0;
         let mut undeclared_for_bad = 0;
         for diag in &diagnostics {

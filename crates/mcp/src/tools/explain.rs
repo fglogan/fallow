@@ -1,6 +1,6 @@
 use crate::params::ExplainParams;
 
-/// Build CLI arguments for the `fallow_explain` tool.
+/// Build CLI arguments for the `plow_explain` tool.
 pub fn build_explain_args(params: &ExplainParams) -> Vec<String> {
     vec![
         "explain".to_string(),

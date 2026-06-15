@@ -73,7 +73,7 @@ expression: redact_version(&json_str)
           "type": "suppress-line",
           "auto_fixable": false,
           "description": "Suppress with an inline comment above the line",
-          "comment": "// fallow-ignore-next-line unused-class-member"
+          "comment": "// plow-ignore-next-line unused-class-member"
         }
       ]
     }

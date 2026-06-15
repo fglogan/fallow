@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Generate the agent-facing doc tables in the fallow skill tree from the
- * `fallow schema` capability manifest (issues #1188 and #1189).
+ * Generate the agent-facing doc tables in the plow skill tree from the
+ * `plow schema` capability manifest (issues #1188 and #1189).
  *
  * Targets: `<target>/SKILL.md` and, when present,
  * `<target>/references/cli-reference.md`. SKILL.md sections:
@@ -12,7 +12,7 @@
  *   <!-- generated:task-matrix:start --> ... <!-- generated:task-matrix:end -->
  *
  * CLI reference sections use `generated:flags:*` markers for global flags,
- * bare `fallow` combined-mode flags, command-local flags, and the dead-code
+ * bare `plow` combined-mode flags, command-local flags, and the dead-code
  * issue filter table.
  *
  * A target whose text contains NEITHER marker of a section has not adopted
@@ -42,7 +42,7 @@
  * `\|`; the row parser splits on unescaped pipes only.
  *
  * Usage:
- *   node scripts/generate-agent-docs.mjs --fallow <path-to-fallow-binary> \
+ *   node scripts/generate-agent-docs.mjs --plow <path-to-plow-binary> \
  *     --target <skills-tree-dir> [--target <dir> ...] [--check] \
  *     [--expect-version <x.y.z>]
  *   node scripts/generate-agent-docs.mjs --schema <schema.json> --target <dir>
@@ -51,8 +51,8 @@
  * nothing. `--expect-version` guards against a stale binary: the manifest's
  * `version` field must match exactly.
  *
- * Run during /fallow-release (step 5c) against the canonical fallow-skills
- * tree before re-vendoring npm/fallow/skills. Zero dependencies; Node >= 18.
+ * Run during /plow-release (step 5c) against the canonical plow-skills
+ * tree before re-vendoring npm/plow/skills. Zero dependencies; Node >= 18.
  */
 
 import { execFileSync } from "node:child_process";
@@ -63,7 +63,7 @@ import { pathToFileURL } from "node:url";
 const SKILL_SECTION_IDS = ["commands", "issue-types", "mcp-tools", "task-matrix"];
 const CLI_REFERENCE_SECTION_IDS = [
   "flags:global",
-  "flags:fallow-combined",
+  "flags:plow-combined",
   "flags:dead-code",
   "flags:dead-code-filters",
   "flags:dupes",
@@ -290,7 +290,7 @@ const renderCommandsSection = (schema, existing) => {
   const extrasByParent = new Map();
   for (const [key, cells] of existing.rows) {
     const parent = key.split(" ")[0];
-    if (key.includes(" ") && (commandNames.has(parent) || parent === "fallow")) {
+    if (key.includes(" ") && (commandNames.has(parent) || parent === "plow")) {
       const list = extrasByParent.get(parent) ?? [];
       list.push(headers.map((h) => cells.get(h) ?? ""));
       extrasByParent.set(parent, list);
@@ -309,8 +309,8 @@ const renderCommandsSection = (schema, existing) => {
     }
   };
 
-  // Bare `fallow` (combined mode) is not in schema.commands[]; synthesize it.
-  pushCommand("fallow", firstSentence(schema.default_behavior), "");
+  // Bare `plow` (combined mode) is not in schema.commands[]; synthesize it.
+  pushCommand("plow", firstSentence(schema.default_behavior), "");
   for (const command of schema.commands) {
     const flagSeed = command.flags
       .slice(0, MAX_SEEDED_KEY_FLAGS)
@@ -322,7 +322,7 @@ const renderCommandsSection = (schema, existing) => {
   return [
     renderTable(headers, rows),
     "",
-    "Run `fallow <command> --help` for the full flag list per command (see also references/cli-reference.md).",
+    "Run `plow <command> --help` for the full flag list per command (see also references/cli-reference.md).",
   ].join("\n");
 };
 
@@ -352,7 +352,7 @@ const renderIssueTypesSection = (schema, existing) => {
   return [
     renderTable(headers, rows),
     "",
-    "Runtime-coverage verdicts and the full security sink catalogue are listed by `fallow schema` (`issue_types`).",
+    "Runtime-coverage verdicts and the full security sink catalogue are listed by `plow schema` (`issue_types`).",
   ].join("\n");
 };
 
@@ -464,7 +464,7 @@ const renderCombinedFlagsSection = (schema, existing) => {
   return [
     renderTable(["Flag", "Type", "Default", "Description"], flagRows(flags, existing)),
     "",
-    "These are global flags with behavior specific to bare `fallow` combined mode.",
+    "These are global flags with behavior specific to bare `plow` combined mode.",
   ].join("\n");
 };
 
@@ -535,7 +535,7 @@ const RENDERERS = {
   "mcp-tools": renderMcpToolsSection,
   "task-matrix": renderTaskMatrixSection,
   "flags:global": renderGlobalFlagsSection,
-  "flags:fallow-combined": renderCombinedFlagsSection,
+  "flags:plow-combined": renderCombinedFlagsSection,
   "flags:dead-code": renderCommandFlagsSection("flags:dead-code"),
   "flags:dead-code-filters": renderDeadCodeFiltersSection,
   "flags:dupes": renderCommandFlagsSection("flags:dupes"),
@@ -647,18 +647,18 @@ const processFile = ({ file, before, after, schema, sectionIds, check }) => {
   return false;
 };
 
-export const loadSchema = ({ fallowBin, schemaPath, expectVersion }) => {
+export const loadSchema = ({ plowBin, schemaPath, expectVersion }) => {
   let raw;
   if (schemaPath) {
     raw = readFileSync(schemaPath, "utf8");
-  } else if (fallowBin) {
-    raw = execFileSync(fallowBin, ["schema"], {
+  } else if (plowBin) {
+    raw = execFileSync(plowBin, ["schema"], {
       encoding: "utf8",
       maxBuffer: 64 * 1024 * 1024,
-      env: { ...process.env, FALLOW_QUIET: "1" },
+      env: { ...process.env, PLOW_QUIET: "1" },
     });
   } else {
-    throw new Error("pass --fallow <binary> or --schema <json file>");
+    throw new Error("pass --plow <binary> or --schema <json file>");
   }
   const schema = JSON.parse(raw);
   if (schema.manifest_version !== "1") {
@@ -666,7 +666,7 @@ export const loadSchema = ({ fallowBin, schemaPath, expectVersion }) => {
   }
   if (expectVersion && schema.version !== expectVersion) {
     throw new Error(
-      `schema came from fallow ${schema.version}, expected ${expectVersion}; ` +
+      `schema came from plow ${schema.version}, expected ${expectVersion}; ` +
         "rebuild the binary before generating docs",
     );
   }
@@ -684,8 +684,8 @@ const parseArgs = (argv) => {
       }
       return argv[i];
     };
-    if (arg === "--fallow") {
-      opts.fallowBin = next();
+    if (arg === "--plow") {
+      opts.plowBin = next();
     } else if (arg === "--schema") {
       opts.schemaPath = next();
     } else if (arg === "--target") {

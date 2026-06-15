@@ -15,7 +15,7 @@ use super::{
 use crate::health::scoring::{FileScoreConcern, file_score_concern_axis};
 
 /// Docs base URL for health explanations.
-const DOCS_HEALTH: &str = "https://docs.fallow.tools/explanations/health";
+const DOCS_HEALTH: &str = "https://docs.genesis-plow.dev/explanations/health";
 
 pub(in crate::report) struct PrintHealthHumanInput<'a> {
     pub(in crate::report) report: &'a crate::health_types::HealthReport,
@@ -242,7 +242,7 @@ fn inject_explain_blocks(lines: Vec<String>) -> Vec<String> {
 
 fn health_explain_for_header(line: &str) -> Option<String> {
     if line.contains("Runtime coverage:") {
-        return rule_full("fallow/runtime-coverage");
+        return rule_full("plow/runtime-coverage");
     }
     if line.contains("Health score:") {
         return Some(
@@ -257,10 +257,10 @@ fn health_explain_for_header(line: &str) -> Option<String> {
         );
     }
     if line.contains("Large functions (") {
-        return rule_full("fallow/high-cyclomatic-complexity");
+        return rule_full("plow/high-cyclomatic-complexity");
     }
     if line.contains("High complexity functions (") {
-        return rule_full("fallow/high-complexity");
+        return rule_full("plow/high-complexity");
     }
     if line.contains("Coverage gaps (") {
         return Some(
@@ -275,7 +275,7 @@ fn health_explain_for_header(line: &str) -> Option<String> {
         );
     }
     if line.contains("Refactoring targets (") {
-        return rule_full("fallow/refactoring-target");
+        return rule_full("plow/refactoring-target");
     }
     None
 }
@@ -750,27 +750,27 @@ fn append_suppression_hints(lines: &mut Vec<String>, report: &crate::health_type
     if has_html_template {
         lines.push(format!(
             "  {}",
-            "To suppress HTML templates: <!-- fallow-ignore-file complexity -->".dimmed()
+            "To suppress HTML templates: <!-- plow-ignore-file complexity -->".dimmed()
         ));
     }
     if has_inline_template {
         lines.push(format!(
             "  {}",
-            "To suppress inline templates: // fallow-ignore-next-line complexity (above @Component)"
+            "To suppress inline templates: // plow-ignore-next-line complexity (above @Component)"
                 .dimmed()
         ));
     }
     if has_component_rollup {
         lines.push(format!(
             "  {}",
-            "To suppress a <component> rollup: suppress the worst class method (// fallow-ignore-next-line complexity above it hides both)"
+            "To suppress a <component> rollup: suppress the worst class method (// plow-ignore-next-line complexity above it hides both)"
                 .dimmed()
         ));
     }
     if has_function_finding && report.findings.len() >= 3 {
         lines.push(format!(
             "  {}",
-            "To suppress: // fallow-ignore-next-line complexity".dimmed()
+            "To suppress: // plow-ignore-next-line complexity".dimmed()
         ));
     }
 }
@@ -786,7 +786,7 @@ fn append_suppression_hints(lines: &mut Vec<String>, report: &crate::health_type
 ///
 /// Renders `template_path` workspace-relative (issue #547) so Angular
 /// projects with many `*.component.html` files unambiguously identify the
-/// template fallow scored.
+/// template plow scored.
 fn render_component_rollup_breakdown(
     finding: &crate::health_types::ComplexityViolation,
     root: &Path,
@@ -1053,7 +1053,7 @@ fn crap_coverage_note(report: &crate::health_types::HealthReport) -> Option<Stri
     }
 
     Some(
-        "CRAP scores are estimated from export references; run `fallow health --coverage <coverage-final.json>` for exact scores."
+        "CRAP scores are estimated from export references; run `plow health --coverage <coverage-final.json>` for exact scores."
             .to_string(),
     )
 }
@@ -1223,7 +1223,7 @@ fn file_scores_crap_note(report: &crate::health_types::HealthReport) -> String {
         };
         format!("CRAP from Istanbul coverage data{match_info}.")
     } else {
-        "CRAP estimated from export references (85% direct, 40% indirect, 0% untested). Run `fallow health --coverage <coverage-final.json>` for exact scores.".to_string()
+        "CRAP estimated from export references (85% direct, 40% indirect, 0% untested). Run `plow health --coverage <coverage-final.json>` for exact scores.".to_string()
     }
 }
 
@@ -1489,7 +1489,7 @@ pub(in crate::report) fn print_health_summary(
 /// D/F red.
 ///
 /// Goes to stdout (the rows are content, not progress) so the block survives
-/// `fallow health --group-by package > out.txt`. The leading blank line,
+/// `plow health --group-by package > out.txt`. The leading blank line,
 /// the `(root)` legend, and the JSON-parity hint go to stderr because they
 /// are display affordances, not data.
 pub(in crate::report) fn print_health_grouping(
@@ -1739,7 +1739,7 @@ mod tests {
         };
         let text = plain(&build_health_human_lines(&report, &root));
         assert!(text.contains("CRAP scores are estimated from export references"));
-        assert!(text.contains("fallow health --coverage <coverage-final.json>"));
+        assert!(text.contains("plow health --coverage <coverage-final.json>"));
     }
 
     #[test]
@@ -1937,7 +1937,7 @@ mod tests {
                 capture_quality: None,
             },
             findings: vec![crate::health_types::RuntimeCoverageFinding {
-                id: "fallow:prod:deadbeef".to_owned(),
+                id: "plow:prod:deadbeef".to_owned(),
                 stable_id: None,
                 path: root.join("src/cold.ts"),
                 function: "coldPath".to_owned(),
@@ -1957,7 +1957,7 @@ mod tests {
                 source_hash: None,
             }],
             hot_paths: vec![crate::health_types::RuntimeCoverageHotPath {
-                id: "fallow:hot:cafebabe".to_owned(),
+                id: "plow:hot:cafebabe".to_owned(),
                 stable_id: None,
                 path: root.join("src/hot.ts"),
                 function: "hotPath".to_owned(),
@@ -2004,7 +2004,7 @@ mod tests {
                 ..Default::default()
             },
             findings: vec![CoverageIntelligenceFinding {
-                id: "fallow:coverage-intel:abc123".to_owned(),
+                id: "plow:coverage-intel:abc123".to_owned(),
                 path: root.join("src/dead.ts"),
                 identity: Some("deadPath".to_owned()),
                 line: 9,
@@ -2104,7 +2104,7 @@ mod tests {
             "upgrade prompt body missing in:\n{text}"
         );
         assert!(
-            text.contains("fallow license activate --trial --email you@company.com"),
+            text.contains("plow license activate --trial --email you@company.com"),
             "trial CTA command missing in:\n{text}"
         );
     }
@@ -2990,7 +2990,7 @@ mod tests {
         }];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
-        assert!(text.contains("docs.fallow.tools/explanations/health#file-health-scores"));
+        assert!(text.contains("docs.genesis-plow.dev/explanations/health#file-health-scores"));
     }
 
     #[test]
@@ -3007,7 +3007,7 @@ mod tests {
                 lines_deleted: 200,
                 complexity_density: 0.85,
                 fan_in: 10,
-                trend: fallow_core::churn::ChurnTrend::Accelerating,
+                trend: plow_core::churn::ChurnTrend::Accelerating,
                 ownership: None,
                 is_test_path: false,
             }
@@ -3039,7 +3039,7 @@ mod tests {
                 lines_deleted: 30,
                 complexity_density: 0.3,
                 fan_in: 2,
-                trend: fallow_core::churn::ChurnTrend::Cooling,
+                trend: plow_core::churn::ChurnTrend::Cooling,
                 ownership: None,
                 is_test_path: false,
             }
@@ -3065,7 +3065,7 @@ mod tests {
                 lines_deleted: 100,
                 complexity_density: 0.5,
                 fan_in: 5,
-                trend: fallow_core::churn::ChurnTrend::Stable,
+                trend: plow_core::churn::ChurnTrend::Stable,
                 ownership: None,
                 is_test_path: false,
             }
@@ -3091,7 +3091,7 @@ mod tests {
                 lines_deleted: 50,
                 complexity_density: 0.4,
                 fan_in: 3,
-                trend: fallow_core::churn::ChurnTrend::Stable,
+                trend: plow_core::churn::ChurnTrend::Stable,
                 ownership: None,
                 is_test_path: false,
             }
@@ -3124,7 +3124,7 @@ mod tests {
                 lines_deleted: 50,
                 complexity_density: 0.4,
                 fan_in: 3,
-                trend: fallow_core::churn::ChurnTrend::Stable,
+                trend: plow_core::churn::ChurnTrend::Stable,
                 ownership: None,
                 is_test_path: false,
             }
@@ -3156,7 +3156,7 @@ mod tests {
                 lines_deleted: 50,
                 complexity_density: 0.4,
                 fan_in: 3,
-                trend: fallow_core::churn::ChurnTrend::Stable,
+                trend: plow_core::churn::ChurnTrend::Stable,
                 ownership: None,
                 is_test_path: false,
             }
@@ -3164,7 +3164,7 @@ mod tests {
         ];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
-        assert!(text.contains("docs.fallow.tools/explanations/health#hotspot-metrics"));
+        assert!(text.contains("docs.genesis-plow.dev/explanations/health#hotspot-metrics"));
     }
 
     #[test]
@@ -3351,7 +3351,7 @@ mod tests {
         ];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
-        assert!(text.contains("docs.fallow.tools/explanations/health#refactoring-targets"));
+        assert!(text.contains("docs.genesis-plow.dev/explanations/health#refactoring-targets"));
     }
 
     #[test]
@@ -3534,7 +3534,7 @@ mod tests {
                 lines_deleted: 100,
                 complexity_density: 0.5,
                 fan_in: 5,
-                trend: fallow_core::churn::ChurnTrend::Accelerating,
+                trend: plow_core::churn::ChurnTrend::Accelerating,
                 ownership: None,
                 is_test_path: false,
             }
@@ -3729,7 +3729,7 @@ mod tests {
         ];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
-        assert!(text.contains("docs.fallow.tools/explanations/health#complexity-metrics"));
+        assert!(text.contains("docs.genesis-plow.dev/explanations/health#complexity-metrics"));
     }
 
     #[test]
@@ -3746,7 +3746,7 @@ mod tests {
                 lines_deleted: 200,
                 complexity_density: 0.9,
                 fan_in: 8,
-                trend: fallow_core::churn::ChurnTrend::Accelerating,
+                trend: plow_core::churn::ChurnTrend::Accelerating,
                 ownership: None,
                 is_test_path: false,
             }
@@ -3760,7 +3760,7 @@ mod tests {
                 lines_deleted: 100,
                 complexity_density: 0.5,
                 fan_in: 4,
-                trend: fallow_core::churn::ChurnTrend::Stable,
+                trend: plow_core::churn::ChurnTrend::Stable,
                 ownership: None,
                 is_test_path: false,
             }
@@ -3774,7 +3774,7 @@ mod tests {
                 lines_deleted: 20,
                 complexity_density: 0.2,
                 fan_in: 1,
-                trend: fallow_core::churn::ChurnTrend::Cooling,
+                trend: plow_core::churn::ChurnTrend::Cooling,
                 ownership: None,
                 is_test_path: false,
             }

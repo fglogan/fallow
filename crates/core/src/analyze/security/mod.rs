@@ -1,4 +1,4 @@
-//! Local security candidate detection (opt-in, surfaced only by `fallow security`).
+//! Local security candidate detection (opt-in, surfaced only by `plow security`).
 //!
 //! These are CANDIDATES for downstream agent verification, NOT verified
 //! vulnerabilities. The graph-structural `client-server-leak` rule has two
@@ -11,7 +11,7 @@
 //!    package, or importing a server-only Next.js / Node API (see the shared
 //!    `is_server_only_module` predicate in `analyze::server_only`).
 //!
-//! fallow emits the structural import-hop trace; it does not prove the path is
+//! plow emits the structural import-hop trace; it does not prove the path is
 //! exploitable.
 //!
 //! Blind spots (surfaced in-band via [`UnresolvedEdgeStats`], not silently
@@ -20,7 +20,7 @@
 //!
 //! ssr:false escape hatch: a server module pulled in ONLY through
 //! `next/dynamic(() => import('./X'), { ssr: false })` is the sanctioned
-//! client-only escape hatch, NOT a leak. fallow's arrow-wrapped dynamic-import
+//! client-only escape hatch, NOT a leak. plow's arrow-wrapped dynamic-import
 //! detection resolves `next/dynamic(() => import('./X'))` to a STATIC graph edge
 //! (it credits the target's default export), so that edge IS in the cone. The
 //! extract layer records the `import()` span of each ssr:false call on
@@ -32,13 +32,13 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::VecDeque;
 
-use fallow_types::extract::ModuleInfo;
-use fallow_types::output::{IssueAction, SuppressFileAction, SuppressFileKind};
-use fallow_types::results::{
+use plow_types::extract::ModuleInfo;
+use plow_types::output::{IssueAction, SuppressFileAction, SuppressFileKind};
+use plow_types::results::{
     SecurityCandidate, SecurityCandidateBoundary, SecurityCandidateSink, SecurityFinding,
     SecurityFindingKind, SecuritySeverity, TraceHop, TraceHopRole,
 };
-use fallow_types::suppress::IssueKind;
+use plow_types::suppress::IssueKind;
 
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 use crate::discover::FileId;
@@ -78,13 +78,13 @@ const SERVER_ONLY_CATEGORY: &str = "server-only-import";
 
 /// Build the machine-actionable suppress hint emitted on every finding. Single
 /// file-level suppress action (`auto_fixable: false`): there is no auto-fix
-/// because verifying the candidate is the agent's job, not fallow's.
+/// because verifying the candidate is the agent's job, not plow's.
 fn build_actions() -> Vec<IssueAction> {
     vec![IssueAction::SuppressFile(SuppressFileAction {
         kind: SuppressFileKind::SuppressFile,
         auto_fixable: false,
         description: "Suppress with a file-level comment at the top of the client file".to_string(),
-        comment: format!("// fallow-ignore-file {SUPPRESS_KIND}"),
+        comment: format!("// plow-ignore-file {SUPPRESS_KIND}"),
     })]
 }
 
@@ -104,9 +104,9 @@ const IMPORT_META_ENV_OBJECT: &str = "import.meta.env";
 const ENV_SOURCE_OBJECTS: &[&str] = &[PROCESS_ENV_OBJECT, IMPORT_META_ENV_OBJECT];
 
 // The public-env predicate (`is_public_env_var`, `PUBLIC_ENV_PREFIXES`) is shared
-// with the extract layer in `fallow_types::extract` (issue #890), so public env
+// with the extract layer in `plow_types::extract` (issue #890), so public env
 // vars are excluded consistently here and at source-recording time.
-use fallow_types::extract::is_public_env_var;
+use plow_types::extract::is_public_env_var;
 
 /// Blind-spot accounting surfaced in-band so the user is never told "clean" when
 /// the analysis could not see part of the import graph.
@@ -120,7 +120,7 @@ pub struct UnresolvedEdgeStats {
 
 /// Run the security MVP rules over the graph. Returns the findings plus the
 /// blind-spot stats. Callers gate this on the `security_client_server_leak`
-/// rule severity; it never runs under bare `fallow` or the `audit` gate.
+/// rule severity; it never runs under bare `plow` or the `audit` gate.
 #[must_use]
 pub fn find_security_findings(
     graph: &ModuleGraph,
@@ -234,7 +234,7 @@ fn find_client_server_leaks(
             continue;
         }
         let client_id = node.file_id;
-        // A file-level `// fallow-ignore-file security-client-server-leak`
+        // A file-level `// plow-ignore-file security-client-server-leak`
         // (or a blanket file ignore) opts the whole client file out. Routed
         // through the SuppressionContext so the marker is recorded as consumed
         // (otherwise a working suppression would later be flagged stale).

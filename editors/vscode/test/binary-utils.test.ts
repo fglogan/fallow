@@ -25,7 +25,7 @@ describe("findLocalBinary", () => {
   });
 
   it("returns null when no workspace folders are open", () => {
-    expect(findLocalBinary("fallow")).toBeNull();
+    expect(findLocalBinary("plow")).toBeNull();
   });
 
   it("returns null when node_modules/.bin binary does not exist", () => {
@@ -34,7 +34,7 @@ describe("findLocalBinary", () => {
     ];
     mockExistsSync = () => false;
 
-    expect(findLocalBinary("fallow")).toBeNull();
+    expect(findLocalBinary("plow")).toBeNull();
   });
 
   it("returns the path when node_modules/.bin binary exists", () => {
@@ -43,10 +43,10 @@ describe("findLocalBinary", () => {
     ];
     mockExistsSync = () => true;
 
-    const result = findLocalBinary("fallow");
+    const result = findLocalBinary("plow");
 
     expect(result).toBe(
-      path.join("/workspace/project", "node_modules", ".bin", "fallow")
+      path.join("/workspace/project", "node_modules", ".bin", "plow")
     );
   });
 
@@ -61,11 +61,11 @@ describe("findLocalBinary", () => {
       return false;
     };
 
-    findLocalBinary("fallow");
+    findLocalBinary("plow");
 
     expect(calls).toHaveLength(1);
     expect(calls[0]).toBe(
-      path.join("/first", "node_modules", ".bin", "fallow")
+      path.join("/first", "node_modules", ".bin", "plow")
     );
   });
 });
@@ -76,7 +76,7 @@ describe("findBinaryInPath", () => {
   });
 
   it("returns null when binary is not in PATH", () => {
-    expect(findBinaryInPath("fallow")).toBeNull();
+    expect(findBinaryInPath("plow")).toBeNull();
   });
 
   it("returns the first matching path entry", () => {
@@ -86,8 +86,8 @@ describe("findBinaryInPath", () => {
     process.env["PATH"] = `/usr/bin${path.delimiter}/usr/local/bin`;
 
     try {
-      const result = findBinaryInPath("fallow");
-      expect(result).toBe(path.join("/usr/local/bin", "fallow"));
+      const result = findBinaryInPath("plow");
+      expect(result).toBe(path.join("/usr/local/bin", "plow"));
     } finally {
       process.env["PATH"] = originalPath;
     }

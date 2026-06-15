@@ -3,7 +3,7 @@
 # Each [[matcher]] maps a captured SinkSite (see
 # crates/types/src/extract.rs::SinkSite) to a CWE candidate class. Findings are
 # CANDIDATES for downstream agent verification, NOT verified vulnerabilities:
-# fallow is deterministic and syntactic, never taint-proof. We prefer
+# plow is deterministic and syntactic, never taint-proof. We prefer
 # false-negatives over false-positives, so matchers default to non-literal
 # arguments. Literal-aware rows must opt into narrow literal or context
 # predicates.

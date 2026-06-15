@@ -1,4 +1,4 @@
-//! Per-group attribution for `fallow dupes --group-by`.
+//! Per-group attribution for `plow dupes --group-by`.
 //!
 //! For each `CloneGroup`, every instance is attributed to a group key (owner,
 //! directory, package, or section) via the same [`OwnershipResolver`] used by
@@ -14,7 +14,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use fallow_core::duplicates::{
+use plow_core::duplicates::{
     CloneFingerprintSet, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats,
 };
 use rustc_hash::FxHashSet;
@@ -252,7 +252,7 @@ pub fn build_duplication_grouping(
 mod tests {
     use std::path::PathBuf;
 
-    use fallow_core::duplicates::{CloneInstance, DuplicationStats};
+    use plow_core::duplicates::{CloneInstance, DuplicationStats};
 
     use super::*;
     use crate::codeowners::CodeOwners;

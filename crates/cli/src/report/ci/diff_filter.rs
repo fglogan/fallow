@@ -28,7 +28,7 @@ pub enum DiffFilterMode {
 impl DiffFilterMode {
     #[must_use]
     pub fn from_env() -> Self {
-        match std::env::var("FALLOW_DIFF_FILTER")
+        match std::env::var("PLOW_DIFF_FILTER")
             .unwrap_or_else(|_| "added".into())
             .as_str()
         {
@@ -49,7 +49,7 @@ enum SummaryScope {
 impl SummaryScope {
     #[must_use]
     fn from_env() -> Self {
-        std::env::var("FALLOW_SUMMARY_SCOPE")
+        std::env::var("PLOW_SUMMARY_SCOPE")
             .ok()
             .as_deref()
             .map_or(Self::All, Self::from_value)
@@ -132,7 +132,7 @@ impl DiffIndex {
                     index.added_line_count += 1;
                 } else if !warned_overflow {
                     eprintln!(
-                        "fallow: diff exceeds {MAX_ADDED_LINES} added lines; \
+                        "plow: diff exceeds {MAX_ADDED_LINES} added lines; \
                          indexed prefix only, later additions skipped"
                     );
                     warned_overflow = true;
@@ -271,9 +271,9 @@ pub enum DiffSource {
     /// `--diff-stdin` or `--diff-file -`. Stdin is consumed exactly once;
     /// repeated calls to [`resolve_diff_source`] would observe EOF.
     Stdin,
-    /// `$FALLOW_DIFF_FILE` (absolute after root-join). The env-var path is
+    /// `$PLOW_DIFF_FILE` (absolute after root-join). The env-var path is
     /// the load-bearing breadcrumb for the GitHub Action and the GitLab CI
-    /// template, both of which set the var before invoking fallow.
+    /// template, both of which set the var before invoking plow.
     EnvVar(PathBuf),
 }
 
@@ -284,7 +284,7 @@ impl DiffSource {
         match self {
             Self::Flag(p) => format!("--diff-file {}", p.display()),
             Self::Stdin => "--diff-stdin".to_owned(),
-            Self::EnvVar(p) => format!("$FALLOW_DIFF_FILE {}", p.display()),
+            Self::EnvVar(p) => format!("$PLOW_DIFF_FILE {}", p.display()),
         }
     }
 }
@@ -303,7 +303,7 @@ pub struct LoadedDiff {
 ///   1. `--diff-stdin` -> stdin
 ///   2. `--diff-file -` -> stdin
 ///   3. `--diff-file <path>` -> path (root-joined if relative)
-///   4. `$FALLOW_DIFF_FILE` -> path (root-joined if relative)
+///   4. `$PLOW_DIFF_FILE` -> path (root-joined if relative)
 ///   5. None set -> returns `Ok(None)`
 ///
 /// Returns `Err` only on a configuration conflict (e.g. `--diff-stdin`
@@ -347,7 +347,7 @@ pub fn resolve_diff_source(
         return Ok(Some(DiffSource::Flag(abs)));
     }
 
-    if let Some(env) = std::env::var_os("FALLOW_DIFF_FILE")
+    if let Some(env) = std::env::var_os("PLOW_DIFF_FILE")
         && !env.is_empty()
     {
         let raw = PathBuf::from(env);
@@ -364,7 +364,7 @@ pub fn resolve_diff_source(
 
 /// Read + parse the resolved diff source into a `DiffIndex` for
 /// finding-level filtering. Failure modes (file missing, oversize,
-/// unreadable, empty index) emit a `fallow: warning [diff-file]` line on
+/// unreadable, empty index) emit a `plow: warning [diff-file]` line on
 /// stderr unless `quiet` is set, and return `None` so the analysis runs
 /// at full scope rather than failing for a CI-script issue.
 ///
@@ -380,7 +380,7 @@ pub fn load_diff_index_for_findings(source: &DiffSource, quiet: bool) -> Option<
                     let index = DiffIndex::from_unified_diff(&buf);
                     if !quiet && index.added_line_count() == 0 {
                         eprintln!(
-                            "fallow: warning [diff-file]: --diff-stdin parsed \
+                            "plow: warning [diff-file]: --diff-stdin parsed \
                              0 added lines; no findings will pass the diff filter. \
                              Did you pipe a non-unified diff or an empty stream? \
                              (Pure-rename, binary-only, and deletion-only diffs \
@@ -392,7 +392,7 @@ pub fn load_diff_index_for_findings(source: &DiffSource, quiet: bool) -> Option<
                 Err(err) => {
                     if !quiet {
                         eprintln!(
-                            "fallow: warning [diff-file]: could not read stdin: {err} \
+                            "plow: warning [diff-file]: could not read stdin: {err} \
                              (line-level filtering disabled; rerun with \
                              --diff-file PATH to point at a file on disk)"
                         );
@@ -408,7 +408,7 @@ pub fn load_diff_index_for_findings(source: &DiffSource, quiet: bool) -> Option<
             {
                 if !quiet {
                     eprintln!(
-                        "fallow: warning [diff-file]: {label} is {} bytes (cap {MAX_DIFF_BYTES}); \
+                        "plow: warning [diff-file]: {label} is {} bytes (cap {MAX_DIFF_BYTES}); \
                          line-level filtering disabled, reporting all findings",
                         meta.len()
                     );
@@ -420,7 +420,7 @@ pub fn load_diff_index_for_findings(source: &DiffSource, quiet: bool) -> Option<
                     let index = DiffIndex::from_unified_diff(&text);
                     if !quiet && index.added_line_count() == 0 {
                         eprintln!(
-                            "fallow: warning [diff-file]: {label} parsed 0 added \
+                            "plow: warning [diff-file]: {label} parsed 0 added \
                              lines; no findings will pass the diff filter. \
                              Verify the file is a unified diff (look for \
                              `+++ b/<path>` headers). Pure-rename, binary-only, \
@@ -432,7 +432,7 @@ pub fn load_diff_index_for_findings(source: &DiffSource, quiet: bool) -> Option<
                 Err(err) => {
                     if !quiet {
                         eprintln!(
-                            "fallow: warning [diff-file]: could not read {label}: {err} \
+                            "plow: warning [diff-file]: could not read {label}: {err} \
                              (line-level filtering disabled)"
                         );
                     }
@@ -479,7 +479,7 @@ pub fn shared_diff_index() -> Option<&'static DiffIndex> {
 }
 
 fn context_radius_from_env() -> u64 {
-    std::env::var("FALLOW_DIFF_CONTEXT")
+    std::env::var("PLOW_DIFF_CONTEXT")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
         .unwrap_or(3)
@@ -496,7 +496,7 @@ fn parse_new_hunk_start(header: &str) -> Option<u64> {
 
 #[must_use]
 pub fn filter_issues_from_env(issues: Vec<CiIssue>) -> Vec<CiIssue> {
-    let Some(raw_path) = std::env::var_os("FALLOW_DIFF_FILE") else {
+    let Some(raw_path) = std::env::var_os("PLOW_DIFF_FILE") else {
         return issues;
     };
     filter_issues_from_path(
@@ -509,13 +509,13 @@ pub fn filter_issues_from_env(issues: Vec<CiIssue>) -> Vec<CiIssue> {
 
 /// Filter for the typed PR-comment renderer (`print_pr_comment`).
 ///
-/// `FALLOW_SUMMARY_SCOPE=all` (default) keeps the existing behavior:
+/// `PLOW_SUMMARY_SCOPE=all` (default) keeps the existing behavior:
 /// project-level rule findings (dependency / catalog / override hygiene that
 /// lives in `package.json` / `pnpm-workspace.yaml`) bypass the diff filter
 /// because the PR diff rarely touches the anchored line even though the
 /// finding may be the reason CI fails.
 ///
-/// `FALLOW_SUMMARY_SCOPE=diff` applies the same diff filter to project-level
+/// `PLOW_SUMMARY_SCOPE=diff` applies the same diff filter to project-level
 /// findings too, which is useful for advisory monorepo comments where
 /// unrelated pre-existing dependency findings would otherwise dominate the
 /// sticky summary.
@@ -561,7 +561,7 @@ pub fn filter_issues_from_path(
     match std::fs::metadata(path) {
         Ok(meta) if meta.len() > MAX_DIFF_BYTES => {
             eprintln!(
-                "fallow: FALLOW_DIFF_FILE '{}' is {} bytes (cap {MAX_DIFF_BYTES}); \
+                "plow: PLOW_DIFF_FILE '{}' is {} bytes (cap {MAX_DIFF_BYTES}); \
                  skipping diff filter, reporting all findings",
                 path.display(),
                 meta.len()
@@ -571,7 +571,7 @@ pub fn filter_issues_from_path(
         Ok(_) => {}
         Err(err) => {
             eprintln!(
-                "fallow: FALLOW_DIFF_FILE '{}' could not be stat'd ({err}); \
+                "plow: PLOW_DIFF_FILE '{}' could not be stat'd ({err}); \
                  skipping diff filter, reporting all findings",
                 path.display()
             );
@@ -581,7 +581,7 @@ pub fn filter_issues_from_path(
 
     let Ok(diff) = std::fs::read_to_string(path) else {
         eprintln!(
-            "fallow: FALLOW_DIFF_FILE '{}' could not be read; \
+            "plow: PLOW_DIFF_FILE '{}' could not be read; \
              skipping diff filter, reporting all findings",
             path.display()
         );
@@ -685,7 +685,7 @@ mod tests {
         .expect("write");
 
         let project_level = CiIssue {
-            rule_id: "fallow/unused-dependency-override".into(),
+            rule_id: "plow/unused-dependency-override".into(),
             description: "Override stale".into(),
             severity: "minor".into(),
             path: "package.json".into(),
@@ -693,7 +693,7 @@ mod tests {
             fingerprint: "override".into(),
         };
         let source_level_in_diff = CiIssue {
-            rule_id: "fallow/unused-export".into(),
+            rule_id: "plow/unused-export".into(),
             description: "Export unused".into(),
             severity: "minor".into(),
             path: "src/a.ts".into(),
@@ -701,7 +701,7 @@ mod tests {
             fingerprint: "in-diff".into(),
         };
         let source_level_outside_diff = CiIssue {
-            rule_id: "fallow/unused-export".into(),
+            rule_id: "plow/unused-export".into(),
             description: "Export unused".into(),
             severity: "minor".into(),
             path: "src/b.ts".into(),
@@ -747,7 +747,7 @@ mod tests {
         .expect("write");
 
         let project_level = CiIssue {
-            rule_id: "fallow/unused-dependency".into(),
+            rule_id: "plow/unused-dependency".into(),
             description: "Dependency unused".into(),
             severity: "minor".into(),
             path: "package.json".into(),
@@ -779,7 +779,7 @@ mod tests {
         .expect("write");
 
         let project_level = CiIssue {
-            rule_id: "fallow/unused-dependency".into(),
+            rule_id: "plow/unused-dependency".into(),
             description: "Dependency unused".into(),
             severity: "minor".into(),
             path: "package.json".into(),
@@ -796,7 +796,7 @@ mod tests {
     #[test]
     fn summary_filter_preserves_path_line_fingerprint_sort_order() {
         let a = CiIssue {
-            rule_id: "fallow/unused-export".into(),
+            rule_id: "plow/unused-export".into(),
             description: "a".into(),
             severity: "minor".into(),
             path: "src/a.ts".into(),
@@ -804,7 +804,7 @@ mod tests {
             fingerprint: "a".into(),
         };
         let b = CiIssue {
-            rule_id: "fallow/unused-dependency".into(),
+            rule_id: "plow/unused-dependency".into(),
             description: "b".into(),
             severity: "minor".into(),
             path: "package.json".into(),

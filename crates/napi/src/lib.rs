@@ -7,10 +7,10 @@
     )
 )]
 
-use fallow_cli::programmatic;
 use napi::bindgen_prelude::{AsyncTask, JsObjectValue, ToNapiValue, Unknown};
 use napi::{Env, ScopedTask, Status};
 use napi_derive::napi;
+use plow_cli::programmatic;
 
 #[napi(object)]
 #[derive(Default)]
@@ -413,7 +413,7 @@ fn to_napi_error(env: Env, error: programmatic::ProgrammaticError) -> napi::Erro
         return napi::Error::new(Status::GenericFailure, message);
     };
 
-    let _ = js_error.set_named_property("name", "FallowNodeError");
+    let _ = js_error.set_named_property("name", "PlowNodeError");
     let _ = js_error.set_named_property("exitCode", u32::from(exit_code));
     if let Some(code) = code {
         let _ = js_error.set_named_property("code", code);
@@ -481,8 +481,7 @@ impl<'task> ScopedTask<'task> for ProgrammaticTask {
 
     fn reject(&mut self, env: &'task Env, err: napi::Error) -> napi::Result<Self::JsValue> {
         let error = self.error.take().unwrap_or_else(|| {
-            programmatic::ProgrammaticError::new(err.reason.clone(), 2)
-                .with_code("FALLOW_NODE_ERROR")
+            programmatic::ProgrammaticError::new(err.reason.clone(), 2).with_code("PLOW_NODE_ERROR")
         });
         Err(to_napi_error(*env, error))
     }
@@ -565,7 +564,7 @@ mod tests {
     fn dead_code_options_map_common_fields_filters_and_files() {
         let options = programmatic::DeadCodeOptions::try_from(DeadCodeOptions {
             root: Some("/repo".to_string()),
-            config_path: Some("/repo/fallow.toml".to_string()),
+            config_path: Some("/repo/plow.toml".to_string()),
             no_cache: Some(true),
             threads: Some(4),
             diff_file: Some("/tmp/diff.patch".to_string()),
@@ -609,7 +608,7 @@ mod tests {
         assert_eq!(options.analysis.root.as_deref(), Some(Path::new("/repo")));
         assert_eq!(
             options.analysis.config_path.as_deref(),
-            Some(Path::new("/repo/fallow.toml"))
+            Some(Path::new("/repo/plow.toml"))
         );
         assert!(options.analysis.no_cache);
         assert_eq!(options.analysis.threads, Some(4));
@@ -946,7 +945,7 @@ mod tests {
 
         let mut failing_task = ProgrammaticTask::new(|| {
             Err(programmatic::ProgrammaticError::new("analysis failed", 2)
-                .with_code("FALLOW_TEST_FAILURE"))
+                .with_code("PLOW_TEST_FAILURE"))
         });
 
         let error = failing_task.compute().expect_err("task should fail");
@@ -955,6 +954,6 @@ mod tests {
             .error
             .as_ref()
             .expect("programmatic error should be retained for reject");
-        assert_eq!(stored.code.as_deref(), Some("FALLOW_TEST_FAILURE"));
+        assert_eq!(stored.code.as_deref(), Some("PLOW_TEST_FAILURE"));
     }
 }

@@ -1,5 +1,5 @@
 [package]
-name = "fallow-core"
+name = "plow-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,17 +8,17 @@ homepage.workspace = true
 documentation.workspace = true
 keywords.workspace = true
 categories.workspace = true
-description = "Analysis orchestration for fallow codebase intelligence (dead code, duplication, plugins, cross-reference)"
+description = "Analysis orchestration for plow codebase intelligence (dead code, duplication, plugins, cross-reference)"
 readme = "../../README.md"
 
 [lib]
 doctest = false
 
 [dependencies]
-fallow-config = { workspace = true }
-fallow-extract = { workspace = true }
-fallow-graph = { workspace = true }
-fallow-types = { workspace = true }
+plow-config = { workspace = true }
+plow-extract = { workspace = true }
+plow-graph = { workspace = true }
+plow-types = { workspace = true }
 
 # Parsing & analysis
 oxc_allocator = { workspace = true }
@@ -63,10 +63,10 @@ tracing = { workspace = true }
 schemars = { workspace = true, optional = true }
 
 [features]
-# Mirrors fallow-types' `schema` feature: enables `#[derive(schemars::JsonSchema)]`
+# Mirrors plow-types' `schema` feature: enables `#[derive(schemars::JsonSchema)]`
 # on `DuplicationReport` and friends so the public JSON output contract can be
 # regenerated from the Rust source of truth.
-schema = ["dep:schemars", "fallow-types/schema"]
+schema = ["dep:schemars", "plow-types/schema"]
 
 [dev-dependencies]
 criterion = { workspace = true }

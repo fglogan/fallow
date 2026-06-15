@@ -1,6 +1,6 @@
 import * as path from "node:path";
 // VS Code injects this module into the extension host at runtime.
-// fallow-ignore-next-line unlisted-dependency
+// plow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
 import { clampMinLines, clampMinOccurrences } from "./duplication-utils.js";
 import type {
@@ -12,7 +12,7 @@ import type {
 } from "./types.js";
 import { getDiagnosticCategories } from "./diagnosticFilter.js";
 
-const SECTION = "fallow";
+const SECTION = "plow";
 
 const getConfig = (): vscode.WorkspaceConfiguration => vscode.workspace.getConfiguration(SECTION);
 
@@ -113,10 +113,10 @@ export const getDuplicationIgnoreImportsOverride = (): boolean | undefined =>
   getConfiguredValue<boolean>("duplication.ignoreImports");
 
 /**
- * Resolve `fallow.production` to a production-mode override forwarded to BOTH
+ * Resolve `plow.production` to a production-mode override forwarded to BOTH
  * the CLI-driven sidebar AND the LSP so the two editor surfaces agree. `true`
  * (`"on"`) forces production on, `false` (`"off"`) forces it off, `undefined`
- * (`"auto"`, the default, or unset) defers to the project `.fallowrc.json`. Uses
+ * (`"auto"`, the default, or unset) defers to the project `.plowrc.json`. Uses
  * the inspect-based override pattern (like the `duplication.*` getters) so an
  * unset editor value never overrides project config, and accepts a legacy
  * stored boolean (the pre-enum setting shape) as on/off (issue #1055).
@@ -136,7 +136,7 @@ const getCoverageCapturePath = (): string =>
   getConfig().get<string>("coverage.capturePath", "").trim();
 
 /**
- * Resolve `fallow.coverage.capturePath` to an absolute path against the
+ * Resolve `plow.coverage.capturePath` to an absolute path against the
  * workspace root, mirroring `getResolvedConfigPath`. Empty when unset.
  */
 export const getCoveragePath = (): string => {
@@ -153,7 +153,7 @@ export const getCoveragePath = (): string => {
 export const getCoverageTop = (): number => getConfig().get<number>("coverage.top", 0);
 
 /**
- * Which findings affect the audit verdict. Mirrors `fallow audit --gate`:
+ * Which findings affect the audit verdict. Mirrors `plow audit --gate`:
  * `new-only` (default) fails on findings introduced by the current change set,
  * `all` fails on every finding in changed files.
  */
@@ -243,7 +243,7 @@ export const getComplexityDecorationCap = (): number => {
 };
 
 /**
- * The pinned `fallow.workspace` setting (a monorepo package name). Empty =
+ * The pinned `plow.workspace` setting (a monorepo package name). Empty =
  * whole project. A per-folder `workspaceState` override set via the picker
  * takes precedence over this; see `resolveWorkspaceScope`.
  */
@@ -253,7 +253,7 @@ export const getTraceLevel = (): TraceLevel => getConfig().get<TraceLevel>("trac
 
 /**
  * Whether the opt-in Security Candidates view is enabled. Off by default: no
- * `fallow security` process runs and no security view work happens until the
+ * `plow security` process runs and no security view work happens until the
  * user turns this on AND opens the Security Candidates view (#902 latency
  * protection; #903 enable toggle).
  */

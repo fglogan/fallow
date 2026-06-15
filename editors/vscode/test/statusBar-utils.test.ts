@@ -8,7 +8,7 @@ import {
   renderStatusBarText,
 } from "../src/statusBar-utils.js";
 import type { AnalysisCompleteParams } from "../src/statusBar-utils.js";
-import type { FallowCheckResult, FallowDupesResult } from "../src/types.js";
+import type { PlowCheckResult, PlowDupesResult } from "../src/types.js";
 
 const baseParams = (
   overrides: Partial<AnalysisCompleteParams> = {}
@@ -73,11 +73,11 @@ describe("buildStatusBarTooltipMarkdown", () => {
       })
     );
 
-    expect(markdown).toContain("**Fallow** - Analysis Results");
+    expect(markdown).toContain("**Plow** - Analysis Results");
     expect(markdown).toContain("$(error) 2 unresolved imports");
     expect(markdown).toContain("$(warning) 1 unused files");
     expect(markdown).toContain("$(copy) 1 clone groups (3.3% duplication)");
-    expect(markdown).toContain("command:fallow.analyze");
+    expect(markdown).toContain("command:plow.analyze");
     expect(markdown).not.toContain("unused exports");
   });
 
@@ -88,8 +88,8 @@ describe("buildStatusBarTooltipMarkdown", () => {
   });
 
   it("surfaces the changedSince ref when scoped", () => {
-    const markdown = buildStatusBarTooltipMarkdown(baseParams(), "fallow-baseline");
-    expect(markdown).toContain("Scoped to changes since fallow\\-baseline");
+    const markdown = buildStatusBarTooltipMarkdown(baseParams(), "plow-baseline");
+    expect(markdown).toContain("Scoped to changes since plow\\-baseline");
   });
 
   it("escapes changedSince markdown in trusted tooltip text", () => {
@@ -126,11 +126,11 @@ describe("formatChangedSinceRefForStatusBar", () => {
 
 describe("renderStatusBarText", () => {
   it("returns the base label unchanged when no changedSince is set", () => {
-    expect(renderStatusBarText("$(search) Fallow", null)).toBe(
-      "$(search) Fallow"
+    expect(renderStatusBarText("$(search) Plow", null)).toBe(
+      "$(search) Plow"
     );
-    expect(renderStatusBarText("$(search) Fallow: 5 issues", null)).toBe(
-      "$(search) Fallow: 5 issues"
+    expect(renderStatusBarText("$(search) Plow: 5 issues", null)).toBe(
+      "$(search) Plow: 5 issues"
     );
   });
 
@@ -138,39 +138,39 @@ describe("renderStatusBarText", () => {
     // Defensive: callers should pre-coerce "" to null via getChangedSince()
     // (or the liveChangedSince() wrapper in statusBar.ts). If the empty
     // string ever leaks through directly, the helper must still fall
-    // back to the base label rather than rendering "Fallow (since )".
-    expect(renderStatusBarText("$(search) Fallow", "")).toBe(
-      "$(search) Fallow"
+    // back to the base label rather than rendering "Plow (since )".
+    expect(renderStatusBarText("$(search) Plow", "")).toBe(
+      "$(search) Plow"
     );
   });
 
   it("appends `(since <ref>)` to every state when changedSince is active", () => {
-    const ref = "fallow-baseline";
-    expect(renderStatusBarText("$(search) Fallow", ref)).toBe(
-      "$(search) Fallow (since fallow-baseline)"
+    const ref = "plow-baseline";
+    expect(renderStatusBarText("$(search) Plow", ref)).toBe(
+      "$(search) Plow (since plow-baseline)"
     );
     expect(
-      renderStatusBarText("$(loading~spin) Fallow: Analyzing...", ref)
-    ).toBe("$(loading~spin) Fallow: Analyzing... (since fallow-baseline)");
-    expect(renderStatusBarText("$(error) Fallow: Error", ref)).toBe(
-      "$(error) Fallow: Error (since fallow-baseline)"
+      renderStatusBarText("$(loading~spin) Plow: Analyzing...", ref)
+    ).toBe("$(loading~spin) Plow: Analyzing... (since plow-baseline)");
+    expect(renderStatusBarText("$(error) Plow: Error", ref)).toBe(
+      "$(error) Plow: Error (since plow-baseline)"
     );
-    expect(renderStatusBarText("$(search) Fallow: 3 issues", ref)).toBe(
-      "$(search) Fallow: 3 issues (since fallow-baseline)"
+    expect(renderStatusBarText("$(search) Plow: 3 issues", ref)).toBe(
+      "$(search) Plow: 3 issues (since plow-baseline)"
     );
   });
 
   it("delegates to formatChangedSinceRefForStatusBar for truncation", () => {
     const longRef =
       "feature/some-extremely-long-baseline-branch-name-that-would-crowd-the-status-bar";
-    const rendered = renderStatusBarText("$(search) Fallow", longRef);
-    expect(rendered.startsWith("$(search) Fallow (since ")).toBe(true);
+    const rendered = renderStatusBarText("$(search) Plow", longRef);
+    expect(rendered.startsWith("$(search) Plow (since ")).toBe(true);
     expect(rendered.endsWith("...)")).toBe(true);
   });
 });
 
 describe("buildParamsFromCli", () => {
-  const emptyCheck = (): FallowCheckResult => ({
+  const emptyCheck = (): PlowCheckResult => ({
     schema_version: 7,
     version: "0.0.0-test",
     elapsed_ms: 0,
@@ -225,7 +225,7 @@ describe("buildParamsFromCli", () => {
   });
 
   it("counts issue categories from the check result", () => {
-    const check: FallowCheckResult = {
+    const check: PlowCheckResult = {
       ...emptyCheck(),
       unused_files: [{ path: "a.ts", actions: [] }],
       unused_exports: [
@@ -321,7 +321,7 @@ describe("buildParamsFromCli", () => {
   });
 
   it("propagates duplication stats from the dupes result so the tooltip matches the status bar text", () => {
-    const dupes: FallowDupesResult = {
+    const dupes: PlowDupesResult = {
       clone_groups: [],
       clone_families: [],
       stats: {

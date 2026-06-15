@@ -27,13 +27,13 @@ use tower_lsp_server::{Client, LanguageServer, LspService, Server};
 
 use serde::{Deserialize, Serialize};
 
-use fallow_config::{DetectionMode, DuplicatesConfig};
-use fallow_core::changed_files::{
+use plow_config::{DetectionMode, DuplicatesConfig};
+use plow_core::changed_files::{
     filter_duplication_by_changed_files, filter_results_by_changed_files, resolve_git_toplevel,
     try_get_changed_files_with_toplevel,
 };
-use fallow_core::duplicates::DuplicationReport;
-use fallow_core::results::AnalysisResults;
+use plow_core::duplicates::DuplicationReport;
+use plow_core::results::AnalysisResults;
 
 use crate::code_lens::{InlineComplexityExceeded, InlineComplexityFinding};
 
@@ -44,7 +44,7 @@ enum AnalysisComplete {}
 
 impl notification::Notification for AnalysisComplete {
     type Params = AnalysisCompleteParams;
-    const METHOD: &'static str = "fallow/analysisComplete";
+    const METHOD: &'static str = "plow/analysisComplete";
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -125,7 +125,7 @@ fn analysis_complete_params(
 }
 
 /// Diagnostic codes that the LSP client can disable via initializationOptions.
-/// The same table also backs the `fallow/issueTypes` custom request used by
+/// The same table also backs the `plow/issueTypes` custom request used by
 /// editor clients that need user-facing labels for all emitted diagnostic codes.
 #[derive(Debug, Clone, Copy)]
 struct DiagnosticIssueType {
@@ -351,7 +351,7 @@ fn config_load_error_detail(
 ) -> String {
     match explicit_config_path {
         Some(path) => format!(
-            "fallow.configPath '{}' failed to load for {}: {err} (no diagnostics will be produced)",
+            "plow.configPath '{}' failed to load for {}: {err} (no diagnostics will be produced)",
             path.display(),
             project_root.display()
         ),
@@ -378,7 +378,7 @@ fn analyze_project_root(
     merged_inline_complexity: &mut Vec<InlineComplexityFinding>,
     config_messages: &mut Vec<(MessageType, String)>,
 ) {
-    let (mut config, message) = match fallow_core::config_for_project(project_root, config_path) {
+    let (mut config, message) = match plow_core::config_for_project(project_root, config_path) {
         Ok((config, Some(path))) => (
             config,
             (
@@ -402,12 +402,12 @@ fn analyze_project_root(
             if config_path.is_none() {
                 #[expect(
                     deprecated,
-                    reason = "ADR-008 deprecates fallow_core::analyze_project externally; the LSP still uses the workspace path dependency"
+                    reason = "ADR-008 deprecates plow_core::analyze_project externally; the LSP still uses the workspace path dependency"
                 )]
-                if let Ok(results) = fallow_core::analyze_project(project_root) {
+                if let Ok(results) = plow_core::analyze_project(project_root) {
                     merge_results(merged_results, results);
                 }
-                let duplication = fallow_core::duplicates::find_duplicates_in_project(
+                let duplication = plow_core::duplicates::find_duplicates_in_project(
                     project_root,
                     &DuplicatesConfig::default(),
                 );
@@ -418,7 +418,7 @@ fn analyze_project_root(
     };
 
     // Override the project config's production resolution when the editor
-    // forwarded an explicit `fallow.production` (on/off). Mirrors the
+    // forwarded an explicit `plow.production` (on/off). Mirrors the
     // CLI-driven sidebar receiving `--production`/`--no-production`, so the two
     // surfaces agree; `None` leaves the project config in force (issue #1055).
     if let Some(production) = production_override {
@@ -430,29 +430,29 @@ fn analyze_project_root(
     if inline_complexity_enabled {
         #[expect(
             deprecated,
-            reason = "ADR-008 deprecates fallow_core typed analysis externally; the LSP still uses the workspace path dependency"
+            reason = "ADR-008 deprecates plow_core typed analysis externally; the LSP still uses the workspace path dependency"
         )]
-        if let Ok(output) = fallow_core::analyze_with_usages_and_complexity(&config) {
+        if let Ok(output) = plow_core::analyze_with_usages_and_complexity(&config) {
             merged_inline_complexity.extend(collect_inline_complexity(&config, &output));
             merge_results(merged_results, output.results);
         }
     } else {
         #[expect(
             deprecated,
-            reason = "ADR-008 deprecates fallow_core::analyze_with_usages externally; the LSP still uses the workspace path dependency"
+            reason = "ADR-008 deprecates plow_core::analyze_with_usages externally; the LSP still uses the workspace path dependency"
         )]
-        if let Ok(results) = fallow_core::analyze_with_usages(&config) {
+        if let Ok(results) = plow_core::analyze_with_usages(&config) {
             merge_results(merged_results, results);
         }
     }
 
-    let files = fallow_core::discover::discover_files_with_plugin_scopes(&config);
+    let files = plow_core::discover::discover_files_with_plugin_scopes(&config);
     let duplicates_config = duplication_options.map_or_else(
         || config.duplicates.clone(),
         |options| options.merge_with(&config.duplicates),
     );
     let duplication =
-        fallow_core::duplicates::find_duplicates(project_root, &files, &duplicates_config);
+        plow_core::duplicates::find_duplicates(project_root, &files, &duplicates_config);
     merge_duplication(merged_duplication, duplication);
 }
 
@@ -564,8 +564,8 @@ fn build_health_ignore_set(patterns: &[String]) -> Option<globset::GlobSet> {
 }
 
 fn collect_inline_complexity(
-    config: &fallow_config::ResolvedConfig,
-    output: &fallow_core::AnalysisOutput,
+    config: &plow_config::ResolvedConfig,
+    output: &plow_core::AnalysisOutput,
 ) -> Vec<InlineComplexityFinding> {
     let Some(modules) = output.modules.as_ref() else {
         return Vec::new();
@@ -591,10 +591,10 @@ fn collect_inline_complexity(
         }
 
         for function in &module.complexity {
-            if fallow_core::suppress::is_suppressed(
+            if plow_core::suppress::is_suppressed(
                 &module.suppressions,
                 function.line,
-                fallow_core::suppress::IssueKind::Complexity,
+                plow_core::suppress::IssueKind::Complexity,
             ) {
                 continue;
             }
@@ -630,7 +630,7 @@ fn filter_inline_complexity_by_changed_files(
     findings.retain(|finding| changed_files.contains(&finding.path));
 }
 
-struct FallowLspServer {
+struct PlowLspServer {
     client: Client,
     root: Arc<RwLock<Option<PathBuf>>>,
     results: Arc<RwLock<Option<AnalysisResults>>>,
@@ -662,7 +662,7 @@ struct FallowLspServer {
     /// diagnostics match the CLI-driven sidebar (which receives
     /// `--production`/`--no-production`); `None` defers to the project config,
     /// mirroring the CLI default. Without this the sidebar and editor squiggles
-    /// disagree whenever `fallow.production` is set (issue #1055).
+    /// disagree whenever `plow.production` is set (issue #1055).
     production_override: Arc<RwLock<Option<bool>>>,
     /// Whether the client opted in to heuristic complexity code lenses.
     inline_complexity_enabled: Arc<RwLock<bool>>,
@@ -724,7 +724,7 @@ fn build_server_capabilities(advertise_pull_diagnostics: bool) -> ServerCapabili
         hover_provider: Some(HoverProviderCapability::Simple(true)),
         diagnostic_provider: advertise_pull_diagnostics.then(|| {
             DiagnosticServerCapabilities::Options(DiagnosticOptions {
-                identifier: Some("fallow".to_string()),
+                identifier: Some("plow".to_string()),
                 inter_file_dependencies: true,
                 workspace_diagnostics: false,
                 work_done_progress_options: WorkDoneProgressOptions::default(),
@@ -743,7 +743,7 @@ fn client_supports_workspace_diagnostic_refresh(capabilities: &ClientCapabilitie
         .unwrap_or(false)
 }
 
-impl LanguageServer for FallowLspServer {
+impl LanguageServer for PlowLspServer {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
         let root = params
             .workspace_folders
@@ -810,7 +810,7 @@ impl LanguageServer for FallowLspServer {
 
     async fn initialized(&self, _: InitializedParams) {
         self.client
-            .log_message(MessageType::INFO, "fallow LSP server initialized")
+            .log_message(MessageType::INFO, "plow LSP server initialized")
             .await;
 
         self.run_analysis().await;
@@ -1041,7 +1041,7 @@ impl LanguageServer for FallowLspServer {
         let position = params.text_document_position_params.position;
 
         let duplication = self.duplication.read().await;
-        let empty_report = fallow_core::duplicates::DuplicationReport::default();
+        let empty_report = plow_core::duplicates::DuplicationReport::default();
         let duplication_ref = duplication.as_ref().unwrap_or(&empty_report);
 
         Ok(hover::build_hover(
@@ -1053,7 +1053,7 @@ impl LanguageServer for FallowLspServer {
     }
 }
 
-impl FallowLspServer {
+impl PlowLspServer {
     fn new(client: Client) -> Self {
         Self {
             client,
@@ -1138,7 +1138,7 @@ impl FallowLspServer {
                         .log_message(
                             MessageType::WARNING,
                             format!(
-                                "fallow workspace root ({}) is a subdirectory of git toplevel ({}). \
+                                "plow workspace root ({}) is a subdirectory of git toplevel ({}). \
                                  Diagnostics for files outside the workspace are not produced; the \
                                  changedSince filter joins paths against the toplevel.",
                                 root.display(),
@@ -1175,7 +1175,7 @@ impl FallowLspServer {
             .collect();
 
         self.client
-            .log_message(MessageType::INFO, "Running fallow analysis...")
+            .log_message(MessageType::INFO, "Running plow analysis...")
             .await;
 
         let project_roots = find_project_roots(&root);
@@ -1438,7 +1438,7 @@ impl FallowLspServer {
     /// response. The refresh is a server-to-client request that
     /// `tower-lsp-server` resolves only once the client replies; awaiting it
     /// inline would let a slow or unresponsive client stall `run_analysis`
-    /// (which holds `analysis_guard`) and delay the `fallow/analysisComplete`
+    /// (which holds `analysis_guard`) and delay the `plow/analysisComplete`
     /// signal. Spawning keeps the request on the wire while decoupling analysis
     /// throughput from client responsiveness.
     fn spawn_diagnostic_refresh(&self) {
@@ -1474,13 +1474,13 @@ async fn main() {
             reason = "version query writes to stdout by design"
         )]
         {
-            println!("fallow-lsp {}", env!("CARGO_PKG_VERSION"));
+            println!("plow-lsp {}", env!("CARGO_PKG_VERSION"));
         }
         return;
     }
 
     tracing_subscriber::fmt()
-        .with_env_filter("fallow=info")
+        .with_env_filter("plow=info")
         .with_writer(std::io::stderr)
         .with_ansi(false)
         .init();
@@ -1488,11 +1488,11 @@ async fn main() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
-    let (service, socket) = LspService::build(FallowLspServer::new)
-        .custom_method("fallow/issueTypes", FallowLspServer::issue_types)
+    let (service, socket) = LspService::build(PlowLspServer::new)
+        .custom_method("plow/issueTypes", PlowLspServer::issue_types)
         .custom_method(
-            "fallow/refreshDiagnostics",
-            FallowLspServer::refresh_diagnostics,
+            "plow/refreshDiagnostics",
+            PlowLspServer::refresh_diagnostics,
         )
         .finish();
 
@@ -1503,7 +1503,7 @@ async fn main() {
 /// workspace root.
 ///
 /// The LSP analyzes the workspace root ONCE over the whole tree, matching the
-/// CLI (`fallow dead-code` loads one config via `find_and_load(root)` and runs one
+/// CLI (`plow dead-code` loads one config via `find_and_load(root)` and runs one
 /// `analyze_full` pass). `analyze_full` is already workspace-aware: it discovers
 /// every workspace package and runs `run_workspace_fast` per package for plugin
 /// and script detection, so a single root pass covers all sub-package source
@@ -1546,7 +1546,7 @@ fn find_project_roots(workspace_root: &std::path::Path) -> Vec<std::path::PathBu
 /// non-object (string / number / array), the existing value is left alone
 /// and `changedSince` is not stamped on that one diagnostic; that case is
 /// not used by `build_diagnostics` today and is logged via the structured
-/// fact that `data` for any fallow diagnostic should be an object.
+/// fact that `data` for any plow diagnostic should be an object.
 fn attach_changed_since_data(
     diagnostics_by_file: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     changed_since: Option<&str>,
@@ -1609,8 +1609,8 @@ fn merge_duplication(target: &mut DuplicationReport, source: DuplicationReport) 
 mod tests {
     use super::*;
 
-    use fallow_core::duplicates::{CloneGroup, CloneInstance, DuplicationStats};
-    use fallow_core::results::{
+    use plow_core::duplicates::{CloneGroup, CloneInstance, DuplicationStats};
+    use plow_core::results::{
         BoundaryViolation, BoundaryViolationFinding, CircularDependency, CircularDependencyFinding,
         ExportUsage, SecuritySeverity, TestOnlyDependency, TestOnlyDependencyFinding,
         TypeOnlyDependency, UnlistedDependency, UnlistedDependencyFinding,
@@ -1631,10 +1631,10 @@ mod tests {
             .expect("diagnostic_provider must be advertised for clients that can refresh pulled diagnostics");
         match provider {
             DiagnosticServerCapabilities::Options(opts) => {
-                assert_eq!(opts.identifier.as_deref(), Some("fallow"));
+                assert_eq!(opts.identifier.as_deref(), Some("plow"));
                 assert!(
                     opts.inter_file_dependencies,
-                    "fallow diagnostics span files; clients must re-pull related files on changes"
+                    "plow diagnostics span files; clients must re-pull related files on changes"
                 );
                 assert!(
                     !opts.workspace_diagnostics,
@@ -1689,7 +1689,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn shutdown_sets_cancellation_flag() {
-        let (service, _) = LspService::build(FallowLspServer::new).finish();
+        let (service, _) = LspService::build(PlowLspServer::new).finish();
         let backend = service.inner();
         assert!(
             !backend.cancellation.load(Ordering::SeqCst),
@@ -1704,7 +1704,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn run_analysis_short_circuits_after_shutdown() {
-        let (service, _) = LspService::build(FallowLspServer::new).finish();
+        let (service, _) = LspService::build(PlowLspServer::new).finish();
         let backend = service.inner();
         *backend.root.write().await = Some(std::env::temp_dir());
         backend.shutdown().await.expect("shutdown returns Ok");
@@ -1742,7 +1742,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn text_document_diagnostic_request_is_served() {
-        let (mut service, _) = LspService::build(FallowLspServer::new).finish();
+        let (mut service, _) = LspService::build(PlowLspServer::new).finish();
 
         let initialize = Request::build("initialize")
             .params(json!({"capabilities": {}}))
@@ -1765,7 +1765,7 @@ mod tests {
                 "textDocument": {
                     "uri": "file:///workspace/src/example.ts"
                 },
-                "identifier": "fallow"
+                "identifier": "plow"
             }))
             .id(2)
             .finish();
@@ -1789,7 +1789,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn initialize_advertises_pull_diagnostics_for_refreshable_clients() {
-        let (mut service, _) = LspService::build(FallowLspServer::new).finish();
+        let (mut service, _) = LspService::build(PlowLspServer::new).finish();
 
         let initialize = Request::build("initialize")
             .params(json!({
@@ -1815,14 +1815,14 @@ mod tests {
         let result = response.result().expect("initialize response should be ok");
         assert_eq!(
             result["capabilities"]["diagnosticProvider"]["identifier"],
-            json!("fallow")
+            json!("plow")
         );
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn fallow_issue_types_request_is_served() {
-        let (mut service, _) = LspService::build(FallowLspServer::new)
-            .custom_method("fallow/issueTypes", FallowLspServer::issue_types)
+    async fn plow_issue_types_request_is_served() {
+        let (mut service, _) = LspService::build(PlowLspServer::new)
+            .custom_method("plow/issueTypes", PlowLspServer::issue_types)
             .finish();
 
         let initialize = Request::build("initialize")
@@ -1839,7 +1839,7 @@ mod tests {
             .expect("initialize request should return a response");
         assert!(response.is_ok());
 
-        let issue_types = Request::build("fallow/issueTypes").id(2).finish();
+        let issue_types = Request::build("plow/issueTypes").id(2).finish();
         let response = service
             .ready()
             .await
@@ -1851,7 +1851,7 @@ mod tests {
 
         assert!(
             response.is_ok(),
-            "fallow/issueTypes must not return method_not_found"
+            "plow/issueTypes must not return method_not_found"
         );
         let result = response
             .result()
@@ -1867,16 +1867,16 @@ mod tests {
                 .iter()
                 .any(|v| v["code"] == json!("test-only-dependency")
                     && v["label"] == json!("Test-Only Dependencies")),
-            "response should include every diagnostic code emitted by fallow-lsp"
+            "response should include every diagnostic code emitted by plow-lsp"
         );
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn fallow_refresh_diagnostics_request_is_served() {
-        let (mut service, _) = LspService::build(FallowLspServer::new)
+    async fn plow_refresh_diagnostics_request_is_served() {
+        let (mut service, _) = LspService::build(PlowLspServer::new)
             .custom_method(
-                "fallow/refreshDiagnostics",
-                FallowLspServer::refresh_diagnostics,
+                "plow/refreshDiagnostics",
+                PlowLspServer::refresh_diagnostics,
             )
             .finish();
 
@@ -1894,7 +1894,7 @@ mod tests {
             .expect("initialize request should return a response");
         assert!(response.is_ok());
 
-        let refresh = Request::build("fallow/refreshDiagnostics").id(2).finish();
+        let refresh = Request::build("plow/refreshDiagnostics").id(2).finish();
         let response = service
             .ready()
             .await
@@ -1906,18 +1906,18 @@ mod tests {
 
         assert!(
             response.is_ok(),
-            "fallow/refreshDiagnostics must not return method_not_found"
+            "plow/refreshDiagnostics must not return method_not_found"
         );
     }
 
     #[test]
     fn initialization_config_path_resolves_workspace_relative_path() {
-        let opts = json!({"configPath": "config/fallow.json"});
+        let opts = json!({"configPath": "config/plow.json"});
         let root = Path::new("/workspace");
 
         assert_eq!(
             initialization_config_path(&opts, Some(root)),
-            Some(PathBuf::from("/workspace/config/fallow.json"))
+            Some(PathBuf::from("/workspace/config/plow.json"))
         );
     }
 
@@ -1931,9 +1931,9 @@ mod tests {
     #[test]
     fn initialization_config_path_passes_through_absolute_path() {
         #[cfg(windows)]
-        let absolute = "C:/configs/fallow.json";
+        let absolute = "C:/configs/plow.json";
         #[cfg(not(windows))]
-        let absolute = "/etc/fallow.json";
+        let absolute = "/etc/plow.json";
 
         let opts = json!({ "configPath": absolute });
         assert_eq!(
@@ -1944,11 +1944,11 @@ mod tests {
 
     #[test]
     fn initialization_config_path_keeps_relative_path_without_root() {
-        let opts = json!({"configPath": "config/fallow.json"});
+        let opts = json!({"configPath": "config/plow.json"});
 
         assert_eq!(
             initialization_config_path(&opts, None),
-            Some(PathBuf::from("config/fallow.json"))
+            Some(PathBuf::from("config/plow.json"))
         );
     }
 
@@ -2079,7 +2079,7 @@ mod tests {
         // The project config does NOT set production. Production mode excludes
         // test files from discovery, so an unreferenced `*.test.ts` file is only
         // reported as an unused file when production is OFF. This pins the editor
-        // `fallow.production` -> LSP parity contract: `"on"` (Some(true)) must
+        // `plow.production` -> LSP parity contract: `"on"` (Some(true)) must
         // drop the test file the sidebar's `--production` run also drops; `"off"`
         // (Some(false)) and `"auto"` (None, project config defers to off) keep it
         // (issue #1055).
@@ -2145,7 +2145,7 @@ mod tests {
         )
         .expect("write package");
         std::fs::write(
-            root.join(".fallowrc.jsonc"),
+            root.join(".plowrc.jsonc"),
             r#"{"duplicates":{"minTokens":5,"minLines":1,"minOccurrences":2}}"#,
         )
         .expect("write config");
@@ -2211,7 +2211,7 @@ mod tests {
         )
         .expect("write package");
         std::fs::write(
-            root.join(".fallowrc.jsonc"),
+            root.join(".plowrc.jsonc"),
             r#"{"health":{"maxCyclomatic":2,"maxCognitive":2}}"#,
         )
         .expect("write config");
@@ -2327,7 +2327,7 @@ export function choose(value: number): string {
         // so a single returned root proves the per-package loop is gone (not
         // that discovery found nothing).
         assert_eq!(
-            fallow_config::discover_workspaces(root).len(),
+            plow_config::discover_workspaces(root).len(),
             2,
             "fixture should expose two workspace packages"
         );
@@ -2376,8 +2376,8 @@ export function choose(value: number): string {
                 path: "/a.ts".into(),
             }));
         source_a.unresolved_imports.push(
-            fallow_core::results::UnresolvedImportFinding::with_actions(
-                fallow_core::results::UnresolvedImport {
+            plow_core::results::UnresolvedImportFinding::with_actions(
+                plow_core::results::UnresolvedImport {
                     path: "/a.ts".into(),
                     specifier: "./missing".to_string(),
                     line: 1,
@@ -2432,7 +2432,7 @@ export function choose(value: number): string {
 
     fn merge_test_unused_dependency(
         package_name: &str,
-        location: fallow_core::results::DependencyLocation,
+        location: plow_core::results::DependencyLocation,
         line: u32,
     ) -> UnusedDependency {
         UnusedDependency {
@@ -2447,7 +2447,7 @@ export function choose(value: number): string {
     fn merge_test_unused_member(
         parent_name: &str,
         member_name: &str,
-        kind: fallow_core::extract::MemberKind,
+        kind: plow_core::extract::MemberKind,
         line: u32,
     ) -> UnusedMember {
         UnusedMember {
@@ -2478,45 +2478,35 @@ export function choose(value: number): string {
             unused_dependencies: vec![UnusedDependencyFinding::with_actions(
                 merge_test_unused_dependency(
                     "dep",
-                    fallow_core::results::DependencyLocation::Dependencies,
+                    plow_core::results::DependencyLocation::Dependencies,
                     3,
                 ),
             )],
             unused_dev_dependencies: vec![UnusedDevDependencyFinding::with_actions(
                 merge_test_unused_dependency(
                     "dev-dep",
-                    fallow_core::results::DependencyLocation::DevDependencies,
+                    plow_core::results::DependencyLocation::DevDependencies,
                     4,
                 ),
             )],
             unused_optional_dependencies: vec![UnusedOptionalDependencyFinding::with_actions(
                 merge_test_unused_dependency(
                     "opt-dep",
-                    fallow_core::results::DependencyLocation::OptionalDependencies,
+                    plow_core::results::DependencyLocation::OptionalDependencies,
                     5,
                 ),
             )],
             unused_enum_members: vec![UnusedEnumMemberFinding::with_actions(
-                merge_test_unused_member("E", "A", fallow_core::extract::MemberKind::EnumMember, 6),
+                merge_test_unused_member("E", "A", plow_core::extract::MemberKind::EnumMember, 6),
             )],
             unused_class_members: vec![UnusedClassMemberFinding::with_actions(
-                merge_test_unused_member(
-                    "C",
-                    "m",
-                    fallow_core::extract::MemberKind::ClassMethod,
-                    7,
-                ),
+                merge_test_unused_member("C", "m", plow_core::extract::MemberKind::ClassMethod, 7),
             )],
             unused_store_members: vec![UnusedStoreMemberFinding::with_actions(
-                merge_test_unused_member(
-                    "S",
-                    "a",
-                    fallow_core::extract::MemberKind::StoreMember,
-                    7,
-                ),
+                merge_test_unused_member("S", "a", plow_core::extract::MemberKind::StoreMember, 7),
             )],
-            unresolved_imports: vec![fallow_core::results::UnresolvedImportFinding::with_actions(
-                fallow_core::results::UnresolvedImport {
+            unresolved_imports: vec![plow_core::results::UnresolvedImportFinding::with_actions(
+                plow_core::results::UnresolvedImport {
                     path: "/f.ts".into(),
                     specifier: "./gone".to_string(),
                     line: 8,
@@ -2530,14 +2520,14 @@ export function choose(value: number): string {
                     imported_from: vec![],
                 },
             )],
-            duplicate_exports: vec![fallow_core::results::DuplicateExportFinding::with_actions(
-                fallow_core::results::DuplicateExport {
+            duplicate_exports: vec![plow_core::results::DuplicateExportFinding::with_actions(
+                plow_core::results::DuplicateExport {
                     export_name: "dup".to_string(),
                     locations: vec![],
                 },
             )],
             type_only_dependencies: vec![
-                fallow_core::results::TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
+                plow_core::results::TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
                     package_name: "type-only".to_string(),
                     path: "/pkg.json".into(),
                     line: 9,
@@ -2570,8 +2560,8 @@ export function choose(value: number): string {
                 col: 0,
             })],
             boundary_coverage_violations: vec![
-                fallow_core::results::BoundaryCoverageViolationFinding::with_actions(
-                    fallow_core::results::BoundaryCoverageViolation {
+                plow_core::results::BoundaryCoverageViolationFinding::with_actions(
+                    plow_core::results::BoundaryCoverageViolation {
                         path: "/unzoned.ts".into(),
                         line: 13,
                         col: 0,
@@ -2579,8 +2569,8 @@ export function choose(value: number): string {
                 ),
             ],
             boundary_call_violations: vec![
-                fallow_core::results::BoundaryCallViolationFinding::with_actions(
-                    fallow_core::results::BoundaryCallViolation {
+                plow_core::results::BoundaryCallViolationFinding::with_actions(
+                    plow_core::results::BoundaryCallViolation {
                         path: "/zoned.ts".into(),
                         line: 14,
                         col: 0,
@@ -2590,16 +2580,16 @@ export function choose(value: number): string {
                     },
                 ),
             ],
-            policy_violations: vec![fallow_core::results::PolicyViolationFinding::with_actions(
-                fallow_core::results::PolicyViolation {
+            policy_violations: vec![plow_core::results::PolicyViolationFinding::with_actions(
+                plow_core::results::PolicyViolation {
                     path: "/zoned.ts".into(),
                     line: 15,
                     col: 0,
                     pack: "team-policy".to_string(),
                     rule_id: "no-console".to_string(),
-                    kind: fallow_core::results::PolicyRuleKind::BannedCall,
+                    kind: plow_core::results::PolicyRuleKind::BannedCall,
                     matched: "console.log".to_string(),
-                    severity: fallow_core::results::PolicyViolationSeverity::Warn,
+                    severity: plow_core::results::PolicyViolationSeverity::Warn,
                     message: None,
                 },
             )],
@@ -2611,8 +2601,8 @@ export function choose(value: number): string {
                 reference_count: 3,
                 reference_locations: vec![],
             }],
-            private_type_leaks: vec![fallow_core::results::PrivateTypeLeakFinding::with_actions(
-                fallow_core::results::PrivateTypeLeak {
+            private_type_leaks: vec![plow_core::results::PrivateTypeLeakFinding::with_actions(
+                plow_core::results::PrivateTypeLeak {
                     path: "/f.ts".into(),
                     export_name: "pub_fn".to_string(),
                     type_name: "Secret".to_string(),
@@ -2621,25 +2611,25 @@ export function choose(value: number): string {
                     span_start: 0,
                 },
             )],
-            re_export_cycles: vec![fallow_core::results::ReExportCycleFinding::with_actions(
-                fallow_core::results::ReExportCycle {
+            re_export_cycles: vec![plow_core::results::ReExportCycleFinding::with_actions(
+                plow_core::results::ReExportCycle {
                     files: vec!["/barrel.ts".into()],
-                    kind: fallow_core::results::ReExportCycleKind::SelfLoop,
+                    kind: plow_core::results::ReExportCycleKind::SelfLoop,
                 },
             )],
-            stale_suppressions: vec![fallow_core::results::StaleSuppression {
+            stale_suppressions: vec![plow_core::results::StaleSuppression {
                 path: "/f.ts".into(),
                 line: 15,
                 col: 0,
-                origin: fallow_core::results::SuppressionOrigin::Comment {
+                origin: plow_core::results::SuppressionOrigin::Comment {
                     issue_kind: None,
                     is_file_level: false,
                     kind_known: true,
                 },
             }],
             unused_catalog_entries: vec![
-                fallow_core::results::UnusedCatalogEntryFinding::with_actions(
-                    fallow_core::results::UnusedCatalogEntry {
+                plow_core::results::UnusedCatalogEntryFinding::with_actions(
+                    plow_core::results::UnusedCatalogEntry {
                         entry_name: "react".to_string(),
                         catalog_name: "default".to_string(),
                         path: "/pnpm-workspace.yaml".into(),
@@ -2648,18 +2638,16 @@ export function choose(value: number): string {
                     },
                 ),
             ],
-            empty_catalog_groups: vec![
-                fallow_core::results::EmptyCatalogGroupFinding::with_actions(
-                    fallow_core::results::EmptyCatalogGroup {
-                        catalog_name: "ui".to_string(),
-                        path: "/pnpm-workspace.yaml".into(),
-                        line: 17,
-                    },
-                ),
-            ],
+            empty_catalog_groups: vec![plow_core::results::EmptyCatalogGroupFinding::with_actions(
+                plow_core::results::EmptyCatalogGroup {
+                    catalog_name: "ui".to_string(),
+                    path: "/pnpm-workspace.yaml".into(),
+                    line: 17,
+                },
+            )],
             unresolved_catalog_references: vec![
-                fallow_core::results::UnresolvedCatalogReferenceFinding::with_actions(
-                    fallow_core::results::UnresolvedCatalogReference {
+                plow_core::results::UnresolvedCatalogReferenceFinding::with_actions(
+                    plow_core::results::UnresolvedCatalogReference {
                         entry_name: "vue".to_string(),
                         catalog_name: "default".to_string(),
                         path: "/pkg.json".into(),
@@ -2669,14 +2657,14 @@ export function choose(value: number): string {
                 ),
             ],
             unused_dependency_overrides: vec![
-                fallow_core::results::UnusedDependencyOverrideFinding::with_actions(
-                    fallow_core::results::UnusedDependencyOverride {
+                plow_core::results::UnusedDependencyOverrideFinding::with_actions(
+                    plow_core::results::UnusedDependencyOverride {
                         raw_key: "react".to_string(),
                         target_package: "react".to_string(),
                         parent_package: None,
                         version_constraint: None,
                         version_range: "18".to_string(),
-                        source: fallow_core::results::DependencyOverrideSource::PnpmWorkspaceYaml,
+                        source: plow_core::results::DependencyOverrideSource::PnpmWorkspaceYaml,
                         path: "/pnpm-workspace.yaml".into(),
                         line: 19,
                         hint: None,
@@ -2684,21 +2672,21 @@ export function choose(value: number): string {
                 ),
             ],
             misconfigured_dependency_overrides: vec![
-                fallow_core::results::MisconfiguredDependencyOverrideFinding::with_actions(
-                    fallow_core::results::MisconfiguredDependencyOverride {
+                plow_core::results::MisconfiguredDependencyOverrideFinding::with_actions(
+                    plow_core::results::MisconfiguredDependencyOverride {
                         raw_key: "bad>".to_string(),
                         target_package: None,
                         raw_value: String::new(),
-                        reason: fallow_core::results::DependencyOverrideMisconfigReason::EmptyValue,
-                        source: fallow_core::results::DependencyOverrideSource::PnpmPackageJson,
+                        reason: plow_core::results::DependencyOverrideMisconfigReason::EmptyValue,
+                        source: plow_core::results::DependencyOverrideSource::PnpmPackageJson,
                         path: "/pkg.json".into(),
                         line: 20,
                     },
                 ),
             ],
             invalid_client_exports: vec![
-                fallow_core::results::InvalidClientExportFinding::with_actions(
-                    fallow_core::results::InvalidClientExport {
+                plow_core::results::InvalidClientExportFinding::with_actions(
+                    plow_core::results::InvalidClientExport {
                         path: "/app/page.tsx".into(),
                         export_name: "metadata".to_string(),
                         directive: "use client".to_string(),
@@ -2708,8 +2696,8 @@ export function choose(value: number): string {
                 ),
             ],
             mixed_client_server_barrels: vec![
-                fallow_core::results::MixedClientServerBarrelFinding::with_actions(
-                    fallow_core::results::MixedClientServerBarrel {
+                plow_core::results::MixedClientServerBarrelFinding::with_actions(
+                    plow_core::results::MixedClientServerBarrel {
                         path: "/app/components/index.ts".into(),
                         client_origin: "./Button".to_string(),
                         server_origin: "./fetchUser".to_string(),
@@ -2719,8 +2707,8 @@ export function choose(value: number): string {
                 ),
             ],
             misplaced_directives: vec![
-                fallow_core::results::MisplacedDirectiveFinding::with_actions(
-                    fallow_core::results::MisplacedDirective {
+                plow_core::results::MisplacedDirectiveFinding::with_actions(
+                    plow_core::results::MisplacedDirective {
                         path: "/app/widget.tsx".into(),
                         directive: "use client".to_string(),
                         line: 24,
@@ -2733,8 +2721,8 @@ export function choose(value: number): string {
             unused_component_props: vec![],
             unused_component_emits: vec![],
             unused_server_actions: vec![],
-            route_collisions: vec![fallow_core::results::RouteCollisionFinding::with_actions(
-                fallow_core::results::RouteCollision {
+            route_collisions: vec![plow_core::results::RouteCollisionFinding::with_actions(
+                plow_core::results::RouteCollision {
                     path: "/app/(a)/about/page.tsx".into(),
                     url: "/about".to_string(),
                     conflicting_paths: vec!["/app/(b)/about/page.tsx".into()],
@@ -2743,8 +2731,8 @@ export function choose(value: number): string {
                 },
             )],
             dynamic_segment_name_conflicts: vec![
-                fallow_core::results::DynamicSegmentNameConflictFinding::with_actions(
-                    fallow_core::results::DynamicSegmentNameConflict {
+                plow_core::results::DynamicSegmentNameConflictFinding::with_actions(
+                    plow_core::results::DynamicSegmentNameConflict {
                         path: "/app/shop/[id]/page.tsx".into(),
                         position: "/shop".to_string(),
                         conflicting_segments: vec!["[id]".to_string(), "[slug]".to_string()],
@@ -2756,11 +2744,11 @@ export function choose(value: number): string {
             ],
             suppression_count: 1,
             active_suppressions: Vec::new(),
-            feature_flags: vec![fallow_core::results::FeatureFlag {
+            feature_flags: vec![plow_core::results::FeatureFlag {
                 path: "/f.ts".into(),
                 flag_name: "ENABLE_X".to_string(),
-                kind: fallow_core::results::FlagKind::EnvironmentVariable,
-                confidence: fallow_core::results::FlagConfidence::High,
+                kind: plow_core::results::FlagKind::EnvironmentVariable,
+                confidence: plow_core::results::FlagConfidence::High,
                 line: 21,
                 col: 0,
                 guard_span_start: None,
@@ -2770,16 +2758,16 @@ export function choose(value: number): string {
                 guard_line_end: None,
                 guarded_dead_exports: vec![],
             }],
-            entry_point_summary: Some(fallow_core::results::EntryPointSummary {
+            entry_point_summary: Some(plow_core::results::EntryPointSummary {
                 total: 0,
                 by_source: vec![],
             }),
-            security_findings: vec![fallow_core::results::SecurityFinding {
+            security_findings: vec![plow_core::results::SecurityFinding {
                 finding_id: String::new(),
-                candidate: fallow_core::results::SecurityCandidate::default(),
+                candidate: plow_core::results::SecurityCandidate::default(),
                 taint_flow: None,
                 attack_surface: None,
-                kind: fallow_core::results::SecurityFindingKind::ClientServerLeak,
+                kind: plow_core::results::SecurityFindingKind::ClientServerLeak,
                 category: None,
                 cwe: None,
                 path: "/client.tsx".into(),
@@ -2798,13 +2786,12 @@ export function choose(value: number): string {
             security_unresolved_edge_files: 2,
             security_unresolved_callee_sites: 0,
             security_unresolved_callee_diagnostics: vec![
-                fallow_core::results::SecurityUnresolvedCalleeDiagnostic {
+                plow_core::results::SecurityUnresolvedCalleeDiagnostic {
                     path: "/client.tsx".into(),
                     line: 2,
                     col: 0,
-                    reason: fallow_core::extract::SkippedSecurityCalleeReason::DynamicDispatch,
-                    expression_kind:
-                        fallow_core::extract::SkippedSecurityCalleeExpressionKind::Other,
+                    reason: plow_core::extract::SkippedSecurityCalleeReason::DynamicDispatch,
+                    expression_kind: plow_core::extract::SkippedSecurityCalleeExpressionKind::Other,
                 },
             ],
         }
@@ -2884,7 +2871,7 @@ export function choose(value: number): string {
             },
             severity: Some(DiagnosticSeverity::HINT),
             code: Some(NumberOrString::String("unused-export".to_string())),
-            source: Some("fallow".to_string()),
+            source: Some("plow".to_string()),
             message: "Export 'helper' is unused".to_string(),
             ..Default::default()
         }
@@ -2904,13 +2891,13 @@ export function choose(value: number): string {
         let uri = "file:///a.ts".parse::<Uri>().unwrap();
         map.insert(uri.clone(), vec![make_diagnostic(), make_diagnostic()]);
 
-        attach_changed_since_data(&mut map, Some("fallow-baseline"));
+        attach_changed_since_data(&mut map, Some("plow-baseline"));
 
         let diags = &map[&uri];
         for d in diags {
             assert_eq!(
                 d.data,
-                Some(serde_json::json!({ "changedSince": "fallow-baseline" })),
+                Some(serde_json::json!({ "changedSince": "plow-baseline" })),
                 "every diagnostic must carry data.changedSince when filter is active"
             );
         }
@@ -2945,11 +2932,11 @@ export function choose(value: number): string {
         d.data = Some(serde_json::json!({ "resolveToken": "abc-123" }));
         map.insert(uri.clone(), vec![d]);
 
-        attach_changed_since_data(&mut map, Some("fallow-baseline"));
+        attach_changed_since_data(&mut map, Some("plow-baseline"));
 
         let merged = map[&uri][0].data.as_ref().unwrap();
         assert_eq!(merged["resolveToken"], "abc-123");
-        assert_eq!(merged["changedSince"], "fallow-baseline");
+        assert_eq!(merged["changedSince"], "plow-baseline");
     }
 
     #[test]
@@ -2960,7 +2947,7 @@ export function choose(value: number): string {
         d.data = Some(serde_json::Value::String("custom-token".to_string()));
         map.insert(uri.clone(), vec![d]);
 
-        attach_changed_since_data(&mut map, Some("fallow-baseline"));
+        attach_changed_since_data(&mut map, Some("plow-baseline"));
 
         assert_eq!(
             map[&uri][0].data,
@@ -3146,7 +3133,7 @@ export function choose(value: number): string {
         }
     }
 
-    async fn install_document(backend: &FallowLspServer, uri: &Uri, version: i32, text: &str) {
+    async fn install_document(backend: &PlowLspServer, uri: &Uri, version: i32, text: &str) {
         backend.documents.write().await.insert(
             uri.clone(),
             DocumentState {
@@ -3158,7 +3145,7 @@ export function choose(value: number): string {
 
     #[tokio::test(flavor = "current_thread")]
     async fn publish_skips_uri_when_live_version_advanced_past_snapshot() {
-        let (service, _) = LspService::build(FallowLspServer::new).finish();
+        let (service, _) = LspService::build(PlowLspServer::new).finish();
         let backend = service.inner();
 
         let uri = "file:///stale.ts".parse::<Uri>().unwrap();
@@ -3181,7 +3168,7 @@ export function choose(value: number): string {
 
     #[tokio::test(flavor = "current_thread")]
     async fn publish_emits_when_live_version_equals_snapshot() {
-        let (service, _) = LspService::build(FallowLspServer::new).finish();
+        let (service, _) = LspService::build(PlowLspServer::new).finish();
         let backend = service.inner();
 
         let uri = "file:///fresh.ts".parse::<Uri>().unwrap();
@@ -3209,7 +3196,7 @@ export function choose(value: number): string {
 
     #[tokio::test(flavor = "current_thread")]
     async fn publish_emits_when_uri_absent_from_snapshot_and_live() {
-        let (service, _) = LspService::build(FallowLspServer::new).finish();
+        let (service, _) = LspService::build(PlowLspServer::new).finish();
         let backend = service.inner();
 
         let uri = "file:///never-opened/package.json".parse::<Uri>().unwrap();
@@ -3229,7 +3216,7 @@ export function choose(value: number): string {
 
     #[tokio::test(flavor = "current_thread")]
     async fn publish_skips_uri_when_opened_mid_run() {
-        let (service, _) = LspService::build(FallowLspServer::new).finish();
+        let (service, _) = LspService::build(PlowLspServer::new).finish();
         let backend = service.inner();
 
         let uri = "file:///opened-mid-run.ts".parse::<Uri>().unwrap();
@@ -3262,7 +3249,7 @@ export function choose(value: number): string {
         std::fs::write(&file_path, "export const value = 1;\n")
             .expect("fixture file should be written");
 
-        let (service, _) = LspService::build(FallowLspServer::new).finish();
+        let (service, _) = LspService::build(PlowLspServer::new).finish();
         let backend = service.inner();
         let uri = Uri::from_file_path(&file_path).expect("temp path should convert to file URI");
         let snapshot: VersionSnapshot = FxHashMap::default();
@@ -3283,7 +3270,7 @@ export function choose(value: number): string {
 
     #[tokio::test(flavor = "current_thread")]
     async fn publish_skips_uri_when_closed_mid_run() {
-        let (service, _) = LspService::build(FallowLspServer::new).finish();
+        let (service, _) = LspService::build(PlowLspServer::new).finish();
         let backend = service.inner();
 
         let uri = "file:///closed.ts".parse::<Uri>().unwrap();
@@ -3308,7 +3295,7 @@ export function choose(value: number): string {
     async fn publish_threads_snapshot_version_to_client() {
         use futures::StreamExt;
 
-        let (mut service, socket) = LspService::build(FallowLspServer::new).finish();
+        let (mut service, socket) = LspService::build(PlowLspServer::new).finish();
 
         let initialize = Request::build("initialize")
             .params(json!({"capabilities": {}}))
@@ -3361,7 +3348,7 @@ export function choose(value: number): string {
         use futures::{SinkExt, StreamExt};
         use tower_lsp_server::jsonrpc::Response;
 
-        let (mut service, socket) = LspService::build(FallowLspServer::new).finish();
+        let (mut service, socket) = LspService::build(PlowLspServer::new).finish();
 
         let initialize = Request::build("initialize")
             .params(json!({
@@ -3430,7 +3417,7 @@ export function choose(value: number): string {
         use futures::{SinkExt, StreamExt};
         use tower_lsp_server::jsonrpc::Response;
 
-        let (mut service, socket) = LspService::build(FallowLspServer::new).finish();
+        let (mut service, socket) = LspService::build(PlowLspServer::new).finish();
 
         let initialize = Request::build("initialize")
             .params(json!({
@@ -3502,7 +3489,7 @@ export function choose(value: number): string {
     async fn open_files_keep_push_when_client_never_pulls() {
         use futures::StreamExt;
 
-        let (mut service, socket) = LspService::build(FallowLspServer::new).finish();
+        let (mut service, socket) = LspService::build(PlowLspServer::new).finish();
 
         // A refresh-capable client can advertise `workspace.diagnostics.refreshSupport`
         // without issuing `textDocument/diagnostic`. Suppressing open-file pushes
@@ -3580,11 +3567,11 @@ export function choose(value: number): string {
 
         // The opt-in author-time security surface must reach a client that
         // advertises pull-diagnostics `refreshSupport` but never issues a
-        // `textDocument/diagnostic` (fallow's own VS Code extension does
+        // `textDocument/diagnostic` (plow's own VS Code extension does
         // exactly this). Delivery keys on the OBSERVED pull, so the new
         // `security-sink` code rides the push path like any other. This locks
         // the exact path that silently blanked once (issue #891 / rec 4).
-        let (mut service, socket) = LspService::build(FallowLspServer::new).finish();
+        let (mut service, socket) = LspService::build(PlowLspServer::new).finish();
         let initialize = Request::build("initialize")
             .params(json!({
                 "capabilities": {
@@ -3608,12 +3595,12 @@ export function choose(value: number): string {
         install_document(backend, &uri, 1, "doRender();").await;
         let snapshot: VersionSnapshot = std::iter::once((uri.clone(), 1)).collect();
 
-        let finding = fallow_core::results::SecurityFinding {
+        let finding = plow_core::results::SecurityFinding {
             finding_id: String::new(),
-            candidate: fallow_core::results::SecurityCandidate::default(),
+            candidate: plow_core::results::SecurityCandidate::default(),
             taint_flow: None,
             attack_surface: None,
-            kind: fallow_core::results::SecurityFindingKind::TaintedSink,
+            kind: plow_core::results::SecurityFindingKind::TaintedSink,
             category: Some("dangerous-html".to_string()),
             cwe: Some(79),
             path: std::path::PathBuf::from("/render.ts"),
@@ -3668,7 +3655,7 @@ export function choose(value: number): string {
         use futures::{SinkExt, StreamExt};
         use tower_lsp_server::jsonrpc::Response;
 
-        let (mut service, mut socket) = LspService::build(FallowLspServer::new).finish();
+        let (mut service, mut socket) = LspService::build(PlowLspServer::new).finish();
 
         let initialize = Request::build("initialize")
             .params(json!({
@@ -3738,7 +3725,7 @@ export function choose(value: number): string {
 
     #[tokio::test(flavor = "current_thread")]
     async fn text_document_diagnostic_returns_cached_diagnostics_after_open_refresh() {
-        let (mut service, _) = LspService::build(FallowLspServer::new).finish();
+        let (mut service, _) = LspService::build(PlowLspServer::new).finish();
 
         let initialize = Request::build("initialize")
             .params(json!({
@@ -3781,7 +3768,7 @@ export function choose(value: number): string {
                 "textDocument": {
                     "uri": uri.to_string()
                 },
-                "identifier": "fallow"
+                "identifier": "plow"
             }))
             .id(2)
             .finish();
@@ -3920,7 +3907,7 @@ export function choose(value: number): string {
         let (server_tx, client_rx) = tokio::io::duplex(64 * 1024);
         let mut reader = BufReader::new(client_rx);
 
-        let (service, socket) = LspService::build(FallowLspServer::new).finish();
+        let (service, socket) = LspService::build(PlowLspServer::new).finish();
         let server = tokio::spawn(async move {
             Server::new(server_rx, server_tx, socket)
                 .serve(service)
@@ -3961,7 +3948,7 @@ export function choose(value: number): string {
                     "method": "textDocument/diagnostic",
                     "params": {
                         "textDocument": { "uri": file_uri },
-                        "identifier": "fallow"
+                        "identifier": "plow"
                     }
                 }),
             )
@@ -3993,7 +3980,7 @@ export function choose(value: number): string {
 
     #[tokio::test(flavor = "current_thread")]
     async fn stale_clearing_skips_uri_when_live_version_advanced() {
-        let (service, _) = LspService::build(FallowLspServer::new).finish();
+        let (service, _) = LspService::build(PlowLspServer::new).finish();
         let backend = service.inner();
 
         let uri = "file:///clearing.ts".parse::<Uri>().unwrap();
@@ -4030,7 +4017,7 @@ export function choose(value: number): string {
 
     #[tokio::test(flavor = "current_thread")]
     async fn publish_inserts_skipped_uri_into_new_uris() {
-        let (service, _) = LspService::build(FallowLspServer::new).finish();
+        let (service, _) = LspService::build(PlowLspServer::new).finish();
         let backend = service.inner();
 
         let uri = "file:///tracked.ts".parse::<Uri>().unwrap();

@@ -1,6 +1,6 @@
-//! Machine-readable manifest of the tools exposed by the fallow MCP server.
+//! Machine-readable manifest of the tools exposed by the plow MCP server.
 //!
-//! Single source of truth shared by `fallow schema` (the agent-facing
+//! Single source of truth shared by `plow schema` (the agent-facing
 //! capability manifest in `crates/cli`) and the telemetry tool-name
 //! allowlist. The MCP server itself defines tool behavior via rmcp
 //! `#[tool]` attributes in `crates/mcp`; a drift test there (dev-dependency
@@ -59,15 +59,15 @@ pub struct McpToolInfo {
 }
 
 /// Free/paid nuance attached to runtime-coverage capabilities. Shared with
-/// the `fallow schema` issue-type rows so the wording cannot drift.
-pub const RUNTIME_COVERAGE_LICENSE_NOTE: &str = "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).";
+/// the `plow schema` issue-type rows so the wording cannot drift.
+pub const RUNTIME_COVERAGE_LICENSE_NOTE: &str = "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (plow license activate).";
 
-/// All tools exposed by the fallow MCP server, in registration order.
+/// All tools exposed by the plow MCP server, in registration order.
 pub const MCP_TOOLS: &[McpToolInfo] = &[
     McpToolInfo {
         name: "code_execute",
         kind: "composition",
-        description: "Run a bounded read-only JavaScript snippet that composes fallow's analysis tools inside a sandbox (Code Mode meta-tool, not a plain analysis call)",
+        description: "Run a bounded read-only JavaScript snippet that composes plow's analysis tools inside a sandbox (Code Mode meta-tool, not a plain analysis call)",
         key_params: &["code", "timeout_ms", "max_output_bytes"],
         license: McpToolLicense::Free,
         license_note: None,
@@ -204,7 +204,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         read_only: true,
     },
     McpToolInfo {
-        name: "fallow_explain",
+        name: "plow_explain",
         kind: "introspection",
         description: "Explain one issue type (rationale, examples, fix guidance) without running an analysis",
         key_params: &["issue_type"],
@@ -263,7 +263,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
     McpToolInfo {
         name: "impact",
         kind: "introspection",
-        description: "Read the local Fallow Impact value-tracking report (per-project history in the user config dir, never in the repo; local-dev only)",
+        description: "Read the local Plow Impact value-tracking report (per-project history in the user config dir, never in the repo; local-dev only)",
         key_params: &["root"],
         license: McpToolLicense::Free,
         license_note: None,
@@ -272,7 +272,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
     McpToolInfo {
         name: "impact_all",
         kind: "introspection",
-        description: "Roll every tracked fallow project on this machine into one cross-repo value report (hashed keys plus basename labels, never paths; local-dev only)",
+        description: "Roll every tracked plow project on this machine into one cross-repo value report (hashed keys plus basename labels, never paths; local-dev only)",
         key_params: &["sort", "limit"],
         license: McpToolLicense::Free,
         license_note: None,

@@ -1,5 +1,5 @@
 // VS Code injects this module into the extension host at runtime.
-// fallow-ignore-next-line unlisted-dependency
+// plow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
 import {
   auditGatingSuffix,
@@ -19,9 +19,9 @@ let auditStatusBarItem: vscode.StatusBarItem | null = null;
  */
 export const createAuditStatusBar = (): vscode.StatusBarItem => {
   auditStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 49);
-  auditStatusBarItem.command = "fallow.audit";
+  auditStatusBarItem.command = "plow.audit";
   auditStatusBarItem.text = "$(shield) Audit";
-  auditStatusBarItem.tooltip = "Fallow: audit the current change set for a pass/warn/fail verdict.";
+  auditStatusBarItem.tooltip = "Plow: audit the current change set for a pass/warn/fail verdict.";
   auditStatusBarItem.show();
   return auditStatusBarItem;
 };
@@ -41,7 +41,7 @@ export const setAuditError = (): void => {
     auditStatusBarItem.text = "$(error) Audit: error";
     auditStatusBarItem.backgroundColor = new vscode.ThemeColor("statusBarItem.errorBackground");
     auditStatusBarItem.tooltip =
-      "Fallow: the audit run failed. See the Fallow output channel for details.";
+      "Plow: the audit run failed. See the Plow output channel for details.";
   }
 };
 
@@ -56,7 +56,7 @@ export const setAuditIdle = (): void => {
     auditStatusBarItem.text = "$(shield) Audit";
     auditStatusBarItem.backgroundColor = undefined;
     auditStatusBarItem.tooltip =
-      "Fallow: audit the current change set for a pass/warn/fail verdict.";
+      "Plow: audit the current change set for a pass/warn/fail verdict.";
   }
 };
 

@@ -1,7 +1,7 @@
 //! Integration coverage for opt-in hardcoded-secret candidates.
 
-use fallow_config::{SecurityCategories, SecurityConfig, Severity};
-use fallow_core::results::{AnalysisResults, SecurityFindingKind};
+use plow_config::{SecurityCategories, SecurityConfig, Severity};
+use plow_core::results::{AnalysisResults, SecurityFindingKind};
 
 use super::common::{create_config_with_rules, fixture_path};
 
@@ -20,10 +20,10 @@ fn analyze_with_category(include: bool, exclude: bool) -> AnalysisResults {
         }),
         request_receivers: Vec::new(),
     };
-    fallow_core::analyze(&config).expect("analysis should succeed")
+    plow_core::analyze(&config).expect("analysis should succeed")
 }
 
-fn category_findings(results: &AnalysisResults) -> Vec<&fallow_core::results::SecurityFinding> {
+fn category_findings(results: &AnalysisResults) -> Vec<&plow_core::results::SecurityFinding> {
     results
         .security_findings
         .iter()

@@ -1,5 +1,5 @@
 // VS Code injects this module into the extension host at runtime.
-// fallow-ignore-next-line unlisted-dependency
+// plow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
 import type {
   HandleDiagnosticsSignature,
@@ -8,13 +8,13 @@ import type {
 } from "vscode-languageclient/node.js";
 import type { DiagnosticSeveritySetting } from "./types.js";
 
-const STATE_KEY = "fallow.diagnosticFilter.v1";
-const FALLOW_SOURCE = "fallow";
+const STATE_KEY = "plow.diagnosticFilter.v1";
+const PLOW_SOURCE = "plow";
 
 /**
  * Cap the per-URI cache so a workspace-wide LSP publish on a 50k-file
  * monorepo doesn't grow the heap forever. The cache holds only PUSH-delivered
- * diagnostics (`handleDiagnostics`); fallow-lsp pushes diagnostics for every
+ * diagnostics (`handleDiagnostics`); plow-lsp pushes diagnostics for every
  * diagnosed unopened file, not just open editors, and `onDidCloseTextDocument`
  * never fires for files that were never opened. (Pull results are not cached;
  * see `provideDiagnostics`.) When the cap is hit we evict the oldest entry
@@ -28,8 +28,8 @@ export interface DiagnosticCategory {
 }
 
 /**
- * Fallback diagnostic categories for older fallow-lsp binaries that do not
- * support `fallow/issueTypes`. Current servers provide the canonical list.
+ * Fallback diagnostic categories for older plow-lsp binaries that do not
+ * support `plow/issueTypes`. Current servers provide the canonical list.
  */
 export const DIAGNOSTIC_CATEGORIES: ReadonlyArray<DiagnosticCategory> = [
   { code: "code-duplication", label: "Code Duplication" },
@@ -137,10 +137,10 @@ interface FilterClient {
 
 type DiagnosticSeverityGetter = () => DiagnosticSeveritySetting;
 
-/** LSP diagnostics get tagged with `source: "fallow"` (see
+/** LSP diagnostics get tagged with `source: "plow"` (see
  *  `crates/lsp/src/diagnostics/*.rs`). Anything else flows through
  *  the filter untouched so we never affect TypeScript or ESLint. */
-export const isFallowDiagnostic = (d: vscode.Diagnostic): boolean => d.source === FALLOW_SOURCE;
+export const isPlowDiagnostic = (d: vscode.Diagnostic): boolean => d.source === PLOW_SOURCE;
 
 /** `Diagnostic.code` per VSCode types is `string | number | { value, target }`,
  *  and may be absent. Returns `null` when there's nothing to match against. */
@@ -179,7 +179,7 @@ const withRenderedSeverity = (
   d: vscode.Diagnostic,
   severity: vscode.DiagnosticSeverity,
 ): vscode.Diagnostic => {
-  if (!isFallowDiagnostic(d) || d.severity === severity) {
+  if (!isPlowDiagnostic(d) || d.severity === severity) {
     return d;
   }
   return { ...d, severity };
@@ -398,7 +398,7 @@ export class DiagnosticFilter {
     const renderedSeverity = severityToDiagnosticSeverity(this.getSeverity());
     const filtered = this.anythingMuted()
       ? diagnostics.filter((d) => {
-          if (!isFallowDiagnostic(d)) {
+          if (!isPlowDiagnostic(d)) {
             return true;
           }
           if (this.mutedAll) {

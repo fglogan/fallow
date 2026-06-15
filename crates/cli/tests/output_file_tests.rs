@@ -8,7 +8,7 @@
 
 mod common;
 
-use common::{fallow_bin, fixture_path, run_fallow, run_fallow_raw};
+use common::{fixture_path, plow_bin, run_plow, run_plow_raw};
 use std::process::Command;
 
 const FIXTURE: &str = "basic-project";
@@ -21,7 +21,7 @@ fn read(path: &std::path::Path) -> String {
 fn human_report_goes_to_file_and_stdout_stays_empty() {
     let dir = tempfile::tempdir().expect("tempdir");
     let out = dir.path().join("report.txt");
-    let result = run_fallow(
+    let result = run_plow(
         "dead-code",
         FIXTURE,
         &["-o", out.to_str().expect("utf8 path")],
@@ -53,7 +53,7 @@ fn human_report_goes_to_file_and_stdout_stays_empty() {
 fn json_report_is_written_to_the_file_and_parses() {
     let dir = tempfile::tempdir().expect("tempdir");
     let out = dir.path().join("report.json");
-    let result = run_fallow(
+    let result = run_plow(
         "dead-code",
         FIXTURE,
         &["--format", "json", "-o", out.to_str().expect("utf8 path")],
@@ -70,7 +70,7 @@ fn json_report_is_written_to_the_file_and_parses() {
 fn quiet_suppresses_the_confirmation() {
     let dir = tempfile::tempdir().expect("tempdir");
     let out = dir.path().join("report.txt");
-    let result = run_fallow(
+    let result = run_plow(
         "dead-code",
         FIXTURE,
         &["--quiet", "-o", out.to_str().expect("utf8 path")],
@@ -92,8 +92,8 @@ fn long_and_short_flags_are_equivalent() {
     let dir = tempfile::tempdir().expect("tempdir");
     let short = dir.path().join("short.txt");
     let long = dir.path().join("long.txt");
-    run_fallow("dead-code", FIXTURE, &["-o", short.to_str().unwrap()]);
-    run_fallow(
+    run_plow("dead-code", FIXTURE, &["-o", short.to_str().unwrap()]);
+    run_plow(
         "dead-code",
         FIXTURE,
         &["--output-file", long.to_str().unwrap()],
@@ -109,7 +109,7 @@ fn long_and_short_flags_are_equivalent() {
 fn rejected_for_a_non_analysis_command() {
     let dir = tempfile::tempdir().expect("tempdir");
     let out = dir.path().join("nope.txt");
-    let result = run_fallow_raw(&["list", "-o", out.to_str().unwrap()]);
+    let result = run_plow_raw(&["list", "-o", out.to_str().unwrap()]);
 
     assert_eq!(result.code, 2, "non-analysis command should exit 2");
     assert!(
@@ -128,7 +128,7 @@ fn errors_when_the_parent_path_is_a_file() {
     std::fs::write(&blocker, b"x").expect("write blocker file");
     let bad = blocker.join("report.txt");
 
-    let result = run_fallow("dead-code", FIXTURE, &["-o", bad.to_str().unwrap()]);
+    let result = run_plow("dead-code", FIXTURE, &["-o", bad.to_str().unwrap()]);
     assert_eq!(result.code, 2, "an unopenable path should exit 2");
     assert!(
         result.stderr.contains("--output-file"),
@@ -142,7 +142,7 @@ fn coexists_with_sarif_file() {
     let dir = tempfile::tempdir().expect("tempdir");
     let primary = dir.path().join("report.txt");
     let sarif = dir.path().join("out.sarif");
-    let result = run_fallow(
+    let result = run_plow(
         "dead-code",
         FIXTURE,
         &[
@@ -170,7 +170,7 @@ fn confirmation_is_suppressed_when_a_command_errors_before_rendering() {
     // and we must not claim "Report written" over it.
     let dir = tempfile::tempdir().expect("tempdir");
     let out = dir.path().join("report.txt");
-    let result = run_fallow(
+    let result = run_plow(
         "health",
         FIXTURE,
         &[
@@ -194,7 +194,7 @@ fn confirmation_is_suppressed_when_a_command_errors_before_rendering() {
 fn bare_combined_mode_writes_json_to_file() {
     let dir = tempfile::tempdir().expect("tempdir");
     let out = dir.path().join("combined.json");
-    let bin = fallow_bin();
+    let bin = plow_bin();
     let root = fixture_path(FIXTURE);
     let output = Command::new(&bin)
         .arg("--root")
@@ -206,7 +206,7 @@ fn bare_combined_mode_writes_json_to_file() {
         .env("RUST_LOG", "")
         .env("NO_COLOR", "1")
         .output()
-        .expect("run fallow");
+        .expect("run plow");
 
     assert!(
         output.stdout.is_empty(),

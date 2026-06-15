@@ -4,7 +4,7 @@ use super::common::{create_config, fixture_path};
 fn css_modules_exports_tracked() {
     let root = fixture_path("css-modules-project");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_names: Vec<String> = results
         .unused_files

@@ -219,7 +219,7 @@ pub(super) fn expand_workspace_glob(
 /// applied first:
 /// 1. The directory's leaf name is checked against [`is_skip_listed_dir`]
 ///    (build artifacts, tooling caches, hidden directories). pnpm/npm/yarn
-///    silently filter the same set; fallow follows suit.
+///    silently filter the same set; plow follows suit.
 /// 2. The project-root-relative path is checked against `ignore_patterns`.
 ///    User-excluded paths produce no diagnostic.
 ///
@@ -635,7 +635,7 @@ mod tests {
 
     #[test]
     fn tsconfig_references_from_dir() {
-        let temp_dir = std::env::temp_dir().join("fallow-test-tsconfig-refs");
+        let temp_dir = std::env::temp_dir().join("plow-test-tsconfig-refs");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(temp_dir.join("packages/core")).unwrap();
         std::fs::create_dir_all(temp_dir.join("packages/ui")).unwrap();
@@ -667,7 +667,7 @@ mod tests {
 
     #[test]
     fn tsconfig_references_no_references_field() {
-        let temp_dir = std::env::temp_dir().join("fallow-test-tsconfig-no-refs");
+        let temp_dir = std::env::temp_dir().join("plow-test-tsconfig-no-refs");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
 
@@ -685,7 +685,7 @@ mod tests {
 
     #[test]
     fn tsconfig_references_skips_nonexistent_dirs() {
-        let temp_dir = std::env::temp_dir().join("fallow-test-tsconfig-missing-dir");
+        let temp_dir = std::env::temp_dir().join("plow-test-tsconfig-missing-dir");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(temp_dir.join("packages/core")).unwrap();
 
@@ -704,7 +704,7 @@ mod tests {
 
     #[test]
     fn tsconfig_references_skip_file_paths_silently() {
-        let temp_dir = std::env::temp_dir().join("fallow-test-tsconfig-file-refs");
+        let temp_dir = std::env::temp_dir().join("plow-test-tsconfig-file-refs");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(temp_dir.join("build")).unwrap();
         std::fs::create_dir_all(temp_dir.join("dist/types")).unwrap();
@@ -765,7 +765,7 @@ mod tests {
 
     #[test]
     fn tsconfig_references_mixed_file_and_dir() {
-        let temp_dir = std::env::temp_dir().join("fallow-test-tsconfig-mixed-refs");
+        let temp_dir = std::env::temp_dir().join("plow-test-tsconfig-mixed-refs");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(temp_dir.join("packages/core")).unwrap();
         std::fs::create_dir_all(temp_dir.join("apps/web")).unwrap();
@@ -840,7 +840,7 @@ mod tests {
 
     #[test]
     fn tsconfig_references_malformed_json() {
-        let temp_dir = std::env::temp_dir().join("fallow-test-tsconfig-malformed");
+        let temp_dir = std::env::temp_dir().join("plow-test-tsconfig-malformed");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
 
@@ -858,7 +858,7 @@ mod tests {
 
     #[test]
     fn tsconfig_references_empty_array() {
-        let temp_dir = std::env::temp_dir().join("fallow-test-tsconfig-empty-refs");
+        let temp_dir = std::env::temp_dir().join("plow-test-tsconfig-empty-refs");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
 
@@ -885,7 +885,7 @@ mod tests {
 
     #[test]
     fn expand_workspace_glob_exact_path() {
-        let temp_dir = std::env::temp_dir().join("fallow-test-expand-exact");
+        let temp_dir = std::env::temp_dir().join("plow-test-expand-exact");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(temp_dir.join("packages/core")).unwrap();
         std::fs::write(
@@ -904,7 +904,7 @@ mod tests {
 
     #[test]
     fn expand_workspace_glob_star() {
-        let temp_dir = std::env::temp_dir().join("fallow-test-expand-star");
+        let temp_dir = std::env::temp_dir().join("plow-test-expand-star");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(temp_dir.join("packages/a")).unwrap();
         std::fs::create_dir_all(temp_dir.join("packages/b")).unwrap();
@@ -921,7 +921,7 @@ mod tests {
 
     #[test]
     fn expand_workspace_glob_nested() {
-        let temp_dir = std::env::temp_dir().join("fallow-test-expand-nested");
+        let temp_dir = std::env::temp_dir().join("plow-test-expand-nested");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(temp_dir.join("packages/scope/a")).unwrap();
         std::fs::create_dir_all(temp_dir.join("packages/scope/b")).unwrap();
@@ -945,7 +945,7 @@ mod tests {
 
     #[test]
     fn tsconfig_root_dir_extracted() {
-        let temp_dir = std::env::temp_dir().join("fallow-test-tsconfig-rootdir");
+        let temp_dir = std::env::temp_dir().join("plow-test-tsconfig-rootdir");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
 
@@ -961,7 +961,7 @@ mod tests {
 
     #[test]
     fn tsconfig_root_dir_lib() {
-        let temp_dir = std::env::temp_dir().join("fallow-test-tsconfig-rootdir-lib");
+        let temp_dir = std::env::temp_dir().join("plow-test-tsconfig-rootdir-lib");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
 
@@ -977,7 +977,7 @@ mod tests {
 
     #[test]
     fn tsconfig_root_dir_missing_field() {
-        let temp_dir = std::env::temp_dir().join("fallow-test-tsconfig-rootdir-nofield");
+        let temp_dir = std::env::temp_dir().join("plow-test-tsconfig-rootdir-nofield");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
 
@@ -998,7 +998,7 @@ mod tests {
 
     #[test]
     fn tsconfig_root_dir_with_comments() {
-        let temp_dir = std::env::temp_dir().join("fallow-test-tsconfig-rootdir-comments");
+        let temp_dir = std::env::temp_dir().join("plow-test-tsconfig-rootdir-comments");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
 
@@ -1014,7 +1014,7 @@ mod tests {
 
     #[test]
     fn tsconfig_root_dir_dot_value() {
-        let temp_dir = std::env::temp_dir().join("fallow-test-tsconfig-rootdir-dot");
+        let temp_dir = std::env::temp_dir().join("plow-test-tsconfig-rootdir-dot");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
 
@@ -1030,7 +1030,7 @@ mod tests {
 
     #[test]
     fn tsconfig_root_dir_parent_traversal() {
-        let temp_dir = std::env::temp_dir().join("fallow-test-tsconfig-rootdir-parent");
+        let temp_dir = std::env::temp_dir().join("plow-test-tsconfig-rootdir-parent");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
 
@@ -1049,7 +1049,7 @@ mod tests {
 
     #[test]
     fn expand_workspace_glob_no_matches() {
-        let temp_dir = std::env::temp_dir().join("fallow-test-expand-nomatch");
+        let temp_dir = std::env::temp_dir().join("plow-test-expand-nomatch");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
 
@@ -1097,7 +1097,7 @@ mod tests {
 
     #[test]
     fn tsconfig_root_dir_with_trailing_commas() {
-        let temp_dir = std::env::temp_dir().join("fallow-test-rootdir-trailing-comma");
+        let temp_dir = std::env::temp_dir().join("plow-test-rootdir-trailing-comma");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
 
@@ -1113,7 +1113,7 @@ mod tests {
 
     #[test]
     fn expand_workspace_glob_trailing_slash() {
-        let temp_dir = std::env::temp_dir().join("fallow-test-expand-trailing");
+        let temp_dir = std::env::temp_dir().join("plow-test-expand-trailing");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(temp_dir.join("packages/a")).unwrap();
         std::fs::write(temp_dir.join("packages/a/package.json"), r#"{"name": "a"}"#).unwrap();
@@ -1127,7 +1127,7 @@ mod tests {
 
     #[test]
     fn expand_workspace_glob_excludes_node_modules() {
-        let temp_dir = std::env::temp_dir().join("fallow-test-expand-no-nodemod");
+        let temp_dir = std::env::temp_dir().join("plow-test-expand-no-nodemod");
         let _ = std::fs::remove_dir_all(&temp_dir);
 
         let nm_pkg = temp_dir.join("packages/foo/node_modules/bar");
@@ -1158,7 +1158,7 @@ mod tests {
 
     #[test]
     fn expand_workspace_glob_skips_dirs_without_pkg() {
-        let temp_dir = std::env::temp_dir().join("fallow-test-expand-no-pkg");
+        let temp_dir = std::env::temp_dir().join("plow-test-expand-no-pkg");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(temp_dir.join("packages/with-pkg")).unwrap();
         std::fs::create_dir_all(temp_dir.join("packages/without-pkg")).unwrap();
@@ -1188,7 +1188,7 @@ mod tests {
         // grouping dir `packages/themes` (no package.json); the real package is
         // one level deeper at `packages/themes/my-theme`. A nameless manifest and
         // a non-package dir under the same grouping dir must NOT be recovered.
-        let temp_dir = std::env::temp_dir().join("fallow-test-expand-nested-recover");
+        let temp_dir = std::env::temp_dir().join("plow-test-expand-nested-recover");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(temp_dir.join("packages/themes/my-theme")).unwrap();
         std::fs::create_dir_all(temp_dir.join("packages/themes/no-name")).unwrap();
@@ -1230,7 +1230,7 @@ mod tests {
     fn expand_workspace_glob_recovery_honors_ignore_patterns() {
         // A nested package the user excluded via `ignorePatterns` must NOT be
         // recovered, so `ignorePatterns` stays a reliable opt-out. See issue #842.
-        let temp_dir = std::env::temp_dir().join("fallow-test-recover-ignore");
+        let temp_dir = std::env::temp_dir().join("plow-test-recover-ignore");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(temp_dir.join("packages/themes/my-theme")).unwrap();
         std::fs::write(
@@ -1262,7 +1262,7 @@ mod tests {
 
     #[test]
     fn expand_recursive_glob_prunes_node_modules() {
-        let temp_dir = std::env::temp_dir().join("fallow-test-expand-recursive-prune");
+        let temp_dir = std::env::temp_dir().join("plow-test-expand-recursive-prune");
         let _ = std::fs::remove_dir_all(&temp_dir);
 
         std::fs::create_dir_all(temp_dir.join("packages/app")).unwrap();
@@ -1314,7 +1314,7 @@ mod tests {
 
     #[test]
     fn expand_recursive_glob_preserves_nested_workspace_roots() {
-        let temp_dir = std::env::temp_dir().join("fallow-test-expand-recursive-workspace-prune");
+        let temp_dir = std::env::temp_dir().join("plow-test-expand-recursive-workspace-prune");
         let _ = std::fs::remove_dir_all(&temp_dir);
 
         std::fs::create_dir_all(temp_dir.join("apps/app/packages/nested")).unwrap();
@@ -1346,7 +1346,7 @@ mod tests {
 
     #[test]
     fn expand_recursive_glob_prunes_deeply_nested_node_modules() {
-        let temp_dir = std::env::temp_dir().join("fallow-test-expand-deep-prune");
+        let temp_dir = std::env::temp_dir().join("plow-test-expand-deep-prune");
         let _ = std::fs::remove_dir_all(&temp_dir);
 
         std::fs::create_dir_all(temp_dir.join("packages/core")).unwrap();

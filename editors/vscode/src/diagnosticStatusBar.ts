@@ -1,12 +1,12 @@
 // VS Code injects this module into the extension host at runtime.
-// fallow-ignore-next-line unlisted-dependency
+// plow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
 import type { DiagnosticFilter } from "./diagnosticFilter.js";
 
 let item: vscode.StatusBarItem | null = null;
 let changeSub: vscode.Disposable | null = null;
 
-const CI_SAFE = "CI and `fallow check` are unaffected.";
+const CI_SAFE = "CI and `plow check` are unaffected.";
 
 export interface DiagnosticToggleStatusPresentation {
   readonly text: string;
@@ -25,24 +25,24 @@ export const diagnosticTogglePresentation = (
 ): DiagnosticToggleStatusPresentation => {
   if (mutedAll) {
     return {
-      text: "$(eye-closed) Fallow: hidden",
+      text: "$(eye-closed) Plow: hidden",
       tooltip:
-        "All Fallow findings are hidden in this editor. Click to show. " +
-        "CI and `fallow check` still report every finding.",
+        "All Plow findings are hidden in this editor. Click to show. " +
+        "CI and `plow check` still report every finding.",
     };
   }
   if (mutedCategoryCount > 0) {
     const noun = mutedCategoryCount === 1 ? "category" : "categories";
     return {
-      text: "$(eye) Fallow",
+      text: "$(eye) Plow",
       tooltip:
-        `Fallow findings are visible (${mutedCategoryCount} ${noun} hidden via Manage). ` +
+        `Plow findings are visible (${mutedCategoryCount} ${noun} hidden via Manage). ` +
         `Click to hide all in this editor; the per-category hides are kept when you show again. ${CI_SAFE}`,
     };
   }
   return {
-    text: "$(eye) Fallow",
-    tooltip: `Fallow findings are visible. Click to hide all in this editor. ${CI_SAFE}`,
+    text: "$(eye) Plow",
+    tooltip: `Plow findings are visible. Click to hide all in this editor. ${CI_SAFE}`,
   };
 };
 
@@ -53,14 +53,14 @@ const applyPresentation = (target: vscode.StatusBarItem, filter: DiagnosticFilte
   );
   target.text = presentation.text;
   // Non-trusted: no command links, no user input, no codicons in the body, so
-  // no escaping is needed; backticks just render `fallow check` as inline code.
+  // no escaping is needed; backticks just render `plow check` as inline code.
   target.tooltip = new vscode.MarkdownString(presentation.tooltip);
 };
 
 /**
  * Create the always-visible diagnostics on/off status-bar item, just right of
  * the audit item (priority 48 vs 49 vs the main item's 50). Reuses the existing
- * `fallow.toggleAllDiagnostics` command and the shared filter, so it stays in
+ * `plow.toggleAllDiagnostics` command and the shared filter, so it stays in
  * sync with the right-gutter Language Status item, the Manage QuickPick, and
  * code-action mutes. Left uncolored, mirroring the main item.
  */
@@ -70,7 +70,7 @@ export const createDiagnosticStatusBar = (filter: DiagnosticFilter): vscode.Stat
   // earlier onDidChange listener.
   disposeDiagnosticStatusBar();
   item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 48);
-  item.command = "fallow.toggleAllDiagnostics";
+  item.command = "plow.toggleAllDiagnostics";
   applyPresentation(item, filter);
   changeSub = filter.onDidChange(() => {
     if (item) {

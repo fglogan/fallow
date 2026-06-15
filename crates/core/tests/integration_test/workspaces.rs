@@ -18,7 +18,7 @@ fn force_symlink(target: &std::path::Path, link: &std::path::Path) {
 
 #[test]
 fn workspace_patterns_from_package_json() {
-    let pkg: fallow_config::PackageJson =
+    let pkg: plow_config::PackageJson =
         serde_json::from_str(r#"{"workspaces": ["packages/*", "apps/*"]}"#).unwrap();
 
     let patterns = pkg.workspace_patterns();
@@ -27,7 +27,7 @@ fn workspace_patterns_from_package_json() {
 
 #[test]
 fn workspace_patterns_yarn_format() {
-    let pkg: fallow_config::PackageJson =
+    let pkg: plow_config::PackageJson =
         serde_json::from_str(r#"{"workspaces": {"packages": ["packages/*"]}}"#).unwrap();
 
     let patterns = pkg.workspace_patterns();
@@ -44,7 +44,7 @@ fn workspace_project_discovers_workspace_packages() {
     force_symlink(&root.join("packages/utils"), &nm.join("@workspace/utils"));
 
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_names: Vec<String> = results
         .unused_files
@@ -102,7 +102,7 @@ fn public_packages_suppress_exported_class_and_enum_members() {
 
     let mut config = create_config(root);
     config.public_packages = vec!["@workspace/public-lib".to_string()];
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_class_members: Vec<String> = results
         .unused_class_members
@@ -130,7 +130,7 @@ fn non_public_packages_still_report_unused_class_and_enum_members() {
     let root = fixture_path("public-package-members");
 
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_class_members: Vec<String> = results
         .unused_class_members
@@ -158,8 +158,8 @@ fn project_state_stable_file_ids_by_path() {
     let root = fixture_path("workspace-project");
     let config = create_config(root);
 
-    let files_a = fallow_core::discover::discover_files(&config);
-    let files_b = fallow_core::discover::discover_files(&config);
+    let files_a = plow_core::discover::discover_files(&config);
+    let files_b = plow_core::discover::discover_files(&config);
 
     assert_eq!(files_a.len(), files_b.len());
     for (a, b) in files_a.iter().zip(files_b.iter()) {
@@ -179,13 +179,13 @@ fn project_state_stable_file_ids_by_path() {
 
 #[test]
 fn project_state_workspace_queries() {
-    use fallow_config::discover_workspaces;
+    use plow_config::discover_workspaces;
 
     let root = fixture_path("workspace-project");
     let config = create_config(root.clone());
-    let files = fallow_core::discover::discover_files(&config);
+    let files = plow_core::discover::discover_files(&config);
     let workspaces = discover_workspaces(&root);
-    let project = fallow_core::project::ProjectState::new(files, workspaces);
+    let project = plow_core::project::ProjectState::new(files, workspaces);
 
     assert!(project.workspace_by_name("app").is_some());
     assert!(project.workspace_by_name("shared").is_some());
@@ -220,7 +220,7 @@ fn workspace_exports_map_resolves_subpath_imports() {
     force_symlink(&root.join("packages/ui"), &nm.join("@workspace/ui"));
 
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_names: Vec<String> = results
         .unused_files
@@ -286,7 +286,7 @@ fn workspace_exports_map_resolves_subpath_imports() {
 fn workspace_missing_dist_exports_resolve_to_source() {
     let root = fixture_path("workspace-missing-dist-exports");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results
@@ -382,7 +382,7 @@ fn workspace_missing_dist_exports_resolve_to_source() {
 fn workspace_package_without_exports_resolves_missing_dist_to_source() {
     let root = fixture_path("workspace-no-exports-missing-dist");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unresolved_specifiers: Vec<&str> = results
         .unresolved_imports
@@ -429,7 +429,7 @@ fn workspace_nested_exports_resolves_dist_to_source() {
     force_symlink(&root.join("packages/ui"), &nm.join("@workspace/ui"));
 
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_names: Vec<String> = results
         .unused_files
@@ -512,7 +512,7 @@ fn workspace_package_export_star_barrel_chain_marks_leaf_export_used() {
     let root = fixture_path("workspace-nested-barrel-exports");
 
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_exports: Vec<String> = results
         .unused_exports
@@ -545,7 +545,7 @@ fn workspace_package_export_star_barrel_chain_marks_leaf_export_used() {
 
 #[test]
 fn tsconfig_references_discovers_workspaces() {
-    use fallow_config::discover_workspaces;
+    use plow_config::discover_workspaces;
 
     let root = fixture_path("tsconfig-references");
     let workspaces = discover_workspaces(&root);
@@ -568,7 +568,7 @@ fn tsconfig_references_discovers_workspaces() {
 fn tsconfig_references_analysis_detects_unused() {
     let root = fixture_path("tsconfig-references");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_names: Vec<String> = results
         .unused_files
@@ -602,7 +602,7 @@ fn tsconfig_references_analysis_detects_unused() {
 fn shallow_nested_package_scripts_become_entry_points_without_workspace_config() {
     let root = fixture_path("shallow-package-scripts");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_names: Vec<String> = results
         .unused_files
@@ -645,7 +645,7 @@ fn shallow_nested_package_scripts_become_entry_points_without_workspace_config()
 fn workspace_tsconfig_path_alias_to_unbuilt_dist_resolves_to_source() {
     let root = fixture_path("issue-757-workspace-dist-path-alias");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unresolved: Vec<&str> = results
         .unresolved_imports

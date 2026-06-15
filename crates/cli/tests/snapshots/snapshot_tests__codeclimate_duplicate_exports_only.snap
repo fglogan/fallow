@@ -5,13 +5,13 @@ expression: json_str
 [
   {
     "type": "issue",
-    "check_name": "fallow/duplicate-export",
+    "check_name": "plow/duplicate-export",
     "description": "Export 'Config' appears in multiple modules",
     "categories": [
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "da73cab5c65b029d",
+    "fingerprint": "1d5f8d291b3b6fcc",
     "location": {
       "path": "src/config.ts",
       "lines": {
@@ -21,13 +21,13 @@ expression: json_str
   },
   {
     "type": "issue",
-    "check_name": "fallow/duplicate-export",
+    "check_name": "plow/duplicate-export",
     "description": "Export 'Config' appears in multiple modules",
     "categories": [
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "cc6a09c8dc227321",
+    "fingerprint": "ec485b2f5051e03e",
     "location": {
       "path": "src/types.ts",
       "lines": {

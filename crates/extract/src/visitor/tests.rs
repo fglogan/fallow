@@ -5,12 +5,12 @@ use std::path::Path;
 use super::*;
 use crate::tests::parse_ts as parse;
 use crate::{ImportedName, MemberKind};
-use fallow_types::discover::FileId;
-use fallow_types::extract::{
+use helpers::regex_pattern_to_suffix;
+use plow_types::discover::FileId;
+use plow_types::extract::{
     DiFramework, DiRole, SecurityControlKind, SecurityUrlShape, SinkArgKind, SinkLiteralValue,
     SinkShape, SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason,
 };
-use helpers::regex_pattern_to_suffix;
 
 #[test]
 fn into_module_info_transfers_exports() {
@@ -552,7 +552,7 @@ fn destructure_from_a_call_result_does_not_chain() {
     ));
 }
 
-fn redos_regex_sink(source: &str) -> fallow_types::extract::SinkSite {
+fn redos_regex_sink(source: &str) -> plow_types::extract::SinkSite {
     let info = parse(source);
     info.security_sinks
         .into_iter()
@@ -1001,7 +1001,7 @@ fn security_sink_shadowed_constant_stays_dynamic() {
 
 #[test]
 fn security_temp_file_capture_records_literal_path_argument() {
-    let info = parse(r#"fs.writeFileSync("/tmp/fallow-token", token);"#);
+    let info = parse(r#"fs.writeFileSync("/tmp/plow-token", token);"#);
     let sink = info
         .security_sinks
         .iter()
@@ -1014,7 +1014,7 @@ fn security_temp_file_capture_records_literal_path_argument() {
     assert_eq!(sink.arg_kind, SinkArgKind::Literal);
     assert_eq!(
         sink.arg_literal,
-        Some(SinkLiteralValue::String("/tmp/fallow-token".to_string()))
+        Some(SinkLiteralValue::String("/tmp/plow-token".to_string()))
     );
 }
 
@@ -1142,7 +1142,7 @@ fn security_hardcoded_secret_capture_skips_auth_header_context() {
     );
 }
 
-fn jwt_verify_options_sink(source: &str) -> fallow_types::extract::SinkSite {
+fn jwt_verify_options_sink(source: &str) -> plow_types::extract::SinkSite {
     let info = parse(source);
     info.security_sinks
         .into_iter()
@@ -6244,7 +6244,7 @@ fn ts_import_type_inside_declare_global() {
 #[test]
 fn ts_import_type_inside_actual_dts_file() {
     use crate::parse::parse_source_to_module;
-    use fallow_types::discover::FileId;
+    use plow_types::discover::FileId;
     use std::path::Path;
 
     let m = parse_source_to_module(

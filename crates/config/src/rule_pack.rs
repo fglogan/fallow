@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use fallow_types::suppress::is_valid_policy_identifier;
+use plow_types::suppress::is_valid_policy_identifier;
 use rustc_hash::FxHashSet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -13,7 +13,7 @@ use crate::config::glob_validation::compile_user_glob;
 /// editors do not consume it.
 const RULE_PACK_EXTENSIONS: &[&str] = &["json", "jsonc"];
 
-/// The rule-pack format version this fallow build understands.
+/// The rule-pack format version this plow build understands.
 const SUPPORTED_PACK_VERSION: u32 = 1;
 
 /// Which check a rule-pack rule performs.
@@ -82,12 +82,12 @@ pub struct RulePackRule {
 ///
 /// Rule packs are pure data: loading a pack never executes project code. They
 /// encode project-specific policy (banned calls, banned imports) evaluated
-/// over fallow's static extraction data, reporting as `policy-violation`
+/// over plow's static extraction data, reporting as `policy-violation`
 /// findings.
 ///
 /// ```jsonc
 /// {
-///   "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/rule-pack-schema.json",
+///   "$schema": "https://raw.githubusercontent.com/fglogan/genesis-plow/main/rule-pack-schema.json",
 ///   "version": 1,
 ///   "name": "team-policy",
 ///   "description": "House rules for the platform team",
@@ -116,7 +116,7 @@ pub struct RulePackDef {
     #[schemars(skip)]
     pub schema: Option<String>,
     /// Pack format version. Must be `1`; the field exists so future rule
-    /// kinds can be added without breaking older fallow builds silently.
+    /// kinds can be added without breaking older plow builds silently.
     pub version: u32,
     /// Pack name, unique across all loaded packs. Must use only ASCII
     /// letters, digits, `.`, `_`, and `-` so `"<pack>/<id>"` is unambiguous in
@@ -132,7 +132,7 @@ pub struct RulePackDef {
 
 impl RulePackDef {
     /// Generate JSON Schema for the rule-pack format (consumed by
-    /// `fallow rule-pack-schema` for editor autocomplete).
+    /// `plow rule-pack-schema` for editor autocomplete).
     #[must_use]
     pub fn json_schema() -> serde_json::Value {
         serde_json::to_value(schemars::schema_for!(RulePackDef)).unwrap_or_default()
@@ -258,7 +258,7 @@ fn validate_pack(pack: &RulePackDef, path: &Path, errors: &mut Vec<RulePackError
 
     if pack.version != SUPPORTED_PACK_VERSION {
         errors.push(err(format!(
-            "unsupported rule pack version {}; this fallow build supports version \
+            "unsupported rule pack version {}; this plow build supports version \
              {SUPPORTED_PACK_VERSION}",
             pack.version
         )));

@@ -158,7 +158,7 @@ describe("diagnostic mute language status", () => {
       { scheme: "file", language: "json" },
     ]);
     expect(item.command).toMatchObject({
-      command: "fallow.manageDiagnosticMutes",
+      command: "plow.manageDiagnosticMutes",
     });
 
     filter.clearAllMutes();
@@ -208,7 +208,7 @@ describe("diagnostic mute language status", () => {
 
   it("unchecking 'All findings' in the manage picker reveals everything instead of re-muting every category", async () => {
     // Simulate: hide-all is on, the user opens Manage, unchecks the global
-    // "All Fallow Findings" row, and accepts. They expect findings to come
+    // "All Plow Findings" row, and accepts. They expect findings to come
     // back, not to stay hidden as per-category mutes.
     let acceptListener: (() => void) | undefined;
     let hideListener: (() => void) | undefined;
@@ -313,7 +313,7 @@ describe("diagnostic mute language status", () => {
         (item) => [item.code, item.label]
       )
     ).toEqual([
-      [null, "$(eye-closed) All Fallow Findings"],
+      [null, "$(eye-closed) All Plow Findings"],
       ["future-rule", "Future Rule"],
       ["unused-export", "Unused Exports"],
     ]);

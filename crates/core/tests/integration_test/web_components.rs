@@ -4,7 +4,7 @@ use crate::common::{create_config, fixture_path};
 fn native_web_component_lifecycle_does_not_require_lit_dependency() {
     let root = fixture_path("web-components-native");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_exports: Vec<&str> = results
         .unused_exports
@@ -39,7 +39,7 @@ fn native_web_component_lifecycle_does_not_require_lit_dependency() {
 fn custom_element_named_decorator_must_come_from_lit() {
     let root = fixture_path("web-components-native");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_exports: Vec<&str> = results
         .unused_exports

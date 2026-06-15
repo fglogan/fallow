@@ -5,7 +5,7 @@ use super::common::{create_config, fixture_path};
 fn unused_dev_deps(fixture: &str) -> Vec<String> {
     let root = fixture_path(fixture);
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     results
         .unused_dev_dependencies
         .iter()
@@ -16,7 +16,7 @@ fn unused_dev_deps(fixture: &str) -> Vec<String> {
 #[test]
 fn package_json_string_config_credits_external_package() {
     // Prettier treats package.json#prettier string values as an external config
-    // package or file. Fallow must credit the package instead of reporting the
+    // package or file. Plow must credit the package instead of reporting the
     // shared config as an unused dev dependency.
     let unused = unused_dev_deps("issue-818-prettier-pkg-json-string");
 

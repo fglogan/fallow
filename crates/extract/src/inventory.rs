@@ -1,4 +1,4 @@
-//! Function inventory walker for `fallow coverage upload-inventory`.
+//! Function inventory walker for `plow coverage upload-inventory`.
 //!
 //! Emits one [`InventoryEntry`] per function (declaration, expression, arrow,
 //! method) whose name matches what `oxc-coverage-instrument` produces at
@@ -41,7 +41,7 @@ use oxc_span::{SourceType, Span};
 /// `line` is 1-based, matching the AST span start. The `start_column` /
 /// `end_line` / `end_column` fields carry the function-node span in the
 /// 1-indexed UTF-16 convention the cross-surface `FunctionIdentity` join key
-/// expects (see `fallow_cov_protocol::FunctionIdentity::start_column`). They
+/// expects (see `plow_cov_protocol::FunctionIdentity::start_column`). They
 /// are descriptive metadata: the join hash is `(file, name, line)` only, so
 /// column fidelity never affects the join, only display / same-line
 /// disambiguation.
@@ -59,7 +59,7 @@ pub struct InventoryEntry {
     pub end_column: u32,
     /// Content digest of the function's full-span source slice
     /// (`&source[span.start..span.end]`): first 8 bytes of SHA-256 as 16
-    /// lowercase hex characters, via `fallow_cov_protocol::source_hash_for`.
+    /// lowercase hex characters, via `plow_cov_protocol::source_hash_for`.
     /// The slice is the canonical body bytes (signature line + body + closing
     /// brace, no whitespace normalization), identical for `Function` and
     /// `ArrowFunctionExpression`. Stable across line moves, so a
@@ -117,8 +117,8 @@ impl<'a> InventoryVisitor<'a> {
             .source
             .get(span.start as usize..span.end as usize)
             .map_or_else(
-                || fallow_cov_protocol::source_hash_for(b""),
-                |slice| fallow_cov_protocol::source_hash_for(slice.as_bytes()),
+                || plow_cov_protocol::source_hash_for(b""),
+                |slice| plow_cov_protocol::source_hash_for(slice.as_bytes()),
             );
         self.entries.push(InventoryEntry {
             name,
@@ -219,7 +219,7 @@ pub fn walk_source(path: &Path, source: &str) -> Vec<InventoryEntry> {
     let allocator = Allocator::default();
     let parser_return = Parser::new(&allocator, source, source_type).parse();
 
-    let line_offsets = fallow_types::extract::compute_line_offsets(source);
+    let line_offsets = plow_types::extract::compute_line_offsets(source);
     let mut visitor = InventoryVisitor::new(source, &line_offsets);
     visitor.visit_program(&parser_return.program);
 
@@ -452,7 +452,7 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(
             entries[0].source_hash,
-            fallow_cov_protocol::source_hash_for(src.as_bytes())
+            plow_cov_protocol::source_hash_for(src.as_bytes())
         );
         assert_eq!(entries[0].source_hash.len(), 16);
         assert!(

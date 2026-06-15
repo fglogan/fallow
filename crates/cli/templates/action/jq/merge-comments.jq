@@ -18,7 +18,7 @@ def group_unused_exports:
           ":warning: **\(length) unused exports in this file**\n\n" +
           "The following exports are never imported by other modules:\n\n" +
           (map("- `\(.export_name)` *(line \(.line))*") | join("\n")) +
-          "\n\n<details>\n<summary>Why this matters</summary>\n\nUnused exports signal to other developers that this code is used elsewhere \u2014 so nobody touches it, even when it should change. They also prevent bundlers from tree-shaking this code out of production.\n</details>\n\n**Action:** Remove the `export` keyword from each, or delete the declarations entirely.\n\n> Intentionally public? Add a `/** @public */` JSDoc tag above exports that are part of your API.\n\n---\n<sub><a href=\"https://docs.fallow.tools/explanations/dead-code#unused-exports\">Docs</a> \u00b7 Disagree? <a href=\"https://docs.fallow.tools/configuration/suppression\">Configure or suppress</a></sub>"
+          "\n\n<details>\n<summary>Why this matters</summary>\n\nUnused exports signal to other developers that this code is used elsewhere \u2014 so nobody touches it, even when it should change. They also prevent bundlers from tree-shaking this code out of production.\n</details>\n\n**Action:** Remove the `export` keyword from each, or delete the declarations entirely.\n\n> Intentionally public? Add a `/** @public */` JSDoc tag above exports that are part of your API.\n\n---\n<sub><a href=\"https://docs.genesis-plow.dev/explanations/dead-code#unused-exports\">Docs</a> \u00b7 Disagree? <a href=\"https://docs.genesis-plow.dev/configuration/suppression\">Configure or suppress</a></sub>"
         )
       }
     else empty end

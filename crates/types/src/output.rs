@@ -1,4 +1,4 @@
-//! Types that describe fallow's JSON output contract.
+//! Types that describe plow's JSON output contract.
 //!
 //! Today the JSON serialization layer (`crates/cli/src/report/json.rs`) builds
 //! its output via `serde_json::json!` macros. The types defined here are the
@@ -27,7 +27,7 @@ use serde::Serialize;
 /// Every action variant carries an `auto_fixable: bool` field. The value is
 /// evaluated PER FINDING, not per action type: the same action type may
 /// appear with `auto_fixable: true` on one finding and `auto_fixable: false`
-/// on another, depending on per-instance guards in the `fallow fix` applier.
+/// on another, depending on per-instance guards in the `plow fix` applier.
 /// Agents that filter on `auto_fixable: true` must branch on the bool of
 /// each individual finding's action, not on the action `type` alone.
 ///
@@ -35,20 +35,20 @@ use serde::Serialize;
 ///
 /// - `remove-catalog-entry` (`unused-catalog-entries`): `true` only when the
 ///   finding's `hardcoded_consumers` array is empty. When a workspace
-///   package still pins a hardcoded version of the same package, `fallow fix`
+///   package still pins a hardcoded version of the same package, `plow fix`
 ///   skips the entry to avoid breaking `pnpm install`, and the action is
 ///   emitted with `auto_fixable: false`.
 /// - `remove-dependency` vs `move-dependency` (dependency findings): when the
 ///   finding's `used_in_workspaces` array is non-empty, the primary action
-///   flips to `move-dependency` with `auto_fixable: false` (`fallow fix` will
+///   flips to `move-dependency` with `auto_fixable: false` (`plow fix` will
 ///   not remove a dependency that another workspace imports). On findings
 ///   without cross-workspace consumers the action stays `remove-dependency`
 ///   with `auto_fixable: true`.
 /// - `add-to-config` for `ignoreExports` (`duplicate-exports`): `true` when
-///   `fallow fix` can safely apply the action without further user setup.
-///   That is: a fallow config file exists on disk, OR no config exists AND
+///   `plow fix` can safely apply the action without further user setup.
+///   That is: a plow config file exists on disk, OR no config exists AND
 ///   the working directory is NOT inside a monorepo subpackage (in which
-///   case the applier creates `.fallowrc.json` from `fallow init`'s
+///   case the applier creates `.plowrc.json` from `plow init`'s
 ///   framework-aware scaffolding and layers the new rules on top).
 ///   `false` inside a monorepo subpackage with no workspace-root config
 ///   (the applier refuses to fragment per-package configs across the
@@ -66,18 +66,18 @@ use serde::Serialize;
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(untagged)]
 pub enum IssueAction {
-    /// A code-change fix the user can apply (auto-fixable by `fallow fix` for
+    /// A code-change fix the user can apply (auto-fixable by `plow fix` for
     /// some variants, manual for others).
     Fix(FixAction),
-    /// Place a `// fallow-ignore-next-line ...` comment above the offending
+    /// Place a `// plow-ignore-next-line ...` comment above the offending
     /// line. Always manual.
     SuppressLine(SuppressLineAction),
-    /// Place a `// fallow-ignore-file ...` comment at the top of the file.
+    /// Place a `// plow-ignore-file ...` comment at the top of the file.
     /// Always manual.
     SuppressFile(SuppressFileAction),
-    /// Add the offending finding to the fallow config (e.g.
+    /// Add the offending finding to the plow config (e.g.
     /// `ignoreDependencies: ["lodash"]`). Auto-fixable for the array-shaped
-    /// `ignoreExports` variant when `fallow fix` can safely apply the
+    /// `ignoreExports` variant when `plow fix` can safely apply the
     /// action (config file exists, or no config exists and the working
     /// directory is not inside a monorepo subpackage); manual otherwise.
     AddToConfig(AddToConfigAction),
@@ -91,7 +91,7 @@ pub struct FixAction {
     /// Kebab-case identifier for the fix action.
     #[serde(rename = "type")]
     pub kind: FixActionType,
-    /// Whether `fallow fix` can apply this fix automatically. Evaluated PER
+    /// Whether `plow fix` can apply this fix automatically. Evaluated PER
     /// FINDING, not per action type: the same `type` may carry
     /// `auto_fixable: true` on one finding and `auto_fixable: false` on
     /// another when per-instance guards in the applier discriminate (e.g.
@@ -216,10 +216,10 @@ pub struct SuppressLineAction {
     /// Human-readable description of the suppression.
     pub description: String,
     /// The inline comment to place above the line (e.g.,
-    /// `// fallow-ignore-next-line unused-export`). When multiple
+    /// `// plow-ignore-next-line unused-export`). When multiple
     /// suppressible findings share the same path and line, this may contain a
     /// comma-separated issue-kind list such as
-    /// `// fallow-ignore-next-line unused-export, complexity`.
+    /// `// plow-ignore-next-line unused-export, complexity`.
     pub comment: String,
     /// Present on multi-location issue types (e.g., `duplicate_exports`) to
     /// indicate the comment must be applied at each location.
@@ -232,7 +232,7 @@ pub struct SuppressLineAction {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum SuppressLineKind {
-    /// `// fallow-ignore-next-line <kind>` directive.
+    /// `// plow-ignore-next-line <kind>` directive.
     SuppressLine,
 }
 
@@ -258,7 +258,7 @@ pub struct SuppressFileAction {
     /// Human-readable description of the suppression.
     pub description: String,
     /// The file-level comment to place at the top of the file (e.g.,
-    /// `// fallow-ignore-file unused-file`).
+    /// `// plow-ignore-file unused-file`).
     pub comment: String,
 }
 
@@ -267,11 +267,11 @@ pub struct SuppressFileAction {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum SuppressFileKind {
-    /// `// fallow-ignore-file <kind>` directive.
+    /// `// plow-ignore-file <kind>` directive.
     SuppressFile,
 }
 
-/// Edit a fallow config file (`.fallowrc.json`, `fallow.toml`, etc.) to
+/// Edit a plow config file (`.plowrc.json`, `plow.toml`, etc.) to
 /// add the offending value to an `ignore*` rule.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -279,13 +279,13 @@ pub struct AddToConfigAction {
     /// Action type identifier.
     #[serde(rename = "type")]
     pub kind: AddToConfigKind,
-    /// True when `fallow fix` can apply this config action automatically.
+    /// True when `plow fix` can apply this config action automatically.
     /// Evaluated PER FINDING, not per action type: `ignoreExports`
-    /// duplicate-export actions are auto-fixable when `fallow fix` can
-    /// safely write the rule, which today means EITHER a fallow config
+    /// duplicate-export actions are auto-fixable when `plow fix` can
+    /// safely write the rule, which today means EITHER a plow config
     /// file already exists OR no config exists and the working directory
     /// is NOT inside a monorepo subpackage (in which case the applier
-    /// creates `.fallowrc.json` from `fallow init`'s framework-aware
+    /// creates `.plowrc.json` from `plow init`'s framework-aware
     /// scaffolding). The action is `false` inside a monorepo subpackage
     /// with no workspace-root config because the applier refuses to
     /// fragment per-package configs across the monorepo. Older scalar
@@ -296,7 +296,7 @@ pub struct AddToConfigAction {
     pub auto_fixable: bool,
     /// Human-readable description of the config change.
     pub description: String,
-    /// The fallow config key to add the value to (e.g.,
+    /// The plow config key to add the value to (e.g.,
     /// `ignoreDependencies`).
     pub config_key: String,
     /// Value to add to the config key. Shape depends on `config_key`. For
@@ -305,12 +305,12 @@ pub struct AddToConfigAction {
     /// `{ file, exports }` rule objects so the snippet can be merged into
     /// the user's config verbatim. For `ignoreCatalogReferences` and
     /// `ignoreDependencyOverrides` this is an object whose shape matches the
-    /// rule entry users add to their fallow config.
+    /// rule entry users add to their plow config.
     pub value: AddToConfigValue,
     /// Optional URL pointing at a stable JSON Schema fragment that describes
     /// the shape of `value`. Agents that intend to validate `value` before
     /// writing it into a user's config can fetch the linked schema and run
-    /// it against `value`. The URL is a JSON Pointer fragment into fallow's
+    /// it against `value`. The URL is a JSON Pointer fragment into plow's
     /// main config schema (e.g.
     /// `schema.json#/properties/ignoreExports` for the ignoreExports
     /// action, or `schema.json#/properties/ignoreDependencies/items` for
@@ -325,7 +325,7 @@ pub struct AddToConfigAction {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum AddToConfigKind {
-    /// Append a value into a fallow config `ignore*` list.
+    /// Append a value into a plow config `ignore*` list.
     AddToConfig,
 }
 
@@ -343,12 +343,12 @@ pub enum AddToConfigValue {
     ExportsRules(Vec<IgnoreExportsRule>),
     /// Free-form object for rule-shaped keys like
     /// `ignoreCatalogReferences` / `ignoreDependencyOverrides`. The shape
-    /// matches the rule entry users add to their fallow config; consumers
+    /// matches the rule entry users add to their plow config; consumers
     /// validate against the per-key schema referenced by `value_schema`.
     RuleObject(serde_json::Map<String, serde_json::Value>),
 }
 
-/// Single `ignoreExports` rule entry. The fallow config accepts an array of
+/// Single `ignoreExports` rule entry. The plow config accepts an array of
 /// these under the `ignoreExports` key.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -360,18 +360,18 @@ pub struct IgnoreExportsRule {
     pub exports: Vec<String>,
 }
 
-/// A read-only follow-up command fallow surfaces from the current findings,
+/// A read-only follow-up command plow surfaces from the current findings,
 /// emitted as the top-level `next_steps` array on each command's JSON envelope.
 ///
-/// `next_steps` exists to point agents and humans sideways to fallow's adjacent
+/// `next_steps` exists to point agents and humans sideways to plow's adjacent
 /// verification capabilities (trace, complexity breakdown, audit, workspace
 /// scoping) that telemetry shows agents rarely discover, because they act on the
 /// output in front of them rather than on reference docs.
 ///
 /// ## Two hard contracts
 ///
-/// 1. **Read-only.** A `next_step` NEVER suggests `fallow fix` or any mutating
-///    command. Fallow surfaces evidence and verification paths; deciding and
+/// 1. **Read-only.** A `next_step` NEVER suggests `plow fix` or any mutating
+///    command. Plow surfaces evidence and verification paths; deciding and
 ///    applying the remediation is the agent's job.
 /// 2. **Runnable, placeholder-free.** `command` is always runnable as-is. It
 ///    never contains an angle-bracket placeholder (`<...>`); finding-derived

@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use fallow_types::discover::{EntryPoint, EntryPointSource};
+use plow_types::discover::{EntryPoint, EntryPointSource};
 
 use super::entry_points::resolve_entry_path;
 use super::parse_scripts::{extract_script_file_refs, looks_like_script_file};

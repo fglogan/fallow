@@ -21,7 +21,7 @@ impl AnalysisProgress {
 
         let pb = ProgressBar::with_draw_target(None, ProgressDrawTarget::stderr_with_hz(30));
         pb.set_style(
-            ProgressStyle::with_template("{spinner:.cyan} fallow: {msg} ({elapsed})")
+            ProgressStyle::with_template("{spinner:.cyan} plow: {msg} ({elapsed})")
                 .expect("valid progress template")
                 .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ "),
         );

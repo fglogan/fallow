@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a small public Fallow config corpus report."""
+"""Build a small public Plow config corpus report."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ except ModuleNotFoundError:
     tomllib = None
 
 
-CONFIG_FILENAMES = (".fallowrc.json", ".fallowrc.jsonc", "fallow.toml")
+CONFIG_FILENAMES = (".plowrc.json", ".plowrc.jsonc", "plow.toml")
 KEY_LABELS = {
     "entry": "entry",
     "dynamicallyLoaded": "dynamicallyLoaded",
@@ -37,7 +37,7 @@ KEY_LABELS = {
 COMMENT_PHRASES = (
     "false positive",
     "workaround",
-    "fallow misses",
+    "plow misses",
     "loaded by",
     "framework",
     "generated",
@@ -72,13 +72,13 @@ class CommentHit:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Fetch public Fallow config files and summarize workaround signals."
+        description="Fetch public Plow config files and summarize workaround signals."
     )
     parser.add_argument("--limit", type=int, default=40, help="Maximum search results per filename")
     parser.add_argument(
         "--cache-dir",
         type=Path,
-        default=Path(".fallow/public-config-corpus"),
+        default=Path(".plow/public-config-corpus"),
         help="Directory for cached config snapshots and manifest.json",
     )
     parser.add_argument(
@@ -396,7 +396,7 @@ def fetch_raw(raw_url: str, *, timeout: float, retries: int) -> str:
     last_error: Exception | None = None
     for attempt in range(retries + 1):
         try:
-            request = urllib.request.Request(raw_url, headers={"User-Agent": "fallow-public-config-corpus"})
+            request = urllib.request.Request(raw_url, headers={"User-Agent": "plow-public-config-corpus"})
             with urllib.request.urlopen(request, timeout=timeout) as response:
                 return response.read().decode("utf-8", errors="replace")
         except (urllib.error.URLError, TimeoutError, OSError) as error:
@@ -748,9 +748,9 @@ def render_markdown(manifest: dict[str, Any], manifest_path: Path) -> str:
     comment_rows = collect_comment_rows(fetched)
 
     lines = [
-        "# Public Fallow Config Corpus",
+        "# Public Plow Config Corpus",
         "",
-        "This maintainer report summarizes public Fallow config files that may encode workaround signals. Comment hits are candidate evidence only, not confirmed false positives.",
+        "This maintainer report summarizes public Plow config files that may encode workaround signals. Comment hits are candidate evidence only, not confirmed false positives.",
         "",
         "## How To Run",
         "",
@@ -762,7 +762,7 @@ def render_markdown(manifest: dict[str, Any], manifest_path: Path) -> str:
         f"- `gh` version: `{manifest['gh_version']}`",
         f"- Per-filename cap: `{manifest['limit_per_filename']}`",
         f"- Manifest: `{manifest_path}`",
-        "- Cache: `.fallow/public-config-corpus/` by default, intentionally untracked.",
+        "- Cache: `.plow/public-config-corpus/` by default, intentionally untracked.",
         "- Public repositories only. Do not use private repository tokens for this corpus.",
         "- Store only the small config snapshots needed for reproducibility. When filing issues, link to source and quote only short snippets.",
         "",
@@ -868,11 +868,11 @@ def render_markdown(manifest: dict[str, Any], manifest_path: Path) -> str:
             "",
             "Known issue family from that pass:",
             "",
-            "- [#546](https://github.com/fallow-rs/fallow/issues/546): Storybook staticDirs and manager runtime resources.",
-            "- [#586](https://github.com/fallow-rs/fallow/issues/586): Playwright fixture class-member propagation.",
-            "- [#588](https://github.com/fallow-rs/fallow/issues/588), [#589](https://github.com/fallow-rs/fallow/issues/589), [#590](https://github.com/fallow-rs/fallow/issues/590): rwsdk, Wrangler, Node loader, and content-collections convention-loaded files.",
-            "- [#600](https://github.com/fallow-rs/fallow/issues/600): Electron-Vite renderer HTML entries.",
-            "- [#601](https://github.com/fallow-rs/fallow/issues/601), [#602](https://github.com/fallow-rs/fallow/issues/602): Vitest alias and mock-module consumers.",
+            "- [#546](https://github.com/fglogan/genesis-plow/issues/546): Storybook staticDirs and manager runtime resources.",
+            "- [#586](https://github.com/fglogan/genesis-plow/issues/586): Playwright fixture class-member propagation.",
+            "- [#588](https://github.com/fglogan/genesis-plow/issues/588), [#589](https://github.com/fglogan/genesis-plow/issues/589), [#590](https://github.com/fglogan/genesis-plow/issues/590): rwsdk, Wrangler, Node loader, and content-collections convention-loaded files.",
+            "- [#600](https://github.com/fglogan/genesis-plow/issues/600): Electron-Vite renderer HTML entries.",
+            "- [#601](https://github.com/fglogan/genesis-plow/issues/601), [#602](https://github.com/fglogan/genesis-plow/issues/602): Vitest alias and mock-module consumers.",
             "",
         ]
     )

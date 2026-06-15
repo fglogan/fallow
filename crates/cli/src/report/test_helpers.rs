@@ -1,8 +1,8 @@
 use std::path::Path;
 
-use fallow_core::extract::MemberKind;
-use fallow_core::results::*;
-use fallow_types::output_dead_code::{
+use plow_core::extract::MemberKind;
+use plow_core::results::*;
+use plow_types::output_dead_code::{
     BoundaryViolationFinding, CircularDependencyFinding, TestOnlyDependencyFinding,
     TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
     UnrenderedComponentFinding, UnresolvedImportFinding, UnusedClassMemberFinding,

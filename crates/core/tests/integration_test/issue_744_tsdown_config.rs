@@ -4,7 +4,7 @@ use super::common::{create_config, fixture_path};
 fn issue_744_tsdown_mts_and_cts_configs_are_entry_points() {
     let root = fixture_path("issue-744-tsdown-mts-cts-configs");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files: Vec<String> = results
         .unused_files

@@ -1,6 +1,6 @@
-# Fallow: Common Workflow Patterns & Recipes
+# Plow: Common Workflow Patterns & Recipes
 
-Step-by-step workflows for common fallow usage scenarios.
+Step-by-step workflows for common plow usage scenarios.
 
 ---
 
@@ -31,7 +31,7 @@ Complete codebase hygiene audit.
 ### Step 1: Run full analysis
 
 ```bash
-fallow dead-code --format json --quiet
+plow dead-code --format json --quiet
 ```
 
 ### Step 2: Review issue counts
@@ -41,25 +41,25 @@ Parse `total_issues` and individual arrays (`unused_files`, `unused_exports`, et
 ### Step 3: Find duplication
 
 ```bash
-fallow dupes --format json --quiet
+plow dupes --format json --quiet
 ```
 
 ### Step 4: Preview auto-fix
 
 ```bash
-fallow fix --dry-run --format json --quiet
+plow fix --dry-run --format json --quiet
 ```
 
 ### Step 5: Apply fixes (after user confirmation)
 
 ```bash
-fallow fix --yes --format json --quiet
+plow fix --yes --format json --quiet
 ```
 
 ### Step 6: Verify
 
 ```bash
-fallow dead-code --format json --quiet
+plow dead-code --format json --quiet
 ```
 
 ---
@@ -71,7 +71,7 @@ Check if a pull request introduces new dead code.
 ### Step 1: Analyze changed files
 
 ```bash
-fallow dead-code --format json --quiet --changed-since main --fail-on-issues
+plow dead-code --format json --quiet --changed-since main --fail-on-issues
 ```
 
 Exit code 1 if the PR introduces new dead code. Exit code 0 if clean.
@@ -79,7 +79,7 @@ Exit code 1 if the PR introduces new dead code. Exit code 0 if clean.
 ### Step 2: If issues found, show specifics
 
 ```bash
-fallow dead-code --format json --quiet --changed-since main
+plow dead-code --format json --quiet --changed-since main
 ```
 
 Parse the JSON to list specific files and exports that became unused.
@@ -92,26 +92,26 @@ Parse the JSON to list specific files and exports that became unused.
 
 ```yaml
 - name: Dead code check
-  run: npx fallow dead-code --fail-on-issues --quiet
+  run: npx plow dead-code --fail-on-issues --quiet
 ```
 
 ### GitHub Actions: With SARIF Upload
 
 ```yaml
-- name: Fallow analysis
-  run: npx fallow dead-code --ci > fallow.sarif
+- name: Plow analysis
+  run: npx plow dead-code --ci > plow.sarif
   continue-on-error: true  # --ci sets --fail-on-issues; continue to upload SARIF even if issues found
 
 - name: Upload SARIF
   uses: github/codeql-action/upload-sarif@v3
   with:
-    sarif_file: fallow.sarif
+    sarif_file: plow.sarif
 ```
 
 ### GitHub Actions: Using the Official Action
 
 ```yaml
-- uses: fallow-rs/fallow@v2
+- uses: fglogan/genesis-plow@v2
   with:
     command: dead-code
     fail-on-issues: true
@@ -123,18 +123,18 @@ Parse the JSON to list specific files and exports that became unused.
 Fail a PR only when it introduces new security candidates (or makes existing ones newly reachable). Gated failures exit with code 8; the `issues` output counts only matching gate candidates. PR comment and review renderers skip security envelopes.
 
 ```yaml
-- uses: fallow-rs/fallow@v2
+- uses: fglogan/genesis-plow@v2
   with:
     command: security
     security-gate: new   # or newly-reachable (needs a base ref via changed-since or PR auto-scoping)
 ```
 
-GitLab equivalent: `FALLOW_COMMAND: "security"` with `FALLOW_SECURITY_GATE: "new"`.
+GitLab equivalent: `PLOW_COMMAND: "security"` with `PLOW_SECURITY_GATE: "new"`.
 
 ### GitHub Actions: With Health Score
 
 ```yaml
-- uses: fallow-rs/fallow@v2
+- uses: fglogan/genesis-plow@v2
   with:
     score: true
     changed-since: main
@@ -145,25 +145,25 @@ Computes a health score (0-100 with letter grade) in combined mode and enables t
 ### GitHub Actions: Severity-Aware PR Quality Gate (Audit)
 
 ```yaml
-- uses: fallow-rs/fallow@v2
+- uses: fglogan/genesis-plow@v2
   with:
     command: audit
     gate: new-only        # default; fails only on findings introduced by this PR
     fail-on-issues: true
 ```
 
-Runs `fallow audit` to combine dead-code + complexity + duplication scoped to changed files. The gate respects rule severity from `.fallowrc.json`, so `unused-exports: warn` projects do not fail when a PR touches a file with pre-existing warn-tier findings. Use `gate: all` to fail on every finding in changed files.
+Runs `plow audit` to combine dead-code + complexity + duplication scoped to changed files. The gate respects rule severity from `.plowrc.json`, so `unused-exports: warn` projects do not fail when a PR touches a file with pre-existing warn-tier findings. Use `gate: all` to fail on every finding in changed files.
 
 The action exposes `outputs.verdict` (`pass`/`warn`/`fail`) and `outputs.gate` for downstream conditionals; `outputs.issues` holds the introduced count under `gate: new-only` and the total count under `gate: all`.
 
 ```yaml
-- uses: fallow-rs/fallow@v2
-  id: fallow
+- uses: fglogan/genesis-plow@v2
+  id: plow
   with:
     command: audit
 
 - name: Block release on regression
-  if: steps.fallow.outputs.verdict == 'fail'
+  if: steps.plow.outputs.verdict == 'fail'
   run: exit 1
 ```
 
@@ -174,7 +174,7 @@ Three additional outputs surface silent failures in the action's PR comment / re
 The official action supports inline PR annotations via GitHub workflow commands. This does not require Advanced Security (unlike SARIF upload) and works on any GitHub plan.
 
 ```yaml
-- uses: fallow-rs/fallow@v2
+- uses: fglogan/genesis-plow@v2
   with:
     command: dead-code
     changed-since: main
@@ -188,14 +188,14 @@ Annotations appear as inline warnings on the PR diff. They work with all command
 
 ```yaml
 - name: Check for new dead code
-  run: npx fallow dead-code --format json --quiet --changed-since ${{ github.event.pull_request.base.sha }} --fail-on-issues
+  run: npx plow dead-code --format json --quiet --changed-since ${{ github.event.pull_request.base.sha }} --fail-on-issues
 ```
 
 ### GitHub Actions: Duplication Gate
 
 ```yaml
 - name: Duplication check
-  run: npx fallow dupes --format json --quiet --threshold 5 --mode mild
+  run: npx plow dupes --format json --quiet --threshold 5 --mode mild
 ```
 
 Fails if overall duplication exceeds 5%.
@@ -204,7 +204,7 @@ Fails if overall duplication exceeds 5%.
 
 ```yaml
 - name: Check duplication in changed files
-  run: npx fallow dupes --format json --quiet --changed-since ${{ github.event.pull_request.base.sha }}
+  run: npx plow dupes --format json --quiet --changed-since ${{ github.event.pull_request.base.sha }}
 ```
 
 Only reports duplication in files modified by the PR.
@@ -213,18 +213,18 @@ Only reports duplication in files modified by the PR.
 
 ```yaml
 include:
-  - remote: 'https://raw.githubusercontent.com/fallow-rs/fallow/main/ci/gitlab-ci.yml'
+  - remote: 'https://raw.githubusercontent.com/fglogan/genesis-plow/main/ci/gitlab-ci.yml'
 
-fallow:
-  extends: .fallow
+plow:
+  extends: .plow
   variables:
-    FALLOW_COMMAND: "dead-code"
-    FALLOW_FAIL_ON_ISSUES: "true"
+    PLOW_COMMAND: "dead-code"
+    PLOW_FAIL_ON_ISSUES: "true"
 ```
 
 Generates Code Quality reports (inline MR annotations) automatically. In MR pipelines, `--changed-since` is automatically set to the target branch — no manual configuration needed.
 
-If runners cannot reach `raw.githubusercontent.com`, run `fallow ci-template gitlab --vendor`, commit the generated `ci/` and `action/` files, and use GitLab's local include syntax:
+If runners cannot reach `raw.githubusercontent.com`, run `plow ci-template gitlab --vendor`, commit the generated `ci/` and `action/` files, and use GitLab's local include syntax:
 
 ```yaml
 include:
@@ -235,76 +235,76 @@ include:
 
 ```yaml
 include:
-  - remote: 'https://raw.githubusercontent.com/fallow-rs/fallow/main/ci/gitlab-ci.yml'
+  - remote: 'https://raw.githubusercontent.com/fglogan/genesis-plow/main/ci/gitlab-ci.yml'
 
-fallow:
-  extends: .fallow
+plow:
+  extends: .plow
   variables:
-    FALLOW_COMMENT: "true"
-    FALLOW_SUMMARY_SCOPE: "diff"
+    PLOW_COMMENT: "true"
+    PLOW_SUMMARY_SCOPE: "diff"
 ```
 
-Posts a summary comment on the MR with issue counts and findings. In MR pipelines, `--changed-since` is auto-detected from `$CI_MERGE_REQUEST_TARGET_BRANCH_NAME`, so only issues from changed files are reported. `FALLOW_SUMMARY_SCOPE: "diff"` also hides project-level dependency/catalog/override findings whose anchor line is outside the diff. Requires `GITLAB_TOKEN` CI/CD variable (project access token with `api` scope); `CI_JOB_TOKEN` is read-only for MR notes in the official GitLab API.
+Posts a summary comment on the MR with issue counts and findings. In MR pipelines, `--changed-since` is auto-detected from `$CI_MERGE_REQUEST_TARGET_BRANCH_NAME`, so only issues from changed files are reported. `PLOW_SUMMARY_SCOPE: "diff"` also hides project-level dependency/catalog/override findings whose anchor line is outside the diff. Requires `GITLAB_TOKEN` CI/CD variable (project access token with `api` scope); `CI_JOB_TOKEN` is read-only for MR notes in the official GitLab API.
 
 ### GitLab CI: With Inline Code Review Comments
 
 ```yaml
 include:
-  - remote: 'https://raw.githubusercontent.com/fallow-rs/fallow/main/ci/gitlab-ci.yml'
+  - remote: 'https://raw.githubusercontent.com/fglogan/genesis-plow/main/ci/gitlab-ci.yml'
 
-fallow:
-  extends: .fallow
+plow:
+  extends: .plow
   variables:
-    FALLOW_REVIEW: "true"
-    FALLOW_REVIEW_GUIDANCE: "true"
+    PLOW_REVIEW: "true"
+    PLOW_REVIEW_GUIDANCE: "true"
 ```
 
-Posts inline review comments directly on the MR diff lines where issues were found. `FALLOW_REVIEW_GUIDANCE: "true"` adds collapsed "What to do" guidance blocks to each inline finding. This gives developers precise feedback without leaving the code review flow. Can be combined with `FALLOW_COMMENT: "true"` for both a summary and inline comments. Requires `GITLAB_TOKEN`.
+Posts inline review comments directly on the MR diff lines where issues were found. `PLOW_REVIEW_GUIDANCE: "true"` adds collapsed "What to do" guidance blocks to each inline finding. This gives developers precise feedback without leaving the code review flow. Can be combined with `PLOW_COMMENT: "true"` for both a summary and inline comments. Requires `GITLAB_TOKEN`.
 
 ### GitLab CI: Combined MR Comments + Review
 
 ```yaml
 include:
-  - remote: 'https://raw.githubusercontent.com/fallow-rs/fallow/main/ci/gitlab-ci.yml'
+  - remote: 'https://raw.githubusercontent.com/fglogan/genesis-plow/main/ci/gitlab-ci.yml'
 
-fallow:
-  extends: .fallow
+plow:
+  extends: .plow
   variables:
-    FALLOW_COMMENT: "true"
-    FALLOW_SUMMARY_SCOPE: "diff"
-    FALLOW_REVIEW: "true"
-    FALLOW_REVIEW_GUIDANCE: "true"
-    FALLOW_FAIL_ON_ISSUES: "true"
+    PLOW_COMMENT: "true"
+    PLOW_SUMMARY_SCOPE: "diff"
+    PLOW_REVIEW: "true"
+    PLOW_REVIEW_GUIDANCE: "true"
+    PLOW_FAIL_ON_ISSUES: "true"
 ```
 
-Posts both a summary comment and inline review comments on the MR. `FALLOW_SUMMARY_SCOPE: "diff"` only affects the sticky summary; inline review comments remain anchored to diff lines. The template auto-detects the package manager (npm/pnpm/yarn) from lockfiles, so review comments show the correct commands for the project (e.g., `pnpm remove` instead of `npm uninstall`).
+Posts both a summary comment and inline review comments on the MR. `PLOW_SUMMARY_SCOPE: "diff"` only affects the sticky summary; inline review comments remain anchored to diff lines. The template auto-detects the package manager (npm/pnpm/yarn) from lockfiles, so review comments show the correct commands for the project (e.g., `pnpm remove` instead of `npm uninstall`).
 
 ### GitLab CI: With Health Score and Trend
 
 ```yaml
 include:
-  - remote: 'https://raw.githubusercontent.com/fallow-rs/fallow/main/ci/gitlab-ci.yml'
+  - remote: 'https://raw.githubusercontent.com/fglogan/genesis-plow/main/ci/gitlab-ci.yml'
 
-fallow:
-  extends: .fallow
+plow:
+  extends: .plow
   variables:
-    FALLOW_SCORE: "true"
-    FALLOW_TREND: "true"
-    FALLOW_COMMENT: "true"
+    PLOW_SCORE: "true"
+    PLOW_TREND: "true"
+    PLOW_COMMENT: "true"
 ```
 
-Computes the health score and compares against saved snapshots. The MR comment includes a health delta header showing score changes. `FALLOW_TREND` implies `FALLOW_SCORE`.
+Computes the health score and compares against saved snapshots. The MR comment includes a health delta header showing score changes. `PLOW_TREND` implies `PLOW_SCORE`.
 
 ### GitLab CI: Manual (Without Template)
 
 ```yaml
-fallow:
+plow:
   image: node:20-slim
   script:
-    - npx fallow dead-code --fail-on-issues --quiet --format json > fallow-results.json
+    - npx plow dead-code --fail-on-issues --quiet --format json > plow-results.json
   artifacts:
     paths:
-      - fallow-results.json
+      - plow-results.json
 ```
 
 ---
@@ -316,20 +316,20 @@ For large projects with existing dead code. Adopt gradually without fixing every
 ### Step 1: Save current state as baseline
 
 ```bash
-fallow dead-code --format json --quiet --save-baseline fallow-baselines/dead-code.json
+plow dead-code --format json --quiet --save-baseline plow-baselines/dead-code.json
 ```
 
 ### Step 2: Commit the baseline
 
 ```bash
-git add fallow-baselines/dead-code.json
-git commit -m "chore: add fallow baseline"
+git add plow-baselines/dead-code.json
+git commit -m "chore: add plow baseline"
 ```
 
 ### Step 3: CI only fails on NEW issues
 
 ```bash
-fallow dead-code --format json --quiet --baseline fallow-baselines/dead-code.json --fail-on-issues
+plow dead-code --format json --quiet --baseline plow-baselines/dead-code.json --fail-on-issues
 ```
 
 ### Step 4: Gradually fix and update baseline
@@ -337,7 +337,7 @@ fallow dead-code --format json --quiet --baseline fallow-baselines/dead-code.jso
 As you fix existing issues, regenerate the baseline:
 
 ```bash
-fallow dead-code --format json --quiet --save-baseline fallow-baselines/dead-code.json
+plow dead-code --format json --quiet --save-baseline plow-baselines/dead-code.json
 ```
 
 ### Duplication baseline
@@ -345,8 +345,8 @@ fallow dead-code --format json --quiet --save-baseline fallow-baselines/dead-cod
 Same pattern works for duplication:
 
 ```bash
-fallow dupes --format json --quiet --save-baseline fallow-baselines/dupes.json
-fallow dupes --format json --quiet --baseline fallow-baselines/dupes.json --threshold 5
+plow dupes --format json --quiet --save-baseline plow-baselines/dupes.json
+plow dupes --format json --quiet --baseline plow-baselines/dupes.json --threshold 5
 ```
 
 ---
@@ -356,15 +356,15 @@ fallow dupes --format json --quiet --baseline fallow-baselines/dupes.json --thre
 ### Analyze the full monorepo
 
 ```bash
-fallow dead-code --format json --quiet
+plow dead-code --format json --quiet
 ```
 
-Fallow auto-detects workspaces from `package.json` workspaces or `pnpm-workspace.yaml`.
+Plow auto-detects workspaces from `package.json` workspaces or `pnpm-workspace.yaml`.
 
 ### Analyze a single package
 
 ```bash
-fallow dead-code --format json --quiet --workspace my-package
+plow dead-code --format json --quiet --workspace my-package
 ```
 
 Full cross-workspace graph is built (so imports between packages are resolved), but only issues in `my-package` are reported.
@@ -374,14 +374,14 @@ Full cross-workspace graph is built (so imports between packages are resolved), 
 Run analysis for each workspace package separately:
 
 ```bash
-fallow dead-code --format json --quiet --workspace package-a --fail-on-issues
-fallow dead-code --format json --quiet --workspace package-b --fail-on-issues
+plow dead-code --format json --quiet --workspace package-a --fail-on-issues
+plow dead-code --format json --quiet --workspace package-b --fail-on-issues
 ```
 
 ### List all discovered files across workspaces
 
 ```bash
-fallow list --files --format json --quiet
+plow list --files --format json --quiet
 ```
 
 ---
@@ -393,7 +393,7 @@ Enforce a maximum duplication percentage.
 ### Step 1: Measure current duplication
 
 ```bash
-fallow dupes --format json --quiet
+plow dupes --format json --quiet
 ```
 
 Check `duplication_percentage` in the JSON output.
@@ -403,7 +403,7 @@ Check `duplication_percentage` in the JSON output.
 If current duplication is 3.8%, set threshold to 5%:
 
 ```bash
-fallow dupes --format json --quiet --threshold 5
+plow dupes --format json --quiet --threshold 5
 ```
 
 Exits with code 1 if duplication exceeds 5%.
@@ -417,7 +417,7 @@ As you reduce duplication, lower the threshold.
 To ignore duplication within the same directory (local helpers, similar test files):
 
 ```bash
-fallow dupes --format json --quiet --threshold 5 --skip-local
+plow dupes --format json --quiet --threshold 5 --skip-local
 ```
 
 ---
@@ -427,7 +427,7 @@ fallow dupes --format json --quiet --threshold 5 --skip-local
 ### Step 1: Preview migration
 
 ```bash
-fallow migrate --dry-run
+plow migrate --dry-run
 ```
 
 Shows what config would be generated. Auto-detects `knip.json`, `.knip.json`, `knip.jsonc`, `.knip.jsonc`, or `package.json#knip`.
@@ -435,21 +435,21 @@ Shows what config would be generated. Auto-detects `knip.json`, `.knip.json`, `k
 ### Step 2: Apply migration
 
 ```bash
-fallow migrate
+plow migrate
 ```
 
-Creates `.fallowrc.json` with mapped settings:
-- knip `rules`/`exclude`/`include` → fallow `rules` (error/warn/off)
-- knip `ignore` → fallow `ignorePatterns`
-- knip `ignoreDependencies` → fallow `ignoreDependencies`
-- knip `ignoreExportsUsedInFile` → fallow `ignoreExportsUsedInFile` (boolean and `{ type, interface }` object form both supported; fallow groups type aliases and interfaces under one issue, so the two type-kind fields behave identically)
+Creates `.plowrc.json` with mapped settings:
+- knip `rules`/`exclude`/`include` → plow `rules` (error/warn/off)
+- knip `ignore` → plow `ignorePatterns`
+- knip `ignoreDependencies` → plow `ignoreDependencies`
+- knip `ignoreExportsUsedInFile` → plow `ignoreExportsUsedInFile` (boolean and `{ type, interface }` object form both supported; plow groups type aliases and interfaces under one issue, so the two type-kind fields behave identically)
 - Unmappable fields generate warnings with suggestions
 
 ### Step 3: Compare results
 
 ```bash
-# Run fallow
-fallow dead-code --format json --quiet
+# Run plow
+plow dead-code --format json --quiet
 
 # Compare with knip output
 npx knip --reporter json
@@ -466,7 +466,7 @@ Once satisfied, remove the old `knip.json` and uninstall knip.
 ### Step 1: Preview migration
 
 ```bash
-fallow migrate --dry-run
+plow migrate --dry-run
 ```
 
 Auto-detects `.jscpd.json` or `package.json#jscpd`.
@@ -474,7 +474,7 @@ Auto-detects `.jscpd.json` or `package.json#jscpd`.
 ### Step 2: Apply migration
 
 ```bash
-fallow migrate
+plow migrate
 ```
 
 Maps jscpd settings:
@@ -486,15 +486,15 @@ Maps jscpd settings:
 ### Step 3: Compare results
 
 ```bash
-fallow dupes --format json --quiet
+plow dupes --format json --quiet
 ```
 
 ### Detection mode mapping
 
-| jscpd | fallow |
+| jscpd | plow |
 |-------|--------|
 | Default (exact tokens) | `strict` |
-| — | `mild` (fallow default, syntax normalized) |
+| — | `mild` (plow default, syntax normalized) |
 | — | `weak` (literal normalization) |
 | — | `semantic` (variable rename detection) |
 
@@ -505,7 +505,7 @@ fallow dupes --format json --quiet
 ### Step 1: Dry-run first
 
 ```bash
-fallow fix --dry-run --format json --quiet
+plow fix --dry-run --format json --quiet
 ```
 
 ### Step 2: Review each proposed change
@@ -523,13 +523,13 @@ Show the proposed changes. Wait for user confirmation.
 ### Step 4: Apply
 
 ```bash
-fallow fix --yes --format json --quiet
+plow fix --yes --format json --quiet
 ```
 
 ### Step 5: Verify
 
 ```bash
-fallow dead-code --format json --quiet
+plow dead-code --format json --quiet
 ```
 
 ### Step 6: Run project tests
@@ -543,7 +543,7 @@ After auto-fix, always run the project's test suite to verify nothing broke.
 ### Full audit (default)
 
 ```bash
-fallow dead-code --format json --quiet
+plow dead-code --format json --quiet
 ```
 
 Includes all files, all scripts, all dependencies (including devDependencies).
@@ -551,7 +551,7 @@ Includes all files, all scripts, all dependencies (including devDependencies).
 ### Production audit
 
 ```bash
-fallow dead-code --format json --quiet --production
+plow dead-code --format json --quiet --production
 ```
 
 Differences:
@@ -577,7 +577,7 @@ Use full mode for:
 ### Trace an export's usage chain
 
 ```bash
-fallow dead-code --format json --quiet --trace src/utils.ts:myFunction
+plow dead-code --format json --quiet --trace src/utils.ts:myFunction
 ```
 
 Shows where `myFunction` is imported (or not imported) and why it's flagged.
@@ -585,7 +585,7 @@ Shows where `myFunction` is imported (or not imported) and why it's flagged.
 ### Trace all edges for a file
 
 ```bash
-fallow dead-code --format json --quiet --trace-file src/utils.ts
+plow dead-code --format json --quiet --trace-file src/utils.ts
 ```
 
 Shows all imports/exports for the file and their resolution status.
@@ -593,17 +593,17 @@ Shows all imports/exports for the file and their resolution status.
 ### Trace a dependency
 
 ```bash
-fallow dead-code --format json --quiet --trace-dependency lodash
+plow dead-code --format json --quiet --trace-dependency lodash
 ```
 
 Shows all files that import lodash.
 
 ### If the trace shows it IS used
 
-The export might be consumed through a pattern fallow can't resolve (fully dynamic import, reflection). Add a suppression:
+The export might be consumed through a pattern plow can't resolve (fully dynamic import, reflection). Add a suppression:
 
 ```typescript
-// fallow-ignore-next-line unused-export
+// plow-ignore-next-line unused-export
 export const dynamicallyUsed = createHandler();
 ```
 
@@ -612,7 +612,7 @@ export const dynamicallyUsed = createHandler();
 The export is genuinely unused. Consider removing it or marking it as intentionally kept:
 
 ```typescript
-// fallow-ignore-next-line unused-export
+// plow-ignore-next-line unused-export
 export const publicApi = createWidget();  // Used by external consumers
 ```
 
@@ -625,7 +625,7 @@ Cross-reference dead code with duplication findings to find high-priority cleanu
 ### Step 1: Run combined analysis
 
 ```bash
-fallow dead-code --format json --quiet --include-dupes
+plow dead-code --format json --quiet --include-dupes
 ```
 
 This adds duplication context to dead code findings, identifying clone instances that exist in unused files or overlap with unused exports.
@@ -645,7 +645,7 @@ For frameworks not covered by the 122 built-in plugins.
 ### Option 1: Inline framework config
 
 ```jsonc
-// .fallowrc.json
+// .plowrc.json
 {
   "framework": [
     {
@@ -659,7 +659,7 @@ For frameworks not covered by the 122 built-in plugins.
 
 ### Option 2: External plugin file
 
-Create `.fallow/plugins/my-framework.jsonc`:
+Create `.plow/plugins/my-framework.jsonc`:
 
 ```jsonc
 {
@@ -677,7 +677,7 @@ Create `.fallow/plugins/my-framework.jsonc`:
 ### Option 3: Plugin directory
 
 ```jsonc
-// .fallowrc.json
+// .plowrc.json
 {
   "plugins": ["tools/plugins/"]
 }
@@ -689,12 +689,12 @@ Place `.jsonc`, `.json`, or `.toml` plugin files in that directory.
 
 ## GitHub Code Scanning Integration
 
-Upload fallow results to GitHub's Code Scanning dashboard.
+Upload plow results to GitHub's Code Scanning dashboard.
 
 ### Step 1: Generate SARIF output
 
 ```bash
-fallow dead-code --format sarif --quiet > fallow.sarif
+plow dead-code --format sarif --quiet > plow.sarif
 ```
 
 ### Step 2: Upload via GitHub Action
@@ -703,13 +703,13 @@ fallow dead-code --format sarif --quiet > fallow.sarif
 - name: Upload SARIF
   uses: github/codeql-action/upload-sarif@v3
   with:
-    sarif_file: fallow.sarif
+    sarif_file: plow.sarif
 ```
 
 ### All-in-one with `--ci`
 
 ```bash
-fallow dead-code --ci > fallow.sarif
+plow dead-code --ci > plow.sarif
 ```
 
 The `--ci` flag is equivalent to `--format sarif --fail-on-issues --quiet`. Note: `--fail-on-issues` means exit code 1 if issues exist, in CI scripts use `continue-on-error: true` or `|| true` to ensure the SARIF upload step still runs.
@@ -718,12 +718,12 @@ The `--ci` flag is equivalent to `--format sarif --fail-on-issues --quiet`. Note
 
 ## Guard `git push` with a Claude Code PreToolUse hook
 
-Use this when Claude Code is allowed to run Git commands in a repository that already uses fallow.
+Use this when Claude Code is allowed to run Git commands in a repository that already uses plow.
 
 The pattern is a local agent gate, not a Git hook. Claude Code intercepts its own `Bash` tool calls before execution. When Claude tries `git commit` or `git push`, the hook runs:
 
 ```bash
-fallow audit --format json --quiet --explain --gate-marker agent
+plow audit --format json --quiet --explain --gate-marker agent
 ```
 
 Behavior:
@@ -738,13 +738,13 @@ Because Claude receives stderr as tool feedback on a blocked `PreToolUse` call, 
 Install it automatically:
 
 ```bash
-fallow hooks install --target agent
+plow hooks install --target agent
 ```
 
 Remove it later with:
 
 ```bash
-fallow hooks uninstall --target agent
+plow hooks uninstall --target agent
 ```
 
 Manual files:
@@ -761,7 +761,7 @@ Manual files:
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/fallow-gate.sh"
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/plow-gate.sh"
           }
         ]
       }
@@ -770,35 +770,35 @@ Manual files:
 }
 ```
 
-### `.claude/hooks/fallow-gate.sh`
+### `.claude/hooks/plow-gate.sh`
 
-Prefer `fallow hooks install --target agent` to install this file. The script is written and maintained by fallow itself; the canonical source is [`crates/cli/src/setup_hooks/fallow-gate.sh`](https://github.com/fallow-rs/fallow/blob/main/crates/cli/src/setup_hooks/fallow-gate.sh).
+Prefer `plow hooks install --target agent` to install this file. The script is written and maintained by plow itself; the canonical source is [`crates/cli/src/setup_hooks/plow-gate.sh`](https://github.com/fglogan/genesis-plow/blob/main/crates/cli/src/setup_hooks/plow-gate.sh).
 
 Behavior you can rely on:
 - Runs only when the intercepted command matches `git commit` or `git push`; otherwise exits 0.
-- Resolves `fallow` from PATH first, then `npx --no-install fallow` as a fallback. Skips with a stderr notice if neither is available or if `jq` is missing.
-- Enforces a version floor via `FALLOW_GATE_MIN_VERSION` (default `2.85.0`). Binaries below the floor are blocked with an upgrade hint. Set the env var to the empty string to disable the check.
-- Runs `fallow audit --format json --quiet --explain --gate-marker agent` and, on verdict=`fail`, writes the full JSON envelope to stderr preceded by `fallow-gate: blocked by fallow <version> at <binary>` so the responsible binary is always identifiable. The gate marker lets local Impact record blocked-then-cleared agent gate events when Impact is enabled.
+- Resolves `plow` from PATH first, then `npx --no-install plow` as a fallback. Skips with a stderr notice if neither is available or if `jq` is missing.
+- Enforces a version floor via `PLOW_GATE_MIN_VERSION` (default `2.85.0`). Binaries below the floor are blocked with an upgrade hint. Set the env var to the empty string to disable the check.
+- Runs `plow audit --format json --quiet --explain --gate-marker agent` and, on verdict=`fail`, writes the full JSON envelope to stderr preceded by `plow-gate: blocked by plow <version> at <binary>` so the responsible binary is always identifiable. The gate marker lets local Impact record blocked-then-cleared agent gate events when Impact is enabled.
 - On runtime error (`{"error": true, ...}`) or unexpected non-zero exit, fails open with a one-line stderr notice; warn verdicts pass through silently.
 
 Codex fallback (add to repo root `AGENTS.md`):
 
 ```md
-Before any `git commit` or `git push`, run `fallow audit --format json --quiet --explain --gate-marker agent`. If the verdict is `fail`, fix the reported findings before retrying. Treat JSON runtime errors like `{ "error": true, ... }` as non-blocking.
+Before any `git commit` or `git push`, run `plow audit --format json --quiet --explain --gate-marker agent`. If the verdict is `fail`, fix the reported findings before retrying. Treat JSON runtime errors like `{ "error": true, ... }` as non-blocking.
 ```
 
-Keep `fallow audit` in CI alongside this local gate. The hook only runs for Claude Code, not for human pushes or other agents, so it is a reinforcement layer rather than a replacement for server-side enforcement.
+Keep `plow audit` in CI alongside this local gate. The hook only runs for Claude Code, not for human pushes or other agents, so it is a reinforcement layer rather than a replacement for server-side enforcement.
 
 ### Remove the hook
 
 ```bash
-fallow hooks uninstall --target agent
+plow hooks uninstall --target agent
 ```
 
-Removes the fallow-gate handler from `.claude/settings.json` (preserving any other handlers in the same matcher group), deletes `.claude/hooks/fallow-gate.sh` if it still carries the `# Generated by fallow setup-hooks.` marker, and strips the managed block from `AGENTS.md`. Idempotent: a second run reports `unchanged` / `not present` and exits 0.
+Removes the plow-gate handler from `.claude/settings.json` (preserving any other handlers in the same matcher group), deletes `.claude/hooks/plow-gate.sh` if it still carries the `# Generated by plow setup-hooks.` marker, and strips the managed block from `AGENTS.md`. Idempotent: a second run reports `unchanged` / `not present` and exits 0.
 
 Use `--force` to remove a hook script that the user has edited (the marker is no longer present). Use `--dry-run` to preview without touching files.
 
-### Distinguish from `fallow hooks install --target git`
+### Distinguish from `plow hooks install --target git`
 
-`fallow hooks install --target git` is a different target: it scaffolds a shell-level Git pre-commit hook under `.git/hooks/` that runs `fallow` on changed files. That is the *human* enforcement path. `fallow hooks install --target agent` is the *agent* enforcement path, targeting `.claude/` and `AGENTS.md`. Both can live in the same repo: git hooks catch human commits, the agent gate catches agent commits.
+`plow hooks install --target git` is a different target: it scaffolds a shell-level Git pre-commit hook under `.git/hooks/` that runs `plow` on changed files. That is the *human* enforcement path. `plow hooks install --target agent` is the *agent* enforcement path, targeting `.claude/` and `AGENTS.md`. Both can live in the same repo: git hooks catch human commits, the agent gate catches agent commits.

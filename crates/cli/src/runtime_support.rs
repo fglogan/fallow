@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::{LazyLock, Mutex, OnceLock};
 
-use fallow_config::{
-    FallowConfig, OutputFormat, PartialRulesConfig, ProductionAnalysis, ResolvedConfig, RulesConfig,
+use plow_config::{
+    OutputFormat, PartialRulesConfig, PlowConfig, ProductionAnalysis, ResolvedConfig, RulesConfig,
 };
 use rustc_hash::FxHashSet;
 
@@ -24,13 +24,13 @@ pub fn set_max_file_size_override(max_file_size_mb: Option<u32>) {
 }
 
 /// Resolve the effective per-file size ceiling override (in megabytes): the
-/// `--max-file-size` flag wins, then `FALLOW_MAX_FILE_SIZE`, else `None` (the
+/// `--max-file-size` flag wins, then `PLOW_MAX_FILE_SIZE`, else `None` (the
 /// built-in default applies). `Some(0)` from either source means unlimited.
 fn resolve_max_file_size_mb() -> Option<u32> {
     if let Some(Some(mb)) = MAX_FILE_SIZE_OVERRIDE.get() {
         return Some(*mb);
     }
-    std::env::var("FALLOW_MAX_FILE_SIZE")
+    std::env::var("PLOW_MAX_FILE_SIZE")
         .ok()
         .and_then(|raw| raw.trim().parse::<u32>().ok())
 }
@@ -98,7 +98,7 @@ pub fn build_ownership_resolver(
         },
         GroupBy::Directory => Ok(Some(crate::report::OwnershipResolver::Directory)),
         GroupBy::Package => {
-            let workspaces = fallow_config::discover_workspaces(root);
+            let workspaces = plow_config::discover_workspaces(root);
             if workspaces.is_empty() {
                 Err(crate::error::emit_error(
                     "--group-by package requires a monorepo with workspace packages \
@@ -175,7 +175,7 @@ pub fn load_config_for_analysis(
     analysis: ProductionAnalysis,
 ) -> Result<ResolvedConfig, ExitCode> {
     let user_config = if let Some(path) = config_path {
-        match FallowConfig::load(path) {
+        match PlowConfig::load(path) {
             Ok(c) => {
                 log_config_loaded(path, output, quiet);
                 Some(c)
@@ -186,7 +186,7 @@ pub fn load_config_for_analysis(
             }
         }
     } else {
-        match FallowConfig::find_and_load(root) {
+        match PlowConfig::find_and_load(root) {
             Ok(Some((config, found_path))) => {
                 log_config_loaded(&found_path, output, quiet);
                 Some(config)
@@ -206,15 +206,15 @@ pub fn load_config_for_analysis(
             config.production = production.into();
             config
         }
-        None => FallowConfig {
+        None => PlowConfig {
             production: production_override.unwrap_or(false).into(),
-            ..FallowConfig::default()
+            ..PlowConfig::default()
         },
     };
     crate::telemetry::note_config_shape(config_shape_for(&final_config, loaded_user_config));
 
     if let Err(errors) =
-        fallow_config::discover_and_validate_external_plugins(root, &final_config.plugins)
+        plow_config::discover_and_validate_external_plugins(root, &final_config.plugins)
     {
         let joined = errors
             .iter()
@@ -237,7 +237,7 @@ pub fn load_config_for_analysis(
 
     // A pack that fails to load must fail the run: silently skipping policy
     // is the exact failure mode rule packs document themselves as preventing.
-    if let Err(errors) = fallow_config::load_rule_packs(root, &final_config.rule_packs) {
+    if let Err(errors) = plow_config::load_rule_packs(root, &final_config.rule_packs) {
         let joined = errors
             .iter()
             .map(ToString::to_string)
@@ -257,7 +257,7 @@ pub fn load_config_for_analysis(
         cache_max_size_mb,
     );
     if let Some(mb) = resolve_max_file_size_mb() {
-        resolved.max_file_size_bytes = fallow_config::resolve_max_file_size_bytes(Some(mb));
+        resolved.max_file_size_bytes = plow_config::resolve_max_file_size_bytes(Some(mb));
     }
     apply_cache_dir_env_override(root, &mut resolved, resolve_cache_dir_env());
     crate::cache_notice::record_candidate(
@@ -268,13 +268,13 @@ pub fn load_config_for_analysis(
         resolved.no_cache,
     );
 
-    match fallow_config::discover_workspaces_with_diagnostics(root, &resolved.ignore_patterns) {
+    match plow_config::discover_workspaces_with_diagnostics(root, &resolved.ignore_patterns) {
         Ok((_, diagnostics)) => {
-            fallow_config::stash_workspace_diagnostics(root, diagnostics.clone());
+            plow_config::stash_workspace_diagnostics(root, diagnostics.clone());
             if !diagnostics.is_empty() && matches!(output, OutputFormat::Human) && !quiet {
                 eprintln!(
-                    "fallow: {} workspace discovery diagnostic{}. \
-                     Run `fallow list --workspaces` for detail.",
+                    "plow: {} workspace discovery diagnostic{}. \
+                     Run `plow list --workspaces` for detail.",
                     diagnostics.len(),
                     if diagnostics.len() == 1 { "" } else { "s" }
                 );
@@ -289,7 +289,7 @@ pub fn load_config_for_analysis(
 }
 
 fn config_shape_for(
-    config: &FallowConfig,
+    config: &PlowConfig,
     loaded_user_config: bool,
 ) -> crate::telemetry::ConfigShape {
     if !config.plugins.is_empty() || !config.framework.is_empty() {
@@ -318,29 +318,29 @@ fn partial_rules_config_has_values(rules: &PartialRulesConfig) -> bool {
 
 /// Read the workspace-discovery diagnostics produced by the most recent
 /// `load_config_for_analysis` call for `root`. Thin re-export over
-/// [`fallow_config::workspace_diagnostics_for`] so call sites inside the
+/// [`plow_config::workspace_diagnostics_for`] so call sites inside the
 /// CLI crate (`report::json::build_json*`) keep a stable module-local path.
 #[must_use]
-pub fn workspace_diagnostics_for(root: &Path) -> Vec<fallow_config::WorkspaceDiagnostic> {
-    fallow_config::workspace_diagnostics_for(root)
+pub fn workspace_diagnostics_for(root: &Path) -> Vec<plow_config::WorkspaceDiagnostic> {
+    plow_config::workspace_diagnostics_for(root)
 }
 
-/// Read `FALLOW_CACHE_MAX_SIZE` (megabytes) into `Option<u32>`, returning
+/// Read `PLOW_CACHE_MAX_SIZE` (megabytes) into `Option<u32>`, returning
 /// `None` when the env var is unset or fails to parse as a positive integer.
 /// Resolved here rather than as a clap flag because the cache cap is a
 /// platform/CI ergonomic concern, not an analysis input; an env var keeps
 /// it out of the `--help` surface (see ADR-009).
 fn resolve_cache_max_size_env() -> Option<u32> {
-    std::env::var("FALLOW_CACHE_MAX_SIZE")
+    std::env::var("PLOW_CACHE_MAX_SIZE")
         .ok()
         .and_then(|raw| raw.trim().parse::<u32>().ok())
         .filter(|mb| *mb > 0)
 }
 
-/// Read `FALLOW_CACHE_DIR` into an optional project-root-resolved cache path.
+/// Read `PLOW_CACHE_DIR` into an optional project-root-resolved cache path.
 /// Relative values use the same project-root base as `cache.dir`.
 fn resolve_cache_dir_env() -> Option<PathBuf> {
-    std::env::var_os("FALLOW_CACHE_DIR")
+    std::env::var_os("PLOW_CACHE_DIR")
         .map(PathBuf::from)
         .filter(|path| !path.as_os_str().is_empty())
 }
@@ -370,8 +370,8 @@ mod tests {
     #[test]
     fn config_loaded_notice_dedupes_by_config_path() {
         let dir = tempfile::tempdir().unwrap();
-        let first = dir.path().join("first.fallow.json");
-        let second = dir.path().join("second.fallow.json");
+        let first = dir.path().join("first.plow.json");
+        let second = dir.path().join("second.plow.json");
         std::fs::write(&first, "{}").unwrap();
         std::fs::write(&second, "{}").unwrap();
 
@@ -383,19 +383,19 @@ mod tests {
     #[test]
     fn cache_dir_env_value_resolves_relative_to_project_root() {
         assert_eq!(
-            resolve_cache_dir_value(Path::new("/repo"), PathBuf::from(".cache/fallow")),
-            PathBuf::from("/repo/.cache/fallow")
+            resolve_cache_dir_value(Path::new("/repo"), PathBuf::from(".cache/plow")),
+            PathBuf::from("/repo/.cache/plow")
         );
         assert_eq!(
-            resolve_cache_dir_value(Path::new("/repo"), PathBuf::from("/tmp/fallow-cache")),
-            PathBuf::from("/tmp/fallow-cache")
+            resolve_cache_dir_value(Path::new("/repo"), PathBuf::from("/tmp/plow-cache")),
+            PathBuf::from("/tmp/plow-cache")
         );
     }
 
     #[test]
     fn cache_dir_env_value_wins_over_configured_cache_dir() {
-        let mut resolved = FallowConfig {
-            cache: fallow_config::CacheConfig {
+        let mut resolved = PlowConfig {
+            cache: plow_config::CacheConfig {
                 dir: Some(PathBuf::from(".cache/from-config")),
                 ..Default::default()
             },

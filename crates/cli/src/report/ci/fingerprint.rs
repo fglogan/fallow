@@ -1,5 +1,5 @@
 /// Fingerprint key used in SARIF partialFingerprints and other CI formats.
-pub const FINGERPRINT_KEY: &str = "tools.fallow.fingerprint/v1";
+pub const FINGERPRINT_KEY: &str = "tools.plow.fingerprint/v1";
 
 /// Conventional SARIF key consumed by GitHub Code Scanning.
 pub const GHAS_FINGERPRINT_KEY: &str = "primaryLocationLineHash/v1";
@@ -56,16 +56,8 @@ mod tests {
 
     #[test]
     fn fingerprint_is_stable_for_whitespace_only_snippet_changes() {
-        let a = finding_fingerprint(
-            "fallow/unused-export",
-            "src/a.ts",
-            "  export const x = 1;  ",
-        );
-        let b = finding_fingerprint(
-            "fallow/unused-export",
-            "src/a.ts",
-            "\nexport const x = 1;\n",
-        );
+        let a = finding_fingerprint("plow/unused-export", "src/a.ts", "  export const x = 1;  ");
+        let b = finding_fingerprint("plow/unused-export", "src/a.ts", "\nexport const x = 1;\n");
         assert_eq!(a, b);
     }
 
@@ -90,10 +82,10 @@ mod tests {
 
     #[test]
     fn summary_fingerprint_shifts_when_body_changes() {
-        let a = summary_fingerprint("### Fallow check\n\n0 findings");
-        let b = summary_fingerprint("### Fallow check\n\n1 finding");
+        let a = summary_fingerprint("### Plow check\n\n0 findings");
+        let b = summary_fingerprint("### Plow check\n\n1 finding");
         assert_ne!(a, b);
-        assert_eq!(a, summary_fingerprint("### Fallow check\n\n0 findings"));
+        assert_eq!(a, summary_fingerprint("### Plow check\n\n0 findings"));
         assert_eq!(a.len(), 16);
     }
 }

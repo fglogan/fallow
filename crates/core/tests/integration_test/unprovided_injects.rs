@@ -10,7 +10,7 @@
 use std::path::Path;
 
 use super::common::{create_config, fixture_path};
-use fallow_types::results::AnalysisResults;
+use plow_types::results::AnalysisResults;
 
 fn injects(results: &AnalysisResults, root: &Path) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = results
@@ -35,7 +35,7 @@ fn injects(results: &AnalysisResults, root: &Path) -> Vec<(String, String)> {
 fn flags_dead_vue_inject_and_credits_matched_pairs() {
     let root = fixture_path("unprovided-inject-vue");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let found = injects(&results, &root);
     let names: Vec<&str> = found.iter().map(|(_, k)| k.as_str()).collect();
 
@@ -64,7 +64,7 @@ fn flags_dead_vue_inject_and_credits_matched_pairs() {
 fn flags_dead_svelte_get_context() {
     let root = fixture_path("unprovided-inject-svelte");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let found = injects(&results, &root);
     let names: Vec<&str> = found.iter().map(|(_, k)| k.as_str()).collect();
 
@@ -84,7 +84,7 @@ fn flags_dead_svelte_get_context() {
 fn abstains_on_package_imported_key() {
     let root = fixture_path("unprovided-inject-external-abstain");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let found = injects(&results, &root);
 
     // The key is imported from an npm package; the provide may live inside that
@@ -99,7 +99,7 @@ fn abstains_on_package_imported_key() {
 fn abstains_on_string_literal_and_string_const_keys() {
     let root = fixture_path("unprovided-inject-string-abstain");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let found = injects(&results, &root);
 
     // Both a bare string-literal key (`inject('stringKey')`) and a key bound to
@@ -116,7 +116,7 @@ fn abstains_on_string_literal_and_string_const_keys() {
 fn dep_gate_suppresses_without_vue_or_svelte() {
     let root = fixture_path("unprovided-inject-no-dep");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let found = injects(&results, &root);
 
     // The project declares neither vue nor svelte, so detection is off.
@@ -130,7 +130,7 @@ fn dep_gate_suppresses_without_vue_or_svelte() {
 fn abstains_on_public_api_inject_composable() {
     let root = fixture_path("unprovided-inject-public-api");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let found = injects(&results, &root);
 
     // A headless library exports the key AND an inject composable for the
@@ -146,7 +146,7 @@ fn abstains_on_public_api_inject_composable() {
 fn dynamic_provide_forces_project_wide_abstain() {
     let root = fixture_path("unprovided-inject-dynamic-provide");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let found = injects(&results, &root);
 
     // A loop `provide(k, ...)` keyed by a transient local could provide any

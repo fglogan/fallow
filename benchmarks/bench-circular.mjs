@@ -14,7 +14,7 @@ const runRealWorld = args.includes("--real-world") || !hasFilter;
 const RUNS = parseInt(args.find((a) => a.startsWith("--runs="))?.split("=")[1] ?? "5");
 const WARMUP = parseInt(args.find((a) => a.startsWith("--warmup="))?.split("=")[1] ?? "2");
 
-console.log("Building fallow (release)...");
+console.log("Building plow (release)...");
 const buildResult = spawnSync("cargo", ["build", "--release"], {
   cwd: rootDir,
   stdio: "pipe",
@@ -24,7 +24,7 @@ if (buildResult.status !== 0) {
   console.error("Build failed:", buildResult.stderr?.toString());
   process.exit(1);
 }
-const fallowBin = join(rootDir, "target", "release", "fallow");
+const plowBin = join(rootDir, "target", "release", "plow");
 
 // Detect available tools
 const madgeBin = join(__dirname, "node_modules", ".bin", "madge");
@@ -37,7 +37,7 @@ if (!hasMadge && !hasDpdm) {
   process.exit(1);
 }
 
-const fallowVersion = spawnSync(fallowBin, ["--version"], { stdio: "pipe" })
+const plowVersion = spawnSync(plowBin, ["--version"], { stdio: "pipe" })
   .stdout?.toString()
   .trim();
 const madgeVersion = hasMadge
@@ -48,10 +48,10 @@ const dpdmVersion = hasDpdm
   : "n/a";
 const rustVersion = spawnSync("rustc", ["--version"], { stdio: "pipe" }).stdout?.toString().trim();
 
-console.log(`\n=== Fallow vs madge/dpdm — Circular Dependency Detection ===\n`);
+console.log(`\n=== Plow vs madge/dpdm — Circular Dependency Detection ===\n`);
 printEnvironment();
 console.log(`Tools:`);
-console.log(`  fallow dead-code --circular-deps  ${fallowVersion}`);
+console.log(`  plow dead-code --circular-deps  ${plowVersion}`);
 if (hasMadge) console.log(`  madge --circular              ${madgeVersion}`);
 if (hasDpdm) console.log(`  dpdm                          ${dpdmVersion}`);
 console.log(`Config: ${RUNS} runs, ${WARMUP} warmup\n`);
@@ -120,7 +120,7 @@ function timeRunWithMemory(cmd, cmdArgs, cwd) {
   };
 }
 
-function parseFallowCycles(stdout) {
+function parsePlowCycles(stdout) {
   try {
     const data = JSON.parse(stdout);
     return data.circular_dependencies?.length ?? 0;
@@ -173,8 +173,8 @@ function benchmarkProject(name, dir) {
   const hasTsConfig = existsSync(join(dir, "tsconfig.json"));
   console.log(`### ${name} (${files} source files)\n`);
 
-  // fallow: JSON output, only circular deps, no cache
-  const fallowArgs = ["dead-code", "--format", "json", "--quiet", "--no-cache", "--circular-deps"];
+  // plow: JSON output, only circular deps, no cache
+  const plowArgs = ["dead-code", "--format", "json", "--quiet", "--no-cache", "--circular-deps"];
 
   // madge: circular detection with JSON output
   const madgeArgs = [
@@ -195,7 +195,7 @@ function benchmarkProject(name, dir) {
 
   // Warmup
   for (let i = 0; i < WARMUP; i++) {
-    timeRunWithMemory(fallowBin, fallowArgs, dir);
+    timeRunWithMemory(plowBin, plowArgs, dir);
     if (hasMadge) timeRunWithMemory(madgeBin, madgeArgs, dir);
     if (hasDpdm) {
       timeRunWithMemory(dpdmBin, dpdmArgs, dir);
@@ -204,23 +204,23 @@ function benchmarkProject(name, dir) {
   }
 
   // --- Measured runs ---
-  const fallowTimes = [],
+  const plowTimes = [],
     madgeTimes = [],
     dpdmTimes = [];
-  let fallowCycles = "?",
+  let plowCycles = "?",
     madgeCycles = "?",
     dpdmCycles = "?";
-  let fallowRss = 0,
+  let plowRss = 0,
     madgeRss = 0,
     dpdmRss = 0;
 
   for (let i = 0; i < RUNS; i++) {
-    // fallow
-    const fr = timeRunWithMemory(fallowBin, fallowArgs, dir);
-    fallowTimes.push(fr.elapsed);
+    // plow
+    const fr = timeRunWithMemory(plowBin, plowArgs, dir);
+    plowTimes.push(fr.elapsed);
     if (i === 0) {
-      fallowCycles = parseFallowCycles(fr.stdout);
-      fallowRss = fr.peakRssBytes;
+      plowCycles = parsePlowCycles(fr.stdout);
+      plowRss = fr.peakRssBytes;
     }
 
     // madge
@@ -249,21 +249,21 @@ function benchmarkProject(name, dir) {
     }
   }
 
-  const fs = stats(fallowTimes);
+  const fs = stats(plowTimes);
   const rows = [
     {
-      Tool: "fallow",
+      Tool: "plow",
       Min: fmt(fs.min),
       Mean: fmt(fs.mean),
       Median: fmt(fs.median),
       Max: fmt(fs.max),
       Speedup: "—",
-      Memory: fmtMem(fallowRss),
-      Cycles: fallowCycles,
+      Memory: fmtMem(plowRss),
+      Cycles: plowCycles,
     },
   ];
 
-  const result = { name, files, fallow: fs, fallowCycles, fallowRss };
+  const result = { name, files, plow: fs, plowCycles, plowRss };
 
   if (hasMadge && madgeTimes.length > 0) {
     const ms = stats(madgeTimes);
@@ -304,7 +304,7 @@ function benchmarkProject(name, dir) {
   }
 
   console.table(rows);
-  console.log(`  fallow: [${fallowTimes.map((t) => t.toFixed(0)).join(", ")}]`);
+  console.log(`  plow: [${plowTimes.map((t) => t.toFixed(0)).join(", ")}]`);
   if (hasMadge && madgeTimes.length > 0)
     console.log(`  madge:  [${madgeTimes.map((t) => t.toFixed(0)).join(", ")}]`);
   if (hasDpdm && dpdmTimes.length > 0)
@@ -349,9 +349,9 @@ if (results.length > 0) {
     const row = {
       Project: r.name,
       Files: r.files,
-      "Fallow (median)": fmt(r.fallow.median),
-      "Fallow cycles": r.fallowCycles,
-      "Fallow RSS": fmtMem(r.fallowRss),
+      "Plow (median)": fmt(r.plow.median),
+      "Plow cycles": r.plowCycles,
+      "Plow RSS": fmtMem(r.plowRss),
     };
     if (r.madge) {
       row["madge (median)"] = fmt(r.madge.median);

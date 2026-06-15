@@ -35,10 +35,10 @@ export interface HealthArgsOptions {
 }
 
 /**
- * Build the argument vector for the standalone `fallow health` run that backs
+ * Build the argument vector for the standalone `plow health` run that backs
  * the Health view. Kept pure so flag-forwarding rules can be unit-tested.
  *
- * `fallow health` shows every section by default; passing ANY section flag
+ * `plow health` shows every section by default; passing ANY section flag
  * switches it to "only these sections". We always request the cheap sections
  * (`--score --complexity --targets`, no git) and add `--hotspots` only when the
  * user opted in, since that section walks git history. The combined sidebar run
@@ -87,8 +87,8 @@ export const escapeHealthMarkdown = escapeMarkdownMultiline;
 
 /**
  * Detect a clap "unrecognized subcommand" error for `health`, raised when the
- * resolved CLI predates the `fallow health` command. Lets the caller degrade to
- * a one-line "update fallow" warning instead of surfacing a raw stderr blob and
+ * resolved CLI predates the `plow health` command. Lets the caller degrade to
+ * a one-line "update plow" warning instead of surfacing a raw stderr blob and
  * re-spawning on every Health-view reveal. Handles modern clap (`unrecognized
  * subcommand 'health'`) and the legacy phrasing (`The subcommand 'health'
  * wasn't recognized`). Unrelated errors return false so genuine failures stay

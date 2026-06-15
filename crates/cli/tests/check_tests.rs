@@ -8,13 +8,13 @@
 mod common;
 
 use common::{
-    fixture_path, parse_json, redact_all, run_fallow, run_fallow_combined, run_fallow_in_root,
-    run_fallow_raw,
+    fixture_path, parse_json, redact_all, run_plow, run_plow_combined, run_plow_in_root,
+    run_plow_raw,
 };
 
 #[test]
 fn check_with_issues_exits_1() {
-    let output = run_fallow("check", "basic-project", &["--format", "json", "--quiet"]);
+    let output = run_plow("check", "basic-project", &["--format", "json", "--quiet"]);
     assert_eq!(
         output.code, 1,
         "check should exit 1 when error-severity issues found"
@@ -23,7 +23,7 @@ fn check_with_issues_exits_1() {
 
 #[test]
 fn check_warn_severity_exits_0_without_fail_flag() {
-    let output = run_fallow(
+    let output = run_plow(
         "check",
         "config-file-project",
         &["--unused-files", "--format", "json", "--quiet"],
@@ -41,7 +41,7 @@ fn check_warn_severity_exits_0_without_fail_flag() {
 
 #[test]
 fn check_warn_severity_exits_1_with_fail_on_issues() {
-    let output = run_fallow(
+    let output = run_plow(
         "check",
         "config-file-project",
         &[
@@ -60,13 +60,13 @@ fn check_warn_severity_exits_1_with_fail_on_issues() {
 
 #[test]
 fn check_ci_flag_implies_fail_on_issues() {
-    let output = run_fallow("check", "basic-project", &["--ci", "--format", "json"]);
+    let output = run_plow("check", "basic-project", &["--ci", "--format", "json"]);
     assert_eq!(output.code, 1, "--ci should imply --fail-on-issues");
 }
 
 #[test]
 fn check_json_format_produces_valid_json() {
-    let output = run_fallow("check", "basic-project", &["--format", "json", "--quiet"]);
+    let output = run_plow("check", "basic-project", &["--format", "json", "--quiet"]);
     let json = parse_json(&output);
     assert!(
         json.get("schema_version").is_some(),
@@ -86,7 +86,7 @@ fn duplicate_export_add_to_config_is_auto_fixable_with_explicit_config() {
         r#"{"name":"explicit-config","main":"src/index.ts"}"#,
     )
     .unwrap();
-    let config_path = root.join("custom.fallow.json");
+    let config_path = root.join("custom.plow.json");
     std::fs::write(&config_path, "{}\n").unwrap();
     std::fs::write(
         root.join("src/index.ts"),
@@ -96,7 +96,7 @@ fn duplicate_export_add_to_config_is_auto_fixable_with_explicit_config() {
     std::fs::write(root.join("src/one/index.ts"), "export const Button = 1;\n").unwrap();
     std::fs::write(root.join("src/two/index.ts"), "export const Button = 2;\n").unwrap();
 
-    let output = run_fallow_in_root(
+    let output = run_plow_in_root(
         "dead-code",
         root,
         &[
@@ -122,7 +122,7 @@ fn duplicate_export_add_to_config_is_auto_fixable_with_explicit_config() {
 
 #[test]
 fn combined_performance_includes_duplication_stage() {
-    let output = run_fallow_combined(
+    let output = run_plow_combined(
         "duplicate-code",
         &["--only", "dead-code,dupes", "--performance", "--quiet"],
     );
@@ -175,7 +175,7 @@ fn combined_parallel_output_is_deterministic() {
     }
 
     let mut canonicalized: Vec<String> = std::iter::repeat_with(|| {
-        let output = run_fallow_combined(
+        let output = run_plow_combined(
             "duplicate-code",
             &["--only", "dead-code,dupes", "--format", "json", "--quiet"],
         );
@@ -205,7 +205,7 @@ fn combined_parallel_output_is_deterministic() {
 
 #[test]
 fn check_compact_format_has_no_ansi() {
-    let output = run_fallow(
+    let output = run_plow(
         "check",
         "basic-project",
         &["--format", "compact", "--quiet"],
@@ -222,7 +222,7 @@ fn check_compact_format_has_no_ansi() {
 
 #[test]
 fn check_sarif_format_has_schema() {
-    let output = run_fallow("check", "basic-project", &["--format", "sarif", "--quiet"]);
+    let output = run_plow("check", "basic-project", &["--format", "sarif", "--quiet"]);
     let json = parse_json(&output);
     assert!(
         json.get("$schema").is_some(),
@@ -232,7 +232,7 @@ fn check_sarif_format_has_schema() {
 
 #[test]
 fn check_markdown_format_has_heading() {
-    let output = run_fallow(
+    let output = run_plow(
         "check",
         "basic-project",
         &["--format", "markdown", "--quiet"],
@@ -245,7 +245,7 @@ fn check_markdown_format_has_heading() {
 
 #[test]
 fn check_codeclimate_format_is_array() {
-    let output = run_fallow(
+    let output = run_plow(
         "check",
         "basic-project",
         &["--format", "codeclimate", "--quiet"],
@@ -261,7 +261,7 @@ fn check_codeclimate_format_is_array() {
 
 #[test]
 fn check_gitlab_codequality_alias_is_array() {
-    let output = run_fallow(
+    let output = run_plow(
         "check",
         "basic-project",
         &["--format", "gitlab-codequality", "--quiet"],
@@ -280,7 +280,7 @@ fn check_gitlab_codequality_alias_is_array() {
 
 #[test]
 fn check_unused_files_filter_limits_output() {
-    let output = run_fallow(
+    let output = run_plow(
         "check",
         "basic-project",
         &["--unused-files", "--format", "json", "--quiet"],
@@ -299,7 +299,7 @@ fn check_unused_files_filter_limits_output() {
 
 #[test]
 fn check_multiple_filters_combined() {
-    let output = run_fallow(
+    let output = run_plow(
         "check",
         "basic-project",
         &[
@@ -323,7 +323,7 @@ fn check_multiple_filters_combined() {
 
 #[test]
 fn check_unused_deps_filter() {
-    let output = run_fallow(
+    let output = run_plow(
         "check",
         "basic-project",
         &["--unused-deps", "--format", "json", "--quiet"],
@@ -337,7 +337,7 @@ fn check_unused_deps_filter() {
 
 #[test]
 fn check_json_has_total_issues() {
-    let output = run_fallow("check", "basic-project", &["--format", "json", "--quiet"]);
+    let output = run_plow("check", "basic-project", &["--format", "json", "--quiet"]);
     let json = parse_json(&output);
     assert!(
         json.get("total_issues").is_some(),
@@ -351,7 +351,7 @@ fn check_json_has_total_issues() {
 
 #[test]
 fn check_json_has_version_and_elapsed() {
-    let output = run_fallow("check", "basic-project", &["--format", "json", "--quiet"]);
+    let output = run_plow("check", "basic-project", &["--format", "json", "--quiet"]);
     let json = parse_json(&output);
     assert!(json.get("version").is_some(), "JSON should have version");
     assert!(
@@ -362,13 +362,13 @@ fn check_json_has_version_and_elapsed() {
 
 #[test]
 fn check_invalid_root_exits_2() {
-    let output = run_fallow_raw(&["check", "--root", "/nonexistent/path/xyz", "--quiet"]);
+    let output = run_plow_raw(&["check", "--root", "/nonexistent/path/xyz", "--quiet"]);
     assert_eq!(output.code, 2, "invalid root should exit with code 2");
 }
 
 #[test]
 fn check_json_error_format() {
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "check",
         "--root",
         "/nonexistent/path/xyz",
@@ -391,7 +391,7 @@ fn check_json_error_format() {
 
 #[test]
 fn check_human_output_unused_files_only() {
-    let output = run_fallow("check", "basic-project", &["--unused-files", "--quiet"]);
+    let output = run_plow("check", "basic-project", &["--unused-files", "--quiet"]);
     let root = fixture_path("basic-project");
     let redacted = redact_all(&output.stdout, &root);
     insta::assert_snapshot!("check_human_unused_files_only", redacted);
@@ -399,7 +399,7 @@ fn check_human_output_unused_files_only() {
 
 #[test]
 fn check_human_output_unused_exports_only() {
-    let output = run_fallow("check", "basic-project", &["--unused-exports", "--quiet"]);
+    let output = run_plow("check", "basic-project", &["--unused-exports", "--quiet"]);
     let root = fixture_path("basic-project");
     let redacted = redact_all(&output.stdout, &root);
     insta::assert_snapshot!("check_human_unused_exports_only", redacted);
@@ -418,7 +418,7 @@ fn combined_check_unused_export_names(json: &serde_json::Value) -> Vec<String> {
 
 #[test]
 fn include_entry_exports_works_in_combined_mode() {
-    let output = run_fallow_combined(
+    let output = run_plow_combined(
         "entry-export-validation",
         &["--include-entry-exports", "--format", "json", "--quiet"],
     );
@@ -438,7 +438,7 @@ fn include_entry_exports_works_in_combined_mode() {
 
 #[test]
 fn include_entry_exports_via_config_file_in_combined_mode() {
-    let output = run_fallow_combined(
+    let output = run_plow_combined(
         "entry-export-validation-config",
         &["--format", "json", "--quiet"],
     );
@@ -452,7 +452,7 @@ fn include_entry_exports_via_config_file_in_combined_mode() {
 
 #[test]
 fn check_human_output_unused_deps_has_content() {
-    let output = run_fallow("check", "basic-project", &["--unused-deps", "--quiet"]);
+    let output = run_plow("check", "basic-project", &["--unused-deps", "--quiet"]);
     assert!(
         output.stdout.contains("Unused dependencies"),
         "unused-deps output should contain section header"

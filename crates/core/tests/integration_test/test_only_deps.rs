@@ -4,7 +4,7 @@ use super::common::{create_config, fixture_path};
 fn test_only_dependency_detected() {
     let root = fixture_path("test-only-prod-dep");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let test_only_names: Vec<&str> = results
         .test_only_dependencies

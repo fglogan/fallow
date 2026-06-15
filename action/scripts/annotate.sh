@@ -2,9 +2,9 @@
 set -eo pipefail
 
 # Emit inline PR annotations via workflow commands
-# Required env: FALLOW_COMMAND, MAX_ANNOTATIONS, ACTION_JQ_DIR
-# Optional env: CHANGED_SINCE, INPUT_ROOT, FALLOW_RESULTS_FILE,
-#   FALLOW_SCOPED_RESULTS_FILE, FALLOW_CHANGED_FILES_FILE
+# Required env: PLOW_COMMAND, MAX_ANNOTATIONS, ACTION_JQ_DIR
+# Optional env: CHANGED_SINCE, INPUT_ROOT, PLOW_RESULTS_FILE,
+#   PLOW_SCOPED_RESULTS_FILE, PLOW_CHANGED_FILES_FILE
 
 MAX="${MAX_ANNOTATIONS:-50}"
 if ! [[ "$MAX" =~ ^[0-9]+$ ]]; then
@@ -14,7 +14,7 @@ fi
 
 # Detect package manager from lock files
 PKG_MANAGER="npm"
-ROOT="${FALLOW_ROOT:-.}"
+ROOT="${PLOW_ROOT:-.}"
 if [ -f "${ROOT}/pnpm-lock.yaml" ] || [ -f "pnpm-lock.yaml" ]; then
   PKG_MANAGER="pnpm"
 elif [ -f "${ROOT}/yarn.lock" ] || [ -f "yarn.lock" ]; then
@@ -23,9 +23,9 @@ fi
 export PKG_MANAGER
 
 # Scope results to changed files when --changed-since is active
-RESULTS_FILE="${FALLOW_RESULTS_FILE:-fallow-results.json}"
-SCOPED_RESULTS_FILE="${FALLOW_SCOPED_RESULTS_FILE:-fallow-results-scoped.json}"
-CHANGED_FILES_FILE="${FALLOW_CHANGED_FILES_FILE:-fallow-changed-files.json}"
+RESULTS_FILE="${PLOW_RESULTS_FILE:-plow-results.json}"
+SCOPED_RESULTS_FILE="${PLOW_SCOPED_RESULTS_FILE:-plow-results-scoped.json}"
+CHANGED_FILES_FILE="${PLOW_CHANGED_FILES_FILE:-plow-changed-files.json}"
 if [ -n "${CHANGED_SINCE:-}" ]; then
   CHANGED_JSON=""
 
@@ -51,7 +51,7 @@ fi
 ANNOTATIONS_FILE=$(mktemp)
 : > "$ANNOTATIONS_FILE"
 
-case "$FALLOW_COMMAND" in
+case "$PLOW_COMMAND" in
   dead-code|check)
     jq -r -f "${ACTION_JQ_DIR}/annotations-check.jq" "$RESULTS_FILE" > "$ANNOTATIONS_FILE" 2>/dev/null || true ;;
   dupes)

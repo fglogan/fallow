@@ -31,20 +31,20 @@ mod unused_server_action;
 pub(crate) use unused_deps::matches_virtual_prefix;
 
 /// Human-readable title for a security catalogue category id, for the CLI
-/// renderer. Re-exported so the `fallow security` command can label a
+/// renderer. Re-exported so the `plow security` command can label a
 /// `TaintedSink` finding without reaching into the private `security` module.
 pub use security::catalogue_title as security_catalogue_title;
 pub use security::derive_security_severity;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_config::{PackageJson, ResolvedConfig, Severity};
+use plow_config::{PackageJson, ResolvedConfig, Severity};
 
 use crate::discover::FileId;
 use crate::extract::ModuleInfo;
 use crate::graph::ModuleGraph;
 use crate::resolve::ResolvedModule;
-use fallow_types::output_dead_code::{
+use plow_types::output_dead_code::{
     BoundaryCallViolationFinding, BoundaryCoverageViolationFinding, BoundaryViolationFinding,
     CircularDependencyFinding, DuplicateExportFinding, DynamicSegmentNameConflictFinding,
     EmptyCatalogGroupFinding, InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding,
@@ -137,7 +137,7 @@ pub fn byte_offset_to_line_col(
     line_offsets_map
         .get(&file_id)
         .map_or((1, byte_offset), |offsets| {
-            fallow_types::extract::byte_offset_to_line_col(offsets, byte_offset)
+            plow_types::extract::byte_offset_to_line_col(offsets, byte_offset)
         })
 }
 
@@ -196,7 +196,7 @@ fn read_source(path: &std::path::Path) -> String {
 /// only cycles between two distinct named workspaces are flagged.
 fn is_cross_package_cycle(
     files: &[std::path::PathBuf],
-    workspaces: &[fallow_config::WorkspaceInfo],
+    workspaces: &[plow_config::WorkspaceInfo],
 ) -> bool {
     let find_workspace = |path: &std::path::Path| -> Option<&std::path::Path> {
         workspaces
@@ -221,7 +221,7 @@ fn is_cross_package_cycle(
 
 fn public_workspace_roots<'a>(
     public_packages: &[String],
-    workspaces: &'a [fallow_config::WorkspaceInfo],
+    workspaces: &'a [plow_config::WorkspaceInfo],
 ) -> Vec<&'a std::path::Path> {
     if public_packages.is_empty() || workspaces.is_empty() {
         return Vec::new();
@@ -329,7 +329,7 @@ fn public_api_package_entry_points(
     graph: &ModuleGraph,
     config: &ResolvedConfig,
     root_pkg: Option<&PackageJson>,
-    workspaces: &[fallow_config::WorkspaceInfo],
+    workspaces: &[plow_config::WorkspaceInfo],
 ) -> FxHashSet<FileId> {
     let mut public_api_entry_points = FxHashSet::default();
     let path_to_file_id = graph_path_to_file_id(graph);
@@ -378,7 +378,7 @@ fn find_circular_dependencies(
     graph: &ModuleGraph,
     line_offsets_map: &LineOffsetsMap<'_>,
     suppressions: &crate::suppress::SuppressionContext<'_>,
-    workspaces: &[fallow_config::WorkspaceInfo],
+    workspaces: &[plow_config::WorkspaceInfo],
 ) -> Vec<CircularDependency> {
     let cycles = graph.find_cycles();
     let mut dependencies: Vec<CircularDependency> = cycles
@@ -442,7 +442,7 @@ fn run_circular_dep_detector(
     config: &ResolvedConfig,
     line_offsets_by_file: &LineOffsetsMap<'_>,
     suppressions: &crate::suppress::SuppressionContext<'_>,
-    workspaces: &[fallow_config::WorkspaceInfo],
+    workspaces: &[plow_config::WorkspaceInfo],
 ) -> Vec<CircularDependencyFinding> {
     if config.rules.circular_dependencies == Severity::Off {
         return Vec::new();
@@ -587,7 +587,7 @@ fn run_export_usages_collector(
 fn collect_declared_dependency_names(
     config: &ResolvedConfig,
     root_pkg: Option<&PackageJson>,
-    workspaces: &[fallow_config::WorkspaceInfo],
+    workspaces: &[plow_config::WorkspaceInfo],
 ) -> FxHashSet<String> {
     let mut deps: FxHashSet<String> = FxHashSet::default();
     if let Some(pkg) = root_pkg {
@@ -607,14 +607,14 @@ fn collect_declared_dependency_names(
 /// Find all dead code, with optional resolved module data, plugin context, and workspace info.
 #[deprecated(
     since = "2.76.0",
-    note = "fallow_core is internal; use fallow_cli::programmatic::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/fallow-core-migration.md and ADR-008."
+    note = "plow_core is internal; use plow_cli::programmatic::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/plow-core-migration.md and ADR-008."
 )]
 pub fn find_dead_code_full(
     graph: &ModuleGraph,
     config: &ResolvedConfig,
     resolved_modules: &[ResolvedModule],
     plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
-    workspaces: &[fallow_config::WorkspaceInfo],
+    workspaces: &[plow_config::WorkspaceInfo],
     modules: &[ModuleInfo],
     collect_usages: bool,
 ) -> AnalysisResults {
@@ -699,7 +699,7 @@ pub fn find_dead_code_full(
     filter_public_workspace_results(config, workspaces, &mut results);
 
     // Reclassify the server-action subset of unused exports BEFORE stale
-    // detection so a `// fallow-ignore-next-line unused-server-action` marker is
+    // detection so a `// plow-ignore-next-line unused-server-action` marker is
     // recorded as consumed. Gate-off keeps the findings as plain unused-exports.
     if config.rules.unused_server_actions != Severity::Off {
         reclassify_unused_server_actions(
@@ -773,7 +773,7 @@ fn populate_framework_specific_findings(
     modules: &[ModuleInfo],
     resolved_modules: &[ResolvedModule],
     config: &ResolvedConfig,
-    workspaces: &[fallow_config::WorkspaceInfo],
+    workspaces: &[plow_config::WorkspaceInfo],
     declared_deps: &FxHashSet<String>,
     public_api_entry_points: &FxHashSet<FileId>,
     suppressions: &SuppressionContext<'_>,
@@ -1057,7 +1057,7 @@ fn populate_unused_component_emit_findings(
 fn populate_route_collision_findings(
     graph: &ModuleGraph,
     config: &ResolvedConfig,
-    workspaces: &[fallow_config::WorkspaceInfo],
+    workspaces: &[plow_config::WorkspaceInfo],
     declared_deps: &FxHashSet<String>,
     suppressions: &SuppressionContext<'_>,
     results: &mut AnalysisResults,
@@ -1078,7 +1078,7 @@ fn populate_route_collision_findings(
 fn populate_dynamic_segment_name_conflict_findings(
     graph: &ModuleGraph,
     config: &ResolvedConfig,
-    workspaces: &[fallow_config::WorkspaceInfo],
+    workspaces: &[plow_config::WorkspaceInfo],
     declared_deps: &FxHashSet<String>,
     suppressions: &SuppressionContext<'_>,
     results: &mut AnalysisResults,
@@ -1100,7 +1100,7 @@ fn populate_dynamic_segment_name_conflict_findings(
 fn populate_nextjs_route_tree_findings(
     graph: &ModuleGraph,
     config: &ResolvedConfig,
-    workspaces: &[fallow_config::WorkspaceInfo],
+    workspaces: &[plow_config::WorkspaceInfo],
     declared_deps: &FxHashSet<String>,
     suppressions: &SuppressionContext<'_>,
     results: &mut AnalysisResults,
@@ -1128,13 +1128,13 @@ struct DeadCodeDetectorInput<'a> {
     graph: &'a ModuleGraph,
     config: &'a ResolvedConfig,
     resolved_modules: &'a [ResolvedModule],
-    workspaces: &'a [fallow_config::WorkspaceInfo],
+    workspaces: &'a [plow_config::WorkspaceInfo],
     modules: &'a [ModuleInfo],
     suppressions: &'a SuppressionContext<'a>,
     line_offsets_by_file: &'a LineOffsetsMap<'a>,
     plugin_result: Option<&'a crate::plugins::AggregatedPluginResult>,
     pkg: Option<&'a PackageJson>,
-    user_class_members: &'a [fallow_config::UsedClassMemberRule],
+    user_class_members: &'a [plow_config::UsedClassMemberRule],
     public_api_entry_points: &'a FxHashSet<FileId>,
     virtual_prefixes: &'a [&'a str],
     generated_patterns: &'a [&'a str],
@@ -1417,7 +1417,7 @@ fn run_boundary_violation_detector(
 
 fn filter_public_workspace_results(
     config: &ResolvedConfig,
-    workspaces: &[fallow_config::WorkspaceInfo],
+    workspaces: &[plow_config::WorkspaceInfo],
     results: &mut AnalysisResults,
 ) {
     let public_roots = public_workspace_roots(&config.public_packages, workspaces);
@@ -1452,7 +1452,7 @@ fn filter_public_workspace_results(
 )]
 fn populate_pnpm_catalog_findings(
     config: &ResolvedConfig,
-    workspaces: &[fallow_config::WorkspaceInfo],
+    workspaces: &[plow_config::WorkspaceInfo],
     results: &mut AnalysisResults,
 ) {
     let need_unused = config.rules.unused_catalog_entries != Severity::Off;
@@ -1494,7 +1494,7 @@ fn populate_pnpm_catalog_findings(
 )]
 fn populate_pnpm_override_findings(
     config: &ResolvedConfig,
-    workspaces: &[fallow_config::WorkspaceInfo],
+    workspaces: &[plow_config::WorkspaceInfo],
     results: &mut AnalysisResults,
 ) {
     let need_unused = config.rules.unused_dependency_overrides != Severity::Off;
@@ -1715,7 +1715,7 @@ fn run_member_detectors(
     config: &ResolvedConfig,
     suppressions: &crate::suppress::SuppressionContext<'_>,
     line_offsets_by_file: &LineOffsetsMap<'_>,
-    user_class_members: &[fallow_config::UsedClassMemberRule],
+    user_class_members: &[plow_config::UsedClassMemberRule],
     public_api_entry_points: &FxHashSet<FileId>,
     declared_deps: &FxHashSet<String>,
 ) -> AnalysisResults {
@@ -1776,7 +1776,7 @@ fn run_dependency_detectors(
     pkg: Option<&PackageJson>,
     config: &ResolvedConfig,
     plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
-    workspaces: &[fallow_config::WorkspaceInfo],
+    workspaces: &[plow_config::WorkspaceInfo],
     resolved_modules: &[ResolvedModule],
     line_offsets_by_file: &LineOffsetsMap<'_>,
 ) -> AnalysisResults {
@@ -1876,7 +1876,7 @@ fn run_unresolved_import_detector(
     reason = "ADR-008 keeps direct analyzer unit tests while the public warning targets external callers"
 )]
 mod tests {
-    use fallow_types::extract::{byte_offset_to_line_col, compute_line_offsets};
+    use plow_types::extract::{byte_offset_to_line_col, compute_line_offsets};
 
     fn line_col(source: &str, byte_offset: u32) -> (u32, u32) {
         let offsets = compute_line_offsets(source);
@@ -1978,7 +1978,7 @@ mod tests {
 
     mod orchestration {
         use super::super::*;
-        use fallow_config::{FallowConfig, OutputFormat, RulesConfig, Severity};
+        use plow_config::{OutputFormat, PlowConfig, RulesConfig, Severity};
         use std::path::PathBuf;
 
         fn find_dead_code(graph: &ModuleGraph, config: &ResolvedConfig) -> AnalysisResults {
@@ -1986,7 +1986,7 @@ mod tests {
         }
 
         fn make_config_with_rules(rules: RulesConfig) -> ResolvedConfig {
-            FallowConfig {
+            PlowConfig {
                 rules,
                 ..Default::default()
             }

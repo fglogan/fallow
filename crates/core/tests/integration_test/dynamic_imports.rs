@@ -4,7 +4,7 @@ use super::common::{create_config, fixture_path};
 fn dynamic_import_makes_module_reachable() {
     let root = fixture_path("dynamic-imports");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_names: Vec<String> = results
         .unused_files
@@ -34,7 +34,7 @@ fn dynamic_import_makes_module_reachable() {
 fn dynamic_import_literal_edges_match_static_imports() {
     let root = fixture_path("dynamic-import-literals");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_names: Vec<String> = results
         .unused_files
@@ -93,7 +93,7 @@ fn dynamic_import_literal_edges_match_static_imports() {
 fn vitest_vi_mock_makes_auto_mock_reachable() {
     let root = fixture_path("vitest-auto-mocks");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files: Vec<String> = results
         .unused_files
@@ -145,7 +145,7 @@ fn vitest_vi_mock_makes_auto_mock_reachable() {
 fn vitest_vi_mock_factory_credits_target_and_skips_auto_mock_synthesis() {
     let root = fixture_path("issue-311-vi-mock-factory-target");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files: Vec<String> = results
         .unused_files
@@ -206,7 +206,7 @@ fn vitest_vi_mock_factory_credits_target_and_skips_auto_mock_synthesis() {
 fn vitest_vi_mock_without_sibling_does_not_surface_unresolved_import() {
     let root = fixture_path("issue-378-vi-mock-no-sibling");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unresolved: Vec<&str> = results
         .unresolved_imports
@@ -244,7 +244,7 @@ fn vitest_vi_mock_without_sibling_does_not_surface_unresolved_import() {
 fn dynamic_import_pattern_makes_files_reachable() {
     let root = fixture_path("dynamic-import-patterns");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_names: Vec<String> = results
         .unused_files
@@ -292,7 +292,7 @@ fn dynamic_import_pattern_makes_files_reachable() {
 fn vite_glob_makes_files_reachable() {
     let root = fixture_path("vite-glob");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_names: Vec<String> = results
         .unused_files
@@ -326,7 +326,7 @@ fn vite_glob_makes_files_reachable() {
 fn webpack_context_makes_files_reachable() {
     let root = fixture_path("webpack-context");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_names: Vec<String> = results
         .unused_files

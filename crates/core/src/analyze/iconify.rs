@@ -14,7 +14,7 @@
 //! project actually declaring an Iconify-ecosystem dependency. Crediting only
 //! exempts a declared dependency from "unused"; it never produces a finding.
 
-use fallow_config::{PackageJson, WorkspaceInfo};
+use plow_config::{PackageJson, WorkspaceInfo};
 use rustc_hash::FxHashSet;
 
 use crate::extract::ModuleInfo;
@@ -232,7 +232,7 @@ mod tests {
 
     fn empty_module() -> ModuleInfo {
         ModuleInfo {
-            file_id: fallow_types::discover::FileId(1),
+            file_id: plow_types::discover::FileId(1),
             exports: Vec::new(),
             imports: Vec::new(),
             re_exports: Vec::new(),

@@ -4,7 +4,7 @@ use super::common::{create_config, fixture_path};
 fn unused_enum_members_detected_by_access_pattern() {
     let root = fixture_path("unused-enum-members");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_enum_member_names: Vec<&str> = results
         .unused_enum_members
@@ -30,7 +30,7 @@ fn unused_enum_members_detected_by_access_pattern() {
 fn partially_used_enum_members() {
     let root = fixture_path("unused-enum-members");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_enum_member_names: Vec<&str> = results
         .unused_enum_members
@@ -60,7 +60,7 @@ fn partially_used_enum_members() {
 fn whole_object_use_suppresses_enum_members() {
     let root = fixture_path("unused-enum-members");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_enum_member_names: Vec<&str> = results
         .unused_enum_members

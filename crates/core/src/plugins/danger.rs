@@ -70,7 +70,7 @@ fn is_dangerfile_path(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_config::EntryPointRole;
+    use plow_config::EntryPointRole;
 
     #[test]
     fn always_used_includes_dangerfile_variants() {

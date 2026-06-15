@@ -2,14 +2,14 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 // VS Code injects this module into the extension host at runtime.
-// fallow-ignore-next-line unlisted-dependency
+// plow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
 
 export const getExecutableExtension = (): string => (os.platform() === "win32" ? ".exe" : "");
 
 /**
  * Look for a locally installed binary in the workspace's node_modules/.bin.
- * This allows teams to pin fallow as a devDependency for consistent versions.
+ * This allows teams to pin plow as a devDependency for consistent versions.
  */
 export const findLocalBinary = (name: string): string | null => {
   const folders = vscode.workspace.workspaceFolders;

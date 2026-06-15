@@ -1,5 +1,5 @@
 {
-  "$schema": "Ground truth for fallow duplication detection benchmark",
+  "$schema": "Ground truth for plow duplication detection benchmark",
   "description": "Each clone pair documents a known duplication relationship between two file regions. 'type' follows the standard clone taxonomy (Type-1 through Type-4). 'min_overlap_lines' is the minimum number of shared lines a correct detection should cover.",
   "clone_pairs": [
     {

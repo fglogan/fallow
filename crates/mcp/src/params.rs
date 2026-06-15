@@ -98,7 +98,7 @@ pub struct CheckChangedParams {
 /// Parameters for the `security_candidates` tool.
 ///
 /// Security analysis can exceed the default MCP subprocess timeout on large
-/// repos. Raise `FALLOW_TIMEOUT_SECS` in the server environment when needed.
+/// repos. Raise `PLOW_TIMEOUT_SECS` in the server environment when needed.
 #[derive(Default, Deserialize, JsonSchema)]
 pub struct SecurityCandidatesParams {
     pub root: Option<String>,
@@ -113,7 +113,7 @@ pub struct SecurityCandidatesParams {
     pub changed_since: Option<String>,
 
     /// Scope candidates to just-edited files for the agent edit loop. Each path
-    /// is passed to `fallow security --file` and matches finding anchors or
+    /// is passed to `plow security --file` and matches finding anchors or
     /// trace hops.
     pub paths: Option<Vec<String>>,
 
@@ -224,7 +224,7 @@ pub struct ProjectInfoParams {
 ///
 /// The tool composes several existing read-only analyses into one evidence
 /// bundle. Large repositories can exceed the default MCP subprocess timeout;
-/// raise `FALLOW_TIMEOUT_SECS` in the server environment when needed.
+/// raise `PLOW_TIMEOUT_SECS` in the server environment when needed.
 #[derive(Deserialize, JsonSchema)]
 pub struct InspectTargetParams {
     pub target: InspectTarget,
@@ -361,7 +361,7 @@ pub struct HealthParams {
     /// Root directory of the project to analyze. Defaults to current working directory.
     pub root: Option<String>,
 
-    /// Path to fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
+    /// Path to plow config file (.plowrc.json, .plowrc.jsonc, plow.toml, or .plow.toml).
     pub config: Option<String>,
 
     /// Maximum cyclomatic complexity threshold. Functions exceeding this are reported.
@@ -373,7 +373,7 @@ pub struct HealthParams {
     /// Maximum CRAP score threshold (default 30.0). Functions meeting or
     /// exceeding this score are reported alongside complexity findings. Pair
     /// with `coverage` for accurate per-function CRAP; without Istanbul data
-    /// fallow estimates coverage from the module graph.
+    /// plow estimates coverage from the module graph.
     pub max_crap: Option<f64>,
 
     /// Number of top results to return.
@@ -436,7 +436,7 @@ pub struct HealthParams {
     /// Minimum commits for a file to appear in hotspot ranking.
     pub min_commits: Option<u32>,
 
-    /// Import change history from a `fallow-churn/v1` JSON file instead of `git
+    /// Import change history from a `plow-churn/v1` JSON file instead of `git
     /// log`, so `hotspots` / `ownership` / `targets` work on projects with no git
     /// repository (Yandex Arc, Mercurial, Perforce). A small wrapper translates
     /// the VCS log into the contract. Resolved relative to `root`. Powers the
@@ -455,7 +455,7 @@ pub struct HealthParams {
     /// Only analyze production code (excludes tests, stories, dev files).
     pub production: Option<bool>,
 
-    /// Save a vital signs snapshot. Provide a file path, or omit value for default (`.fallow/snapshots/{timestamp}.json`).
+    /// Save a vital signs snapshot. Provide a file path, or omit value for default (`.plow/snapshots/{timestamp}.json`).
     pub save_snapshot: Option<String>,
 
     /// Compare results against a saved baseline file. Only new issues (not in the baseline) are reported.
@@ -471,7 +471,7 @@ pub struct HealthParams {
     pub threads: Option<usize>,
 
     /// Compare current metrics against the most recent saved snapshot and show per-metric deltas.
-    /// Implies --score. Reads from `.fallow/snapshots/`.
+    /// Implies --score. Reads from `.plow/snapshots/`.
     pub trend: Option<bool>,
 
     /// Analysis effort level. Controls the depth of analysis: "low" (fast, surface-level),
@@ -494,10 +494,10 @@ pub struct HealthParams {
     /// Istanbul `coverage-final.json`. A single local capture is free and
     /// runs without a license; continuous or multi-capture runtime
     /// monitoring (a directory containing multiple JSON dumps) requires an
-    /// active license. Run `fallow license activate --trial --email <addr>`
+    /// active license. Run `plow license activate --trial --email <addr>`
     /// to start a 30-day trial when you need continuous monitoring.
     /// Runtime coverage can exceed the default 120s MCP subprocess timeout
-    /// on large dumps; raise `FALLOW_TIMEOUT_SECS` accordingly.
+    /// on large dumps; raise `PLOW_TIMEOUT_SECS` accordingly.
     pub runtime_coverage: Option<String>,
 
     /// Minimum invocation count for a function to be classified as a hot
@@ -529,15 +529,15 @@ pub struct HealthParams {
 }
 
 /// Parameters for `check_runtime_coverage`, the focused runtime-coverage
-/// entry point. A thin wrapper around `fallow health --runtime-coverage
+/// entry point. A thin wrapper around `plow health --runtime-coverage
 /// <path>` with a narrow surface area so agents can pick the right tool
 /// by name and pass exactly the knobs that apply to runtime coverage. A
 /// single local capture is free and runs without a license; continuous or
 /// multi-capture runtime monitoring (a directory containing multiple JSON
-/// dumps) requires an active license JWT (`fallow license activate
+/// dumps) requires an active license JWT (`plow license activate
 /// --trial --email <addr>` to start a 30-day trial). Long V8 dumps can
 /// exceed the default 120s MCP subprocess timeout; raise
-/// `FALLOW_TIMEOUT_SECS` for multi-megabyte inputs.
+/// `PLOW_TIMEOUT_SECS` for multi-megabyte inputs.
 #[derive(Deserialize, JsonSchema)]
 pub struct CheckRuntimeCoverageParams {
     /// Path to runtime coverage input. Accepts a V8 coverage directory
@@ -548,7 +548,7 @@ pub struct CheckRuntimeCoverageParams {
     /// Root directory of the project to analyze. Defaults to current working directory.
     pub root: Option<String>,
 
-    /// Path to fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
+    /// Path to plow config file (.plowrc.json, .plowrc.jsonc, plow.toml, or .plow.toml).
     pub config: Option<String>,
 
     /// Only analyze production code (excludes tests, stories, dev files).
@@ -606,12 +606,12 @@ pub struct AuditParams {
     /// Root directory of the project to analyze. Defaults to current working directory.
     pub root: Option<String>,
 
-    /// Path to fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
+    /// Path to plow config file (.plowrc.json, .plowrc.jsonc, plow.toml, or .plow.toml).
     pub config: Option<String>,
 
     /// Git ref to compare against (e.g., "main", "HEAD~5"). When unset, the
     /// base is the git merge-base against the branch's upstream or the remote
-    /// default (`origin/main`); set `FALLOW_AUDIT_BASE` in the server env to pin
+    /// default (`origin/main`); set `PLOW_AUDIT_BASE` in the server env to pin
     /// it.
     pub base: Option<String>,
 
@@ -652,19 +652,19 @@ pub struct AuditParams {
     /// or "all". Passed through to the CLI's `--gate` flag.
     pub gate: Option<String>,
 
-    /// Path to a dead-code baseline file (produced by `fallow dead-code
+    /// Path to a dead-code baseline file (produced by `plow dead-code
     /// --save-baseline`). When set, dead-code issues present in the
     /// baseline are excluded from the audit verdict. Passed through to
     /// the CLI's `--dead-code-baseline` flag.
     pub dead_code_baseline: Option<String>,
 
-    /// Path to a health baseline file (produced by `fallow health
+    /// Path to a health baseline file (produced by `plow health
     /// --save-baseline`). When set, complexity findings present in the
     /// baseline are excluded from the audit verdict. Passed through to
     /// the CLI's `--health-baseline` flag.
     pub health_baseline: Option<String>,
 
-    /// Path to a duplication baseline file (produced by `fallow dupes
+    /// Path to a duplication baseline file (produced by `plow dupes
     /// --save-baseline`). When set, clone groups present in the baseline
     /// are excluded from the audit verdict. Passed through to the CLI's
     /// `--dupes-baseline` flag.
@@ -677,7 +677,7 @@ pub struct AuditParams {
     /// Maximum CRAP score threshold (default 30.0). Functions meeting or
     /// exceeding this score cause audit to fail. Pair with `coverage` on
     /// `check_health` for accurate per-function CRAP; without Istanbul data
-    /// fallow estimates coverage from the module graph. Passed through to
+    /// plow estimates coverage from the module graph. Passed through to
     /// the CLI's `--max-crap` flag.
     pub max_crap: Option<f64>,
 
@@ -694,7 +694,7 @@ pub struct AuditParams {
     /// Report unused exports in entry files instead of auto-marking them as
     /// used. Catches typos in framework exports (e.g. `meatdata` instead of
     /// `metadata`). Also configurable persistently via
-    /// `includeEntryExports: true` in the fallow config file; this param
+    /// `includeEntryExports: true` in the plow config file; this param
     /// ORs with the config value. Passed through to the CLI's
     /// `--include-entry-exports` flag.
     pub include_entry_exports: Option<bool>,
@@ -718,7 +718,7 @@ pub struct AuditParams {
 #[derive(Default, Deserialize, JsonSchema)]
 pub struct ExplainParams {
     /// Issue type or rule id to explain, for example "unused-export",
-    /// "fallow/unused-dependency", "high-complexity", or "code-duplication".
+    /// "plow/unused-dependency", "high-complexity", or "code-duplication".
     pub issue_type: String,
 }
 
@@ -728,7 +728,7 @@ pub struct ListBoundariesParams {
     /// Project root directory (defaults to current working directory).
     pub root: Option<String>,
 
-    /// Path to a fallow config file.
+    /// Path to a plow config file.
     pub config: Option<String>,
 
     /// Disable the incremental parse cache.
@@ -763,11 +763,11 @@ pub struct ImpactAllParams {
 #[derive(Deserialize, JsonSchema)]
 pub struct CodeExecuteParams {
     /// JavaScript function expression or function body. The function receives
-    /// `{ fallow, root }` and must return a JSON-serializable value.
+    /// `{ plow, root }` and must return a JSON-serializable value.
     #[schemars(length(min = 1, max = 20000))]
     pub code: String,
 
-    /// Default project root injected into fallow host calls when their params
+    /// Default project root injected into plow host calls when their params
     /// omit `root`.
     pub root: Option<String>,
 
@@ -776,7 +776,7 @@ pub struct CodeExecuteParams {
     #[schemars(range(min = 1, max = 30000))]
     pub timeout_ms: Option<u64>,
 
-    /// Maximum total bytes of fallow JSON output that sandbox host calls may
+    /// Maximum total bytes of plow JSON output that sandbox host calls may
     /// read. Defaults to 1000000 and is capped at 4000000.
     #[schemars(range(min = 1024, max = 4_000_000))]
     pub max_output_bytes: Option<usize>,
@@ -787,7 +787,7 @@ pub struct FeatureFlagsParams {
     /// Root directory of the project to analyze. Defaults to current working directory.
     pub root: Option<String>,
 
-    /// Path to fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
+    /// Path to plow config file (.plowrc.json, .plowrc.jsonc, plow.toml, or .plow.toml).
     pub config: Option<String>,
 
     /// Only analyze production code (excludes tests, stories, dev files).

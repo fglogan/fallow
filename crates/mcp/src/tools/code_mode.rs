@@ -134,10 +134,10 @@ fn install_globals(ctx: &Ctx<'_>, state: &Rc<RefCell<CodeModeState>>) -> rquickj
     let globals = ctx.globals();
     harden_globals(&globals)?;
 
-    let fallow = Object::new(ctx.clone())?;
-    install_host_api(ctx, &fallow, state)?;
-    globals.set("fallow", fallow)?;
-    ctx.eval::<(), _>("Object.freeze(globalThis.fallow);")?;
+    let plow = Object::new(ctx.clone())?;
+    install_host_api(ctx, &plow, state)?;
+    globals.set("plow", plow)?;
+    ctx.eval::<(), _>("Object.freeze(globalThis.plow);")?;
     Ok(())
 }
 
@@ -162,11 +162,11 @@ fn harden_globals(globals: &Object<'_>) -> rquickjs::Result<()> {
 
 fn install_host_api<'js>(
     ctx: &Ctx<'js>,
-    fallow: &Object<'js>,
+    plow: &Object<'js>,
     state: &Rc<RefCell<CodeModeState>>,
 ) -> rquickjs::Result<()> {
     let run_state = Rc::clone(state);
-    fallow.set(
+    plow.set(
         "run",
         Func::from(MutFn::from(
             move |ctx: Ctx<'js>, tool: String, params: Value<'js>| {
@@ -177,7 +177,7 @@ fn install_host_api<'js>(
 
     for (alias, tool) in CODE_MODE_ALIASES {
         let alias_state = Rc::clone(state);
-        fallow.set(
+        plow.set(
             *alias,
             Func::from(MutFn::from(move |ctx: Ctx<'js>, params: Value<'js>| {
                 run_host_call(&ctx, &alias_state, tool, params)
@@ -249,7 +249,7 @@ fn user_source(code: &str) -> String {
     } else {
         format!(
             "(({{
-                fallow,
+                plow,
                 root
             }}) => {{
                 {trimmed}
@@ -264,9 +264,9 @@ fn user_source(code: &str) -> String {
         if (typeof __codeModeUser !== "function") {{
             throw new Error("code must evaluate to a function or function body");
         }}
-        const __codeModeResult = __codeModeUser({{ fallow: globalThis.fallow, root: globalThis.root }});
+        const __codeModeResult = __codeModeUser({{ plow: globalThis.plow, root: globalThis.root }});
         if (__codeModeResult && typeof __codeModeResult.then === "function") {{
-            throw new Error("async Code Mode snippets are not supported; use synchronous fallow host calls");
+            throw new Error("async Code Mode snippets are not supported; use synchronous plow host calls");
         }}
         __codeModeResult;
         "#
@@ -335,7 +335,7 @@ impl CodeModeState {
                 self.max_output_bytes
             ));
         }
-        let stdout = run_fallow_sync(
+        let stdout = run_plow_sync(
             &self.binary,
             "code_execute",
             &args,
@@ -369,7 +369,7 @@ struct CodeModeCall {
 
 fn classify_host_error(message: &str) -> &'static str {
     if message.contains("does not expose fix tools")
-        || message.contains("unsupported code mode fallow tool")
+        || message.contains("unsupported code mode plow tool")
     {
         return "unsupported_tool";
     }
@@ -401,7 +401,7 @@ enum CodeModeTool {
     TraceClone,
     CheckHealth,
     Audit,
-    FallowExplain,
+    PlowExplain,
     ListBoundaries,
     FeatureFlags,
     Impact,
@@ -426,7 +426,7 @@ impl CodeModeTool {
             "trace_clone" => Ok(Self::TraceClone),
             "check_health" => Ok(Self::CheckHealth),
             "audit" => Ok(Self::Audit),
-            "fallow_explain" => Ok(Self::FallowExplain),
+            "plow_explain" => Ok(Self::PlowExplain),
             "list_boundaries" => Ok(Self::ListBoundaries),
             "feature_flags" => Ok(Self::FeatureFlags),
             "impact" => Ok(Self::Impact),
@@ -439,7 +439,7 @@ impl CodeModeTool {
                 "code mode does not expose fix tools; use standalone MCP tools for previews"
                     .to_string(),
             ),
-            _ => Err(format!("unsupported code mode fallow tool '{name}'")),
+            _ => Err(format!("unsupported code mode plow tool '{name}'")),
         }
     }
 
@@ -456,7 +456,7 @@ impl CodeModeTool {
             Self::TraceClone => "trace_clone",
             Self::CheckHealth => "check_health",
             Self::Audit => "audit",
-            Self::FallowExplain => "fallow_explain",
+            Self::PlowExplain => "plow_explain",
             Self::ListBoundaries => "list_boundaries",
             Self::FeatureFlags => "feature_flags",
             Self::Impact => "impact",
@@ -481,7 +481,7 @@ const CODE_MODE_ALIASES: &[(&str, &str)] = &[
     ("traceClone", "trace_clone"),
     ("checkHealth", "check_health"),
     ("audit", "audit"),
-    ("explain", "fallow_explain"),
+    ("explain", "plow_explain"),
     ("listBoundaries", "list_boundaries"),
     ("featureFlags", "feature_flags"),
     ("impact", "impact"),
@@ -499,7 +499,7 @@ fn merge_default_root(
     let mut params: serde_json::Value =
         serde_json::from_str(params_json).map_err(|err| format!("invalid params JSON: {err}"))?;
     if !params.is_object() {
-        return Err("fallow host call params must be an object".to_string());
+        return Err("plow host call params must be an object".to_string());
     }
     if let Some(root) = default_root
         && params.get("root").is_none()
@@ -559,7 +559,7 @@ fn build_tool_args(tool: CodeModeTool, params: serde_json::Value) -> Result<Vec<
             let params: AuditParams = parse_params(params)?;
             build_audit_args(&params)
         }
-        CodeModeTool::FallowExplain => {
+        CodeModeTool::PlowExplain => {
             let params: ExplainParams = parse_params(params)?;
             Ok(build_explain_args(&params))
         }
@@ -605,7 +605,7 @@ where
     serde_json::from_value(params).map_err(|err| format!("invalid tool params: {err}"))
 }
 
-fn run_fallow_sync(
+fn run_plow_sync(
     binary: &str,
     tool: &'static str,
     args: &[String],
@@ -628,19 +628,19 @@ fn run_fallow_sync(
                 .reopen()
                 .map_err(|err| format!("failed to reopen stderr temp file: {err}"))?,
         ))
-        .env("FALLOW_INTEGRATION_SURFACE", "mcp")
-        .env("FALLOW_MCP_TOOL", tool)
+        .env("PLOW_INTEGRATION_SURFACE", "mcp")
+        .env("PLOW_MCP_TOOL", tool)
         .spawn()
         .map_err(|err| {
             format!(
-                "failed to execute fallow binary '{binary}': {err}. Ensure fallow is installed and available in PATH, or set FALLOW_BIN."
+                "failed to execute plow binary '{binary}': {err}. Ensure plow is installed and available in PATH, or set PLOW_BIN."
             )
         })?;
 
     loop {
         if let Some(status) = child
             .try_wait()
-            .map_err(|err| format!("failed to wait for fallow subprocess: {err}"))?
+            .map_err(|err| format!("failed to wait for plow subprocess: {err}"))?
         {
             let stdout_len = file_len(stdout_file.as_file())?;
             if stdout_len > max_output_bytes as u64 {
@@ -657,7 +657,7 @@ fn run_fallow_sync(
         if Instant::now() >= deadline {
             let _ = child.kill();
             let _ = child.wait();
-            return Err("code mode execution timed out while running fallow".to_string());
+            return Err("code mode execution timed out while running plow".to_string());
         }
         if file_len(stdout_file.as_file())? > max_output_bytes as u64 {
             let _ = child.kill();
@@ -674,15 +674,15 @@ fn run_fallow_sync(
 fn file_len(file: &fs::File) -> Result<u64, String> {
     file.metadata()
         .map(|metadata| metadata.len())
-        .map_err(|err| format!("failed to inspect fallow output file: {err}"))
+        .map_err(|err| format!("failed to inspect plow output file: {err}"))
 }
 
 fn read_file(file: &mut fs::File, label: &str) -> Result<Vec<u8>, String> {
     file.seek(SeekFrom::Start(0))
-        .map_err(|err| format!("failed to rewind fallow {label}: {err}"))?;
+        .map_err(|err| format!("failed to rewind plow {label}: {err}"))?;
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes)
-        .map_err(|err| format!("failed to read fallow {label}: {err}"))?;
+        .map_err(|err| format!("failed to read plow {label}: {err}"))?;
     Ok(bytes)
 }
 
@@ -710,7 +710,7 @@ fn normalize_output(exit_code: i32, stdout: &[u8], stderr: &[u8]) -> Result<Stri
         _ => Err(json!({
             "error": true,
             "message": if stderr.is_empty() {
-                format!("fallow exited with code {exit_code}")
+                format!("plow exited with code {exit_code}")
             } else {
                 stderr
             },
@@ -753,13 +753,13 @@ mod tests {
     fn statement_body_is_wrapped_as_function_body() {
         let source = user_source("return { ok: true };");
         assert!(source.contains("return { ok: true };"));
-        assert!(source.contains("__codeModeUser({ fallow: globalThis.fallow"));
+        assert!(source.contains("__codeModeUser({ plow: globalThis.plow"));
     }
 
     #[test]
     fn function_expression_is_preserved() {
-        let source = user_source("({ fallow }) => fallow.projectInfo({ files: true })");
-        assert!(source.contains("({ fallow }) => fallow.projectInfo({ files: true })"));
+        let source = user_source("({ plow }) => plow.projectInfo({ files: true })");
+        assert!(source.contains("({ plow }) => plow.projectInfo({ files: true })"));
     }
 
     #[test]
@@ -771,14 +771,14 @@ mod tests {
 
     #[test]
     fn async_snippets_are_rejected_explicitly() {
-        let source = user_source("async ({ fallow }) => fallow.projectInfo({ files: true })");
+        let source = user_source("async ({ plow }) => plow.projectInfo({ files: true })");
         assert!(source.contains("async Code Mode snippets are not supported"));
     }
 
     #[test]
     fn oversized_code_is_rejected_before_runtime() {
         let output = execute_code_mode(
-            "fallow".to_string(),
+            "plow".to_string(),
             CodeExecuteParams {
                 code: "x".repeat(MAX_CODE_BYTES + 1),
                 root: None,
@@ -801,7 +801,7 @@ mod tests {
     #[test]
     fn cpu_bound_snippets_report_timeout() {
         let output = execute_code_mode(
-            "fallow".to_string(),
+            "plow".to_string(),
             CodeExecuteParams {
                 code: "while (true) {}".to_string(),
                 root: None,

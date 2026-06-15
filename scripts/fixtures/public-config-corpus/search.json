@@ -1,53 +1,53 @@
 {
   "queries": [
     {
-      "query": "filename:.fallowrc.jsonc",
+      "query": "filename:.plowrc.jsonc",
       "results": [
         {
-          "path": ".fallowrc.jsonc",
+          "path": ".plowrc.jsonc",
           "repository": {
             "nameWithOwner": "alpha/app",
             "url": "https://github.com/alpha/app"
           },
           "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          "url": "https://github.com/alpha/app/blob/1111111111111111111111111111111111111111/.fallowrc.jsonc"
+          "url": "https://github.com/alpha/app/blob/1111111111111111111111111111111111111111/.plowrc.jsonc"
         }
       ]
     },
     {
-      "query": "filename:fallow.toml",
+      "query": "filename:plow.toml",
       "results": [
         {
-          "path": "config/fallow.toml",
+          "path": "config/plow.toml",
           "repository": {
             "nameWithOwner": "beta/tool",
             "url": "https://github.com/beta/tool"
           },
           "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-          "url": "https://github.com/beta/tool/blob/2222222222222222222222222222222222222222/config/fallow.toml"
+          "url": "https://github.com/beta/tool/blob/2222222222222222222222222222222222222222/config/plow.toml"
         }
       ]
     },
     {
-      "query": "filename:.fallowrc.json",
+      "query": "filename:.plowrc.json",
       "results": [
         {
-          "path": ".fallowrc.json",
+          "path": ".plowrc.json",
           "repository": {
             "nameWithOwner": "bad/invalid",
             "url": "https://github.com/bad/invalid"
           },
           "sha": "cccccccccccccccccccccccccccccccccccccccc",
-          "url": "https://github.com/bad/invalid/blob/3333333333333333333333333333333333333333/.fallowrc.json"
+          "url": "https://github.com/bad/invalid/blob/3333333333333333333333333333333333333333/.plowrc.json"
         },
         {
-          "path": ".fallowrc.json",
+          "path": ".plowrc.json",
           "repository": {
             "nameWithOwner": "missing/cache",
             "url": "https://github.com/missing/cache"
           },
           "sha": "dddddddddddddddddddddddddddddddddddddddd",
-          "url": "https://github.com/missing/cache/blob/4444444444444444444444444444444444444444/.fallowrc.json"
+          "url": "https://github.com/missing/cache/blob/4444444444444444444444444444444444444444/.plowrc.json"
         }
       ]
     }

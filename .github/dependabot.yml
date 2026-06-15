@@ -34,7 +34,7 @@ updates:
       - dependency-name: "@types/vscode"
 
   - package-ecosystem: npm
-    directory: /npm/fallow
+    directory: /npm/plow
     schedule:
       interval: weekly
     cooldown:

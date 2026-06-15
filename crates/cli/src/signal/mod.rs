@@ -1,9 +1,9 @@
 //! Process-wide signal handling and scoped child-process registry.
 //!
 //! On SIGINT or SIGTERM (Unix) and the equivalent console-control events on
-//! Windows, fallow's default unwind drops `std::process::Child` handles
-//! without killing the underlying children. The `fallow-cov` sidecar,
-//! `npm install -g`, and self-invoked `fallow health` can run for minutes
+//! Windows, plow's default unwind drops `std::process::Child` handles
+//! without killing the underlying children. The `plow-cov` sidecar,
+//! `npm install -g`, and self-invoked `plow health` can run for minutes
 //! and accumulate as orphan processes when the user hits Ctrl+C.
 //!
 //! This module installs a single handler (see `install_handlers`) that on
@@ -35,7 +35,7 @@ pub use scoped_child::ScopedChild;
 /// True once a termination signal has been observed.
 static SHUTDOWN: AtomicBool = AtomicBool::new(false);
 
-/// True when a cooperative consumer (`fallow watch`) is active. The handler
+/// True when a cooperative consumer (`plow watch`) is active. The handler
 /// then flips `SHUTDOWN` and returns instead of killing children and
 /// exiting; the consumer is responsible for clean teardown.
 static GRACEFUL: AtomicBool = AtomicBool::new(false);
@@ -59,7 +59,7 @@ pub fn install_handlers() -> std::io::Result<()> {
 }
 
 /// True after a signal has been observed. Read by long-running loops
-/// (currently `fallow watch`) to break out cooperatively.
+/// (currently `plow watch`) to break out cooperatively.
 pub fn is_shutting_down() -> bool {
     SHUTDOWN.load(Ordering::SeqCst)
 }
@@ -120,11 +120,11 @@ fn platform_install() -> std::io::Result<()> {
 /// Mark shutdown, drain the registry (kills every registered child
 /// regardless of mode so in-flight subprocesses do not survive the
 /// signal), then either exit (default) or return for cooperative
-/// consumers in graceful mode (`fallow watch`).
+/// consumers in graceful mode (`plow watch`).
 ///
 /// Graceful mode MUST still drain children: watch's `analyze_and_
-/// report` spawns git subprocesses (via `fallow_core::changed_files`
-/// and `fallow_core::churn`) that need reaping mid-analysis. Without
+/// report` spawns git subprocesses (via `plow_core::changed_files`
+/// and `plow_core::churn`) that need reaping mid-analysis. Without
 /// drain, a Ctrl+C during analysis would let the parent return from
 /// the inner pass only after every git child completed naturally,
 /// defeating the entire "Ctrl+C reaps in-flight git work" contract.

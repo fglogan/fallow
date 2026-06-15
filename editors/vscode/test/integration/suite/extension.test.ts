@@ -2,19 +2,19 @@ import * as assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as path from "node:path";
 // VS Code injects this module into the extension host at runtime.
-// fallow-ignore-next-line unlisted-dependency
+// plow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
-import type { FallowCheckResult, FallowDupesResult, FallowFixResult } from "../../../src/types.js";
+import type { PlowCheckResult, PlowDupesResult, PlowFixResult } from "../../../src/types.js";
 
 interface ExtensionApi {
   readonly runAnalysis: (context: vscode.ExtensionContext) => Promise<{
-    check: FallowCheckResult | null;
-    dupes: FallowDupesResult | null;
+    check: PlowCheckResult | null;
+    dupes: PlowDupesResult | null;
   }>;
   readonly runFix: (
     context: vscode.ExtensionContext,
     dryRun: boolean,
-  ) => Promise<FallowFixResult | null>;
+  ) => Promise<PlowFixResult | null>;
 }
 
 const defaultIssueTypes = {
@@ -66,7 +66,7 @@ const testContext = (): vscode.ExtensionContext =>
     workspaceState: inMemoryMemento(),
   }) as vscode.ExtensionContext;
 
-const cliLogPath = (): string => path.join(workspaceFolder().uri.fsPath, ".fallow-cli-log.jsonl");
+const cliLogPath = (): string => path.join(workspaceFolder().uri.fsPath, ".plow-cli-log.jsonl");
 
 const readCliLog = (): Array<{ command: string; args: string[] }> => {
   const logPath = cliLogPath();
@@ -112,7 +112,7 @@ const runAnalysisAndReadCliLog = async (
   return readCliLog();
 };
 
-describe("Fallow VS Code extension", () => {
+describe("Plow VS Code extension", () => {
   let api: ExtensionApi;
   const windowApi = vscode.window as any;
   const originalShowQuickPick = vscode.window.showQuickPick;
@@ -121,7 +121,7 @@ describe("Fallow VS Code extension", () => {
   const originalShowInformationMessage = vscode.window.showInformationMessage;
 
   before(async () => {
-    const extension = vscode.extensions.getExtension("fallow-rs.fallow-vscode");
+    const extension = vscode.extensions.getExtension("plow-rs.plow-vscode");
     assert.ok(extension, "extension should be discoverable");
     api = (await extension.activate()) as ExtensionApi;
   });
@@ -136,12 +136,12 @@ describe("Fallow VS Code extension", () => {
     }
 
     await vscode.workspace
-      .getConfiguration("fallow")
+      .getConfiguration("plow")
       .update("issueTypes", defaultIssueTypes, vscode.ConfigurationTarget.Workspace);
     await vscode.workspace
-      .getConfiguration("fallow")
+      .getConfiguration("plow")
       .update("changedSince", "", vscode.ConfigurationTarget.Workspace);
-    const config = vscode.workspace.getConfiguration("fallow");
+    const config = vscode.workspace.getConfiguration("plow");
     for (const key of [
       "duplication.mode",
       "duplication.threshold",
@@ -164,23 +164,23 @@ describe("Fallow VS Code extension", () => {
   it("registers the expected commands", async () => {
     const commands = await vscode.commands.getCommands(true);
 
-    assert.ok(commands.includes("fallow.analyze"));
-    assert.ok(commands.includes("fallow.reloadAnalysis"));
-    assert.ok(commands.includes("fallow.health.reload"));
-    assert.ok(commands.includes("fallow.audit"));
-    assert.ok(commands.includes("fallow.fix"));
-    assert.ok(commands.includes("fallow.fixDryRun"));
-    assert.ok(commands.includes("fallow.restart"));
+    assert.ok(commands.includes("plow.analyze"));
+    assert.ok(commands.includes("plow.reloadAnalysis"));
+    assert.ok(commands.includes("plow.health.reload"));
+    assert.ok(commands.includes("plow.audit"));
+    assert.ok(commands.includes("plow.fix"));
+    assert.ok(commands.includes("plow.fixDryRun"));
+    assert.ok(commands.includes("plow.restart"));
     // Escape hatch for a stuck-hidden workspace (discussion #287); if it is
     // unregistered the startup nudge's "Show all findings" action throws.
-    assert.ok(commands.includes("fallow.resetDiagnosticFilters"));
+    assert.ok(commands.includes("plow.resetDiagnosticFilters"));
     // The "N references" Code Lens routes here; if it is unregistered, clicking a
-    // lens throws "command 'fallow.showReferences' not found".
-    assert.ok(commands.includes("fallow.showReferences"));
+    // lens throws "command 'plow.showReferences' not found".
+    assert.ok(commands.includes("plow.showReferences"));
   });
 
   it("runs analysis against the configured CLI and filters disabled issue types", async () => {
-    await vscode.workspace.getConfiguration("fallow").update(
+    await vscode.workspace.getConfiguration("plow").update(
       "issueTypes",
       {
         ...defaultIssueTypes,
@@ -200,7 +200,7 @@ describe("Fallow VS Code extension", () => {
 
     // The sidebar's dead-code + duplication analysis must be ONE combined call,
     // never split into per-issue-type calls. Calls that are not the sidebar
-    // analysis are excluded: `fallow workspaces` (monorepo discovery for the
+    // analysis are excluded: `plow workspaces` (monorepo discovery for the
     // workspace picker, #906) and the lazily-spawned health / audit / security /
     // coverage surfaces are orthogonal commands, not the dead-code analysis.
     const sidebarAnalysisCalls = readCliLog().filter(
@@ -224,7 +224,7 @@ describe("Fallow VS Code extension", () => {
   });
 
   it("forwards duplication settings to the CLI analysis path", async () => {
-    const config = vscode.workspace.getConfiguration("fallow");
+    const config = vscode.workspace.getConfiguration("plow");
     await config.update("duplication.mode", "mild", vscode.ConfigurationTarget.Workspace);
     await config.update("duplication.threshold", 0, vscode.ConfigurationTarget.Workspace);
     await config.update("duplication.minTokens", 80, vscode.ConfigurationTarget.Workspace);
@@ -247,7 +247,7 @@ describe("Fallow VS Code extension", () => {
 
   it("forwards changedSince to the CLI analysis path", async () => {
     await vscode.workspace
-      .getConfiguration("fallow")
+      .getConfiguration("plow")
       .update("changedSince", "origin/main", vscode.ConfigurationTarget.Workspace);
 
     const analysisCalls = await runAnalysisAndReadCliLog(api);
@@ -269,7 +269,7 @@ describe("Fallow VS Code extension", () => {
     // The picker persists its choice under this workspaceState key; the analysis
     // path reads it via resolveActiveWorkspaceScope and appends --workspace.
     const context = testContext();
-    await context.workspaceState.update("fallow.workspaceScope", "pkg-a");
+    await context.workspaceState.update("plow.workspaceScope", "pkg-a");
 
     const result = await api.runAnalysis(context);
     assert.ok(result.check, "check result should be available");
@@ -338,7 +338,7 @@ describe("Fallow VS Code extension", () => {
 
     assert.ok(result, "apply result should be returned");
     assert.equal(result.fixes.length, 1);
-    assert.equal(infoMessage, "Fallow: applied 1 fix.");
+    assert.equal(infoMessage, "Plow: applied 1 fix.");
     assert.deepEqual(readFixCommands(), [
       {
         command: "fix",

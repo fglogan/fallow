@@ -1,57 +1,57 @@
-# fallow
+# plow
 
 **Deterministic codebase intelligence for TypeScript and JavaScript.**
 
 Quality, risk, architecture, dependencies, duplication, and safe cleanup evidence for humans, CI, and agents.
 
-[![CI](https://github.com/fallow-rs/fallow/actions/workflows/ci.yml/badge.svg)](https://github.com/fallow-rs/fallow/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/fallow.svg)](https://www.npmjs.com/package/fallow)
-[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/fallow-rs/fallow/blob/main/LICENSE)
+[![CI](https://github.com/fglogan/genesis-plow/actions/workflows/ci.yml/badge.svg)](https://github.com/fglogan/genesis-plow/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/plow.svg)](https://www.npmjs.com/package/plow)
+[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/fglogan/genesis-plow/blob/main/LICENSE)
 
-Fallow turns a JS/TS repository into a trusted quality report: health score, changed-code risk, hotspots, duplication, architecture issues, dependency hygiene, and cleanup opportunities.
+Plow turns a JS/TS repository into a trusted quality report: health score, changed-code risk, hotspots, duplication, architecture issues, dependency hygiene, and cleanup opportunities.
 
-It helps you answer: what changed, what got riskier, what should be reviewed, what should be refactored, and what can be safely removed. No AI inside the analyzer. Fallow produces deterministic findings, typed output contracts, and traceable explanations that downstream tools can trust.
+It helps you answer: what changed, what got riskier, what should be reviewed, what should be refactored, and what can be safely removed. No AI inside the analyzer. Plow produces deterministic findings, typed output contracts, and traceable explanations that downstream tools can trust.
 
-Static analysis is free and open source. An optional paid runtime layer (Fallow Runtime) adds production execution evidence. Rust-native, sub-second, 122 framework plugins, 5-18x faster than [knip](https://knip.dev) v5 (2.7-9x faster than knip v6), 8-29x faster than [jscpd](https://github.com/kucherenko/jscpd) for duplication detection, with no Node.js runtime dependency for analysis.
+Static analysis is free and open source. An optional paid runtime layer (Plow Runtime) adds production execution evidence. Rust-native, sub-second, 122 framework plugins, 5-18x faster than [knip](https://knip.dev) v5 (2.7-9x faster than knip v6), 8-29x faster than [jscpd](https://github.com/kucherenko/jscpd) for duplication detection, with no Node.js runtime dependency for analysis.
 
 ## Installation
 
 ```bash
-npm install --save-dev fallow   # or: pnpm add -D fallow / yarn add -D fallow / bun add -d fallow
+npm install --save-dev plow   # or: pnpm add -D plow / yarn add -D plow / bun add -d plow
 ```
 
-Installs the `fallow` CLI plus the companion `fallow-lsp` and `fallow-mcp` binaries in your project.
+Installs the `plow` CLI plus the companion `plow-lsp` and `plow-mcp` binaries in your project.
 
-The package also ships a version-matched Agent Skill under `skills/fallow`.
+The package also ships a version-matched Agent Skill under `skills/plow`.
 TanStack Intent discovers it from `node_modules` automatically:
 
 ```bash
 npx @tanstack/intent list
-npx @tanstack/intent load fallow#fallow
+npx @tanstack/intent load plow#plow
 ```
 
-For one-off CLI use without project-local skill discovery, run `npx fallow`.
+For one-off CLI use without project-local skill discovery, run `npx plow`.
 
-Parsing fallow's JSON output in TypeScript? Import the typed shapes:
+Parsing plow's JSON output in TypeScript? Import the typed shapes:
 
 ```ts
-import type { CheckOutput, FallowJsonOutput } from "fallow/types";
+import type { CheckOutput, PlowJsonOutput } from "plow/types";
 ```
 
-The types are generated from the same schema as the VS Code extension and pin to the CLI version you install. See [docs.fallow.tools](https://docs.fallow.tools) for the full output contract.
+The types are generated from the same schema as the VS Code extension and pin to the CLI version you install. See [docs.genesis-plow.dev](https://docs.genesis-plow.dev) for the full output contract.
 
 ## Quick start
 
 ```bash
-npx fallow audit                 # PR-style audit: verdict pass / warn / fail
-npx fallow audit --format json   # Machine-readable audit (for CI and agents)
-npx fallow health --score        # Quality score and grade
-npx fallow                       # Full codebase analysis: health + duplication + cleanup
-npx fallow dead-code             # Cleanup-specific findings
-npx fallow fix --dry-run         # Preview automatic cleanup
+npx plow audit                 # PR-style audit: verdict pass / warn / fail
+npx plow audit --format json   # Machine-readable audit (for CI and agents)
+npx plow health --score        # Quality score and grade
+npx plow                       # Full codebase analysis: health + duplication + cleanup
+npx plow dead-code             # Cleanup-specific findings
+npx plow fix --dry-run         # Preview automatic cleanup
 ```
 
-## What Fallow reports
+## What Plow reports
 
 - **Quality score** -- compact health score with grade and trend delta when snapshot history is enabled
 - **PR risk** -- changed-code analysis with pass / warn / fail verdict and per-finding attribution
@@ -67,17 +67,17 @@ Cleanup opportunities are findings that look safe to review for removal because 
 ## Code duplication
 
 ```bash
-fallow dupes                       # Default: mild mode
-fallow dupes --mode semantic       # Catch clones with renamed variables
-fallow dupes --threshold 5         # Fail CI if duplication exceeds 5%
-fallow dupes --save-baseline       # Save current duplication as baseline
+plow dupes                       # Default: mild mode
+plow dupes --mode semantic       # Catch clones with renamed variables
+plow dupes --threshold 5         # Fail CI if duplication exceeds 5%
+plow dupes --save-baseline       # Save current duplication as baseline
 ```
 
 Four detection modes (strict, mild, weak, semantic), clone family grouping with refactoring suggestions, baseline tracking, and cross-language TS/JS matching.
 
 ## Built for agents
 
-Fallow gives AI agents structured repo truth instead of forcing them to infer everything from grep. Agents call the CLI or the MCP server to answer:
+Plow gives AI agents structured repo truth instead of forcing them to infer everything from grep. Agents call the CLI or the MCP server to answer:
 
 - Who imports this symbol?
 - Why is this export considered used or unused?
@@ -94,12 +94,12 @@ Every issue in `--format json` carries a machine-actionable `actions` array with
 
 ## Configuration
 
-Create a config file in your project root, or run `fallow init`:
+Create a config file in your project root, or run `plow init`:
 
 ```jsonc
-// .fallowrc.json
+// .plowrc.json
 {
-  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+  "$schema": "https://raw.githubusercontent.com/fglogan/genesis-plow/main/schema.json",
   "entry": ["src/workers/*.ts", "scripts/*.ts"],
   "ignorePatterns": ["**/*.generated.ts"],
   "rules": {
@@ -110,13 +110,13 @@ Create a config file in your project root, or run `fallow init`:
 }
 ```
 
-Also supports TOML (`fallow init --toml` creates `fallow.toml`).
+Also supports TOML (`plow init --toml` creates `plow.toml`).
 
 ## Documentation
 
-- [Full documentation](https://docs.fallow.tools)
-- [GitHub repository](https://github.com/fallow-rs/fallow)
-- [Plugin Authoring Guide](https://github.com/fallow-rs/fallow/blob/main/docs/plugin-authoring.md)
+- [Full documentation](https://docs.genesis-plow.dev)
+- [GitHub repository](https://github.com/fglogan/genesis-plow)
+- [Plugin Authoring Guide](https://github.com/fglogan/genesis-plow/blob/main/docs/plugin-authoring.md)
 
 ## License
 

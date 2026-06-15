@@ -123,7 +123,7 @@ pub enum CatalogPrecedingCommentPolicy {
 
 #[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct FallowConfig {
+pub struct PlowConfig {
     #[serde(rename = "$schema", default, skip_serializing)]
     pub schema: Option<String>,
 
@@ -234,7 +234,7 @@ pub struct FallowConfig {
     pub cache: CacheConfig,
 }
 
-/// Scopes `fallow security` catalogue behavior. An absent category block admits
+/// Scopes `plow security` catalogue behavior. An absent category block admits
 /// every catalogue category. `hardcoded-secret` is include-required and only
 /// runs when explicitly listed in `security.categories.include`.
 #[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
@@ -290,7 +290,7 @@ pub struct SecurityCategories {
 #[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct CacheConfig {
-    /// Directory for fallow's persistent analysis cache. Relative paths resolve
+    /// Directory for plow's persistent analysis cache. Relative paths resolve
     /// from the project root.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dir: Option<PathBuf>,
@@ -517,7 +517,7 @@ mod tests {
 
     #[test]
     fn default_config_has_empty_collections() {
-        let config = FallowConfig::default();
+        let config = PlowConfig::default();
         assert!(config.schema.is_none());
         assert!(config.extends.is_empty());
         assert!(config.entry.is_empty());
@@ -540,7 +540,7 @@ mod tests {
 
     #[test]
     fn default_config_rules_are_error() {
-        let config = FallowConfig::default();
+        let config = PlowConfig::default();
         assert_eq!(config.rules.unused_files, Severity::Error);
         assert_eq!(config.rules.unused_exports, Severity::Error);
         assert_eq!(config.rules.unused_dependencies, Severity::Error);
@@ -548,7 +548,7 @@ mod tests {
 
     #[test]
     fn default_config_duplicates_enabled() {
-        let config = FallowConfig::default();
+        let config = PlowConfig::default();
         assert!(config.duplicates.enabled);
         assert_eq!(config.duplicates.min_tokens, 50);
         assert_eq!(config.duplicates.min_lines, 5);
@@ -556,14 +556,14 @@ mod tests {
 
     #[test]
     fn default_config_health_thresholds() {
-        let config = FallowConfig::default();
+        let config = PlowConfig::default();
         assert_eq!(config.health.max_cyclomatic, 20);
         assert_eq!(config.health.max_cognitive, 15);
     }
 
     #[test]
     fn deserialize_empty_json_object() {
-        let config: FallowConfig = serde_json::from_str("{}").unwrap();
+        let config: PlowConfig = serde_json::from_str("{}").unwrap();
         assert!(config.entry.is_empty());
         assert!(!config.production);
     }
@@ -571,7 +571,7 @@ mod tests {
     #[test]
     fn deserialize_json_with_all_top_level_fields() {
         let json = r#"{
-            "$schema": "https://fallow.dev/schema.json",
+            "$schema": "https://plow.dev/schema.json",
             "entry": ["src/main.ts"],
             "ignorePatterns": ["generated/**"],
             "ignoreDependencies": ["postcss"],
@@ -581,10 +581,10 @@ mod tests {
             "duplicates": {"enabled": false},
             "health": {"maxCyclomatic": 30}
         }"#;
-        let config: FallowConfig = serde_json::from_str(json).unwrap();
+        let config: PlowConfig = serde_json::from_str(json).unwrap();
         assert_eq!(
             config.schema.as_deref(),
-            Some("https://fallow.dev/schema.json")
+            Some("https://plow.dev/schema.json")
         );
         assert_eq!(config.entry, vec!["src/main.ts"]);
         assert_eq!(config.ignore_patterns, vec!["generated/**"]);
@@ -599,25 +599,25 @@ mod tests {
     #[test]
     fn deserialize_json_deny_unknown_fields() {
         let json = r#"{"unknownField": true}"#;
-        let result: Result<FallowConfig, _> = serde_json::from_str(json);
+        let result: Result<PlowConfig, _> = serde_json::from_str(json);
         assert!(result.is_err(), "unknown fields should be rejected");
     }
 
     #[test]
     fn deserialize_json_production_mode_default_false() {
-        let config: FallowConfig = serde_json::from_str("{}").unwrap();
+        let config: PlowConfig = serde_json::from_str("{}").unwrap();
         assert!(!config.production);
     }
 
     #[test]
     fn deserialize_json_production_mode_true() {
-        let config: FallowConfig = serde_json::from_str(r#"{"production": true}"#).unwrap();
+        let config: PlowConfig = serde_json::from_str(r#"{"production": true}"#).unwrap();
         assert!(config.production);
     }
 
     #[test]
     fn deserialize_json_per_analysis_production_mode() {
-        let config: FallowConfig = serde_json::from_str(
+        let config: PlowConfig = serde_json::from_str(
             r#"{"production": {"deadCode": false, "health": true, "dupes": false}}"#,
         )
         .unwrap();
@@ -628,7 +628,7 @@ mod tests {
 
     #[test]
     fn deserialize_json_per_analysis_production_mode_rejects_unknown_fields() {
-        let err = serde_json::from_str::<FallowConfig>(r#"{"production": {"healthTypo": true}}"#)
+        let err = serde_json::from_str::<PlowConfig>(r#"{"production": {"healthTypo": true}}"#)
             .unwrap_err();
         assert!(
             err.to_string().contains("healthTypo"),
@@ -639,7 +639,7 @@ mod tests {
     #[test]
     fn deserialize_json_dynamically_loaded() {
         let json = r#"{"dynamicallyLoaded": ["plugins/**/*.ts", "locales/**/*.json"]}"#;
-        let config: FallowConfig = serde_json::from_str(json).unwrap();
+        let config: PlowConfig = serde_json::from_str(json).unwrap();
         assert_eq!(
             config.dynamically_loaded,
             vec!["plugins/**/*.ts", "locales/**/*.json"]
@@ -648,13 +648,13 @@ mod tests {
 
     #[test]
     fn deserialize_json_dynamically_loaded_defaults_empty() {
-        let config: FallowConfig = serde_json::from_str("{}").unwrap();
+        let config: PlowConfig = serde_json::from_str("{}").unwrap();
         assert!(config.dynamically_loaded.is_empty());
     }
 
     #[test]
     fn deserialize_json_fix_catalog_delete_preceding_comments() {
-        let config: FallowConfig =
+        let config: PlowConfig =
             serde_json::from_str(r#"{"fix": {"catalog": {"deletePrecedingComments": "always"}}}"#)
                 .unwrap();
         assert_eq!(
@@ -665,7 +665,7 @@ mod tests {
 
     #[test]
     fn deserialize_json_fix_catalog_delete_preceding_comments_rejects_unknown_policy() {
-        let err = serde_json::from_str::<FallowConfig>(
+        let err = serde_json::from_str::<PlowConfig>(
             r#"{"fix": {"catalog": {"deletePrecedingComments": "sometimes"}}}"#,
         )
         .unwrap_err();
@@ -684,7 +684,7 @@ mod tests {
                 { "extends": "BaseCommand", "implements": "CanActivate", "members": ["execute"] }
             ]
         }"#;
-        let config: FallowConfig = serde_json::from_str(json).unwrap();
+        let config: PlowConfig = serde_json::from_str(json).unwrap();
         assert_eq!(
             config.used_class_members,
             vec![
@@ -709,7 +709,7 @@ mod tests {
 entry = ["src/index.ts"]
 production = true
 "#;
-        let config: FallowConfig = toml::from_str(toml_str).unwrap();
+        let config: PlowConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(config.entry, vec!["src/index.ts"]);
         assert!(config.production);
     }
@@ -722,7 +722,7 @@ deadCode = false
 health = true
 dupes = false
 ";
-        let config: FallowConfig = toml::from_str(toml_str).unwrap();
+        let config: PlowConfig = toml::from_str(toml_str).unwrap();
         assert!(!config.production.for_analysis(ProductionAnalysis::DeadCode));
         assert!(config.production.for_analysis(ProductionAnalysis::Health));
         assert!(!config.production.for_analysis(ProductionAnalysis::Dupes));
@@ -730,7 +730,7 @@ dupes = false
 
     #[test]
     fn deserialize_toml_per_analysis_production_mode_rejects_unknown_fields() {
-        let err = toml::from_str::<FallowConfig>(
+        let err = toml::from_str::<PlowConfig>(
             r"
 [production]
 healthTypo = true
@@ -751,7 +751,7 @@ name = "my-framework"
 enablers = ["my-framework-pkg"]
 entryPoints = ["src/routes/**/*.tsx"]
 "#;
-        let config: FallowConfig = toml::from_str(toml_str).unwrap();
+        let config: PlowConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(config.framework.len(), 1);
         assert_eq!(config.framework[0].name, "my-framework");
         assert_eq!(config.framework[0].enablers, vec!["my-framework-pkg"]);
@@ -767,7 +767,7 @@ entryPoints = ["src/routes/**/*.tsx"]
 [fix.catalog]
 deletePrecedingComments = "never"
 "#;
-        let config: FallowConfig = toml::from_str(toml_str).unwrap();
+        let config: PlowConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(
             config.fix.catalog.delete_preceding_comments,
             CatalogPrecedingCommentPolicy::Never
@@ -780,7 +780,7 @@ deletePrecedingComments = "never"
 [workspaces]
 patterns = ["packages/*", "apps/*"]
 "#;
-        let config: FallowConfig = toml::from_str(toml_str).unwrap();
+        let config: PlowConfig = toml::from_str(toml_str).unwrap();
         assert!(config.workspaces.is_some());
         let ws = config.workspaces.unwrap();
         assert_eq!(ws.patterns, vec!["packages/*", "apps/*"]);
@@ -793,7 +793,7 @@ patterns = ["packages/*", "apps/*"]
 file = "src/types/**/*.ts"
 exports = ["*"]
 "#;
-        let config: FallowConfig = toml::from_str(toml_str).unwrap();
+        let config: PlowConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(config.ignore_exports.len(), 1);
         assert_eq!(config.ignore_exports[0].file, "src/types/**/*.ts");
         assert_eq!(config.ignore_exports[0].exports, vec!["*"]);
@@ -807,7 +807,7 @@ usedClassMembers = [
   { extends = "BaseCommand", members = ["execute"] },
 ]
 "#;
-        let config: FallowConfig = toml::from_str(toml_str).unwrap();
+        let config: PlowConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(
             config.used_class_members,
             vec![
@@ -827,9 +827,8 @@ usedClassMembers = [
 
     #[test]
     fn deserialize_json_used_class_members_rejects_unconstrained_scoped_rules() {
-        let result = serde_json::from_str::<FallowConfig>(
-            r#"{"usedClassMembers":[{"members":["refresh"]}]}"#,
-        );
+        let result =
+            serde_json::from_str::<PlowConfig>(r#"{"usedClassMembers":[{"members":["refresh"]}]}"#);
         assert!(
             result.is_err(),
             "unconstrained scoped rule should be rejected"
@@ -838,7 +837,7 @@ usedClassMembers = [
 
     #[test]
     fn deserialize_ignore_exports_used_in_file_bool() {
-        let config: FallowConfig =
+        let config: PlowConfig =
             serde_json::from_str(r#"{"ignoreExportsUsedInFile":true}"#).unwrap();
 
         assert!(config.ignore_exports_used_in_file.suppresses(false));
@@ -847,7 +846,7 @@ usedClassMembers = [
 
     #[test]
     fn deserialize_ignore_exports_used_in_file_kind_form() {
-        let config: FallowConfig =
+        let config: PlowConfig =
             serde_json::from_str(r#"{"ignoreExportsUsedInFile":{"type":true}}"#).unwrap();
 
         assert!(!config.ignore_exports_used_in_file.suppresses(false));
@@ -857,28 +856,28 @@ usedClassMembers = [
     #[test]
     fn deserialize_toml_deny_unknown_fields() {
         let toml_str = r"bogus_field = true";
-        let result: Result<FallowConfig, _> = toml::from_str(toml_str);
+        let result: Result<PlowConfig, _> = toml::from_str(toml_str);
         assert!(result.is_err(), "unknown fields should be rejected");
     }
 
     #[test]
     fn json_serialize_roundtrip() {
-        let config = FallowConfig {
+        let config = PlowConfig {
             entry: vec!["src/main.ts".to_string()],
             production: true.into(),
-            ..FallowConfig::default()
+            ..PlowConfig::default()
         };
         let json = serde_json::to_string(&config).unwrap();
-        let restored: FallowConfig = serde_json::from_str(&json).unwrap();
+        let restored: PlowConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(restored.entry, vec!["src/main.ts"]);
         assert!(restored.production);
     }
 
     #[test]
     fn schema_field_not_serialized() {
-        let config = FallowConfig {
+        let config = PlowConfig {
             schema: Some("https://example.com/schema.json".to_string()),
-            ..FallowConfig::default()
+            ..PlowConfig::default()
         };
         let json = serde_json::to_string(&config).unwrap();
         assert!(
@@ -889,9 +888,9 @@ usedClassMembers = [
 
     #[test]
     fn extends_field_not_serialized() {
-        let config = FallowConfig {
+        let config = PlowConfig {
             extends: vec!["base.json".to_string()],
-            ..FallowConfig::default()
+            ..PlowConfig::default()
         };
         let json = serde_json::to_string(&config).unwrap();
         assert!(
@@ -912,7 +911,7 @@ usedClassMembers = [
                 }
             }
         }"#;
-        let config: FallowConfig = serde_json::from_str(json).unwrap();
+        let config: PlowConfig = serde_json::from_str(json).unwrap();
         let regression = config.regression.unwrap();
         let baseline = regression.baseline.unwrap();
         assert_eq!(baseline.total_issues, 42);
@@ -925,7 +924,7 @@ usedClassMembers = [
 
     #[test]
     fn regression_config_defaults_to_none() {
-        let config: FallowConfig = serde_json::from_str("{}").unwrap();
+        let config: PlowConfig = serde_json::from_str("{}").unwrap();
         assert!(config.regression.is_none());
     }
 
@@ -961,12 +960,12 @@ usedClassMembers = [
         let regression = RegressionConfig {
             baseline: Some(baseline),
         };
-        let config = FallowConfig {
+        let config = PlowConfig {
             regression: Some(regression),
-            ..FallowConfig::default()
+            ..PlowConfig::default()
         };
         let json = serde_json::to_string(&config).unwrap();
-        let restored: FallowConfig = serde_json::from_str(&json).unwrap();
+        let restored: PlowConfig = serde_json::from_str(&json).unwrap();
         let restored_baseline = restored.regression.unwrap().baseline.unwrap();
         assert_eq!(restored_baseline.total_issues, 100);
         assert_eq!(restored_baseline.unused_files, 20);
@@ -977,16 +976,16 @@ usedClassMembers = [
     #[test]
     fn regression_config_empty_baseline_deserialize() {
         let json = r#"{"regression": {}}"#;
-        let config: FallowConfig = serde_json::from_str(json).unwrap();
+        let config: PlowConfig = serde_json::from_str(json).unwrap();
         let regression = config.regression.unwrap();
         assert!(regression.baseline.is_none());
     }
 
     #[test]
     fn regression_baseline_not_serialized_when_none() {
-        let config = FallowConfig {
+        let config = PlowConfig {
             regression: None,
-            ..FallowConfig::default()
+            ..PlowConfig::default()
         };
         let json = serde_json::to_string(&config).unwrap();
         assert!(
@@ -1008,7 +1007,7 @@ usedClassMembers = [
                 }
             ]
         }"#;
-        let config: FallowConfig = serde_json::from_str(json).unwrap();
+        let config: PlowConfig = serde_json::from_str(json).unwrap();
         assert_eq!(config.overrides.len(), 1);
         assert_eq!(config.overrides[0].files.len(), 2);
         assert_eq!(
@@ -1025,7 +1024,7 @@ usedClassMembers = [
                 "preset": "layered"
             }
         }"#;
-        let config: FallowConfig = serde_json::from_str(json).unwrap();
+        let config: PlowConfig = serde_json::from_str(json).unwrap();
         assert_eq!(config.boundaries.preset, Some(BoundaryPreset::Layered));
     }
 
@@ -1037,7 +1036,7 @@ totalIssues = 50
 unusedFiles = 10
 unusedExports = 15
 ";
-        let config: FallowConfig = toml::from_str(toml_str).unwrap();
+        let config: PlowConfig = toml::from_str(toml_str).unwrap();
         let baseline = config.regression.unwrap().baseline.unwrap();
         assert_eq!(baseline.total_issues, 50);
         assert_eq!(baseline.unused_files, 10);
@@ -1059,7 +1058,7 @@ files = ["*.stories.tsx"]
 [overrides.rules]
 unused-files = "off"
 "#;
-        let config: FallowConfig = toml::from_str(toml_str).unwrap();
+        let config: PlowConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(config.overrides.len(), 2);
         assert_eq!(
             config.overrides[0].rules.unused_exports,
@@ -1083,7 +1082,7 @@ unused-files = "off"
                 {"file": "src/index.ts", "exports": ["default"]}
             ]
         }"#;
-        let config: FallowConfig = serde_json::from_str(json).unwrap();
+        let config: PlowConfig = serde_json::from_str(json).unwrap();
         assert_eq!(config.ignore_exports.len(), 3);
         assert_eq!(config.ignore_exports[2].exports, vec!["default"]);
     }
@@ -1091,7 +1090,7 @@ unused-files = "off"
     #[test]
     fn deserialize_json_public_packages_camel_case() {
         let json = r#"{"publicPackages": ["@myorg/shared-lib", "@myorg/utils"]}"#;
-        let config: FallowConfig = serde_json::from_str(json).unwrap();
+        let config: PlowConfig = serde_json::from_str(json).unwrap();
         assert_eq!(
             config.public_packages,
             vec!["@myorg/shared-lib", "@myorg/utils"]
@@ -1101,7 +1100,7 @@ unused-files = "off"
     #[test]
     fn deserialize_json_public_packages_rejects_snake_case() {
         let json = r#"{"public_packages": ["@myorg/shared-lib"]}"#;
-        let result: Result<FallowConfig, _> = serde_json::from_str(json);
+        let result: Result<PlowConfig, _> = serde_json::from_str(json);
         assert!(
             result.is_err(),
             "snake_case should be rejected by deny_unknown_fields + rename_all camelCase"
@@ -1110,7 +1109,7 @@ unused-files = "off"
 
     #[test]
     fn deserialize_json_public_packages_empty() {
-        let config: FallowConfig = serde_json::from_str("{}").unwrap();
+        let config: PlowConfig = serde_json::from_str("{}").unwrap();
         assert!(config.public_packages.is_empty());
     }
 
@@ -1119,7 +1118,7 @@ unused-files = "off"
         let toml_str = r#"
 publicPackages = ["@myorg/shared-lib", "@myorg/ui"]
 "#;
-        let config: FallowConfig = toml::from_str(toml_str).unwrap();
+        let config: PlowConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(
             config.public_packages,
             vec!["@myorg/shared-lib", "@myorg/ui"]
@@ -1128,12 +1127,12 @@ publicPackages = ["@myorg/shared-lib", "@myorg/ui"]
 
     #[test]
     fn public_packages_serialize_roundtrip() {
-        let config = FallowConfig {
+        let config = PlowConfig {
             public_packages: vec!["@myorg/shared-lib".to_string()],
-            ..FallowConfig::default()
+            ..PlowConfig::default()
         };
         let json = serde_json::to_string(&config).unwrap();
-        let restored: FallowConfig = serde_json::from_str(&json).unwrap();
+        let restored: PlowConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(restored.public_packages, vec!["@myorg/shared-lib"]);
     }
 }

@@ -112,8 +112,8 @@ describe("downloadCliBinary network error paths", () => {
   beforeEach(reset);
 
   it("returns null and prompts when the release contains no matching CLI asset", async () => {
-    // Valid 200 release JSON, but no fallow-darwin-arm64 asset in it.
-    httpsState.body = releaseBody([{ name: "fallow-linux-x64-gnu" }]);
+    // Valid 200 release JSON, but no plow-darwin-arm64 asset in it.
+    httpsState.body = releaseBody([{ name: "plow-linux-x64-gnu" }]);
 
     const result = await downloadCliBinary(fakeContext);
 
@@ -152,7 +152,7 @@ describe("downloadBinary network error paths", () => {
   beforeEach(reset);
 
   it("returns null and prompts when the release contains no matching LSP asset", async () => {
-    httpsState.body = releaseBody([{ name: "fallow-lsp-linux-x64-gnu" }]);
+    httpsState.body = releaseBody([{ name: "plow-lsp-linux-x64-gnu" }]);
 
     const result = await downloadBinary(fakeContext);
 

@@ -73,8 +73,8 @@ vi.mock("../src/config.js", () => ({
 
 vi.mock("../src/binary-utils.js", () => ({
   getExecutableExtension: () => "",
-  findLocalBinary: (name: string) => (name === "fallow" ? mockLocalBinary : null),
-  findBinaryInPath: (name: string) => (name === "fallow" ? mockPathBinary : null),
+  findLocalBinary: (name: string) => (name === "plow" ? mockLocalBinary : null),
+  findBinaryInPath: (name: string) => (name === "plow" ? mockPathBinary : null),
 }));
 
 vi.mock("../src/download.js", () => ({
@@ -87,8 +87,8 @@ vi.mock("../src/download.js", () => ({
 import { window as mockWindow, workspace as mockWorkspace } from "vscode";
 import { downloadCliBinary, getInstalledCliPath } from "../src/download.js";
 import {
-  execFallow,
-  FallowExecError,
+  execPlow,
+  PlowExecError,
   findCliBinary,
   resolveCliBinary,
   resolveCliForRun,
@@ -185,10 +185,10 @@ const setWorkspaceRoot = (root: string | null): void => {
 
 const restoreMaxFileSizeEnv = (value: string | undefined): void => {
   if (value === undefined) {
-    delete process.env.FALLOW_MAX_FILE_SIZE;
+    delete process.env.PLOW_MAX_FILE_SIZE;
     return;
   }
-  process.env.FALLOW_MAX_FILE_SIZE = value;
+  process.env.PLOW_MAX_FILE_SIZE = value;
 };
 
 const readSpawnLog = async (
@@ -208,9 +208,9 @@ const readSpawnLog = async (
     );
 };
 
-describe("execFallow", () => {
+describe("execPlow", () => {
   it("preserves structured stdout on nonzero coverage gate exits", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "fallow-vscode-exec-"));
+    const dir = await mkdtemp(join(tmpdir(), "plow-vscode-exec-"));
     const structuredError = {
       error: true,
       message: "license missing",
@@ -231,13 +231,13 @@ describe("execFallow", () => {
 
       let caught: unknown = null;
       try {
-        await execFallow(process.execPath, [script], dir);
+        await execPlow(process.execPath, [script], dir);
       } catch (err) {
         caught = err;
       }
 
-      expect(caught).toBeInstanceOf(FallowExecError);
-      const error = caught as FallowExecError;
+      expect(caught).toBeInstanceOf(PlowExecError);
+      const error = caught as PlowExecError;
       expect(error.exitCode).toBe(3);
       expect(error.stdout).toBe(JSON.stringify(structuredError));
       expect(error.message).toBe("license gate failed");
@@ -247,7 +247,7 @@ describe("execFallow", () => {
   });
 
   it("rejects once with an actionable message when stdout exceeds the cap", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "fallow-vscode-exec-overflow-"));
+    const dir = await mkdtemp(join(tmpdir(), "plow-vscode-exec-overflow-"));
 
     try {
       // Stream well past the 50MB cap in chunks so the overflow trips inside a
@@ -267,7 +267,7 @@ describe("execFallow", () => {
 
       let caught: unknown = null;
       try {
-        await execFallow(process.execPath, [script], dir);
+        await execPlow(process.execPath, [script], dir);
       } catch (err) {
         caught = err;
       }
@@ -294,27 +294,27 @@ describe("findCliBinary", () => {
   });
 
   it("uses the CLI sibling of a configured LSP path first", async () => {
-    mockLspPath = "/tools/fallow-lsp";
-    mockFiles = new Set(["/tools/fallow"]);
-    mockLocalBinary = "/workspace/node_modules/.bin/fallow";
-    mockPathBinary = "/usr/local/bin/fallow";
-    mockInstalledCli = "/storage/bin/fallow";
+    mockLspPath = "/tools/plow-lsp";
+    mockFiles = new Set(["/tools/plow"]);
+    mockLocalBinary = "/workspace/node_modules/.bin/plow";
+    mockPathBinary = "/usr/local/bin/plow";
+    mockInstalledCli = "/storage/bin/plow";
 
-    expect(await findCliBinary(context)).toBe("/tools/fallow");
+    expect(await findCliBinary(context)).toBe("/tools/plow");
   });
 
   it("prefers the workspace CLI before PATH and managed storage", async () => {
-    mockLocalBinary = "/workspace/node_modules/.bin/fallow";
-    mockPathBinary = "/usr/local/bin/fallow";
-    mockInstalledCli = "/storage/bin/fallow";
+    mockLocalBinary = "/workspace/node_modules/.bin/plow";
+    mockPathBinary = "/usr/local/bin/plow";
+    mockInstalledCli = "/storage/bin/plow";
 
-    expect(await findCliBinary(context)).toBe("/workspace/node_modules/.bin/fallow");
+    expect(await findCliBinary(context)).toBe("/workspace/node_modules/.bin/plow");
   });
 
   it("uses the managed CLI after configured, workspace, and PATH lookups miss", async () => {
-    mockInstalledCli = "/storage/bin/fallow";
+    mockInstalledCli = "/storage/bin/plow";
 
-    expect(await findCliBinary(context)).toBe("/storage/bin/fallow");
+    expect(await findCliBinary(context)).toBe("/storage/bin/plow");
   });
 });
 
@@ -331,15 +331,15 @@ describe("resolveCliBinary", () => {
   });
 
   it("downloads the managed CLI when every higher-priority location misses", async () => {
-    mockDownloadedCli = "/storage/bin/fallow";
+    mockDownloadedCli = "/storage/bin/plow";
 
-    await expect(resolveCliBinary(context)).resolves.toBe("/storage/bin/fallow");
+    await expect(resolveCliBinary(context)).resolves.toBe("/storage/bin/plow");
     expect(downloadCliBinary).toHaveBeenCalledWith(context);
   });
 
   it("does not download the CLI when auto-download is disabled", async () => {
     mockAutoDownload = false;
-    mockDownloadedCli = "/storage/bin/fallow";
+    mockDownloadedCli = "/storage/bin/plow";
 
     await expect(resolveCliBinary(context)).resolves.toBeNull();
     expect(downloadCliBinary).not.toHaveBeenCalled();
@@ -361,11 +361,11 @@ describe("resolveCliForRun", () => {
   });
 
   it("uses a resolved CLI at the extension version as-is, without downloading", async () => {
-    mockPathBinary = "/usr/local/bin/ok-fallow";
-    mockBinaryVersions = { "/usr/local/bin/ok-fallow": "2.88.1" };
+    mockPathBinary = "/usr/local/bin/ok-plow";
+    mockBinaryVersions = { "/usr/local/bin/ok-plow": "2.88.1" };
 
     await expect(resolveCliForRun(context)).resolves.toEqual({
-      binary: "/usr/local/bin/ok-fallow",
+      binary: "/usr/local/bin/ok-plow",
       version: "2.88.1",
     });
     expect(getInstalledCliPath).not.toHaveBeenCalled();
@@ -373,42 +373,42 @@ describe("resolveCliForRun", () => {
   });
 
   it("uses a newer resolved CLI as-is (never downgrades)", async () => {
-    mockPathBinary = "/usr/local/bin/newer-fallow";
-    mockBinaryVersions = { "/usr/local/bin/newer-fallow": "2.99.0" };
+    mockPathBinary = "/usr/local/bin/newer-plow";
+    mockBinaryVersions = { "/usr/local/bin/newer-plow": "2.99.0" };
 
     await expect(resolveCliForRun(context)).resolves.toEqual({
-      binary: "/usr/local/bin/newer-fallow",
+      binary: "/usr/local/bin/newer-plow",
       version: "2.99.0",
     });
     expect(downloadCliBinary).not.toHaveBeenCalled();
   });
 
   it("switches a stale PATH CLI to the already-installed managed binary (no network)", async () => {
-    mockPathBinary = "/usr/local/bin/old-fallow";
-    mockInstalledCli = "/storage/bin/fallow";
+    mockPathBinary = "/usr/local/bin/old-plow";
+    mockInstalledCli = "/storage/bin/plow";
     mockBinaryVersions = {
-      "/usr/local/bin/old-fallow": "2.86.0",
-      "/storage/bin/fallow": "2.88.1",
+      "/usr/local/bin/old-plow": "2.86.0",
+      "/storage/bin/plow": "2.88.1",
     };
 
     await expect(resolveCliForRun(context)).resolves.toEqual({
-      binary: "/storage/bin/fallow",
+      binary: "/storage/bin/plow",
       version: "2.88.1",
     });
     expect(downloadCliBinary).not.toHaveBeenCalled();
   });
 
   it("downloads the managed binary once when a stale PATH CLI has no managed copy yet", async () => {
-    mockPathBinary = "/usr/local/bin/stale-fallow";
+    mockPathBinary = "/usr/local/bin/stale-plow";
     mockInstalledCli = null;
-    mockDownloadedCli = "/storage/bin/fallow";
+    mockDownloadedCli = "/storage/bin/plow";
     mockBinaryVersions = {
-      "/usr/local/bin/stale-fallow": "2.86.0",
-      "/storage/bin/fallow": "2.88.1",
+      "/usr/local/bin/stale-plow": "2.86.0",
+      "/storage/bin/plow": "2.88.1",
     };
 
     await expect(resolveCliForRun(context)).resolves.toEqual({
-      binary: "/storage/bin/fallow",
+      binary: "/storage/bin/plow",
       version: "2.88.1",
     });
     expect(downloadCliBinary).toHaveBeenCalledWith(context);
@@ -416,22 +416,22 @@ describe("resolveCliForRun", () => {
 
   it("keeps a stale CLI (degraded) when auto-download is disabled", async () => {
     mockAutoDownload = false;
-    mockPathBinary = "/usr/local/bin/pinned-fallow";
-    mockBinaryVersions = { "/usr/local/bin/pinned-fallow": "2.86.0" };
+    mockPathBinary = "/usr/local/bin/pinned-plow";
+    mockBinaryVersions = { "/usr/local/bin/pinned-plow": "2.86.0" };
 
     await expect(resolveCliForRun(context)).resolves.toEqual({
-      binary: "/usr/local/bin/pinned-fallow",
+      binary: "/usr/local/bin/pinned-plow",
       version: "2.86.0",
     });
     expect(downloadCliBinary).not.toHaveBeenCalled();
   });
 
   it("does not force an upgrade when the resolved CLI version is unknown", async () => {
-    mockPathBinary = "/usr/local/bin/unknown-fallow";
-    mockBinaryVersions = { "/usr/local/bin/unknown-fallow": null };
+    mockPathBinary = "/usr/local/bin/unknown-plow";
+    mockBinaryVersions = { "/usr/local/bin/unknown-plow": null };
 
     await expect(resolveCliForRun(context)).resolves.toEqual({
-      binary: "/usr/local/bin/unknown-fallow",
+      binary: "/usr/local/bin/unknown-plow",
       version: null,
     });
     expect(downloadCliBinary).not.toHaveBeenCalled();
@@ -454,20 +454,20 @@ describe("runAnalysis retry backoff", () => {
   });
 
   it("runs analysis with the default max-file-size ceiling", async () => {
-    const originalLimit = process.env.FALLOW_MAX_FILE_SIZE;
-    const dir = await mkdtemp(join(tmpdir(), "fallow-vscode-analysis-env-"));
-    const script = join(dir, "fallow-cli.js");
+    const originalLimit = process.env.PLOW_MAX_FILE_SIZE;
+    const dir = await mkdtemp(join(tmpdir(), "plow-vscode-analysis-env-"));
+    const script = join(dir, "plow-cli.js");
     const logPath = join(dir, "spawn.log");
     const output = JSON.stringify({ check: emptyCheck, dupes: emptyDupes });
 
     try {
-      delete process.env.FALLOW_MAX_FILE_SIZE;
+      delete process.env.PLOW_MAX_FILE_SIZE;
       await writeFile(
         script,
         [
           "#!/usr/bin/env node",
           'const fs = require("node:fs");',
-          `fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ env: process.env.FALLOW_MAX_FILE_SIZE, args: process.argv.slice(2) }) + "\\n");`,
+          `fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ env: process.env.PLOW_MAX_FILE_SIZE, args: process.argv.slice(2) }) + "\\n");`,
           `process.stdout.write(${JSON.stringify(output)});`,
         ].join("\n"),
         "utf8",
@@ -494,8 +494,8 @@ describe("runAnalysis retry backoff", () => {
   });
 
   it("stops automatic reruns after repeated analysis failures", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "fallow-vscode-analysis-backoff-"));
-    const script = join(dir, "fallow-cli.js");
+    const dir = await mkdtemp(join(tmpdir(), "plow-vscode-analysis-backoff-"));
+    const script = join(dir, "plow-cli.js");
     const logPath = join(dir, "spawn.log");
     const backoff = new AnalysisFailureBackoff();
 
@@ -505,7 +505,7 @@ describe("runAnalysis retry backoff", () => {
         [
           "#!/usr/bin/env node",
           'const fs = require("node:fs");',
-          `fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ env: process.env.FALLOW_MAX_FILE_SIZE, args: process.argv.slice(2) }) + "\\n");`,
+          `fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ env: process.env.PLOW_MAX_FILE_SIZE, args: process.argv.slice(2) }) + "\\n");`,
           'process.stderr.write("boom\\n");',
           "process.exit(2);",
         ].join("\n"),
@@ -526,7 +526,7 @@ describe("runAnalysis retry backoff", () => {
       let calls = await readSpawnLog(logPath);
       expect(calls).toHaveLength(3);
       expect(mockWindow.showErrorMessage).toHaveBeenCalledWith(
-        expect.stringContaining("Fallow analysis paused after 3 failed attempts"),
+        expect.stringContaining("Plow analysis paused after 3 failed attempts"),
         "Retry now",
       );
 
@@ -542,8 +542,8 @@ describe("runAnalysis retry backoff", () => {
   });
 
   it("clears previous failures after a successful empty analysis run", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "fallow-vscode-analysis-reset-"));
-    const script = join(dir, "fallow-cli.js");
+    const dir = await mkdtemp(join(tmpdir(), "plow-vscode-analysis-reset-"));
+    const script = join(dir, "plow-cli.js");
     const logPath = join(dir, "spawn.log");
     const modePath = join(dir, "mode.txt");
     const backoff = new AnalysisFailureBackoff();
@@ -555,7 +555,7 @@ describe("runAnalysis retry backoff", () => {
         [
           "#!/usr/bin/env node",
           'const fs = require("node:fs");',
-          `fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ env: process.env.FALLOW_MAX_FILE_SIZE, args: process.argv.slice(2) }) + "\\n");`,
+          `fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ env: process.env.PLOW_MAX_FILE_SIZE, args: process.argv.slice(2) }) + "\\n");`,
           `if (fs.readFileSync(${JSON.stringify(modePath)}, "utf8").trim() === "fail") {`,
           '  process.stderr.write("boom\\n");',
           "  process.exit(2);",
@@ -610,7 +610,7 @@ describe("runHealthAnalysis no-workspace gate (#902)", () => {
     await expect(runHealthAnalysis(context)).resolves.toBeNull();
 
     expect(mockWindow.showWarningMessage).toHaveBeenCalledTimes(1);
-    expect(mockWindow.showWarningMessage).toHaveBeenCalledWith("Fallow: no workspace folder open.");
+    expect(mockWindow.showWarningMessage).toHaveBeenCalledWith("Plow: no workspace folder open.");
   });
 
   it("warns again after the once-per-session gate is reset (reactivation)", async () => {
@@ -643,15 +643,15 @@ describe("runHealthAnalysis return type (envelope reachable)", () => {
   // reachable on the resolved value WITHOUT a cast. Reading them here would not
   // type-check if the declaration narrowed back to the report body.
   it("resolves a value whose envelope fields are typed and present", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "fallow-vscode-health-envelope-"));
-    const script = join(dir, "fallow-cli.js");
+    const dir = await mkdtemp(join(tmpdir(), "plow-vscode-health-envelope-"));
+    const script = join(dir, "plow-cli.js");
     const output = JSON.stringify({
       schema_version: 7,
       version: "9.9.9-test",
       elapsed_ms: 12,
       findings: [],
       summary: {},
-      next_steps: [{ id: "health-clean", title: "Project is healthy", command: "fallow health" }],
+      next_steps: [{ id: "health-clean", title: "Project is healthy", command: "plow health" }],
     });
 
     try {

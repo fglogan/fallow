@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_config::{ResolvedConfig, WorkspaceInfo};
+use plow_config::{ResolvedConfig, WorkspaceInfo};
 
 use crate::discover::FileId;
 use crate::graph::ModuleGraph;
@@ -54,7 +54,7 @@ struct Occurrence<'a> {
 /// [`DynamicSegmentNameConflict`] per involved file; `conflicting_segments`
 /// lists the distinct spellings at the position and `conflicting_paths` lists
 /// the other involved files. A file carrying a
-/// `// fallow-ignore-file dynamic-segment-name-conflict` marker is skipped via
+/// `// plow-ignore-file dynamic-segment-name-conflict` marker is skipped via
 /// [`SuppressionContext`].
 #[must_use]
 pub fn find_dynamic_segment_name_conflicts(

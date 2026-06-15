@@ -1,10 +1,10 @@
-//! `fallow license` subcommand: activate, status, refresh, deactivate.
+//! `plow license` subcommand: activate, status, refresh, deactivate.
 //!
 //! All entry points are dispatched from [`run`]. Network-bound flows
-//! (`refresh`, `activate --trial`) fetch a JWT from `api.fallow.cloud` and
+//! (`refresh`, `activate --trial`) fetch a JWT from `api.plow.cloud` and
 //! then pass it through the same offline verifier used by the local activation
 //! path. Local flows (`activate <jwt>`, `status`, `deactivate`) are fully
-//! wired against [`fallow_license`].
+//! wired against [`plow_license`].
 //!
 //! # Public key
 //!
@@ -15,8 +15,8 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use ed25519_dalek::VerifyingKey;
-use fallow_config::OutputFormat;
-use fallow_license::{
+use plow_config::OutputFormat;
+use plow_license::{
     DEFAULT_HARD_FAIL_DAYS, Feature, LicenseClaims, LicenseError, LicenseStatus,
     current_unix_seconds, default_license_path, normalize_jwt, skew_tolerance_seconds_from_env,
     verify_jwt_with_skew,
@@ -27,7 +27,7 @@ use crate::api::{
     NETWORK_EXIT_CODE, api_url, http_status_message, sanitize_network_error, try_api_agent,
 };
 
-/// Ed25519 verification key for fallow license JWT validation.
+/// Ed25519 verification key for plow license JWT validation.
 #[cfg(not(feature = "test-sidecar-key"))]
 pub const PUBLIC_KEY_BYTES: [u8; 32] = [
     179, 203, 218, 13, 98, 63, 103, 172, 91, 108, 23, 122, 27, 101, 200, 182, 174, 117, 160, 41,
@@ -43,21 +43,21 @@ pub const PUBLIC_KEY_BYTES: [u8; 32] = [
     0x7d, 0x59, 0xc5, 0x62, 0x3d, 0xd4, 0x0a, 0x74, 0xaa, 0x4d, 0x5a, 0x32, 0xac, 0x64, 0x5d, 0x3b,
     0x3f, 0x95, 0xda, 0xea, 0xe4, 0xc2, 0x2b, 0xe2, 0x54, 0x76, 0xdd, 0x6a, 0x48, 0x6f, 0x73, 0x82,
 ];
-/// Subcommands for `fallow license`.
+/// Subcommands for `plow license`.
 #[derive(Debug)]
 pub enum LicenseSubcommand {
-    /// Install a license JWT into `~/.fallow/license.jwt`.
+    /// Install a license JWT into `~/.plow/license.jwt`.
     Activate(ActivateArgs),
     /// Print active license tier, seats, features, days remaining.
     Status,
-    /// Fetch a fresh JWT from `api.fallow.cloud`, verify it offline, and
+    /// Fetch a fresh JWT from `api.plow.cloud`, verify it offline, and
     /// persist it to the active license path.
     Refresh,
     /// Remove the local license file.
     Deactivate,
 }
 
-/// Arguments for `fallow license activate`.
+/// Arguments for `plow license activate`.
 #[derive(Clone, Default)]
 pub struct ActivateArgs {
     /// JWT passed directly as a positional argument.
@@ -66,7 +66,7 @@ pub struct ActivateArgs {
     pub from_file: Option<PathBuf>,
     /// Read JWT from stdin.
     pub from_stdin: bool,
-    /// Issue a 30-day email-gated trial via `api.fallow.cloud` and persist
+    /// Issue a 30-day email-gated trial via `api.plow.cloud` and persist
     /// the returned JWT in one step.
     pub trial: bool,
     /// Email used for the trial flow (required when `trial = true`).
@@ -124,7 +124,7 @@ impl LicenseKind {
     }
 }
 
-/// Dispatch a `fallow license <sub>` invocation.
+/// Dispatch a `plow license <sub>` invocation.
 ///
 /// `output` is the globally-resolved [`OutputFormat`]; the human path is
 /// byte-for-byte unchanged from before, and `--format json` switches every
@@ -145,7 +145,7 @@ fn fail(message: &str, exit_code: u8, json: bool) -> ExitCode {
     if json {
         emit_error_json(message, exit_code);
     } else {
-        eprintln!("fallow license: {message}");
+        eprintln!("plow license: {message}");
     }
     ExitCode::from(exit_code)
 }
@@ -212,7 +212,7 @@ fn run_status(json: bool) -> ExitCode {
         Ok(k) => k,
         Err(msg) => return fail(&msg, 2, json),
     };
-    match fallow_license::load_and_verify(&key, DEFAULT_HARD_FAIL_DAYS) {
+    match plow_license::load_and_verify(&key, DEFAULT_HARD_FAIL_DAYS) {
         Ok(status) => {
             emit_status(&status, LicenseKind::Status, json);
             match status {
@@ -253,7 +253,7 @@ fn run_deactivate(json: bool) -> ExitCode {
         if json {
             print_deactivate_json(&path, false);
         } else {
-            println!("fallow license: no license file at {}", path.display());
+            println!("plow license: no license file at {}", path.display());
         }
         return ExitCode::SUCCESS;
     }
@@ -262,7 +262,7 @@ fn run_deactivate(json: bool) -> ExitCode {
             if json {
                 print_deactivate_json(&path, true);
             } else {
-                println!("fallow license: removed {}", path.display());
+                println!("plow license: removed {}", path.display());
             }
             ExitCode::SUCCESS
         }
@@ -298,7 +298,7 @@ fn read_jwt(args: &ActivateArgs) -> Result<String, String> {
 fn persist_jwt(jwt: &str, json: bool) -> Result<(), String> {
     let path = write_jwt(jwt)?;
     if !json {
-        println!("fallow license: stored at {}", path.display());
+        println!("plow license: stored at {}", path.display());
     }
     Ok(())
 }
@@ -340,7 +340,7 @@ fn restrict_license_permissions(_path: &Path) -> Result<(), String> {
 
 /// Construct the compiled-in Ed25519 verification key.
 ///
-/// Crate-internal so other CLI subcommands (e.g. `fallow coverage setup`)
+/// Crate-internal so other CLI subcommands (e.g. `plow coverage setup`)
 /// can also detect license state without re-implementing key construction.
 pub fn verifying_key() -> Result<VerifyingKey, String> {
     VerifyingKey::from_bytes(&PUBLIC_KEY_BYTES)
@@ -376,10 +376,10 @@ pub fn refresh_active_license(json: bool) -> Result<LicenseStatus, String> {
 }
 
 fn load_current_jwt() -> Result<String, String> {
-    match fallow_license::load_raw_jwt() {
+    match plow_license::load_raw_jwt() {
         Ok(Some(jwt)) => Ok(jwt),
         Ok(None) => Err(
-            "no license found. Run: fallow license activate --trial --email you@company.com"
+            "no license found. Run: plow license activate --trial --email you@company.com"
                 .to_owned(),
         ),
         Err(err) => Err(format!("failed to read the current license: {err}")),
@@ -399,11 +399,11 @@ fn store_verified_jwt(
     let status = verify_downloaded_jwt(&jwt)?;
     let path = write_jwt(&jwt)?;
     if !json {
-        println!("fallow license: stored at {}", path.display());
+        println!("plow license: stored at {}", path.display());
         if let Some(trial_ends_at) = payload.trial_ends_at.as_deref() {
             let trimmed = trial_ends_at.trim();
             if !trimmed.is_empty() {
-                println!("fallow license: trial ends at {trimmed}");
+                println!("plow license: trial ends at {trimmed}");
             }
         }
     }
@@ -444,7 +444,7 @@ fn print_status(status: &LicenseStatus) {
                 && current_unix_seconds() >= refresh_after
             {
                 println!(
-                    "  refresh suggested now: fallow license refresh (prevents CI breakage before expiry)"
+                    "  refresh suggested now: plow license refresh (prevents CI breakage before expiry)"
                 );
             }
         }
@@ -454,7 +454,7 @@ fn print_status(status: &LicenseStatus) {
         } => {
             println!(
                 "license: EXPIRED ({days_since_expiry} days ago), analysis still runs in the warning window. \
-                 Refresh: fallow license refresh"
+                 Refresh: plow license refresh"
             );
             println!(
                 "  tier={} seats={} features={}",
@@ -469,7 +469,7 @@ fn print_status(status: &LicenseStatus) {
         } => {
             println!(
                 "license: EXPIRED ({days_since_expiry} days ago), output will show a watermark until refreshed. \
-                 Refresh: fallow license refresh"
+                 Refresh: plow license refresh"
             );
             println!(
                 "  tier={} seats={} features={}",
@@ -483,12 +483,12 @@ fn print_status(status: &LicenseStatus) {
         } => {
             println!(
                 "license: EXPIRED ({days_since_expiry} days ago, past grace window), paid features blocked. \
-                 Refresh: fallow license refresh, or fallow license activate --trial --email <addr>"
+                 Refresh: plow license refresh, or plow license activate --trial --email <addr>"
             );
         }
         LicenseStatus::Missing => {
             println!(
-                "license: NOT FOUND. Start a 30-day trial: fallow license activate --trial --email you@company.com"
+                "license: NOT FOUND. Start a 30-day trial: plow license activate --trial --email you@company.com"
             );
         }
     }
@@ -616,19 +616,19 @@ const fn plural(n: u64) -> &'static str {
     if n == 1 { "" } else { "s" }
 }
 
-/// Sentinel reported for the inline-JWT source: `$FALLOW_LICENSE` carries the
+/// Sentinel reported for the inline-JWT source: `$PLOW_LICENSE` carries the
 /// JWT string directly, so there is no file path to point at.
-const INLINE_LICENSE_SENTINEL: &str = "<inline FALLOW_LICENSE>";
+const INLINE_LICENSE_SENTINEL: &str = "<inline PLOW_LICENSE>";
 
 /// Resolve the license source the loader would actually use, mirroring the
-/// precedence in `fallow_license::load_raw_jwt`: `$FALLOW_LICENSE` (inline JWT)
-/// wins over `$FALLOW_LICENSE_PATH` (file), which wins over the canonical
+/// precedence in `plow_license::load_raw_jwt`: `$PLOW_LICENSE` (inline JWT)
+/// wins over `$PLOW_LICENSE_PATH` (file), which wins over the canonical
 /// default path. The inline case has no file to point at, so it reports the
 /// [`INLINE_LICENSE_SENTINEL`] rather than a misleading default file path.
 fn active_license_path() -> String {
     resolve_active_license_path(
-        std::env::var("FALLOW_LICENSE").ok().as_deref(),
-        std::env::var("FALLOW_LICENSE_PATH").ok().as_deref(),
+        std::env::var("PLOW_LICENSE").ok().as_deref(),
+        std::env::var("PLOW_LICENSE_PATH").ok().as_deref(),
     )
 }
 
@@ -694,7 +694,7 @@ fn print_status_json(status: &LicenseStatus, kind: LicenseKind) {
     print_json_payload(&payload);
 }
 
-/// JSON envelope for `fallow license deactivate --format json`.
+/// JSON envelope for `plow license deactivate --format json`.
 ///
 /// Deactivation leaves no active license, so the payload reuses the full
 /// `LicenseStatusJson` shape for the `Missing` state (every documented field is
@@ -721,7 +721,7 @@ fn print_deactivate_json(path: &Path, removed: bool) {
 fn print_json_payload(payload: &LicenseStatusJson) {
     match serde_json::to_string_pretty(payload) {
         Ok(json) => println!("{json}"),
-        Err(err) => eprintln!("fallow license: failed to serialize JSON output: {err}"),
+        Err(err) => eprintln!("plow license: failed to serialize JSON output: {err}"),
     }
 }
 
@@ -830,7 +830,7 @@ mod tests {
 
     fn sample_claims(features: &[&str]) -> LicenseClaims {
         LicenseClaims {
-            iss: "https://api.fallow.cloud".to_owned(),
+            iss: "https://api.plow.cloud".to_owned(),
             sub: "org_1".to_owned(),
             tid: "tenant_1".to_owned(),
             seats: 5,
@@ -911,13 +911,13 @@ mod tests {
     fn active_license_path_reports_inline_sentinel_over_file_and_default() {
         // Inline JWT wins, even when a path is also set (loader precedence).
         assert_eq!(
-            resolve_active_license_path(Some("eyJ.payload.sig"), Some("/etc/fallow/license.jwt")),
+            resolve_active_license_path(Some("eyJ.payload.sig"), Some("/etc/plow/license.jwt")),
             INLINE_LICENSE_SENTINEL
         );
         // Whitespace-only inline value is ignored; the path is reported.
         assert_eq!(
-            resolve_active_license_path(Some("   "), Some("/etc/fallow/license.jwt")),
-            "/etc/fallow/license.jwt"
+            resolve_active_license_path(Some("   "), Some("/etc/plow/license.jwt")),
+            "/etc/plow/license.jwt"
         );
         // No env override falls back to the canonical default path.
         assert_eq!(

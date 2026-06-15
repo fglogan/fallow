@@ -7,7 +7,7 @@ body:
     attributes:
       label: What happened?
       description: A clear description of the bug.
-      placeholder: "fallow reports `foo` as unused, but it's imported in `bar.ts`."
+      placeholder: "plow reports `foo` as unused, but it's imported in `bar.ts`."
     validations:
       required: true
 
@@ -19,7 +19,7 @@ body:
       placeholder: |
         1. Create a file `src/index.ts` with `export const foo = 1`
         2. Create a file `src/bar.ts` with `import { foo } from './index'`
-        3. Run `fallow dead-code`
+        3. Run `plow dead-code`
         4. `foo` is incorrectly reported as unused
     validations:
       required: true
@@ -35,8 +35,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: Fallow version
-      description: Output of `fallow --version`
+      label: Plow version
+      description: Output of `plow --version`
       placeholder: "0.1.0"
     validations:
       required: true
@@ -56,7 +56,7 @@ body:
     id: config
     attributes:
       label: Configuration
-      description: Contents of your `fallow.toml` (if any).
+      description: Contents of your `plow.toml` (if any).
       render: toml
     validations:
       required: false

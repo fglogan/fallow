@@ -3,8 +3,8 @@
 use std::ops::Range;
 use std::path::PathBuf;
 
-use fallow_types::discover::FileId;
-use fallow_types::extract::{ExportName, VisibilityTag};
+use plow_types::discover::FileId;
+use plow_types::extract::{ExportName, VisibilityTag};
 
 /// A single module in the graph.
 ///
@@ -172,7 +172,7 @@ pub struct ExportSymbol {
     /// Which files reference this export.
     pub references: Vec<SymbolReference>,
     /// Members of this export (enum members, class members).
-    pub members: Vec<fallow_types::extract::MemberInfo>,
+    pub members: Vec<plow_types::extract::MemberInfo>,
 }
 
 /// A reference to an export from another file.

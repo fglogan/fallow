@@ -9,7 +9,7 @@ use std::sync::LazyLock;
 use oxc_span::Span;
 
 use crate::{ExportInfo, ExportName, ImportInfo, ImportedName, ModuleInfo, VisibilityTag};
-use fallow_types::discover::FileId;
+use plow_types::discover::FileId;
 
 /// Regex to extract CSS @import sources.
 /// Matches: @import "path"; @import 'path'; @import url("path"); @import url('path'); @import url(path);
@@ -77,12 +77,12 @@ pub(crate) fn is_css_file(path: &Path) -> bool {
         .is_some_and(|ext| ext == "css" || ext == "scss")
 }
 
-/// A CSS import source with both the literal source and fallow's resolver-normalized form.
+/// A CSS import source with both the literal source and plow's resolver-normalized form.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CssImportSource {
     /// The import source exactly as it appeared in `@import` / `@use` / `@forward` / `@plugin`.
     pub raw: String,
-    /// The source normalized for fallow's resolver (`variables` -> `./variables` in SCSS).
+    /// The source normalized for plow's resolver (`variables` -> `./variables` in SCSS).
     pub normalized: String,
     /// Whether this source came from Tailwind CSS `@plugin`.
     pub is_plugin: bool,
@@ -397,7 +397,7 @@ pub(crate) fn parse_css_to_module(
         unused_import_bindings: Vec::new(),
         type_referenced_import_bindings: Vec::new(),
         value_referenced_import_bindings: Vec::new(),
-        line_offsets: fallow_types::extract::compute_line_offsets(source),
+        line_offsets: plow_types::extract::compute_line_offsets(source),
         complexity: Vec::new(),
         flag_uses: Vec::new(),
         class_heritage: vec![],
@@ -888,8 +888,8 @@ mod tests {
     #[test]
     fn normalize_scoped_package_without_extension_stays_bare() {
         assert_eq!(
-            normalize_css_import_path("@fallow/design-system/styles".to_string(), false),
-            "@fallow/design-system/styles"
+            normalize_css_import_path("@plow/design-system/styles".to_string(), false),
+            "@plow/design-system/styles"
         );
     }
 
@@ -943,9 +943,9 @@ mod tests {
     #[test]
     fn css_module_parses_suppressions() {
         let info = parse_css_to_module(
-            fallow_types::discover::FileId(0),
+            plow_types::discover::FileId(0),
             Path::new("Component.module.css"),
-            "/* fallow-ignore-file */\n.btn { color: red; }",
+            "/* plow-ignore-file */\n.btn { color: red; }",
             0,
         );
         assert!(!info.suppressions.is_empty());
@@ -1064,8 +1064,8 @@ mod tests {
     /// Resolve a span's start to (line, col) using the same primitives the
     /// downstream pipeline uses in `crates/core/src/analyze/unused_exports.rs`.
     fn span_line_col(source: &str, start: u32) -> (u32, u32) {
-        let offsets = fallow_types::extract::compute_line_offsets(source);
-        fallow_types::extract::byte_offset_to_line_col(&offsets, start)
+        let offsets = plow_types::extract::compute_line_offsets(source);
+        plow_types::extract::byte_offset_to_line_col(&offsets, start)
     }
 
     #[test]
@@ -1180,13 +1180,13 @@ mod tests {
     fn parse_css_to_module_resolves_real_line_offsets() {
         let source = "\n\n\n\n.foo { color: red; }\n";
         let info = parse_css_to_module(
-            fallow_types::discover::FileId(0),
+            plow_types::discover::FileId(0),
             Path::new("Component.module.css"),
             source,
             0,
         );
         assert_eq!(info.exports.len(), 1);
-        let (line, _col) = fallow_types::extract::byte_offset_to_line_col(
+        let (line, _col) = plow_types::extract::byte_offset_to_line_col(
             &info.line_offsets,
             info.exports[0].span.start,
         );

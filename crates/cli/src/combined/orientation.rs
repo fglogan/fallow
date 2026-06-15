@@ -179,7 +179,7 @@ impl OrientationHeader<'_> {
             eprintln!(
                 "{}",
                 format!(
-                    "  {target_count} refactoring target{} \u{2014} try `fallow dead-code --workspace <name>` to scope",
+                    "  {target_count} refactoring target{} \u{2014} try `plow dead-code --workspace <name>` to scope",
                     if target_count == 1 { "" } else { "s" },
                 )
                 .dimmed()
@@ -268,17 +268,17 @@ pub(super) fn is_test_path(path: &std::path::Path) -> bool {
 
 /// Print entry-point detection summary to stderr.
 ///
-/// Shows a dimmed informational line so users can verify that fallow found the
+/// Shows a dimmed informational line so users can verify that plow found the
 /// right entry points. When zero entry points are detected, emits a warning
 /// with a remediation command.
-pub fn print_entry_point_summary(results: &fallow_core::results::AnalysisResults) {
+pub fn print_entry_point_summary(results: &plow_core::results::AnalysisResults) {
     let Some(ref summary) = results.entry_point_summary else {
         return;
     };
     if summary.total == 0 {
         eprintln!(
             "{}",
-            "  \u{26a0} No entry points detected \u{2014} exports may appear unused. Run: fallow list --entry-points"
+            "  \u{26a0} No entry points detected \u{2014} exports may appear unused. Run: plow list --entry-points"
                 .yellow()
         );
         return;

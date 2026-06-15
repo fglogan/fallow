@@ -26,9 +26,9 @@ use crate::sfc_template::{SfcKind, collect_template_usage_with_bound_targets};
 use crate::source_map::ExtractionResult;
 use crate::visitor::ModuleInfoExtractor;
 use crate::{ImportInfo, ImportedName, ModuleInfo};
-use fallow_types::discover::FileId;
-use fallow_types::extract::{FunctionComplexity, byte_offset_to_line_col, compute_line_offsets};
 use oxc_span::Span;
+use plow_types::discover::FileId;
+use plow_types::extract::{FunctionComplexity, byte_offset_to_line_col, compute_line_offsets};
 
 /// Regex to extract `<script>` block content from Vue/Svelte SFCs.
 /// The attrs pattern handles `>` inside quoted attribute values (e.g., `generic="T extends Foo<Bar>"`).
@@ -716,7 +716,7 @@ fn build_generic_attr_probe_source(script: &SfcScript) -> Option<String> {
         return None;
     }
     Some(format!(
-        "{}\n;type __FALLOW_GENERIC_ATTR_PROBE<{}> = unknown;\n",
+        "{}\n;type __PLOW_GENERIC_ATTR_PROBE<{}> = unknown;\n",
         script.body, constraint,
     ))
 }
@@ -1196,7 +1196,7 @@ const count = ref(0);
             FileId(0),
             Path::new("Suppressions.vue"),
             r#"<script lang="ts">
-// fallow-ignore-file
+// plow-ignore-file
 export const foo = 1;
 </script>"#,
             0,

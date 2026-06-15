@@ -173,13 +173,13 @@ pub struct RulesConfig {
     pub misconfigured_dependency_overrides: Severity,
     /// Opt-in (default off): a `"use client"` file that transitively imports a
     /// module reading a non-public `process.env` secret. Surfaced only by
-    /// `fallow security`; never under bare `fallow` or the `audit` gate.
+    /// `plow security`; never under bare `plow` or the `audit` gate.
     #[serde(default = "Severity::default_off")]
     pub security_client_server_leak: Severity,
     /// Opt-in (default off): a syntactic tainted-sink candidate matched against
     /// the data-driven catalogue (`security_matchers.toml`). ONE knob gates ALL
-    /// catalogue categories. Surfaced only by `fallow security`; never under
-    /// bare `fallow` or the `audit` gate.
+    /// catalogue categories. Surfaced only by `plow security`; never under
+    /// bare `plow` or the `audit` gate.
     #[serde(default = "Severity::default_off")]
     pub security_sink: Severity,
     /// Master severity for rule-pack findings (`rulePacks` config). Defaults
@@ -191,7 +191,7 @@ pub struct RulesConfig {
     pub policy_violation: Severity,
     /// A `"use client"` file that exports a Next.js server-only /
     /// route-segment config name (e.g. `metadata`, `revalidate`, `GET`).
-    /// Next.js rejects this at build time; fallow catches it statically.
+    /// Next.js rejects this at build time; plow catches it statically.
     /// Defaults to `warn`.
     #[serde(default = "Severity::default_warn", alias = "invalid-client-exports")]
     pub invalid_client_export: Severity,
@@ -213,10 +213,10 @@ pub struct RulesConfig {
     pub misplaced_directive: Severity,
     /// Two or more Next.js App Router route files that resolve to the same URL
     /// within one app-root. Next.js fails the build ("You cannot have two
-    /// parallel pages that resolve to the same path"); fallow catches it
+    /// parallel pages that resolve to the same path"); plow catches it
     /// statically and names every colliding file. Defaults to `error`: the
     /// project already fails `next build`, so flagging it as an error aligns
-    /// fallow's exit code with the build it mirrors.
+    /// plow's exit code with the build it mirrors.
     #[serde(default, alias = "route-collisions")]
     pub route_collision: Severity,
     /// Sibling Next.js dynamic route segments at one tree position using
@@ -224,7 +224,7 @@ pub struct RulesConfig {
     /// cannot use different slug names for the same dynamic path" at dev and
     /// production runtime when the position is hit; `next build` does NOT catch
     /// it (the build succeeds), so CI passes while the route crashes on its
-    /// first request. fallow catches it statically. Defaults to `warn` for now
+    /// first request. plow catches it statically. Defaults to `warn` for now
     /// (graduates to `error` in a later release once field-proven).
     #[serde(
         default = "Severity::default_warn",
@@ -760,7 +760,7 @@ pub struct UnknownRuleKey {
 /// Returns an empty `Vec` when `value` is not an object or every key is
 /// recognized (canonical kebab-case or a documented alias). Called from
 /// [`crate::config::parsing`] after `extends` merge and before
-/// `serde_json::from_value::<FallowConfig>`, so the warning lists keys from
+/// `serde_json::from_value::<PlowConfig>`, so the warning lists keys from
 /// the final merged config rather than per-file partials.
 #[must_use]
 pub fn find_unknown_rule_keys(value: &serde_json::Value, context: &str) -> Vec<UnknownRuleKey> {

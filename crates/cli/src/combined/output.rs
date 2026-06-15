@@ -3,7 +3,7 @@ use std::io::IsTerminal;
 use std::process::ExitCode;
 
 use colored::Colorize;
-use fallow_config::OutputFormat;
+use plow_config::OutputFormat;
 
 use crate::check::CheckResult;
 use crate::dupes::DupesResult;
@@ -42,7 +42,7 @@ pub(super) fn print_combined_report(
                 total_elapsed,
                 opts.explain,
                 opts.config_path.is_some()
-                    || fallow_config::FallowConfig::find_config_path(opts.root).is_some(),
+                    || plow_config::PlowConfig::find_config_path(opts.root).is_some(),
             );
             if code != ExitCode::SUCCESS {
                 return Err(code);
@@ -150,7 +150,7 @@ fn print_human_sections(
     {
         println!(
             "{}",
-            "Tip: run `fallow explain <issue label>`; spaces and hyphens both work, e.g. `fallow explain unused files`."
+            "Tip: run `plow explain <issue label>`; spaces and hyphens both work, e.g. `plow explain unused files`."
                 .dimmed()
         );
         println!();
@@ -327,7 +327,7 @@ fn print_failure_summary(
         // with the header. Deliberately not TTY-gated (agents reading piped
         // human output are a primary audience); quiet is gated by the caller,
         // and CI, configured projects, suggestions off, and a recorded
-        // decline (`fallow init --decline`) suppress it here.
+        // decline (`plow init --decline`) suppress it here.
         if crate::report::suggestions::suggestions_enabled()
             && crate::report::suggestions::setup_pointer_applicable(root)
         {
@@ -383,9 +383,9 @@ fn combined_json_root(
     elapsed: std::time::Duration,
 ) -> Result<serde_json::Map<String, serde_json::Value>, ExitCode> {
     let envelope = crate::output_envelope::CombinedOutput {
-        schema_version: fallow_types::envelope::SchemaVersion(crate::report::SCHEMA_VERSION),
-        version: fallow_types::envelope::ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
-        elapsed_ms: fallow_types::envelope::ElapsedMs(elapsed.as_millis() as u64),
+        schema_version: plow_types::envelope::SchemaVersion(crate::report::SCHEMA_VERSION),
+        version: plow_types::envelope::ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
+        elapsed_ms: plow_types::envelope::ElapsedMs(elapsed.as_millis() as u64),
         meta: None,
         check: None,
         dupes: None,
@@ -394,7 +394,7 @@ fn combined_json_root(
         next_steps: Vec::new(),
     };
     match crate::output_envelope::serialize_root_output(
-        crate::output_envelope::FallowOutput::Combined(envelope),
+        crate::output_envelope::PlowOutput::Combined(envelope),
     ) {
         Ok(serde_json::Value::Object(map)) => Ok(map),
         Ok(_) => unreachable!("CombinedOutput serializes as a JSON object"),
@@ -589,15 +589,15 @@ fn print_combined_sarif(
         let run = serde_json::json!({
             "tool": {
                 "driver": {
-                    "name": "fallow",
+                    "name": "plow",
                     "version": env!("CARGO_PKG_VERSION"),
-                    "informationUri": "https://github.com/fallow-rs/fallow",
+                    "informationUri": "https://github.com/fglogan/genesis-plow",
                 }
             },
-            "automationDetails": { "id": "fallow/dupes" },
+            "automationDetails": { "id": "plow/dupes" },
             "results": result.report.clone_groups.iter().enumerate().map(|(i, g)| {
                 serde_json::json!({
-                    "ruleId": "fallow/code-duplication",
+                    "ruleId": "plow/code-duplication",
                     "level": "warning",
                     "message": { "text": format!("Clone group {} ({} lines, {} instances)", i + 1, g.line_count, g.instances.len()) },
                 })

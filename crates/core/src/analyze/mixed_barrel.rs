@@ -26,7 +26,7 @@
 
 use rustc_hash::FxHashMap;
 
-use fallow_types::extract::ModuleInfo;
+use plow_types::extract::ModuleInfo;
 
 use crate::discover::FileId;
 use crate::graph::ModuleGraph;

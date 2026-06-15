@@ -29,10 +29,10 @@ def main():
 
     projects = {}
     totals = {
-        "fallow_total": 0,
+        "plow_total": 0,
         "knip_total": 0,
         "agreed": 0,
-        "fallow_only": 0,
+        "plow_only": 0,
         "knip_only": 0,
     }
 
@@ -54,23 +54,23 @@ def main():
         for issue_type, data in report.get("by_type", {}).items():
             if issue_type not in agg_by_type:
                 agg_by_type[issue_type] = {
-                    "fallow_count": 0,
+                    "plow_count": 0,
                     "knip_count": 0,
                     "agreed": 0,
-                    "fallow_only": 0,
+                    "plow_only": 0,
                     "knip_only": 0,
                 }
-            for field in ("fallow_count", "knip_count", "agreed", "fallow_only", "knip_only"):
+            for field in ("plow_count", "knip_count", "agreed", "plow_only", "knip_only"):
                 agg_by_type[issue_type][field] += data[field]
 
     # Calculate agreement percentages
-    total_unique = totals["agreed"] + totals["fallow_only"] + totals["knip_only"]
+    total_unique = totals["agreed"] + totals["plow_only"] + totals["knip_only"]
     totals["agreement_pct"] = (
         round(totals["agreed"] / total_unique * 100, 1) if total_unique > 0 else 100.0
     )
 
     for data in agg_by_type.values():
-        type_total = data["agreed"] + data["fallow_only"] + data["knip_only"]
+        type_total = data["agreed"] + data["plow_only"] + data["knip_only"]
         data["agreement_pct"] = (
             round(data["agreed"] / type_total * 100, 1) if type_total > 0 else 100.0
         )
@@ -84,7 +84,7 @@ def main():
     # Print human summary to stderr
     print(f"Overall agreement: {totals['agreement_pct']}%", file=sys.stderr)
     print(f"  Agreed: {totals['agreed']}", file=sys.stderr)
-    print(f"  Fallow-only: {totals['fallow_only']}", file=sys.stderr)
+    print(f"  Plow-only: {totals['plow_only']}", file=sys.stderr)
     print(f"  Knip-only: {totals['knip_only']}", file=sys.stderr)
     print(file=sys.stderr)
     print("Per project:", file=sys.stderr)

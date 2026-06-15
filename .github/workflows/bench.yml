@@ -51,7 +51,7 @@ jobs:
       - name: Store benchmark result
         uses: ./.github/actions/store-benchmark
         with:
-          name: Fallow Benchmarks
+          name: Plow Benchmarks
           tool: cargo
           output-file-path: bench-output.txt
           data-dir: bench

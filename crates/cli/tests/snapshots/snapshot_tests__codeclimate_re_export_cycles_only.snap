@@ -1,18 +1,17 @@
 ---
 source: crates/cli/tests/snapshot_tests.rs
-assertion_line: 1882
 expression: json_str
 ---
 [
   {
     "type": "issue",
-    "check_name": "fallow/re-export-cycle",
+    "check_name": "plow/re-export-cycle",
     "description": "Re-export cycle: src/api/index.ts <-> src/api/internal/index.ts",
     "categories": [
       "Bug Risk"
     ],
     "severity": "minor",
-    "fingerprint": "3b15e7a61f99e1df",
+    "fingerprint": "d5108d19da1b478c",
     "location": {
       "path": "src/api/index.ts",
       "lines": {
@@ -22,13 +21,13 @@ expression: json_str
   },
   {
     "type": "issue",
-    "check_name": "fallow/re-export-cycle",
+    "check_name": "plow/re-export-cycle",
     "description": "Re-export cycle (self-loop): src/utils/index.ts",
     "categories": [
       "Bug Risk"
     ],
     "severity": "minor",
-    "fingerprint": "b6fba8d635e40e20",
+    "fingerprint": "e5479debd850ca4d",
     "location": {
       "path": "src/utils/index.ts",
       "lines": {

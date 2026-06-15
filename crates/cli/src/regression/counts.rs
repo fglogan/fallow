@@ -1,4 +1,4 @@
-use fallow_core::results::AnalysisResults;
+use plow_core::results::AnalysisResults;
 
 /// Regression baseline: stores issue counts per type for comparison.
 ///
@@ -8,14 +8,14 @@ use fallow_core::results::AnalysisResults;
 /// `schema_version` is the forward-compatibility gate; unknown fields are tolerated
 /// intentionally (see `CheckCounts` `#[serde(default)]`) so adding a new issue type
 /// stays backwards-compatible with existing baselines. Bumping `schema_version`
-/// signals "this baseline cannot be safely loaded by older fallow builds" and
+/// signals "this baseline cannot be safely loaded by older plow builds" and
 /// triggers a hard-fail with a regenerate hint in `load_regression_baseline`.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct RegressionBaseline {
     /// Schema version for forward compatibility.
     pub schema_version: u32,
-    /// Fallow version that produced this baseline.
-    pub fallow_version: String,
+    /// Plow version that produced this baseline.
+    pub plow_version: String,
     /// ISO 8601 timestamp.
     pub timestamp: String,
     /// Git SHA at baseline time, if available.
@@ -33,7 +33,7 @@ pub const REGRESSION_SCHEMA_VERSION: u32 = 1;
 
 /// Per-type issue counts for dead code analysis.
 ///
-/// All fields use `#[serde(default)]` for forward compatibility: when fallow adds a new
+/// All fields use `#[serde(default)]` for forward compatibility: when plow adds a new
 /// issue type, old baselines will deserialize with the new field defaulting to zero
 /// instead of failing.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -127,7 +127,7 @@ impl CheckCounts {
 
     /// Convert from config-embedded baseline.
     #[must_use]
-    pub const fn from_config_baseline(b: &fallow_config::RegressionBaseline) -> Self {
+    pub const fn from_config_baseline(b: &plow_config::RegressionBaseline) -> Self {
         Self {
             total_issues: b.total_issues,
             unused_files: b.unused_files,
@@ -138,22 +138,22 @@ impl CheckCounts {
             unused_optional_dependencies: b.unused_optional_dependencies,
             unused_enum_members: b.unused_enum_members,
             unused_class_members: b.unused_class_members,
-            // `fallow_config::RegressionBaseline` has no `unused_store_members`
+            // `plow_config::RegressionBaseline` has no `unused_store_members`
             // field; default to 0 until the config baseline schema gains one.
             unused_store_members: 0,
-            // `fallow_config::RegressionBaseline` has no `unprovided_injects`
+            // `plow_config::RegressionBaseline` has no `unprovided_injects`
             // field; default to 0 until the config baseline schema gains one.
             unprovided_injects: 0,
-            // `fallow_config::RegressionBaseline` has no `unrendered_components`
+            // `plow_config::RegressionBaseline` has no `unrendered_components`
             // field; default to 0 until the config baseline schema gains one.
             unrendered_components: 0,
-            // `fallow_config::RegressionBaseline` has no `unused_component_props`
+            // `plow_config::RegressionBaseline` has no `unused_component_props`
             // field; default to 0 until the config baseline schema gains one.
             unused_component_props: 0,
-            // `fallow_config::RegressionBaseline` has no `unused_component_emits`
+            // `plow_config::RegressionBaseline` has no `unused_component_emits`
             // field; default to 0 until the config baseline schema gains one.
             unused_component_emits: 0,
-            // `fallow_config::RegressionBaseline` has no `unused_server_actions`
+            // `plow_config::RegressionBaseline` has no `unused_server_actions`
             // field; default to 0 until the config baseline schema gains one.
             unused_server_actions: 0,
             unresolved_imports: b.unresolved_imports,
@@ -172,8 +172,8 @@ impl CheckCounts {
 
     /// Convert to config-embeddable baseline.
     #[must_use]
-    pub const fn to_config_baseline(&self) -> fallow_config::RegressionBaseline {
-        fallow_config::RegressionBaseline {
+    pub const fn to_config_baseline(&self) -> plow_config::RegressionBaseline {
+        plow_config::RegressionBaseline {
             total_issues: self.total_issues,
             unused_files: self.unused_files,
             unused_exports: self.unused_exports,
@@ -259,7 +259,7 @@ pub struct DupesCounts {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_core::results::*;
+    use plow_core::results::*;
     use std::path::PathBuf;
 
     #[test]
@@ -334,7 +334,7 @@ mod tests {
     fn regression_baseline_roundtrip() {
         let baseline = RegressionBaseline {
             schema_version: 1,
-            fallow_version: "2.4.0".into(),
+            plow_version: "2.4.0".into(),
             timestamp: "2026-03-27T10:00:00Z".into(),
             git_sha: Some("abc123".into()),
             check: Some(CheckCounts {
@@ -630,7 +630,7 @@ mod tests {
     fn baseline_without_check_section() {
         let baseline = RegressionBaseline {
             schema_version: 1,
-            fallow_version: "2.4.0".into(),
+            plow_version: "2.4.0".into(),
             timestamp: "2026-03-27T10:00:00Z".into(),
             git_sha: None,
             check: None,
@@ -649,13 +649,13 @@ mod tests {
     fn baseline_without_dupes_section() {
         let baseline = RegressionBaseline {
             schema_version: 1,
-            fallow_version: "2.4.0".into(),
+            plow_version: "2.4.0".into(),
             timestamp: "2026-03-27T10:00:00Z".into(),
             git_sha: Some("deadbeef".into()),
             check: Some(CheckCounts {
                 total_issues: 1,
                 unused_files: 1,
-                ..CheckCounts::from_config_baseline(&fallow_config::RegressionBaseline::default())
+                ..CheckCounts::from_config_baseline(&plow_config::RegressionBaseline::default())
             }),
             dupes: None,
         };
@@ -670,7 +670,7 @@ mod tests {
     fn baseline_without_git_sha() {
         let baseline = RegressionBaseline {
             schema_version: 1,
-            fallow_version: "2.4.0".into(),
+            plow_version: "2.4.0".into(),
             timestamp: "2026-03-27T10:00:00Z".into(),
             git_sha: None,
             check: None,
@@ -686,7 +686,7 @@ mod tests {
     fn baseline_json_with_unknown_check_fields_deserializes() {
         let json = r#"{
             "schema_version": 1,
-            "fallow_version": "3.0.0",
+            "plow_version": "3.0.0",
             "timestamp": "2026-03-27T10:00:00Z",
             "check": {
                 "total_issues": 10,

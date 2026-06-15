@@ -1,7 +1,7 @@
 // VS Code calls TreeDataProvider members through the registered provider.
-// fallow-ignore-file unused-class-member
+// plow-ignore-file unused-class-member
 // VS Code injects this module into the extension host at runtime.
-// fallow-ignore-next-line unlisted-dependency
+// plow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
 import {
   countHealthItems,

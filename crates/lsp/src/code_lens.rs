@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use ls_types::{CodeLens, Command, Position, Range, Uri};
 
-use fallow_core::results::AnalysisResults;
+use plow_core::results::AnalysisResults;
 
 /// LSP-local inline complexity signal rendered as a code lens.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,13 +79,13 @@ pub fn build_code_lenses(
             // `instanceof URI / Position / Location`, which the JSON sent over the
             // wire (a string URI, a plain position, plain locations) fails with
             // "argument does not match one of these constraints". The
-            // `fallow.showReferences` command in the VS Code extension converts
+            // `plow.showReferences` command in the VS Code extension converts
             // these into real vscode types and then calls the built-in.
             let (command_name, arguments) = if ref_locations.is_empty() {
-                ("fallow.noop".to_string(), None)
+                ("plow.noop".to_string(), None)
             } else {
                 (
-                    "fallow.showReferences".to_string(),
+                    "plow.showReferences".to_string(),
                     Some(vec![
                         serde_json::json!(document_uri.as_str()),
                         serde_json::json!({
@@ -134,7 +134,7 @@ pub fn build_code_lenses(
                             finding.cognitive,
                             finding.exceeded.label()
                         ),
-                        command: "fallow.noop".to_string(),
+                        command: "plow.noop".to_string(),
                         arguments: None,
                     }),
                     data: None,
@@ -150,7 +150,7 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    use fallow_core::results::{ExportUsage, ReferenceLocation};
+    use plow_core::results::{ExportUsage, ReferenceLocation};
 
     fn test_root() -> PathBuf {
         if cfg!(windows) {
@@ -299,7 +299,7 @@ mod tests {
         assert_eq!(lenses.len(), 1);
 
         let cmd = lenses[0].command.as_ref().unwrap();
-        assert_eq!(cmd.command, "fallow.noop");
+        assert_eq!(cmd.command, "plow.noop");
         assert!(cmd.arguments.is_none());
     }
 
@@ -333,7 +333,7 @@ mod tests {
         assert_eq!(lenses.len(), 1);
 
         let cmd = lenses[0].command.as_ref().unwrap();
-        assert_eq!(cmd.command, "fallow.showReferences");
+        assert_eq!(cmd.command, "plow.showReferences");
 
         let args = cmd.arguments.as_ref().unwrap();
         assert_eq!(args.len(), 3);
@@ -443,7 +443,7 @@ mod tests {
         assert_eq!(lenses.len(), 1);
 
         let cmd = lenses[0].command.as_ref().unwrap();
-        assert_eq!(cmd.command, "fallow.showReferences");
+        assert_eq!(cmd.command, "plow.showReferences");
 
         let args = cmd.arguments.as_ref().unwrap();
         let ref_locs = args[2].as_array().unwrap();
@@ -544,7 +544,7 @@ mod tests {
         assert_eq!(lenses[0].range.start.line, 11);
         assert_eq!(lenses[0].range.start.character, 2);
         let command = lenses[0].command.as_ref().expect("complexity lens command");
-        assert_eq!(command.command, "fallow.noop");
+        assert_eq!(command.command, "plow.noop");
         assert_eq!(
             command.title,
             "parseConfig complexity: 31 cyc, 26 cog (cyclomatic, cognitive)"

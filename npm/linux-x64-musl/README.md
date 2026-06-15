@@ -1,5 +1,5 @@
-# @fallow-cli/linux-x64-musl
+# @plow-cli/linux-x64-musl
 
-This is the **x86_64-unknown-linux-musl** binary for [`fallow`](https://www.npmjs.com/package/fallow).
+This is the **x86_64-unknown-linux-musl** binary for [`plow`](https://www.npmjs.com/package/plow).
 
-You should not install this package directly. Install `fallow` instead — it will automatically select the correct binary for your platform.
+You should not install this package directly. Install `plow` instead — it will automatically select the correct binary for your platform.

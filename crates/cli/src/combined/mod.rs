@@ -1,7 +1,7 @@
 use std::process::ExitCode;
 use std::time::Instant;
 
-use fallow_config::OutputFormat;
+use plow_config::OutputFormat;
 
 use crate::check::{CheckOptions, CheckResult, IssueFilters, TraceOptions};
 use crate::dupes::{DupesMode, DupesOptions, DupesResult};
@@ -29,7 +29,7 @@ pub struct CombinedOptions<'a> {
     pub fail_on_issues: bool,
     pub sarif_file: Option<&'a std::path::Path>,
     pub changed_since: Option<&'a str>,
-    /// Import churn from a `fallow-churn/v1` file (`--churn-file`) for the
+    /// Import churn from a `plow-churn/v1` file (`--churn-file`) for the
     /// health hotspots / ownership pass instead of `git log`. Resolved relative
     /// to `root` inside the health pipeline.
     pub churn_file: Option<&'a std::path::Path>,
@@ -283,7 +283,7 @@ fn run_combined_dupes(
         opts.production_dupes
             .or_else(|| opts.production.then_some(true)),
         opts.quiet,
-        fallow_config::ProductionAnalysis::Dupes,
+        plow_config::ProductionAnalysis::Dupes,
     )?
     .duplicates;
 

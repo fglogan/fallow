@@ -6,7 +6,7 @@
 //! when some file instantiates it: a `<Tag>` in a template, a `:is`/`this=`
 //! binding, a `components: {}` / `app.component()` registration, an `h()` call,
 //! a Nuxt auto-import, or a lazy `() => import('./X.vue')`. All of those make the
-//! importing file REFERENCE the component binding, which fallow records (the
+//! importing file REFERENCE the component binding, which plow records (the
 //! binding is removed from `unused_import_bindings`, and Nuxt auto-imports add a
 //! synthetic resolved import). Only a bare barrel re-export
 //! (`export { default as Foo } from './Foo.vue'`) keeps a component reachable
@@ -33,7 +33,7 @@ use std::path::Path;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_types::extract::{ImportedName, ModuleInfo};
+use plow_types::extract::{ImportedName, ModuleInfo};
 
 use crate::discover::FileId;
 use crate::graph::ModuleGraph;

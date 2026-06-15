@@ -4,7 +4,7 @@
     reason = "tests and benches use unwrap and expect to keep fixture setup concise"
 )]
 
-//! End-to-end tests that `fallow dupes` and combined-mode dupes respect
+//! End-to-end tests that `plow dupes` and combined-mode dupes respect
 //! `--workspace` and `--changed-workspaces` scoping.
 //!
 //! The fixture builds three packages with intentionally duplicated code across
@@ -15,14 +15,14 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use common::{parse_json, run_fallow_raw};
+use common::{parse_json, run_plow_raw};
 use std::fs;
 use std::path::Path;
 use std::process::Command;
 use tempfile::TempDir;
 
 /// Two-workspace monorepo with a repeating block of TypeScript duplicated
-/// across both workspaces. The block is sized to clear fallow's default
+/// across both workspaces. The block is sized to clear plow's default
 /// clone-detection thresholds (min_tokens, min_lines).
 fn build_dupes_fixture() -> TempDir {
     let tmp = TempDir::new().unwrap();
@@ -108,7 +108,7 @@ fn combined_dupes_clone_groups(json: &serde_json::Value) -> usize {
 #[test]
 fn dupes_without_scope_finds_cross_package_clone() {
     let tmp = build_dupes_fixture();
-    let out = run_fallow_raw(&[
+    let out = run_plow_raw(&[
         "dupes",
         "--root",
         tmp.path().to_str().unwrap(),
@@ -128,7 +128,7 @@ fn dupes_without_scope_finds_cross_package_clone() {
 #[test]
 fn dupes_workspace_scope_drops_cross_package_only_group() {
     let tmp = build_dupes_fixture();
-    let out = run_fallow_raw(&[
+    let out = run_plow_raw(&[
         "dupes",
         "--root",
         tmp.path().to_str().unwrap(),
@@ -150,7 +150,7 @@ fn dupes_workspace_scope_drops_cross_package_only_group() {
 #[test]
 fn combined_changed_workspaces_head_drops_all_dupes() {
     let tmp = build_dupes_fixture();
-    let out = run_fallow_raw(&[
+    let out = run_plow_raw(&[
         "--root",
         tmp.path().to_str().unwrap(),
         "--changed-workspaces",
@@ -175,7 +175,7 @@ fn combined_changed_workspaces_head_drops_all_dupes() {
 #[test]
 fn combined_workspace_scope_applies_to_dupes() {
     let tmp = build_dupes_fixture();
-    let out_with_scope = run_fallow_raw(&[
+    let out_with_scope = run_plow_raw(&[
         "--root",
         tmp.path().to_str().unwrap(),
         "--workspace",

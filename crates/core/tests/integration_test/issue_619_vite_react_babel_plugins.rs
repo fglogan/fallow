@@ -4,7 +4,7 @@ use super::common::{create_config, fixture_path};
 fn vite_and_vitest_react_babel_plugins_credit_dependencies() {
     let root = fixture_path("issue-619-vite-react-babel-plugins");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_dev_dependencies: Vec<&str> = results
         .unused_dev_dependencies

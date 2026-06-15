@@ -8,11 +8,11 @@
 //! category-blind `SinkSite`s against the loaded catalogue).
 //!
 //! Findings are CANDIDATES for downstream agent verification, NOT verified
-//! vulnerabilities: fallow is deterministic and syntactic, never taint-proof.
+//! vulnerabilities: plow is deterministic and syntactic, never taint-proof.
 //! Matchers default to non-literal arguments. A row can opt into narrowly
 //! captured literal or context predicates when the literal itself is the signal.
 
-use fallow_types::extract::{SinkArgKind, SinkLiteralValue, SinkObjectProperty, SinkShape};
+use plow_types::extract::{SinkArgKind, SinkLiteralValue, SinkObjectProperty, SinkShape};
 use rustc_hash::FxHashSet;
 
 /// Embedded catalogue source. Because it is `include_str!`-embedded at compile
@@ -900,7 +900,7 @@ pub fn catalogue() -> &'static Catalogue {
     CATALOGUE.get_or_init(|| {
         parse_catalogue(CATALOGUE_TOML).expect(
             "embedded crates/core/data/security_matchers.toml must parse; run \
-             `cargo test -p fallow-core security_catalogue_parses` to see the error",
+             `cargo test -p plow-core security_catalogue_parses` to see the error",
         )
     })
 }

@@ -1,10 +1,10 @@
-use fallow_types::extract::{SinkArgKind, SinkShape, SinkSite};
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{BinaryOperator, Expression, ObjectPropertyKind, Statement};
 use oxc_ast_visit::Visit;
 use oxc_parser::Parser;
 use oxc_semantic::SemanticBuilder;
 use oxc_span::SourceType;
+use plow_types::extract::{SinkArgKind, SinkShape, SinkSite};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::MemberAccess;
@@ -269,7 +269,7 @@ fn with_parsed_template_expression<R>(
     if snippet.is_empty() {
         return None;
     }
-    let wrapped = format!("const __fallow_template_sink = ({snippet});");
+    let wrapped = format!("const __plow_template_sink = ({snippet});");
     let allocator = Allocator::default();
     let parser_return = Parser::new(&allocator, &wrapped, SourceType::ts()).parse();
     let Statement::VariableDeclaration(decl) = parser_return.program.body.first()? else {
@@ -411,11 +411,11 @@ fn remap_object_name(
 fn wrap_snippet(snippet: &str, kind: TemplateSnippetKind, locals: &[String]) -> String {
     let mut wrapped = String::new();
     if !locals.is_empty() {
-        wrapped.push_str("const __fallow_local = undefined;\n");
+        wrapped.push_str("const __plow_local = undefined;\n");
         for local in locals {
             wrapped.push_str("const ");
             wrapped.push_str(local);
-            wrapped.push_str(" = __fallow_local;\n");
+            wrapped.push_str(" = __plow_local;\n");
         }
     }
 

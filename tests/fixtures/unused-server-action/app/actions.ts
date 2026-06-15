@@ -23,7 +23,7 @@ export async function deadAction(formData: FormData) {
 }
 
 // Suppressed as unused-server-action: must appear in NEITHER bucket.
-// fallow-ignore-next-line unused-server-action
+// plow-ignore-next-line unused-server-action
 export async function suppressedDeadAction() {
   await ping();
 }

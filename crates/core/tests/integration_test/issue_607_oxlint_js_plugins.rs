@@ -4,7 +4,7 @@ use super::common::{create_config, fixture_path};
 fn oxlint_js_plugins_credit_dev_dependencies() {
     let root = fixture_path("issue-607-oxlint-js-plugins");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_dev_dependencies: Vec<&str> = results
         .unused_dev_dependencies
@@ -33,7 +33,7 @@ fn oxlint_js_plugins_credit_dev_dependencies() {
 fn oxlint_ts_config_credits_object_specifiers_and_local_plugins() {
     let root = fixture_path("issue-607-oxlint-ts-config");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_dev_dependencies: Vec<&str> = results
         .unused_dev_dependencies

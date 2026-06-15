@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare fallow JSON output against an expected.json fixture.
+"""Compare plow JSON output against an expected.json fixture.
 
 Usage:
     python3 verify-expected.py <actual.json> <expected.json>

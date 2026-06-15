@@ -1,4 +1,4 @@
-// fallow-ignore-file complexity
+// plow-ignore-file complexity
 export function fileSuppressed(n: number): string {
   if (n < 0) return "negative";
   else if (n === 0) return "zero";

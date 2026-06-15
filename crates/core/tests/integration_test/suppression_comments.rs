@@ -4,7 +4,7 @@ use super::common::{create_config, fixture_path};
 fn active_suppressions_capture_present_markers_all_kinds() {
     let root = fixture_path("suppression-comments");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let captured: Vec<(String, Option<String>, bool)> = results
         .active_suppressions
@@ -52,7 +52,7 @@ fn active_suppressions_capture_present_markers_all_kinds() {
 fn next_line_suppression_hides_unused_export() {
     let root = fixture_path("suppression-comments");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -75,7 +75,7 @@ fn next_line_suppression_hides_unused_export() {
 fn file_level_suppression_hides_all_exports() {
     let root = fixture_path("suppression-comments");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<(&str, String)> = results
         .unused_exports
@@ -111,7 +111,7 @@ fn file_level_suppression_hides_all_exports() {
 fn enum_member_suppression() {
     let root = fixture_path("suppression-comments");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_enum_member_names: Vec<&str> = results
         .unused_enum_members

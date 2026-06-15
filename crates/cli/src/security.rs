@@ -1,11 +1,11 @@
-//! `fallow security` command: opt-in local security-candidate surface.
+//! `plow security` command: opt-in local security-candidate surface.
 //!
 //! Ships the graph-structural `client-server-leak` rule plus the data-driven
 //! `tainted-sink` catalogue (one `TaintedSink` kind covering every CWE category
 //! in `security_matchers.toml`). Findings are CANDIDATES for downstream agent
 //! verification, NOT verified vulnerabilities.
 //! This command is the ONLY surface for security findings: they never appear
-//! under bare `fallow` or the `audit` gate. There is no `confidence` or
+//! under bare `plow` or the `audit` gate. There is no `confidence` or
 //! `signal_strength` field; structural traces and reachability context are the
 //! only honest signals.
 
@@ -17,16 +17,16 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Instant;
 
-use fallow_config::{OutputFormat, ProductionAnalysis, Severity};
-use fallow_core::analyze::derive_security_severity;
-use fallow_core::results::{
+use plow_config::{OutputFormat, ProductionAnalysis, Severity};
+use plow_core::analyze::derive_security_severity;
+use plow_core::results::{
     AnalysisResults, SecurityAttackSurfaceEntry, SecurityDeadCodeKind, SecurityFinding,
     SecurityFindingKind, TraceHop, TraceHopRole,
 };
-use fallow_types::discover::DiscoveredFile;
-use fallow_types::envelope::{ElapsedMs, Meta, ToolVersion};
-use fallow_types::extract::ModuleInfo;
-use fallow_types::results::{
+use plow_types::discover::DiscoveredFile;
+use plow_types::envelope::{ElapsedMs, Meta, ToolVersion};
+use plow_types::extract::ModuleInfo;
+use plow_types::results::{
     SecurityRuntimeContext, SecurityRuntimeState, SecuritySeverity,
     SecurityUnresolvedCalleeDiagnostic, TaintConfidence,
 };
@@ -45,12 +45,12 @@ use crate::load_config_for_analysis;
 const UNRESOLVED_CALLEE_SAMPLE_LIMIT: usize = 25;
 const UNRESOLVED_CALLEE_TOP_FILES_LIMIT: usize = 10;
 
-/// The `fallow security --format json` schema version. Independently versioned
+/// The `plow security --format json` schema version. Independently versioned
 /// from the main contract, mirroring `ImpactReportSchemaVersion`.
 #[derive(Debug, Clone, Copy, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum SecuritySchemaVersion {
-    /// First release of the `fallow security --format json` shape.
+    /// First release of the `plow security --format json` shape.
     #[allow(
         dead_code,
         reason = "kept so the generated schema documents historical v1"
@@ -98,7 +98,7 @@ pub enum SecuritySchemaVersion {
     V7,
 }
 
-/// Gate mode for `fallow security --gate <mode>`.
+/// Gate mode for `plow security --gate <mode>`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, clap::ValueEnum)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
@@ -139,7 +139,7 @@ pub struct SecurityGate {
     pub new_count: usize,
 }
 
-/// Allowlisted config context for `fallow security --format json`.
+/// Allowlisted config context for `plow security --format json`.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
@@ -175,7 +175,7 @@ pub struct SecurityRuleSeverityConfig {
     pub effective: Severity,
 }
 
-/// The `fallow security --format json` envelope. `FallowOutput` discriminates it
+/// The `plow security --format json` envelope. `PlowOutput` discriminates it
 /// by the `kind: "security"` tag; the optional `gate` block is additive and is
 /// not part of that discrimination.
 #[derive(Debug, Clone, Serialize)]
@@ -183,7 +183,7 @@ pub struct SecurityRuleSeverityConfig {
 pub struct SecurityOutput {
     /// Schema version of this envelope.
     pub schema_version: SecuritySchemaVersion,
-    /// Fallow CLI version that produced this output.
+    /// Plow CLI version that produced this output.
     pub version: ToolVersion,
     /// Wall-clock milliseconds spent producing the report.
     pub elapsed_ms: ElapsedMs,
@@ -218,7 +218,7 @@ pub struct SecurityOutput {
     pub unresolved_callee_diagnostics: Option<SecurityUnresolvedCalleeDiagnostics>,
 }
 
-/// Bounded unresolved-callee diagnostics for `fallow security --format json`.
+/// Bounded unresolved-callee diagnostics for `plow security --format json`.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityUnresolvedCalleeDiagnostics {
@@ -245,9 +245,9 @@ pub struct SecurityUnresolvedCalleeSample {
     /// 0-based byte column.
     pub col: u32,
     /// Why the callee was skipped.
-    pub reason: fallow_types::extract::SkippedSecurityCalleeReason,
+    pub reason: plow_types::extract::SkippedSecurityCalleeReason,
     /// Compact syntax shape of the skipped callee.
-    pub expression_kind: fallow_types::extract::SkippedSecurityCalleeExpressionKind,
+    pub expression_kind: plow_types::extract::SkippedSecurityCalleeExpressionKind,
 }
 
 /// Count of unresolved callees in one file.
@@ -265,12 +265,12 @@ pub struct SecurityUnresolvedCalleeTopFile {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityUnresolvedCalleeReasonCount {
     /// Why the callees were skipped.
-    pub reason: fallow_types::extract::SkippedSecurityCalleeReason,
+    pub reason: plow_types::extract::SkippedSecurityCalleeReason,
     /// Number of unresolved callees with this reason.
     pub count: usize,
 }
 
-/// Compact `fallow security --summary --format json` payload. Uses the same
+/// Compact `plow security --summary --format json` payload. Uses the same
 /// `kind: "security"` discriminator as the full payload, but omits candidate
 /// arrays and exposes only aggregate counts.
 #[derive(Debug, Clone, Serialize)]
@@ -278,7 +278,7 @@ pub struct SecurityUnresolvedCalleeReasonCount {
 pub struct SecuritySummaryOutput {
     /// Schema version of this envelope.
     pub schema_version: SecuritySchemaVersion,
-    /// Fallow CLI version that produced this output.
+    /// Plow CLI version that produced this output.
     pub version: ToolVersion,
     /// Wall-clock milliseconds spent producing the report.
     pub elapsed_ms: ElapsedMs,
@@ -294,7 +294,7 @@ pub struct SecuritySummaryOutput {
     pub summary: SecuritySummary,
 }
 
-/// Aggregate counts for `fallow security --summary --format json`.
+/// Aggregate counts for `plow security --summary --format json`.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecuritySummary {
@@ -351,7 +351,7 @@ pub struct SecurityRuntimeStateCounts {
     pub not_collected: usize,
 }
 
-/// Options for `fallow security`, mirroring the global CLI flags it honors.
+/// Options for `plow security`, mirroring the global CLI flags it honors.
 pub struct SecurityOptions<'a> {
     /// Project root.
     pub root: &'a Path,
@@ -396,7 +396,7 @@ pub struct SecurityOptions<'a> {
     pub explain: bool,
 }
 
-/// Run `fallow security`. Always exits 0 unless the user explicitly raised the
+/// Run `plow security`. Always exits 0 unless the user explicitly raised the
 /// `security-client-server-leak` rule to `error` AND findings exist (the rule
 /// defaults to `off` and the command forces it to `warn`, so the common case is
 /// advisory). Unsupported output formats exit 2.
@@ -490,7 +490,7 @@ struct SecurityRuleSeverities {
 struct SecurityOutputInput<'a, 'b> {
     opts: &'a SecurityOptions<'b>,
     started: Instant,
-    config: &'a fallow_config::ResolvedConfig,
+    config: &'a plow_config::ResolvedConfig,
     configured_severities: SecurityRuleSeverities,
     effective_severities: SecurityRuleSeverities,
     gate_mode: Option<SecurityGateMode>,
@@ -509,14 +509,14 @@ fn validate_security_output(output: OutputFormat) -> Result<(), ExitCode> {
         Ok(())
     } else {
         Err(emit_error(
-            "fallow security supports --format human, json, or sarif only.",
+            "plow security supports --format human, json, or sarif only.",
             2,
             output,
         ))
     }
 }
 
-fn security_rule_severities(config: &fallow_config::ResolvedConfig) -> SecurityRuleSeverities {
+fn security_rule_severities(config: &plow_config::ResolvedConfig) -> SecurityRuleSeverities {
     SecurityRuleSeverities {
         leak: config.rules.security_client_server_leak,
         sink: config.rules.security_sink,
@@ -648,7 +648,7 @@ fn prepare_security_findings(
     }
 }
 
-fn force_security_rules(config: &mut fallow_config::ResolvedConfig) {
+fn force_security_rules(config: &mut plow_config::ResolvedConfig) {
     // Respect explicit user severities; force the rules on when they are the
     // default off so this dedicated command actually surfaces candidates.
     if config.rules.security_client_server_leak == Severity::Off {
@@ -660,7 +660,7 @@ fn force_security_rules(config: &mut fallow_config::ResolvedConfig) {
 }
 
 fn security_output_config(
-    config: &fallow_config::ResolvedConfig,
+    config: &plow_config::ResolvedConfig,
     configured_severity: Severity,
     effective_severity: Severity,
     configured_sink_severity: Severity,
@@ -685,9 +685,9 @@ fn security_output_config(
 
 fn apply_changed_scope(opts: &SecurityOptions<'_>, results: &mut AnalysisResults) {
     if let Some(git_ref) = opts.changed_since
-        && let Some(changed) = fallow_core::changed_files::get_changed_files(opts.root, git_ref)
+        && let Some(changed) = plow_core::changed_files::get_changed_files(opts.root, git_ref)
     {
-        fallow_core::changed_files::filter_results_by_changed_files(results, &changed);
+        plow_core::changed_files::filter_results_by_changed_files(results, &changed);
     }
     if opts.use_shared_diff_index
         && let Some(diff_index) = crate::report::ci::diff_filter::shared_diff_index()
@@ -720,7 +720,7 @@ fn apply_security_scopes(
 
 fn apply_security_gate(
     opts: &SecurityOptions<'_>,
-    config: &fallow_config::ResolvedConfig,
+    config: &plow_config::ResolvedConfig,
     results: &mut AnalysisResults,
 ) -> Result<Option<SecurityGateMode>, ExitCode> {
     let Some(mode) = opts.gate else {
@@ -741,13 +741,13 @@ fn apply_security_gate(
         if let Some(shared) = crate::report::ci::diff_filter::shared_diff_index() {
             shared
         } else if let Some(git_ref) = opts.changed_since {
-            match fallow_core::changed_files::try_get_changed_diff(opts.root, git_ref) {
+            match plow_core::changed_files::try_get_changed_diff(opts.root, git_ref) {
                 Ok(text) => owned_gate_diff
                     .insert(crate::report::ci::diff_filter::DiffIndex::from_unified_diff(&text)),
                 Err(err) => {
                     return Err(emit_error(
                         &format!(
-                            "fallow security --gate could not compute the diff for '{git_ref}': {}",
+                            "plow security --gate could not compute the diff for '{git_ref}': {}",
                             err.describe()
                         ),
                         2,
@@ -757,7 +757,7 @@ fn apply_security_gate(
             }
         } else {
             return Err(emit_error(
-                "fallow security --gate requires a diff source: --changed-since <ref>, \
+                "plow security --gate requires a diff source: --changed-since <ref>, \
                      --diff-file <path>, or --diff-stdin.",
                 2,
                 opts.output,
@@ -791,12 +791,12 @@ struct CachedSecurityKeySnapshot {
 
 fn retain_gate_newly_reachable(
     opts: &SecurityOptions<'_>,
-    config: &fallow_config::ResolvedConfig,
+    config: &plow_config::ResolvedConfig,
     results: &mut AnalysisResults,
 ) -> Result<(), ExitCode> {
     let Some(base_ref) = opts.changed_since else {
         return Err(emit_error(
-            "fallow security --gate newly-reachable requires --changed-since <ref>; \
+            "plow security --gate newly-reachable requires --changed-since <ref>; \
              --diff-file and --diff-stdin do not identify a base tree.",
             2,
             opts.output,
@@ -805,7 +805,7 @@ fn retain_gate_newly_reachable(
     let Some(base_sha) = git_rev_parse(opts.root, base_ref) else {
         return Err(emit_error(
             &format!(
-                "fallow security --gate newly-reachable could not resolve base ref '{base_ref}'."
+                "plow security --gate newly-reachable could not resolve base ref '{base_ref}'."
             ),
             2,
             opts.output,
@@ -828,7 +828,7 @@ fn retain_gate_newly_reachable(
 
 fn compute_base_security_snapshot(
     opts: &SecurityOptions<'_>,
-    config: &fallow_config::ResolvedConfig,
+    config: &plow_config::ResolvedConfig,
     base_ref: &str,
     base_sha: &str,
 ) -> Result<SecurityKeySnapshot, ExitCode> {
@@ -843,7 +843,7 @@ fn compute_base_security_snapshot(
     let current_config_path = opts
         .config_path
         .clone()
-        .or_else(|| fallow_config::FallowConfig::find_config_path(opts.root));
+        .or_else(|| plow_config::PlowConfig::find_config_path(opts.root));
     let mut base_config = load_config_for_analysis(
         &base_root,
         &current_config_path,
@@ -927,7 +927,7 @@ fn security_kind_key(kind: SecurityFindingKind) -> &'static str {
 
 fn security_base_snapshot_cache_key(
     opts: &SecurityOptions<'_>,
-    config: &fallow_config::ResolvedConfig,
+    config: &plow_config::ResolvedConfig,
     base_sha: &str,
 ) -> Result<SecurityBaseSnapshotCacheKey, ExitCode> {
     let payload = serde_json::json!({
@@ -953,14 +953,14 @@ fn security_base_snapshot_cache_key(
     })
 }
 
-fn security_base_snapshot_cache_dir(config: &fallow_config::ResolvedConfig) -> PathBuf {
+fn security_base_snapshot_cache_dir(config: &plow_config::ResolvedConfig) -> PathBuf {
     config.cache_dir.join("cache").join(format!(
         "security-base-v{SECURITY_BASE_SNAPSHOT_CACHE_VERSION}"
     ))
 }
 
 fn security_base_snapshot_cache_file(
-    config: &fallow_config::ResolvedConfig,
+    config: &plow_config::ResolvedConfig,
     key: &SecurityBaseSnapshotCacheKey,
 ) -> PathBuf {
     security_base_snapshot_cache_dir(config).join(format!("{:016x}.bin", key.hash))
@@ -976,7 +976,7 @@ fn ensure_security_base_snapshot_cache_dir(dir: &Path) -> Result<(), std::io::Er
 }
 
 fn load_cached_security_base_snapshot(
-    config: &fallow_config::ResolvedConfig,
+    config: &plow_config::ResolvedConfig,
     key: &SecurityBaseSnapshotCacheKey,
 ) -> Option<SecurityKeySnapshot> {
     if config.no_cache {
@@ -1001,7 +1001,7 @@ fn load_cached_security_base_snapshot(
 }
 
 fn save_cached_security_base_snapshot(
-    config: &fallow_config::ResolvedConfig,
+    config: &plow_config::ResolvedConfig,
     key: &SecurityBaseSnapshotCacheKey,
     snapshot: &SecurityKeySnapshot,
 ) {
@@ -1057,19 +1057,19 @@ struct SecurityAnalysisState {
     results: AnalysisResults,
     modules: Option<Vec<ModuleInfo>>,
     files: Option<Vec<DiscoveredFile>>,
-    analysis_output: Option<fallow_core::AnalysisOutput>,
+    analysis_output: Option<plow_core::AnalysisOutput>,
 }
 
 #[expect(
     deprecated,
-    reason = "ADR-008 deprecates fallow_core::analyze APIs externally; the CLI uses the workspace path dependency"
+    reason = "ADR-008 deprecates plow_core::analyze APIs externally; the CLI uses the workspace path dependency"
 )]
 fn analyze_security_candidates(
     opts: &SecurityOptions<'_>,
-    config: &fallow_config::ResolvedConfig,
+    config: &plow_config::ResolvedConfig,
 ) -> Result<SecurityAnalysisState, ExitCode> {
     if opts.runtime_coverage.is_none() {
-        return fallow_core::analyze(config)
+        return plow_core::analyze(config)
             .map(|results| SecurityAnalysisState {
                 results,
                 modules: None,
@@ -1079,7 +1079,7 @@ fn analyze_security_candidates(
             .map_err(|err| emit_error(&format!("Analysis error: {err}"), 2, opts.output));
     }
 
-    fallow_core::analyze_retaining_modules(config, true, true)
+    plow_core::analyze_retaining_modules(config, true, true)
         .map(|mut output| {
             let modules = output.modules.take();
             let files = output.files.take();
@@ -1116,7 +1116,7 @@ fn analyze_security_runtime(
     path: &Path,
     modules: Vec<ModuleInfo>,
     files: Vec<DiscoveredFile>,
-    analysis_output: fallow_core::AnalysisOutput,
+    analysis_output: plow_core::AnalysisOutput,
 ) -> Result<Option<RuntimeCoverageReport>, ExitCode> {
     let runtime_coverage = crate::health::coverage::prepare_options(
         path,
@@ -1202,7 +1202,7 @@ struct FunctionSpan {
 fn apply_runtime_context(
     findings: &mut Vec<SecurityFinding>,
     modules: &[ModuleInfo],
-    files: &[fallow_types::discover::DiscoveredFile],
+    files: &[plow_types::discover::DiscoveredFile],
     root: &Path,
     report: &RuntimeCoverageReport,
 ) {
@@ -1225,7 +1225,7 @@ fn apply_runtime_context(
 
 fn function_spans(
     modules: &[ModuleInfo],
-    files: &[fallow_types::discover::DiscoveredFile],
+    files: &[plow_types::discover::DiscoveredFile],
     root: &Path,
 ) -> Vec<FunctionSpan> {
     let paths_by_id = files
@@ -1491,7 +1491,7 @@ fn unresolved_callee_diagnostics(
         .collect();
 
     let mut by_file: BTreeMap<String, usize> = BTreeMap::new();
-    let mut by_reason: BTreeMap<fallow_types::extract::SkippedSecurityCalleeReason, usize> =
+    let mut by_reason: BTreeMap<plow_types::extract::SkippedSecurityCalleeReason, usize> =
         BTreeMap::new();
     for diagnostic in &sorted {
         *by_file
@@ -1523,7 +1523,7 @@ fn unresolved_callee_diagnostics(
 }
 
 fn filter_to_files(
-    results: &mut fallow_core::results::AnalysisResults,
+    results: &mut plow_core::results::AnalysisResults,
     root: &Path,
     files: &[PathBuf],
     quiet: bool,
@@ -1556,7 +1556,7 @@ fn filter_to_files(
     }
 
     let file_set: rustc_hash::FxHashSet<PathBuf> = resolved_files.into_iter().collect();
-    fallow_core::changed_files::filter_results_by_changed_files(results, &file_set);
+    plow_core::changed_files::filter_results_by_changed_files(results, &file_set);
 }
 
 fn prepare_findings(
@@ -1626,7 +1626,7 @@ fn relativize(path: &Path, root: &Path) -> PathBuf {
 #[must_use]
 pub fn render_json(output: &SecurityOutput) -> String {
     let Ok(value) = crate::output_envelope::serialize_root_output(
-        crate::output_envelope::FallowOutput::Security(output.clone()),
+        crate::output_envelope::PlowOutput::Security(output.clone()),
     ) else {
         return "{\"error\":\"failed to serialize security output\"}".to_owned();
     };
@@ -1647,7 +1647,7 @@ pub fn render_json_summary(output: &SecurityOutput) -> String {
         summary: security_summary(output),
     };
     let Ok(value) = crate::output_envelope::serialize_root_output_without_telemetry(
-        crate::output_envelope::FallowOutput::SecuritySummary(summary),
+        crate::output_envelope::PlowOutput::SecuritySummary(summary),
     ) else {
         return "{\"error\":\"failed to serialize security summary output\"}".to_owned();
     };
@@ -1736,7 +1736,7 @@ fn write_sarif_file(output: &SecurityOutput, path: &Path) -> Result<(), String> 
 
 /// One-line gate verdict header. Leads with the ACTION ("REVIEW REQUIRED") and
 /// immediately qualifies with the candidate framing, so a human never reads the
-/// gate as "fallow confirmed a vulnerability". The wire `verdict` token stays
+/// gate as "plow confirmed a vulnerability". The wire `verdict` token stays
 /// `fail`; only this human prose says "REVIEW REQUIRED".
 fn gate_human_header(gate: &SecurityGate) -> String {
     use crate::report::plural;
@@ -1746,7 +1746,7 @@ fn gate_human_header(gate: &SecurityGate) -> String {
     };
     match gate.verdict {
         SecurityGateVerdict::Fail => format!(
-            "Gate: REVIEW REQUIRED, {} new security item{} {checked}. fallow has not confirmed a vulnerability.",
+            "Gate: REVIEW REQUIRED, {} new security item{} {checked}. plow has not confirmed a vulnerability.",
             gate.new_count,
             plural(gate.new_count),
         ),
@@ -1768,12 +1768,12 @@ fn unresolved_callee_human_hint(output: &SecurityOutput) -> Option<String> {
 }
 
 fn unresolved_callee_reason_label(
-    reason: fallow_types::extract::SkippedSecurityCalleeReason,
+    reason: plow_types::extract::SkippedSecurityCalleeReason,
 ) -> &'static str {
     match reason {
-        fallow_types::extract::SkippedSecurityCalleeReason::ComputedMember => "computed-member",
-        fallow_types::extract::SkippedSecurityCalleeReason::DynamicDispatch => "dynamic-dispatch",
-        fallow_types::extract::SkippedSecurityCalleeReason::UnsupportedAssignmentObject => {
+        plow_types::extract::SkippedSecurityCalleeReason::ComputedMember => "computed-member",
+        plow_types::extract::SkippedSecurityCalleeReason::DynamicDispatch => "dynamic-dispatch",
+        plow_types::extract::SkippedSecurityCalleeReason::UnsupportedAssignmentObject => {
             "unsupported-assignment-object"
         }
     }
@@ -1807,7 +1807,7 @@ fn render_human_summary(output: &SecurityOutput) -> String {
         let verb = if n == 1 { "uses" } else { "use" };
         let _ = writeln!(
             out,
-            "Blind spot: {n} client file{} {verb} dynamic imports that fallow could not follow.",
+            "Blind spot: {n} client file{} {verb} dynamic imports that plow could not follow.",
             plural(n)
         );
     }
@@ -1816,7 +1816,7 @@ fn render_human_summary(output: &SecurityOutput) -> String {
         let verb = if n == 1 { "uses" } else { "use" };
         let _ = writeln!(
             out,
-            "Blind spot: {n} call site{} {verb} code patterns that fallow could not resolve.",
+            "Blind spot: {n} call site{} {verb} code patterns that plow could not resolve.",
             plural(n)
         );
         if let Some(hint) = unresolved_callee_human_hint(output) {
@@ -2021,7 +2021,7 @@ fn push_human_blind_spots(out: &mut String, output: &SecurityOutput) {
         let verb = if n == 1 { "uses" } else { "use" };
         let _ = writeln!(
             out,
-            "{} Blind spot: {n} client file{} {verb} dynamic imports that fallow could not \
+            "{} Blind spot: {n} client file{} {verb} dynamic imports that plow could not \
              follow. Code behind those imports may be missing from this report.",
             "[I]".blue().bold(),
             plural(n),
@@ -2033,7 +2033,7 @@ fn push_human_blind_spots(out: &mut String, output: &SecurityOutput) {
         let verb = if n == 1 { "uses" } else { "use" };
         let _ = writeln!(
             out,
-            "{} Blind spot: {n} call site{} {verb} code patterns that fallow could not resolve, \
+            "{} Blind spot: {n} call site{} {verb} code patterns that plow could not resolve, \
              such as dynamic dispatch, computed members, or aliased bindings.",
             "[I]".blue().bold(),
             plural(n),
@@ -2058,7 +2058,7 @@ fn security_finding_label(finding: &SecurityFinding) -> String {
             let title = finding
                 .category
                 .as_deref()
-                .and_then(fallow_core::analyze::security_catalogue_title)
+                .and_then(plow_core::analyze::security_catalogue_title)
                 .or(finding.category.as_deref())
                 .unwrap_or("tainted-sink");
             match finding.cwe {
@@ -2112,7 +2112,7 @@ fn source_reachability_hint(finding: &SecurityFinding) -> Option<&'static str> {
         .as_ref()
         .filter(|reach| reach.reachable_from_untrusted_source)
         .map(|_| {
-            "Module-level context: the sink module is reachable from an untrusted-source module; fallow does not prove value flow."
+            "Module-level context: the sink module is reachable from an untrusted-source module; plow does not prove value flow."
         })
 }
 
@@ -2187,7 +2187,7 @@ fn sarif_rule_id(finding: &SecurityFinding) -> String {
 fn security_help_text(title: &str) -> String {
     format!(
         "Verify this unverified {title} candidate before acting. Review the source, sink, \
-         SARIF code flow, and any runtime or dead-code context. fallow does not prove \
+         SARIF code flow, and any runtime or dead-code context. plow does not prove \
          exploitability, attacker control, or missing sanitization."
     )
 }
@@ -2274,14 +2274,14 @@ fn sarif_rule_def(
                     "Unverified candidate, requires verification: a \"use client\" file \
                      transitively imports a server-only module (one carrying a \"use server\" \
                      directive or importing server-only code such as server-only, next/headers, \
-                     next/server, or node:fs / node:child_process). fallow does not prove this \
+                     next/server, or node:fs / node:child_process). plow does not prove this \
                      code runs on the client; a module pulled in only through \
                      next/dynamic(..., { ssr: false }) is a false positive." },
                 "help": {
                     "text": security_help_text(title),
                     "markdown": security_help_markdown(title)
                 },
-                "helpUri": "https://github.com/fallow-rs/fallow",
+                "helpUri": "https://github.com/fglogan/genesis-plow",
                 "defaultConfiguration": { "level": "note" }
             })
         }
@@ -2294,12 +2294,12 @@ fn sarif_rule_def(
                 "fullDescription": { "text":
                     "Unverified candidate, requires verification: a \"use client\" file \
                      transitively imports a module that reads a non-public process.env \
-                     secret. fallow does not prove the secret reaches client-bundled code." },
+                     secret. plow does not prove the secret reaches client-bundled code." },
                 "help": {
                     "text": security_help_text(title),
                     "markdown": security_help_markdown(title)
                 },
-                "helpUri": "https://github.com/fallow-rs/fallow",
+                "helpUri": "https://github.com/fglogan/genesis-plow",
                 "defaultConfiguration": { "level": "note" }
             })
         }
@@ -2307,7 +2307,7 @@ fn sarif_rule_def(
             let title = finding
                 .category
                 .as_deref()
-                .and_then(fallow_core::analyze::security_catalogue_title)
+                .and_then(plow_core::analyze::security_catalogue_title)
                 .or(finding.category.as_deref())
                 .unwrap_or("tainted-sink");
             let mut rule = serde_json::json!({
@@ -2315,7 +2315,7 @@ fn sarif_rule_def(
                 "name": title,
                 "shortDescription": { "text": format!("{title} candidate (unverified)") },
                 "fullDescription": { "text": format!(
-                    "Unverified candidate, requires verification: {title}. fallow flags a \
+                    "Unverified candidate, requires verification: {title}. plow flags a \
                      syntactic sink reached by a non-literal argument; it does not prove the \
                      value is attacker-controlled or reaches the sink unsanitized."
                 ) },
@@ -2323,7 +2323,7 @@ fn sarif_rule_def(
                     "text": security_help_text(title),
                     "markdown": security_help_markdown(title)
                 },
-                "helpUri": "https://github.com/fallow-rs/fallow",
+                "helpUri": "https://github.com/fglogan/genesis-plow",
                 "defaultConfiguration": { "level": "note" }
             });
             if let Some(cwe) = finding.cwe {
@@ -2355,7 +2355,7 @@ fn sarif_thread_flow_location(hop: &TraceHop) -> serde_json::Value {
     serde_json::json!({
         "location": sarif_location(&hop.path, hop.line, hop.col),
         "kinds": [role],
-        "properties": { "fallowTraceRole": role }
+        "properties": { "plowTraceRole": role }
     })
 }
 
@@ -2451,7 +2451,7 @@ fn render_sarif(output: &SecurityOutput) -> String {
                 "message": { "text": message },
                 "locations": [sarif_location(&finding.path, finding.line, finding.col)],
                 "relatedLocations": related,
-                "partialFingerprints": { "fallowSecurity/v1": security_finding_id(finding) },
+                "partialFingerprints": { "plowSecurity/v1": security_finding_id(finding) },
             });
             if let Some(code_flows) = sarif_code_flows(finding) {
                 result["codeFlows"] = code_flows;
@@ -2475,9 +2475,9 @@ fn render_sarif(output: &SecurityOutput) -> String {
 
     let mut run = serde_json::json!({
         "tool": { "driver": {
-            "name": "fallow",
+            "name": "plow",
             "version": env!("CARGO_PKG_VERSION"),
-            "informationUri": "https://github.com/fallow-rs/fallow",
+            "informationUri": "https://github.com/fglogan/genesis-plow",
             "rules": rules,
         }},
         "results": results,
@@ -2494,7 +2494,7 @@ fn render_sarif(output: &SecurityOutput) -> String {
     if let Some(gate) = &output.gate
         && let Ok(gate_value) = serde_json::to_value(gate)
     {
-        run["properties"] = serde_json::json!({ "fallowGate": gate_value });
+        run["properties"] = serde_json::json!({ "plowGate": gate_value });
     }
 
     let sarif = serde_json::json!({
@@ -2543,14 +2543,12 @@ fn sarif_location(path: &Path, line: u32, col: u32) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_core::results::{
+    use plow_core::results::{
         SecurityCandidate, SecurityCandidateBoundary, SecurityCandidateSink,
         SecurityDeadCodeContext, SecurityDeadCodeKind, SecurityFinding, SecurityFindingKind,
         TraceHop, TraceHopRole,
     };
-    use fallow_types::results::{
-        SecurityReachability, SecurityTaintFlow, TaintEndpoint, TaintPath,
-    };
+    use plow_types::results::{SecurityReachability, SecurityTaintFlow, TaintEndpoint, TaintPath};
 
     /// Build a finding anchored under `root` with a three-hop client -> secret trace.
     fn sample_finding(root: &Path) -> SecurityFinding {
@@ -2656,23 +2654,23 @@ mod tests {
                     path: root.join("src/z.ts"),
                     line: 9,
                     col: 4,
-                    reason: fallow_types::extract::SkippedSecurityCalleeReason::ComputedMember,
+                    reason: plow_types::extract::SkippedSecurityCalleeReason::ComputedMember,
                     expression_kind:
-                        fallow_types::extract::SkippedSecurityCalleeExpressionKind::ComputedMemberExpression,
+                        plow_types::extract::SkippedSecurityCalleeExpressionKind::ComputedMemberExpression,
                 },
                 SecurityUnresolvedCalleeDiagnostic {
                     path: root.join("src/a.ts"),
                     line: 3,
                     col: 2,
-                    reason: fallow_types::extract::SkippedSecurityCalleeReason::DynamicDispatch,
-                    expression_kind: fallow_types::extract::SkippedSecurityCalleeExpressionKind::Other,
+                    reason: plow_types::extract::SkippedSecurityCalleeReason::DynamicDispatch,
+                    expression_kind: plow_types::extract::SkippedSecurityCalleeExpressionKind::Other,
                 },
                 SecurityUnresolvedCalleeDiagnostic {
                     path: root.join("src/a.ts"),
                     line: 4,
                     col: 2,
-                    reason: fallow_types::extract::SkippedSecurityCalleeReason::DynamicDispatch,
-                    expression_kind: fallow_types::extract::SkippedSecurityCalleeExpressionKind::Other,
+                    reason: plow_types::extract::SkippedSecurityCalleeReason::DynamicDispatch,
+                    expression_kind: plow_types::extract::SkippedSecurityCalleeExpressionKind::Other,
                 },
             ],
             root,
@@ -2707,7 +2705,7 @@ mod tests {
             function: "render".to_owned(),
             line: 10,
             invocations: Some(123),
-            stable_id: Some("fallow:fn:test".to_owned()),
+            stable_id: Some("plow:fn:test".to_owned()),
             evidence: Some("production runtime evidence".to_owned()),
         });
         finding
@@ -2751,7 +2749,7 @@ mod tests {
         let mut medium_a = sample_finding(root);
         medium_a.path = root.join("a.ts");
         medium_a.severity = SecuritySeverity::Medium;
-        medium_a.reachability = Some(fallow_types::results::SecurityReachability {
+        medium_a.reachability = Some(plow_types::results::SecurityReachability {
             reachable_from_entry: false,
             reachable_from_untrusted_source: true,
             taint_confidence: Some(TaintConfidence::ModuleLevel),
@@ -2764,7 +2762,7 @@ mod tests {
         medium_b.path = root.join("b.ts");
         medium_b.severity = SecuritySeverity::Medium;
         medium_b.source_backed = true;
-        medium_b.reachability = Some(fallow_types::results::SecurityReachability {
+        medium_b.reachability = Some(plow_types::results::SecurityReachability {
             reachable_from_entry: false,
             reachable_from_untrusted_source: true,
             taint_confidence: Some(TaintConfidence::ArgLevel),
@@ -2917,7 +2915,7 @@ mod tests {
     #[test]
     fn gate_sarif_is_a_run_property_not_result_severity() {
         let sarif = render_sarif(&output_with_gate(SecurityGateVerdict::Fail, 1));
-        assert!(sarif.contains("fallowGate"));
+        assert!(sarif.contains("plowGate"));
         // The gate verdict is a run property and creates no result severity.
         assert!(!sarif.contains("\"level\": \"error\""));
         assert!(!sarif.contains("\"level\": \"warning\""));
@@ -2928,7 +2926,7 @@ mod tests {
             reachable_from_entry: true,
             reachable_from_untrusted_source: true,
             // Cross-module reachability is module-level (issue #1093).
-            taint_confidence: Some(fallow_core::results::TaintConfidence::ModuleLevel),
+            taint_confidence: Some(plow_core::results::TaintConfidence::ModuleLevel),
             untrusted_source_hop_count: Some(1),
             untrusted_source_trace: vec![
                 TraceHop {
@@ -3405,7 +3403,7 @@ mod tests {
             serde_json::from_str(&render_sarif(&output_with(vec![finding], 0)))
                 .expect("valid SARIF");
         assert_eq!(
-            sarif["runs"][0]["results"][0]["partialFingerprints"]["fallowSecurity/v1"],
+            sarif["runs"][0]["results"][0]["partialFingerprints"]["plowSecurity/v1"],
             serde_json::Value::String(id)
         );
     }
@@ -3437,7 +3435,7 @@ mod tests {
         let sarif: serde_json::Value = serde_json::from_str(&rendered).expect("valid SARIF JSON");
         assert_eq!(sarif["version"], "2.1.0");
         let run = &sarif["runs"][0];
-        assert_eq!(run["tool"]["driver"]["name"], "fallow");
+        assert_eq!(run["tool"]["driver"]["name"], "plow");
         let result = &run["results"][0];
         // Candidate framing: a high-priority finding is warning, never error.
         assert_eq!(result["level"], "warning");
@@ -3462,7 +3460,7 @@ mod tests {
             serde_json::json!("secret-source")
         );
         // Stable dedup fingerprint present for GHAS.
-        assert!(result["partialFingerprints"]["fallowSecurity/v1"].is_string());
+        assert!(result["partialFingerprints"]["plowSecurity/v1"].is_string());
 
         let rules = run["tool"]["driver"]["rules"].as_array().unwrap();
         assert_eq!(rules[0]["name"], "Client-server secret leak");
@@ -3663,7 +3661,7 @@ mod tests {
         .expect("fixture config loads");
         config.rules.security_sink = Severity::Warn;
 
-        let results = fallow_core::analyze(&config).expect("fixture analyzes");
+        let results = plow_core::analyze(&config).expect("fixture analyzes");
         let finding = results
             .security_findings
             .iter()
@@ -3678,7 +3676,7 @@ mod tests {
         // `UntrustedSource` (which is reserved for an arg-level same-module read).
         assert_eq!(
             reach.taint_confidence,
-            Some(fallow_core::results::TaintConfidence::ModuleLevel)
+            Some(plow_core::results::TaintConfidence::ModuleLevel)
         );
         assert_eq!(
             reach
@@ -3711,7 +3709,7 @@ mod tests {
     #[test]
     fn file_scope_keeps_security_finding_when_anchor_matches() {
         let root = Path::new("/proj/root");
-        let mut results = fallow_core::results::AnalysisResults::default();
+        let mut results = plow_core::results::AnalysisResults::default();
         results.security_findings.push(sample_finding(root));
 
         filter_to_files(&mut results, root, &[PathBuf::from("src/app.tsx")], true);
@@ -3722,7 +3720,7 @@ mod tests {
     #[test]
     fn file_scope_keeps_security_finding_when_trace_hop_matches() {
         let root = Path::new("/proj/root");
-        let mut results = fallow_core::results::AnalysisResults::default();
+        let mut results = plow_core::results::AnalysisResults::default();
         results.security_findings.push(sample_finding(root));
 
         filter_to_files(
@@ -3738,7 +3736,7 @@ mod tests {
     #[test]
     fn file_scope_drops_unrelated_security_finding() {
         let root = Path::new("/proj/root");
-        let mut results = fallow_core::results::AnalysisResults::default();
+        let mut results = plow_core::results::AnalysisResults::default();
         results.security_findings.push(sample_finding(root));
 
         filter_to_files(&mut results, root, &[PathBuf::from("src/other.ts")], true);

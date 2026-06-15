@@ -4,6 +4,6 @@
 |---------|-------------|
 | **Editor** | Unused code is faded with squiggly underlines. Hover for details. |
 | **Problems panel** | All issues listed with file locations. Click to navigate. |
-| **Fallow sidebar** | Browse by category — unused files, exports, dependencies, and more. |
+| **Plow sidebar** | Browse by category — unused files, exports, dependencies, and more. |
 | **Code Lens** | Reference counts shown above every export declaration. |
 | **Status bar** | Total issue count and duplication percentage at a glance. |

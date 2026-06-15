@@ -52,7 +52,7 @@ fn combined_git_sha(root: &std::path::Path) -> Option<String> {
     command
         .args(["rev-parse", "--short", "HEAD"])
         .current_dir(root);
-    fallow_core::git_env::clear_ambient_git_env(&mut command);
+    plow_core::git_env::clear_ambient_git_env(&mut command);
     command
         .output()
         .ok()

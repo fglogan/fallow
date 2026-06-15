@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 
 use rustc_hash::FxHashMap;
 
-use fallow_config::WorkspaceInfo;
+use plow_config::WorkspaceInfo;
 
-use fallow_types::discover::{DiscoveredFile, FileId};
+use plow_types::discover::{DiscoveredFile, FileId};
 
 /// Centralized project state owning the file registry and workspace metadata.
 ///

@@ -6,7 +6,7 @@ use std::sync::Mutex;
 use oxc_resolver::Resolver;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_types::discover::FileId;
+use plow_types::discover::FileId;
 
 /// Result of resolving an import specifier.
 #[derive(Debug, Clone)]
@@ -57,7 +57,7 @@ impl ResolveResult {
 #[derive(Debug, Clone)]
 pub struct ResolvedImport {
     /// The original import information.
-    pub info: fallow_types::extract::ImportInfo,
+    pub info: plow_types::extract::ImportInfo,
     /// Where the import resolved to.
     pub target: ResolveResult,
 }
@@ -66,7 +66,7 @@ pub struct ResolvedImport {
 #[derive(Debug, Clone)]
 pub struct ResolvedReExport {
     /// The original re-export information.
-    pub info: fallow_types::extract::ReExportInfo,
+    pub info: plow_types::extract::ReExportInfo,
     /// Where the re-export source resolved to.
     pub target: ResolveResult,
 }
@@ -134,7 +134,7 @@ pub struct ResolvedModule {
     /// Absolute path to the module file.
     pub path: PathBuf,
     /// All export declarations in this module.
-    pub exports: Vec<fallow_types::extract::ExportInfo>,
+    pub exports: Vec<plow_types::extract::ExportInfo>,
     /// All re-exports with resolved targets.
     pub re_exports: Vec<ResolvedReExport>,
     /// All static imports with resolved targets.
@@ -142,9 +142,9 @@ pub struct ResolvedModule {
     /// All dynamic imports with resolved targets.
     pub resolved_dynamic_imports: Vec<ResolvedImport>,
     /// Dynamic import patterns matched against discovered files.
-    pub resolved_dynamic_patterns: Vec<(fallow_types::extract::DynamicImportPattern, Vec<FileId>)>,
+    pub resolved_dynamic_patterns: Vec<(plow_types::extract::DynamicImportPattern, Vec<FileId>)>,
     /// Static member accesses (e.g., `Status.Active`).
-    pub member_accesses: Vec<fallow_types::extract::MemberAccess>,
+    pub member_accesses: Vec<plow_types::extract::MemberAccess>,
     /// Identifiers used as whole objects (Object.values, for..in, spread, etc.).
     pub whole_object_uses: Vec<String>,
     /// Whether this module uses `CommonJS` exports.
@@ -160,8 +160,8 @@ pub struct ResolvedModule {
     /// Local import bindings referenced from runtime/value positions.
     pub value_referenced_import_bindings: Vec<String>,
     /// Namespace-import aliases re-exported through an object literal.
-    /// See `fallow_types::extract::NamespaceObjectAlias` for the shape.
-    pub namespace_object_aliases: Vec<fallow_types::extract::NamespaceObjectAlias>,
+    /// See `plow_types::extract::NamespaceObjectAlias` for the shape.
+    pub namespace_object_aliases: Vec<plow_types::extract::NamespaceObjectAlias>,
 }
 
 impl Default for ResolvedModule {
@@ -271,17 +271,17 @@ pub(super) struct PackageManifestInfo {
     /// Parsed package name.
     pub name: Option<String>,
     /// Parsed package.json fields.
-    pub package_json: fallow_config::PackageJson,
+    pub package_json: plow_config::PackageJson,
 }
 
 /// Thread-safe lazy canonical path index, built on first access.
 pub(super) struct CanonicalFallback<'a> {
-    files: &'a [fallow_types::discover::DiscoveredFile],
+    files: &'a [plow_types::discover::DiscoveredFile],
     map: std::sync::OnceLock<FxHashMap<std::path::PathBuf, FileId>>,
 }
 
 impl<'a> CanonicalFallback<'a> {
-    pub const fn new(files: &'a [fallow_types::discover::DiscoveredFile]) -> Self {
+    pub const fn new(files: &'a [plow_types::discover::DiscoveredFile]) -> Self {
         Self {
             files,
             map: std::sync::OnceLock::new(),
@@ -311,7 +311,7 @@ impl<'a> CanonicalFallback<'a> {
 #[cfg(all(test, not(miri)))]
 mod tests {
     use super::*;
-    use fallow_types::discover::DiscoveredFile;
+    use plow_types::discover::DiscoveredFile;
 
     #[test]
     fn canonical_fallback_returns_none_for_empty_files() {
@@ -322,7 +322,7 @@ mod tests {
 
     #[test]
     fn canonical_fallback_finds_existing_file() {
-        let temp = std::env::temp_dir().join("fallow-test-canonical-fallback");
+        let temp = std::env::temp_dir().join("plow-test-canonical-fallback");
         let _ = std::fs::create_dir_all(&temp);
         let test_file = temp.join("test.ts");
         std::fs::write(&test_file, "").unwrap();
@@ -344,7 +344,7 @@ mod tests {
 
     #[test]
     fn canonical_fallback_returns_none_for_missing_path() {
-        let temp = std::env::temp_dir().join("fallow-test-canonical-miss");
+        let temp = std::env::temp_dir().join("plow-test-canonical-miss");
         let _ = std::fs::create_dir_all(&temp);
         let test_file = temp.join("exists.ts");
         std::fs::write(&test_file, "").unwrap();

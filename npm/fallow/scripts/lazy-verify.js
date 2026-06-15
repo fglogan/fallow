@@ -1,9 +1,9 @@
-// Lazy first-run binary verification for the fallow npm wrapper.
+// Lazy first-run binary verification for the plow npm wrapper.
 //
-// Called from bin/fallow, bin/fallow-lsp, and bin/fallow-mcp before each
+// Called from bin/plow, bin/plow-lsp, and bin/plow-mcp before each
 // invocation execs the platform binary. Replaces the postinstall-time check
 // that npm RFC 868 (npm/cli#9360) Phase 2 will silently disable for any
-// consumer that has not added fallow to its `allowScripts` field.
+// consumer that has not added plow to its `allowScripts` field.
 //
 // On every invocation:
 //   1. Resolve a writable sentinel location (see sentinel-path.js).
@@ -12,7 +12,7 @@
 //      sentinel on success, return result.
 //
 // Verification is fail-closed: any non-ok outcome surfaces to the caller and
-// bin/fallow exits non-zero before execing the binary. FALLOW_SKIP_BINARY_VERIFY
+// bin/plow exits non-zero before execing the binary. PLOW_SKIP_BINARY_VERIFY
 // remains the documented escape hatch.
 //
 // Refs: SECURITY.md "Binary distribution and verification".
@@ -30,7 +30,7 @@ const { verifyInstalledSync, SKIP_ENV } = require("./verify-binary");
 // cross-install reuse gap in the shared $XDG fallback cache). v1 sentinels
 // without these fields are invalidated automatically.
 const SENTINEL_SCHEMA_VERSION = 2;
-const VERIFY_LOG_ENV = "FALLOW_VERIFY_LOG";
+const VERIFY_LOG_ENV = "PLOW_VERIFY_LOG";
 
 // One-shot warning state: each warning class fires once per process,
 // keyed by `code` so independent failure modes are still surfaced.
@@ -41,7 +41,7 @@ function warnOnce(code, message) {
     return;
   }
   _warningEmitted.add(code);
-  process.stderr.write(`fallow: ${message}\n`);
+  process.stderr.write(`plow: ${message}\n`);
 }
 
 function isVerifyLogEnabled(env) {
@@ -62,12 +62,12 @@ function emitVerifyLog(env, payload) {
       parts.push(`${key}=${v}`);
     }
   }
-  process.stderr.write(`fallow-verify ${parts.join(" ")}\n`);
+  process.stderr.write(`plow-verify ${parts.join(" ")}\n`);
 }
 
 function binaryTargetsForPlatform(platform) {
   const ext = platform === "win32" ? ".exe" : "";
-  return [`fallow${ext}`, `fallow-lsp${ext}`, `fallow-mcp${ext}`];
+  return [`plow${ext}`, `plow-lsp${ext}`, `plow-mcp${ext}`];
 }
 
 function statMtimeMs(absPath) {
@@ -215,11 +215,11 @@ function isSkipRequested(env) {
   return v === "1" || v === "true" || v === "yes";
 }
 
-// Main entry point. Synchronous by design: bin/fallow runs this before
+// Main entry point. Synchronous by design: bin/plow runs this before
 // execFileSync, so the verify result must be available without awaiting.
 //
 // Required input:
-//   platformPkgDir: absolute path to the @fallow-cli/<platform> directory
+//   platformPkgDir: absolute path to the @plow-cli/<platform> directory
 //   packageName:    the platform package name (used as sentinel filename in
 //                   the cache-dir fallback locations)
 //   manifestPath:   absolute path to the platform package's package.json
@@ -228,8 +228,8 @@ function isSkipRequested(env) {
 // Optional input (all dependency-injected for tests):
 //   verifyFn       - replaces verifyBinaryAt (sig check) in verifyInstalledSync
 //   digestProvider - sync function returning a sha256 digest string; used when
-//                    fallowDigests is missing from the manifest (tests only;
-//                    production install path always has fallowDigests)
+//                    plowDigests is missing from the manifest (tests only;
+//                    production install path always has plowDigests)
 //   env            - process.env (defaults to process.env)
 //   platform       - process.platform (defaults to process.platform)
 //   logger         - function (line: string) -> void (defaults to stderr)
@@ -243,7 +243,7 @@ function buildVerifyOptions(input, manifest) {
   const opts = {
     dirOverride: input.platformPkgDir,
     version: manifest.version,
-    platformId: (input.packageName || "").replace(/^@fallow-cli\//, "") || "unknown",
+    platformId: (input.packageName || "").replace(/^@plow-cli\//, "") || "unknown",
   };
   if (typeof input.verifyFn === "function") opts.verifyFn = input.verifyFn;
   if (typeof input.digestProvider === "function") opts.digestProvider = input.digestProvider;
@@ -257,7 +257,7 @@ function persistSentinel(sentinel, platformPkgDir, manifest, platform) {
     warnOnce(
       "sentinel-no-writable-location",
       `no writable cache location for verify sentinel (platform pkg dir read-only, ` +
-        `$FALLOW_VERIFY_CACHE_DIR unset, $XDG_CACHE_HOME / %LOCALAPPDATA% unavailable). ` +
+        `$PLOW_VERIFY_CACHE_DIR unset, $XDG_CACHE_HOME / %LOCALAPPDATA% unavailable). ` +
         `Binary verification will re-run on every invocation. Set ${SKIP_ENV}=1 to ` +
         `bypass verification entirely.`,
     );
@@ -270,7 +270,7 @@ function persistSentinel(sentinel, platformPkgDir, manifest, platform) {
   warnOnce(
     "sentinel-write-failed",
     `could not persist verify sentinel at ${sentinel.path} (${write.code}): ` +
-      `verification will re-run on next invocation. Set FALLOW_VERIFY_CACHE_DIR ` +
+      `verification will re-run on next invocation. Set PLOW_VERIFY_CACHE_DIR ` +
       `to a writable location to enable caching.`,
   );
 }
@@ -288,7 +288,7 @@ function ensureVerified(input) {
     const reason = `${SKIP_ENV} is set`;
     // Warn once per process so the bypass stays visible in CI logs and
     // vendor audits regardless of whether the user runs `--version` or
-    // sets FALLOW_VERIFY_LOG. Documented in SECURITY.md.
+    // sets PLOW_VERIFY_LOG. Documented in SECURITY.md.
     warnOnce(
       "skip-binary-verify-set",
       `${SKIP_ENV} is set; binary verification is skipped. ` +

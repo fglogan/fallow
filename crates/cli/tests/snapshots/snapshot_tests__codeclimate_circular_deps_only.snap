@@ -5,13 +5,13 @@ expression: json_str
 [
   {
     "type": "issue",
-    "check_name": "fallow/circular-dependency",
+    "check_name": "plow/circular-dependency",
     "description": "Circular dependency: src/a.ts → src/b.ts",
     "categories": [
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "405f0abed155920d",
+    "fingerprint": "9f70c2f1869ab63a",
     "location": {
       "path": "src/a.ts",
       "lines": {

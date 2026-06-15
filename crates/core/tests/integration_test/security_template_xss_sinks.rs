@@ -1,7 +1,7 @@
 //! Integration tests for framework-template XSS sink capture (#883).
 
-use fallow_config::Severity;
-use fallow_core::results::{AnalysisResults, SecurityFindingKind};
+use plow_config::Severity;
+use plow_core::results::{AnalysisResults, SecurityFindingKind};
 
 use super::common::{create_config, create_config_with_rules, fixture_path};
 
@@ -10,13 +10,13 @@ fn analyze_with_security_sink() -> AnalysisResults {
     let config = create_config_with_rules(root, |rules| {
         rules.security_sink = Severity::Warn;
     });
-    fallow_core::analyze(&config).expect("analysis should succeed")
+    plow_core::analyze(&config).expect("analysis should succeed")
 }
 
 fn finding_for<'a>(
     results: &'a AnalysisResults,
     suffix: &str,
-) -> &'a fallow_core::results::SecurityFinding {
+) -> &'a plow_core::results::SecurityFinding {
     results
         .security_findings
         .iter()
@@ -95,7 +95,7 @@ fn default_off_emits_no_template_sink_findings() {
     let root = fixture_path("security-template-xss-sinks");
     let config = create_config(root);
     assert_eq!(config.rules.security_sink, Severity::Off);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     assert!(
         results
             .security_findings

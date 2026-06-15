@@ -1,4 +1,4 @@
-//! Best-effort "a newer fallow is available" nudge.
+//! Best-effort "a newer plow is available" nudge.
 //!
 //! Telemetry shows users lag well behind the latest release (an old version
 //! dominates run volume while newer ones carry real fixes). This module prints
@@ -16,7 +16,7 @@
 //! - Never writes to stdout, never into JSON / SARIF / any machine format.
 //! - Suppressed when quiet, non-TTY (either stream), non-human, or in CI.
 //! - Suppressed by the universal kill switches (`DO_NOT_TRACK`,
-//!   `FALLOW_TELEMETRY_DISABLED`) and the dedicated `FALLOW_UPDATE_CHECK=off`,
+//!   `PLOW_TELEMETRY_DISABLED`) and the dedicated `PLOW_UPDATE_CHECK=off`,
 //!   plus a persistent `disabled` flag in the cache file.
 //! - The fetch runs on a detached thread with a bounded grace window, so it
 //!   never blocks process exit, and every error is swallowed so it never
@@ -28,7 +28,7 @@ use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use fallow_config::OutputFormat;
+use plow_config::OutputFormat;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 
@@ -53,27 +53,27 @@ const FETCH_CONNECT_TIMEOUT_SECS: u64 = 1;
 const FETCH_TOTAL_TIMEOUT_SECS: u64 = 1;
 
 /// Cloud endpoint that returns the latest published stable version. Resolved
-/// through `api_url` so `FALLOW_API_URL` overrides apply.
+/// through `api_url` so `PLOW_API_URL` overrides apply.
 const LATEST_VERSION_PATH: &str = "/v1/cli/latest-version";
 
 /// Dedicated opt-out env var. Truthy-disable values mirror the telemetry mode
 /// parser's "off" set.
-const UPDATE_CHECK_ENV: &str = "FALLOW_UPDATE_CHECK";
+const UPDATE_CHECK_ENV: &str = "PLOW_UPDATE_CHECK";
 const DO_NOT_TRACK_ENV: &str = "DO_NOT_TRACK";
-const TELEMETRY_DISABLED_ENV: &str = "FALLOW_TELEMETRY_DISABLED";
+const TELEMETRY_DISABLED_ENV: &str = "PLOW_TELEMETRY_DISABLED";
 
 /// Where the user is pointed to decide whether the upgrade is worth it. Kept
-/// method-agnostic on purpose: fallow ships via npm, Homebrew, and a direct
+/// method-agnostic on purpose: plow ships via npm, Homebrew, and a direct
 /// binary, so a hardcoded install command would be a false instruction for most
 /// users.
-const CHANGELOG_URL: &str = "https://github.com/fallow-rs/fallow/blob/main/CHANGELOG.md";
+const CHANGELOG_URL: &str = "https://github.com/fglogan/genesis-plow/blob/main/CHANGELOG.md";
 
 /// Persisted latest-version answer. Lives in the user-global config dir next to
 /// `telemetry.json`.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct UpdateCache {
     schema_version: u8,
-    /// Persistent opt-out. A future `fallow update-check disable` would set
+    /// Persistent opt-out. A future `plow update-check disable` would set
     /// this; today a user can set it by hand. Preserved across background
     /// refreshes.
     #[serde(default)]
@@ -152,7 +152,7 @@ pub fn maybe_nudge(output: OutputFormat, quiet: bool, telemetry_note_printed: bo
     let current = env!("CARGO_PKG_VERSION");
     if is_newer_stable(current, &cache.latest_version) {
         eprintln!(
-            "A newer fallow is available ({}, you have {current}). Changelog: {CHANGELOG_URL} (silence: {UPDATE_CHECK_ENV}=off)",
+            "A newer plow is available ({}, you have {current}). Changelog: {CHANGELOG_URL} (silence: {UPDATE_CHECK_ENV}=off)",
             cache.latest_version
         );
     }
@@ -194,7 +194,7 @@ fn env_disabled() -> bool {
         || is_ci()
 }
 
-/// `FALLOW_UPDATE_CHECK` set to an explicit off value.
+/// `PLOW_UPDATE_CHECK` set to an explicit off value.
 fn update_check_off() -> bool {
     std::env::var(UPDATE_CHECK_ENV).ok().is_some_and(|value| {
         matches!(
@@ -238,7 +238,7 @@ fn cache_path() -> Option<PathBuf> {
             .map(PathBuf::from)
             .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
     }?;
-    Some(base.join("fallow").join("update-check.json"))
+    Some(base.join("plow").join("update-check.json"))
 }
 
 fn read_cache_from(path: &std::path::Path) -> Result<UpdateCache, String> {

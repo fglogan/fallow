@@ -16,7 +16,7 @@ export interface AnalysisBackoffNotice {
 export class AnalysisBackoffBlockedError extends Error {
   constructor(readonly failures: number) {
     super(
-      `automatic analysis is paused after ${failures} failed attempts for this workspace input. Run Fallow: Run Analysis to retry.`,
+      `automatic analysis is paused after ${failures} failed attempts for this workspace input. Run Plow: Run Analysis to retry.`,
     );
     this.name = "AnalysisBackoffBlockedError";
   }
@@ -59,7 +59,7 @@ export class AnalysisFailureBackoff {
     return paused ? { failures, shouldNotify } : null;
   }
 
-  // fallow-ignore-next-line unused-class-member
+  // plow-ignore-next-line unused-class-member
   readonly recordSuccess = (key: string): void => {
     this.reset(key);
   };
@@ -77,9 +77,9 @@ export const buildAnalysisBackoffKey = (root: string, args: ReadonlyArray<string
 export const buildAnalysisProcessEnv = (
   env: NodeJS.ProcessEnv = process.env,
 ): Readonly<Record<string, string>> => {
-  const configured = env.FALLOW_MAX_FILE_SIZE?.trim();
+  const configured = env.PLOW_MAX_FILE_SIZE?.trim();
   return {
-    FALLOW_MAX_FILE_SIZE:
+    PLOW_MAX_FILE_SIZE:
       configured && configured.length > 0 ? configured : ANALYSIS_DEFAULT_MAX_FILE_SIZE_MB,
   };
 };

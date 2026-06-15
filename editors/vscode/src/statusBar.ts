@@ -1,5 +1,5 @@
 // VS Code injects this module into the extension host at runtime.
-// fallow-ignore-next-line unlisted-dependency
+// plow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
 import { getChangedSince, getHealthStatusBar } from "./config.js";
 import { formatHealthStatusPart } from "./health-utils.js";
@@ -9,7 +9,7 @@ import {
   buildStatusBarTooltipMarkdown,
   renderStatusBarText,
 } from "./statusBar-utils.js";
-import type { FallowCheckResult, FallowDupesResult, HealthOutput } from "./types.js";
+import type { PlowCheckResult, PlowDupesResult, HealthOutput } from "./types.js";
 export type { AnalysisCompleteParams } from "./statusBar-utils.js";
 import type { AnalysisCompleteParams } from "./statusBar-utils.js";
 
@@ -31,16 +31,16 @@ const healthSuffix = (): string => (healthPart ? ` | health: ${healthPart}` : ""
 
 export const createStatusBar = (): vscode.StatusBarItem => {
   statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
-  statusBarItem.command = "fallow.analyze";
-  statusBarItem.text = renderStatusBarText("$(search) Fallow", liveChangedSince());
+  statusBarItem.command = "plow.analyze";
+  statusBarItem.text = renderStatusBarText("$(search) Plow", liveChangedSince());
   statusBarItem.show();
   return statusBarItem;
 };
 
 /** Update the status bar from CLI-driven analysis results. */
 export const updateStatusBar = (
-  checkResult: FallowCheckResult | null,
-  dupesResult: FallowDupesResult | null,
+  checkResult: PlowCheckResult | null,
+  dupesResult: PlowDupesResult | null,
 ): void => {
   if (!statusBarItem) {
     return;
@@ -102,7 +102,7 @@ const applyStatusBarText = (parts: string[]): void => {
     return;
   }
   lastBaseParts = parts;
-  const joined = parts.length > 0 ? `$(search) Fallow: ${parts.join(" | ")}` : "$(search) Fallow";
+  const joined = parts.length > 0 ? `$(search) Plow: ${parts.join(" | ")}` : "$(search) Plow";
   const base = `${joined}${healthSuffix()}`;
   statusBarItem.text = renderStatusBarText(base, liveChangedSince());
 };
@@ -126,7 +126,7 @@ export const updateStatusBarHealth = (report: HealthOutput | null): void => {
 export const setStatusBarAnalyzing = (): void => {
   if (statusBarItem) {
     statusBarItem.text = renderStatusBarText(
-      "$(loading~spin) Fallow: Analyzing...",
+      "$(loading~spin) Plow: Analyzing...",
       liveChangedSince(),
     );
   }
@@ -134,7 +134,7 @@ export const setStatusBarAnalyzing = (): void => {
 
 export const setStatusBarError = (): void => {
   if (statusBarItem) {
-    statusBarItem.text = renderStatusBarText("$(error) Fallow: Error", liveChangedSince());
+    statusBarItem.text = renderStatusBarText("$(error) Plow: Error", liveChangedSince());
   }
 };
 

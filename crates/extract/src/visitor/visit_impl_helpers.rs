@@ -431,7 +431,7 @@ pub(super) fn normalize_module_file_relative_path(relative: &str) -> Option<Stri
         return None;
     }
 
-    let normalized = PathBuf::from("__fallow_current_file__").join(relative);
+    let normalized = PathBuf::from("__plow_current_file__").join(relative);
 
     let mut parts = Vec::new();
     for component in normalized.components() {
@@ -447,7 +447,7 @@ pub(super) fn normalize_module_file_relative_path(relative: &str) -> Option<Stri
 
     if parts
         .first()
-        .is_some_and(|part| part == "__fallow_current_file__")
+        .is_some_and(|part| part == "__plow_current_file__")
         || parts.is_empty()
     {
         return None;

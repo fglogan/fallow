@@ -1,4 +1,4 @@
-### What Fallow finds
+### What Plow finds
 
 | Category | Examples |
 |----------|---------|

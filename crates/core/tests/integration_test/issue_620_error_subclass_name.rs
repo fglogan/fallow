@@ -9,7 +9,7 @@ use crate::common::{create_config, fixture_path};
 fn error_subclass_name_override_is_not_flagged() {
     let root = fixture_path("issue-620-error-subclass-name");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_members: Vec<String> = results
         .unused_class_members

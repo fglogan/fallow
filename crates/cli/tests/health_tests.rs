@@ -7,9 +7,7 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use common::{
-    fixture_path, parse_json, redact_all, run_fallow, run_fallow_combined, run_fallow_in_root,
-};
+use common::{fixture_path, parse_json, redact_all, run_plow, run_plow_combined, run_plow_in_root};
 use std::path::Path;
 use tempfile::tempdir;
 
@@ -50,7 +48,7 @@ fn git(root: &Path, args: &[&str]) {
 
 #[test]
 fn health_json_output_is_valid() {
-    let output = run_fallow(
+    let output = run_plow(
         "health",
         "complexity-project",
         &["--max-crap", "10000", "--format", "json", "--quiet"],
@@ -62,10 +60,10 @@ fn health_json_output_is_valid() {
 
 #[test]
 fn health_min_score_zero_exits_zero_with_findings() {
-    let plain = run_fallow("health", "complexity-project", &["--quiet"]);
+    let plain = run_plow("health", "complexity-project", &["--quiet"]);
     assert_eq!(plain.code, 1, "plain health should still fail on findings");
 
-    let gated = run_fallow(
+    let gated = run_plow(
         "health",
         "complexity-project",
         &["--min-score", "0", "--quiet"],
@@ -79,7 +77,7 @@ fn health_min_score_zero_exits_zero_with_findings() {
 
 #[test]
 fn health_min_score_below_threshold_fails() {
-    let output = run_fallow(
+    let output = run_plow(
         "health",
         "complexity-project",
         &["--min-score", "100", "--quiet"],
@@ -93,7 +91,7 @@ fn health_min_score_below_threshold_fails() {
 
 #[test]
 fn health_min_score_demotes_rendered_findings_with_informational_note() {
-    let output = run_fallow(
+    let output = run_plow(
         "health",
         "complexity-project",
         &["--complexity", "--min-score", "0"],
@@ -110,7 +108,7 @@ fn health_min_score_demotes_rendered_findings_with_informational_note() {
 
 #[test]
 fn health_report_only_never_fails() {
-    let output = run_fallow(
+    let output = run_plow(
         "health",
         "complexity-project",
         &["--report-only", "--quiet"],
@@ -124,7 +122,7 @@ fn health_report_only_never_fails() {
 
 #[test]
 fn health_report_only_rejects_gate_flags() {
-    let output = run_fallow(
+    let output = run_plow(
         "health",
         "complexity-project",
         &[
@@ -152,7 +150,7 @@ fn health_report_only_rejects_gate_flags() {
 
 #[test]
 fn health_rejects_relative_coverage_root() {
-    let output = run_fallow(
+    let output = run_plow(
         "health",
         "complexity-project",
         &["--coverage-root", "src", "--format", "json", "--quiet"],
@@ -232,7 +230,7 @@ export const elementsFrom = async (
         &serde_json::to_string(&coverage).expect("serialize coverage"),
     );
 
-    let output = run_fallow_in_root(
+    let output = run_plow_in_root(
         "health",
         dir.path(),
         &[
@@ -271,7 +269,7 @@ export const elementsFrom = async (
 
 #[test]
 fn health_json_has_findings() {
-    let output = run_fallow(
+    let output = run_plow(
         "health",
         "complexity-project",
         &["--complexity", "--format", "json", "--quiet"],
@@ -288,7 +286,7 @@ fn write_threshold_override_fixture(root: &Path, config: &str, source: &str) {
         &root.join("package.json"),
         r#"{"name":"threshold-override-fixture","type":"module","main":"src/legacy.ts"}"#,
     );
-    write_file(&root.join(".fallowrc.json"), config);
+    write_file(&root.join(".plowrc.json"), config);
     write_file(&root.join("src/legacy.ts"), source);
 }
 
@@ -328,7 +326,7 @@ fn health_threshold_override_uses_local_ceiling() {
         complex_threshold_override_source(),
     );
 
-    let output = run_fallow_in_root(
+    let output = run_plow_in_root(
         "health",
         dir.path(),
         &[
@@ -376,7 +374,7 @@ fn health_threshold_override_reports_stale_when_under_global_threshold() {
         "export function legacyFlow(input: number): number {\n  return input + 1;\n}\n",
     );
 
-    let output = run_fallow_in_root(
+    let output = run_plow_in_root(
         "health",
         dir.path(),
         &[
@@ -423,7 +421,7 @@ fn health_threshold_override_omits_no_match_state_for_scoped_run() {
     git(dir.path(), &["add", "."]);
     git(dir.path(), &["commit", "-m", "initial"]);
 
-    let output = run_fallow_in_root(
+    let output = run_plow_in_root(
         "health",
         dir.path(),
         &[
@@ -455,7 +453,7 @@ fn health_threshold_override_omits_no_match_state_for_scoped_run() {
 #[test]
 fn health_complexity_breakdown_gates_and_reconstructs_contributions() {
     // Without the flag, no `contributions` key is emitted on any finding.
-    let without = parse_json(&run_fallow(
+    let without = parse_json(&run_plow(
         "health",
         "complexity-project",
         &[
@@ -481,7 +479,7 @@ fn health_complexity_breakdown_gates_and_reconstructs_contributions() {
 
     // With the flag, each finding carries a breakdown that reconstructs the
     // aggregate metrics exactly (sum of weights, +1 for cyclomatic).
-    let with = parse_json(&run_fallow(
+    let with = parse_json(&run_plow(
         "health",
         "complexity-project",
         &[
@@ -530,7 +528,7 @@ fn health_complexity_breakdown_gates_and_reconstructs_contributions() {
 
 #[test]
 fn health_reports_angular_template_complexity() {
-    let output = run_fallow(
+    let output = run_plow(
         "health",
         "angular-template-complexity",
         &[
@@ -571,15 +569,12 @@ fn health_reports_angular_template_complexity() {
         .iter()
         .find(|action| action["type"] == "suppress-file")
         .unwrap_or_else(|| panic!("expected HTML suppress action, got: {actions:#?}"));
-    assert_eq!(
-        suppress["comment"],
-        "<!-- fallow-ignore-file complexity -->"
-    );
+    assert_eq!(suppress["comment"], "<!-- plow-ignore-file complexity -->");
 }
 
 #[test]
 fn health_emits_component_rollup_for_angular_component() {
-    let output = run_fallow(
+    let output = run_plow(
         "health",
         "angular-component-rollup",
         &[
@@ -729,7 +724,7 @@ fn health_angular_template_crap_inherits_from_component_ts() {
         &serde_json::to_string(&coverage).expect("serialize coverage"),
     );
 
-    let output = run_fallow_in_root(
+    let output = run_plow_in_root(
         "health",
         dir.path(),
         &[
@@ -815,7 +810,7 @@ fn health_angular_template_inherit_rejects_non_component_owner() {
         "@if (user) {\n  @if (user.isAdmin) {\n    @for (item of user.permissions; track item.id) {\n      @switch (item.status) {\n        @case ('active') { <a/> }\n        @case ('pending') { <b/> }\n        @default { <c/> }\n      }\n    }\n  }\n}\n",
     );
 
-    let output = run_fallow_in_root(
+    let output = run_plow_in_root(
         "health",
         dir.path(),
         &[
@@ -860,7 +855,7 @@ fn health_angular_template_inherit_rejects_non_component_owner() {
 
 #[test]
 fn health_reports_angular_inline_template_complexity() {
-    let output = run_fallow(
+    let output = run_plow(
         "health",
         "angular-inline-template-complexity",
         &[
@@ -937,7 +932,7 @@ fn health_inline_template_complexity_can_be_suppressed() {
     let original = std::fs::read_to_string(&component_path).expect("read component");
     let prefixed = original.replacen(
         "@Component({",
-        "// fallow-ignore-next-line complexity\n@Component({",
+        "// plow-ignore-next-line complexity\n@Component({",
         1,
     );
     assert_ne!(
@@ -946,7 +941,7 @@ fn health_inline_template_complexity_can_be_suppressed() {
     );
     std::fs::write(&component_path, prefixed).expect("write suppressed component");
 
-    let output = run_fallow_in_root(
+    let output = run_plow_in_root(
         "health",
         dir.path(),
         &[
@@ -984,11 +979,11 @@ fn health_html_template_complexity_can_be_suppressed() {
     let original = std::fs::read_to_string(&template_path).expect("read template");
     std::fs::write(
         &template_path,
-        format!("<!-- fallow-ignore-file complexity -->\n{original}"),
+        format!("<!-- plow-ignore-file complexity -->\n{original}"),
     )
     .expect("write suppressed template");
 
-    let output = run_fallow_in_root(
+    let output = run_plow_in_root(
         "health",
         dir.path(),
         &[
@@ -1028,8 +1023,8 @@ fn health_save_baseline_creates_parent_directory() {
 ",
     );
 
-    let baseline_path = dir.path().join("fallow-baselines/health.json");
-    let output = run_fallow_in_root(
+    let baseline_path = dir.path().join("plow-baselines/health.json");
+    let output = run_plow_in_root(
         "health",
         dir.path(),
         &[
@@ -1054,7 +1049,7 @@ fn health_save_baseline_creates_parent_directory() {
 
 #[test]
 fn health_exits_0_below_threshold() {
-    let output = run_fallow(
+    let output = run_plow(
         "health",
         "complexity-project",
         &[
@@ -1076,7 +1071,7 @@ fn health_exits_0_below_threshold() {
 
 #[test]
 fn health_exits_1_when_threshold_exceeded() {
-    let output = run_fallow(
+    let output = run_plow(
         "health",
         "complexity-project",
         &[
@@ -1099,7 +1094,7 @@ fn health_exits_1_when_threshold_exceeded() {
 /// summary's `max_crap_threshold` must reflect the CLI override.
 #[test]
 fn health_exits_0_when_crap_below_threshold() {
-    let output = run_fallow(
+    let output = run_plow(
         "health",
         "complexity-project",
         &[
@@ -1129,7 +1124,7 @@ fn health_exits_0_when_crap_below_threshold() {
 /// finding and the command must exit 1.
 #[test]
 fn health_exits_1_when_crap_threshold_exceeded() {
-    let output = run_fallow(
+    let output = run_plow(
         "health",
         "complexity-project",
         &[
@@ -1167,7 +1162,7 @@ fn health_exits_1_when_crap_threshold_exceeded() {
 
 #[test]
 fn health_score_flag_shows_score() {
-    let output = run_fallow(
+    let output = run_plow(
         "health",
         "complexity-project",
         &["--score", "--format", "json", "--quiet"],
@@ -1226,7 +1221,7 @@ fn health_score_save_snapshot_keeps_hotspot_vital_signs() {
     git(root, &["add", "."]);
     git(root, &["commit", "-m", "increase churn"]);
 
-    let score_only = run_fallow_in_root(
+    let score_only = run_plow_in_root(
         "health",
         root,
         &[
@@ -1249,7 +1244,7 @@ fn health_score_save_snapshot_keeps_hotspot_vital_signs() {
         "plain --score should not compute churn-backed hotspot penalties"
     );
 
-    let snapshot = run_fallow_in_root(
+    let snapshot = run_plow_in_root(
         "health",
         root,
         &[
@@ -1273,7 +1268,7 @@ fn health_score_save_snapshot_keeps_hotspot_vital_signs() {
         "snapshot score should include the hotspot penalty when hotspot vitals were computed"
     );
 
-    let snapshot_dir = root.join(".fallow/snapshots");
+    let snapshot_dir = root.join(".plow/snapshots");
     let snapshot_path = std::fs::read_dir(&snapshot_dir)
         .expect("read snapshot dir")
         .filter_map(Result::ok)
@@ -1289,7 +1284,7 @@ fn health_score_save_snapshot_keeps_hotspot_vital_signs() {
         "--score --save-snapshot should still save hotspot vital signs"
     );
 
-    let trend = run_fallow_in_root(
+    let trend = run_plow_in_root(
         "health",
         root,
         &[
@@ -1318,7 +1313,7 @@ fn health_score_save_snapshot_keeps_hotspot_vital_signs() {
 #[test]
 fn health_score_flag_with_config_does_not_render_coverage_gaps() {
     let dir = tempfile::tempdir().expect("create temp dir");
-    let config_path = dir.path().join("fallow.json");
+    let config_path = dir.path().join("plow.json");
     write_file(
         &config_path,
         r#"{
@@ -1329,7 +1324,7 @@ fn health_score_flag_with_config_does_not_render_coverage_gaps() {
     );
 
     let root = fixture_path("production-mode");
-    let output = common::run_fallow_in_root(
+    let output = common::run_plow_in_root(
         "health",
         &root,
         &[
@@ -1389,7 +1384,7 @@ fn health_baseline_partial_overflow_does_not_emit_stale_baseline_warning() {
         .to_str()
         .expect("baseline path should be valid UTF-8");
 
-    let save = run_fallow_in_root(
+    let save = run_plow_in_root(
         "health",
         dir.path(),
         &[
@@ -1459,7 +1454,7 @@ export function beta(items: number[]): string {
 }"#,
     );
 
-    let load = run_fallow_in_root(
+    let load = run_plow_in_root(
         "health",
         dir.path(),
         &[
@@ -1490,7 +1485,7 @@ export function beta(items: number[]): string {
 #[test]
 fn health_score_flag_with_config_error_fails_without_rendering_coverage_gaps() {
     let dir = tempfile::tempdir().expect("create temp dir");
-    let config_path = dir.path().join("fallow.json");
+    let config_path = dir.path().join("plow.json");
     write_file(
         &config_path,
         r#"{
@@ -1502,7 +1497,7 @@ fn health_score_flag_with_config_error_fails_without_rendering_coverage_gaps() {
     );
 
     let root = fixture_path("production-mode");
-    let output = common::run_fallow_in_root(
+    let output = common::run_plow_in_root(
         "health",
         &root,
         &[
@@ -1528,7 +1523,7 @@ fn health_score_flag_with_config_error_fails_without_rendering_coverage_gaps() {
 
 #[test]
 fn health_file_scores_flag() {
-    let output = run_fallow(
+    let output = run_plow(
         "health",
         "complexity-project",
         &["--file-scores", "--format", "json", "--quiet"],
@@ -1542,7 +1537,7 @@ fn health_file_scores_flag() {
 
 #[test]
 fn health_file_scores_include_vue_sfc_files() {
-    let output = run_fallow(
+    let output = run_plow(
         "health",
         "vue-split-type-value-export",
         &["--file-scores", "--format", "json", "--quiet"],
@@ -1564,7 +1559,7 @@ fn health_file_scores_include_vue_sfc_files() {
 
 #[test]
 fn health_complexity_reports_vue_sfc_functions() {
-    let output = run_fallow(
+    let output = run_plow(
         "health",
         "vue-split-type-value-export",
         &[
@@ -1599,7 +1594,7 @@ fn health_complexity_reports_vue_sfc_functions() {
 
 #[test]
 fn health_coverage_gaps_flag_reports_runtime_gaps() {
-    let output = run_fallow(
+    let output = run_plow(
         "health",
         "coverage-gaps",
         &["--coverage-gaps", "--format", "json", "--quiet"],
@@ -1661,7 +1656,7 @@ fn health_coverage_gaps_flag_reports_runtime_gaps() {
 #[test]
 fn health_coverage_gaps_config_error_enforces_without_flag() {
     let dir = tempfile::tempdir().expect("create temp dir");
-    let config_path = dir.path().join("fallow.json");
+    let config_path = dir.path().join("plow.json");
     write_file(
         &config_path,
         r#"{
@@ -1673,7 +1668,7 @@ fn health_coverage_gaps_config_error_enforces_without_flag() {
     );
 
     let root = fixture_path("production-mode");
-    let output = common::run_fallow_in_root(
+    let output = common::run_plow_in_root(
         "health",
         &root,
         &[
@@ -1698,7 +1693,7 @@ fn health_coverage_gaps_config_error_enforces_without_flag() {
 
 #[test]
 fn health_coverage_gaps_production_excludes_dead_test_helpers() {
-    let output = run_fallow(
+    let output = run_plow(
         "health",
         "production-mode",
         &[
@@ -1752,14 +1747,14 @@ fn health_coverage_gaps_suppressed_file_excluded() {
 
     write_file(
         &root.join("src/setup-only.ts"),
-        r#"// fallow-ignore-file coverage-gaps
+        r#"// plow-ignore-file coverage-gaps
 export function viaSetup(): string {
   return "setup";
 }
 "#,
     );
 
-    let output = common::run_fallow_in_root(
+    let output = common::run_plow_in_root(
         "health",
         root,
         &["--coverage-gaps", "--format", "json", "--quiet"],
@@ -1781,7 +1776,7 @@ export function viaSetup(): string {
         !file_paths
             .iter()
             .any(|path| path.ends_with("src/setup-only.ts")),
-        "setup-only.ts should be excluded when suppressed with fallow-ignore-file: {file_paths:?}"
+        "setup-only.ts should be excluded when suppressed with plow-ignore-file: {file_paths:?}"
     );
 
     let export_names: Vec<_> = coverage["exports"]
@@ -1877,7 +1872,7 @@ export const shared = sharedGap();
 "#,
     );
 
-    let output = common::run_fallow_in_root(
+    let output = common::run_plow_in_root(
         "health",
         root,
         &[
@@ -1938,7 +1933,7 @@ fn health_workspace_scopes_vital_signs_and_health_score() {
 }"#,
     );
     write_file(
-        &root.join(".fallowrc.json"),
+        &root.join(".plowrc.json"),
         r#"{"duplicates":{"min_tokens":10,"min_lines":3}}"#,
     );
     write_file(
@@ -1993,7 +1988,7 @@ export * from "./util_4";
     git(root, &["add", "."]);
     git(root, &["commit", "-m", "initial"]);
 
-    let monorepo = common::run_fallow_in_root(
+    let monorepo = common::run_plow_in_root(
         "health",
         root,
         &[
@@ -2008,9 +2003,9 @@ export * from "./util_4";
     assert_eq!(monorepo.code, 0, "monorepo health run should succeed");
     let monorepo_json = parse_json(&monorepo);
 
-    let snapshot_path = root.join(".fallow/app-snapshot.json");
+    let snapshot_path = root.join(".plow/app-snapshot.json");
     let snapshot_arg = snapshot_path.to_string_lossy().to_string();
-    let scoped = common::run_fallow_in_root(
+    let scoped = common::run_plow_in_root(
         "health",
         root,
         &[
@@ -2095,7 +2090,7 @@ fn health_group_by_package_emits_per_workspace_envelope() {
 }"#,
     );
     write_file(
-        &root.join(".fallowrc.json"),
+        &root.join(".plowrc.json"),
         r#"{"duplicates":{"min_tokens":10,"min_lines":3}}"#,
     );
     write_file(
@@ -2138,7 +2133,7 @@ fn health_group_by_package_emits_per_workspace_envelope() {
     git(root, &["add", "."]);
     git(root, &["commit", "-m", "initial"]);
 
-    let output = common::run_fallow_in_root(
+    let output = common::run_plow_in_root(
         "health",
         root,
         &[
@@ -2273,7 +2268,7 @@ fn health_group_by_package_tags_sarif_results_with_group() {
 ",
     );
 
-    let sarif = common::run_fallow_in_root(
+    let sarif = common::run_plow_in_root(
         "health",
         root,
         &[
@@ -2312,7 +2307,7 @@ fn health_group_by_package_tags_sarif_results_with_group() {
         "SARIF results should tag alpha and beta groups: {sarif_groups:?}"
     );
 
-    let cc = common::run_fallow_in_root(
+    let cc = common::run_plow_in_root(
         "health",
         root,
         &[
@@ -2357,7 +2352,7 @@ fn health_group_by_non_monorepo_emits_single_json_error() {
     );
     write_file(&root.join("src/index.ts"), "export const x = 1;\n");
 
-    let output = common::run_fallow_in_root(
+    let output = common::run_plow_in_root(
         "health",
         root,
         &["--group-by", "package", "--format", "json", "--quiet"],
@@ -2401,7 +2396,7 @@ fn health_coverage_gaps_changed_since_scopes_results() {
     git(root, &["add", "src/fixture-only.ts"]);
     git(root, &["commit", "-m", "update fixture gap"]);
 
-    let output = common::run_fallow_in_root(
+    let output = common::run_plow_in_root(
         "health",
         root,
         &[
@@ -2452,7 +2447,7 @@ fn health_coverage_gaps_changed_since_scopes_results() {
 
 #[test]
 fn health_human_output_snapshot() {
-    let output = run_fallow(
+    let output = run_plow(
         "health",
         "complexity-project",
         &["--complexity", "--max-cyclomatic", "10", "--quiet"],
@@ -2464,7 +2459,7 @@ fn health_human_output_snapshot() {
 
 #[test]
 fn health_file_scores_include_plugin_scoped_hidden_dirs_for_react_router() {
-    let output = run_fallow(
+    let output = run_plow(
         "health",
         "react-router-conventions",
         &["--file-scores", "--format", "json", "--quiet"],
@@ -2506,7 +2501,7 @@ fn count_occurrences(haystack: &str, needle: &str) -> usize {
     count
 }
 
-/// Regression test for issue #557: `fallow --score` (bare combined mode) must
+/// Regression test for issue #557: `plow --score` (bare combined mode) must
 /// render the health score in human output, and must render it EXACTLY ONCE.
 /// The score has always been present in JSON / SARIF / CodeClimate; only the
 /// terminal renderer was missing the call into `render_health_score`. The
@@ -2515,7 +2510,7 @@ fn count_occurrences(haystack: &str, needle: &str) -> usize {
 /// Complexity section's own `print_health_human` call would render it again.
 #[test]
 fn combined_score_renders_health_score_exactly_once() {
-    let output = run_fallow_combined("complexity-project", &["--score"]);
+    let output = run_plow_combined("complexity-project", &["--score"]);
     assert!(
         output.code == 0 || output.code == 1,
         "combined --score should not crash: stdout={}\nstderr={}",
@@ -2531,12 +2526,12 @@ fn combined_score_renders_health_score_exactly_once() {
     );
 }
 
-/// Control: without `--score`, the bare `fallow` invocation must NOT render a
+/// Control: without `--score`, the bare `plow` invocation must NOT render a
 /// Health score line. This guards against accidentally always rendering the
 /// score regardless of the flag.
 #[test]
 fn combined_without_score_omits_health_score_line() {
-    let output = run_fallow_combined("complexity-project", &[]);
+    let output = run_plow_combined("complexity-project", &[]);
     assert!(
         output.code == 0 || output.code == 1,
         "bare combined run should not crash: stdout={}\nstderr={}",
@@ -2545,21 +2540,21 @@ fn combined_without_score_omits_health_score_line() {
     );
     assert!(
         !output.stderr.contains("Health score:"),
-        "bare `fallow` (no --score) must NOT render a Health score line, got:\n{}",
+        "bare `plow` (no --score) must NOT render a Health score line, got:\n{}",
         output.stderr
     );
 }
 
-/// Standalone `fallow health --score` must keep rendering the score inline:
+/// Standalone `plow health --score` must keep rendering the score inline:
 /// it has no upstream orientation header to absorb the responsibility. Pins
 /// the second half of the `skip_score_and_trend` contract (combined skips,
 /// standalone does not).
 #[test]
 fn standalone_health_score_still_renders_inline() {
-    let output = run_fallow("health", "complexity-project", &["--score"]);
+    let output = run_plow("health", "complexity-project", &["--score"]);
     assert!(
         output.code == 0 || output.code == 1,
-        "fallow health --score should not crash: stdout={}\nstderr={}",
+        "plow health --score should not crash: stdout={}\nstderr={}",
         output.stdout,
         output.stderr
     );
@@ -2567,24 +2562,24 @@ fn standalone_health_score_still_renders_inline() {
     let count = count_occurrences(&combined, "Health score:");
     assert_eq!(
         count, 1,
-        "fallow health --score must render the Health score line exactly once, got {count}:\nstdout={}\nstderr={}",
+        "plow health --score must render the Health score line exactly once, got {count}:\nstdout={}\nstderr={}",
         output.stdout, output.stderr
     );
 }
 
-/// `--min-score` is a `fallow health` (subcommand) flag, not a combined-mode
+/// `--min-score` is a `plow health` (subcommand) flag, not a combined-mode
 /// flag. Pin that the standalone exit-code gate still fires when the score is
 /// below threshold, independent of where the human renderer emits the score.
 #[test]
 fn health_min_score_gate_fails_below_threshold() {
-    let output = run_fallow(
+    let output = run_plow(
         "health",
         "complexity-project",
         &["--score", "--min-score", "100"],
     );
     assert_ne!(
         output.code, 0,
-        "fallow health --score --min-score 100 should fail the gate: stdout={}\nstderr={}",
+        "plow health --score --min-score 100 should fail the gate: stdout={}\nstderr={}",
         output.stdout, output.stderr
     );
 }
@@ -2618,7 +2613,7 @@ fn health_churn_file_powers_hotspots_and_ownership_without_git() {
         .as_secs();
     let day = 86_400;
     let churn = serde_json::json!({
-        "schema": "fallow-churn/v1",
+        "schema": "plow-churn/v1",
         "events": [
             { "path": "src/hot.ts", "timestamp": now - day, "author": "alice@corp", "added": 40, "deleted": 12 },
             { "path": "src/hot.ts", "timestamp": now - 2 * day, "author": "alice@corp", "added": 20, "deleted": 5 },
@@ -2632,7 +2627,7 @@ fn health_churn_file_powers_hotspots_and_ownership_without_git() {
     );
 
     // Imported churn powers hotspots on a directory with NO .git.
-    let output = run_fallow_in_root(
+    let output = run_plow_in_root(
         "health",
         dir.path(),
         &[
@@ -2673,7 +2668,7 @@ fn health_churn_file_powers_hotspots_and_ownership_without_git() {
 
     // Neuter check: WITHOUT --churn-file the same non-git dir skips hotspots,
     // proving the imported data (not git) is what lit them up.
-    let no_churn = run_fallow_in_root(
+    let no_churn = run_plow_in_root(
         "health",
         dir.path(),
         &["--hotspots", "--ownership", "--format", "json"],
@@ -2695,7 +2690,7 @@ fn health_churn_file_powers_hotspots_and_ownership_without_git() {
         &dir.path().join("bad.json"),
         r#"{ "schema": "nope", "events": [] }"#,
     );
-    let bad = run_fallow_in_root(
+    let bad = run_plow_in_root(
         "health",
         dir.path(),
         &["--hotspots", "--churn-file", "bad.json", "--format", "json"],
@@ -2710,7 +2705,7 @@ fn health_churn_file_powers_hotspots_and_ownership_without_git() {
     // Inert: with no churn-consuming section (--score only), the same malformed
     // file is never validated, so it does not fail the run. The gate is
     // validate-iff-consume.
-    let inert = run_fallow_in_root(
+    let inert = run_plow_in_root(
         "health",
         dir.path(),
         &["--score", "--churn-file", "bad.json", "--format", "json"],

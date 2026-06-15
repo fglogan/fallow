@@ -28,11 +28,11 @@ jobs:
       - uses: taiki-e/install-action@2d15d02e710b40b6332201aba6af30d595b5cd96 # cargo-llvm-cov
 
       - name: Build CLI binary for e2e tests
-        run: cargo build -p fallow-cli
+        run: cargo build -p plow-cli
 
       - name: Run tests with coverage
         env:
-          FALLOW_BIN: ${{ github.workspace }}/target/debug/fallow
+          PLOW_BIN: ${{ github.workspace }}/target/debug/plow
         run: |
           mkdir -p coverage
           cargo llvm-cov --workspace --lcov --output-path coverage/lcov.info
@@ -70,7 +70,7 @@ jobs:
       - name: Store coverage metrics
         uses: ./.github/actions/store-benchmark
         with:
-          name: Fallow Coverage
+          name: Plow Coverage
           tool: customBiggerIsBetter
           output-file-path: coverage-bench.json
           data-dir: coverage

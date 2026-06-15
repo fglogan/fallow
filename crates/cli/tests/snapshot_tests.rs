@@ -7,8 +7,8 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use fallow_cli::health_types::*;
-use fallow_cli::report::{
+use plow_cli::health_types::*;
+use plow_cli::report::{
     build_codeclimate, build_compact_lines, build_duplication_codeclimate,
     build_duplication_markdown, build_grouped_duplication_json, build_health_codeclimate,
     build_health_json, build_health_markdown, build_health_sarif, build_json, build_markdown,
@@ -19,10 +19,10 @@ use fallow_cli::report::{
     },
     codeclimate_issues_to_value,
 };
-use fallow_config::RulesConfig;
-use fallow_core::duplicates::{CloneGroup, CloneInstance, DuplicationReport, DuplicationStats};
-use fallow_core::extract::MemberKind;
-use fallow_core::results::*;
+use plow_config::RulesConfig;
+use plow_core::duplicates::{CloneGroup, CloneInstance, DuplicationReport, DuplicationStats};
+use plow_core::extract::MemberKind;
+use plow_core::results::*;
 
 /// Build sample `AnalysisResults` with one issue of each type for consistent snapshots.
 #[expect(
@@ -179,40 +179,37 @@ fn sample_results(root: &Path) -> AnalysisResults {
             ],
             kind: ReExportCycleKind::MultiNode,
         }));
-    r.unused_catalog_entries.push(
-        fallow_core::results::UnusedCatalogEntryFinding::with_actions(
-            fallow_core::results::UnusedCatalogEntry {
+    r.unused_catalog_entries
+        .push(plow_core::results::UnusedCatalogEntryFinding::with_actions(
+            plow_core::results::UnusedCatalogEntry {
                 entry_name: "is-even".to_string(),
                 catalog_name: "default".to_string(),
                 path: PathBuf::from("pnpm-workspace.yaml"),
                 line: 6,
                 hardcoded_consumers: vec![],
             },
-        ),
-    );
-    r.unused_catalog_entries.push(
-        fallow_core::results::UnusedCatalogEntryFinding::with_actions(
-            fallow_core::results::UnusedCatalogEntry {
+        ));
+    r.unused_catalog_entries
+        .push(plow_core::results::UnusedCatalogEntryFinding::with_actions(
+            plow_core::results::UnusedCatalogEntry {
                 entry_name: "old-thing".to_string(),
                 catalog_name: "legacy".to_string(),
                 path: PathBuf::from("pnpm-workspace.yaml"),
                 line: 12,
                 hardcoded_consumers: vec![PathBuf::from("apps/web/package.json")],
             },
-        ),
-    );
-    r.empty_catalog_groups.push(
-        fallow_core::results::EmptyCatalogGroupFinding::with_actions(
-            fallow_core::results::EmptyCatalogGroup {
+        ));
+    r.empty_catalog_groups
+        .push(plow_core::results::EmptyCatalogGroupFinding::with_actions(
+            plow_core::results::EmptyCatalogGroup {
                 catalog_name: "react17".to_string(),
                 path: PathBuf::from("pnpm-workspace.yaml"),
                 line: 10,
             },
-        ),
-    );
+        ));
     r.unresolved_catalog_references.push(
-        fallow_core::results::UnresolvedCatalogReferenceFinding::with_actions(
-            fallow_core::results::UnresolvedCatalogReference {
+        plow_core::results::UnresolvedCatalogReferenceFinding::with_actions(
+            plow_core::results::UnresolvedCatalogReference {
                 entry_name: "old-react".to_string(),
                 catalog_name: "react17".to_string(),
                 path: root.join("packages/app/package.json"),
@@ -222,14 +219,14 @@ fn sample_results(root: &Path) -> AnalysisResults {
         ),
     );
     r.unused_dependency_overrides.push(
-        fallow_core::results::UnusedDependencyOverrideFinding::with_actions(
-            fallow_core::results::UnusedDependencyOverride {
+        plow_core::results::UnusedDependencyOverrideFinding::with_actions(
+            plow_core::results::UnusedDependencyOverride {
                 raw_key: "axios".to_string(),
                 target_package: "axios".to_string(),
                 parent_package: None,
                 version_constraint: None,
                 version_range: "^1.6.0".to_string(),
-                source: fallow_core::results::DependencyOverrideSource::PnpmWorkspaceYaml,
+                source: plow_core::results::DependencyOverrideSource::PnpmWorkspaceYaml,
                 path: root.join("pnpm-workspace.yaml"),
                 line: 9,
                 hint: Some(
@@ -240,21 +237,21 @@ fn sample_results(root: &Path) -> AnalysisResults {
         ),
     );
     r.misconfigured_dependency_overrides.push(
-        fallow_core::results::MisconfiguredDependencyOverrideFinding::with_actions(
-            fallow_core::results::MisconfiguredDependencyOverride {
+        plow_core::results::MisconfiguredDependencyOverrideFinding::with_actions(
+            plow_core::results::MisconfiguredDependencyOverride {
                 raw_key: "@types/react@<<18".to_string(),
                 target_package: None,
                 raw_value: "18.0.0".to_string(),
-                reason: fallow_core::results::DependencyOverrideMisconfigReason::UnparsableKey,
-                source: fallow_core::results::DependencyOverrideSource::PnpmPackageJson,
+                reason: plow_core::results::DependencyOverrideMisconfigReason::UnparsableKey,
+                source: plow_core::results::DependencyOverrideSource::PnpmPackageJson,
                 path: root.join("package.json"),
                 line: 3,
             },
         ),
     );
     r.invalid_client_exports.push(
-        fallow_core::results::InvalidClientExportFinding::with_actions(
-            fallow_core::results::InvalidClientExport {
+        plow_core::results::InvalidClientExportFinding::with_actions(
+            plow_core::results::InvalidClientExport {
                 path: root.join("app/page.tsx"),
                 export_name: "metadata".to_string(),
                 directive: "use client".to_string(),
@@ -264,8 +261,8 @@ fn sample_results(root: &Path) -> AnalysisResults {
         ),
     );
     r.mixed_client_server_barrels.push(
-        fallow_core::results::MixedClientServerBarrelFinding::with_actions(
-            fallow_core::results::MixedClientServerBarrel {
+        plow_core::results::MixedClientServerBarrelFinding::with_actions(
+            plow_core::results::MixedClientServerBarrel {
                 path: root.join("app/components/index.ts"),
                 client_origin: "./Button".to_string(),
                 server_origin: "./fetchUser".to_string(),
@@ -275,8 +272,8 @@ fn sample_results(root: &Path) -> AnalysisResults {
         ),
     );
     r.unprovided_injects
-        .push(fallow_core::results::UnprovidedInjectFinding::with_actions(
-            fallow_core::results::UnprovidedInject {
+        .push(plow_core::results::UnprovidedInjectFinding::with_actions(
+            plow_core::results::UnprovidedInject {
                 path: root.join("src/useTheme.ts"),
                 key_name: "THEME_KEY".to_string(),
                 framework: "vue".to_string(),
@@ -719,45 +716,45 @@ fn sarif_mixed_severity_snapshot() {
     let root = PathBuf::from("/project");
     let results = sample_results(&root);
     let rules = RulesConfig {
-        unused_files: fallow_config::Severity::Error,
-        unused_exports: fallow_config::Severity::Warn,
-        unused_types: fallow_config::Severity::Warn,
-        private_type_leaks: fallow_config::Severity::Warn,
-        unused_dependencies: fallow_config::Severity::Error,
-        unused_dev_dependencies: fallow_config::Severity::Warn,
-        unused_optional_dependencies: fallow_config::Severity::Warn,
-        unused_enum_members: fallow_config::Severity::Warn,
-        unused_class_members: fallow_config::Severity::Warn,
-        unused_store_members: fallow_config::Severity::Warn,
-        unprovided_injects: fallow_config::Severity::Warn,
-        unrendered_components: fallow_config::Severity::Warn,
-        unused_component_props: fallow_config::Severity::Warn,
-        unused_component_emits: fallow_config::Severity::Warn,
-        unused_server_actions: fallow_config::Severity::Warn,
-        unresolved_imports: fallow_config::Severity::Error,
-        unlisted_dependencies: fallow_config::Severity::Error,
-        duplicate_exports: fallow_config::Severity::Warn,
-        type_only_dependencies: fallow_config::Severity::Warn,
-        circular_dependencies: fallow_config::Severity::Warn,
-        re_export_cycle: fallow_config::Severity::Warn,
-        test_only_dependencies: fallow_config::Severity::Warn,
-        boundary_violation: fallow_config::Severity::Warn,
-        coverage_gaps: fallow_config::Severity::Warn,
-        feature_flags: fallow_config::Severity::Off,
-        stale_suppressions: fallow_config::Severity::Warn,
-        unused_catalog_entries: fallow_config::Severity::Warn,
-        empty_catalog_groups: fallow_config::Severity::Warn,
-        unresolved_catalog_references: fallow_config::Severity::Error,
-        unused_dependency_overrides: fallow_config::Severity::Warn,
-        misconfigured_dependency_overrides: fallow_config::Severity::Error,
-        security_client_server_leak: fallow_config::Severity::Off,
-        security_sink: fallow_config::Severity::Off,
-        policy_violation: fallow_config::Severity::Warn,
-        invalid_client_export: fallow_config::Severity::Warn,
-        mixed_client_server_barrel: fallow_config::Severity::Warn,
-        misplaced_directive: fallow_config::Severity::Warn,
-        route_collision: fallow_config::Severity::Warn,
-        dynamic_segment_name_conflict: fallow_config::Severity::Warn,
+        unused_files: plow_config::Severity::Error,
+        unused_exports: plow_config::Severity::Warn,
+        unused_types: plow_config::Severity::Warn,
+        private_type_leaks: plow_config::Severity::Warn,
+        unused_dependencies: plow_config::Severity::Error,
+        unused_dev_dependencies: plow_config::Severity::Warn,
+        unused_optional_dependencies: plow_config::Severity::Warn,
+        unused_enum_members: plow_config::Severity::Warn,
+        unused_class_members: plow_config::Severity::Warn,
+        unused_store_members: plow_config::Severity::Warn,
+        unprovided_injects: plow_config::Severity::Warn,
+        unrendered_components: plow_config::Severity::Warn,
+        unused_component_props: plow_config::Severity::Warn,
+        unused_component_emits: plow_config::Severity::Warn,
+        unused_server_actions: plow_config::Severity::Warn,
+        unresolved_imports: plow_config::Severity::Error,
+        unlisted_dependencies: plow_config::Severity::Error,
+        duplicate_exports: plow_config::Severity::Warn,
+        type_only_dependencies: plow_config::Severity::Warn,
+        circular_dependencies: plow_config::Severity::Warn,
+        re_export_cycle: plow_config::Severity::Warn,
+        test_only_dependencies: plow_config::Severity::Warn,
+        boundary_violation: plow_config::Severity::Warn,
+        coverage_gaps: plow_config::Severity::Warn,
+        feature_flags: plow_config::Severity::Off,
+        stale_suppressions: plow_config::Severity::Warn,
+        unused_catalog_entries: plow_config::Severity::Warn,
+        empty_catalog_groups: plow_config::Severity::Warn,
+        unresolved_catalog_references: plow_config::Severity::Error,
+        unused_dependency_overrides: plow_config::Severity::Warn,
+        misconfigured_dependency_overrides: plow_config::Severity::Error,
+        security_client_server_leak: plow_config::Severity::Off,
+        security_sink: plow_config::Severity::Off,
+        policy_violation: plow_config::Severity::Warn,
+        invalid_client_export: plow_config::Severity::Warn,
+        mixed_client_server_barrel: plow_config::Severity::Warn,
+        misplaced_directive: plow_config::Severity::Warn,
+        route_collision: plow_config::Severity::Warn,
+        dynamic_segment_name_conflict: plow_config::Severity::Warn,
     };
     let sarif = build_sarif(&results, &root, &rules);
     let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");
@@ -1015,10 +1012,10 @@ fn json_stale_suppression_unknown_kind_snapshot() {
 fn redact_sarif_version(json_str: &str) -> String {
     json_str.replace(
         &format!(
-            "\"name\": \"fallow\",\n          \"version\": \"{}\"",
+            "\"name\": \"plow\",\n          \"version\": \"{}\"",
             env!("CARGO_PKG_VERSION")
         ),
-        "\"name\": \"fallow\",\n          \"version\": \"[VERSION]\"",
+        "\"name\": \"plow\",\n          \"version\": \"[VERSION]\"",
     )
 }
 
@@ -1592,45 +1589,45 @@ fn codeclimate_mixed_severity_snapshot() {
     let root = PathBuf::from("/project");
     let results = sample_results(&root);
     let rules = RulesConfig {
-        unused_files: fallow_config::Severity::Error,
-        unused_exports: fallow_config::Severity::Warn,
-        unused_types: fallow_config::Severity::Warn,
-        private_type_leaks: fallow_config::Severity::Warn,
-        unused_dependencies: fallow_config::Severity::Error,
-        unused_dev_dependencies: fallow_config::Severity::Warn,
-        unused_optional_dependencies: fallow_config::Severity::Warn,
-        unused_enum_members: fallow_config::Severity::Warn,
-        unused_class_members: fallow_config::Severity::Warn,
-        unused_store_members: fallow_config::Severity::Warn,
-        unprovided_injects: fallow_config::Severity::Warn,
-        unrendered_components: fallow_config::Severity::Warn,
-        unused_component_props: fallow_config::Severity::Warn,
-        unused_component_emits: fallow_config::Severity::Warn,
-        unused_server_actions: fallow_config::Severity::Warn,
-        unresolved_imports: fallow_config::Severity::Error,
-        unlisted_dependencies: fallow_config::Severity::Error,
-        duplicate_exports: fallow_config::Severity::Warn,
-        type_only_dependencies: fallow_config::Severity::Warn,
-        circular_dependencies: fallow_config::Severity::Warn,
-        re_export_cycle: fallow_config::Severity::Warn,
-        test_only_dependencies: fallow_config::Severity::Warn,
-        boundary_violation: fallow_config::Severity::Warn,
-        coverage_gaps: fallow_config::Severity::Warn,
-        feature_flags: fallow_config::Severity::Off,
-        stale_suppressions: fallow_config::Severity::Warn,
-        unused_catalog_entries: fallow_config::Severity::Warn,
-        empty_catalog_groups: fallow_config::Severity::Warn,
-        unresolved_catalog_references: fallow_config::Severity::Error,
-        unused_dependency_overrides: fallow_config::Severity::Warn,
-        misconfigured_dependency_overrides: fallow_config::Severity::Error,
-        security_client_server_leak: fallow_config::Severity::Off,
-        security_sink: fallow_config::Severity::Off,
-        policy_violation: fallow_config::Severity::Warn,
-        invalid_client_export: fallow_config::Severity::Warn,
-        mixed_client_server_barrel: fallow_config::Severity::Warn,
-        misplaced_directive: fallow_config::Severity::Warn,
-        route_collision: fallow_config::Severity::Warn,
-        dynamic_segment_name_conflict: fallow_config::Severity::Warn,
+        unused_files: plow_config::Severity::Error,
+        unused_exports: plow_config::Severity::Warn,
+        unused_types: plow_config::Severity::Warn,
+        private_type_leaks: plow_config::Severity::Warn,
+        unused_dependencies: plow_config::Severity::Error,
+        unused_dev_dependencies: plow_config::Severity::Warn,
+        unused_optional_dependencies: plow_config::Severity::Warn,
+        unused_enum_members: plow_config::Severity::Warn,
+        unused_class_members: plow_config::Severity::Warn,
+        unused_store_members: plow_config::Severity::Warn,
+        unprovided_injects: plow_config::Severity::Warn,
+        unrendered_components: plow_config::Severity::Warn,
+        unused_component_props: plow_config::Severity::Warn,
+        unused_component_emits: plow_config::Severity::Warn,
+        unused_server_actions: plow_config::Severity::Warn,
+        unresolved_imports: plow_config::Severity::Error,
+        unlisted_dependencies: plow_config::Severity::Error,
+        duplicate_exports: plow_config::Severity::Warn,
+        type_only_dependencies: plow_config::Severity::Warn,
+        circular_dependencies: plow_config::Severity::Warn,
+        re_export_cycle: plow_config::Severity::Warn,
+        test_only_dependencies: plow_config::Severity::Warn,
+        boundary_violation: plow_config::Severity::Warn,
+        coverage_gaps: plow_config::Severity::Warn,
+        feature_flags: plow_config::Severity::Off,
+        stale_suppressions: plow_config::Severity::Warn,
+        unused_catalog_entries: plow_config::Severity::Warn,
+        empty_catalog_groups: plow_config::Severity::Warn,
+        unresolved_catalog_references: plow_config::Severity::Error,
+        unused_dependency_overrides: plow_config::Severity::Warn,
+        misconfigured_dependency_overrides: plow_config::Severity::Error,
+        security_client_server_leak: plow_config::Severity::Off,
+        security_sink: plow_config::Severity::Off,
+        policy_violation: plow_config::Severity::Warn,
+        invalid_client_export: plow_config::Severity::Warn,
+        mixed_client_server_barrel: plow_config::Severity::Warn,
+        misplaced_directive: plow_config::Severity::Warn,
+        route_collision: plow_config::Severity::Warn,
+        dynamic_segment_name_conflict: plow_config::Severity::Warn,
     };
     let cc = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
@@ -2371,15 +2368,15 @@ fn markdown_workspace_dep_snapshot() {
 
 /// Build a minimal health report with one finding for snapshot tests.
 fn sample_health_report(root: &Path) -> HealthReport {
-    let action_ctx = fallow_cli::health_types::HealthActionContext {
-        opts: fallow_cli::health_types::HealthActionOptions::default(),
+    let action_ctx = plow_cli::health_types::HealthActionContext {
+        opts: plow_cli::health_types::HealthActionOptions::default(),
         max_cyclomatic_threshold: 20,
         max_cognitive_threshold: 15,
         max_crap_threshold: 30.0,
         crap_refactor_band: 5,
     };
     HealthReport {
-        findings: vec![fallow_cli::health_types::HealthFinding::with_actions(
+        findings: vec![plow_cli::health_types::HealthFinding::with_actions(
             ComplexityViolation {
                 path: root.join("src/complex.ts"),
                 name: "processData".to_string(),
@@ -2458,8 +2455,8 @@ fn health_report_with_runtime_coverage(root: &Path) -> HealthReport {
         },
         findings: vec![
             RuntimeCoverageFinding {
-                id: "fallow:prod:deadbeef".to_string(),
-                stable_id: Some("fallow:fn:00000001".to_string()),
+                id: "plow:prod:deadbeef".to_string(),
+                stable_id: Some("plow:fn:00000001".to_string()),
                 path: root.join("src/cold.ts"),
                 function: "coldPath".to_string(),
                 line: 14,
@@ -2482,7 +2479,7 @@ fn health_report_with_runtime_coverage(root: &Path) -> HealthReport {
                 source_hash: None,
             },
             RuntimeCoverageFinding {
-                id: "fallow:prod:feedface".to_string(),
+                id: "plow:prod:feedface".to_string(),
                 stable_id: None,
                 path: root.join("src/unknown.ts"),
                 function: "lateBound".to_string(),
@@ -2507,8 +2504,8 @@ fn health_report_with_runtime_coverage(root: &Path) -> HealthReport {
             },
         ],
         hot_paths: vec![RuntimeCoverageHotPath {
-            id: "fallow:hot:cafebabe".to_string(),
-            stable_id: Some("fallow:fn:00000002".to_string()),
+            id: "plow:hot:cafebabe".to_string(),
+            stable_id: Some("plow:fn:00000002".to_string()),
             path: root.join("src/hot.ts"),
             function: "hotPath".to_string(),
             line: 3,
@@ -2548,7 +2545,7 @@ fn health_report_with_coverage_intelligence(root: &Path) -> HealthReport {
         },
         findings: vec![
             CoverageIntelligenceFinding {
-                id: "fallow:coverage-intel:0badc0de".to_string(),
+                id: "plow:coverage-intel:0badc0de".to_string(),
                 path: root.join("src/hot.ts"),
                 identity: Some("handler".to_string()),
                 line: 10,
@@ -2561,7 +2558,7 @@ fn health_report_with_coverage_intelligence(root: &Path) -> HealthReport {
                 ],
                 recommendation: CoverageIntelligenceRecommendation::AddTestOrSplitBeforeMerge,
                 confidence: CoverageIntelligenceConfidence::High,
-                related_ids: vec!["fallow:hot:cafebabe".to_string()],
+                related_ids: vec!["plow:hot:cafebabe".to_string()],
                 evidence: CoverageIntelligenceEvidence {
                     coverage_pct: Some(20.0),
                     crap: Some(45.0),
@@ -2582,7 +2579,7 @@ fn health_report_with_coverage_intelligence(root: &Path) -> HealthReport {
                 }],
             },
             CoverageIntelligenceFinding {
-                id: "fallow:coverage-intel:1deadfa1".to_string(),
+                id: "plow:coverage-intel:1deadfa1".to_string(),
                 path: root.join("src/dead.ts"),
                 identity: Some("deadPath".to_string()),
                 line: 4,
@@ -2594,7 +2591,7 @@ fn health_report_with_coverage_intelligence(root: &Path) -> HealthReport {
                 ],
                 recommendation: CoverageIntelligenceRecommendation::DeleteAfterConfirmingOwner,
                 confidence: CoverageIntelligenceConfidence::High,
-                related_ids: vec!["fallow:prod:deadbeef".to_string()],
+                related_ids: vec!["plow:prod:deadbeef".to_string()],
                 evidence: CoverageIntelligenceEvidence {
                     coverage_pct: Some(0.0),
                     crap: None,
@@ -2743,10 +2740,10 @@ fn markdown_health_with_vital_signs_snapshot() {
 fn redact_health_sarif_version(json_str: &str) -> String {
     json_str.replace(
         &format!(
-            "\"name\": \"fallow\",\n          \"version\": \"{}\"",
+            "\"name\": \"plow\",\n          \"version\": \"{}\"",
             env!("CARGO_PKG_VERSION")
         ),
-        "\"name\": \"fallow\",\n          \"version\": \"[VERSION]\"",
+        "\"name\": \"plow\",\n          \"version\": \"[VERSION]\"",
     )
 }
 
@@ -3190,9 +3187,9 @@ fn sample_grouped_duplication_report(root: &Path) -> DuplicationReport {
 fn grouped_duplication_json_directory_snapshot() {
     let root = PathBuf::from("/project");
     let report = sample_grouped_duplication_report(&root);
-    let resolver = fallow_cli::report::OwnershipResolver::Directory;
+    let resolver = plow_cli::report::OwnershipResolver::Directory;
     let grouping =
-        fallow_cli::report::dupes_grouping::build_duplication_grouping(&report, &root, &resolver);
+        plow_cli::report::dupes_grouping::build_duplication_grouping(&report, &root, &resolver);
     let value =
         build_grouped_duplication_json(&report, &grouping, &root, Duration::from_millis(0), false)
             .expect("should serialize");
@@ -3210,11 +3207,11 @@ fn grouped_duplication_json_directory_snapshot() {
 fn grouped_duplication_codeclimate_directory_snapshot() {
     let root = PathBuf::from("/project");
     let report = sample_grouped_duplication_report(&root);
-    let resolver = fallow_cli::report::OwnershipResolver::Directory;
+    let resolver = plow_cli::report::OwnershipResolver::Directory;
     let mut value = codeclimate_issues_to_value(&build_duplication_codeclimate(&report, &root));
     let mut path_to_owner = rustc_hash::FxHashMap::<String, String>::default();
     for group in &report.clone_groups {
-        let owner = fallow_cli::report::dupes_grouping::largest_owner(group, &root, &resolver);
+        let owner = plow_cli::report::dupes_grouping::largest_owner(group, &root, &resolver);
         for instance in &group.instances {
             let rel = instance
                 .file

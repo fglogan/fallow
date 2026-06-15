@@ -5,13 +5,13 @@ expression: json_str
 [
   {
     "type": "issue",
-    "check_name": "fallow/code-duplication",
+    "check_name": "plow/code-duplication",
     "description": "Code clone group 1 (11 lines, 3 instances)",
     "categories": [
       "Duplication"
     ],
     "severity": "minor",
-    "fingerprint": "93bea2d4a76a8b7a",
+    "fingerprint": "f325a5d5cff33aa9",
     "location": {
       "path": "src/a.ts",
       "lines": {
@@ -22,13 +22,13 @@ expression: json_str
   },
   {
     "type": "issue",
-    "check_name": "fallow/code-duplication",
+    "check_name": "plow/code-duplication",
     "description": "Code clone group 1 (11 lines, 3 instances)",
     "categories": [
       "Duplication"
     ],
     "severity": "minor",
-    "fingerprint": "ad7e48aeabd81fcf",
+    "fingerprint": "9204dfb93536af7a",
     "location": {
       "path": "src/b.ts",
       "lines": {
@@ -39,13 +39,13 @@ expression: json_str
   },
   {
     "type": "issue",
-    "check_name": "fallow/code-duplication",
+    "check_name": "plow/code-duplication",
     "description": "Code clone group 1 (11 lines, 3 instances)",
     "categories": [
       "Duplication"
     ],
     "severity": "minor",
-    "fingerprint": "d96cdaf714b23e6b",
+    "fingerprint": "a2ecd3354aecd720",
     "location": {
       "path": "lib/c.ts",
       "lines": {
@@ -56,13 +56,13 @@ expression: json_str
   },
   {
     "type": "issue",
-    "check_name": "fallow/code-duplication",
+    "check_name": "plow/code-duplication",
     "description": "Code clone group 2 (8 lines, 2 instances)",
     "categories": [
       "Duplication"
     ],
     "severity": "minor",
-    "fingerprint": "57b59089719fb478",
+    "fingerprint": "64c8198eedf046c3",
     "location": {
       "path": "lib/x.ts",
       "lines": {
@@ -73,13 +73,13 @@ expression: json_str
   },
   {
     "type": "issue",
-    "check_name": "fallow/code-duplication",
+    "check_name": "plow/code-duplication",
     "description": "Code clone group 2 (8 lines, 2 instances)",
     "categories": [
       "Duplication"
     ],
     "severity": "minor",
-    "fingerprint": "dd8ab1ec1b9ea93f",
+    "fingerprint": "1156d7fd76fc9d2c",
     "location": {
       "path": "lib/y.ts",
       "lines": {

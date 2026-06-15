@@ -8,7 +8,7 @@ class BrowserWindow {
 
 export function localLookalikes(): void {
   chmodSync("file", 0o777);
-  writeFileSync("/tmp/fallow-token", "secret");
+  writeFileSync("/tmp/plow-token", "secret");
   new BrowserWindow({ webPreferences: { nodeIntegration: true } });
   createConnection({ multipleStatements: true });
 }

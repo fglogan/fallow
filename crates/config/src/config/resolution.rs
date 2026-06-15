@@ -19,7 +19,7 @@ use super::used_class_members::UsedClassMemberRule;
 use crate::external_plugin::{ExternalPluginDef, discover_external_plugins};
 
 use super::IgnoreExportsUsedInFileConfig;
-use super::{FallowConfig, SecurityConfig};
+use super::{PlowConfig, SecurityConfig};
 
 /// Process-local dedup state for inter-file rule warnings.
 static INTER_FILE_WARN_SEEN: OnceLock<Mutex<FxHashSet<u64>>> = OnceLock::new();
@@ -208,7 +208,7 @@ pub struct ResolvedConfig {
     /// (`.d.ts`/`.d.mts`/`.d.cts`) are exempt regardless of size because they
     /// are reachability roots for global types. Defaults to
     /// [`DEFAULT_MAX_FILE_SIZE_MB`] MB; the CLI overrides it post-resolve from
-    /// `--max-file-size` / `FALLOW_MAX_FILE_SIZE` (`0` = unlimited).
+    /// `--max-file-size` / `PLOW_MAX_FILE_SIZE` (`0` = unlimited).
     pub max_file_size_bytes: Option<u64>,
 }
 
@@ -247,7 +247,7 @@ fn compute_cache_config_hash(external_plugins: &[ExternalPluginDef]) -> u64 {
 
 fn resolve_cache_dir(root: &Path, configured: Option<PathBuf>) -> PathBuf {
     let Some(dir) = configured else {
-        return root.join(".fallow");
+        return root.join(".plow");
     };
     if dir.is_absolute() {
         dir
@@ -341,13 +341,13 @@ fn warn_inter_file_overrides(rules: &PartialRulesConfig, files: &[String]) {
     {
         let files = files.join(", ");
         tracing::warn!(
-            "overrides.rules.circular-dependency has no effect for files matching [{files}]: circular-dependency is an inter-file rule. Use a file-level `// fallow-ignore-file circular-dependency` comment in one participating file instead."
+            "overrides.rules.circular-dependency has no effect for files matching [{files}]: circular-dependency is an inter-file rule. Use a file-level `// plow-ignore-file circular-dependency` comment in one participating file instead."
         );
     }
     if rules.re_export_cycle.is_some() && record_inter_file_warn_seen("re-export-cycle", files) {
         let files = files.join(", ");
         tracing::warn!(
-            "overrides.rules.re-export-cycle has no effect for files matching [{files}]: re-export-cycle is an inter-file rule (the cycle spans multiple barrels). Use a file-level `// fallow-ignore-file re-export-cycle` comment in one participating file instead, or set `rules.re-export-cycle: off` at the top level."
+            "overrides.rules.re-export-cycle has no effect for files matching [{files}]: re-export-cycle is an inter-file rule (the cycle spans multiple barrels). Use a file-level `// plow-ignore-file re-export-cycle` comment in one participating file instead, or set `rules.re-export-cycle: off` at the top level."
         );
     }
 }
@@ -382,7 +382,7 @@ fn compile_overrides(overrides: Vec<ConfigOverride>) -> Vec<ResolvedOverride> {
         .collect()
 }
 
-impl FallowConfig {
+impl PlowConfig {
     /// Resolve into a fully resolved config with compiled globs.
     #[expect(
         clippy::expect_used,
@@ -556,7 +556,7 @@ mod tests {
                 }
             }]
         }"#;
-        let config: FallowConfig = serde_json::from_str(json_str).unwrap();
+        let config: PlowConfig = serde_json::from_str(json_str).unwrap();
         assert_eq!(config.overrides.len(), 1);
         assert_eq!(config.overrides[0].files, vec!["*.test.ts"]);
         assert_eq!(
@@ -568,7 +568,7 @@ mod tests {
 
     #[test]
     fn resolve_rules_for_path_no_overrides() {
-        let config = FallowConfig {
+        let config = PlowConfig {
             schema: None,
             extends: vec![],
             entry: vec![],
@@ -619,7 +619,7 @@ mod tests {
 
     #[test]
     fn resolve_rules_for_path_with_matching_override() {
-        let config = FallowConfig {
+        let config = PlowConfig {
             schema: None,
             extends: vec![],
             entry: vec![],
@@ -681,7 +681,7 @@ mod tests {
 
     #[test]
     fn resolve_rules_for_path_later_override_wins() {
-        let config = FallowConfig {
+        let config = PlowConfig {
             schema: None,
             extends: vec![],
             entry: vec![],
@@ -751,7 +751,7 @@ mod tests {
 
     #[test]
     fn resolve_keeps_inter_file_rule_override_after_warning() {
-        let config = FallowConfig {
+        let config = PlowConfig {
             schema: None,
             extends: vec![],
             entry: vec![],
@@ -853,7 +853,7 @@ mod tests {
     fn resolve_called_n_times_dedupes_inter_file_warning_to_one() {
         reset_inter_file_warn_dedup_for_test();
         let files = vec!["__test_resolve_dedup/**".to_string()];
-        let build_config = || FallowConfig {
+        let build_config = || PlowConfig {
             schema: None,
             extends: vec![],
             entry: vec![],
@@ -912,9 +912,9 @@ mod tests {
         );
     }
 
-    /// Helper to build a FallowConfig with minimal boilerplate.
-    fn make_config(production: bool) -> FallowConfig {
-        FallowConfig {
+    /// Helper to build a PlowConfig with minimal boilerplate.
+    fn make_config(production: bool) -> PlowConfig {
+        PlowConfig {
             schema: None,
             extends: vec![],
             entry: vec![],
@@ -1326,14 +1326,14 @@ mod tests {
             true,
             None,
         );
-        assert_eq!(resolved.cache_dir, PathBuf::from("/my/project/.fallow"));
+        assert_eq!(resolved.cache_dir, PathBuf::from("/my/project/.plow"));
     }
 
     #[test]
     fn resolve_uses_relative_configured_cache_dir_from_root() {
-        let config = FallowConfig {
+        let config = PlowConfig {
             cache: crate::CacheConfig {
-                dir: Some(PathBuf::from(".cache/fallow")),
+                dir: Some(PathBuf::from(".cache/plow")),
                 ..Default::default()
             },
             ..make_config(false)
@@ -1346,17 +1346,14 @@ mod tests {
             true,
             None,
         );
-        assert_eq!(
-            resolved.cache_dir,
-            PathBuf::from("/my/project/.cache/fallow")
-        );
+        assert_eq!(resolved.cache_dir, PathBuf::from("/my/project/.cache/plow"));
     }
 
     #[test]
     fn resolve_keeps_absolute_configured_cache_dir() {
-        let config = FallowConfig {
+        let config = PlowConfig {
             cache: crate::CacheConfig {
-                dir: Some(PathBuf::from("/tmp/fallow-cache")),
+                dir: Some(PathBuf::from("/tmp/plow-cache")),
                 ..Default::default()
             },
             ..make_config(false)
@@ -1369,7 +1366,7 @@ mod tests {
             true,
             None,
         );
-        assert_eq!(resolved.cache_dir, PathBuf::from("/tmp/fallow-cache"));
+        assert_eq!(resolved.cache_dir, PathBuf::from("/tmp/plow-cache"));
     }
 
     #[test]
@@ -1579,11 +1576,11 @@ mod tests {
                 );
             }
 
-            /// Default cache dir is root/.fallow.
+            /// Default cache dir is root/.plow.
             #[test]
-            fn cache_dir_defaults_to_root_fallow(dir_suffix in "[a-zA-Z0-9_]{1,20}") {
+            fn cache_dir_defaults_to_root_plow(dir_suffix in "[a-zA-Z0-9_]{1,20}") {
                 let root = PathBuf::from(format!("/project/{dir_suffix}"));
-                let expected_cache = root.join(".fallow");
+                let expected_cache = root.join(".plow");
                 let resolved = make_config(false).resolve(
                     root,
                     OutputFormat::Human,
@@ -1594,7 +1591,7 @@ mod tests {
                 );
                 prop_assert_eq!(
                     resolved.cache_dir, expected_cache,
-                    "Default cache dir should be root/.fallow"
+                    "Default cache dir should be root/.plow"
                 );
             }
 

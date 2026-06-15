@@ -7,16 +7,16 @@
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
-use fallow_config::{BoundaryConfig, FallowConfig, OutputFormat};
+use plow_config::{BoundaryConfig, OutputFormat, PlowConfig};
 
 #[must_use]
-pub fn create_test_config(root: PathBuf) -> fallow_config::ResolvedConfig {
+pub fn create_test_config(root: PathBuf) -> plow_config::ResolvedConfig {
     make_config(root, true)
 }
 
 #[must_use]
-pub fn make_config(root: PathBuf, no_cache: bool) -> fallow_config::ResolvedConfig {
-    FallowConfig {
+pub fn make_config(root: PathBuf, no_cache: bool) -> plow_config::ResolvedConfig {
+    PlowConfig {
         schema: None,
         extends: vec![],
         entry: vec![],
@@ -28,12 +28,12 @@ pub fn make_config(root: PathBuf, no_cache: bool) -> fallow_config::ResolvedConf
         ignore_exports: vec![],
         ignore_catalog_references: vec![],
         ignore_dependency_overrides: vec![],
-        ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+        ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
-        duplicates: fallow_config::DuplicatesConfig::default(),
-        health: fallow_config::HealthConfig::default(),
-        rules: fallow_config::RulesConfig::default(),
+        duplicates: plow_config::DuplicatesConfig::default(),
+        health: plow_config::HealthConfig::default(),
+        rules: plow_config::RulesConfig::default(),
         boundaries: BoundaryConfig::default(),
         production: false.into(),
         plugins: vec![],
@@ -41,17 +41,17 @@ pub fn make_config(root: PathBuf, no_cache: bool) -> fallow_config::ResolvedConf
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
-        audit: fallow_config::AuditConfig::default(),
+        audit: plow_config::AuditConfig::default(),
         codeowners: None,
         public_packages: vec![],
-        flags: fallow_config::FlagsConfig::default(),
-        security: fallow_config::SecurityConfig::default(),
-        fix: fallow_config::FixConfig::default(),
-        resolve: fallow_config::ResolveConfig::default(),
+        flags: plow_config::FlagsConfig::default(),
+        security: plow_config::SecurityConfig::default(),
+        fix: plow_config::FixConfig::default(),
+        resolve: plow_config::ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
         auto_imports: false,
-        cache: fallow_config::CacheConfig::default(),
+        cache: plow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, no_cache, true, None)
 }
@@ -62,7 +62,7 @@ pub fn make_config(root: PathBuf, no_cache: bool) -> fallow_config::ResolvedConf
 pub fn create_synthetic_project(
     name: &str,
     file_count: usize,
-) -> (PathBuf, fallow_config::ResolvedConfig) {
+) -> (PathBuf, plow_config::ResolvedConfig) {
     create_synthetic_project_with_cache(name, file_count, true)
 }
 
@@ -74,8 +74,8 @@ pub fn create_synthetic_project_with_cache(
     name: &str,
     file_count: usize,
     no_cache: bool,
-) -> (PathBuf, fallow_config::ResolvedConfig) {
-    let temp_dir = std::env::temp_dir().join(format!("fallow-bench-{name}"));
+) -> (PathBuf, plow_config::ResolvedConfig) {
+    let temp_dir = std::env::temp_dir().join(format!("plow-bench-{name}"));
     let _ = std::fs::remove_dir_all(&temp_dir);
     std::fs::create_dir_all(temp_dir.join("src")).unwrap();
 
@@ -124,8 +124,8 @@ export const helper{i} = () => value{i} + 1;
 pub fn create_dupe_project(
     name: &str,
     file_count: usize,
-) -> (PathBuf, fallow_config::ResolvedConfig) {
-    let temp_dir = std::env::temp_dir().join(format!("fallow-bench-dupes-{name}"));
+) -> (PathBuf, plow_config::ResolvedConfig) {
+    let temp_dir = std::env::temp_dir().join(format!("plow-bench-dupes-{name}"));
     let _ = std::fs::remove_dir_all(&temp_dir);
     std::fs::create_dir_all(temp_dir.join("src")).unwrap();
 

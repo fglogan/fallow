@@ -1,8 +1,8 @@
 // VS Code injects this module into the extension host at runtime.
-// fallow-ignore-next-line unlisted-dependency
+// plow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
 
-export const OPEN_FILE_COMMAND = "fallow.openFile";
+export const OPEN_FILE_COMMAND = "plow.openFile";
 
 export interface OpenFileCommandArgs {
   readonly absolutePath: string;

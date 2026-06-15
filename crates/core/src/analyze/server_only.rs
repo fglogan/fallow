@@ -12,7 +12,7 @@
 //! definition (the [`SERVER_ONLY_PACKAGES`] list, `next/headers` named-import
 //! handling, and the `"use server"` directive check) never drifts.
 
-use fallow_types::extract::{ImportedName, ModuleInfo};
+use plow_types::extract::{ImportedName, ModuleInfo};
 
 /// The React Server Components / Server Actions directive marking a module as
 /// server-only.
@@ -92,7 +92,7 @@ fn is_next_headers_server_import(name: &ImportedName) -> bool {
 mod tests {
     use super::*;
     use crate::discover::FileId;
-    use fallow_types::extract::{ImportInfo, ModuleInfo};
+    use plow_types::extract::{ImportInfo, ModuleInfo};
 
     fn empty_module() -> ModuleInfo {
         ModuleInfo {

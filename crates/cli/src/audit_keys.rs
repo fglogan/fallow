@@ -14,17 +14,17 @@ fn relative_key_path(path: &Path, root: &Path) -> String {
         .replace('\\', "/")
 }
 
-fn dependency_location_key(location: &fallow_core::results::DependencyLocation) -> &'static str {
+fn dependency_location_key(location: &plow_core::results::DependencyLocation) -> &'static str {
     match location {
-        fallow_core::results::DependencyLocation::Dependencies => "unused-dependency",
-        fallow_core::results::DependencyLocation::DevDependencies => "unused-dev-dependency",
-        fallow_core::results::DependencyLocation::OptionalDependencies => {
+        plow_core::results::DependencyLocation::Dependencies => "unused-dependency",
+        plow_core::results::DependencyLocation::DevDependencies => "unused-dev-dependency",
+        plow_core::results::DependencyLocation::OptionalDependencies => {
             "unused-optional-dependency"
         }
     }
 }
 
-fn unused_dependency_key(item: &fallow_core::results::UnusedDependency, root: &Path) -> String {
+fn unused_dependency_key(item: &plow_core::results::UnusedDependency, root: &Path) -> String {
     format!(
         "{}:{}:{}",
         dependency_location_key(&item.location),
@@ -34,7 +34,7 @@ fn unused_dependency_key(item: &fallow_core::results::UnusedDependency, root: &P
 }
 
 fn invalid_client_export_key(
-    item: &fallow_core::results::InvalidClientExport,
+    item: &plow_core::results::InvalidClientExport,
     root: &Path,
 ) -> String {
     format!(
@@ -45,7 +45,7 @@ fn invalid_client_export_key(
 }
 
 fn mixed_client_server_barrel_key(
-    item: &fallow_core::results::MixedClientServerBarrel,
+    item: &plow_core::results::MixedClientServerBarrel,
     root: &Path,
 ) -> String {
     format!(
@@ -56,7 +56,7 @@ fn mixed_client_server_barrel_key(
     )
 }
 
-fn misplaced_directive_key(item: &fallow_core::results::MisplacedDirective, root: &Path) -> String {
+fn misplaced_directive_key(item: &plow_core::results::MisplacedDirective, root: &Path) -> String {
     format!(
         "misplaced-directive:{}:{}:{}",
         relative_key_path(&item.path, root),
@@ -65,7 +65,7 @@ fn misplaced_directive_key(item: &fallow_core::results::MisplacedDirective, root
     )
 }
 
-fn unprovided_inject_key(item: &fallow_core::results::UnprovidedInject, root: &Path) -> String {
+fn unprovided_inject_key(item: &plow_core::results::UnprovidedInject, root: &Path) -> String {
     format!(
         "unprovided-inject:{}:{}",
         relative_key_path(&item.path, root),
@@ -73,10 +73,7 @@ fn unprovided_inject_key(item: &fallow_core::results::UnprovidedInject, root: &P
     )
 }
 
-fn unrendered_component_key(
-    item: &fallow_core::results::UnrenderedComponent,
-    root: &Path,
-) -> String {
+fn unrendered_component_key(item: &plow_core::results::UnrenderedComponent, root: &Path) -> String {
     format!(
         "unrendered-component:{}:{}",
         relative_key_path(&item.path, root),
@@ -85,7 +82,7 @@ fn unrendered_component_key(
 }
 
 fn unused_component_prop_key(
-    item: &fallow_core::results::UnusedComponentProp,
+    item: &plow_core::results::UnusedComponentProp,
     root: &Path,
 ) -> String {
     format!(
@@ -96,7 +93,7 @@ fn unused_component_prop_key(
 }
 
 fn unused_component_emit_key(
-    item: &fallow_core::results::UnusedComponentEmit,
+    item: &plow_core::results::UnusedComponentEmit,
     root: &Path,
 ) -> String {
     format!(
@@ -106,10 +103,7 @@ fn unused_component_emit_key(
     )
 }
 
-fn unused_server_action_key(
-    item: &fallow_core::results::UnusedServerAction,
-    root: &Path,
-) -> String {
+fn unused_server_action_key(item: &plow_core::results::UnusedServerAction, root: &Path) -> String {
     format!(
         "unused-server-action:{}:{}",
         relative_key_path(&item.path, root),
@@ -117,7 +111,7 @@ fn unused_server_action_key(
     )
 }
 
-fn route_collision_key(item: &fallow_core::results::RouteCollision, root: &Path) -> String {
+fn route_collision_key(item: &plow_core::results::RouteCollision, root: &Path) -> String {
     format!(
         "route-collision:{}:{}",
         relative_key_path(&item.path, root),
@@ -126,7 +120,7 @@ fn route_collision_key(item: &fallow_core::results::RouteCollision, root: &Path)
 }
 
 fn dynamic_segment_name_conflict_key(
-    item: &fallow_core::results::DynamicSegmentNameConflict,
+    item: &plow_core::results::DynamicSegmentNameConflict,
     root: &Path,
 ) -> String {
     format!(
@@ -136,7 +130,7 @@ fn dynamic_segment_name_conflict_key(
     )
 }
 
-fn unlisted_dependency_key(item: &fallow_core::results::UnlistedDependency, root: &Path) -> String {
+fn unlisted_dependency_key(item: &plow_core::results::UnlistedDependency, root: &Path) -> String {
     let mut sites = item
         .imported_from
         .iter()
@@ -160,7 +154,7 @@ fn unlisted_dependency_key(item: &fallow_core::results::UnlistedDependency, root
 
 fn unused_member_key(
     rule_id: &str,
-    item: &fallow_core::results::UnusedMember,
+    item: &plow_core::results::UnusedMember,
     root: &Path,
 ) -> String {
     format!(
@@ -172,10 +166,7 @@ fn unused_member_key(
     )
 }
 
-fn unused_catalog_entry_key(
-    item: &fallow_core::results::UnusedCatalogEntry,
-    root: &Path,
-) -> String {
+fn unused_catalog_entry_key(item: &plow_core::results::UnusedCatalogEntry, root: &Path) -> String {
     format!(
         "unused-catalog-entry:{}:{}:{}:{}",
         relative_key_path(&item.path, root),
@@ -185,7 +176,7 @@ fn unused_catalog_entry_key(
     )
 }
 
-fn empty_catalog_group_key(item: &fallow_core::results::EmptyCatalogGroup, root: &Path) -> String {
+fn empty_catalog_group_key(item: &plow_core::results::EmptyCatalogGroup, root: &Path) -> String {
     format!(
         "empty-catalog-group:{}:{}:{}",
         relative_key_path(&item.path, root),
@@ -205,10 +196,7 @@ fn sorted_relative_path_keys<'a>(
     keys
 }
 
-fn duplicate_export_key(
-    item: &fallow_core::results::DuplicateExportFinding,
-    root: &Path,
-) -> String {
+fn duplicate_export_key(item: &plow_core::results::DuplicateExportFinding, root: &Path) -> String {
     let mut locations = sorted_relative_path_keys(
         item.export.locations.iter().map(|loc| loc.path.as_path()),
         root,
@@ -222,7 +210,7 @@ fn duplicate_export_key(
 }
 
 fn circular_dependency_key(
-    item: &fallow_core::results::CircularDependencyFinding,
+    item: &plow_core::results::CircularDependencyFinding,
     root: &Path,
 ) -> String {
     let files = sorted_relative_path_keys(
@@ -232,10 +220,10 @@ fn circular_dependency_key(
     format!("circular-dependency:{}", files.join("|"))
 }
 
-fn re_export_cycle_key(item: &fallow_core::results::ReExportCycleFinding, root: &Path) -> String {
+fn re_export_cycle_key(item: &plow_core::results::ReExportCycleFinding, root: &Path) -> String {
     let kind = match item.cycle.kind {
-        fallow_core::results::ReExportCycleKind::MultiNode => "multi-node",
-        fallow_core::results::ReExportCycleKind::SelfLoop => "self-loop",
+        plow_core::results::ReExportCycleKind::MultiNode => "multi-node",
+        plow_core::results::ReExportCycleKind::SelfLoop => "self-loop",
     };
     let files = sorted_relative_path_keys(
         item.cycle.files.iter().map(std::path::PathBuf::as_path),
@@ -245,7 +233,7 @@ fn re_export_cycle_key(item: &fallow_core::results::ReExportCycleFinding, root: 
 }
 
 fn boundary_violation_key(
-    item: &fallow_core::results::BoundaryViolationFinding,
+    item: &plow_core::results::BoundaryViolationFinding,
     root: &Path,
 ) -> String {
     format!(
@@ -257,7 +245,7 @@ fn boundary_violation_key(
 }
 
 fn boundary_coverage_key(
-    item: &fallow_core::results::BoundaryCoverageViolationFinding,
+    item: &plow_core::results::BoundaryCoverageViolationFinding,
     root: &Path,
 ) -> String {
     format!(
@@ -267,7 +255,7 @@ fn boundary_coverage_key(
 }
 
 fn boundary_call_key(
-    item: &fallow_core::results::BoundaryCallViolationFinding,
+    item: &plow_core::results::BoundaryCallViolationFinding,
     root: &Path,
 ) -> String {
     format!(
@@ -277,10 +265,7 @@ fn boundary_call_key(
     )
 }
 
-fn policy_violation_key(
-    item: &fallow_core::results::PolicyViolationFinding,
-    root: &Path,
-) -> String {
+fn policy_violation_key(item: &plow_core::results::PolicyViolationFinding, root: &Path) -> String {
     format!(
         "policy-violation:{}:{}/{}:{}",
         relative_key_path(&item.violation.path, root),
@@ -290,7 +275,7 @@ fn policy_violation_key(
     )
 }
 
-fn stale_suppression_key(item: &fallow_core::results::StaleSuppression, root: &Path) -> String {
+fn stale_suppression_key(item: &plow_core::results::StaleSuppression, root: &Path) -> String {
     format!(
         "stale-suppression:{}:{}",
         relative_key_path(&item.path, root),
@@ -299,7 +284,7 @@ fn stale_suppression_key(item: &fallow_core::results::StaleSuppression, root: &P
 }
 
 fn unresolved_catalog_reference_key(
-    item: &fallow_core::results::UnresolvedCatalogReferenceFinding,
+    item: &plow_core::results::UnresolvedCatalogReferenceFinding,
     root: &Path,
 ) -> String {
     format!(
@@ -312,7 +297,7 @@ fn unresolved_catalog_reference_key(
 }
 
 fn unused_dependency_override_key(
-    item: &fallow_core::results::UnusedDependencyOverrideFinding,
+    item: &plow_core::results::UnusedDependencyOverrideFinding,
     root: &Path,
 ) -> String {
     format!(
@@ -324,7 +309,7 @@ fn unused_dependency_override_key(
 }
 
 fn misconfigured_dependency_override_key(
-    item: &fallow_core::results::MisconfiguredDependencyOverrideFinding,
+    item: &plow_core::results::MisconfiguredDependencyOverrideFinding,
     root: &Path,
 ) -> String {
     format!(
@@ -348,7 +333,7 @@ fn misconfigured_dependency_override_key(
 /// explicitly whether the new finding type needs an audit key (add a loop)
 /// or has no key representation today (bind with underscore and document why).
 ///
-/// Sibling exhaustive sites: `fallow_core::changed_files::filter_results_by_changed_files`,
+/// Sibling exhaustive sites: `plow_core::changed_files::filter_results_by_changed_files`,
 /// `dead_code_keys`, `retain_introduced_dead_code`.
 /// Non-exhaustive siblings the compiler will NOT flag (wire manually when a
 /// finding type is added): `annotate_dead_code_json` (same key formats, this
@@ -356,10 +341,10 @@ fn misconfigured_dependency_override_key(
 /// `crates/cli/src/check/rules.rs` (`apply_rules`, `has_error_severity_issues`).
 /// TypeScript mirror: `editors/vscode/scripts/codegen-types.mjs` (`BARE_DEAD_CODE_ALIASES`).
 pub(super) fn dead_code_keys(
-    results: &fallow_core::results::AnalysisResults,
+    results: &plow_core::results::AnalysisResults,
     root: &Path,
 ) -> FxHashSet<String> {
-    let fallow_core::results::AnalysisResults {
+    let plow_core::results::AnalysisResults {
         unused_files,
         unused_exports,
         unused_types,
@@ -401,7 +386,7 @@ pub(super) fn dead_code_keys(
         suppression_count: _suppression_count,
         active_suppressions: _active_suppressions,
         feature_flags: _feature_flags,
-        // Security findings are emitted via `fallow security`, not the audit
+        // Security findings are emitted via `plow security`, not the audit
         // dead-code gate; they have no dead-code key representation today.
         security_findings: _security_findings,
         security_unresolved_edge_files: _security_unresolved_edge_files,
@@ -475,7 +460,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
         self.keys.insert(key);
     }
 
-    fn add_unused_files(&mut self, items: &[fallow_core::results::UnusedFileFinding]) {
+    fn add_unused_files(&mut self, items: &[plow_core::results::UnusedFileFinding]) {
         for item in items {
             self.insert(format!(
                 "unused-file:{}",
@@ -484,7 +469,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
         }
     }
 
-    fn add_unused_exports(&mut self, items: &[fallow_core::results::UnusedExportFinding]) {
+    fn add_unused_exports(&mut self, items: &[plow_core::results::UnusedExportFinding]) {
         for item in items {
             self.insert(format!(
                 "unused-export:{}:{}",
@@ -494,7 +479,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
         }
     }
 
-    fn add_unused_types(&mut self, items: &[fallow_core::results::UnusedTypeFinding]) {
+    fn add_unused_types(&mut self, items: &[plow_core::results::UnusedTypeFinding]) {
         for item in items {
             self.insert(format!(
                 "unused-type:{}:{}",
@@ -504,7 +489,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
         }
     }
 
-    fn add_private_type_leaks(&mut self, items: &[fallow_core::results::PrivateTypeLeakFinding]) {
+    fn add_private_type_leaks(&mut self, items: &[plow_core::results::PrivateTypeLeakFinding]) {
         for item in items {
             self.insert(format!(
                 "private-type-leak:{}:{}:{}",
@@ -517,7 +502,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_invalid_client_exports(
         &mut self,
-        items: &[fallow_core::results::InvalidClientExportFinding],
+        items: &[plow_core::results::InvalidClientExportFinding],
     ) {
         for item in items {
             self.insert(invalid_client_export_key(&item.export, self.root));
@@ -526,7 +511,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_mixed_client_server_barrels(
         &mut self,
-        items: &[fallow_core::results::MixedClientServerBarrelFinding],
+        items: &[plow_core::results::MixedClientServerBarrelFinding],
     ) {
         for item in items {
             self.insert(mixed_client_server_barrel_key(&item.barrel, self.root));
@@ -535,14 +520,14 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_misplaced_directives(
         &mut self,
-        items: &[fallow_core::results::MisplacedDirectiveFinding],
+        items: &[plow_core::results::MisplacedDirectiveFinding],
     ) {
         for item in items {
             self.insert(misplaced_directive_key(&item.directive_site, self.root));
         }
     }
 
-    fn add_unprovided_injects(&mut self, items: &[fallow_core::results::UnprovidedInjectFinding]) {
+    fn add_unprovided_injects(&mut self, items: &[plow_core::results::UnprovidedInjectFinding]) {
         for item in items {
             self.insert(unprovided_inject_key(&item.inject, self.root));
         }
@@ -550,7 +535,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_unrendered_components(
         &mut self,
-        items: &[fallow_core::results::UnrenderedComponentFinding],
+        items: &[plow_core::results::UnrenderedComponentFinding],
     ) {
         for item in items {
             self.insert(unrendered_component_key(&item.component, self.root));
@@ -559,7 +544,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_unused_component_props(
         &mut self,
-        items: &[fallow_core::results::UnusedComponentPropFinding],
+        items: &[plow_core::results::UnusedComponentPropFinding],
     ) {
         for item in items {
             self.insert(unused_component_prop_key(&item.prop, self.root));
@@ -568,7 +553,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_unused_component_emits(
         &mut self,
-        items: &[fallow_core::results::UnusedComponentEmitFinding],
+        items: &[plow_core::results::UnusedComponentEmitFinding],
     ) {
         for item in items {
             self.insert(unused_component_emit_key(&item.emit, self.root));
@@ -577,14 +562,14 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_unused_server_actions(
         &mut self,
-        items: &[fallow_core::results::UnusedServerActionFinding],
+        items: &[plow_core::results::UnusedServerActionFinding],
     ) {
         for item in items {
             self.insert(unused_server_action_key(&item.action, self.root));
         }
     }
 
-    fn add_route_collisions(&mut self, items: &[fallow_core::results::RouteCollisionFinding]) {
+    fn add_route_collisions(&mut self, items: &[plow_core::results::RouteCollisionFinding]) {
         for item in items {
             self.insert(route_collision_key(&item.collision, self.root));
         }
@@ -592,14 +577,14 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_dynamic_segment_name_conflicts(
         &mut self,
-        items: &[fallow_core::results::DynamicSegmentNameConflictFinding],
+        items: &[plow_core::results::DynamicSegmentNameConflictFinding],
     ) {
         for item in items {
             self.insert(dynamic_segment_name_conflict_key(&item.conflict, self.root));
         }
     }
 
-    fn add_unused_dependencies(&mut self, items: &[fallow_core::results::UnusedDependencyFinding]) {
+    fn add_unused_dependencies(&mut self, items: &[plow_core::results::UnusedDependencyFinding]) {
         for item in items {
             self.insert(unused_dependency_key(&item.dep, self.root));
         }
@@ -607,7 +592,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_unused_dev_dependencies(
         &mut self,
-        items: &[fallow_core::results::UnusedDevDependencyFinding],
+        items: &[plow_core::results::UnusedDevDependencyFinding],
     ) {
         for item in items {
             self.insert(unused_dependency_key(&item.dep, self.root));
@@ -616,14 +601,14 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_unused_optional_dependencies(
         &mut self,
-        items: &[fallow_core::results::UnusedOptionalDependencyFinding],
+        items: &[plow_core::results::UnusedOptionalDependencyFinding],
     ) {
         for item in items {
             self.insert(unused_dependency_key(&item.dep, self.root));
         }
     }
 
-    fn add_unused_enum_members(&mut self, items: &[fallow_core::results::UnusedEnumMemberFinding]) {
+    fn add_unused_enum_members(&mut self, items: &[plow_core::results::UnusedEnumMemberFinding]) {
         for item in items {
             self.insert(unused_member_key(
                 "unused-enum-member",
@@ -633,10 +618,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
         }
     }
 
-    fn add_unused_class_members(
-        &mut self,
-        items: &[fallow_core::results::UnusedClassMemberFinding],
-    ) {
+    fn add_unused_class_members(&mut self, items: &[plow_core::results::UnusedClassMemberFinding]) {
         for item in items {
             self.insert(unused_member_key(
                 "unused-class-member",
@@ -646,10 +628,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
         }
     }
 
-    fn add_unused_store_members(
-        &mut self,
-        items: &[fallow_core::results::UnusedStoreMemberFinding],
-    ) {
+    fn add_unused_store_members(&mut self, items: &[plow_core::results::UnusedStoreMemberFinding]) {
         for item in items {
             self.insert(unused_member_key(
                 "unused-store-member",
@@ -659,7 +638,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
         }
     }
 
-    fn add_unresolved_imports(&mut self, items: &[fallow_core::results::UnresolvedImportFinding]) {
+    fn add_unresolved_imports(&mut self, items: &[plow_core::results::UnresolvedImportFinding]) {
         for item in items {
             self.insert(format!(
                 "unresolved-import:{}:{}",
@@ -671,14 +650,14 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_unlisted_dependencies(
         &mut self,
-        items: &[fallow_core::results::UnlistedDependencyFinding],
+        items: &[plow_core::results::UnlistedDependencyFinding],
     ) {
         for item in items {
             self.insert(unlisted_dependency_key(&item.dep, self.root));
         }
     }
 
-    fn add_duplicate_exports(&mut self, items: &[fallow_core::results::DuplicateExportFinding]) {
+    fn add_duplicate_exports(&mut self, items: &[plow_core::results::DuplicateExportFinding]) {
         for item in items {
             self.insert(duplicate_export_key(item, self.root));
         }
@@ -686,7 +665,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_type_only_dependencies(
         &mut self,
-        items: &[fallow_core::results::TypeOnlyDependencyFinding],
+        items: &[plow_core::results::TypeOnlyDependencyFinding],
     ) {
         for item in items {
             self.insert(format!(
@@ -699,7 +678,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_test_only_dependencies(
         &mut self,
-        items: &[fallow_core::results::TestOnlyDependencyFinding],
+        items: &[plow_core::results::TestOnlyDependencyFinding],
     ) {
         for item in items {
             self.insert(format!(
@@ -712,23 +691,20 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_circular_dependencies(
         &mut self,
-        items: &[fallow_core::results::CircularDependencyFinding],
+        items: &[plow_core::results::CircularDependencyFinding],
     ) {
         for item in items {
             self.insert(circular_dependency_key(item, self.root));
         }
     }
 
-    fn add_re_export_cycles(&mut self, items: &[fallow_core::results::ReExportCycleFinding]) {
+    fn add_re_export_cycles(&mut self, items: &[plow_core::results::ReExportCycleFinding]) {
         for item in items {
             self.insert(re_export_cycle_key(item, self.root));
         }
     }
 
-    fn add_boundary_violations(
-        &mut self,
-        items: &[fallow_core::results::BoundaryViolationFinding],
-    ) {
+    fn add_boundary_violations(&mut self, items: &[plow_core::results::BoundaryViolationFinding]) {
         for item in items {
             self.insert(boundary_violation_key(item, self.root));
         }
@@ -736,7 +712,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_boundary_coverage_violations(
         &mut self,
-        items: &[fallow_core::results::BoundaryCoverageViolationFinding],
+        items: &[plow_core::results::BoundaryCoverageViolationFinding],
     ) {
         for item in items {
             self.insert(boundary_coverage_key(item, self.root));
@@ -745,20 +721,20 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_boundary_call_violations(
         &mut self,
-        items: &[fallow_core::results::BoundaryCallViolationFinding],
+        items: &[plow_core::results::BoundaryCallViolationFinding],
     ) {
         for item in items {
             self.insert(boundary_call_key(item, self.root));
         }
     }
 
-    fn add_policy_violations(&mut self, items: &[fallow_core::results::PolicyViolationFinding]) {
+    fn add_policy_violations(&mut self, items: &[plow_core::results::PolicyViolationFinding]) {
         for item in items {
             self.insert(policy_violation_key(item, self.root));
         }
     }
 
-    fn add_stale_suppressions(&mut self, items: &[fallow_core::results::StaleSuppression]) {
+    fn add_stale_suppressions(&mut self, items: &[plow_core::results::StaleSuppression]) {
         for item in items {
             self.insert(stale_suppression_key(item, self.root));
         }
@@ -766,7 +742,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_unresolved_catalog_references(
         &mut self,
-        items: &[fallow_core::results::UnresolvedCatalogReferenceFinding],
+        items: &[plow_core::results::UnresolvedCatalogReferenceFinding],
     ) {
         for item in items {
             self.insert(unresolved_catalog_reference_key(item, self.root));
@@ -775,17 +751,14 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_unused_catalog_entries(
         &mut self,
-        items: &[fallow_core::results::UnusedCatalogEntryFinding],
+        items: &[plow_core::results::UnusedCatalogEntryFinding],
     ) {
         for item in items {
             self.insert(unused_catalog_entry_key(&item.entry, self.root));
         }
     }
 
-    fn add_empty_catalog_groups(
-        &mut self,
-        items: &[fallow_core::results::EmptyCatalogGroupFinding],
-    ) {
+    fn add_empty_catalog_groups(&mut self, items: &[plow_core::results::EmptyCatalogGroupFinding]) {
         for item in items {
             self.insert(empty_catalog_group_key(&item.group, self.root));
         }
@@ -793,7 +766,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_unused_dependency_overrides(
         &mut self,
-        items: &[fallow_core::results::UnusedDependencyOverrideFinding],
+        items: &[plow_core::results::UnusedDependencyOverrideFinding],
     ) {
         for item in items {
             self.insert(unused_dependency_override_key(item, self.root));
@@ -802,7 +775,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_misconfigured_dependency_overrides(
         &mut self,
-        items: &[fallow_core::results::MisconfiguredDependencyOverrideFinding],
+        items: &[plow_core::results::MisconfiguredDependencyOverrideFinding],
     ) {
         for item in items {
             self.insert(misconfigured_dependency_override_key(item, self.root));
@@ -821,7 +794,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
 /// retain block) or has no key representation today (bind with underscore and
 /// document why).
 ///
-/// Sibling exhaustive sites: `fallow_core::changed_files::filter_results_by_changed_files`,
+/// Sibling exhaustive sites: `plow_core::changed_files::filter_results_by_changed_files`,
 /// `dead_code_keys`, `retain_introduced_dead_code`.
 /// Non-exhaustive siblings the compiler will NOT flag (wire manually when a
 /// finding type is added): `annotate_dead_code_json` (same key formats, this
@@ -829,7 +802,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
 /// `crates/cli/src/check/rules.rs` (`apply_rules`, `has_error_severity_issues`).
 /// TypeScript mirror: `editors/vscode/scripts/codegen-types.mjs` (`BARE_DEAD_CODE_ALIASES`).
 pub(super) fn retain_introduced_dead_code(
-    results: &mut fallow_core::results::AnalysisResults,
+    results: &mut plow_core::results::AnalysisResults,
     root: &Path,
     base: Option<&FxHashSet<String>>,
 ) {
@@ -847,7 +820,7 @@ pub(super) fn retain_introduced_dead_code(
     let introduced = introduced_dead_code_keys(results, root, base);
     let keep = |key: String| introduced.contains(&key);
 
-    let fallow_core::results::AnalysisResults {
+    let plow_core::results::AnalysisResults {
         unused_files,
         unused_exports,
         unused_types,
@@ -890,7 +863,7 @@ pub(super) fn retain_introduced_dead_code(
         suppression_count: _suppression_count,
         active_suppressions: _active_suppressions,
         feature_flags: _feature_flags,
-        // Security findings are emitted via `fallow security`, not the audit
+        // Security findings are emitted via `plow security`, not the audit
         // dead-code gate; they have no key representation and are not filtered
         // here.
         security_findings: _security_findings,
@@ -976,7 +949,7 @@ pub(super) fn retain_introduced_dead_code(
 }
 
 fn introduced_dead_code_keys(
-    results: &fallow_core::results::AnalysisResults,
+    results: &plow_core::results::AnalysisResults,
     root: &Path,
     base: &FxHashSet<String>,
 ) -> FxHashSet<String> {
@@ -987,9 +960,9 @@ fn introduced_dead_code_keys(
 }
 
 fn retain_introduced_fast_paths(
-    unused_files: &mut Vec<fallow_core::results::UnusedFileFinding>,
-    unused_exports: &mut Vec<fallow_core::results::UnusedExportFinding>,
-    unused_types: &mut Vec<fallow_core::results::UnusedTypeFinding>,
+    unused_files: &mut Vec<plow_core::results::UnusedFileFinding>,
+    unused_exports: &mut Vec<plow_core::results::UnusedExportFinding>,
+    unused_types: &mut Vec<plow_core::results::UnusedTypeFinding>,
     root: &Path,
     base: &FxHashSet<String>,
 ) {
@@ -1035,7 +1008,7 @@ where
 
 pub(super) fn annotate_dead_code_json(
     json: &mut serde_json::Value,
-    results: &fallow_core::results::AnalysisResults,
+    results: &plow_core::results::AnalysisResults,
     root: &Path,
     base: &FxHashSet<String>,
 ) {
@@ -1055,7 +1028,7 @@ pub(super) fn annotate_dead_code_json(
 
 struct DeadCodeJsonAnnotator<'a> {
     json: &'a mut serde_json::Value,
-    results: &'a fallow_core::results::AnalysisResults,
+    results: &'a plow_core::results::AnalysisResults,
     root: &'a Path,
     base: &'a FxHashSet<String>,
 }
@@ -1304,7 +1277,7 @@ impl DeadCodeJsonAnnotator<'_> {
 
 fn annotate_dependency_json(
     json: &mut serde_json::Value,
-    results: &fallow_core::results::AnalysisResults,
+    results: &plow_core::results::AnalysisResults,
     root: &Path,
     base: &FxHashSet<String>,
 ) {
@@ -1336,7 +1309,7 @@ fn annotate_dependency_json(
 
 fn annotate_member_json(
     json: &mut serde_json::Value,
-    results: &fallow_core::results::AnalysisResults,
+    results: &plow_core::results::AnalysisResults,
     root: &Path,
     base: &FxHashSet<String>,
 ) {
@@ -1374,7 +1347,7 @@ fn annotate_member_json(
 
 fn annotate_graph_json(
     json: &mut serde_json::Value,
-    results: &fallow_core::results::AnalysisResults,
+    results: &plow_core::results::AnalysisResults,
     root: &Path,
     base: &FxHashSet<String>,
 ) {
@@ -1397,8 +1370,8 @@ fn annotate_graph_json(
         "re_export_cycles",
         results.re_export_cycles.iter().map(|item| {
             let kind = match item.cycle.kind {
-                fallow_core::results::ReExportCycleKind::MultiNode => "multi-node",
-                fallow_core::results::ReExportCycleKind::SelfLoop => "self-loop",
+                plow_core::results::ReExportCycleKind::MultiNode => "multi-node",
+                plow_core::results::ReExportCycleKind::SelfLoop => "self-loop",
             };
             let mut files: Vec<String> = item
                 .cycle
@@ -1486,7 +1459,7 @@ fn annotate_graph_json(
 
 fn annotate_catalog_json(
     json: &mut serde_json::Value,
-    results: &fallow_core::results::AnalysisResults,
+    results: &plow_core::results::AnalysisResults,
     root: &Path,
     base: &FxHashSet<String>,
 ) {
@@ -1584,7 +1557,7 @@ pub(super) fn annotate_health_json(
 
 pub(super) fn annotate_dupes_json(
     json: &mut serde_json::Value,
-    report: &fallow_core::duplicates::DuplicationReport,
+    report: &plow_core::duplicates::DuplicationReport,
     root: &Path,
     base: &FxHashSet<String>,
 ) {
@@ -1628,7 +1601,7 @@ pub(super) fn health_finding_key(
 }
 
 pub(super) fn dupes_keys(
-    report: &fallow_core::duplicates::DuplicationReport,
+    report: &plow_core::duplicates::DuplicationReport,
     root: &Path,
 ) -> FxHashSet<String> {
     report
@@ -1638,7 +1611,7 @@ pub(super) fn dupes_keys(
         .collect()
 }
 
-pub(super) fn dupe_group_key(group: &fallow_core::duplicates::CloneGroup, root: &Path) -> String {
+pub(super) fn dupe_group_key(group: &plow_core::duplicates::CloneGroup, root: &Path) -> String {
     let mut files: Vec<String> = group
         .instances
         .iter()
@@ -1663,8 +1636,8 @@ pub(super) fn dupe_group_key(group: &fallow_core::duplicates::CloneGroup, root: 
 mod tests {
     use std::path::{Path, PathBuf};
 
-    use fallow_core::extract::MemberKind;
-    use fallow_core::results::{
+    use plow_core::extract::MemberKind;
+    use plow_core::results::{
         AnalysisResults, BoundaryCallViolation, BoundaryCallViolationFinding,
         BoundaryCoverageViolation, BoundaryCoverageViolationFinding, BoundaryViolation,
         BoundaryViolationFinding, CircularDependency, CircularDependencyFinding,
@@ -2040,7 +2013,7 @@ mod tests {
         assert!(keys.contains("boundary-coverage:src/unmatched.ts"));
         assert!(keys.contains("boundary-call:src/app.ts:child_process.exec"));
         assert!(
-            keys.contains("stale-suppression:src/app.ts:// fallow-ignore-next-line unused-export")
+            keys.contains("stale-suppression:src/app.ts:// plow-ignore-next-line unused-export")
         );
         assert!(
             keys.contains("unresolved-catalog-reference:packages/app/package.json:9:default:react")

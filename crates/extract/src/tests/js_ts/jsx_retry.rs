@@ -1,7 +1,7 @@
 use std::path::Path;
 
-use fallow_types::discover::FileId;
-use fallow_types::extract::{ModuleInfo, VisibilityTag};
+use plow_types::discover::FileId;
+use plow_types::extract::{ModuleInfo, VisibilityTag};
 
 use crate::parse::parse_source_to_module;
 
@@ -57,7 +57,7 @@ export const Button = ({ children }) => <button className="btn">{children}</butt
 #[test]
 fn jsx_retry_preserves_suppressions() {
     let source = r#"
-// fallow-ignore-next-line unused-export
+// plow-ignore-next-line unused-export
 export const Unused = ({ text }) => <span className="unused-component">{text}</span>;
 "#;
     let info = parse_as_js(source);

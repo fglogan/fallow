@@ -5,9 +5,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use colored::Colorize;
-use fallow_config::OutputFormat;
 use ignore::Match;
 use notify::{RecommendedWatcher, Watcher};
+use plow_config::OutputFormat;
 use rustc_hash::FxHashSet;
 
 use crate::report;
@@ -41,12 +41,12 @@ type LoadConfigFn = fn(
     threads: usize,
     production: bool,
     quiet: bool,
-) -> Result<fallow_config::ResolvedConfig, ExitCode>;
+) -> Result<plow_config::ResolvedConfig, ExitCode>;
 
 fn is_relevant_source(path: &Path) -> bool {
     path.extension()
         .and_then(|s| s.to_str())
-        .is_some_and(|ext| fallow_core::discover::SOURCE_EXTENSIONS.contains(&ext))
+        .is_some_and(|ext| plow_core::discover::SOURCE_EXTENSIONS.contains(&ext))
 }
 
 fn is_relevant_config(path: &Path) -> bool {
@@ -56,10 +56,10 @@ fn is_relevant_config(path: &Path) -> bool {
             matches!(
                 name,
                 "package.json"
-                    | ".fallowrc.json"
-                    | ".fallowrc.jsonc"
-                    | "fallow.toml"
-                    | ".fallow.toml"
+                    | ".plowrc.json"
+                    | ".plowrc.jsonc"
+                    | "plow.toml"
+                    | ".plow.toml"
                     | "tsconfig.json"
             )
         })
@@ -70,14 +70,14 @@ fn has_disallowed_hidden_dir(relative: &Path) -> bool {
         parent.components().any(|component| {
             let name = component.as_os_str();
             name.to_string_lossy().starts_with('.')
-                && !fallow_core::discover::is_allowed_hidden_dir(name)
+                && !plow_core::discover::is_allowed_hidden_dir(name)
         })
     })
 }
 
 fn build_production_glob_set() -> Option<globset::GlobSet> {
     let mut builder = globset::GlobSetBuilder::new();
-    for pattern in fallow_core::discover::PRODUCTION_EXCLUDE_PATTERNS {
+    for pattern in plow_core::discover::PRODUCTION_EXCLUDE_PATTERNS {
         if let Ok(glob) = globset::GlobBuilder::new(pattern)
             .literal_separator(true)
             .build()
@@ -98,7 +98,7 @@ struct WatchFilter {
 }
 
 impl WatchFilter {
-    fn new(config: &fallow_config::ResolvedConfig) -> Self {
+    fn new(config: &plow_config::ResolvedConfig) -> Self {
         let gitignores = build_project_gitignores(config);
         let (global_gitignore, _) = ignore::gitignore::Gitignore::global();
         Self {
@@ -158,7 +158,7 @@ impl WatchFilter {
 }
 
 fn build_project_gitignores(
-    config: &fallow_config::ResolvedConfig,
+    config: &plow_config::ResolvedConfig,
 ) -> Vec<ignore::gitignore::Gitignore> {
     let root = &config.root;
     let mut gitignores = Vec::new();
@@ -297,13 +297,13 @@ fn print_waiting(opts: &WatchOptions<'_>) {
     );
 }
 
-fn analyze_and_report(config: &fallow_config::ResolvedConfig, opts: &WatchOptions<'_>) -> ExitCode {
+fn analyze_and_report(config: &plow_config::ResolvedConfig, opts: &WatchOptions<'_>) -> ExitCode {
     let start = Instant::now();
     #[expect(
         deprecated,
-        reason = "ADR-008 deprecates fallow_core::analyze externally; the CLI still uses the workspace path dependency"
+        reason = "ADR-008 deprecates plow_core::analyze externally; the CLI still uses the workspace path dependency"
     )]
-    let results = match fallow_core::analyze(config) {
+    let results = match plow_core::analyze(config) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("Analysis error: {e}");
@@ -334,7 +334,7 @@ fn analyze_and_report(config: &fallow_config::ResolvedConfig, opts: &WatchOption
 }
 
 fn reload_config_or_keep_previous(
-    config: &mut fallow_config::ResolvedConfig,
+    config: &mut plow_config::ResolvedConfig,
     opts: &WatchOptions<'_>,
     load: LoadConfigFn,
 ) {
@@ -496,14 +496,14 @@ fn create_watcher(
     Ok(watcher)
 }
 
-fn replace_watch_filter(filter: &Arc<Mutex<WatchFilter>>, config: &fallow_config::ResolvedConfig) {
+fn replace_watch_filter(filter: &Arc<Mutex<WatchFilter>>, config: &plow_config::ResolvedConfig) {
     if let Ok(mut guard) = filter.lock() {
         *guard = WatchFilter::new(config);
     }
 }
 
 struct RootLifecycleState<'a> {
-    config: &'a mut fallow_config::ResolvedConfig,
+    config: &'a mut plow_config::ResolvedConfig,
     filter: &'a Arc<Mutex<WatchFilter>>,
     watcher: &'a mut Option<RecommendedWatcher>,
     tx: &'a std::sync::mpsc::Sender<WatchEvent>,
@@ -575,8 +575,8 @@ fn handle_root_lifecycle(opts: &WatchOptions<'_>, state: RootLifecycleState<'_>)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_config::FallowConfig;
     use notify::event::EventKind;
+    use plow_config::PlowConfig;
 
     #[test]
     fn relevant_source_ts_extensions() {
@@ -622,10 +622,10 @@ mod tests {
     fn relevant_config_files() {
         assert!(is_relevant_config(Path::new("package.json")));
         assert!(is_relevant_config(Path::new("/project/package.json")));
-        assert!(is_relevant_config(Path::new(".fallowrc.json")));
-        assert!(is_relevant_config(Path::new(".fallowrc.jsonc")));
-        assert!(is_relevant_config(Path::new("fallow.toml")));
-        assert!(is_relevant_config(Path::new(".fallow.toml")));
+        assert!(is_relevant_config(Path::new(".plowrc.json")));
+        assert!(is_relevant_config(Path::new(".plowrc.jsonc")));
+        assert!(is_relevant_config(Path::new("plow.toml")));
+        assert!(is_relevant_config(Path::new(".plow.toml")));
         assert!(is_relevant_config(Path::new("tsconfig.json")));
     }
 
@@ -640,7 +640,7 @@ mod tests {
 
     #[test]
     fn disallowed_hidden_dirs_match_discovery_filter() {
-        assert!(has_disallowed_hidden_dir(Path::new(".fallow/.gitignore")));
+        assert!(has_disallowed_hidden_dir(Path::new(".plow/.gitignore")));
         assert!(has_disallowed_hidden_dir(Path::new(".cache/file.ts")));
         assert!(!has_disallowed_hidden_dir(Path::new(".storybook/main.ts")));
         assert!(!has_disallowed_hidden_dir(Path::new("src/.generated.ts")));
@@ -675,12 +675,12 @@ mod tests {
         let filter = WatchFilter::new(&config);
         let event = make_event(&[
             Path::new("/project/package.json"),
-            Path::new("/project/.fallowrc.json"),
+            Path::new("/project/.plowrc.json"),
         ]);
         let paths = display_changed_paths(filter_event_paths(event, &filter), &root);
         assert_eq!(paths.len(), 2);
         assert!(paths.contains(&"package.json".to_string()));
-        assert!(paths.contains(&".fallowrc.json".to_string()));
+        assert!(paths.contains(&".plowrc.json".to_string()));
     }
 
     #[test]
@@ -720,7 +720,7 @@ mod tests {
         let filter = WatchFilter::new(&config);
         let event = make_event(&[
             Path::new("/project/.gitignore"),
-            Path::new("/project/.fallow/.gitignore"),
+            Path::new("/project/.plow/.gitignore"),
         ]);
         let paths = display_changed_paths(filter_event_paths(event, &filter), &root);
         assert_eq!(paths, vec![".gitignore"]);
@@ -900,7 +900,7 @@ mod tests {
         output: OutputFormat,
         threads: usize,
         quiet: bool,
-    ) -> fallow_config::ResolvedConfig {
+    ) -> plow_config::ResolvedConfig {
         make_config_with_ignores(root, output, threads, quiet, Vec::new())
     }
 
@@ -910,8 +910,8 @@ mod tests {
         threads: usize,
         quiet: bool,
         ignore_patterns: Vec<String>,
-    ) -> fallow_config::ResolvedConfig {
-        FallowConfig {
+    ) -> plow_config::ResolvedConfig {
+        PlowConfig {
             schema: None,
             extends: vec![],
             entry: vec![],
@@ -923,30 +923,30 @@ mod tests {
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
             ignore_dependency_overrides: vec![],
-            ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+            ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             ignore_decorators: vec![],
-            duplicates: fallow_config::DuplicatesConfig::default(),
-            health: fallow_config::HealthConfig::default(),
-            rules: fallow_config::RulesConfig::default(),
-            boundaries: fallow_config::BoundaryConfig::default(),
+            duplicates: plow_config::DuplicatesConfig::default(),
+            health: plow_config::HealthConfig::default(),
+            rules: plow_config::RulesConfig::default(),
+            boundaries: plow_config::BoundaryConfig::default(),
             production: false.into(),
             plugins: vec![],
             rule_packs: vec![],
             dynamically_loaded: vec![],
             overrides: vec![],
             regression: None,
-            audit: fallow_config::AuditConfig::default(),
+            audit: plow_config::AuditConfig::default(),
             codeowners: None,
             public_packages: vec![],
-            flags: fallow_config::FlagsConfig::default(),
-            security: fallow_config::SecurityConfig::default(),
-            fix: fallow_config::FixConfig::default(),
-            resolve: fallow_config::ResolveConfig::default(),
+            flags: plow_config::FlagsConfig::default(),
+            security: plow_config::SecurityConfig::default(),
+            fix: plow_config::FixConfig::default(),
+            resolve: plow_config::ResolveConfig::default(),
             sealed: false,
             include_entry_exports: false,
             auto_imports: false,
-            cache: fallow_config::CacheConfig::default(),
+            cache: plow_config::CacheConfig::default(),
         }
         .resolve(root.to_path_buf(), output, threads, false, quiet, None)
     }

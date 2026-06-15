@@ -4,7 +4,7 @@ use colored::Colorize;
 
 use super::{MAX_FLAT_ITEMS, relative_path, split_dir_filename};
 
-const DOCS_HEALTH: &str = "https://docs.fallow.tools/explanations/health";
+const DOCS_HEALTH: &str = "https://docs.genesis-plow.dev/explanations/health";
 
 fn render_direct_import_symbol(symbol: &crate::health_types::DirectCallerSymbolEvidence) -> String {
     let imported = if symbol.imported == "side-effect" {

@@ -1,5 +1,5 @@
 [package]
-name = "fallow-mcp"
+name = "plow-mcp"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,11 +9,11 @@ homepage.workspace = true
 documentation.workspace = true
 keywords.workspace = true
 categories.workspace = true
-description = "MCP server for fallow codebase intelligence (exposes fallow as typed tools to AI agents)"
+description = "MCP server for plow codebase intelligence (exposes plow as typed tools to AI agents)"
 readme = "../../README.md"
 
 [[bin]]
-name = "fallow-mcp"
+name = "plow-mcp"
 path = "src/main.rs"
 
 [dependencies]
@@ -27,10 +27,10 @@ tempfile.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
-# Test-only: drift tests assert the shared MCP tool manifest in fallow-types
+# Test-only: drift tests assert the shared MCP tool manifest in plow-types
 # stays in sync with the live rmcp tool router. The shipped binary remains
-# free of fallow-* workspace dependencies.
-fallow-types.workspace = true
+# free of plow-* workspace dependencies.
+plow-types.workspace = true
 regex.workspace = true
 
 [lints]

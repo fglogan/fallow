@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Test suite for fallow GitHub Action jq scripts and bash helpers
+# Test suite for plow GitHub Action jq scripts and bash helpers
 # Run: bash action/tests/run.sh
 
 set -o pipefail
@@ -84,37 +84,37 @@ trap 'rm -rf "$INSTALL_TMP"' EXIT
 mkdir -p "$INSTALL_TMP/pinned" "$INSTALL_TMP/range" "$INSTALL_TMP/unsafe" "$INSTALL_TMP/empty"
 
 cat > "$INSTALL_TMP/pinned/package.json" <<'JSON'
-{"devDependencies":{"fallow":"2.7.3"}}
+{"devDependencies":{"plow":"2.7.3"}}
 JSON
 cat > "$INSTALL_TMP/range/package.json" <<'JSON'
-{"dependencies":{"fallow":"^2.52.0"}}
+{"dependencies":{"plow":"^2.52.0"}}
 JSON
 cat > "$INSTALL_TMP/unsafe/package.json" <<'JSON'
-{"devDependencies":{"fallow":"workspace:*"}}
+{"devDependencies":{"plow":"workspace:*"}}
 JSON
 
-OUT=$(INPUT_ROOT="$INSTALL_TMP/pinned" FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
-assert_contains "$OUT" "Using fallow version from" "install: reads package.json pin"
-assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow@2.7.3" "install: installs project pin"
+OUT=$(INPUT_ROOT="$INSTALL_TMP/pinned" PLOW_VERSION="" PLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+assert_contains "$OUT" "Using plow version from" "install: reads package.json pin"
+assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts plow@2.7.3" "install: installs project pin"
 
-OUT=$(INPUT_ROOT="$INSTALL_TMP/range" FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
-assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow@^2.52.0" "install: supports package.json semver range"
+OUT=$(INPUT_ROOT="$INSTALL_TMP/range" PLOW_VERSION="" PLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts plow@^2.52.0" "install: supports package.json semver range"
 
-OUT=$(INPUT_ROOT="$INSTALL_TMP/empty" FALLOW_VERSION="2.52.0 - 2.53.0" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
-assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow@2.52.0 - 2.53.0" "install: supports npm hyphen ranges"
+OUT=$(INPUT_ROOT="$INSTALL_TMP/empty" PLOW_VERSION="2.52.0 - 2.53.0" PLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts plow@2.52.0 - 2.53.0" "install: supports npm hyphen ranges"
 
-OUT=$(INPUT_ROOT="$INSTALL_TMP/pinned" FALLOW_VERSION="latest" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
-assert_contains "$OUT" "Using fallow version from action input: latest" "install: explicit version wins"
-assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow" "install: explicit latest installs latest"
+OUT=$(INPUT_ROOT="$INSTALL_TMP/pinned" PLOW_VERSION="latest" PLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+assert_contains "$OUT" "Using plow version from action input: latest" "install: explicit version wins"
+assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts plow" "install: explicit latest installs latest"
 
-OUT=$(INPUT_ROOT="$INSTALL_TMP/unsafe" FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
-assert_contains "$OUT" "Ignoring unsupported fallow package.json spec" "install: warns on unsupported package spec"
-assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow" "install: unsupported package spec falls back to latest"
+OUT=$(INPUT_ROOT="$INSTALL_TMP/unsafe" PLOW_VERSION="" PLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+assert_contains "$OUT" "Ignoring unsupported plow package.json spec" "install: warns on unsupported package spec"
+assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts plow" "install: unsupported package spec falls back to latest"
 
-OUT=$(INPUT_ROOT="$INSTALL_TMP/empty" FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
-assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow" "install: no package spec falls back to latest"
+OUT=$(INPUT_ROOT="$INSTALL_TMP/empty" PLOW_VERSION="" PLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts plow" "install: no package spec falls back to latest"
 
-OUT=$(INPUT_ROOT="$INSTALL_TMP/empty" FALLOW_VERSION="file:../fallow" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+OUT=$(INPUT_ROOT="$INSTALL_TMP/empty" PLOW_VERSION="file:../plow" PLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
 cmd_status=$?
 if [ "$cmd_status" -ne 0 ]; then
   pass "install: invalid explicit spec fails"
@@ -123,7 +123,7 @@ else
 fi
 assert_contains "$OUT" "Invalid version specifier" "install: invalid explicit spec explains failure"
 
-OUT=$(INPUT_ROOT="$INSTALL_TMP/empty" FALLOW_VERSION="2.0.0 -g malicious" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+OUT=$(INPUT_ROOT="$INSTALL_TMP/empty" PLOW_VERSION="2.0.0 -g malicious" PLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
 cmd_status=$?
 if [ "$cmd_status" -ne 0 ]; then
   pass "install: rejects dash-prefixed extra args in spec"
@@ -134,7 +134,7 @@ fi
 # --- Binary verification integration ---
 #
 # Exercises the same verifier path used by install.sh against a controlled
-# fake `node_modules/fallow` tree.
+# fake `node_modules/plow` tree.
 # We can't sign with the production key from a test, so we override the
 # verifier with a test keypair via the verifyFn knob. The goal is to prove
 # that bad signatures produce a non-zero exit, that good signatures
@@ -144,7 +144,7 @@ VERIFY_TMP=$(mktemp -d)
 trap 'rm -rf "$INSTALL_TMP" "$VERIFY_TMP"' EXIT
 
 PLATFORM_PKG=$(node -e "
-const { getPlatformPackage } = require('$DIR/../../npm/fallow/scripts/platform-package');
+const { getPlatformPackage } = require('$DIR/../../npm/plow/scripts/platform-package');
 let pkg;
 if (process.platform !== 'linux') {
   pkg = getPlatformPackage(process.platform, process.arch);
@@ -159,16 +159,16 @@ console.log(pkg);
 if [ -z "$PLATFORM_PKG" ] || [ "$PLATFORM_PKG" = "null" ]; then
   echo "  (skipping binary verification tests on unsupported platform $(node -e 'console.log(process.platform + \"-\" + process.arch)'))"
 else
-  # Build a fake `node_modules/fallow` tree with our scripts and a fake
+  # Build a fake `node_modules/plow` tree with our scripts and a fake
   # platform package. Use a generated keypair, sign the binaries with it,
   # and have the test invocation override the embedded production key.
-  mkdir -p "$VERIFY_TMP/node_modules/fallow/scripts"
+  mkdir -p "$VERIFY_TMP/node_modules/plow/scripts"
   mkdir -p "$VERIFY_TMP/node_modules/$PLATFORM_PKG"
-  cp "$DIR/../../npm/fallow/scripts/verify-binary.js" "$VERIFY_TMP/node_modules/fallow/scripts/"
-  cp "$DIR/../../npm/fallow/scripts/platform-package.js" "$VERIFY_TMP/node_modules/fallow/scripts/"
+  cp "$DIR/../../npm/plow/scripts/verify-binary.js" "$VERIFY_TMP/node_modules/plow/scripts/"
+  cp "$DIR/../../npm/plow/scripts/platform-package.js" "$VERIFY_TMP/node_modules/plow/scripts/"
 
   # Generate a keypair, write three binaries, sign them. Also write a
-  # minimal package.json so require.resolve('@fallow-cli/<platform>/package.json')
+  # minimal package.json so require.resolve('@plow-cli/<platform>/package.json')
   # succeeds.
   node -e "
 const crypto = require('node:crypto');
@@ -180,7 +180,7 @@ const rawPub = der.subarray(der.length - 32);
 const dir = '$VERIFY_TMP/node_modules/$PLATFORM_PKG';
 fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: '$PLATFORM_PKG', version: '0.0.0' }));
 const ext = process.platform === 'win32' ? '.exe' : '';
-for (const base of ['fallow', 'fallow-lsp', 'fallow-mcp']) {
+for (const base of ['plow', 'plow-lsp', 'plow-mcp']) {
   const bin = path.join(dir, base + ext);
   const data = Buffer.from('mock ' + base);
   fs.writeFileSync(bin, data);
@@ -195,7 +195,7 @@ fs.writeFileSync('$VERIFY_TMP/testkey.pem', privateKey.export({ format: 'pem', t
 const fs = require('node:fs');
 const crypto = require('node:crypto');
 const rawPub = fs.readFileSync('$VERIFY_TMP/testkey.bin');
-const { verifyInstalled, _verifyWithKey } = require('fallow/scripts/verify-binary');
+const { verifyInstalled, _verifyWithKey } = require('plow/scripts/verify-binary');
 (async () => {
   const result = await verifyInstalled({
     verifyFn: (p) => _verifyWithKey(p, rawPub),
@@ -212,12 +212,12 @@ const { verifyInstalled, _verifyWithKey } = require('fallow/scripts/verify-binar
     fail "install verify: good signatures succeed" "exit $good_status, output: $GOOD"
   fi
 
-  # Corrupt the fallow-lsp sig and confirm verifyInstalled returns a failure.
+  # Corrupt the plow-lsp sig and confirm verifyInstalled returns a failure.
   ext=""
   if [ "$(node -p 'process.platform')" = "win32" ]; then ext=".exe"; fi
   node -e "
 const fs = require('node:fs');
-const p = '$VERIFY_TMP/node_modules/$PLATFORM_PKG/fallow-lsp${ext}.sig';
+const p = '$VERIFY_TMP/node_modules/$PLATFORM_PKG/plow-lsp${ext}.sig';
 const sig = fs.readFileSync(p);
 sig[0] ^= 0xff;
 fs.writeFileSync(p, sig);
@@ -227,7 +227,7 @@ fs.writeFileSync(p, sig);
 const fs = require('node:fs');
 const crypto = require('node:crypto');
 const rawPub = fs.readFileSync('$VERIFY_TMP/testkey.bin');
-const { verifyInstalled, _verifyWithKey } = require('fallow/scripts/verify-binary');
+const { verifyInstalled, _verifyWithKey } = require('plow/scripts/verify-binary');
 (async () => {
   const result = await verifyInstalled({
     verifyFn: (p) => _verifyWithKey(p, rawPub),
@@ -245,13 +245,13 @@ const { verifyInstalled, _verifyWithKey } = require('fallow/scripts/verify-binar
     fail "install verify: bad signature aborts with non-zero exit" "exit $bad_status, output: $BAD"
   fi
   assert_contains "$BAD" "FAILED sig-invalid" "install verify: bad signature reports sig-invalid"
-  assert_contains "$BAD" "fallow-lsp" "install verify: bad signature names the offending binary"
+  assert_contains "$BAD" "plow-lsp" "install verify: bad signature names the offending binary"
 
   node -e "
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const privateKey = crypto.createPrivateKey(fs.readFileSync('$VERIFY_TMP/testkey.pem', 'utf8'));
-const bin = '$VERIFY_TMP/node_modules/$PLATFORM_PKG/fallow-lsp${ext}';
+const bin = '$VERIFY_TMP/node_modules/$PLATFORM_PKG/plow-lsp${ext}';
 fs.writeFileSync(bin + '.sig', crypto.sign(null, fs.readFileSync(bin), privateKey));
 "
 
@@ -259,13 +259,13 @@ fs.writeFileSync(bin + '.sig', crypto.sign(null, fs.readFileSync(bin), privateKe
 const fs = require('node:fs');
 const crypto = require('node:crypto');
 const rawPub = fs.readFileSync('$VERIFY_TMP/testkey.bin');
-const { verifyInstalled, _verifyWithKey } = require('fallow/scripts/verify-binary');
+const { verifyInstalled, _verifyWithKey } = require('plow/scripts/verify-binary');
 (async () => {
   const result = await verifyInstalled({
     verifyFn: (p) => _verifyWithKey(p, rawPub),
     digestProvider: ({ binaryPath }) => {
       const digest = crypto.createHash('sha256').update(fs.readFileSync(binaryPath)).digest('hex');
-      return /fallow-mcp/.test(binaryPath) ? '0'.repeat(64) : digest;
+      return /plow-mcp/.test(binaryPath) ? '0'.repeat(64) : digest;
     },
   });
   if (result.ok) { console.error('FAIL: expected ok=false'); process.exit(2); }
@@ -280,16 +280,16 @@ const { verifyInstalled, _verifyWithKey } = require('fallow/scripts/verify-binar
     fail "install verify: digest mismatch aborts with non-zero exit" "exit $digest_bad_status, output: $DIGEST_BAD"
   fi
   assert_contains "$DIGEST_BAD" "FAILED digest-mismatch" "install verify: digest mismatch reports digest-mismatch"
-  assert_contains "$DIGEST_BAD" "fallow-mcp" "install verify: digest mismatch names the offending binary"
+  assert_contains "$DIGEST_BAD" "plow-mcp" "install verify: digest mismatch names the offending binary"
 
   # sig-missing: binary present, .sig file absent (partial-deploy scenario,
   # most likely real-world failure mode after a botched release).
-  rm -f "$VERIFY_TMP/node_modules/$PLATFORM_PKG/fallow-mcp${ext}.sig"
+  rm -f "$VERIFY_TMP/node_modules/$PLATFORM_PKG/plow-mcp${ext}.sig"
   MISSING=$(cd "$VERIFY_TMP" && node -e "
 const fs = require('node:fs');
 const crypto = require('node:crypto');
 const rawPub = fs.readFileSync('$VERIFY_TMP/testkey.bin');
-const { verifyInstalled, _verifyWithKey } = require('fallow/scripts/verify-binary');
+const { verifyInstalled, _verifyWithKey } = require('plow/scripts/verify-binary');
 (async () => {
   const result = await verifyInstalled({
     verifyFn: (p) => _verifyWithKey(p, rawPub),
@@ -307,18 +307,18 @@ const { verifyInstalled, _verifyWithKey } = require('fallow/scripts/verify-binar
     fail "install verify: missing .sig file aborts with non-zero exit" "exit $missing_status, output: $MISSING"
   fi
   assert_contains "$MISSING" "FAILED sig-missing" "install verify: missing .sig reports sig-missing"
-  assert_contains "$MISSING" "fallow-mcp" "install verify: missing .sig names the offending binary"
+  assert_contains "$MISSING" "plow-mcp" "install verify: missing .sig names the offending binary"
 
   # Restore a valid-length .sig so the skip-env test sees an otherwise
   # intact-but-wrong setup.
   node -e "
 const fs = require('node:fs');
-fs.writeFileSync('$VERIFY_TMP/node_modules/$PLATFORM_PKG/fallow-mcp${ext}.sig', Buffer.alloc(64));
+fs.writeFileSync('$VERIFY_TMP/node_modules/$PLATFORM_PKG/plow-mcp${ext}.sig', Buffer.alloc(64));
 "
 
-  # FALLOW_SKIP_BINARY_VERIFY=1 with intact-but-wrong setup short-circuits.
-  SKIP=$(cd "$VERIFY_TMP" && FALLOW_SKIP_BINARY_VERIFY=1 node -e "
-const { verifyInstalled } = require('fallow/scripts/verify-binary');
+  # PLOW_SKIP_BINARY_VERIFY=1 with intact-but-wrong setup short-circuits.
+  SKIP=$(cd "$VERIFY_TMP" && PLOW_SKIP_BINARY_VERIFY=1 node -e "
+const { verifyInstalled } = require('plow/scripts/verify-binary');
 (async () => {
   const result = await verifyInstalled();
   console.log(JSON.stringify(result));
@@ -326,9 +326,9 @@ const { verifyInstalled } = require('fallow/scripts/verify-binary');
 " 2>&1)
   skip_status=$?
   if [ "$skip_status" -eq 0 ]; then
-    pass "install verify: FALLOW_SKIP_BINARY_VERIFY short-circuits"
+    pass "install verify: PLOW_SKIP_BINARY_VERIFY short-circuits"
   else
-    fail "install verify: FALLOW_SKIP_BINARY_VERIFY short-circuits" "exit $skip_status, output: $SKIP"
+    fail "install verify: PLOW_SKIP_BINARY_VERIFY short-circuits" "exit $skip_status, output: $SKIP"
   fi
   assert_contains "$SKIP" "skipped" "install verify: skip env reports skipped=true"
 fi
@@ -339,19 +339,19 @@ echo "=== Analyze script failure handling ==="
 ANALYZE_TMP=$(mktemp -d)
 trap 'rm -rf "$INSTALL_TMP" "$ANALYZE_TMP"' EXIT
 mkdir -p "$ANALYZE_TMP/bin" "$ANALYZE_TMP/work"
-cat > "$ANALYZE_TMP/bin/fallow" <<'SH'
+cat > "$ANALYZE_TMP/bin/plow" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' '{"error":true,"message":"bad audit config","exit_code":2}'
 exit 2
 SH
-chmod +x "$ANALYZE_TMP/bin/fallow"
+chmod +x "$ANALYZE_TMP/bin/plow"
 
 OUT=$(cd "$ANALYZE_TMP/work" && PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" INPUT_ROOT="." INPUT_COMMAND="audit" INPUT_FORMAT="json" bash "$DIR/../scripts/analyze.sh" 2>&1)
 cmd_status=$?
 if [ "$cmd_status" -eq 2 ]; then
-  pass "analyze: structured fallow errors fail"
+  pass "analyze: structured plow errors fail"
 else
-  fail "analyze: structured fallow errors fail" "expected exit 2, got $cmd_status"
+  fail "analyze: structured plow errors fail" "expected exit 2, got $cmd_status"
 fi
 assert_contains "$OUT" "bad audit config" "analyze: surfaces structured error message"
 
@@ -364,18 +364,18 @@ else
 fi
 assert_contains "$OUT" "dead-code-baseline" "analyze: baseline error points to audit baselines"
 
-cat > "$ANALYZE_TMP/bin/fallow" <<'SH'
+cat > "$ANALYZE_TMP/bin/plow" <<'SH'
 #!/usr/bin/env bash
 case "$*" in
   *"--help"*)
-    printf '%s\n' 'Usage: fallow dead-code --sarif-file <PATH>'
+    printf '%s\n' 'Usage: plow dead-code --sarif-file <PATH>'
     ;;
   *)
     printf '%s\n' '{"total_issues":0}'
     ;;
 esac
 SH
-chmod +x "$ANALYZE_TMP/bin/fallow"
+chmod +x "$ANALYZE_TMP/bin/plow"
 
 cat > "$ANALYZE_TMP/bin/git" <<'SH'
 #!/usr/bin/env bash
@@ -437,13 +437,13 @@ run_analyze_scope_case() {
       EVENT_NAME="pull_request" \
       PR_BASE_SHA="base1234" \
       INPUT_BASELINE="$baseline" \
-      FALLOW_DIFF_FILE="$diff_file" \
+      PLOW_DIFF_FILE="$diff_file" \
       bash "$DIR/../scripts/analyze.sh"
   ) 2>&1
 }
 
-OUT=$(run_analyze_scope_case "config-baseline-auto" ".fallowrc.json" "baseline.json" "" "")
-ARGS=$(cat "$ANALYZE_TMP/scope-config-baseline-auto/fallow-analysis-args.sh")
+OUT=$(run_analyze_scope_case "config-baseline-auto" ".plowrc.json" "baseline.json" "" "")
+ARGS=$(cat "$ANALYZE_TMP/scope-config-baseline-auto/plow-analysis-args.sh")
 OUTPUTS=$(cat "$ANALYZE_TMP/output-config-baseline-auto")
 ENV_OUT=$(cat "$ANALYZE_TMP/env-config-baseline-auto")
 assert_not_contains "$ARGS" "--changed-since" "analyze: config baseline auto-scope removes changed-since"
@@ -452,38 +452,38 @@ if grep -qx 'changed_since=' "$ANALYZE_TMP/output-config-baseline-auto"; then
 else
   fail "analyze: config baseline auto-scope clears changed_since output" "outputs were: $OUTPUTS"
 fi
-assert_not_contains "$ENV_OUT" "FALLOW_DIFF_FILE=" "analyze: config baseline auto-scope skips auto diff file"
-assert_contains "$OUT" "dead-code baseline comparison is running unscoped because '.fallowrc.json' changed" "analyze: config baseline auto-scope warns"
+assert_not_contains "$ENV_OUT" "PLOW_DIFF_FILE=" "analyze: config baseline auto-scope skips auto diff file"
+assert_contains "$OUT" "dead-code baseline comparison is running unscoped because '.plowrc.json' changed" "analyze: config baseline auto-scope warns"
 
 OUT=$(run_analyze_scope_case "source-baseline-auto" "src/a.ts" "baseline.json" "" "")
-ARGS=$(cat "$ANALYZE_TMP/scope-source-baseline-auto/fallow-analysis-args.sh")
+ARGS=$(cat "$ANALYZE_TMP/scope-source-baseline-auto/plow-analysis-args.sh")
 OUTPUTS=$(cat "$ANALYZE_TMP/output-source-baseline-auto")
 ENV_OUT=$(cat "$ANALYZE_TMP/env-source-baseline-auto")
 assert_contains "$ARGS" "--changed-since base1234" "analyze: source baseline auto-scope keeps changed-since"
 assert_contains "$OUTPUTS" "changed_since=base1234" "analyze: source baseline auto-scope keeps changed_since output"
-assert_contains "$ENV_OUT" "FALLOW_DIFF_FILE=" "analyze: source baseline auto-scope writes auto diff file"
+assert_contains "$ENV_OUT" "PLOW_DIFF_FILE=" "analyze: source baseline auto-scope writes auto diff file"
 
-OUT=$(run_analyze_scope_case "config-no-baseline" ".fallowrc.json" "" "" "")
-ARGS=$(cat "$ANALYZE_TMP/scope-config-no-baseline/fallow-analysis-args.sh")
+OUT=$(run_analyze_scope_case "config-no-baseline" ".plowrc.json" "" "" "")
+ARGS=$(cat "$ANALYZE_TMP/scope-config-no-baseline/plow-analysis-args.sh")
 OUTPUTS=$(cat "$ANALYZE_TMP/output-config-no-baseline")
 assert_contains "$ARGS" "--changed-since base1234" "analyze: config without baseline keeps changed-since"
 assert_contains "$OUTPUTS" "changed_since=base1234" "analyze: config without baseline keeps changed_since output"
 
-OUT=$(run_analyze_scope_case "explicit-config-root-prefix" "packages/app/config/fallow.jsonc" "baseline.json" "" "" "packages/app" "config/fallow.jsonc")
-ARGS=$(cat "$ANALYZE_TMP/scope-explicit-config-root-prefix/fallow-analysis-args.sh")
+OUT=$(run_analyze_scope_case "explicit-config-root-prefix" "packages/app/config/plow.jsonc" "baseline.json" "" "" "packages/app" "config/plow.jsonc")
+ARGS=$(cat "$ANALYZE_TMP/scope-explicit-config-root-prefix/plow-analysis-args.sh")
 assert_not_contains "$ARGS" "--changed-since" "analyze: explicit config path with root prefix removes auto changed-since"
-assert_contains "$OUT" "because 'config/fallow.jsonc' changed" "analyze: explicit config path warning uses root-relative path"
+assert_contains "$OUT" "because 'config/plow.jsonc' changed" "analyze: explicit config path warning uses root-relative path"
 
-OUT=$(run_analyze_scope_case "config-explicit-changed-since" ".fallowrc.json" "baseline.json" "manual-base" "")
-ARGS=$(cat "$ANALYZE_TMP/scope-config-explicit-changed-since/fallow-analysis-args.sh")
+OUT=$(run_analyze_scope_case "config-explicit-changed-since" ".plowrc.json" "baseline.json" "manual-base" "")
+ARGS=$(cat "$ANALYZE_TMP/scope-config-explicit-changed-since/plow-analysis-args.sh")
 OUTPUTS=$(cat "$ANALYZE_TMP/output-config-explicit-changed-since")
 assert_contains "$ARGS" "--changed-since manual-base" "analyze: explicit changed-since is preserved"
 assert_contains "$OUTPUTS" "changed_since=manual-base" "analyze: explicit changed-since output is preserved"
 assert_contains "$OUT" "explicitly scoped" "analyze: explicit changed-since warns about baseline drift"
 
 EXPLICIT_DIFF="$ANALYZE_TMP/user.diff"
-OUT=$(run_analyze_scope_case "config-explicit-diff" ".fallowrc.json" "baseline.json" "" "$EXPLICIT_DIFF")
-ARGS=$(cat "$ANALYZE_TMP/scope-config-explicit-diff/fallow-analysis-args.sh")
+OUT=$(run_analyze_scope_case "config-explicit-diff" ".plowrc.json" "baseline.json" "" "$EXPLICIT_DIFF")
+ARGS=$(cat "$ANALYZE_TMP/scope-config-explicit-diff/plow-analysis-args.sh")
 OUTPUTS=$(cat "$ANALYZE_TMP/output-config-explicit-diff")
 ENV_OUT=$(cat "$ANALYZE_TMP/env-config-explicit-diff")
 assert_not_contains "$ARGS" "--changed-since base1234" "analyze: explicit diff still clears auto changed-since"
@@ -492,13 +492,13 @@ if grep -qx 'changed_since=' "$ANALYZE_TMP/output-config-explicit-diff"; then
 else
   fail "analyze: explicit diff clears auto changed_since output" "outputs were: $OUTPUTS"
 fi
-assert_contains "$ENV_OUT" "FALLOW_DIFF_FILE=$EXPLICIT_DIFF" "analyze: explicit diff file is preserved"
+assert_contains "$ENV_OUT" "PLOW_DIFF_FILE=$EXPLICIT_DIFF" "analyze: explicit diff file is preserved"
 assert_contains "$OUT" "explicit diff file remains active" "analyze: explicit diff warns about remaining scope"
 
 # Audit verdict + gate are emitted to GITHUB_OUTPUT for the Check threshold step.
 # Without this, the threshold step gates on raw introduced count, re-introducing
 # the issue #302 bug where warn-tier findings fail CI.
-cat > "$ANALYZE_TMP/bin/fallow" <<'SH'
+cat > "$ANALYZE_TMP/bin/plow" <<'SH'
 #!/usr/bin/env bash
 # Synthesize an audit JSON with verdict=warn, dead_code_introduced=1.
 # Mimics the warn-tier scenario from issue #302: a project with
@@ -510,7 +510,7 @@ case "$*" in
   *) printf '{"total_issues":0}\n' ;;
 esac
 SH
-chmod +x "$ANALYZE_TMP/bin/fallow"
+chmod +x "$ANALYZE_TMP/bin/plow"
 
 cd "$ANALYZE_TMP/work" && rm -f "$ANALYZE_TMP/output"
 OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
@@ -524,7 +524,7 @@ ISSUES=$(grep '^issues=' "$ANALYZE_TMP/output" | cut -d= -f2)
 [ "$GATE" = "new-only" ] && pass "analyze: emits gate to GITHUB_OUTPUT for audit" || fail "analyze: gate output" "expected new-only, got '$GATE'"
 [ "$ISSUES" = "1" ] && pass "analyze: still emits issues count for audit" || fail "analyze: issues output" "expected 1, got '$ISSUES'"
 
-cat > "$ANALYZE_TMP/bin/fallow" <<'SH'
+cat > "$ANALYZE_TMP/bin/plow" <<'SH'
 #!/usr/bin/env bash
 case "$*" in
   *"security"*"--gate newly-reachable"*)
@@ -536,7 +536,7 @@ case "$*" in
   *) printf '{"total_issues":0}\n' ;;
 esac
 SH
-chmod +x "$ANALYZE_TMP/bin/fallow"
+chmod +x "$ANALYZE_TMP/bin/plow"
 
 cd "$ANALYZE_TMP/work" && rm -f "$ANALYZE_TMP/output"
 OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
@@ -545,10 +545,10 @@ OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
 cd "$DIR"
 GATE=$(grep '^gate=' "$ANALYZE_TMP/output" | cut -d= -f2)
 ISSUES=$(grep '^issues=' "$ANALYZE_TMP/output" | cut -d= -f2)
-ARGS=$(cat "$ANALYZE_TMP/work/fallow-analysis-args.sh")
+ARGS=$(cat "$ANALYZE_TMP/work/plow-analysis-args.sh")
 [ "$GATE" = "newly-reachable" ] && pass "analyze: emits gate to GITHUB_OUTPUT for security" || fail "analyze: security gate output" "expected newly-reachable, got '$GATE'"
 [ "$ISSUES" = "2" ] && pass "analyze: security gate uses new_count for issues" || fail "analyze: security gate issues" "expected 2, got '$ISSUES'"
-assert_contains "$ARGS" "--gate newly-reachable" "analyze: forwards security-gate to fallow"
+assert_contains "$ARGS" "--gate newly-reachable" "analyze: forwards security-gate to plow"
 
 cd "$ANALYZE_TMP/work" && rm -f "$ANALYZE_TMP/output"
 OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
@@ -564,14 +564,14 @@ fi
 assert_contains "$OUT" "security-gate must be 'new' or 'newly-reachable'" "analyze: invalid security-gate error is clear"
 
 # Non-audit commands must NOT emit verdict / gate (empty values are fine).
-cat > "$ANALYZE_TMP/bin/fallow" <<'SH'
+cat > "$ANALYZE_TMP/bin/plow" <<'SH'
 #!/usr/bin/env bash
 case "$*" in
   *dead-code*) printf '{"total_issues":3}\n' ;;
   *) printf '{"check":{"total_issues":3}}\n' ;;
 esac
 SH
-chmod +x "$ANALYZE_TMP/bin/fallow"
+chmod +x "$ANALYZE_TMP/bin/plow"
 cd "$ANALYZE_TMP/work" && rm -f "$ANALYZE_TMP/output"
 OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
   INPUT_ROOT="." INPUT_COMMAND="dead-code" INPUT_FORMAT="json" \
@@ -586,16 +586,16 @@ OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
   INPUT_COVERAGE="coverage/coverage-final.json" INPUT_COVERAGE_ROOT="/ci/workspace" \
   bash "$DIR/../scripts/analyze.sh" 2>&1) || true
 cd "$DIR"
-ARGS=$(cat "$ANALYZE_TMP/work/fallow-analysis-args.sh")
+ARGS=$(cat "$ANALYZE_TMP/work/plow-analysis-args.sh")
 assert_contains "$ARGS" "--coverage coverage/coverage-final.json" "analyze: forwards coverage to default combined command"
 assert_contains "$ARGS" "--coverage-root /ci/workspace" "analyze: forwards coverage-root to default combined command"
 
 # Issue #735: generated artifacts can be moved out of the workspace root.
-cat > "$ANALYZE_TMP/bin/fallow" <<'SH'
+cat > "$ANALYZE_TMP/bin/plow" <<'SH'
 #!/usr/bin/env bash
 case "$*" in
   *"--help"*)
-    printf '%s\n' 'Usage: fallow dead-code --sarif-file <PATH>'
+    printf '%s\n' 'Usage: plow dead-code --sarif-file <PATH>'
     ;;
   *"--format sarif"*)
     printf '%s\n' '{"version":"2.1.0","runs":[]}'
@@ -605,23 +605,23 @@ case "$*" in
     ;;
 esac
 SH
-chmod +x "$ANALYZE_TMP/bin/fallow"
+chmod +x "$ANALYZE_TMP/bin/plow"
 
 CUSTOM_WORK="$ANALYZE_TMP/custom-artifacts"
 mkdir -p "$CUSTOM_WORK"
 cd "$CUSTOM_WORK" && rm -f "$ANALYZE_TMP/output" "$ANALYZE_TMP/env"
 OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" GITHUB_ENV="$ANALYZE_TMP/env" \
-  INPUT_ROOT="." INPUT_COMMAND="dead-code" INPUT_FORMAT="sarif" INPUT_SARIF="true" INPUT_ARTIFACTS_DIR=".var/fallow" \
+  INPUT_ROOT="." INPUT_COMMAND="dead-code" INPUT_FORMAT="sarif" INPUT_SARIF="true" INPUT_ARTIFACTS_DIR=".var/plow" \
   bash "$DIR/../scripts/analyze.sh" 2>&1) || true
 cd "$DIR"
-assert_contains "$(grep '^results=' "$ANALYZE_TMP/output")" "results=.var/fallow/fallow-results.json" "analyze: custom artifacts-dir emits results path"
-assert_contains "$(grep '^sarif=' "$ANALYZE_TMP/output")" "sarif=.var/fallow/fallow-results.sarif" "analyze: custom artifacts-dir emits sarif path"
-[ -f "$CUSTOM_WORK/.var/fallow/fallow-results.json" ] && pass "analyze: custom artifacts-dir writes results file" || fail "analyze: custom artifacts-dir writes results file" "missing results file"
-[ -f "$CUSTOM_WORK/.var/fallow/fallow-stderr.log" ] && pass "analyze: custom artifacts-dir writes stderr log" || fail "analyze: custom artifacts-dir writes stderr log" "missing stderr log"
-[ -f "$CUSTOM_WORK/.var/fallow/fallow-analysis-args.sh" ] && pass "analyze: custom artifacts-dir writes args file" || fail "analyze: custom artifacts-dir writes args file" "missing args file"
-[ ! -e "$CUSTOM_WORK/fallow-results.json" ] && pass "analyze: custom artifacts-dir keeps root clean" || fail "analyze: custom artifacts-dir keeps root clean" "root results file exists"
-assert_contains "$(cat "$ANALYZE_TMP/env")" "FALLOW_ANALYSIS_ARGS_FILE=.var/fallow/fallow-analysis-args.sh" "analyze: custom artifacts-dir propagates args path"
-assert_contains "$(cat "$CUSTOM_WORK/.var/fallow/fallow-analysis-args.sh")" "--sarif-file .var/fallow/fallow-results.sarif" "analyze: custom artifacts-dir passes sarif path to fallow"
+assert_contains "$(grep '^results=' "$ANALYZE_TMP/output")" "results=.var/plow/plow-results.json" "analyze: custom artifacts-dir emits results path"
+assert_contains "$(grep '^sarif=' "$ANALYZE_TMP/output")" "sarif=.var/plow/plow-results.sarif" "analyze: custom artifacts-dir emits sarif path"
+[ -f "$CUSTOM_WORK/.var/plow/plow-results.json" ] && pass "analyze: custom artifacts-dir writes results file" || fail "analyze: custom artifacts-dir writes results file" "missing results file"
+[ -f "$CUSTOM_WORK/.var/plow/plow-stderr.log" ] && pass "analyze: custom artifacts-dir writes stderr log" || fail "analyze: custom artifacts-dir writes stderr log" "missing stderr log"
+[ -f "$CUSTOM_WORK/.var/plow/plow-analysis-args.sh" ] && pass "analyze: custom artifacts-dir writes args file" || fail "analyze: custom artifacts-dir writes args file" "missing args file"
+[ ! -e "$CUSTOM_WORK/plow-results.json" ] && pass "analyze: custom artifacts-dir keeps root clean" || fail "analyze: custom artifacts-dir keeps root clean" "root results file exists"
+assert_contains "$(cat "$ANALYZE_TMP/env")" "PLOW_ANALYSIS_ARGS_FILE=.var/plow/plow-analysis-args.sh" "analyze: custom artifacts-dir propagates args path"
+assert_contains "$(cat "$CUSTOM_WORK/.var/plow/plow-analysis-args.sh")" "--sarif-file .var/plow/plow-results.sarif" "analyze: custom artifacts-dir passes sarif path to plow"
 
 DEFAULT_WORK="$ANALYZE_TMP/default-artifacts"
 mkdir -p "$DEFAULT_WORK"
@@ -630,8 +630,8 @@ OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
   INPUT_ROOT="." INPUT_COMMAND="dead-code" INPUT_FORMAT="json" \
   bash "$DIR/../scripts/analyze.sh" 2>&1) || true
 cd "$DIR"
-assert_contains "$(grep '^results=' "$ANALYZE_TMP/output")" "results=fallow-results.json" "analyze: default artifacts path is unchanged"
-[ -f "$DEFAULT_WORK/fallow-results.json" ] && pass "analyze: default writes root results file" || fail "analyze: default writes root results file" "missing root results file"
+assert_contains "$(grep '^results=' "$ANALYZE_TMP/output")" "results=plow-results.json" "analyze: default artifacts path is unchanged"
+[ -f "$DEFAULT_WORK/plow-results.json" ] && pass "analyze: default writes root results file" || fail "analyze: default writes root results file" "missing root results file"
 
 INVALID_WORK="$ANALYZE_TMP/invalid-artifacts"
 mkdir -p "$INVALID_WORK"
@@ -649,11 +649,11 @@ fi
 assert_contains "$OUT" "artifacts-dir must be a relative path inside the workspace" "analyze: artifacts-dir traversal error is clear"
 
 # Issue #813: the fallback SARIF block must validate the produced file, not gate
-# on the exit code. fallow exits 1 when issues are found (e.g. `health` with
+# on the exit code. plow exits 1 when issues are found (e.g. `health` with
 # complexity findings), which is not a generation failure. `health` never gets
 # --sarif-file support (HAS_SARIF_FILE stays false), so the fallback block always
 # runs for it. The mock writes valid SARIF and exits 1 to mimic findings-present.
-cat > "$ANALYZE_TMP/bin/fallow" <<'SH'
+cat > "$ANALYZE_TMP/bin/plow" <<'SH'
 #!/usr/bin/env bash
 fmt=""
 prev=""
@@ -663,7 +663,7 @@ for arg in "$@"; do
 done
 if [ "$fmt" = "sarif" ]; then
   if [ "${MOCK_SARIF_MODE:-valid}" = "valid" ]; then
-    printf '%s\n' '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"fallow"}},"results":[]}]}'
+    printf '%s\n' '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"plow"}},"results":[]}]}'
   fi
   # exit 1 = issues found (valid mode) OR genuine failure (empty mode writes nothing)
   exit 1
@@ -672,7 +672,7 @@ fi
 printf '%s\n' '{"summary":{"functions_above_threshold":0}}'
 exit 1
 SH
-chmod +x "$ANALYZE_TMP/bin/fallow"
+chmod +x "$ANALYZE_TMP/bin/plow"
 
 SARIF_OK_WORK="$ANALYZE_TMP/sarif-exit1-valid"
 mkdir -p "$SARIF_OK_WORK"
@@ -682,7 +682,7 @@ OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
   bash "$DIR/../scripts/analyze.sh" 2>&1) || true
 cd "$DIR"
 assert_not_contains "$OUT" "SARIF generation failed" "analyze: valid SARIF + exit 1 does not warn (issue #813)"
-[ -s "$SARIF_OK_WORK/fallow-results.sarif" ] && pass "analyze: valid SARIF + exit 1 still writes the file" || fail "analyze: valid SARIF + exit 1 still writes the file" "missing sarif file"
+[ -s "$SARIF_OK_WORK/plow-results.sarif" ] && pass "analyze: valid SARIF + exit 1 still writes the file" || fail "analyze: valid SARIF + exit 1 still writes the file" "missing sarif file"
 
 SARIF_BAD_WORK="$ANALYZE_TMP/sarif-empty"
 mkdir -p "$SARIF_BAD_WORK"
@@ -701,7 +701,7 @@ echo "=== Summary scripts ==="
 echo "  summary-check.jq:"
 OUT=$(jq -r -f "$JQ_DIR/summary-check.jq" "$FIXTURES/check.json" 2>&1)
 assert_valid_markdown "$OUT" "produces output"
-assert_contains "$OUT" "Fallow Analysis" "has title"
+assert_contains "$OUT" "Plow Analysis" "has title"
 assert_contains "$OUT" "issues" "mentions issues"
 assert_contains "$OUT" "Unused" "lists unused categories"
 assert_contains "$OUT" "Imported elsewhere" "shows dependency workspace context column"
@@ -789,7 +789,7 @@ OUT=$(jq -n '{
   }]
 }' | jq -r -f "$JQ_DIR/summary-security.jq" 2>&1)
 assert_valid_markdown "$OUT" "produces output"
-assert_contains "$OUT" "Fallow Security" "security: has title"
+assert_contains "$OUT" "Plow Security" "security: has title"
 assert_contains "$OUT" "Security gate: \`new\`" "security: shows gate"
 assert_contains "$OUT" "src/api.ts:10" "security: lists candidate location"
 
@@ -896,7 +896,7 @@ OUT_AUDIT=$(jq -n --slurpfile h "$FIXTURES/health.json" --slurpfile c "$FIXTURES
   duplication: ($d[0] | .clone_groups |= map(. + {introduced: false}))
 }' | jq -r -f "$JQ_DIR/summary-audit.jq" 2>&1)
 assert_valid_markdown "$OUT_AUDIT" "produces audit output"
-assert_contains "$OUT_AUDIT" "Fallow Audit" "audit: has title"
+assert_contains "$OUT_AUDIT" "Plow Audit" "audit: has title"
 assert_contains "$OUT_AUDIT" "Audit failed" "audit: shows failed verdict"
 assert_contains "$OUT_AUDIT" "Dead Code" "audit: has dead-code details"
 assert_contains "$OUT_AUDIT" "fetchFromApi" "audit: lists dead-code findings"
@@ -942,7 +942,7 @@ assert_not_contains "$OUT_AUDIT_NOMODEL" "Coverage model:" "audit: absent covera
 echo "  summary-combined.jq:"
 OUT=$(jq -r -f "$JQ_DIR/summary-combined.jq" "$FIXTURES/combined.json" 2>&1)
 assert_valid_markdown "$OUT" "produces output"
-assert_contains "$OUT" "Fallow" "has title"
+assert_contains "$OUT" "Plow" "has title"
 assert_contains "$OUT" "code issues" "mentions code issues"
 assert_contains "$OUT" "Maintainability" "shows vital signs"
 
@@ -960,11 +960,11 @@ assert_not_contains "$OUT" "| [Duplicated lines]" "dupes: old metric table is go
 assert_not_contains "$OUT" "| Files with clones | 2 |" "dupes: old files-with-clones row is gone"
 
 # Linkified cells engage when GH_REPO + PR_HEAD_SHA are set
-OUT_LINKED=$(GH_REPO="fallow-rs/fallow" PR_HEAD_SHA="abcdef1234567890" jq -r -f "$JQ_DIR/summary-combined.jq" "$FIXTURES/combined.json" 2>&1)
-assert_contains "$OUT_LINKED" "https://github.com/fallow-rs/fallow/blob/abcdef1234567890/src/helpers/content-parser.ts#L27-L50" "dupes: file_link engages with env vars"
+OUT_LINKED=$(GH_REPO="fglogan/genesis-plow" PR_HEAD_SHA="abcdef1234567890" jq -r -f "$JQ_DIR/summary-combined.jq" "$FIXTURES/combined.json" 2>&1)
+assert_contains "$OUT_LINKED" "https://github.com/fglogan/genesis-plow/blob/abcdef1234567890/src/helpers/content-parser.ts#L27-L50" "dupes: file_link engages with env vars"
 
 # Deep paths (>3 segments): display is rel_path-truncated but URL keeps the full path
-OUT_DEEP=$(jq '.dupes.clone_groups = [{line_count: 10, token_count: 50, instances: [{file: "apps/web/src/services/billing/calculator.ts", start_line: 5, end_line: 15}, {file: "apps/api/src/services/billing/calculator.ts", start_line: 8, end_line: 18}]}] | .dupes.stats.clone_groups = 1 | .dupes.stats.files_with_clones = 2' "$FIXTURES/combined.json" | GH_REPO="fallow-rs/fallow" PR_HEAD_SHA="deadbeef" jq -r -f "$JQ_DIR/summary-combined.jq" 2>&1)
+OUT_DEEP=$(jq '.dupes.clone_groups = [{line_count: 10, token_count: 50, instances: [{file: "apps/web/src/services/billing/calculator.ts", start_line: 5, end_line: 15}, {file: "apps/api/src/services/billing/calculator.ts", start_line: 8, end_line: 18}]}] | .dupes.stats.clone_groups = 1 | .dupes.stats.files_with_clones = 2' "$FIXTURES/combined.json" | GH_REPO="fglogan/genesis-plow" PR_HEAD_SHA="deadbeef" jq -r -f "$JQ_DIR/summary-combined.jq" 2>&1)
 # Display truncates to last 3 segments
 assert_contains "$OUT_DEEP" "\`services/billing/calculator.ts:5-15\`" "deep-path: display uses rel_path"
 # URL must contain the FULL path including 'apps/web/' prefix, otherwise the link 404s
@@ -1063,11 +1063,11 @@ assert_not_contains "$OUT" "changed files" "unfiltered: no scoped maintainabilit
 
 echo "  summary-combined.jq (conditional tips):"
 # Fixture has unused_exports and unused_dependencies → fix tip + @public tip
-assert_contains "$OUT" "fallow fix --dry-run" "tip: shows fix tip when fixable issues present"
+assert_contains "$OUT" "plow fix --dry-run" "tip: shows fix tip when fixable issues present"
 assert_contains "$OUT" "@public" "tip: shows @public tip when unused exports present"
 # Remove fixable categories → no tip block
 OUT_NO_FIX=$(jq '.check.unused_exports = [] | .check.unused_dependencies = [] | .check.unused_enum_members = [] | .check.circular_dependencies = [{"files":["a.ts","b.ts"],"length":2}] | .check.total_issues = 1' "$FIXTURES/combined.json" | jq -r -f "$JQ_DIR/summary-combined.jq" 2>&1)
-assert_not_contains "$OUT_NO_FIX" "fallow fix" "tip: no fix tip when no fixable issues"
+assert_not_contains "$OUT_NO_FIX" "plow fix" "tip: no fix tip when no fixable issues"
 assert_not_contains "$OUT_NO_FIX" "@public" "tip: no @public tip when no unused exports"
 
 echo "  summary-combined.jq (clean state):"
@@ -1137,7 +1137,7 @@ OUT_CLEAN=$(jq -r -f "$JQ_DIR/annotations-check.jq" "$FIXTURES/check-clean.json"
 OUT_UNKNOWN_KIND=$(jq '.unused_files = [] | .unused_exports = [] | .unused_types = [] | .unused_dependencies = [] | .unused_dev_dependencies = [] | .unused_optional_dependencies = [] | .unused_enum_members = [] | .unused_class_members = [] | .unresolved_imports = [] | .unlisted_dependencies = [] | .duplicate_exports = [] | .circular_dependencies = [] | .boundary_violations = [] | .type_only_dependencies = [] | .test_only_dependencies = [] | .unused_catalog_entries = [] | .empty_catalog_groups = [] | .unresolved_catalog_references = [] | .unused_dependency_overrides = [] | .misconfigured_dependency_overrides = [] | .private_type_leaks = [] | .stale_suppressions = [{"path": "src/utils.ts", "line": 1, "col": 0, "origin": {"type": "comment", "issue_kind": "complexity-typo", "is_file_level": false, "kind_known": false}}] | .total_issues = 1' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/annotations-check.jq" 2>&1)
 assert_contains "$OUT_UNKNOWN_KIND" "Unknown suppression kind" "unknown kind: typo title"
 assert_contains "$OUT_UNKNOWN_KIND" "complexity-typo" "unknown kind: verbatim token in message"
-assert_contains "$OUT_UNKNOWN_KIND" "fallow-ignore-next-line" "unknown kind: directive type preserved"
+assert_contains "$OUT_UNKNOWN_KIND" "plow-ignore-next-line" "unknown kind: directive type preserved"
 assert_contains "$OUT_UNKNOWN_KIND" "Fix the typo" "unknown kind: actionable next step"
 
 echo "  annotations-dupes.jq:"
@@ -1228,12 +1228,12 @@ ACTION_TYPED_LOG="$ACTION_TYPED_WORK/mock.log"
 SCRIPTS_DIR="$DIR/../scripts"
 mkdir -p "$ACTION_TYPED_BIN"
 
-cat > "$ACTION_TYPED_BIN/fallow" <<'SH'
+cat > "$ACTION_TYPED_BIN/plow" <<'SH'
 #!/usr/bin/env bash
-printf 'fallow %s\n' "$*" >> "$MOCK_LOG"
-printf 'summary_scope=%s\n' "${FALLOW_SUMMARY_SCOPE:-}" >> "$MOCK_LOG"
+printf 'plow %s\n' "$*" >> "$MOCK_LOG"
+printf 'summary_scope=%s\n' "${PLOW_SUMMARY_SCOPE:-}" >> "$MOCK_LOG"
 if [ "${1:-}" = "ci" ]; then
-  printf '{"schema":"fallow-review-reconcile/v1","stale":[]}\n'
+  printf '{"schema":"plow-review-reconcile/v1","stale":[]}\n'
   exit 0
 fi
 format=""
@@ -1247,17 +1247,17 @@ for arg in "$@"; do
 done
 case "$format" in
   pr-comment-github)
-    printf '<!-- fallow-id: fallow-results -->\n### Fallow smoke\n\nGenerated by fallow.\n'
+    printf '<!-- plow-id: plow-results -->\n### Plow smoke\n\nGenerated by plow.\n'
     ;;
   review-github)
     if [ "${MOCK_ZERO_REVIEW:-}" = "1" ]; then
       cat <<'JSON'
-{"event":"COMMENT","body":"### Fallow smoke\n\n<!-- fallow-review -->","comments":[],"meta":{"schema":"fallow-review-envelope/v1","provider":"github"}}
+{"event":"COMMENT","body":"### Plow smoke\n\n<!-- plow-review -->","comments":[],"meta":{"schema":"plow-review-envelope/v1","provider":"github"}}
 JSON
       exit 0
     fi
     cat <<'JSON'
-{"event":"COMMENT","body":"### Fallow smoke\n\n<!-- fallow-review -->","comments":[{"path":"src/a.ts","line":1,"side":"RIGHT","body":"**warn** `fallow/smoke`: smoke\n\n<!-- fallow-fingerprint: abc -->","fingerprint":"abc"}],"meta":{"schema":"fallow-review-envelope/v1","provider":"github"}}
+{"event":"COMMENT","body":"### Plow smoke\n\n<!-- plow-review -->","comments":[{"path":"src/a.ts","line":1,"side":"RIGHT","body":"**warn** `plow/smoke`: smoke\n\n<!-- plow-fingerprint: abc -->","fingerprint":"abc"}],"meta":{"schema":"plow-review-envelope/v1","provider":"github"}}
 JSON
     ;;
   *)
@@ -1265,7 +1265,7 @@ JSON
     ;;
 esac
 SH
-chmod +x "$ACTION_TYPED_BIN/fallow"
+chmod +x "$ACTION_TYPED_BIN/plow"
 
 cat > "$ACTION_TYPED_BIN/gh" <<'SH'
 #!/usr/bin/env bash
@@ -1289,7 +1289,7 @@ fi
 SH
 chmod +x "$ACTION_TYPED_BIN/gh"
 
-printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$ACTION_TYPED_WORK/fallow-analysis-args.sh"
+printf 'PLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$ACTION_TYPED_WORK/plow-analysis-args.sh"
 (
   cd "$ACTION_TYPED_WORK"
   PATH="$ACTION_TYPED_BIN:$PATH" \
@@ -1297,16 +1297,16 @@ printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$ACTION_TYPED_
     GH_TOKEN="test" \
     PR_NUMBER="123" \
     GH_REPO="owner/repo" \
-    FALLOW_COMMAND="check" \
-    FALLOW_SUMMARY_SCOPE="diff" \
+    PLOW_COMMAND="check" \
+    PLOW_SUMMARY_SCOPE="diff" \
     bash "$SCRIPTS_DIR/comment.sh" > /dev/null
   PATH="$ACTION_TYPED_BIN:$PATH" \
     MOCK_LOG="$ACTION_TYPED_LOG" \
     GH_TOKEN="test" \
     PR_NUMBER="123" \
     GH_REPO="owner/repo" \
-    FALLOW_COMMAND="check" \
-    FALLOW_ROOT="." \
+    PLOW_COMMAND="check" \
+    PLOW_ROOT="." \
     MAX_COMMENTS="5" \
     bash "$SCRIPTS_DIR/review.sh" > /dev/null
   PATH="$ACTION_TYPED_BIN:$PATH" \
@@ -1316,42 +1316,42 @@ printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$ACTION_TYPED_
     GH_TOKEN="test" \
     PR_NUMBER="123" \
     GH_REPO="owner/repo" \
-    FALLOW_COMMAND="check" \
-    FALLOW_ROOT="." \
+    PLOW_COMMAND="check" \
+    PLOW_ROOT="." \
     MAX_COMMENTS="5" \
     bash "$SCRIPTS_DIR/review.sh" > /dev/null
 )
 ACTION_TYPED_OUT=$(cat "$ACTION_TYPED_LOG")
 assert_contains "$ACTION_TYPED_OUT" "--format pr-comment-github" "comment.sh invokes typed PR comment format"
 assert_contains "$ACTION_TYPED_OUT" "--format review-github" "review.sh invokes typed GitHub review format"
-assert_contains "$ACTION_TYPED_OUT" "summary_scope=diff" "comment.sh passes FALLOW_SUMMARY_SCOPE to typed PR comment render"
+assert_contains "$ACTION_TYPED_OUT" "summary_scope=diff" "comment.sh passes PLOW_SUMMARY_SCOPE to typed PR comment render"
 ACTION_BLANK_SUMMARY_SCOPE_COUNT=$(printf '%s\n' "$ACTION_TYPED_OUT" | grep -c '^summary_scope=$' || true)
 if [ "$ACTION_BLANK_SUMMARY_SCOPE_COUNT" -ge 1 ]; then
-  pass "review.sh does not receive FALLOW_SUMMARY_SCOPE by default"
+  pass "review.sh does not receive PLOW_SUMMARY_SCOPE by default"
 else
-  fail "review.sh does not receive FALLOW_SUMMARY_SCOPE by default" "$ACTION_TYPED_OUT"
+  fail "review.sh does not receive PLOW_SUMMARY_SCOPE by default" "$ACTION_TYPED_OUT"
 fi
-assert_contains "$ACTION_TYPED_OUT" "fallow ci reconcile-review --provider github" "review.sh invokes GitHub reconcile command"
+assert_contains "$ACTION_TYPED_OUT" "plow ci reconcile-review --provider github" "review.sh invokes GitHub reconcile command"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "apply_errors" "review.sh checks reconcile apply errors"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "apply_hint" "review.sh emits reconcile apply hint"
 assert_contains "$ACTION_TYPED_OUT" "repos/owner/repo/pulls/123/reviews" "review.sh posts review envelope"
 assert_contains "$ACTION_TYPED_OUT" "repos/owner/repo/issues/comments/777 --method PATCH" "review.sh updates existing body-only review comment"
 assert_contains "$(cat "$DIR/../../action.yml")" "review-guidance:" "action.yml exposes review-guidance input"
-assert_contains "$(cat "$DIR/../../action.yml")" "FALLOW_REVIEW_GUIDANCE: \${{ inputs.review-guidance }}" "action.yml maps review-guidance to env"
+assert_contains "$(cat "$DIR/../../action.yml")" "PLOW_REVIEW_GUIDANCE: \${{ inputs.review-guidance }}" "action.yml maps review-guidance to env"
 assert_contains "$(cat "$DIR/../../action.yml")" "summary-scope:" "action.yml exposes summary-scope input"
-assert_contains "$(cat "$DIR/../../action.yml")" "FALLOW_SUMMARY_SCOPE: \${{ inputs.summary-scope }}" "action.yml maps summary-scope to comment env"
+assert_contains "$(cat "$DIR/../../action.yml")" "PLOW_SUMMARY_SCOPE: \${{ inputs.summary-scope }}" "action.yml maps summary-scope to comment env"
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "gh_api_retry" "comment.sh wraps GitHub API calls with retry"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "gh_api_retry" "review.sh wraps GitHub API calls with retry"
-assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "Unsupported FALLOW_SUMMARY_SCOPE" "comment.sh warns on invalid summary scope"
-assert_not_contains "$(cat "$SCRIPTS_DIR/review.sh")" "FALLOW_SUMMARY_SCOPE" "review.sh does not consume summary scope"
-if sed -n '/name: Post review comments/,/run: bash/p' "$DIR/../../action.yml" | /usr/bin/grep -q "FALLOW_SUMMARY_SCOPE"; then
-  fail "Post review comments action env excludes FALLOW_SUMMARY_SCOPE" "summary scope must not affect inline review comments"
+assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "Unsupported PLOW_SUMMARY_SCOPE" "comment.sh warns on invalid summary scope"
+assert_not_contains "$(cat "$SCRIPTS_DIR/review.sh")" "PLOW_SUMMARY_SCOPE" "review.sh does not consume summary scope"
+if sed -n '/name: Post review comments/,/run: bash/p' "$DIR/../../action.yml" | /usr/bin/grep -q "PLOW_SUMMARY_SCOPE"; then
+  fail "Post review comments action env excludes PLOW_SUMMARY_SCOPE" "summary scope must not affect inline review comments"
 else
-  pass "Post review comments action env excludes FALLOW_SUMMARY_SCOPE"
+  pass "Post review comments action env excludes PLOW_SUMMARY_SCOPE"
 fi
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "rate limit response; retrying" "comment.sh retries GitHub rate-limit responses"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "rate limit response; retrying" "review.sh retries GitHub rate-limit responses"
-assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "fallow-review-payload.json" "review.sh stores retryable review payload"
+assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "plow-review-payload.json" "review.sh stores retryable review payload"
 assert_not_contains "$(cat "$SCRIPTS_DIR/review.sh")" "--input -" "review.sh does not retry with consumed stdin"
 if sed -n '/name: Post review comments/,/run: bash/p' "$DIR/../../action.yml" | /usr/bin/grep -q "steps.analyze.outputs.issues != '0'"; then
   fail "Post review comments action condition" "must run on zero-issue analyses so stale inline review threads can be resolved"
@@ -1402,8 +1402,8 @@ API_FAIL_STDERR=$(cd "$API_FAIL_WORK" \
   PR_NUMBER="123" \
   GH_REPO="owner/repo" \
   GH_TOKEN="test" \
-  FALLOW_API_RETRIES=1 \
-  FALLOW_API_RETRY_DELAY=0 \
+  PLOW_API_RETRIES=1 \
+  PLOW_API_RETRY_DELAY=0 \
   bash "$SCRIPTS_DIR/analyze.sh" 2>&1 1>/dev/null) || true
 
 assert_contains "$(cat "$API_FAIL_OUTPUT")" "changed_files_unavailable=true" \
@@ -1436,8 +1436,8 @@ chmod +x "$API_FAIL_BIN/gh"
   PR_NUMBER="123" \
   GH_REPO="owner/repo" \
   GH_TOKEN="test" \
-  FALLOW_API_RETRIES=1 \
-  FALLOW_API_RETRY_DELAY=0 \
+  PLOW_API_RETRIES=1 \
+  PLOW_API_RETRY_DELAY=0 \
   bash "$SCRIPTS_DIR/analyze.sh" >/dev/null 2>&1) || true
 
 if grep -q '^changed_files_unavailable=false$' "$API_FAIL_OUTPUT" \
@@ -1469,7 +1469,7 @@ else
 fi
 
 # --- Test 3-5: review.sh dedup-lookup failure paths ---
-# Shared mock harness: fallow renders the typed envelope; gh fails on the
+# Shared mock harness: plow renders the typed envelope; gh fails on the
 # pulls/.../comments paginate (multi-comment dedup endpoint) and on the
 # issues/.../comments paginate (summary-only dedup endpoint), but succeeds
 # on every other gh api call (POST to reviews / comments / reconcile).
@@ -1500,11 +1500,11 @@ fi
 SH
   chmod +x "$API_FAIL_BIN/gh"
 
-  cat > "$API_FAIL_BIN/fallow" <<'SH'
+  cat > "$API_FAIL_BIN/plow" <<'SH'
 #!/usr/bin/env bash
-printf 'fallow %s\n' "$*" >> "$MOCK_LOG"
+printf 'plow %s\n' "$*" >> "$MOCK_LOG"
 if [ "${1:-}" = "ci" ]; then
-  printf '{"schema":"fallow-review-reconcile/v1","stale":[]}\n'
+  printf '{"schema":"plow-review-reconcile/v1","stale":[]}\n'
   exit 0
 fi
 format=""
@@ -1518,20 +1518,20 @@ done
 if [ "$format" = "review-github" ]; then
   if [ "${MOCK_ZERO_REVIEW:-}" = "1" ]; then
     cat <<'JSON'
-{"event":"COMMENT","body":"### Fallow smoke\n\n<!-- fallow-review -->","comments":[],"meta":{"schema":"fallow-review-envelope/v1","provider":"github"}}
+{"event":"COMMENT","body":"### Plow smoke\n\n<!-- plow-review -->","comments":[],"meta":{"schema":"plow-review-envelope/v1","provider":"github"}}
 JSON
   else
     cat <<'JSON'
-{"event":"COMMENT","body":"### Fallow smoke\n\n<!-- fallow-review -->","comments":[{"path":"src/a.ts","line":1,"side":"RIGHT","body":"**warn** `fallow/smoke`: smoke\n\n<!-- fallow-fingerprint: abc -->","fingerprint":"abc"}],"meta":{"schema":"fallow-review-envelope/v1","provider":"github"}}
+{"event":"COMMENT","body":"### Plow smoke\n\n<!-- plow-review -->","comments":[{"path":"src/a.ts","line":1,"side":"RIGHT","body":"**warn** `plow/smoke`: smoke\n\n<!-- plow-fingerprint: abc -->","fingerprint":"abc"}],"meta":{"schema":"plow-review-envelope/v1","provider":"github"}}
 JSON
   fi
 fi
 SH
-  chmod +x "$API_FAIL_BIN/fallow"
+  chmod +x "$API_FAIL_BIN/plow"
 
   : > "$API_FAIL_OUTPUT"
   : > "$API_FAIL_WORK/mock.log"
-  printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$API_FAIL_WORK/fallow-analysis-args.sh"
+  printf 'PLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$API_FAIL_WORK/plow-analysis-args.sh"
   local _stderr _status
   _stderr=$(cd "$API_FAIL_WORK" \
     && PATH="$API_FAIL_BIN:$PATH" \
@@ -1541,11 +1541,11 @@ SH
     PR_NUMBER="123" \
     GH_REPO="owner/repo" \
     GITHUB_OUTPUT="$API_FAIL_OUTPUT" \
-    FALLOW_COMMAND="check" \
-    FALLOW_ROOT="." \
+    PLOW_COMMAND="check" \
+    PLOW_ROOT="." \
     MAX_COMMENTS="5" \
-    FALLOW_API_RETRIES=1 \
-    FALLOW_API_RETRY_DELAY=0 \
+    PLOW_API_RETRIES=1 \
+    PLOW_API_RETRY_DELAY=0 \
     bash "$SCRIPTS_DIR/review.sh" 2>&1 1>/dev/null)
   _status=$?
   printf -v "$exit_status_var" '%s' "$_status"
@@ -1610,12 +1610,12 @@ if [ "${1:-}" = "api" ]; then
 fi
 SH
 chmod +x "$API_FAIL_BIN/gh"
-write_fallow_review_mock_inline() { :; }
-cat > "$API_FAIL_BIN/fallow" <<'SH'
+write_plow_review_mock_inline() { :; }
+cat > "$API_FAIL_BIN/plow" <<'SH'
 #!/usr/bin/env bash
-printf 'fallow %s\n' "$*" >> "$MOCK_LOG"
+printf 'plow %s\n' "$*" >> "$MOCK_LOG"
 if [ "${1:-}" = "ci" ]; then
-  printf '{"schema":"fallow-review-reconcile/v1","stale":[]}\n'
+  printf '{"schema":"plow-review-reconcile/v1","stale":[]}\n'
   exit 0
 fi
 format=""; previous=""
@@ -1625,11 +1625,11 @@ for arg in "$@"; do
 done
 if [ "$format" = "review-github" ]; then
   cat <<'JSON'
-{"event":"COMMENT","body":"### Fallow smoke\n\n<!-- fallow-review -->","comments":[{"path":"src/a.ts","line":1,"side":"RIGHT","body":"**warn** `fallow/smoke`: smoke\n\n<!-- fallow-fingerprint: abc -->","fingerprint":"abc"}],"meta":{"schema":"fallow-review-envelope/v1","provider":"github"}}
+{"event":"COMMENT","body":"### Plow smoke\n\n<!-- plow-review -->","comments":[{"path":"src/a.ts","line":1,"side":"RIGHT","body":"**warn** `plow/smoke`: smoke\n\n<!-- plow-fingerprint: abc -->","fingerprint":"abc"}],"meta":{"schema":"plow-review-envelope/v1","provider":"github"}}
 JSON
 fi
 SH
-chmod +x "$API_FAIL_BIN/fallow"
+chmod +x "$API_FAIL_BIN/plow"
 
 : > "$API_FAIL_OUTPUT"
 : > "$API_FAIL_WORK/mock.log"
@@ -1638,8 +1638,8 @@ R5B_STDERR=$(cd "$API_FAIL_WORK" \
   MOCK_LOG="$API_FAIL_WORK/mock.log" \
   GH_TOKEN=test PR_NUMBER=123 GH_REPO=owner/repo \
   GITHUB_OUTPUT="$API_FAIL_OUTPUT" \
-  FALLOW_COMMAND=check FALLOW_ROOT=. MAX_COMMENTS=5 \
-  FALLOW_API_RETRIES=1 FALLOW_API_RETRY_DELAY=0 \
+  PLOW_COMMAND=check PLOW_ROOT=. MAX_COMMENTS=5 \
+  PLOW_API_RETRIES=1 PLOW_API_RETRY_DELAY=0 \
   bash "$SCRIPTS_DIR/review.sh" 2>&1 1>/dev/null)
 R5B_STATUS=$?
 [ "$R5B_STATUS" -eq 0 ] \
@@ -1660,9 +1660,9 @@ fi
 SH
 chmod +x "$API_FAIL_BIN/gh"
 
-cat > "$API_FAIL_BIN/fallow" <<'SH'
+cat > "$API_FAIL_BIN/plow" <<'SH'
 #!/usr/bin/env bash
-printf 'fallow %s\n' "$*" >> "$MOCK_LOG"
+printf 'plow %s\n' "$*" >> "$MOCK_LOG"
 format=""; previous=""
 for arg in "$@"; do
   if [ "$previous" = "--format" ]; then format="$arg"; break; fi
@@ -1670,14 +1670,14 @@ for arg in "$@"; do
 done
 if [ "$format" = "pr-comment-github" ]; then
   cat <<'BODY'
-<!-- fallow-id: fallow-results -->
-### Fallow smoke
+<!-- plow-id: plow-results -->
+### Plow smoke
 
-Generated by fallow.
+Generated by plow.
 BODY
 fi
 SH
-chmod +x "$API_FAIL_BIN/fallow"
+chmod +x "$API_FAIL_BIN/plow"
 
 : > "$API_FAIL_OUTPUT"
 : > "$API_FAIL_WORK/mock.log"
@@ -1688,9 +1688,9 @@ C6_STDERR=$(cd "$API_FAIL_WORK" \
   PR_NUMBER="123" \
   GH_REPO="owner/repo" \
   GITHUB_OUTPUT="$API_FAIL_OUTPUT" \
-  FALLOW_COMMAND="check" \
-  FALLOW_API_RETRIES=1 \
-  FALLOW_API_RETRY_DELAY=0 \
+  PLOW_COMMAND="check" \
+  PLOW_API_RETRIES=1 \
+  PLOW_API_RETRY_DELAY=0 \
   bash "$SCRIPTS_DIR/comment.sh" 2>&1 1>/dev/null) || true
 
 assert_contains "$(cat "$API_FAIL_OUTPUT")" "dedup_lookup_failed=true" \
@@ -1715,34 +1715,34 @@ rm -rf "$API_FAIL_WORK"
 # --- Pre-computed changed files (shallow clone fallback) tests ---
 
 echo ""
-echo "=== Pre-computed changed files (fallow-changed-files.json) ==="
+echo "=== Pre-computed changed files (plow-changed-files.json) ==="
 
 WORK_DIR=$(mktemp -d)
 SCRIPTS_DIR="$DIR/../scripts"
 
 # Copy fixtures into work dir to simulate the action working directory
-cp "$FIXTURES/check.json" "$WORK_DIR/fallow-results.json"
+cp "$FIXTURES/check.json" "$WORK_DIR/plow-results.json"
 
 echo "  comment.sh filtering with pre-computed file:"
 
 # Create a pre-computed changed files list (what analyze.sh produces)
-echo '["src/helpers/api.ts"]' > "$WORK_DIR/fallow-changed-files.json"
+echo '["src/helpers/api.ts"]' > "$WORK_DIR/plow-changed-files.json"
 
 # Run the filtering logic from comment.sh in the work dir
 OUT=$(cd "$WORK_DIR" && \
   CHANGED_SINCE="abc123" \
   INPUT_ROOT="." \
   ACTION_JQ_DIR="$JQ_DIR" \
-  FALLOW_COMMAND="dead-code" \
+  PLOW_COMMAND="dead-code" \
   bash -c '
-    RESULTS_FILE="fallow-results.json"
+    RESULTS_FILE="plow-results.json"
     CHANGED_JSON=""
-    if [ -f fallow-changed-files.json ]; then
-      CHANGED_JSON=$(cat fallow-changed-files.json)
+    if [ -f plow-changed-files.json ]; then
+      CHANGED_JSON=$(cat plow-changed-files.json)
     fi
     if [ -n "$CHANGED_JSON" ] && [ "$CHANGED_JSON" != "[]" ]; then
-      if jq --argjson changed "$CHANGED_JSON" -f "${ACTION_JQ_DIR}/filter-changed.jq" fallow-results.json > fallow-results-scoped.json 2>/dev/null; then
-        RESULTS_FILE="fallow-results-scoped.json"
+      if jq --argjson changed "$CHANGED_JSON" -f "${ACTION_JQ_DIR}/filter-changed.jq" plow-results.json > plow-results-scoped.json 2>/dev/null; then
+        RESULTS_FILE="plow-results-scoped.json"
       fi
     fi
     jq -r ".total_issues" "$RESULTS_FILE"
@@ -1750,18 +1750,18 @@ OUT=$(cd "$WORK_DIR" && \
 [ "$OUT" = "7" ] && pass "filters to 7 issues (pre-computed)" || fail "pre-computed filter" "expected 7, got $OUT"
 
 echo "  fallback to unfiltered when no pre-computed file:"
-rm -f "$WORK_DIR/fallow-changed-files.json"
+rm -f "$WORK_DIR/plow-changed-files.json"
 
-# Without fallow-changed-files.json AND without git, falls through to unfiltered
+# Without plow-changed-files.json AND without git, falls through to unfiltered
 OUT=$(cd "$WORK_DIR" && \
   CHANGED_SINCE="abc123" \
   INPUT_ROOT="." \
   ACTION_JQ_DIR="$JQ_DIR" \
   bash -c '
-    RESULTS_FILE="fallow-results.json"
+    RESULTS_FILE="plow-results.json"
     CHANGED_JSON=""
-    if [ -f fallow-changed-files.json ]; then
-      CHANGED_JSON=$(cat fallow-changed-files.json)
+    if [ -f plow-changed-files.json ]; then
+      CHANGED_JSON=$(cat plow-changed-files.json)
     else
       CHANGED_FILES=$(git diff --name-only --relative "abc123...HEAD" -- . 2>/dev/null || true)
       if [ -n "$CHANGED_FILES" ]; then
@@ -1769,7 +1769,7 @@ OUT=$(cd "$WORK_DIR" && \
       fi
     fi
     if [ -n "$CHANGED_JSON" ] && [ "$CHANGED_JSON" != "[]" ]; then
-      jq --argjson changed "$CHANGED_JSON" -f "${ACTION_JQ_DIR}/filter-changed.jq" fallow-results.json > fallow-results-scoped.json 2>/dev/null && RESULTS_FILE="fallow-results-scoped.json"
+      jq --argjson changed "$CHANGED_JSON" -f "${ACTION_JQ_DIR}/filter-changed.jq" plow-results.json > plow-results-scoped.json 2>/dev/null && RESULTS_FILE="plow-results-scoped.json"
     fi
     jq -r ".total_issues" "$RESULTS_FILE"
   ' 2>&1)
@@ -1777,49 +1777,49 @@ EXPECTED_TOTAL=$(jq -r '.total_issues' "$FIXTURES/check.json")
 [ "$OUT" = "$EXPECTED_TOTAL" ] && pass "unfiltered when no pre-computed file" || fail "no pre-computed fallback" "expected $EXPECTED_TOTAL, got $OUT"
 
 echo "  empty changed list produces no filtering:"
-echo '[]' > "$WORK_DIR/fallow-changed-files.json"
+echo '[]' > "$WORK_DIR/plow-changed-files.json"
 OUT=$(cd "$WORK_DIR" && \
   CHANGED_SINCE="abc123" \
   ACTION_JQ_DIR="$JQ_DIR" \
   bash -c '
-    RESULTS_FILE="fallow-results.json"
+    RESULTS_FILE="plow-results.json"
     CHANGED_JSON=""
-    if [ -f fallow-changed-files.json ]; then
-      CHANGED_JSON=$(cat fallow-changed-files.json)
+    if [ -f plow-changed-files.json ]; then
+      CHANGED_JSON=$(cat plow-changed-files.json)
     fi
     if [ -n "$CHANGED_JSON" ] && [ "$CHANGED_JSON" != "[]" ]; then
-      jq --argjson changed "$CHANGED_JSON" -f "${ACTION_JQ_DIR}/filter-changed.jq" fallow-results.json > fallow-results-scoped.json 2>/dev/null && RESULTS_FILE="fallow-results-scoped.json"
+      jq --argjson changed "$CHANGED_JSON" -f "${ACTION_JQ_DIR}/filter-changed.jq" plow-results.json > plow-results-scoped.json 2>/dev/null && RESULTS_FILE="plow-results-scoped.json"
     fi
     jq -r ".total_issues" "$RESULTS_FILE"
   ' 2>&1)
 [ "$OUT" = "$EXPECTED_TOTAL" ] && pass "empty list skips filtering" || fail "empty list guard" "expected $EXPECTED_TOTAL, got $OUT"
 
 echo "  combined format with pre-computed file:"
-cp "$FIXTURES/combined.json" "$WORK_DIR/fallow-results.json"
-echo '["src/helpers/api.ts"]' > "$WORK_DIR/fallow-changed-files.json"
+cp "$FIXTURES/combined.json" "$WORK_DIR/plow-results.json"
+echo '["src/helpers/api.ts"]' > "$WORK_DIR/plow-changed-files.json"
 OUT=$(cd "$WORK_DIR" && \
   CHANGED_SINCE="abc123" \
   ACTION_JQ_DIR="$JQ_DIR" \
   bash -c '
-    RESULTS_FILE="fallow-results.json"
+    RESULTS_FILE="plow-results.json"
     CHANGED_JSON=""
-    if [ -f fallow-changed-files.json ]; then
-      CHANGED_JSON=$(cat fallow-changed-files.json)
+    if [ -f plow-changed-files.json ]; then
+      CHANGED_JSON=$(cat plow-changed-files.json)
     fi
     if [ -n "$CHANGED_JSON" ] && [ "$CHANGED_JSON" != "[]" ]; then
-      jq --argjson changed "$CHANGED_JSON" -f "${ACTION_JQ_DIR}/filter-changed.jq" fallow-results.json > fallow-results-scoped.json 2>/dev/null && RESULTS_FILE="fallow-results-scoped.json"
+      jq --argjson changed "$CHANGED_JSON" -f "${ACTION_JQ_DIR}/filter-changed.jq" plow-results.json > plow-results-scoped.json 2>/dev/null && RESULTS_FILE="plow-results-scoped.json"
     fi
     jq -r ".check.total_issues" "$RESULTS_FILE"
   ' 2>&1)
 [ "$OUT" = "6" ] && pass "combined format filters check section" || fail "combined pre-computed" "expected 6, got $OUT"
 
 echo "  no CHANGED_SINCE skips filtering entirely:"
-cp "$FIXTURES/check.json" "$WORK_DIR/fallow-results.json"
-echo '["src/helpers/api.ts"]' > "$WORK_DIR/fallow-changed-files.json"
+cp "$FIXTURES/check.json" "$WORK_DIR/plow-results.json"
+echo '["src/helpers/api.ts"]' > "$WORK_DIR/plow-changed-files.json"
 OUT=$(cd "$WORK_DIR" && \
   ACTION_JQ_DIR="$JQ_DIR" \
   bash -c '
-    RESULTS_FILE="fallow-results.json"
+    RESULTS_FILE="plow-results.json"
     if [ -n "${CHANGED_SINCE:-}" ]; then
       echo "ERROR: should not enter filter block"
     fi
@@ -1828,22 +1828,22 @@ OUT=$(cd "$WORK_DIR" && \
 [ "$OUT" = "$EXPECTED_TOTAL" ] && pass "no CHANGED_SINCE skips filtering" || fail "no CHANGED_SINCE guard" "expected $EXPECTED_TOTAL, got $OUT"
 
 echo "  summary.sh and annotate.sh with custom artifact paths:"
-CUSTOM_ARTIFACTS="$WORK_DIR/.var/fallow"
+CUSTOM_ARTIFACTS="$WORK_DIR/.var/plow"
 mkdir -p "$CUSTOM_ARTIFACTS"
-cp "$FIXTURES/check.json" "$CUSTOM_ARTIFACTS/fallow-results.json"
-echo '["src/helpers/api.ts"]' > "$CUSTOM_ARTIFACTS/fallow-changed-files.json"
+cp "$FIXTURES/check.json" "$CUSTOM_ARTIFACTS/plow-results.json"
+echo '["src/helpers/api.ts"]' > "$CUSTOM_ARTIFACTS/plow-changed-files.json"
 SUMMARY_FILE="$WORK_DIR/summary.md"
 OUT=$(cd "$WORK_DIR" && \
   GITHUB_STEP_SUMMARY="$SUMMARY_FILE" \
-  FALLOW_COMMAND="dead-code" \
+  PLOW_COMMAND="dead-code" \
   ACTION_JQ_DIR="$JQ_DIR" \
   CHANGED_SINCE="abc123" \
-  FALLOW_RESULTS_FILE=".var/fallow/fallow-results.json" \
-  FALLOW_SCOPED_RESULTS_FILE=".var/fallow/fallow-results-scoped.json" \
-  FALLOW_CHANGED_FILES_FILE=".var/fallow/fallow-changed-files.json" \
+  PLOW_RESULTS_FILE=".var/plow/plow-results.json" \
+  PLOW_SCOPED_RESULTS_FILE=".var/plow/plow-results-scoped.json" \
+  PLOW_CHANGED_FILES_FILE=".var/plow/plow-changed-files.json" \
   bash "$SCRIPTS_DIR/summary.sh" 2>&1)
 cmd_status=$?
-if [ "$cmd_status" -eq 0 ] && [ -f "$CUSTOM_ARTIFACTS/fallow-results-scoped.json" ]; then
+if [ "$cmd_status" -eq 0 ] && [ -f "$CUSTOM_ARTIFACTS/plow-results-scoped.json" ]; then
   pass "summary.sh: custom artifacts path writes scoped results beside source"
 else
   fail "summary.sh: custom artifacts path writes scoped results beside source" "exit $cmd_status, output: $OUT"
@@ -1851,13 +1851,13 @@ fi
 assert_contains "$(cat "$SUMMARY_FILE")" "Issue counts scoped" "summary.sh: custom artifacts path still appends scoping note"
 
 OUT=$(cd "$WORK_DIR" && \
-  FALLOW_COMMAND="dead-code" \
+  PLOW_COMMAND="dead-code" \
   MAX_ANNOTATIONS="3" \
   ACTION_JQ_DIR="$JQ_DIR" \
   CHANGED_SINCE="abc123" \
-  FALLOW_RESULTS_FILE=".var/fallow/fallow-results.json" \
-  FALLOW_SCOPED_RESULTS_FILE=".var/fallow/fallow-results-scoped.json" \
-  FALLOW_CHANGED_FILES_FILE=".var/fallow/fallow-changed-files.json" \
+  PLOW_RESULTS_FILE=".var/plow/plow-results.json" \
+  PLOW_SCOPED_RESULTS_FILE=".var/plow/plow-results-scoped.json" \
+  PLOW_CHANGED_FILES_FILE=".var/plow/plow-changed-files.json" \
   bash "$SCRIPTS_DIR/annotate.sh" 2>&1)
 cmd_status=$?
 if [ "$cmd_status" -eq 0 ]; then

@@ -15,7 +15,7 @@
 //!
 //! 2. **`misconfigured-dependency-overrides`**: an override whose key cannot
 //!    be parsed or whose value is empty. `pnpm install` refuses to honor
-//!    these entries; fallow surfaces the issue statically.
+//!    these entries; plow surfaces the issue statically.
 //!
 //! Suppression is config-only via `ignoreDependencyOverrides: [{ package,
 //! source? }]`. Inline suppression is structurally impossible because
@@ -28,12 +28,12 @@
 //! parent is declared and the override forces a transitive version inside that
 //! parent's subtree.
 
-use fallow_config::{
+use plow_config::{
     CompiledIgnoreDependencyOverrideRule, PackageJson, PnpmOverrideData, ResolvedConfig,
     WorkspaceInfo, override_misconfig_reason as parser_misconfig_reason,
     parse_pnpm_package_json_overrides, parse_pnpm_workspace_overrides,
 };
-use fallow_types::results::{
+use plow_types::results::{
     DependencyOverrideMisconfigReason, DependencyOverrideSource, MisconfiguredDependencyOverride,
     UnusedDependencyOverride,
 };
@@ -240,7 +240,7 @@ fn package_name_from_lock_key(raw_key: &str) -> Option<String> {
 #[must_use]
 #[deprecated(
     since = "2.76.0",
-    note = "fallow_core is internal; use fallow_cli::programmatic::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/fallow-core-migration.md and ADR-008."
+    note = "plow_core is internal; use plow_cli::programmatic::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/plow-core-migration.md and ADR-008."
 )]
 pub fn find_unused_dependency_overrides(
     state: &PnpmOverrideState,
@@ -286,7 +286,7 @@ fn collect_unused_from_source(
         let Some(value) = entry.raw_value.as_ref() else {
             continue;
         };
-        if !fallow_config::is_valid_override_value(value) {
+        if !plow_config::is_valid_override_value(value) {
             continue;
         }
 
@@ -333,7 +333,7 @@ fn collect_unused_from_source(
 #[must_use]
 #[deprecated(
     since = "2.76.0",
-    note = "fallow_core is internal; use fallow_cli::programmatic::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/fallow-core-migration.md and ADR-008."
+    note = "plow_core is internal; use plow_cli::programmatic::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/plow-core-migration.md and ADR-008."
 )]
 pub fn find_misconfigured_dependency_overrides(
     state: &PnpmOverrideState,
@@ -399,13 +399,13 @@ fn collect_misconfigured_from_source(
 }
 
 const fn map_misconfig_reason(
-    reason: fallow_config::MisconfigReason,
+    reason: plow_config::MisconfigReason,
 ) -> DependencyOverrideMisconfigReason {
     match reason {
-        fallow_config::MisconfigReason::UnparsableKey => {
+        plow_config::MisconfigReason::UnparsableKey => {
             DependencyOverrideMisconfigReason::UnparsableKey
         }
-        fallow_config::MisconfigReason::EmptyValue => DependencyOverrideMisconfigReason::EmptyValue,
+        plow_config::MisconfigReason::EmptyValue => DependencyOverrideMisconfigReason::EmptyValue,
     }
 }
 

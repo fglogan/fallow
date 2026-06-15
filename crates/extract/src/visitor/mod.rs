@@ -14,12 +14,12 @@ use crate::{
     DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName, ImportInfo, ImportedName,
     MemberAccess, MemberInfo, MemberKind, ModuleInfo, ReExportInfo, RequireCallInfo, VisibilityTag,
 };
-use fallow_types::extract::{
+use helpers::LitCustomElementDecorator;
+use plow_types::extract::{
     CalleeUse, ClassHeritageInfo, DiKeySite, LocalTypeDeclaration, MisplacedDirectiveSite,
     PublicSignatureTypeReference, SanitizedSinkArg, SanitizerScope, SecurityControlSite,
     SinkLiteralValue, SinkSite, SkippedSecurityCalleeSite, TaintedBinding,
 };
-use helpers::LitCustomElementDecorator;
 
 #[derive(Debug, Clone)]
 struct LocalClassExportInfo {
@@ -851,7 +851,7 @@ impl ModuleInfoExtractor {
         }
     }
 
-    fn collect_namespace_object_aliases(&self) -> Vec<fallow_types::extract::NamespaceObjectAlias> {
+    fn collect_namespace_object_aliases(&self) -> Vec<plow_types::extract::NamespaceObjectAlias> {
         if self.binding_target_names.is_empty() || self.namespace_binding_names.is_empty() {
             return Vec::new();
         }
@@ -875,7 +875,7 @@ impl ModuleInfoExtractor {
                     ExportName::Named(name) => name.clone(),
                     ExportName::Default => "default".to_string(),
                 };
-                aliases.push(fallow_types::extract::NamespaceObjectAlias {
+                aliases.push(plow_types::extract::NamespaceObjectAlias {
                     via_export_name: canonical_name,
                     suffix: suffix.to_string(),
                     namespace_local: target_name.clone(),
@@ -900,7 +900,7 @@ impl ModuleInfoExtractor {
 
     pub(crate) fn into_module_info(
         mut self,
-        file_id: fallow_types::discover::FileId,
+        file_id: plow_types::discover::FileId,
         content_hash: u64,
         parsed: ParsedSuppressions,
     ) -> ModuleInfo {

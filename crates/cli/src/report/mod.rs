@@ -18,10 +18,10 @@ use std::path::Path;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use fallow_config::{OutputFormat, RulesConfig, Severity};
-use fallow_core::duplicates::DuplicationReport;
-use fallow_core::results::AnalysisResults;
-use fallow_core::trace::{CloneTrace, DependencyTrace, ExportTrace, FileTrace, PipelineTimings};
+use plow_config::{OutputFormat, RulesConfig, Severity};
+use plow_core::duplicates::DuplicationReport;
+use plow_core::results::AnalysisResults;
+use plow_core::trace::{CloneTrace, DependencyTrace, ExportTrace, FileTrace, PipelineTimings};
 
 use crate::report::sink::outln;
 
@@ -53,18 +53,18 @@ pub struct ReportContext<'a> {
     /// already prints section headers, so it disables this to avoid duplicate
     /// "Dead Code" / "Dead Code Summary" headings.
     pub summary_heading: bool,
-    /// Human-only: print a one-line hint pointing at `fallow explain`.
+    /// Human-only: print a one-line hint pointing at `plow explain`.
     pub show_explain_tip: bool,
     /// When a baseline was loaded: (total entries in baseline, entries that matched).
     pub baseline_matched: Option<(usize, usize)>,
-    /// Whether config-edit actions can be applied by `fallow fix`.
+    /// Whether config-edit actions can be applied by `plow fix`.
     ///
     /// This is caller-provided because an explicit `--config` path is fixable
     /// even when default config discovery from the root would find nothing.
     pub config_fixable: bool,
     /// When set, the human health renderer skips the `● Health score:` and
     /// trend table sections because they have already been rendered upstream
-    /// (combined-mode orientation header). Standalone `fallow health` keeps
+    /// (combined-mode orientation header). Standalone `plow health` keeps
     /// the default `false` and renders both sections inline.
     pub skip_score_and_trend: bool,
 }
@@ -607,7 +607,7 @@ fn warn_grouping_unsupported(grouping: Option<&crate::health_types::HealthGroupi
 ///
 /// Only emits output in human format to avoid corrupting structured JSON/SARIF output.
 pub fn print_cross_reference_findings(
-    cross_ref: &fallow_core::cross_reference::CrossReferenceResult,
+    cross_ref: &plow_core::cross_reference::CrossReferenceResult,
     root: &Path,
     quiet: bool,
     output: OutputFormat,

@@ -5,8 +5,8 @@
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_types::discover::FileId;
-use fallow_types::extract::{ExportName, VisibilityTag};
+use plow_types::discover::FileId;
+use plow_types::extract::{ExportName, VisibilityTag};
 
 use crate::graph::types::{ExportSymbol, ModuleNode, ReferenceKind, SymbolReference};
 use crate::graph::{Edge, ImportedName};

@@ -73,10 +73,10 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
         {
           "type": "add-to-config",
           "auto_fixable": false,
-          "description": "Add \"zod\" to ignoreDependencies in fallow config",
+          "description": "Add \"zod\" to ignoreDependencies in plow config",
           "config_key": "ignoreDependencies",
           "value": "zod",
-          "value_schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencies/items"
+          "value_schema": "https://raw.githubusercontent.com/fglogan/genesis-plow/main/schema.json#/properties/ignoreDependencies/items"
         }
       ]
     },
@@ -94,10 +94,10 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
         {
           "type": "add-to-config",
           "auto_fixable": false,
-          "description": "Add \"@types/react\" to ignoreDependencies in fallow config",
+          "description": "Add \"@types/react\" to ignoreDependencies in plow config",
           "config_key": "ignoreDependencies",
           "value": "@types/react",
-          "value_schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencies/items"
+          "value_schema": "https://raw.githubusercontent.com/fglogan/genesis-plow/main/schema.json#/properties/ignoreDependencies/items"
         }
       ]
     }

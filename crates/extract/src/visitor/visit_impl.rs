@@ -13,7 +13,7 @@ use crate::{
     DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName, ImportInfo, ImportedName,
     MemberAccess, ReExportInfo, RequireCallInfo, VisibilityTag,
 };
-use fallow_types::extract::{
+use plow_types::extract::{
     CalleeUse, ClassHeritageInfo, DiFramework, DiKeySite, DiRole, LocalTypeDeclaration, MemberInfo,
     MemberKind, MisplacedDirectiveSite, PublicSignatureTypeReference, SanitizedSinkArg,
     SanitizerScope, SecurityControlKind, SecurityControlSite, SecurityUrlShape, SinkArgKind,
@@ -4296,7 +4296,7 @@ fn tainted_source_path(expr: &Expression<'_>) -> Option<String> {
         Expression::AwaitExpression(await_expr) => tainted_source_path(&await_expr.argument),
         Expression::StaticMemberExpression(member) => {
             if let Some(full) = flatten_member_path(expr)
-                && fallow_types::extract::is_public_env_path(&full)
+                && plow_types::extract::is_public_env_path(&full)
             {
                 return None;
             }
@@ -5698,7 +5698,7 @@ fn push_source_path(path: String, out: &mut Vec<String>) {
 fn push_member_source_paths(path: &str, out: &mut Vec<String>) {
     // A public env var is build-inlined, not a secret source; record neither the
     // full path nor the `process.env` / `import.meta.env` object prefix (#890).
-    if fallow_types::extract::is_public_env_path(path) {
+    if plow_types::extract::is_public_env_path(path) {
         return;
     }
     push_source_path(path.to_string(), out);
@@ -5727,7 +5727,7 @@ fn collect_source_paths_into(expr: &Expression<'_>, out: &mut Vec<String>) {
                 // before recursing into the object, otherwise the bare
                 // `process.env` / `import.meta.env` object would be re-pushed as a
                 // source and defeat the exclusion.
-                if fallow_types::extract::is_public_env_path(&path) {
+                if plow_types::extract::is_public_env_path(&path) {
                     return;
                 }
                 push_member_source_paths(&path, out);

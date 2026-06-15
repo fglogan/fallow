@@ -8,7 +8,7 @@ use super::common::{create_config, fixture_path};
 fn flags_barrel_masked_component_but_credits_rendered_and_value_read() {
     let root = fixture_path("unrendered-component");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let flagged: Vec<&str> = results
         .unrendered_components
         .iter()

@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 use std::time::{Duration, Instant};
 
-use fallow_config::{AuditGate, OutputFormat};
-use fallow_core::git_env::clear_ambient_git_env;
+use plow_config::{AuditGate, OutputFormat};
+use plow_core::git_env::clear_ambient_git_env;
 use rustc_hash::FxHashSet;
 use xxhash_rust::xxh3::xxh3_64;
 
@@ -65,7 +65,7 @@ pub struct AuditResult {
     pub base_snapshot_skipped: bool,
     pub changed_files_count: usize,
     /// Absolute paths of the files this run re-analyzed. Threaded into the
-    /// Fallow Impact per-finding attribution so the frontier diff knows which
+    /// Plow Impact per-finding attribution so the frontier diff knows which
     /// files were authoritative this run.
     pub changed_files: Vec<PathBuf>,
     pub base_ref: String,
@@ -102,11 +102,11 @@ pub struct AuditOptions<'a> {
     pub explain_skipped: bool,
     pub performance: bool,
     pub group_by: Option<crate::GroupBy>,
-    /// Baseline file for dead-code analysis (as produced by `fallow dead-code --save-baseline`).
+    /// Baseline file for dead-code analysis (as produced by `plow dead-code --save-baseline`).
     pub dead_code_baseline: Option<&'a std::path::Path>,
-    /// Baseline file for health analysis (as produced by `fallow health --save-baseline`).
+    /// Baseline file for health analysis (as produced by `plow health --save-baseline`).
     pub health_baseline: Option<&'a std::path::Path>,
-    /// Baseline file for duplication analysis (as produced by `fallow dupes --save-baseline`).
+    /// Baseline file for duplication analysis (as produced by `plow dupes --save-baseline`).
     pub dupes_baseline: Option<&'a std::path::Path>,
     /// Maximum CRAP score threshold (overrides `health.maxCrap` from config).
     /// Functions meeting or exceeding this score cause audit to fail.
@@ -121,7 +121,7 @@ pub struct AuditOptions<'a> {
     /// Paid runtime-coverage sidecar input (V8 directory, V8 JSON, or
     /// Istanbul coverage map). Forwarded into the embedded health pass so
     /// audit surfaces the `hot-path-touched` verdict alongside dead-code
-    /// and complexity findings without requiring a second `fallow health`
+    /// and complexity findings without requiring a second `plow health`
     /// invocation in CI.
     pub runtime_coverage: Option<&'a std::path::Path>,
     /// Threshold for hot-path classification, forwarded to the sidecar.
@@ -199,11 +199,11 @@ fn detect_remote_default_ref(root: &std::path::Path) -> Option<String> {
     None
 }
 
-/// Auto-detect the base ref for `fallow audit` when no `--base` / env override
+/// Auto-detect the base ref for `plow audit` when no `--base` / env override
 /// is set.
 ///
 /// The base is the `git merge-base` (fork point) against the branch's upstream
-/// or the remote default, mirroring the `fallow hooks install --target git`
+/// or the remote default, mirroring the `plow hooks install --target git`
 /// pre-commit hook (issue #242). Resolving to the merge-base SHA, rather than a
 /// bare branch name, fixes the long-standing bug where the default branch was
 /// discovered via `origin/HEAD` but returned as the bare name `main` (issue
@@ -580,20 +580,20 @@ fn save_cached_base_snapshot(
     let _ = tmp.persist(audit_base_snapshot_cache_file(opts.cache_dir, key));
 }
 
-/// If fallow's process inherited any ambient git repo-state env vars (typical
+/// If plow's process inherited any ambient git repo-state env vars (typical
 /// when invoked from a `pre-commit` / `pre-push` hook or a tool wrapping git),
 /// surface the most likely culprit so a user hitting an unexpected worktree
 /// failure can short-circuit the diagnosis. Returns `None` otherwise.
 fn ambient_git_env_hint() -> Option<String> {
-    use fallow_core::git_env::AMBIENT_GIT_ENV_VARS;
+    use plow_core::git_env::AMBIENT_GIT_ENV_VARS;
     for var in AMBIENT_GIT_ENV_VARS {
         if let Ok(value) = std::env::var(var)
             && !value.is_empty()
         {
             return Some(format!(
-                "{var}={value} is set in the environment; if fallow is being \
+                "{var}={value} is set in the environment; if plow is being \
 invoked from a git hook this can interfere with worktree operations. Re-run \
-with `env -u {var} fallow audit` to confirm."
+with `env -u {var} plow audit` to confirm."
             ));
         }
     }
@@ -619,7 +619,7 @@ fn normalized_changed_files(root: &Path, changed_files: &FxHashSet<PathBuf>) -> 
 
 fn config_file_fingerprint(opts: &AuditOptions<'_>) -> Result<serde_json::Value, ExitCode> {
     let loaded = if let Some(path) = opts.config_path {
-        let config = fallow_config::FallowConfig::load(path).map_err(|e| {
+        let config = plow_config::PlowConfig::load(path).map_err(|e| {
             emit_error(
                 &format!("failed to load config '{}': {e}", path.display()),
                 2,
@@ -628,7 +628,7 @@ fn config_file_fingerprint(opts: &AuditOptions<'_>) -> Result<serde_json::Value,
         })?;
         Some((config, path.clone()))
     } else {
-        fallow_config::FallowConfig::find_and_load(opts.root)
+        plow_config::PlowConfig::find_and_load(opts.root)
             .map_err(|e| emit_error(&e, 2, opts.output))?
     };
 
@@ -742,7 +742,7 @@ fn compute_base_snapshot(
     let current_config_path = opts
         .config_path
         .clone()
-        .or_else(|| fallow_config::FallowConfig::find_config_path(opts.root));
+        .or_else(|| plow_config::PlowConfig::find_config_path(opts.root));
     let base_opts = AuditOptions {
         root: &base_root,
         config_path: &current_config_path,
@@ -860,7 +860,7 @@ fn can_reuse_current_as_base(
     // artifacts or docs never touches git, so it spawns zero processes.
     let mut reader: Option<BaseFileReader> = None;
     for path in changed_files {
-        if is_fallow_cache_artifact(path, &cache_dir, canonical_cache_dir.as_deref()) {
+        if is_plow_cache_artifact(path, &cache_dir, canonical_cache_dir.as_deref()) {
             continue;
         }
         if !is_analysis_input(path) {
@@ -999,7 +999,7 @@ impl Drop for BaseFileReader {
     }
 }
 
-fn is_fallow_cache_artifact(
+fn is_plow_cache_artifact(
     path: &Path,
     cache_dir: &Path,
     canonical_cache_dir: Option<&Path>,
@@ -1050,7 +1050,7 @@ fn is_non_behavioral_doc(path: &Path) -> bool {
 }
 
 fn js_ts_tokens_equivalent(path: &Path, current: &str, base: &str) -> bool {
-    if current.contains("fallow-ignore") || base.contains("fallow-ignore") {
+    if current.contains("plow-ignore") || base.contains("plow-ignore") {
         return false;
     }
     if !matches!(
@@ -1059,8 +1059,8 @@ fn js_ts_tokens_equivalent(path: &Path, current: &str, base: &str) -> bool {
     ) {
         return false;
     }
-    let current_tokens = fallow_core::duplicates::tokenize::tokenize_file(path, current, false);
-    let base_tokens = fallow_core::duplicates::tokenize::tokenize_file(path, base, false);
+    let current_tokens = plow_core::duplicates::tokenize::tokenize_file(path, current, false);
+    let base_tokens = plow_core::duplicates::tokenize::tokenize_file(path, base, false);
     current_tokens
         .tokens
         .iter()
@@ -1091,7 +1091,7 @@ use std::time::SystemTime;
 #[cfg(test)]
 use crate::base_worktree::{
     ReusableWorktreeLock, WorktreeCleanupGuard, audit_worktree_pid, days_to_duration,
-    is_fallow_audit_worktree_path, is_reusable_audit_worktree_path, list_audit_worktrees,
+    is_plow_audit_worktree_path, is_reusable_audit_worktree_path, list_audit_worktrees,
     materialize_base_dependency_context, parse_worktree_list, paths_equal, process_is_alive,
     remove_audit_worktree, reusable_worktree_last_used_path, reusable_worktree_lock_path,
     sweep_orphan_audit_worktrees, touch_last_used,
@@ -1293,7 +1293,7 @@ pub fn execute_audit(opts: &AuditOptions<'_>) -> Result<AuditResult, ExitCode> {
     })
 }
 
-/// Parse a raw `FALLOW_AUDIT_BASE` value: trim, treat empty / whitespace-only as
+/// Parse a raw `PLOW_AUDIT_BASE` value: trim, treat empty / whitespace-only as
 /// unset. Pure helper so the trimming logic is testable without mutating env.
 fn parse_audit_base_override(raw: Option<String>) -> Option<String> {
     let trimmed = raw?.trim().to_string();
@@ -1304,16 +1304,16 @@ fn parse_audit_base_override(raw: Option<String>) -> Option<String> {
     }
 }
 
-/// The `FALLOW_AUDIT_BASE` override (trimmed), or `None` when unset / empty.
+/// The `PLOW_AUDIT_BASE` override (trimmed), or `None` when unset / empty.
 /// Lets a downstream consumer pin the base without editing the generated agent
-/// gate script (issue #1168), e.g. `FALLOW_AUDIT_BASE=upstream/main` on a fork.
+/// gate script (issue #1168), e.g. `PLOW_AUDIT_BASE=upstream/main` on a fork.
 fn audit_base_env_override() -> Option<String> {
-    parse_audit_base_override(std::env::var("FALLOW_AUDIT_BASE").ok())
+    parse_audit_base_override(std::env::var("PLOW_AUDIT_BASE").ok())
 }
 
 /// Resolve the base ref and an optional human-readable provenance for the scope
 /// line. Precedence: explicit `--changed-since` / `--base` flag, then the
-/// `FALLOW_AUDIT_BASE` env override, then auto-detection.
+/// `PLOW_AUDIT_BASE` env override, then auto-detection.
 fn resolve_base_ref(opts: &AuditOptions<'_>) -> Result<(String, Option<String>), ExitCode> {
     if let Some(ref_str) = opts.changed_since {
         return Ok((ref_str.to_string(), None));
@@ -1321,12 +1321,12 @@ fn resolve_base_ref(opts: &AuditOptions<'_>) -> Result<(String, Option<String>),
     if let Some(env_ref) = audit_base_env_override() {
         if let Err(e) = crate::validate::validate_git_ref(&env_ref) {
             return Err(emit_error(
-                &format!("FALLOW_AUDIT_BASE='{env_ref}' is not a valid git ref: {e}"),
+                &format!("PLOW_AUDIT_BASE='{env_ref}' is not a valid git ref: {e}"),
                 2,
                 opts.output,
             ));
         }
-        let description = format!("FALLOW_AUDIT_BASE={env_ref}");
+        let description = format!("PLOW_AUDIT_BASE={env_ref}");
         return Ok((env_ref, Some(description)));
     }
     let Some(detected) = auto_detect_base_ref(opts.root) else {
@@ -1453,7 +1453,7 @@ fn run_audit_dupes<'a>(
     opts: &'a AuditOptions<'a>,
     changed_since: Option<&'a str>,
     changed_files: Option<&'a FxHashSet<PathBuf>>,
-    pre_discovered: Option<Vec<fallow_types::discover::DiscoveredFile>>,
+    pre_discovered: Option<Vec<plow_types::discover::DiscoveredFile>>,
 ) -> Result<Option<DupesResult>, ExitCode> {
     let dupes_cfg = match crate::load_config_for_analysis(
         opts.root,
@@ -1464,7 +1464,7 @@ fn run_audit_dupes<'a>(
         opts.production_dupes
             .or_else(|| opts.production.then_some(true)),
         opts.quiet,
-        fallow_config::ProductionAnalysis::Dupes,
+        plow_config::ProductionAnalysis::Dupes,
     ) {
         Ok(c) => c.duplicates,
         Err(code) => return Err(code),
@@ -1603,7 +1603,7 @@ pub use output::print_audit_result;
 
 /// Run the full audit command: execute analyses, print results, return exit code.
 /// Run audit, optionally tagged with a gate marker (e.g. `"pre-commit"`) so
-/// Fallow Impact can record a containment event when the gate blocks then
+/// Plow Impact can record a containment event when the gate blocks then
 /// clears. The marker only affects the local Impact store; it never changes
 /// the verdict, exit code, or output.
 pub fn run_audit(opts: &AuditOptions<'_>, gate_marker: Option<&str>) -> ExitCode {
@@ -1636,7 +1636,7 @@ pub fn run_audit(opts: &AuditOptions<'_>, gate_marker: Option<&str>) -> ExitCode
                 .as_ref()
                 .map(|d| crate::impact::collect_clone_findings(&d.report))
                 .unwrap_or_default();
-            let empty_supps: Vec<fallow_core::results::ActiveSuppression> = Vec::new();
+            let empty_supps: Vec<plow_core::results::ActiveSuppression> = Vec::new();
             let suppressions = result.check.as_ref().map_or(empty_supps.as_slice(), |c| {
                 c.results.active_suppressions.as_slice()
             });
@@ -1694,14 +1694,14 @@ mod tests {
     }
 
     #[test]
-    fn audit_worktree_helpers_filter_to_fallow_temp_prefix() {
+    fn audit_worktree_helpers_filter_to_plow_temp_prefix() {
         let temp = std::env::temp_dir();
-        let audit_path = temp.join("fallow-audit-base-123-456");
-        let reusable_path = temp.join("fallow-audit-base-cache-abcd-1234");
+        let audit_path = temp.join("plow-audit-base-123-456");
+        let reusable_path = temp.join("plow-audit-base-cache-abcd-1234");
         let canonical_audit_path = temp
             .canonicalize()
             .unwrap_or_else(|_| temp.clone())
-            .join("fallow-audit-base-456-789");
+            .join("plow-audit-base-456-789");
         let unrelated_temp = temp.join("other-worktree");
         let output = format!(
             "worktree /repo\nHEAD abc\n\nworktree {}\nHEAD def\n\nworktree {}\nHEAD ghi\n\nworktree {}\nHEAD jkl\n",
@@ -1714,14 +1714,11 @@ mod tests {
             parse_worktree_list(&output),
             vec![audit_path, reusable_path.clone()]
         );
-        assert!(is_fallow_audit_worktree_path(&canonical_audit_path));
+        assert!(is_plow_audit_worktree_path(&canonical_audit_path));
         assert!(is_reusable_audit_worktree_path(&reusable_path));
-        assert_eq!(audit_worktree_pid("fallow-audit-base-123-456"), Some(123));
-        assert_eq!(
-            audit_worktree_pid("fallow-audit-base-cache-abcd-1234"),
-            None
-        );
-        assert_eq!(audit_worktree_pid("not-fallow-audit-base-123"), None);
+        assert_eq!(audit_worktree_pid("plow-audit-base-123-456"), Some(123));
+        assert_eq!(audit_worktree_pid("plow-audit-base-cache-abcd-1234"), None);
+        assert_eq!(audit_worktree_pid("not-plow-audit-base-123"), None);
     }
 
     /// Initialize a throwaway git repo with a single commit and return its root.
@@ -1971,7 +1968,7 @@ mod tests {
     fn worktree_cleanup_guard_runs_on_drop() {
         let tmp = tempfile::TempDir::new().expect("temp dir should be created");
         let repo = init_throwaway_repo(tmp.path(), "repo");
-        let worktree_path = tmp.path().join("fallow-audit-base-1234-5678");
+        let worktree_path = tmp.path().join("plow-audit-base-1234-5678");
 
         git(
             &repo,
@@ -2005,7 +2002,7 @@ mod tests {
     fn worktree_cleanup_guard_defused_skips_drop() {
         let tmp = tempfile::TempDir::new().expect("temp dir should be created");
         let repo = init_throwaway_repo(tmp.path(), "repo");
-        let worktree_path = tmp.path().join("fallow-audit-base-1234-5679");
+        let worktree_path = tmp.path().join("plow-audit-base-1234-5679");
 
         git(
             &repo,
@@ -2048,7 +2045,7 @@ mod tests {
         let repo = init_throwaway_repo(tmp.path(), "repo");
 
         let worktree_path = std::env::temp_dir().join(format!(
-            "fallow-audit-base-{}-{}",
+            "plow-audit-base-{}-{}",
             DEAD_PID,
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -2090,7 +2087,7 @@ mod tests {
         let repo = init_throwaway_repo(tmp.path(), "repo");
 
         let worktree_path = std::env::temp_dir().join(format!(
-            "fallow-audit-base-{}-{}",
+            "plow-audit-base-{}-{}",
             live_pid,
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -2132,7 +2129,7 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .expect("clock should be after epoch")
             .as_nanos();
-        std::env::temp_dir().join(format!("fallow-audit-base-cache-{label}-{nanos:032x}"))
+        std::env::temp_dir().join(format!("plow-audit-base-cache-{label}-{nanos:032x}"))
     }
 
     /// Register a worktree with the parent repo at `path` checked out at HEAD.
@@ -2424,19 +2421,19 @@ mod tests {
 
     #[test]
     fn reusable_worktree_last_used_path_lives_next_to_cache_dir() {
-        let cache_dir = std::env::temp_dir().join("fallow-audit-base-cache-abcd-1234");
+        let cache_dir = std::env::temp_dir().join("plow-audit-base-cache-abcd-1234");
         let sidecar = reusable_worktree_last_used_path(&cache_dir);
         assert_eq!(sidecar.parent(), cache_dir.parent());
         assert_eq!(
             sidecar.file_name().and_then(|s| s.to_str()),
-            Some("fallow-audit-base-cache-abcd-1234.last-used"),
+            Some("plow-audit-base-cache-abcd-1234.last-used"),
         );
     }
 
     #[test]
     fn touch_last_used_creates_sidecar_if_missing() {
         let tmp = tempfile::TempDir::new().expect("temp dir should be created");
-        let cache_dir = tmp.path().join("fallow-audit-base-cache-touchtest-0000");
+        let cache_dir = tmp.path().join("plow-audit-base-cache-touchtest-0000");
         fs::create_dir(&cache_dir).expect("cache dir should be created");
         let sidecar = reusable_worktree_last_used_path(&cache_dir);
         assert!(!sidecar.exists(), "sidecar should not exist before touch");
@@ -2459,7 +2456,7 @@ mod tests {
     #[test]
     fn reusable_worktree_lock_excludes_concurrent_acquires() {
         let tmp = tempfile::TempDir::new().expect("temp dir should be created");
-        let reusable = tmp.path().join("fallow-audit-base-cache-deadbeef-0000");
+        let reusable = tmp.path().join("plow-audit-base-cache-deadbeef-0000");
         let lock_path = reusable_worktree_lock_path(&reusable);
 
         let first = ReusableWorktreeLock::try_acquire(&reusable)
@@ -2496,7 +2493,7 @@ mod tests {
         let tmp = tempfile::TempDir::new().expect("temp dir should be created");
         let root = tmp.path();
         fs::create_dir_all(root.join("src")).expect("src dir should be created");
-        fs::write(root.join(".gitignore"), "node_modules\n.fallow\n")
+        fs::write(root.join(".gitignore"), "node_modules\n.plow\n")
             .expect("gitignore should be written");
         fs::write(
             root.join("package.json"),
@@ -2714,7 +2711,7 @@ mod tests {
     fn audit_reusable_base_worktree_refreshes_current_node_modules_context() {
         let tmp = tempfile::TempDir::new().expect("temp dir should be created");
         let root = tmp.path();
-        fs::write(root.join(".gitignore"), "node_modules\n.fallow\n")
+        fs::write(root.join(".gitignore"), "node_modules\n.plow\n")
             .expect("gitignore should be written");
         fs::write(root.join("package.json"), r#"{"name":"audit-reusable"}"#)
             .expect("package.json should be written");
@@ -2804,7 +2801,7 @@ mod tests {
     #[test]
     fn audit_base_snapshot_cache_dir_writes_gitignore() {
         let tmp = tempfile::TempDir::new().expect("temp dir should be created");
-        let cache_root = tmp.path().join(".custom-fallow-cache");
+        let cache_root = tmp.path().join(".custom-plow-cache");
         let cache_dir = audit_base_snapshot_cache_dir(&cache_root);
 
         ensure_audit_base_snapshot_cache_dir(&cache_dir).expect("cache dir should be created");
@@ -2819,7 +2816,7 @@ mod tests {
     fn audit_base_snapshot_cache_roundtrips_from_disk() {
         let tmp = tempfile::TempDir::new().expect("temp dir should be created");
         let config_path = None;
-        let cache_root = tmp.path().join(".custom-fallow-cache");
+        let cache_root = tmp.path().join(".custom-plow-cache");
         let opts = AuditOptions {
             root: tmp.path(),
             cache_dir: &cache_root,
@@ -2876,7 +2873,7 @@ mod tests {
     fn audit_base_snapshot_cache_rejects_mismatched_key() {
         let tmp = tempfile::TempDir::new().expect("temp dir should be created");
         let config_path = None;
-        let cache_root = tmp.path().join(".custom-fallow-cache");
+        let cache_root = tmp.path().join(".custom-plow-cache");
         let opts = AuditOptions {
             root: tmp.path(),
             cache_dir: &cache_root,
@@ -2936,7 +2933,7 @@ mod tests {
         let tmp = tempfile::TempDir::new().expect("temp dir should be created");
         let root = tmp.path();
         fs::write(
-            root.join(".fallowrc.json"),
+            root.join(".plowrc.json"),
             r#"{"extends":"base.json","entry":["src/index.ts"]}"#,
         )
         .expect("config should be written");
@@ -2947,7 +2944,7 @@ mod tests {
         .expect("base config should be written");
 
         let config_path = None;
-        let cache_root = root.join(".fallow");
+        let cache_root = root.join(".plow");
         let opts = AuditOptions {
             root,
             cache_dir: &cache_root,
@@ -3019,7 +3016,7 @@ mod tests {
         .expect("changed module should be written");
 
         let config_path = None;
-        let cache_root = root.join(".fallow");
+        let cache_root = root.join(".plow");
         let opts = AuditOptions {
             root,
             cache_dir: &cache_root,
@@ -3069,7 +3066,7 @@ mod tests {
         )
         .expect("package.json should be written");
         fs::write(
-            root.join(".fallowrc.json"),
+            root.join(".plowrc.json"),
             r#"{"duplicates":{"minTokens":5,"minLines":2,"mode":"strict"}}"#,
         )
         .expect("config should be written");
@@ -3085,18 +3082,15 @@ mod tests {
             &["-c", "commit.gpgsign=false", "commit", "-m", "initial"],
         );
         fs::write(root.join("README.md"), "after\n").expect("readme should be modified");
-        fs::create_dir_all(root.join(".fallow/cache/dupes-tokens-v2"))
+        fs::create_dir_all(root.join(".plow/cache/dupes-tokens-v2"))
             .expect("cache dir should be created");
-        fs::write(
-            root.join(".fallow/cache/dupes-tokens-v2/cache.bin"),
-            b"cache",
-        )
-        .expect("cache artifact should be written");
+        fs::write(root.join(".plow/cache/dupes-tokens-v2/cache.bin"), b"cache")
+            .expect("cache artifact should be written");
 
         let before_worktrees = audit_worktree_names(root);
 
         let config_path = None;
-        let cache_root = root.join(".fallow");
+        let cache_root = root.join(".plow");
         let opts = AuditOptions {
             root,
             cache_dir: &cache_root,
@@ -3189,7 +3183,7 @@ mod tests {
         .expect("changed module should be written");
 
         let config_path = None;
-        let cache_root = root.join(".fallow");
+        let cache_root = root.join(".plow");
         let opts = AuditOptions {
             root,
             cache_dir: &cache_root,
@@ -3266,7 +3260,7 @@ mod tests {
         .expect("changed module should be written");
 
         let config_path = None;
-        let cache_root = root.join(".fallow");
+        let cache_root = root.join(".plow");
         let opts = AuditOptions {
             root,
             cache_dir: &cache_root,
@@ -3360,20 +3354,20 @@ mod tests {
     fn remap_cache_dir_moves_project_local_cache_to_base_worktree() {
         let tmp = tempfile::TempDir::new().expect("temp dir should be created");
         let current_root = tmp.path().join("repo");
-        let base_root = tmp.path().join("fallow-base");
-        let cache_dir = current_root.join(".cache").join("fallow");
+        let base_root = tmp.path().join("plow-base");
+        let cache_dir = current_root.join(".cache").join("plow");
 
         let remapped = remap_cache_dir_for_base_worktree(&current_root, &base_root, &cache_dir);
 
-        assert_eq!(remapped, base_root.join(".cache").join("fallow"));
+        assert_eq!(remapped, base_root.join(".cache").join("plow"));
     }
 
     #[test]
     fn remap_cache_dir_keeps_external_absolute_cache_shared() {
         let tmp = tempfile::TempDir::new().expect("temp dir should be created");
         let current_root = tmp.path().join("repo");
-        let base_root = tmp.path().join("fallow-base");
-        let cache_dir = tmp.path().join("shared").join("fallow-cache");
+        let base_root = tmp.path().join("plow-base");
+        let cache_dir = tmp.path().join("shared").join("plow-cache");
 
         let remapped = remap_cache_dir_for_base_worktree(&current_root, &base_root, &cache_dir);
 
@@ -3395,7 +3389,7 @@ mod tests {
         )
         .expect("package.json should be written");
         fs::write(
-            root.join(".fallowrc.json"),
+            root.join(".plowrc.json"),
             r#"{"duplicates":{"minTokens":10,"minLines":3,"mode":"strict"}}"#,
         )
         .expect("config should be written");
@@ -3422,7 +3416,7 @@ mod tests {
         );
 
         let config_path = None;
-        let cache_root = root.join(".fallow");
+        let cache_root = root.join(".plow");
         let opts = AuditOptions {
             root,
             cache_dir: &cache_root,
@@ -3552,7 +3546,7 @@ export function App() {
         .expect("app should be modified");
 
         let config_path = None;
-        let cache_root = root.join(".fallow");
+        let cache_root = root.join(".plow");
         let opts = AuditOptions {
             root,
             cache_dir: &cache_root,
@@ -3689,7 +3683,7 @@ export function App() {
         .expect("app should be modified");
 
         let config_path = None;
-        let cache_root = root.join(".fallow");
+        let cache_root = root.join(".plow");
         let opts = AuditOptions {
             root: &root,
             cache_dir: &cache_root,
@@ -3764,14 +3758,14 @@ export function App() {
             &["-c", "commit.gpgsign=false", "commit", "-m", "initial"],
         );
 
-        let explicit_config = root.join(".fallowrc.json");
+        let explicit_config = root.join(".plowrc.json");
         fs::write(&explicit_config, r#"{"rules":{"unused-files":"error"}}"#)
             .expect("new config should be written");
         fs::write(root.join("src/index.ts"), "export const used = 2;\n")
             .expect("index should be modified");
 
         let config_path = Some(explicit_config);
-        let cache_root = root.join(".fallow");
+        let cache_root = root.join(".plow");
         let opts = AuditOptions {
             root,
             cache_dir: &cache_root,
@@ -3821,7 +3815,7 @@ export function App() {
         )
         .expect("package.json should be written");
         fs::write(
-            root.join(".fallowrc.json"),
+            root.join(".plowrc.json"),
             r#"{"rules":{"unused-dependencies":"off"}}"#,
         )
         .expect("base config should be written");
@@ -3836,7 +3830,7 @@ export function App() {
         );
 
         fs::write(
-            root.join(".fallowrc.json"),
+            root.join(".plowrc.json"),
             r#"{"rules":{"unused-dependencies":"error"}}"#,
         )
         .expect("current config should be written");
@@ -3847,7 +3841,7 @@ export function App() {
         .expect("package.json should be touched");
 
         let config_path = None;
-        let cache_root = root.join(".fallow");
+        let cache_root = root.join(".plow");
         let opts = AuditOptions {
             root,
             cache_dir: &cache_root,
@@ -3903,7 +3897,7 @@ export function App() {
         )
         .expect("package.json should be written");
         fs::write(
-            root.join(".fallowrc.json"),
+            root.join(".plowrc.json"),
             r#"{"rules":{"unused-dependencies":"off"}}"#,
         )
         .expect("base config should be written");
@@ -3918,7 +3912,7 @@ export function App() {
         );
 
         fs::write(
-            root.join(".fallowrc.json"),
+            root.join(".plowrc.json"),
             r#"{"rules":{"unused-dependencies":"error"}}"#,
         )
         .expect("current config should be written");
@@ -3929,7 +3923,7 @@ export function App() {
         .expect("package.json should be touched");
 
         let config_path = None;
-        let cache_root = root.join(".fallow");
+        let cache_root = root.join(".plow");
         let opts = AuditOptions {
             root,
             cache_dir: &cache_root,
@@ -4006,7 +4000,7 @@ export function App() {
         )
         .expect("package.json should be written");
         fs::write(
-            root.join(".fallowrc.json"),
+            root.join(".plowrc.json"),
             r#"{"duplicates":{"minTokens":5,"minLines":2,"mode":"strict"}}"#,
         )
         .expect("config should be written");
@@ -4034,7 +4028,7 @@ export function App() {
         .expect("changed file should be modified");
 
         let config_path = None;
-        let cache_root = root.join(".fallow");
+        let cache_root = root.join(".plow");
         let opts = AuditOptions {
             root,
             cache_dir: &cache_root,
@@ -4130,13 +4124,13 @@ export function App() {
     }
 
     #[test]
-    fn tokens_equivalent_fallow_ignore_marker_forces_false() {
+    fn tokens_equivalent_plow_ignore_marker_forces_false() {
         // The guard fires before tokenization; even identical content containing the
         // marker must return false so suppression changes are never skipped.
-        let code = "// fallow-ignore-next-line unused-exports\nexport const x = 1;\n";
+        let code = "// plow-ignore-next-line unused-exports\nexport const x = 1;\n";
         assert!(
             !js_ts_tokens_equivalent(Path::new("a.ts"), code, code),
-            "fallow-ignore marker in either side must force false"
+            "plow-ignore marker in either side must force false"
         );
     }
 

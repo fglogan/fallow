@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use fallow_config::{NapiConfig, PackageJson};
+use plow_config::{NapiConfig, PackageJson};
 use rustc_hash::FxHashSet;
 
 use super::Plugin;

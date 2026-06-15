@@ -1,8 +1,8 @@
 // VS Code injects this module into the extension host at runtime.
-// fallow-ignore-next-line unlisted-dependency
+// plow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
 import { compareVersions } from "./analysis-utils.js";
-import { execFallow, FallowExecError, resolveCliForRun } from "./commands.js";
+import { execPlow, PlowExecError, resolveCliForRun } from "./commands.js";
 import {
   getCoveragePath,
   getCoverageTop,
@@ -29,7 +29,7 @@ const getWorkspaceRoot = (): string | null => {
 
 /**
  * Prompt for a runtime-coverage capture (file or folder) and persist the choice
- * to `fallow.coverage.capturePath` (workspace scope). Returns the absolute path,
+ * to `plow.coverage.capturePath` (workspace scope). Returns the absolute path,
  * or null when the user cancels.
  */
 const promptForCapturePath = async (): Promise<string | null> => {
@@ -47,7 +47,7 @@ const promptForCapturePath = async (): Promise<string | null> => {
   }
 
   await vscode.workspace
-    .getConfiguration("fallow")
+    .getConfiguration("plow")
     .update(CAPTURE_PATH_SETTING, chosen.fsPath, vscode.ConfigurationTarget.Workspace);
 
   return chosen.fsPath;
@@ -61,7 +61,7 @@ const isStructuredError = (value: unknown): value is { error: true; message?: st
   (value as { error: unknown }).error === true;
 
 /**
- * Run `fallow coverage analyze --runtime-coverage <path> --format json` against
+ * Run `plow coverage analyze --runtime-coverage <path> --format json` against
  * a local capture and return its `runtime_coverage` block. Mirrors `runAnalysis`
  * in `commands.ts`: resolves (and self-heals) the CLI, version-gates the
  * subcommand, spawns, and surfaces failures as error toasts. Returns null when
@@ -76,7 +76,7 @@ export const runCoverageAnalysis = async (
 ): Promise<RuntimeCoverageReport | null> => {
   const root = getWorkspaceRoot();
   if (!root) {
-    void vscode.window.showWarningMessage("Fallow: no workspace folder open.");
+    void vscode.window.showWarningMessage("Plow: no workspace folder open.");
     return null;
   }
 
@@ -90,7 +90,7 @@ export const runCoverageAnalysis = async (
 
     if (version !== null && compareVersions(version, COVERAGE_ANALYZE_MIN_VERSION) < 0) {
       void vscode.window.showErrorMessage(
-        `Fallow: runtime coverage requires CLI v${COVERAGE_ANALYZE_MIN_VERSION} or newer (resolved v${version}). Update the fallow binary or enable auto-download.`,
+        `Plow: runtime coverage requires CLI v${COVERAGE_ANALYZE_MIN_VERSION} or newer (resolved v${version}). Update the plow binary or enable auto-download.`,
       );
       return null;
     }
@@ -102,10 +102,10 @@ export const runCoverageAnalysis = async (
       configPath: getResolvedConfigPath(),
     });
 
-    const output = await execFallow(binary, args, root);
+    const output = await execPlow(binary, args, root);
     if (output.trim().length === 0) {
       void vscode.window.showWarningMessage(
-        "Fallow: the coverage capture produced no runtime data.",
+        "Plow: the coverage capture produced no runtime data.",
       );
       return null;
     }
@@ -113,7 +113,7 @@ export const runCoverageAnalysis = async (
     const parsed: unknown = JSON.parse(output);
     if (isStructuredError(parsed)) {
       void vscode.window.showErrorMessage(
-        `Fallow coverage failed: ${parsed.message ?? "the capture could not be analyzed."}`,
+        `Plow coverage failed: ${parsed.message ?? "the capture could not be analyzed."}`,
       );
       return null;
     }
@@ -121,7 +121,7 @@ export const runCoverageAnalysis = async (
     const result = parsed as CoverageAnalyzeOutput;
     if (!result.runtime_coverage) {
       void vscode.window.showWarningMessage(
-        "Fallow: the coverage capture produced no runtime data.",
+        "Plow: the coverage capture produced no runtime data.",
       );
       return null;
     }
@@ -129,17 +129,17 @@ export const runCoverageAnalysis = async (
     return result.runtime_coverage;
   } catch (err) {
     // A non-zero gate exit (license 3 / sidecar 4-5) rejects with a
-    // FallowExecError that still carries the CLI's structured stdout envelope,
+    // PlowExecError that still carries the CLI's structured stdout envelope,
     // which the generic fallback would otherwise discard. Recover the actionable
-    // message and the concrete next step (`fallow license activate` / `fallow
+    // message and the concrete next step (`plow license activate` / `plow
     // coverage setup`) for this paid, separately-installed feature.
-    if (err instanceof FallowExecError) {
+    if (err instanceof PlowExecError) {
       const message = buildCoverageGateMessage(err.exitCode, err.stdout, err.message);
-      void vscode.window.showErrorMessage(`Fallow coverage failed: ${message}`);
+      void vscode.window.showErrorMessage(`Plow coverage failed: ${message}`);
       return null;
     }
     const message = err instanceof Error ? err.message : String(err);
-    void vscode.window.showErrorMessage(`Fallow coverage failed: ${message}`);
+    void vscode.window.showErrorMessage(`Plow coverage failed: ${message}`);
     return null;
   }
 };

@@ -1,5 +1,5 @@
 [package]
-name = "fallow-cli"
+name = "plow-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,11 +8,11 @@ homepage.workspace = true
 documentation.workspace = true
 keywords.workspace = true
 categories.workspace = true
-description = "CLI for fallow, Rust-native codebase intelligence for TypeScript and JavaScript"
+description = "CLI for plow, Rust-native codebase intelligence for TypeScript and JavaScript"
 readme = "../../README.md"
 
 [[bin]]
-name = "fallow"
+name = "plow"
 path = "src/main.rs"
 
 [[bin]]
@@ -21,7 +21,7 @@ path = "src/bin/stub_sidecar.rs"
 required-features = ["test-sidecar-key"]
 
 [[bin]]
-name = "fallow-schema-emit"
+name = "plow-schema-emit"
 path = "src/bin/schema_emit.rs"
 required-features = ["schema-emit"]
 
@@ -35,29 +35,29 @@ default = []
 test-sidecar-key = []
 # Library feature that toggles `JsonSchema` derives on the health output types
 # defined in `crates/cli/src/health_types/`. Mirrors the `schema` feature on
-# `fallow-types` and `fallow-core` so the schema-emit binary can derive a
+# `plow-types` and `plow-core` so the schema-emit binary can derive a
 # single `JsonSchema` document covering health alongside the rest of the
 # output contract. Strictly additive: non-schema builds pay zero compile cost
 # because every derive is gated behind `#[cfg_attr(feature = "schema", ...)]`.
-schema = ["dep:schemars", "fallow-types/schema"]
-# Build-only feature that enables the `fallow-schema-emit` binary, which
+schema = ["dep:schemars", "plow-types/schema"]
+# Build-only feature that enables the `plow-schema-emit` binary, which
 # regenerates `docs/output-schema.json` from the Rust source of truth. Pulls in
 # schemars across the workspace via the per-crate `schema` features. Not part
 # of the published CLI; used by the schema drift gate and contributors editing
 # result types.
 schema-emit = [
     "schema",
-    "fallow-types/schema",
-    "fallow-core/schema",
+    "plow-types/schema",
+    "plow-core/schema",
 ]
 
 [dependencies]
-fallow-core = { workspace = true }
-fallow-config = { workspace = true }
-fallow-types = { workspace = true }
-fallow-v8-coverage = { version = "2.96.0", path = "../v8-coverage" }
-fallow-cov-protocol = "0.8"
-fallow-license = { version = "2.96.0", path = "../license" }
+plow-core = { workspace = true }
+plow-config = { workspace = true }
+plow-types = { workspace = true }
+plow-v8-coverage = { version = "2.96.0", path = "../v8-coverage" }
+plow-cov-protocol = { package = "fallow-cov-protocol", version = "0.8" }
+plow-license = { version = "2.96.0", path = "../license" }
 ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 clap = { workspace = true }
 dunce = { workspace = true }
@@ -99,26 +99,26 @@ signal-hook = { workspace = true }
 windows-sys = { workspace = true }
 
 [lib]
-name = "fallow_cli"
+name = "plow_cli"
 path = "src/lib.rs"
 doctest = false
 
 [dev-dependencies]
 toml = { workspace = true }
 insta = { workspace = true }
-fallow-types = { workspace = true }
+plow-types = { workspace = true }
 oxc_span = { workspace = true }
 proptest = { workspace = true }
 proc-macro2 = { version = "1", features = ["span-locations"] }
 syn = { version = "2", features = ["full"] }
 base64 = "0.22"
 ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
-fallow-cov-protocol = "0.8"
+plow-cov-protocol = { package = "fallow-cov-protocol", version = "0.8" }
 serde_yaml_ng = { workspace = true }
 
 [package.metadata.cargo-shear]
 ignored = [
-    "miette",       # feature-only dep: activates fancy rendering for fallow-config's miette::Report
+    "miette",       # feature-only dep: activates fancy rendering for plow-config's miette::Report
     "proc-macro2",  # feature-only dep: activates `span-locations` so syn-returned `.span().start().line` reports real source positions in the schema-drift gate (crates/cli/tests/schema_tests.rs); no explicit import
 ]
 

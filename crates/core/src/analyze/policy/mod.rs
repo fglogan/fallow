@@ -1,8 +1,8 @@
 use rustc_hash::FxHashMap;
 
-use fallow_config::{ResolvedConfig, RulePackRule, RulePackRuleKind, Severity};
-use fallow_types::extract::ModuleInfo;
-use fallow_types::results::{PolicyRuleKind, PolicyViolation, PolicyViolationSeverity};
+use plow_config::{ResolvedConfig, RulePackRule, RulePackRuleKind, Severity};
+use plow_types::extract::ModuleInfo;
+use plow_types::results::{PolicyRuleKind, PolicyViolation, PolicyViolationSeverity};
 
 use crate::discover::FileId;
 use crate::graph::ModuleGraph;

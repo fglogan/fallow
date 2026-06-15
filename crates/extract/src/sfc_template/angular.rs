@@ -16,7 +16,7 @@ use std::sync::LazyLock;
 
 use rustc_hash::FxHashSet;
 
-use fallow_types::extract::SinkSite;
+use plow_types::extract::SinkSite;
 
 use crate::MemberAccess;
 use crate::template_usage::{TemplateSnippetKind, collect_unresolved_refs_and_accesses};

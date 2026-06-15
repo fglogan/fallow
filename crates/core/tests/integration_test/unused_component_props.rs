@@ -9,7 +9,7 @@ use super::common::{create_config, fixture_path};
 fn flags_unused_props_but_credits_alias_and_abstains_on_forward() {
     let root = fixture_path("unused-component-prop");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let flagged: Vec<&str> = results
         .unused_component_props
         .iter()

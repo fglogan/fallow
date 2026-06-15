@@ -79,7 +79,7 @@ afterEach(() => {
 describe("diagnosticTogglePresentation", () => {
   it("shows the hidden state when all findings are muted", () => {
     const p = diagnosticTogglePresentation(true, 0);
-    expect(p.text).toBe("$(eye-closed) Fallow: hidden");
+    expect(p.text).toBe("$(eye-closed) Plow: hidden");
     expect(p.tooltip).toContain("hidden in this editor");
     expect(p.tooltip).toContain("Click to show");
     expect(p.tooltip).toContain("still report every finding");
@@ -89,15 +89,15 @@ describe("diagnosticTogglePresentation", () => {
 
   it("shows the visible state with a hide-all hint when nothing is muted", () => {
     const p = diagnosticTogglePresentation(false, 0);
-    expect(p.text).toBe("$(eye) Fallow");
-    expect(p.tooltip).toContain("Fallow findings are visible");
+    expect(p.text).toBe("$(eye) Plow");
+    expect(p.tooltip).toContain("Plow findings are visible");
     expect(p.tooltip).toContain("Click to hide all");
-    expect(p.tooltip).toContain("CI and `fallow check` are unaffected");
+    expect(p.tooltip).toContain("CI and `plow check` are unaffected");
   });
 
   it("names the hidden-category count with singular grammar", () => {
     const p = diagnosticTogglePresentation(false, 1);
-    expect(p.text).toBe("$(eye) Fallow");
+    expect(p.text).toBe("$(eye) Plow");
     expect(p.tooltip).toContain("1 category hidden");
     expect(p.tooltip).not.toContain("1 categories");
   });
@@ -116,21 +116,21 @@ describe("diagnostic status bar lifecycle", () => {
     const item = createDiagnosticStatusBar(filter) as unknown as FakeStatusBarItem;
 
     expect(hasDiagnosticStatusBar()).toBe(true);
-    expect(item.command).toBe("fallow.toggleAllDiagnostics");
-    expect(item.text).toBe("$(eye) Fallow");
+    expect(item.command).toBe("plow.toggleAllDiagnostics");
+    expect(item.text).toBe("$(eye) Plow");
     expect(item.show).toHaveBeenCalledTimes(1);
   });
 
   it("re-renders when the filter state changes", () => {
     const { filter, set } = makeFilter();
     const item = createDiagnosticStatusBar(filter) as unknown as FakeStatusBarItem;
-    expect(item.text).toBe("$(eye) Fallow");
+    expect(item.text).toBe("$(eye) Plow");
 
     set({ mutedAll: true });
-    expect(item.text).toBe("$(eye-closed) Fallow: hidden");
+    expect(item.text).toBe("$(eye-closed) Plow: hidden");
 
     set({ mutedAll: false, categories: ["code-duplication", "unused-export"] });
-    expect(item.text).toBe("$(eye) Fallow");
+    expect(item.text).toBe("$(eye) Plow");
     expect(tooltipValue(item)).toContain("2 categories hidden");
   });
 
@@ -158,6 +158,6 @@ describe("diagnostic status bar lifecycle", () => {
 
     // A late filter event after dispose must not touch the disposed item.
     set({ mutedAll: true });
-    expect(item.text).toBe("$(eye) Fallow");
+    expect(item.text).toBe("$(eye) Plow");
   });
 });

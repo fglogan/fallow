@@ -1,12 +1,12 @@
-use fallow_config::{FallowConfig, OutputFormat, RulesConfig, Severity};
+use plow_config::{OutputFormat, PlowConfig, RulesConfig, Severity};
 
 use crate::common::fixture_path;
 
 /// Resolve a fixture with the `misplaced-directive` rule at `warn` (its
 /// default). The detector is gated on the project declaring `next`, which the
 /// `misplaced-directive` fixture's `package.json` does.
-fn fixture_config(name: &str) -> fallow_config::ResolvedConfig {
-    FallowConfig {
+fn fixture_config(name: &str) -> plow_config::ResolvedConfig {
+    PlowConfig {
         rules: RulesConfig {
             misplaced_directive: Severity::Warn,
             ..RulesConfig::default()
@@ -19,7 +19,7 @@ fn fixture_config(name: &str) -> fallow_config::ResolvedConfig {
 #[test]
 fn post_import_directive_is_flagged_once() {
     let config = fixture_config("misplaced-directive");
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let findings: Vec<(String, String)> = results
         .misplaced_directives
@@ -48,7 +48,7 @@ fn post_import_directive_is_flagged_once() {
 #[test]
 fn leading_directive_is_not_flagged() {
     let config = fixture_config("misplaced-directive");
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     // app/widget.tsx carries a correctly-positioned leading "use client", which
     // oxc places in `program.directives`; it must never be flagged.
@@ -66,7 +66,7 @@ fn leading_directive_is_not_flagged() {
 #[test]
 fn no_findings_when_next_is_absent() {
     let config = fixture_config("misplaced-directive-no-next");
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.misplaced_directives.is_empty(),

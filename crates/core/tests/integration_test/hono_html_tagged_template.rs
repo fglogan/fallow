@@ -15,7 +15,7 @@ use super::common::{create_config, fixture_path};
 fn html_tagged_template_makes_static_assets_reachable() {
     let root = fixture_path("hono-html-tagged-template");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_names: Vec<String> = results
         .unused_files

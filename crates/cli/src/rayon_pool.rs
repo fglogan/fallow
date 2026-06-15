@@ -26,7 +26,7 @@ fn build_pool(threads: usize) -> rayon::ThreadPoolBuilder {
 mod tests {
     use std::process::Command;
 
-    const STACK_PROBE_ENV: &str = "FALLOW_RAYON_STACK_PROBE_CHILD";
+    const STACK_PROBE_ENV: &str = "PLOW_RAYON_STACK_PROBE_CHILD";
     const STACK_PROBE_TEST: &str =
         "rayon_pool::tests::configured_pool_survives_deep_worker_stack_probe";
 

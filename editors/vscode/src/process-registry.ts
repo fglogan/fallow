@@ -1,7 +1,7 @@
 import type { ChildProcess } from "node:child_process";
 
 /**
- * Tracks every `fallow` child process spawned by the extension (analysis, audit,
+ * Tracks every `plow` child process spawned by the extension (analysis, audit,
  * health, security, fix, workspaces, and license invocations) so they can be
  * killed on extension deactivation.
  *

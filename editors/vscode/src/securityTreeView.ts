@@ -1,7 +1,7 @@
 // VS Code calls TreeDataProvider members through the registered provider.
-// fallow-ignore-file unused-class-member
+// plow-ignore-file unused-class-member
 // VS Code injects this module into the extension host at runtime.
-// fallow-ignore-next-line unlisted-dependency
+// plow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
 import { openFileCommand } from "./openFileCommand.js";
 import { countSecurityFindings, hopRoleLabel, securityFindingLabel } from "./security-utils.js";
@@ -148,7 +148,7 @@ class SecurityFindingItem extends vscode.TreeItem {
 }
 
 /**
- * Renders local security CANDIDATES from `fallow security` into the Security
+ * Renders local security CANDIDATES from `plow security` into the Security
  * Candidates view. Findings are grouped by kind and CWE/category, then each
  * finding can expand into detector trace hops, while source-reachability traces
  * appear in the finding tooltip. Every node frames the finding as unverified

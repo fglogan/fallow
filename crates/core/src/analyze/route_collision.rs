@@ -28,7 +28,7 @@ use std::path::{Path, PathBuf};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_config::{ResolvedConfig, WorkspaceInfo};
+use plow_config::{ResolvedConfig, WorkspaceInfo};
 
 use crate::discover::FileId;
 use crate::graph::ModuleGraph;
@@ -45,7 +45,7 @@ type BucketKey = (String, String, String);
 /// Returns empty unless the project declares `next`. Emits one
 /// [`RouteCollision`] per colliding file; `conflicting_paths` lists the other
 /// files that own the same URL (path-sorted). A file carrying a
-/// `// fallow-ignore-file route-collision` marker is skipped via
+/// `// plow-ignore-file route-collision` marker is skipped via
 /// [`SuppressionContext`], but it still appears in its siblings'
 /// `conflicting_paths` because the collision is real regardless of suppression.
 #[must_use]

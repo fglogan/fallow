@@ -1,8 +1,8 @@
 use crate::report::sink::outln;
 use std::path::Path;
 
-use fallow_core::duplicates::DuplicationReport;
-use fallow_core::results::{AnalysisResults, UnusedExport, UnusedMember};
+use plow_core::duplicates::DuplicationReport;
+use plow_core::results::{AnalysisResults, UnusedExport, UnusedMember};
 
 use super::grouping::ResultGroup;
 use super::{normalize_uri, relative_path};
@@ -18,7 +18,7 @@ fn compact_path(path: &Path, root: &Path) -> String {
 }
 
 fn compact_circular_dependency_line(
-    cycle: &fallow_core::results::CircularDependencyFinding,
+    cycle: &plow_core::results::CircularDependencyFinding,
     root: &Path,
 ) -> String {
     let chain: Vec<String> = cycle
@@ -47,7 +47,7 @@ fn compact_circular_dependency_line(
 }
 
 fn compact_re_export_cycle_line(
-    cycle: &fallow_core::results::ReExportCycleFinding,
+    cycle: &plow_core::results::ReExportCycleFinding,
     root: &Path,
 ) -> String {
     let chain: Vec<String> = cycle
@@ -58,8 +58,8 @@ fn compact_re_export_cycle_line(
         .collect();
     let first_file = chain.first().map_or_else(String::new, Clone::clone);
     let kind_tag = match cycle.cycle.kind {
-        fallow_core::results::ReExportCycleKind::SelfLoop => " (self-loop)",
-        fallow_core::results::ReExportCycleKind::MultiNode => "",
+        plow_core::results::ReExportCycleKind::SelfLoop => " (self-loop)",
+        plow_core::results::ReExportCycleKind::MultiNode => "",
     };
     format!(
         "re-export-cycle:{}:{}{}",
@@ -70,7 +70,7 @@ fn compact_re_export_cycle_line(
 }
 
 fn compact_boundary_violation_line(
-    item: &fallow_core::results::BoundaryViolationFinding,
+    item: &plow_core::results::BoundaryViolationFinding,
     root: &Path,
 ) -> String {
     format!(
@@ -85,7 +85,7 @@ fn compact_boundary_violation_line(
 }
 
 fn compact_boundary_coverage_line(
-    item: &fallow_core::results::BoundaryCoverageViolationFinding,
+    item: &plow_core::results::BoundaryCoverageViolationFinding,
     root: &Path,
 ) -> String {
     format!(
@@ -96,7 +96,7 @@ fn compact_boundary_coverage_line(
 }
 
 fn compact_boundary_call_line(
-    item: &fallow_core::results::BoundaryCallViolationFinding,
+    item: &plow_core::results::BoundaryCallViolationFinding,
     root: &Path,
 ) -> String {
     format!(
@@ -110,7 +110,7 @@ fn compact_boundary_call_line(
 }
 
 fn compact_stale_suppression_line(
-    item: &fallow_core::results::StaleSuppression,
+    item: &plow_core::results::StaleSuppression,
     root: &Path,
 ) -> String {
     format!(
@@ -122,7 +122,7 @@ fn compact_stale_suppression_line(
 }
 
 fn compact_catalog_reference_line(
-    item: &fallow_core::results::UnresolvedCatalogReferenceFinding,
+    item: &plow_core::results::UnresolvedCatalogReferenceFinding,
     root: &Path,
 ) -> String {
     format!(
@@ -135,7 +135,7 @@ fn compact_catalog_reference_line(
 }
 
 fn compact_unused_override_line(
-    item: &fallow_core::results::UnusedDependencyOverrideFinding,
+    item: &plow_core::results::UnusedDependencyOverrideFinding,
     root: &Path,
 ) -> String {
     format!(
@@ -148,7 +148,7 @@ fn compact_unused_override_line(
 }
 
 fn compact_misconfigured_override_line(
-    item: &fallow_core::results::MisconfiguredDependencyOverrideFinding,
+    item: &plow_core::results::MisconfiguredDependencyOverrideFinding,
     root: &Path,
 ) -> String {
     format!(
@@ -855,8 +855,8 @@ mod tests {
         RuntimeCoverageVerdict,
     };
     use crate::report::test_helpers::sample_results;
-    use fallow_core::extract::MemberKind;
-    use fallow_core::results::*;
+    use plow_core::extract::MemberKind;
+    use plow_core::results::*;
     use std::path::PathBuf;
 
     #[test]
@@ -924,7 +924,7 @@ mod tests {
                     capture_quality: None,
                 },
                 findings: vec![RuntimeCoverageFinding {
-                    id: "fallow:prod:deadbeef".to_owned(),
+                    id: "plow:prod:deadbeef".to_owned(),
                     stable_id: None,
                     path: root.join("src/cold.ts"),
                     function: "coldPath".to_owned(),
@@ -944,7 +944,7 @@ mod tests {
                     source_hash: None,
                 }],
                 hot_paths: vec![RuntimeCoverageHotPath {
-                    id: "fallow:hot:cafebabe".to_owned(),
+                    id: "plow:hot:cafebabe".to_owned(),
                     stable_id: None,
                     path: root.join("src/hot.ts"),
                     function: "hotPath".to_owned(),
@@ -975,11 +975,11 @@ mod tests {
         );
         assert_eq!(
             lines[1],
-            "runtime-coverage:src/cold.ts:14:coldPath:id=fallow:prod:deadbeef,verdict=review_required,invocations=0,confidence=medium"
+            "runtime-coverage:src/cold.ts:14:coldPath:id=plow:prod:deadbeef,verdict=review_required,invocations=0,confidence=medium"
         );
         assert_eq!(
             lines[2],
-            "production-hot-path:src/hot.ts:3:hotPath:id=fallow:hot:cafebabe,invocations=250,percentile=99"
+            "production-hot-path:src/hot.ts:3:hotPath:id=plow:hot:cafebabe,invocations=250,percentile=99"
         );
     }
 
@@ -1003,7 +1003,7 @@ mod tests {
                 ..Default::default()
             },
             findings: vec![CoverageIntelligenceFinding {
-                id: "fallow:coverage-intel:abc123".to_owned(),
+                id: "plow:coverage-intel:abc123".to_owned(),
                 path: root.join("src/dead.ts"),
                 identity: Some("deadPath".to_owned()),
                 line: 9,
@@ -1014,7 +1014,7 @@ mod tests {
                 ],
                 recommendation: CoverageIntelligenceRecommendation::DeleteAfterConfirmingOwner,
                 confidence: CoverageIntelligenceConfidence::High,
-                related_ids: vec!["fallow:prod:deadbeef".to_owned()],
+                related_ids: vec!["plow:prod:deadbeef".to_owned()],
                 evidence: CoverageIntelligenceEvidence {
                     match_confidence: CoverageIntelligenceMatchConfidence::Direct,
                     ..Default::default()
@@ -1034,7 +1034,7 @@ mod tests {
         );
         assert_eq!(
             lines[1],
-            "coverage-intelligence:src/dead.ts:9:deadPath:id=fallow:coverage-intel:abc123,verdict=high-confidence-delete,recommendation=delete-after-confirming-owner,confidence=high,signals=static_unused+runtime_cold"
+            "coverage-intelligence:src/dead.ts:9:deadPath:id=plow:coverage-intel:abc123,verdict=high-confidence-delete,recommendation=delete-after-confirming-owner,confidence=high,signals=static_unused+runtime_cold"
         );
     }
 

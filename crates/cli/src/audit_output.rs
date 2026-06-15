@@ -2,7 +2,7 @@ use std::io::IsTerminal;
 use std::process::ExitCode;
 
 use colored::Colorize;
-use fallow_config::{AuditGate, OutputFormat};
+use plow_config::{AuditGate, OutputFormat};
 
 use crate::error::emit_error;
 use crate::report;
@@ -92,7 +92,7 @@ fn print_audit_human(result: &AuditResult, quiet: bool, explain: bool, output: O
         {
             println!(
                 "{}",
-                "Tip: run `fallow explain <issue label>`; spaces and hyphens both work, e.g. `fallow explain unused files`."
+                "Tip: run `plow explain <issue label>`; spaces and hyphens both work, e.g. `plow explain unused files`."
                     .dimmed()
             );
             println!();
@@ -173,7 +173,7 @@ fn short_base_ref(base_ref: &str) -> &str {
 }
 
 /// Format the scope context line. When the base ref was auto-detected (or set
-/// via `FALLOW_AUDIT_BASE`), append the provenance so the comparison target is
+/// via `PLOW_AUDIT_BASE`), append the provenance so the comparison target is
 /// checkable, e.g. `vs a1b2c3d4e5f6 (merge-base with origin/main)`.
 fn format_scope_line(result: &AuditResult) -> String {
     format_scope_line_parts(
@@ -509,15 +509,15 @@ fn print_audit_sarif(result: &AuditResult) -> ExitCode {
         let run = serde_json::json!({
             "tool": {
                 "driver": {
-                    "name": "fallow",
+                    "name": "plow",
                     "version": env!("CARGO_PKG_VERSION"),
-                    "informationUri": "https://github.com/fallow-rs/fallow",
+                    "informationUri": "https://github.com/fglogan/genesis-plow",
                 }
             },
-            "automationDetails": { "id": "fallow/audit/dupes" },
+            "automationDetails": { "id": "plow/audit/dupes" },
             "results": dupes.report.clone_groups.iter().enumerate().map(|(i, g)| {
                 serde_json::json!({
-                    "ruleId": "fallow/code-duplication",
+                    "ruleId": "plow/code-duplication",
                     "level": "warning",
                     "message": { "text": format!("Clone group {} ({} lines, {} instances)", i + 1, g.line_count, g.instances.len()) },
                 })

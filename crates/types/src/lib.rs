@@ -1,6 +1,6 @@
-//! Shared types for fallow codebase intelligence.
+//! Shared types for plow codebase intelligence.
 //!
-//! This crate contains type definitions used across multiple fallow crates
+//! This crate contains type definitions used across multiple plow crates
 //! (core, CLI, LSP). It has no analysis logic, only data structures.
 
 #![warn(missing_docs)]
@@ -24,8 +24,8 @@ pub mod discover;
 pub mod envelope;
 /// Module extraction types: exports, imports, re-exports, and member info.
 pub mod extract;
-/// Machine-readable manifest of the fallow MCP server's tools, shared by
-/// `fallow schema` and the telemetry tool-name allowlist; kept in sync with
+/// Machine-readable manifest of the plow MCP server's tools, shared by
+/// `plow schema` and the telemetry tool-name allowlist; kept in sync with
 /// the live tool router by a drift test in `crates/mcp`.
 pub mod mcp_manifest;
 /// JSON-output augmentation types: `IssueAction` enum + variants.

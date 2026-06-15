@@ -157,7 +157,7 @@ name = "knip"
 ecosystem = "analysis"
 
 [[exact]]
-name = "fallow"
+name = "plow"
 ecosystem = "analysis"
 
 [[exact]]

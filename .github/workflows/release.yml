@@ -41,72 +41,72 @@ jobs:
         id: crates_io_auth
         uses: rust-lang/crates-io-auth-action@bbd81622f20ce9e2dd9622e3218b975523e45bbe # v1.0.4
 
-      - name: Publish fallow-types
-        run: cargo publish -p fallow-types --no-verify || echo "Already published, skipping"
+      - name: Publish plow-types
+        run: cargo publish -p plow-types --no-verify || echo "Already published, skipping"
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.crates_io_auth.outputs.token }}
 
       - name: Wait for crates.io index
         run: sleep 30
 
-      - name: Publish fallow-config
-        run: cargo publish -p fallow-config --no-verify || echo "Already published, skipping"
+      - name: Publish plow-config
+        run: cargo publish -p plow-config --no-verify || echo "Already published, skipping"
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.crates_io_auth.outputs.token }}
 
       - name: Wait for crates.io index
         run: sleep 30
 
-      - name: Publish fallow-extract
-        run: cargo publish -p fallow-extract --no-verify || echo "Already published, skipping"
+      - name: Publish plow-extract
+        run: cargo publish -p plow-extract --no-verify || echo "Already published, skipping"
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.crates_io_auth.outputs.token }}
 
       - name: Wait for crates.io index
         run: sleep 30
 
-      - name: Publish fallow-graph
-        run: cargo publish -p fallow-graph --no-verify || echo "Already published, skipping"
+      - name: Publish plow-graph
+        run: cargo publish -p plow-graph --no-verify || echo "Already published, skipping"
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.crates_io_auth.outputs.token }}
 
       - name: Wait for crates.io index
         run: sleep 30
 
-      - name: Publish fallow-core
-        run: cargo publish -p fallow-core --no-verify || echo "Already published, skipping"
+      - name: Publish plow-core
+        run: cargo publish -p plow-core --no-verify || echo "Already published, skipping"
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.crates_io_auth.outputs.token }}
 
       - name: Wait for crates.io index
         run: sleep 30
 
-      - name: Publish fallow-license
-        run: cargo publish -p fallow-license --no-verify || echo "Already published, skipping"
+      - name: Publish plow-license
+        run: cargo publish -p plow-license --no-verify || echo "Already published, skipping"
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.crates_io_auth.outputs.token }}
 
       - name: Wait for crates.io index
         run: sleep 30
 
-      - name: Publish fallow-v8-coverage
-        run: cargo publish -p fallow-v8-coverage --no-verify || echo "Already published, skipping"
+      - name: Publish plow-v8-coverage
+        run: cargo publish -p plow-v8-coverage --no-verify || echo "Already published, skipping"
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.crates_io_auth.outputs.token }}
 
       - name: Wait for crates.io index
         run: sleep 30
 
-      - name: Publish fallow-cli
-        run: cargo publish -p fallow-cli --no-verify || echo "Already published, skipping"
+      - name: Publish plow-cli
+        run: cargo publish -p plow-cli --no-verify || echo "Already published, skipping"
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.crates_io_auth.outputs.token }}
 
       - name: Wait for crates.io index
         run: sleep 30
 
-      - name: Publish fallow-mcp
-        run: cargo publish -p fallow-mcp --no-verify || echo "Already published, skipping"
+      - name: Publish plow-mcp
+        run: cargo publish -p plow-mcp --no-verify || echo "Already published, skipping"
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.crates_io_auth.outputs.token }}
 
@@ -122,53 +122,53 @@ jobs:
         include:
           - target: x86_64-apple-darwin
             os: macos-latest
-            binary: fallow
-            lsp_binary: fallow-lsp
-            mcp_binary: fallow-mcp
+            binary: plow
+            lsp_binary: plow-lsp
+            mcp_binary: plow-mcp
             npm_dir: darwin-x64
           - target: aarch64-apple-darwin
             os: macos-latest
-            binary: fallow
-            lsp_binary: fallow-lsp
-            mcp_binary: fallow-mcp
+            binary: plow
+            lsp_binary: plow-lsp
+            mcp_binary: plow-mcp
             npm_dir: darwin-arm64
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             container: rust:1.95-bullseye
-            binary: fallow
-            lsp_binary: fallow-lsp
-            mcp_binary: fallow-mcp
+            binary: plow
+            lsp_binary: plow-lsp
+            mcp_binary: plow-mcp
             npm_dir: linux-x64-gnu
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             container: rust:1.95-bullseye
-            binary: fallow
-            lsp_binary: fallow-lsp
-            mcp_binary: fallow-mcp
+            binary: plow
+            lsp_binary: plow-lsp
+            mcp_binary: plow-mcp
             npm_dir: linux-arm64-gnu
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
-            binary: fallow
-            lsp_binary: fallow-lsp
-            mcp_binary: fallow-mcp
+            binary: plow
+            lsp_binary: plow-lsp
+            mcp_binary: plow-mcp
             npm_dir: linux-x64-musl
           - target: aarch64-unknown-linux-musl
             os: ubuntu-latest
-            binary: fallow
-            lsp_binary: fallow-lsp
-            mcp_binary: fallow-mcp
+            binary: plow
+            lsp_binary: plow-lsp
+            mcp_binary: plow-mcp
             npm_dir: linux-arm64-musl
           - target: x86_64-pc-windows-msvc
             os: windows-latest
-            binary: fallow.exe
-            lsp_binary: fallow-lsp.exe
-            mcp_binary: fallow-mcp.exe
+            binary: plow.exe
+            lsp_binary: plow-lsp.exe
+            mcp_binary: plow-mcp.exe
             npm_dir: win32-x64-msvc
           - target: aarch64-pc-windows-msvc
             os: windows-11-arm
-            binary: fallow.exe
-            lsp_binary: fallow-lsp.exe
-            mcp_binary: fallow-mcp.exe
+            binary: plow.exe
+            lsp_binary: plow-lsp.exe
+            mcp_binary: plow-mcp.exe
             npm_dir: win32-arm64-msvc
 
     steps:
@@ -205,7 +205,7 @@ jobs:
           $apt_get update
           $apt_get install -y gcc-aarch64-linux-gnu
 
-      # fallow-mcp pulls rquickjs (QuickJS, a C library). On aarch64-musl the
+      # plow-mcp pulls rquickjs (QuickJS, a C library). On aarch64-musl the
       # glibc cross-gcc cannot link C objects into a musl binary, so the MCP
       # build for this one target uses cargo-zigbuild (zig cc as a musl-capable
       # C cross-compiler). Pinned to the pair validated locally against
@@ -220,27 +220,27 @@ jobs:
           python3 -m ziglang version
 
       - name: Build CLI release binary
-        run: cargo build --release --target ${{ matrix.target }} -p fallow-cli
+        run: cargo build --release --target ${{ matrix.target }} -p plow-cli
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
 
       - name: Build LSP release binary
-        run: cargo build --release --target ${{ matrix.target }} -p fallow-lsp
+        run: cargo build --release --target ${{ matrix.target }} -p plow-lsp
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
 
       - name: Build MCP release binary
         if: matrix.target != 'aarch64-unknown-linux-musl'
-        run: cargo build --release --target ${{ matrix.target }} -p fallow-mcp
+        run: cargo build --release --target ${{ matrix.target }} -p plow-mcp
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
 
       - name: Build MCP release binary (aarch64-musl, QuickJS C via zig)
         if: matrix.target == 'aarch64-unknown-linux-musl'
-        run: cargo zigbuild --release --target ${{ matrix.target }} -p fallow-mcp
+        run: cargo zigbuild --release --target ${{ matrix.target }} -p plow-mcp
 
       - name: Install NAPI package dependencies
         run: cd crates/napi && npm ci --omit=optional --ignore-scripts
@@ -291,39 +291,39 @@ jobs:
           check_glibc_floor "target/${{ matrix.target }}/release/${{ matrix.binary }}"
           check_glibc_floor "target/${{ matrix.target }}/release/${{ matrix.lsp_binary }}"
           check_glibc_floor "target/${{ matrix.target }}/release/${{ matrix.mcp_binary }}"
-          check_glibc_floor "crates/napi/fallow-node.${{ matrix.npm_dir }}.node"
+          check_glibc_floor "crates/napi/plow-node.${{ matrix.npm_dir }}.node"
 
       - name: Package binaries (unix)
         if: runner.os != 'Windows'
         run: |
           cd target/${{ matrix.target }}/release
-          tar czf ../../../fallow-${{ matrix.target }}.tar.gz ${{ matrix.binary }} ${{ matrix.lsp_binary }} ${{ matrix.mcp_binary }}
+          tar czf ../../../plow-${{ matrix.target }}.tar.gz ${{ matrix.binary }} ${{ matrix.lsp_binary }} ${{ matrix.mcp_binary }}
 
       - name: Package binaries (windows)
         if: runner.os == 'Windows'
         run: |
           cd target/${{ matrix.target }}/release
-          7z a ../../../fallow-${{ matrix.target }}.zip ${{ matrix.binary }} ${{ matrix.lsp_binary }} ${{ matrix.mcp_binary }}
+          7z a ../../../plow-${{ matrix.target }}.zip ${{ matrix.binary }} ${{ matrix.lsp_binary }} ${{ matrix.mcp_binary }}
 
       - name: Upload release artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: fallow-${{ matrix.target }}
-          path: fallow-${{ matrix.target }}.*
+          name: plow-${{ matrix.target }}
+          path: plow-${{ matrix.target }}.*
 
       - name: Rename CLI, LSP, and MCP binaries with target identifier (unix)
         if: runner.os != 'Windows'
         run: |
-          cp target/${{ matrix.target }}/release/${{ matrix.binary }} fallow-${{ matrix.npm_dir }}
-          cp target/${{ matrix.target }}/release/${{ matrix.lsp_binary }} fallow-lsp-${{ matrix.npm_dir }}
-          cp target/${{ matrix.target }}/release/${{ matrix.mcp_binary }} fallow-mcp-${{ matrix.npm_dir }}
+          cp target/${{ matrix.target }}/release/${{ matrix.binary }} plow-${{ matrix.npm_dir }}
+          cp target/${{ matrix.target }}/release/${{ matrix.lsp_binary }} plow-lsp-${{ matrix.npm_dir }}
+          cp target/${{ matrix.target }}/release/${{ matrix.mcp_binary }} plow-mcp-${{ matrix.npm_dir }}
 
       - name: Rename CLI, LSP, and MCP binaries with target identifier (windows)
         if: runner.os == 'Windows'
         run: |
-          cp target/${{ matrix.target }}/release/${{ matrix.binary }} fallow-${{ matrix.npm_dir }}.exe
-          cp target/${{ matrix.target }}/release/${{ matrix.lsp_binary }} fallow-lsp-${{ matrix.npm_dir }}.exe
-          cp target/${{ matrix.target }}/release/${{ matrix.mcp_binary }} fallow-mcp-${{ matrix.npm_dir }}.exe
+          cp target/${{ matrix.target }}/release/${{ matrix.binary }} plow-${{ matrix.npm_dir }}.exe
+          cp target/${{ matrix.target }}/release/${{ matrix.lsp_binary }} plow-lsp-${{ matrix.npm_dir }}.exe
+          cp target/${{ matrix.target }}/release/${{ matrix.mcp_binary }} plow-mcp-${{ matrix.npm_dir }}.exe
 
       - name: Sign raw binaries
         shell: bash
@@ -337,9 +337,9 @@ jobs:
           fi
 
           for bin in \
-            "fallow-${{ matrix.npm_dir }}${ext}" \
-            "fallow-lsp-${{ matrix.npm_dir }}${ext}" \
-            "fallow-mcp-${{ matrix.npm_dir }}${ext}"
+            "plow-${{ matrix.npm_dir }}${ext}" \
+            "plow-lsp-${{ matrix.npm_dir }}${ext}" \
+            "plow-mcp-${{ matrix.npm_dir }}${ext}"
           do
             node .github/scripts/sign-binary.mjs "$bin" "${bin}.sig"
             node .github/scripts/verify-binary.mjs "$bin" "${bin}.sig"
@@ -348,7 +348,7 @@ jobs:
       # Stage signatures next to the release binaries so the "Upload npm binary"
       # step below carries them into the npm-<platform> artifact alongside each
       # binary. The platform packages then ship `<binary>.sig` next to each
-      # `<binary>`, which lets `npm/fallow/scripts/postinstall.js` and the
+      # `<binary>`, which lets `npm/plow/scripts/postinstall.js` and the
       # GitHub Action installer verify Ed25519 signatures before they
       # cross-check SHA-256 against the GitHub Release asset digest. Refs #465.
       - name: Stage signatures next to release binaries (for npm packaging)
@@ -358,33 +358,33 @@ jobs:
           if [ "${{ runner.os }}" = "Windows" ]; then
             ext=".exe"
           fi
-          cp "fallow-${{ matrix.npm_dir }}${ext}.sig"     "target/${{ matrix.target }}/release/${{ matrix.binary }}.sig"
-          cp "fallow-lsp-${{ matrix.npm_dir }}${ext}.sig" "target/${{ matrix.target }}/release/${{ matrix.lsp_binary }}.sig"
-          cp "fallow-mcp-${{ matrix.npm_dir }}${ext}.sig" "target/${{ matrix.target }}/release/${{ matrix.mcp_binary }}.sig"
+          cp "plow-${{ matrix.npm_dir }}${ext}.sig"     "target/${{ matrix.target }}/release/${{ matrix.binary }}.sig"
+          cp "plow-lsp-${{ matrix.npm_dir }}${ext}.sig" "target/${{ matrix.target }}/release/${{ matrix.lsp_binary }}.sig"
+          cp "plow-mcp-${{ matrix.npm_dir }}${ext}.sig" "target/${{ matrix.target }}/release/${{ matrix.mcp_binary }}.sig"
 
       - name: Upload CLI artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: fallow-cli-${{ matrix.npm_dir }}
+          name: plow-cli-${{ matrix.npm_dir }}
           path: |
-            fallow-${{ matrix.npm_dir }}${{ runner.os == 'Windows' && '.exe' || '' }}
-            fallow-${{ matrix.npm_dir }}${{ runner.os == 'Windows' && '.exe' || '' }}.sig
+            plow-${{ matrix.npm_dir }}${{ runner.os == 'Windows' && '.exe' || '' }}
+            plow-${{ matrix.npm_dir }}${{ runner.os == 'Windows' && '.exe' || '' }}.sig
 
       - name: Upload LSP artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: fallow-lsp-${{ matrix.npm_dir }}
+          name: plow-lsp-${{ matrix.npm_dir }}
           path: |
-            fallow-lsp-${{ matrix.npm_dir }}${{ runner.os == 'Windows' && '.exe' || '' }}
-            fallow-lsp-${{ matrix.npm_dir }}${{ runner.os == 'Windows' && '.exe' || '' }}.sig
+            plow-lsp-${{ matrix.npm_dir }}${{ runner.os == 'Windows' && '.exe' || '' }}
+            plow-lsp-${{ matrix.npm_dir }}${{ runner.os == 'Windows' && '.exe' || '' }}.sig
 
       - name: Upload MCP artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: fallow-mcp-${{ matrix.npm_dir }}
+          name: plow-mcp-${{ matrix.npm_dir }}
           path: |
-            fallow-mcp-${{ matrix.npm_dir }}${{ runner.os == 'Windows' && '.exe' || '' }}
-            fallow-mcp-${{ matrix.npm_dir }}${{ runner.os == 'Windows' && '.exe' || '' }}.sig
+            plow-mcp-${{ matrix.npm_dir }}${{ runner.os == 'Windows' && '.exe' || '' }}
+            plow-mcp-${{ matrix.npm_dir }}${{ runner.os == 'Windows' && '.exe' || '' }}.sig
 
       - name: Upload npm binary
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -402,7 +402,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: napi-${{ matrix.npm_dir }}
-          path: crates/napi/fallow-node.${{ matrix.npm_dir }}.node
+          path: crates/napi/plow-node.${{ matrix.npm_dir }}.node
 
   release:
     name: Create Release
@@ -422,7 +422,7 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           path: artifacts
-          pattern: fallow-*
+          pattern: plow-*
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
@@ -447,7 +447,7 @@ jobs:
   # job runs. PR CI runs `pnpm run check:codegen` on every relevant change,
   # but a release tag could in theory be cut on a commit where the committed
   # `editors/vscode/src/generated/output-contract.d.ts` /
-  # `npm/fallow/types/output-contract.d.ts` disagree with what regen would
+  # `npm/plow/types/output-contract.d.ts` disagree with what regen would
   # produce from `docs/output-schema.json` (force-push to main, history rewrite,
   # tag pointed at an old SHA). One `check:codegen` run validates BOTH outputs
   # because `editors/vscode/scripts/codegen-types.mjs` writes them in lock-step.
@@ -527,7 +527,7 @@ jobs:
 
       - name: Set binary permissions
         run: |
-          for bin in npm/*/fallow npm/*/fallow-lsp npm/*/fallow-mcp; do
+          for bin in npm/*/plow npm/*/plow-lsp npm/*/plow-mcp; do
             [ -f "$bin" ] && chmod +x "$bin"
           done
 
@@ -549,7 +549,7 @@ jobs:
               pkg.version = version;
               if (pkg.optionalDependencies) {
                 for (const key of Object.keys(pkg.optionalDependencies)) {
-                  if (key.startsWith("@fallow-cli/")) {
+                  if (key.startsWith("@plow-cli/")) {
                     pkg.optionalDependencies[key] = version;
                   }
                 }
@@ -559,8 +559,8 @@ jobs:
           done
 
       # Embed each platform binary's SHA-256 digest into its platform
-      # package's package.json under the `fallowDigests` field. The npm
-      # postinstall script (`npm/fallow/scripts/verify-binary.js`) reads
+      # package's package.json under the `plowDigests` field. The npm
+      # postinstall script (`npm/plow/scripts/verify-binary.js`) reads
       # this field first and only falls back to the GitHub release API
       # when it is absent. Without the embedded digest, shared-IP CI
       # runners hit the 60 req/hr unauthenticated rate limit and the
@@ -577,10 +577,10 @@ jobs:
               const manifestPath = process.env.PKG_PATH;
               const dir = path.dirname(manifestPath);
               const pkg = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-              // Only platform packages (@fallow-cli/<platform>) ship binaries;
-              // the npm/fallow wrapper has no binaries to digest. Skip it
+              // Only platform packages (@plow-cli/<platform>) ship binaries;
+              // the npm/plow wrapper has no binaries to digest. Skip it
               // silently so the same glob keeps working across both shapes.
-              if (typeof pkg.name !== "string" || !pkg.name.startsWith("@fallow-cli/")) {
+              if (typeof pkg.name !== "string" || !pkg.name.startsWith("@plow-cli/")) {
                 process.exit(0);
               }
               const digests = {};
@@ -597,7 +597,7 @@ jobs:
                 console.error("no binaries found in " + dir);
                 process.exit(1);
               }
-              pkg.fallowDigests = digests;
+              pkg.plowDigests = digests;
               fs.writeFileSync(manifestPath, JSON.stringify(pkg, null, 2) + "\n");
               console.log(manifestPath + ": " + Object.keys(digests).join(", "));
             '
@@ -624,7 +624,7 @@ jobs:
             pkg.version = version;
             if (pkg.optionalDependencies) {
               for (const key of Object.keys(pkg.optionalDependencies)) {
-                if (key.startsWith("@fallow-cli/fallow-node")) {
+                if (key.startsWith("@plow-cli/plow-node")) {
                   pkg.optionalDependencies[key] = version;
                 }
               }
@@ -646,25 +646,25 @@ jobs:
             cp "$dir"/* "$target"/
           done
 
-      # Bundle the JSON schema into the fallow npm package so consumers
-      # can reference it from `node_modules/fallow/schema.json`. Without
+      # Bundle the JSON schema into the plow npm package so consumers
+      # can reference it from `node_modules/plow/schema.json`. Without
       # this, users either pin to a remote URL that drifts from the
-      # installed CLI version, or have to run `fallow config-schema`
+      # installed CLI version, or have to run `plow config-schema`
       # themselves and refresh on every upgrade. See
-      # https://github.com/fallow-rs/fallow/issues/275.
-      - name: Bundle schema.json into fallow package
+      # https://github.com/fglogan/genesis-plow/issues/275.
+      - name: Bundle schema.json into plow package
         run: |
-          cp schema.json npm/fallow/schema.json
-          # Document the cp invariant: npm/fallow/schema.json is the root
+          cp schema.json npm/plow/schema.json
+          # Document the cp invariant: npm/plow/schema.json is the root
           # schema.json verbatim. A future refactor that drops or moves the
           # cp will fail loud here instead of silently shipping a stale
           # schema to npm consumers. Refs #440.
-          diff schema.json npm/fallow/schema.json
+          diff schema.json npm/plow/schema.json
 
       - name: Pack tarballs
         run: |
           # Publish order matters: platform packages before their meta package,
-          # NAPI platform packages before the @fallow-cli/fallow-node root.
+          # NAPI platform packages before the @plow-cli/plow-node root.
           # Numbered subdirectories make the order explicit and survive the
           # download/upload artifact round-trip; the publish job iterates them
           # in sequence and publishes whatever .tgz it finds inside.
@@ -704,7 +704,7 @@ jobs:
             pack tarballs/10-cli-platform "$dir"
           done
 
-          pack tarballs/20-cli-root ./npm/fallow
+          pack tarballs/20-cli-root ./npm/plow
 
           for dir in \
             ./crates/napi/npm/darwin-arm64 \
@@ -727,7 +727,7 @@ jobs:
       # Fail the release if any packed tarball omits a file it declares in its
       # own `files` whitelist. npm silently drops a `files` entry with no
       # matching file on disk, so a broken `.sig` staging step would otherwise
-      # publish a platform package missing `fallow.sig` (the Action installer
+      # publish a platform package missing `plow.sig` (the Action installer
       # then hard-fails every install with `sig-missing`). Runs in the
       # token-free prep job, before upload, so the publish job never sees a
       # broken tarball. Refs #944.
@@ -815,24 +815,24 @@ jobs:
             exit 1
           fi
           expected_names=(
-            "@fallow-cli/darwin-arm64"
-            "@fallow-cli/darwin-x64"
-            "@fallow-cli/linux-x64-gnu"
-            "@fallow-cli/linux-arm64-gnu"
-            "@fallow-cli/linux-x64-musl"
-            "@fallow-cli/linux-arm64-musl"
-            "@fallow-cli/win32-x64-msvc"
-            "@fallow-cli/win32-arm64-msvc"
-            "fallow"
-            "@fallow-cli/fallow-node-darwin-arm64"
-            "@fallow-cli/fallow-node-darwin-x64"
-            "@fallow-cli/fallow-node-linux-x64-gnu"
-            "@fallow-cli/fallow-node-linux-arm64-gnu"
-            "@fallow-cli/fallow-node-linux-x64-musl"
-            "@fallow-cli/fallow-node-linux-arm64-musl"
-            "@fallow-cli/fallow-node-win32-x64-msvc"
-            "@fallow-cli/fallow-node-win32-arm64-msvc"
-            "@fallow-cli/fallow-node"
+            "@plow-cli/darwin-arm64"
+            "@plow-cli/darwin-x64"
+            "@plow-cli/linux-x64-gnu"
+            "@plow-cli/linux-arm64-gnu"
+            "@plow-cli/linux-x64-musl"
+            "@plow-cli/linux-arm64-musl"
+            "@plow-cli/win32-x64-msvc"
+            "@plow-cli/win32-arm64-msvc"
+            "plow"
+            "@plow-cli/plow-node-darwin-arm64"
+            "@plow-cli/plow-node-darwin-x64"
+            "@plow-cli/plow-node-linux-x64-gnu"
+            "@plow-cli/plow-node-linux-arm64-gnu"
+            "@plow-cli/plow-node-linux-x64-musl"
+            "@plow-cli/plow-node-linux-arm64-musl"
+            "@plow-cli/plow-node-win32-x64-msvc"
+            "@plow-cli/plow-node-win32-arm64-msvc"
+            "@plow-cli/plow-node"
           )
           FAILED=0
           index=0
@@ -941,7 +941,7 @@ jobs:
       - name: Upload VSIX artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: fallow-vscode
+          name: plow-vscode
           path: editors/vscode/*.vsix
 
   vscode-publish:
@@ -958,7 +958,7 @@ jobs:
       - name: Download VSIX
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: fallow-vscode
+          name: plow-vscode
           path: vsix
 
       - name: Locate VSIX

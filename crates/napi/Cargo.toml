@@ -1,5 +1,5 @@
 [package]
-name = "fallow-node"
+name = "plow-node"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,7 +8,7 @@ homepage.workspace = true
 documentation.workspace = true
 keywords.workspace = true
 categories.workspace = true
-description = "Node.js bindings for fallow: deterministic codebase intelligence (quality, risk, duplication, architecture, dependencies, cleanup) for TypeScript and JavaScript"
+description = "Node.js bindings for plow: deterministic codebase intelligence (quality, risk, duplication, architecture, dependencies, cleanup) for TypeScript and JavaScript"
 publish = false
 
 [lints]
@@ -19,7 +19,7 @@ crate-type = ["cdylib"]
 doctest = false
 
 [dependencies]
-fallow-cli = { workspace = true }
+plow-cli = { workspace = true }
 napi = { version = "3", features = ["serde-json", "tokio_rt"] }
 napi-derive = "3"
 serde_json = { workspace = true }

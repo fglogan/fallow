@@ -31,9 +31,9 @@ struct GroupBucket {
 }
 
 pub(super) struct HealthGroupingInput<'a> {
-    pub files: &'a [fallow_types::discover::DiscoveredFile],
-    pub modules: &'a [fallow_core::extract::ModuleInfo],
-    pub file_paths: &'a FxHashMap<fallow_core::discover::FileId, &'a PathBuf>,
+    pub files: &'a [plow_types::discover::DiscoveredFile],
+    pub modules: &'a [plow_core::extract::ModuleInfo],
+    pub file_paths: &'a FxHashMap<plow_core::discover::FileId, &'a PathBuf>,
     pub score_output: Option<&'a FileScoreOutput>,
     pub file_scores: &'a [FileHealthScore],
     pub findings: &'a [ComplexityViolation],
@@ -41,7 +41,7 @@ pub(super) struct HealthGroupingInput<'a> {
     pub large_functions: &'a [LargeFunctionEntry],
     pub targets: &'a [RefactoringTarget],
     pub score_requested: bool,
-    pub duplicates_config: Option<&'a fallow_config::DuplicatesConfig>,
+    pub duplicates_config: Option<&'a plow_config::DuplicatesConfig>,
     pub needs_file_scores: bool,
     pub needs_hotspots: bool,
     pub show_vital_signs: bool,
@@ -209,7 +209,7 @@ fn apply_group_duplication_metrics(
         return;
     };
     let group_files = filter_group_items(input.files, paths, |file| &file.path);
-    let dupes_report = fallow_core::duplicates::find_duplicates(project_root, &group_files, config);
+    let dupes_report = plow_core::duplicates::find_duplicates(project_root, &group_files, config);
     apply_duplication_metrics(vital_signs, counts, &dupes_report);
 }
 

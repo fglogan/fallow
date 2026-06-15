@@ -7,7 +7,7 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use common::{parse_json, run_fallow_raw};
+use common::{parse_json, run_plow_raw};
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -231,7 +231,7 @@ fn collect_paths(items: &serde_json::Value) -> Vec<String> {
 #[test]
 fn check_changed_since_keeps_added_file_findings() {
     let tmp = build_fixture();
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "check",
         "--root",
         tmp.path().to_str().unwrap(),
@@ -262,7 +262,7 @@ fn check_changed_since_keeps_added_file_findings() {
 #[test]
 fn check_changed_since_keeps_dirty_modified_file_type_findings() {
     let tmp = build_dirty_modified_fixture();
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "check",
         "--root",
         tmp.path().to_str().unwrap(),
@@ -297,7 +297,7 @@ fn check_changed_since_keeps_dirty_modified_file_type_findings() {
 #[test]
 fn check_changed_since_keeps_staged_added_file_type_findings() {
     let tmp = build_staged_added_export_fixture();
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "check",
         "--root",
         tmp.path().to_str().unwrap(),
@@ -332,7 +332,7 @@ fn check_changed_since_keeps_staged_added_file_type_findings() {
 #[test]
 fn check_changed_since_keeps_untracked_added_file_type_findings() {
     let tmp = build_untracked_added_export_fixture();
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "check",
         "--root",
         tmp.path().to_str().unwrap(),
@@ -367,7 +367,7 @@ fn check_changed_since_keeps_untracked_added_file_type_findings() {
 #[test]
 fn dupes_changed_since_keeps_groups_with_added_file_instances() {
     let tmp = build_fixture();
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "dupes",
         "--root",
         tmp.path().to_str().unwrap(),
@@ -411,7 +411,7 @@ fn dupes_changed_since_keeps_groups_with_added_file_instances() {
 #[test]
 fn combined_changed_since_keeps_added_file_findings() {
     let tmp = build_fixture();
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "--root",
         tmp.path().to_str().unwrap(),
         "--changed-since",

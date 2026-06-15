@@ -1,5 +1,5 @@
 /**
- * Types for `fallow fix --format json` output. This command's shape is not
+ * Types for `plow fix --format json` output. This command's shape is not
  * yet covered by `docs/output-schema.json`, so these stay hand-written. The
  * runtime `FixAction` here is distinct from the schema's `FixAction` in
  * `generated/output-contract.d.ts` (which describes a SUGGESTION inside an
@@ -17,9 +17,9 @@ export interface FixAction {
   readonly file?: string;
   /**
    * Reverse-fingerprint identifier set on `applied: true` entries that
-   * created new files. Populated by `fallow fix`'s missing-config
+   * created new files. Populated by `plow fix`'s missing-config
    * fallback for duplicate-export rules: the array always contains
-   * `.fallowrc.json` (the path the create-fallback writes).
+   * `.plowrc.json` (the path the create-fallback writes).
    */
   readonly created_files?: ReadonlyArray<string>;
   /**
@@ -45,18 +45,18 @@ export interface FixAction {
    * - `missing_config` (legacy reason, pre-#332, when no config existed
    *   and the writer declined to create one).
    * - `monorepo_subpackage` (the duplicate-export config-add path
-   *   refused to create `.fallowrc.json` inside a monorepo subpackage).
-   * - `no_create_config` (`--no-create-config` was passed and no fallow
+   *   refused to create `.plowrc.json` inside a monorepo subpackage).
+   * - `no_create_config` (`--no-create-config` was passed and no plow
    *   config exists).
    * - `content_changed` (#454: file's xxh3 content hash at fix time
    *   differs from the hash captured during analysis; applying offsets
-   *   would land on bytes the analysis never saw). Re-run `fallow fix`
+   *   would land on bytes the analysis never saw). Re-run `plow fix`
    *   to refresh the analysis.
    * - `mixed_line_endings` (#475: file mixes CRLF and bare-LF line
    *   endings; not self-healing, normalize with `dos2unix` first).
    * - `low_confidence_off_graph` (#602: export lives in a test, mock, or
-   *   fixture directory whose consumers fallow's graph cannot see;
-   *   removal withheld. Still reported by `fallow check`).
+   *   fixture directory whose consumers plow's graph cannot see;
+   *   removal withheld. Still reported by `plow check`).
    * - `low_confidence_unresolved_imports` (#602: the file has an
    *   unresolved import, so its usage graph is incomplete; export removal
    *   withheld).
@@ -68,13 +68,13 @@ export interface FixAction {
   readonly skip_reason?: string;
   /**
    * Workspace root path emitted on `skip_reason: "monorepo_subpackage"`
-   * entries so consumers can point the user at `fallow init` at the
+   * entries so consumers can point the user at `plow init` at the
    * monorepo root. Relative to the analysis root.
    */
   readonly workspace_root?: string;
 }
 
-export interface FallowFixResult {
+export interface PlowFixResult {
   readonly dry_run: boolean;
   readonly fixes: ReadonlyArray<FixAction>;
   readonly total_fixed: number;
@@ -89,13 +89,13 @@ export interface FallowFixResult {
    * Count of files skipped because their xxh3 content hash at fix time
    * differed from the hash captured during analysis (#454). Always
    * present in the envelope; defaults to 0. A non-zero value means
-   * `fallow fix` exited 2; consumers re-run after refreshing analysis.
+   * `plow fix` exited 2; consumers re-run after refreshing analysis.
    */
   readonly skipped_content_changed?: number;
   /**
    * Count of files skipped because they mix CRLF and bare-LF line
    * endings (#475). Always present; defaults to 0. A non-zero value
-   * means `fallow fix` exited 2; the file must be normalized first.
+   * means `plow fix` exited 2; the file must be normalized first.
    */
   readonly skipped_mixed_line_endings?: number;
   /**
@@ -105,7 +105,7 @@ export interface FallowFixResult {
    * an unresolved import. Always present; defaults to 0. Unlike the two
    * counters above, a non-zero value does NOT change the exit code (it
    * is an intentional, conservative skip). The exports stay reported by
-   * `fallow check`; the per-entry `skip_reason` distinguishes the two
+   * `plow check`; the per-entry `skip_reason` distinguishes the two
    * `low_confidence_*` causes.
    */
   readonly skipped_low_confidence_exports?: number;

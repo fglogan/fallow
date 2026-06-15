@@ -4,7 +4,7 @@ use super::common::{create_config, fixture_path};
 fn package_path_resolution_credits_runtime_dependencies() {
     let root = fixture_path("issue-952-package-path-resolution");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_dependencies: Vec<&str> = results
         .unused_dependencies

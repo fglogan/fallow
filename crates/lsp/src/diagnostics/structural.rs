@@ -5,7 +5,7 @@ use ls_types::{
     Position, Range, Uri,
 };
 
-use fallow_core::results::AnalysisResults;
+use plow_core::results::AnalysisResults;
 
 use super::{FIRST_LINE_RANGE, doc_link};
 
@@ -45,7 +45,7 @@ fn cycle_fingerprint(files: &[std::path::PathBuf]) -> String {
 /// the first file, with the other members listed as related info at line 0.
 fn push_legacy_circular_diagnostic(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
-    cycle: &fallow_core::results::CircularDependency,
+    cycle: &plow_core::results::CircularDependency,
     names: &[String],
 ) {
     let Some(first_file) = cycle.files.first() else {
@@ -86,7 +86,7 @@ fn push_legacy_circular_diagnostic(
             },
         },
         severity: Some(DiagnosticSeverity::WARNING),
-        source: Some("fallow".to_string()),
+        source: Some("plow".to_string()),
         code: Some(NumberOrString::String("circular-dependency".to_string())),
         code_description: doc_link("circular-dependencies"),
         message,
@@ -192,7 +192,7 @@ pub fn push_circular_dep_diagnostics(
                     },
                 },
                 severity: Some(DiagnosticSeverity::WARNING),
-                source: Some("fallow".to_string()),
+                source: Some("plow".to_string()),
                 code: Some(NumberOrString::String("circular-dependency".to_string())),
                 code_description: doc_link("circular-dependencies"),
                 message,
@@ -230,11 +230,11 @@ pub fn push_re_export_cycle_diagnostics(
             })
             .collect();
         let (kind_label, fix_hint) = match cycle.cycle.kind {
-            fallow_core::results::ReExportCycleKind::SelfLoop => (
+            plow_core::results::ReExportCycleKind::SelfLoop => (
                 "Self-loop",
                 "Remove the `export * from './'` (or equivalent) inside this file.",
             ),
-            fallow_core::results::ReExportCycleKind::MultiNode => (
+            plow_core::results::ReExportCycleKind::MultiNode => (
                 "Cycle",
                 "Remove one `export * from` statement on any one member to break the cycle.",
             ),
@@ -281,7 +281,7 @@ pub fn push_re_export_cycle_diagnostics(
             map.entry(uri).or_default().push(Diagnostic {
                 range: FIRST_LINE_RANGE,
                 severity: Some(DiagnosticSeverity::WARNING),
-                source: Some("fallow".to_string()),
+                source: Some("plow".to_string()),
                 code: Some(NumberOrString::String("re-export-cycle".to_string())),
                 code_description: doc_link("re-export-cycles"),
                 message: message.clone(),
@@ -336,7 +336,7 @@ pub fn push_boundary_violation_diagnostics(
                 },
             },
             severity: Some(DiagnosticSeverity::WARNING),
-            source: Some("fallow".to_string()),
+            source: Some("plow".to_string()),
             code: Some(NumberOrString::String("boundary-violation".to_string())),
             code_description: doc_link("boundary-violations"),
             message,
@@ -362,7 +362,7 @@ pub fn push_boundary_violation_diagnostics(
                 },
             },
             severity: Some(DiagnosticSeverity::WARNING),
-            source: Some("fallow".to_string()),
+            source: Some("plow".to_string()),
             code: Some(NumberOrString::String("boundary-violation".to_string())),
             code_description: doc_link("boundary-violations"),
             message: "Boundary coverage: file does not match any configured zone".to_string(),
@@ -388,7 +388,7 @@ pub fn push_boundary_violation_diagnostics(
                 },
             },
             severity: Some(DiagnosticSeverity::WARNING),
-            source: Some("fallow".to_string()),
+            source: Some("plow".to_string()),
             code: Some(NumberOrString::String("boundary-violation".to_string())),
             code_description: doc_link("boundary-violations"),
             message: format!(
@@ -410,7 +410,7 @@ pub fn push_policy_violation_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
 ) {
-    use fallow_core::results::PolicyViolationSeverity;
+    use plow_core::results::PolicyViolationSeverity;
 
     for v in &results.policy_violations {
         let Some(uri) = Uri::from_file_path(&v.violation.path) else {
@@ -443,7 +443,7 @@ pub fn push_policy_violation_diagnostics(
                 },
             },
             severity: Some(severity),
-            source: Some("fallow".to_string()),
+            source: Some("plow".to_string()),
             code: Some(NumberOrString::String("policy-violation".to_string())),
             code_description: doc_link("policy-violations"),
             message,
@@ -482,7 +482,7 @@ pub fn push_invalid_client_export_diagnostics(
                 },
             },
             severity: Some(DiagnosticSeverity::WARNING),
-            source: Some("fallow".to_string()),
+            source: Some("plow".to_string()),
             code: Some(NumberOrString::String("invalid-client-export".to_string())),
             code_description: doc_link("invalid-client-exports"),
             message,
@@ -521,7 +521,7 @@ pub fn push_mixed_client_server_barrel_diagnostics(
                 },
             },
             severity: Some(DiagnosticSeverity::WARNING),
-            source: Some("fallow".to_string()),
+            source: Some("plow".to_string()),
             code: Some(NumberOrString::String(
                 "mixed-client-server-barrel".to_string(),
             )),
@@ -562,7 +562,7 @@ pub fn push_misplaced_directive_diagnostics(
                 },
             },
             severity: Some(DiagnosticSeverity::WARNING),
-            source: Some("fallow".to_string()),
+            source: Some("plow".to_string()),
             code: Some(NumberOrString::String("misplaced-directive".to_string())),
             code_description: doc_link("misplaced-directives"),
             message,
@@ -601,7 +601,7 @@ pub fn push_unprovided_inject_diagnostics(
                 },
             },
             severity: Some(DiagnosticSeverity::WARNING),
-            source: Some("fallow".to_string()),
+            source: Some("plow".to_string()),
             code: Some(NumberOrString::String("unprovided-inject".to_string())),
             code_description: doc_link("unprovided-injects"),
             message,
@@ -639,7 +639,7 @@ pub fn push_route_collision_diagnostics(
                 },
             },
             severity: Some(DiagnosticSeverity::WARNING),
-            source: Some("fallow".to_string()),
+            source: Some("plow".to_string()),
             code: Some(NumberOrString::String("route-collision".to_string())),
             code_description: doc_link("route-collisions"),
             message,
@@ -676,7 +676,7 @@ pub fn push_dynamic_segment_name_conflict_diagnostics(
                 },
             },
             severity: Some(DiagnosticSeverity::WARNING),
-            source: Some("fallow".to_string()),
+            source: Some("plow".to_string()),
             code: Some(NumberOrString::String(
                 "dynamic-segment-name-conflict".to_string(),
             )),
@@ -692,12 +692,12 @@ pub fn push_dynamic_segment_name_conflict_diagnostics(
 mod tests {
     use std::path::PathBuf;
 
-    use fallow_core::duplicates::{DuplicationReport, DuplicationStats};
-    use fallow_core::results::{
+    use ls_types::{DiagnosticSeverity, NumberOrString, Uri};
+    use plow_core::duplicates::{DuplicationReport, DuplicationStats};
+    use plow_core::results::{
         AnalysisResults, BoundaryViolation, BoundaryViolationFinding, CircularDependency,
         CircularDependencyEdge, CircularDependencyFinding,
     };
-    use ls_types::{DiagnosticSeverity, NumberOrString, Uri};
 
     use crate::diagnostics::build_diagnostics;
 
@@ -985,7 +985,7 @@ mod tests {
 
     #[test]
     fn re_export_cycle_multi_node_emits_one_diagnostic_per_member() {
-        use fallow_core::results::{ReExportCycle, ReExportCycleFinding, ReExportCycleKind};
+        use plow_core::results::{ReExportCycle, ReExportCycleFinding, ReExportCycleKind};
 
         let root = test_root();
         let file_a = root.join("src/api/index.ts");
@@ -1044,7 +1044,7 @@ mod tests {
 
     #[test]
     fn re_export_cycle_self_loop_emits_self_loop_message_and_no_related_info() {
-        use fallow_core::results::{ReExportCycle, ReExportCycleFinding, ReExportCycleKind};
+        use plow_core::results::{ReExportCycle, ReExportCycleFinding, ReExportCycleKind};
 
         let root = test_root();
         let file = root.join("src/utils/index.ts");
@@ -1121,8 +1121,8 @@ mod tests {
 
         let mut results = AnalysisResults::default();
         results.boundary_call_violations.push(
-            fallow_core::results::BoundaryCallViolationFinding::with_actions(
-                fallow_core::results::BoundaryCallViolation {
+            plow_core::results::BoundaryCallViolationFinding::with_actions(
+                plow_core::results::BoundaryCallViolation {
                     path: file.clone(),
                     line: 5,
                     col: 2,
@@ -1164,16 +1164,16 @@ mod tests {
         let mut results = AnalysisResults::default();
         results
             .policy_violations
-            .push(fallow_core::results::PolicyViolationFinding::with_actions(
-                fallow_core::results::PolicyViolation {
+            .push(plow_core::results::PolicyViolationFinding::with_actions(
+                plow_core::results::PolicyViolation {
                     path: file.clone(),
                     line: 7,
                     col: 2,
                     pack: "team-policy".to_string(),
                     rule_id: "no-moment".to_string(),
-                    kind: fallow_core::results::PolicyRuleKind::BannedImport,
+                    kind: plow_core::results::PolicyRuleKind::BannedImport,
                     matched: "moment".to_string(),
-                    severity: fallow_core::results::PolicyViolationSeverity::Error,
+                    severity: plow_core::results::PolicyViolationSeverity::Error,
                     message: Some("Use date-fns.".to_string()),
                 },
             ));
@@ -1206,8 +1206,8 @@ mod tests {
 
         let mut results = AnalysisResults::default();
         results.invalid_client_exports.push(
-            fallow_core::results::InvalidClientExportFinding::with_actions(
-                fallow_core::results::InvalidClientExport {
+            plow_core::results::InvalidClientExportFinding::with_actions(
+                plow_core::results::InvalidClientExport {
                     path: file.clone(),
                     export_name: "metadata".to_string(),
                     directive: "use client".to_string(),
@@ -1245,8 +1245,8 @@ mod tests {
 
         let mut results = AnalysisResults::default();
         results.mixed_client_server_barrels.push(
-            fallow_core::results::MixedClientServerBarrelFinding::with_actions(
-                fallow_core::results::MixedClientServerBarrel {
+            plow_core::results::MixedClientServerBarrelFinding::with_actions(
+                plow_core::results::MixedClientServerBarrel {
                     path: file.clone(),
                     client_origin: "./Button".to_string(),
                     server_origin: "./fetchUser".to_string(),
@@ -1286,8 +1286,8 @@ mod tests {
 
         let mut results = AnalysisResults::default();
         results.misplaced_directives.push(
-            fallow_core::results::MisplacedDirectiveFinding::with_actions(
-                fallow_core::results::MisplacedDirective {
+            plow_core::results::MisplacedDirectiveFinding::with_actions(
+                plow_core::results::MisplacedDirective {
                     path: file.clone(),
                     directive: "use client".to_string(),
                     line: 3,
@@ -1341,7 +1341,7 @@ mod tests {
         let uri = Uri::from_file_path(&from_file).unwrap();
         let d = &diags[&uri][0];
         assert_eq!(d.severity, Some(DiagnosticSeverity::WARNING));
-        assert_eq!(d.source, Some("fallow".to_string()));
+        assert_eq!(d.source, Some("plow".to_string()));
     }
 
     #[test]

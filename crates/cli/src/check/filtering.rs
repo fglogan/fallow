@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use fallow_config::{OutputFormat, WorkspaceInfo, discover_workspaces};
 use globset::Glob;
+use plow_config::{OutputFormat, WorkspaceInfo, discover_workspaces};
 use rustc_hash::FxHashSet;
 
 use crate::error::emit_error;
@@ -15,7 +15,7 @@ use crate::error::emit_error;
 /// Any issue whose path starts with one of the roots passes; dependency-level
 /// issues are scoped to the matching workspaces' own `package.json` files.
 pub fn filter_to_workspaces(
-    results: &mut fallow_core::results::AnalysisResults,
+    results: &mut plow_core::results::AnalysisResults,
     ws_roots: &[PathBuf],
 ) {
     let any_under = |p: &Path| ws_roots.iter().any(|r| p.starts_with(r));
@@ -334,7 +334,7 @@ fn find_matches(
     Ok(hits)
 }
 
-pub use fallow_core::changed_files::{
+pub use plow_core::changed_files::{
     filter_results_by_changed_files as filter_changed_files, get_changed_files,
     try_get_changed_files,
 };
@@ -351,7 +351,7 @@ pub use fallow_core::changed_files::{
 /// reasoning applies to catalog entries, dependency overrides, type-only
 /// deps, and test-only deps. The line filter is a noise-floor reducer for
 /// source-anchored findings; CI must still fail on project-level findings
-/// the PR caused. Mirrors the default `FALLOW_SUMMARY_SCOPE=all` behavior
+/// the PR caused. Mirrors the default `PLOW_SUMMARY_SCOPE=all` behavior
 /// in typed PR-comment rendering.
 ///
 /// `relative_to_diff_path` normalizes the finding's absolute path to the
@@ -360,7 +360,7 @@ pub use fallow_core::changed_files::{
 /// escape), the finding is RETAINED rather than silently dropped: an
 /// unfilterable path is better surfaced than silently hidden.
 pub fn filter_results_by_diff(
-    results: &mut fallow_core::results::AnalysisResults,
+    results: &mut plow_core::results::AnalysisResults,
     diff_index: &crate::report::ci::diff_filter::DiffIndex,
     root: &Path,
 ) {
@@ -423,7 +423,7 @@ pub fn filter_results_by_diff(
         line_in_diff(&f.path, f.line)
             || f.trace.iter().any(|hop| {
                 line_in_diff(&hop.path, hop.line)
-                    || (matches!(hop.role, fallow_core::results::TraceHopRole::SecretSource)
+                    || (matches!(hop.role, plow_core::results::TraceHopRole::SecretSource)
                         && touches_file(&hop.path))
             })
             || f.reachability.as_ref().is_some_and(|reachability| {
@@ -496,7 +496,7 @@ pub fn filter_results_by_diff(
         .retain(|c| line_in_diff(&c.conflict.path, c.conflict.line));
 }
 
-/// Strict gate predicate for `fallow security --gate new` (issue #886): retain a
+/// Strict gate predicate for `plow security --gate new` (issue #886): retain a
 /// security finding ONLY when the change INTRODUCED it, not merely when it lives
 /// in a changed file.
 ///
@@ -520,12 +520,12 @@ pub fn filter_results_by_diff(
 /// (`line_in_diff` returns `true` for them): a candidate the gate cannot prove is
 /// old fails conservatively, the safe direction for a security gate.
 pub fn retain_gate_new(
-    results: &mut fallow_core::results::AnalysisResults,
+    results: &mut plow_core::results::AnalysisResults,
     diff_index: &crate::report::ci::diff_filter::DiffIndex,
     root: &Path,
 ) {
     use crate::report::ci::diff_filter::relative_to_diff_path;
-    use fallow_core::results::TraceHopRole;
+    use plow_core::results::TraceHopRole;
 
     let line_in_diff = |path: &Path, line: u32| -> bool {
         match relative_to_diff_path(path, root) {
@@ -649,10 +649,10 @@ pub fn resolve_workspace_scope(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_core::extract::MemberKind;
-    use fallow_core::results::*;
-    use fallow_types::extract::{SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason};
-    use fallow_types::results::{SecurityReachability, SecuritySeverity};
+    use plow_core::extract::MemberKind;
+    use plow_core::results::*;
+    use plow_types::extract::{SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason};
+    use plow_types::results::{SecurityReachability, SecuritySeverity};
     use std::path::PathBuf;
 
     /// Test shim: single-workspace variant on top of `filter_to_workspaces`.
@@ -1673,15 +1673,15 @@ mod tests {
         assert_eq!(results.unresolved_imports[0].import.specifier, "./missing");
     }
 
-    fn ws(name: &str, rel: &str) -> fallow_config::WorkspaceInfo {
-        fallow_config::WorkspaceInfo {
+    fn ws(name: &str, rel: &str) -> plow_config::WorkspaceInfo {
+        plow_config::WorkspaceInfo {
             root: PathBuf::from("/project").join(rel),
             name: name.to_owned(),
             is_internal_dependency: false,
         }
     }
 
-    fn rel(workspaces: &[fallow_config::WorkspaceInfo]) -> Vec<String> {
+    fn rel(workspaces: &[plow_config::WorkspaceInfo]) -> Vec<String> {
         workspaces
             .iter()
             .map(|w| relative_workspace_path(&w.root, Path::new("/project")))
@@ -1711,7 +1711,7 @@ mod tests {
             "web-[staging]",
             &workspaces,
             &rels,
-            fallow_config::OutputFormat::Human,
+            plow_config::OutputFormat::Human,
         )
         .unwrap();
         assert_eq!(hits, vec![0]);
@@ -1730,7 +1730,7 @@ mod tests {
             "@scope/*",
             &workspaces,
             &rels,
-            fallow_config::OutputFormat::Human,
+            plow_config::OutputFormat::Human,
         )
         .unwrap();
         assert_eq!(hits, vec![0]);
@@ -1739,7 +1739,7 @@ mod tests {
             "apps/*",
             &workspaces,
             &rels,
-            fallow_config::OutputFormat::Human,
+            plow_config::OutputFormat::Human,
         )
         .unwrap();
         assert_eq!(hits, vec![1, 2]);
@@ -1754,7 +1754,7 @@ mod tests {
                 "web-[bad",
                 &workspaces,
                 &rels,
-                fallow_config::OutputFormat::Human,
+                plow_config::OutputFormat::Human,
             )
             .is_err()
         );
@@ -2064,7 +2064,7 @@ mod tests {
         let mut results = AnalysisResults::default();
         results.security_findings.push(SecurityFinding {
             finding_id: String::new(),
-            candidate: fallow_types::results::SecurityCandidate::default(),
+            candidate: plow_types::results::SecurityCandidate::default(),
             taint_flow: None,
             attack_surface: None,
             kind: SecurityFindingKind::ClientServerLeak,
@@ -2115,7 +2115,7 @@ mod tests {
         let mut results = AnalysisResults::default();
         results.security_findings.push(SecurityFinding {
             finding_id: String::new(),
-            candidate: fallow_types::results::SecurityCandidate::default(),
+            candidate: plow_types::results::SecurityCandidate::default(),
             taint_flow: None,
             attack_surface: None,
             kind: SecurityFindingKind::TaintedSink,
@@ -2174,7 +2174,7 @@ mod tests {
         let mut results = AnalysisResults::default();
         results.security_findings.push(SecurityFinding {
             finding_id: String::new(),
-            candidate: fallow_types::results::SecurityCandidate::default(),
+            candidate: plow_types::results::SecurityCandidate::default(),
             taint_flow: None,
             attack_surface: None,
             kind: SecurityFindingKind::TaintedSink,
@@ -2242,7 +2242,7 @@ mod tests {
         let mut results = AnalysisResults::default();
         results.security_findings.push(SecurityFinding {
             finding_id: String::new(),
-            candidate: fallow_types::results::SecurityCandidate::default(),
+            candidate: plow_types::results::SecurityCandidate::default(),
             taint_flow: None,
             attack_surface: None,
             kind: SecurityFindingKind::ClientServerLeak,
@@ -2299,7 +2299,7 @@ mod tests {
         let mut results = AnalysisResults::default();
         results.security_findings.push(SecurityFinding {
             finding_id: String::new(),
-            candidate: fallow_types::results::SecurityCandidate::default(),
+            candidate: plow_types::results::SecurityCandidate::default(),
             taint_flow: None,
             attack_surface: None,
             kind: SecurityFindingKind::TaintedSink,
@@ -2353,7 +2353,7 @@ mod tests {
         let mut results = AnalysisResults::default();
         results.security_findings.push(SecurityFinding {
             finding_id: String::new(),
-            candidate: fallow_types::results::SecurityCandidate::default(),
+            candidate: plow_types::results::SecurityCandidate::default(),
             taint_flow: None,
             attack_surface: None,
             kind: SecurityFindingKind::TaintedSink,
