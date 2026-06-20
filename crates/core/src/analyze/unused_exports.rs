@@ -1140,35 +1140,56 @@ fn collect_module_duplicate_export_locations(
     );
 
     for export in &input.module.exports {
-        if matches!(export.name, crate::extract::ExportName::Default) {
+        let Some((name, entry)) = duplicate_export_entry(
+            export,
+            &input,
+            &matching_ignore,
+            &matching_tanstack_contracts,
+        ) else {
             continue;
-        }
-        if export.span.start == 0 && export.span.end == 0 {
-            continue;
-        }
-        let name = export.name.to_string();
-        if is_export_ignored(&name, &matching_ignore, &matching_tanstack_contracts) {
-            continue;
-        }
-        if input.has_tanstack_router
-            && is_route_referenced_by_tanstack_generated_tree(
-                &name,
-                export,
-                input.module,
-                input.graph,
-                &input.config.root,
-            )
-        {
-            continue;
-        }
-        export_locations.entry(name).or_default().push(ExportEntry {
+        };
+        export_locations.entry(name).or_default().push(entry);
+    }
+}
+
+fn duplicate_export_entry(
+    export: &ExportSymbol,
+    input: &DuplicateExportModuleInput<'_>,
+    matching_ignore: &[&[String]],
+    matching_tanstack_contracts: &[&[&str]],
+) -> Option<(String, ExportEntry)> {
+    if matches!(export.name, crate::extract::ExportName::Default) {
+        return None;
+    }
+    if export.span.start == 0 && export.span.end == 0 {
+        return None;
+    }
+    let name = export.name.to_string();
+    if is_export_ignored(&name, matching_ignore, matching_tanstack_contracts) {
+        return None;
+    }
+    if input.has_tanstack_router
+        && is_route_referenced_by_tanstack_generated_tree(
+            &name,
+            export,
+            input.module,
+            input.graph,
+            &input.config.root,
+        )
+    {
+        return None;
+    }
+
+    Some((
+        name,
+        ExportEntry {
             module_idx: input.module_idx,
             path: input.module.path.clone(),
             file_id: input.module.file_id,
             span_start: export.span.start,
             is_type_only: export.is_type_only,
-        });
-    }
+        },
+    ))
 }
 
 /// Evaluate one same-name export group into an optional duplicate finding:
