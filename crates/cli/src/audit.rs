@@ -1357,6 +1357,7 @@ fn run_audit_head_analyses(
     {
         check.impact_closure = compute_brief_impact_closure(opts.root, check, changed_files);
         check.public_api_keys = Some(public_api_keys_from_check(Some(check), opts.root));
+        check.partition_order = compute_brief_partition_order(opts.root, check, changed_files);
     }
     let shared_parse = if share_dead_code_parse_with_health {
         check.as_mut().and_then(|r| r.shared_parse.take())
@@ -1413,6 +1414,46 @@ fn compute_brief_impact_closure(
 
     let closure = graph.impact_closure(&changed_ids);
     Some(graph.closure_with_paths(&closure, root))
+}
+
+/// Compute the E6 partition + order for the review brief's stage 2 from the
+/// check result's retained graph against the changed-file set.
+///
+/// Maps each changed absolute path to its graph `FileId`, groups the changed
+/// files into by-module units, and computes a dependency-sensible review order
+/// over those units. Returns `None` when the graph was not retained (off the
+/// brief path) or no changed file maps to a known module.
+fn compute_brief_partition_order(
+    root: &std::path::Path,
+    check: &CheckResult,
+    changed_files: &FxHashSet<PathBuf>,
+) -> Option<fallow_core::graph::PartitionOrderPaths> {
+    let graph = check
+        .shared_parse
+        .as_ref()
+        .and_then(|sp| sp.analysis_output.as_ref())
+        .and_then(|out| out.graph.as_ref())?;
+
+    let path_to_id: FxHashMap<String, fallow_types::discover::FileId> = graph
+        .modules
+        .iter()
+        .map(|m| (m.path.to_string_lossy().replace('\\', "/"), m.file_id))
+        .collect();
+
+    let changed_ids: Vec<fallow_types::discover::FileId> = changed_files
+        .iter()
+        .filter_map(|p| {
+            let key = p.to_string_lossy().replace('\\', "/");
+            path_to_id.get(&key).copied()
+        })
+        .collect();
+
+    if changed_ids.is_empty() {
+        return None;
+    }
+
+    let partition = graph.partition_order(&changed_ids);
+    Some(graph.partition_order_with_paths(&partition, root))
 }
 
 /// Run the audit pipeline: resolve base ref, run analyses, compute verdict.

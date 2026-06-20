@@ -334,6 +334,13 @@ pub struct CheckResult {
     /// against the base snapshot's `public_api` set to produce the public-API
     /// surface delta.
     pub public_api_keys: Option<rustc_hash::FxHashSet<String>>,
+    /// Partition + order (E6) for the review brief's stage 2: the by-module
+    /// units the changed files cluster into, plus a dependency-sensible review
+    /// order. Computed from the retained graph on the brief path against the
+    /// changed-file set, before the graph is dropped; `None` outside the brief
+    /// path. Holds root-relative paths so it survives the graph drop and
+    /// serializes directly.
+    pub partition_order: Option<fallow_core::graph::PartitionOrderPaths>,
 }
 
 struct CheckAnalysisData {
@@ -693,6 +700,7 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         shared_parse,
         impact_closure: None,
         public_api_keys: None,
+        partition_order: None,
     })
 }
 

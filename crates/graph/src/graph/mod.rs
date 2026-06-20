@@ -9,6 +9,7 @@ mod impact_closure;
 mod namespace_aliases;
 mod namespace_re_exports;
 mod narrowing;
+mod partition_order;
 mod public_exports;
 mod re_export_reachability;
 mod re_exports;
@@ -27,6 +28,7 @@ use fallow_types::extract::ImportedName;
 pub use impact_closure::{
     CoordinationGap, CoordinationGapPaths, ImpactClosure, ImpactClosurePaths,
 };
+pub use partition_order::{PartitionOrder, PartitionOrderPaths, ReviewUnit, ReviewUnitPaths};
 pub use re_exports::GraphReExportCycle;
 pub use types::{ExportSymbol, ModuleNode, ReExportEdge, ReferenceKind, SymbolReference};
 

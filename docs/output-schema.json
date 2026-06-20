@@ -15831,6 +15831,10 @@
           "description": "Stage 1: graph orientation facts.",
           "$ref": "#/definitions/GraphFacts"
         },
+        "partition": {
+          "description": "Stage 2 (E6): the partition + order (by-module units + dependency-sensible\nreview order). The backbone the directed-review loop hands the agent.",
+          "$ref": "#/definitions/PartitionFacts"
+        },
         "impact_closure": {
           "description": "Stage 3: the impact closure (affected-not-shown + coordination gap).",
           "$ref": "#/definitions/ImpactClosureFacts"
@@ -15861,6 +15865,7 @@
         "command",
         "triage",
         "graph_facts",
+        "partition",
         "impact_closure",
         "deltas",
         "weakening",
@@ -16701,6 +16706,51 @@
       ],
       "title": "fallow review --walkthrough-file --format json",
       "description": "The `fallow review --walkthrough-file` validation envelope: the result of\npost-validating the agent's judgment against the live graph. Always exit 0."
+    },
+    "PartitionFacts": {
+      "type": "object",
+      "properties": {
+        "units": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ReviewUnitFact"
+          },
+          "description": "The by-module units, sorted by module directory. Empty when no graph was\nretained or no changed file maps to a known module."
+        },
+        "order": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The dependency-sensible review order: module-directory strings,\ndefinitions before consumers, mechanical/leaf units last. A permutation of\nthe `units` module directories."
+        }
+      },
+      "required": [
+        "units",
+        "order"
+      ],
+      "description": "Stage 2 of the brief: the partition + order (E6). The changed files split into\ncoherent BY-MODULE units (the only byte-identical-deterministic clustering\ndefinition straight from the graph), plus a dependency-sensible review ORDER\nover those units (definitions before consumers, mechanical/leaf units last,\nties broken by the path sort). Stage 2 sits UNDER the decision surface as a\ndrill-down; it is the backbone the directed-review loop hands the agent.\n\nFeature-cluster and concern partitioning are deferred (they need scoring\nheuristics whose tie-breaks are a fresh nondeterminism surface)."
+    },
+    "ReviewUnitFact": {
+      "type": "object",
+      "properties": {
+        "module_dir": {
+          "type": "string",
+          "description": "The module directory the unit covers (root-relative, forward-slashed).\nThe empty string is the repository-root group."
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The changed files in this unit, path-sorted."
+        }
+      },
+      "required": [
+        "module_dir",
+        "files"
+      ],
+      "description": "One review unit: a coherent by-module cluster of the changed set."
     }
   }
 }

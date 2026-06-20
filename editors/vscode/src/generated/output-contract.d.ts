@@ -8488,6 +8488,7 @@ version: string
 command: string
 triage: DiffTriage
 graph_facts: GraphFacts
+partition: PartitionFacts
 impact_closure: ImpactClosureFacts
 deltas: ReviewDeltas
 /**
@@ -8553,6 +8554,44 @@ reachable_from: string[]
  * Derived from the run's boundary-violation findings.
  */
 boundaries_touched: string[]
+}
+/**
+ * Stage 2 of the brief: the partition + order (E6). The changed files split into
+ * coherent BY-MODULE units (the only byte-identical-deterministic clustering
+ * definition straight from the graph), plus a dependency-sensible review ORDER
+ * over those units (definitions before consumers, mechanical/leaf units last,
+ * ties broken by the path sort). Stage 2 sits UNDER the decision surface as a
+ * drill-down; it is the backbone the directed-review loop hands the agent.
+ *
+ * Feature-cluster and concern partitioning are deferred (they need scoring
+ * heuristics whose tie-breaks are a fresh nondeterminism surface).
+ */
+export interface PartitionFacts {
+/**
+ * The by-module units, sorted by module directory. Empty when no graph was
+ * retained or no changed file maps to a known module.
+ */
+units: ReviewUnitFact[]
+/**
+ * The dependency-sensible review order: module-directory strings,
+ * definitions before consumers, mechanical/leaf units last. A permutation of
+ * the `units` module directories.
+ */
+order: string[]
+}
+/**
+ * One review unit: a coherent by-module cluster of the changed set.
+ */
+export interface ReviewUnitFact {
+/**
+ * The module directory the unit covers (root-relative, forward-slashed).
+ * The empty string is the repository-root group.
+ */
+module_dir: string
+/**
+ * The changed files in this unit, path-sorted.
+ */
+files: string[]
 }
 /**
  * Stage 3 of the brief: the impact closure (E2). The transitive

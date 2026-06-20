@@ -569,6 +569,7 @@ mod tests {
                 reachable_from: Vec::new(),
                 boundaries_touched: Vec::new(),
             },
+            partition: crate::audit_brief::PartitionFacts::default(),
             impact_closure: crate::audit_brief::ImpactClosureFacts::default(),
             deltas: ReviewDeltas::default(),
             weakening: Vec::new(),

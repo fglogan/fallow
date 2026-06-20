@@ -163,6 +163,38 @@ pub struct CoordinationGapFact {
 /// The honest-scope note stamped on every coordination-gap entry (ADR-001).
 const COORDINATION_GAP_NOTE: &str = "syntactic attention pointer, not a correctness proof";
 
+/// Stage 2 of the brief: the partition + order (E6). The changed files split into
+/// coherent BY-MODULE units (the only byte-identical-deterministic clustering
+/// definition straight from the graph), plus a dependency-sensible review ORDER
+/// over those units (definitions before consumers, mechanical/leaf units last,
+/// ties broken by the path sort). Stage 2 sits UNDER the decision surface as a
+/// drill-down; it is the backbone the directed-review loop hands the agent.
+///
+/// Feature-cluster and concern partitioning are deferred (they need scoring
+/// heuristics whose tie-breaks are a fresh nondeterminism surface).
+#[derive(Debug, Clone, Default, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PartitionFacts {
+    /// The by-module units, sorted by module directory. Empty when no graph was
+    /// retained or no changed file maps to a known module.
+    pub units: Vec<ReviewUnitFact>,
+    /// The dependency-sensible review order: module-directory strings,
+    /// definitions before consumers, mechanical/leaf units last. A permutation of
+    /// the `units` module directories.
+    pub order: Vec<String>,
+}
+
+/// One review unit: a coherent by-module cluster of the changed set.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ReviewUnitFact {
+    /// The module directory the unit covers (root-relative, forward-slashed).
+    /// The empty string is the repository-root group.
+    pub module_dir: String,
+    /// The changed files in this unit, path-sorted.
+    pub files: Vec<String>,
+}
+
 /// E3 diff-aware deterministic deltas (6.A), framed new-vs-pre-existing against
 /// the audit base snapshot. Each entry is a brief summary/verdict line.
 ///
@@ -229,6 +261,9 @@ pub struct ReviewBriefOutput {
     pub triage: DiffTriage,
     /// Stage 1: graph orientation facts.
     pub graph_facts: GraphFacts,
+    /// Stage 2 (E6): the partition + order (by-module units + dependency-sensible
+    /// review order). The backbone the directed-review loop hands the agent.
+    pub partition: PartitionFacts,
     /// Stage 3: the impact closure (affected-not-shown + coordination gap).
     pub impact_closure: ImpactClosureFacts,
     /// E3 (6.A): diff-aware deterministic deltas (boundary/cycle introduced +
@@ -349,6 +384,32 @@ fn build_impact_closure_facts(result: &AuditResult) -> ImpactClosureFacts {
     }
 }
 
+/// Build the Stage 2 partition facts from the audit result's retained
+/// partition+order (computed on the brief path). Returns an empty partition when
+/// no graph was retained (the partition is `None`).
+#[must_use]
+fn build_partition_facts(result: &AuditResult) -> PartitionFacts {
+    let Some(partition) = result
+        .check
+        .as_ref()
+        .and_then(|c| c.partition_order.as_ref())
+    else {
+        return PartitionFacts::default();
+    };
+    let units = partition
+        .units
+        .iter()
+        .map(|unit| ReviewUnitFact {
+            module_dir: unit.module_dir.clone(),
+            files: unit.files.clone(),
+        })
+        .collect();
+    PartitionFacts {
+        units,
+        order: partition.order.clone(),
+    }
+}
+
 /// Assemble the structured [`ReviewBriefOutput`] for an audit result. Pure: no
 /// timestamps, no randomness, so two runs over the same tree serialize
 /// byte-identically.
@@ -375,6 +436,7 @@ pub fn build_brief_output(result: &AuditResult) -> ReviewBriefOutput {
     let added = deltas.public_api_added.len();
     graph_facts.exports_added = added;
     graph_facts.api_width_delta = i64::try_from(added).unwrap_or(i64::MAX);
+    let partition = build_partition_facts(result);
     let impact_closure = build_impact_closure_facts(result);
     ReviewBriefOutput {
         schema_version: ReviewBriefSchemaVersion::default(),
@@ -382,6 +444,7 @@ pub fn build_brief_output(result: &AuditResult) -> ReviewBriefOutput {
         command: "audit-brief".to_string(),
         triage,
         graph_facts,
+        partition,
         impact_closure,
         deltas,
         weakening: result.weakening_signals.clone(),
@@ -407,6 +470,16 @@ fn insert_brief_graph_facts_json(
 ) {
     if let Ok(value) = serde_json::to_value(&brief.graph_facts) {
         obj.insert("graph_facts".into(), value);
+    }
+}
+
+/// Insert the Stage 2 partition + order object into the brief JSON map.
+fn insert_brief_partition_json(
+    obj: &mut serde_json::Map<String, serde_json::Value>,
+    brief: &ReviewBriefOutput,
+) {
+    if let Ok(value) = serde_json::to_value(&brief.partition) {
+        obj.insert("partition".into(), value);
     }
 }
 
@@ -505,6 +578,7 @@ fn build_brief_json(result: &AuditResult) -> Result<serde_json::Value, ExitCode>
     insert_brief_decisions_json(&mut obj, &brief);
     insert_brief_triage_json(&mut obj, &brief);
     insert_brief_graph_facts_json(&mut obj, &brief);
+    insert_brief_partition_json(&mut obj, &brief);
     insert_brief_impact_closure_json(&mut obj, &brief);
     insert_brief_e3_json(&mut obj, &brief);
     insert_brief_subtract_json(&mut obj, result)?;
@@ -551,6 +625,7 @@ fn print_brief_human(result: &AuditResult, quiet: bool, explain: bool) {
                 brief.graph_facts.boundaries_touched.join(", ")
             );
         }
+        print_partition_human(&brief.partition);
         print_impact_closure_human(&brief.impact_closure);
         print_deltas_human(&brief.deltas);
         print_weakening_human(&brief.weakening);
@@ -561,6 +636,35 @@ fn print_brief_human(result: &AuditResult, quiet: bool, explain: bool) {
     // when the underlying verdict is a fail. Headers stay off (the brief owns its
     // own header line above).
     crate::audit::print_audit_findings(result, quiet, explain, false);
+}
+
+/// Print the Stage 2 partition + order on the human brief: the by-module units
+/// and the dependency-sensible review order (definitions before consumers).
+/// Caller has already gated on `!quiet`. Renders nothing when no unit was
+/// computed (no graph retained, or every changed file is non-source).
+fn print_partition_human(partition: &PartitionFacts) {
+    if partition.units.is_empty() {
+        return;
+    }
+    eprintln!(
+        "  partition: {} unit{} (by module)",
+        partition.units.len(),
+        crate::report::plural(partition.units.len()),
+    );
+    if !partition.order.is_empty() {
+        let labeled: Vec<String> = partition.order.iter().map(|dir| unit_label(dir)).collect();
+        eprintln!("  review order: {}", labeled.join(" \u{2192} "));
+    }
+}
+
+/// Label a unit's module directory for human output; the empty root-group key
+/// renders as `<root>` so it is not a blank token.
+fn unit_label(module_dir: &str) -> String {
+    if module_dir.is_empty() {
+        "<root>".to_string()
+    } else {
+        module_dir.to_string()
+    }
 }
 
 /// Print the Stage 3 impact-closure summary on the human brief: the count of
