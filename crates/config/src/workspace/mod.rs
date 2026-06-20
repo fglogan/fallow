@@ -521,23 +521,30 @@ fn collect_shallow_package_workspaces(
         }
 
         collect_shallow_workspace_candidate(&path, canonical_root, &mut workspaces);
-
-        let Ok(child_entries) = std::fs::read_dir(&path) else {
-            continue;
-        };
-        for child in child_entries.filter_map(Result::ok) {
-            let child_path = child.path();
-            if !child_path.is_dir()
-                || should_skip_workspace_scan_dir(&child.file_name().to_string_lossy())
-            {
-                continue;
-            }
-
-            collect_shallow_workspace_candidate(&child_path, canonical_root, &mut workspaces);
-        }
+        collect_shallow_child_workspaces(&path, canonical_root, &mut workspaces);
     }
 
     workspaces
+}
+
+fn collect_shallow_child_workspaces(
+    parent: &Path,
+    canonical_root: &Path,
+    workspaces: &mut Vec<(WorkspaceInfo, Vec<String>)>,
+) {
+    let Ok(child_entries) = std::fs::read_dir(parent) else {
+        return;
+    };
+    for child in child_entries.filter_map(Result::ok) {
+        let child_path = child.path();
+        if !child_path.is_dir()
+            || should_skip_workspace_scan_dir(&child.file_name().to_string_lossy())
+        {
+            continue;
+        }
+
+        collect_shallow_workspace_candidate(&child_path, canonical_root, workspaces);
+    }
 }
 
 fn collect_shallow_workspace_candidate(
