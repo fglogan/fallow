@@ -29,6 +29,7 @@ pub mod html;
 pub mod iconify;
 pub mod inventory;
 pub mod mdx;
+mod module_info;
 mod parse;
 pub mod sfc;
 pub mod sfc_css;
