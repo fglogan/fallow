@@ -1165,6 +1165,12 @@ fn populate_unused_component_prop_findings(input: &mut FrameworkSpecificFindings
     .into_iter()
     .map(UnusedComponentPropFinding::with_actions)
     .collect();
+
+    append_react_unused_component_prop_findings(input);
+    retain_unsuppressed_unused_component_prop_findings(input);
+}
+
+fn append_react_unused_component_prop_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
     // React/Preact arm: another producer of the SAME finding kind, emitting into
     // the same vector. Gated on `react` / `react-dom` / `next` / `preact` inside
     // the producer.
@@ -1191,7 +1197,11 @@ fn populate_unused_component_prop_findings(input: &mut FrameworkSpecificFindings
             .into_iter()
             .map(UnusedComponentPropFinding::with_actions),
     );
+}
 
+fn retain_unsuppressed_unused_component_prop_findings(
+    input: &mut FrameworkSpecificFindingsInput<'_>,
+) {
     // Inline-suppression filter over ALL arms: a `// fallow-ignore-next-line
     // unused-component-prop` above the prop (or a file-level
     // `// fallow-ignore-file unused-component-prop`) drops the finding. The
