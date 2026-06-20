@@ -76,6 +76,18 @@ pub(super) struct ExportFix {
     enum_declaration: Option<EnumDeclarationRange>,
 }
 
+pub(super) struct ExportFixInput<'a, 'export> {
+    pub(super) root: &'a Path,
+    pub(super) exports_by_file:
+        &'a FxHashMap<PathBuf, Vec<&'export fallow_core::results::UnusedExport>>,
+    pub(super) hashes: &'a CapturedHashes,
+    pub(super) unresolved_import_files: &'a FxHashSet<PathBuf>,
+    pub(super) plan: &'a mut FixPlan,
+    pub(super) output: OutputFormat,
+    pub(super) dry_run: bool,
+    pub(super) fixes: &'a mut Vec<serde_json::Value>,
+}
+
 /// Check if a line (after stripping `export `) is a named export list like `{ A, B } ...`
 fn is_export_list(after_export: &str) -> bool {
     let s = after_export.trim_start();
@@ -188,20 +200,16 @@ fn push_export_fix_json(
 /// (issue #602): the rewrite would risk breaking a consumer fallow's graph
 /// cannot see. The skip is recorded on `plan` so the orchestrator surfaces
 /// it; the export stays reported by `fallow dead-code`.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "per-file fixer threads root + grouped findings + the confidence-gate set + the shared plan + output mode + sink; bundling into a context struct would not reduce the irreducible inputs and hurts locality with the sibling fixers"
-)]
-pub(super) fn apply_export_fixes(
-    root: &Path,
-    exports_by_file: &FxHashMap<PathBuf, Vec<&fallow_core::results::UnusedExport>>,
-    hashes: &CapturedHashes,
-    unresolved_import_files: &FxHashSet<PathBuf>,
-    plan: &mut FixPlan,
-    output: OutputFormat,
-    dry_run: bool,
-    fixes: &mut Vec<serde_json::Value>,
-) {
+pub(super) fn apply_export_fixes(input: &mut ExportFixInput<'_, '_>) {
+    let root = input.root;
+    let exports_by_file = input.exports_by_file;
+    let hashes = input.hashes;
+    let unresolved_import_files = input.unresolved_import_files;
+    let output = input.output;
+    let dry_run = input.dry_run;
+    let plan = &mut *input.plan;
+    let fixes = &mut *input.fixes;
+
     for (path, file_exports) in exports_by_file {
         let relative = path.strip_prefix(root).unwrap_or(path);
 
@@ -444,6 +452,32 @@ fn delete_export_lines(
 mod tests {
     use super::*;
     use fallow_core::results::UnusedExport;
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "test helper preserves compact fixture setup while production uses ExportFixInput"
+    )]
+    fn apply_export_fixes(
+        root: &Path,
+        exports_by_file: &FxHashMap<PathBuf, Vec<&UnusedExport>>,
+        hashes: &CapturedHashes,
+        unresolved_import_files: &FxHashSet<PathBuf>,
+        plan: &mut FixPlan,
+        output: OutputFormat,
+        dry_run: bool,
+        fixes: &mut Vec<serde_json::Value>,
+    ) {
+        super::apply_export_fixes(&mut ExportFixInput {
+            root,
+            exports_by_file,
+            hashes,
+            unresolved_import_files,
+            plan,
+            output,
+            dry_run,
+            fixes,
+        });
+    }
 
     fn make_export(path: &Path, name: &str, line: u32) -> UnusedExport {
         UnusedExport {

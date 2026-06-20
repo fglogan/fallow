@@ -248,16 +248,16 @@ fn apply_unused_export_fixes(input: &mut FixApplicationInput<'_>) {
         .iter()
         .map(|finding| finding.import.path.clone())
         .collect();
-    exports::apply_export_fixes(
-        input.root,
-        &exports_by_file,
-        input.file_hashes,
-        &unresolved_import_files,
-        input.plan,
-        input.output,
-        input.dry_run,
-        input.fixes,
-    );
+    exports::apply_export_fixes(&mut exports::ExportFixInput {
+        root: input.root,
+        exports_by_file: &exports_by_file,
+        hashes: input.file_hashes,
+        unresolved_import_files: &unresolved_import_files,
+        plan: input.plan,
+        output: input.output,
+        dry_run: input.dry_run,
+        fixes: input.fixes,
+    });
 }
 
 fn apply_unused_enum_member_fixes(input: &mut FixApplicationInput<'_>) {
