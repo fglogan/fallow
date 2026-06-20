@@ -6006,6 +6006,17 @@ fn object_key_metadata(expr: &Expression<'_>) -> ObjectKeyMetadata {
     ObjectKeyMetadata { keys, complete }
 }
 
+fn should_capture_member_assign_sink(
+    callee_path: &str,
+    arg_literal: Option<&SinkLiteralValue>,
+    arg_is_non_literal: bool,
+) -> bool {
+    arg_is_non_literal
+        || arg_literal.is_some_and(|literal| {
+            should_capture_literal_sink_value(callee_path, SinkShape::MemberAssign, 0, literal)
+        })
+}
+
 fn should_capture_literal_sink_value(
     callee_path: &str,
     sink_shape: SinkShape,
@@ -8063,23 +8074,39 @@ impl ModuleInfoExtractor {
         let AssignmentTarget::StaticMemberExpression(member) = &expr.left else {
             return;
         };
+        let Some(callee_path) = self.member_assign_callee_path(member) else {
+            return;
+        };
+        let arg_literal = self.static_sink_literal_value(&expr.right);
+        let arg_is_non_literal = arg_literal.is_none() && is_non_literal_arg(&expr.right);
+        if !should_capture_member_assign_sink(
+            &callee_path,
+            arg_literal.as_ref(),
+            arg_is_non_literal,
+        ) {
+            return;
+        }
+        self.record_member_assign_sink(expr, callee_path, arg_literal, arg_is_non_literal);
+    }
+
+    fn member_assign_callee_path(&mut self, member: &StaticMemberExpression<'_>) -> Option<String> {
         let Some(object_path) = flatten_callee_path(&member.object) else {
             self.record_skipped_security_callee(
                 &member.object,
                 SkippedSecurityCalleeReason::UnsupportedAssignmentObject,
             );
-            return;
+            return None;
         };
-        let callee_path = format!("{}.{}", object_path, member.property.name);
-        let arg_literal = self.static_sink_literal_value(&expr.right);
-        let arg_is_non_literal = arg_literal.is_none() && is_non_literal_arg(&expr.right);
-        if !arg_is_non_literal
-            && !arg_literal.as_ref().is_some_and(|literal| {
-                should_capture_literal_sink_value(&callee_path, SinkShape::MemberAssign, 0, literal)
-            })
-        {
-            return;
-        }
+        Some(format!("{}.{}", object_path, member.property.name))
+    }
+
+    fn record_member_assign_sink(
+        &mut self,
+        expr: &AssignmentExpression<'_>,
+        callee_path: String,
+        arg_literal: Option<SinkLiteralValue>,
+        arg_is_non_literal: bool,
+    ) {
         if arg_is_non_literal {
             self.record_sanitized_sink_arg(expr.span.start, 0, &expr.right);
         }
