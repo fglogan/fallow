@@ -33,10 +33,10 @@ use std::path::Path;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_types::extract::{ImportedName, ModuleInfo};
+use fallow_types::extract::{AngularComponentSelector, ExportName, ImportedName, ModuleInfo};
 
 use crate::discover::FileId;
-use crate::graph::ModuleGraph;
+use crate::graph::{ModuleGraph, ModuleNode};
 use crate::resolve::{ResolvedImport, ResolvedModule};
 use crate::results::UnrenderedComponent;
 use crate::suppress::{IssueKind, SuppressionContext};
@@ -519,7 +519,7 @@ fn build_angular_render_signals(modules: &[ModuleInfo]) -> Option<AngularRenderS
 /// per-component abstain ladder (element-selector scope, used-selector, route /
 /// bootstrap entry, lazy-route default-export credit, suppression).
 fn emit_angular_component_findings(
-    node: &crate::graph::ModuleNode,
+    node: &ModuleNode,
     module: &ModuleInfo,
     signals: &AngularRenderSignals<'_>,
     line_offsets_by_file: &LineOffsetsMap<'_>,
@@ -538,51 +538,79 @@ fn emit_angular_component_findings(
     // component is a NAMED export (the `imports: [...]` registration is a named
     // import, the dead case this rule catches), so a referenced NAMED export does
     // NOT suppress it; only the default-export signal does.
-    let default_export_referenced = node.exports.iter().any(|export| {
-        matches!(export.name, fallow_types::extract::ExportName::Default)
-            && (!export.references.is_empty() || export.is_side_effect_used)
-    });
+    let default_export_referenced = angular_default_export_referenced(node);
     for component in &module.angular_component_selectors {
-        // First-cut scope: every selector must be an element selector.
-        if !component.selectors.iter().all(|s| is_element_selector(s)) {
-            continue;
-        }
-        // Used if ANY selector is in the project-wide used set.
-        if component
-            .selectors
-            .iter()
-            .any(|s| signals.used_selectors.contains(&s.to_ascii_lowercase()))
-        {
-            continue;
-        }
-        // Referenced as a route / bootstrap entry point (render-equivalent:
-        // Angular instantiates these without a template `<tag>`).
-        if signals
-            .entry_classes
-            .contains(component.class_name.as_str())
-        {
-            continue;
-        }
-        // Lazily routed via the bare `loadComponent` / `loadChildren` form
-        // (default-export dynamic-import credit).
-        if default_export_referenced {
+        if angular_component_render_abstains(component, signals, default_export_referenced) {
             continue;
         }
         let (line, col) =
             byte_offset_to_line_col(line_offsets_by_file, node.file_id, component.span_start);
-        if suppressions.is_suppressed(node.file_id, line, IssueKind::UnrenderedComponent)
-            || suppressions.is_file_suppressed(node.file_id, IssueKind::UnrenderedComponent)
-        {
+        if angular_component_suppressed(suppressions, node.file_id, line) {
             continue;
         }
-        findings.push(UnrenderedComponent {
-            path: node.path.clone(),
-            component_name: component.class_name.clone(),
-            framework: "angular".to_string(),
-            reachable_via: None,
-            line,
-            col,
-        });
+        findings.push(build_angular_unrendered_component(
+            node, component, line, col,
+        ));
+    }
+}
+
+fn angular_default_export_referenced(node: &ModuleNode) -> bool {
+    node.exports.iter().any(|export| {
+        matches!(export.name, ExportName::Default)
+            && (!export.references.is_empty() || export.is_side_effect_used)
+    })
+}
+
+fn angular_component_render_abstains(
+    component: &AngularComponentSelector,
+    signals: &AngularRenderSignals<'_>,
+    default_export_referenced: bool,
+) -> bool {
+    // First-cut scope: every selector must be an element selector.
+    if !component.selectors.iter().all(|s| is_element_selector(s)) {
+        return true;
+    }
+    // Used if ANY selector is in the project-wide used set.
+    if component
+        .selectors
+        .iter()
+        .any(|s| signals.used_selectors.contains(&s.to_ascii_lowercase()))
+    {
+        return true;
+    }
+    // Referenced as a route / bootstrap entry point.
+    if signals
+        .entry_classes
+        .contains(component.class_name.as_str())
+    {
+        return true;
+    }
+    // Lazily routed via the bare `loadComponent` / `loadChildren` form.
+    default_export_referenced
+}
+
+fn angular_component_suppressed(
+    suppressions: &SuppressionContext<'_>,
+    file_id: FileId,
+    line: u32,
+) -> bool {
+    suppressions.is_suppressed(file_id, line, IssueKind::UnrenderedComponent)
+        || suppressions.is_file_suppressed(file_id, IssueKind::UnrenderedComponent)
+}
+
+fn build_angular_unrendered_component(
+    node: &ModuleNode,
+    component: &AngularComponentSelector,
+    line: u32,
+    col: u32,
+) -> UnrenderedComponent {
+    UnrenderedComponent {
+        path: node.path.clone(),
+        component_name: component.class_name.clone(),
+        framework: "angular".to_string(),
+        reachable_via: None,
+        line,
+        col,
     }
 }
 
