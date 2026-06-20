@@ -456,6 +456,35 @@ fn source_read_location(
     }
 }
 
+fn build_tainted_sink_candidate(
+    matcher: &Matcher,
+    sink: &SinkSite,
+    node: &ModuleNode,
+    source: Option<(&str, &str, Option<u32>)>,
+    sink_line_col: (u32, u32),
+    url_shape: Option<SecurityUrlShape>,
+) -> SecurityCandidate {
+    let (line, col) = sink_line_col;
+    let network = (matcher.id == NETWORK_EXFIL_CATEGORY).then(|| SecurityNetworkContext {
+        destination: sink.url_arg_literal.clone(),
+    });
+
+    SecurityCandidate {
+        source_kind: source.map(|(id, _, _)| id.to_string()),
+        sink: SecurityCandidateSink {
+            path: node.path.clone(),
+            line,
+            col,
+            category: Some(matcher.id.clone()),
+            cwe: Some(matcher.cwe),
+            callee: Some(sink.callee_path.clone()),
+            url_shape,
+        },
+        boundary: SecurityCandidateBoundary::default(),
+        network,
+    }
+}
+
 struct TaintedSinkFindingInput<'a> {
     matcher: &'a Matcher,
     sink: &'a SinkSite,
@@ -492,32 +521,12 @@ fn build_tainted_sink_finding(input: &TaintedSinkFindingInput<'_>) -> SecurityFi
     let source_read = source
         .map(|(_, _, span)| source_read_location(span, line_offsets_by_file, file_id, (line, col)));
 
-    // The destination-host signal for the secret-to-network category
-    // (#890): the arg-0 URL literal, or `None` (dynamic) when not a
-    // literal. The agent triages exfil (dynamic / untrusted host) from
-    // intended auth (a literal provider host) with this.
-    let network = (matcher.id == NETWORK_EXFIL_CATEGORY).then(|| SecurityNetworkContext {
-        destination: sink.url_arg_literal.clone(),
-    });
-
     // Slot 1 (source kind) is the stable catalogue source id; slot 2
     // (sink) carries the callee path the evidence already names. The
     // boundary slot is filled by the post-detection ranking pass once
     // reachability is known. See issue #900.
-    let candidate = SecurityCandidate {
-        source_kind: source.map(|(id, _, _)| id.to_string()),
-        sink: SecurityCandidateSink {
-            path: node.path.clone(),
-            line,
-            col,
-            category: Some(matcher.id.clone()),
-            cwe: Some(matcher.cwe),
-            callee: Some(sink.callee_path.clone()),
-            url_shape,
-        },
-        boundary: SecurityCandidateBoundary::default(),
-        network,
-    };
+    let candidate =
+        build_tainted_sink_candidate(matcher, sink, node, source, (line, col), url_shape);
 
     let path = node.path.clone();
     SecurityFinding {
