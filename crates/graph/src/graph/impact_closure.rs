@@ -1,4 +1,4 @@
-//! Impact-closure engine (E2): from a changed-file set, compute the transitive
+//! Impact-closure engine: from a changed-file set, compute the transitive
 //! affected-but-NOT-in-diff set plus a coordination-gap detector.
 //!
 //! The differentiator a diff tool cannot do: a diff is changed lines, but the
@@ -250,7 +250,7 @@ impl ModuleGraph {
 /// directory). Such a consumer is NOT a cross-module coordination contract: a
 /// contract change surfaces in its own dev/CI run, never as a hidden production
 /// coordination gap. Co-located stories pairing with their component were the
-/// dominant low-value noise in the E0 coordination-gap evidence.
+/// dominant low-value noise in the coordination-gap evidence.
 fn is_dev_glue_path(path: &Path) -> bool {
     let name = path
         .file_name()

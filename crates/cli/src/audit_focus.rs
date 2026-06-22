@@ -1,9 +1,9 @@
-//! E7 weighted focus map (stage 4): a COMPOSITE attention score per review unit
+//! Weighted focus map (stage 4): a COMPOSITE attention score per review unit
 //! that ranks where scarce reviewer attention goes.
 //!
 //! A 40-file diff becomes a handful of `review-here` pieces plus an enumerable
 //! `not-prioritized` remainder. The free tier RANKS but NEVER says "skip" (safe
-//! explicit-skip is E9/paid, runtime-backed only); each unit carries a human
+//! explicit-skip is paid, runtime-backed only); each unit carries a human
 //! reason; a per-unit confidence flag protects dynamically-wired / re-export-heavy
 //! code from a silent static-reachability de-prioritization; and the
 //! `deprioritized` escape-hatch list makes EVERY de-prioritized piece reachable.
@@ -11,7 +11,7 @@
 //! ## The composite score (deterministic, no runtime input)
 //!
 //! `score = fan_io + security_taint + risk_zone + change_shape`, an integer sum
-//! (no floats, matching E6's determinism posture) of four deterministic signals,
+//! (no floats, matching the partition + order engine's determinism posture) of four deterministic signals,
 //! each derived from data the brief already retains:
 //!
 //! 1. **fan-in / fan-out** (graph blast): from `ModuleGraph::focus_file_facts`.
@@ -25,13 +25,13 @@
 //! 4. **change shape**: new export / widened visibility / signature change (the
 //!    coordination-gap proxy, ADR-001 syntactic).
 //!
-//! ## The E9 runtime seam (documented, NOT built)
+//! ## The runtime seam (documented, NOT built)
 //!
-//! `FocusScore` keeps the four component sub-scores on the wire so E9 (paid)
-//! can multiply a runtime hot/cold weight into `total` WITHOUT recomputing the
-//! deterministic signals. The single `// E9 seam` marker sits at the point the
+//! `FocusScore` keeps the four component sub-scores on the wire so the paid
+//! runtime layer can multiply a runtime hot/cold weight into `total` WITHOUT recomputing the
+//! deterministic signals. The single `// runtime seam` marker sits at the point the
 //! components are summed. No runtime field, no runtime read, no runtime gate here:
-//! free mode is the complete E7 surface.
+//! free mode is the complete surface.
 
 use serde::Serialize;
 
@@ -61,8 +61,8 @@ const SECURITY_TAINT_WEIGHT: u32 = 3;
 
 /// The focus label for a review unit. EXACTLY two variants: `Skip` is NOT
 /// representable, so the type system is the guarantee that free mode never emits
-/// a `skip` label (safe explicit-skip is E9/paid, runtime-backed only). Mirrors
-/// E4's "cut category not representable" structural posture.
+/// a `skip` label (safe explicit-skip is paid, runtime-backed only). Mirrors
+/// the decision surface's "cut category not representable" structural posture.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
@@ -113,7 +113,7 @@ impl ConfidenceFlag {
 }
 
 /// The composite attention score, with the four deterministic component
-/// sub-scores kept on the wire so the E9 runtime seam can re-weight `total`
+/// sub-scores kept on the wire so the runtime seam can re-weight `total`
 /// without recomputing the signals.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -127,7 +127,7 @@ pub struct FocusScore {
     pub risk_zone: u32,
     /// Change-shape component (new/widened export, signature change proxy).
     pub change_shape: u32,
-    /// The summed total. E9 (paid) multiplies a runtime hot/cold weight in here.
+    /// The summed total. The paid runtime layer multiplies a runtime hot/cold weight in here.
     pub total: u32,
 }
 
@@ -192,15 +192,15 @@ pub struct FocusInputs<'a> {
     /// Per-file graph facts (fan-in/out + confidence-flag signals) from
     /// `ModuleGraph::focus_file_facts`, path-resolved. The unit spine.
     pub graph_facts: &'a [FocusFileFactsPaths],
-    /// Root-relative `from_file`s of introduced boundary edges (E3). A unit file
+    /// Root-relative `from_file`s of introduced boundary edges. A unit file
     /// in this set carries the boundary risk-zone signal.
     pub boundary_files: &'a [BoundaryZoneFile],
-    /// The exports-aware public-API surface delta keys (`<rel_path>::<name>`, E3).
+    /// The exports-aware public-API surface delta keys (`<rel_path>::<name>`).
     /// A unit file that is the `<rel_path>` prefix of any key carries the
     /// public-API risk-zone AND new/widened-export change-shape signals.
     pub public_api_added: &'a [String],
     /// Root-relative changed-file paths that changed a contract consumed outside
-    /// the diff (E2 coordination-gap `changed_file`s). A unit file here carries
+    /// the diff (coordination-gap `changed_file`s). A unit file here carries
     /// the signature-change change-shape signal (syntactic proxy, ADR-001).
     pub coordination_changed_files: &'a [String],
     /// Root-relative file paths a security source -> sink taint trace touches
@@ -250,11 +250,11 @@ fn score_unit(facts: &FocusFileFactsPaths, inputs: &FocusInputs<'_>) -> FocusSco
     let shapes = u32::from(new_export) + u32::from(sig_change);
     let change_shape = shapes * CHANGE_SHAPE_WEIGHT;
 
-    // E9 seam: E9 (paid) multiplies a runtime hot/cold weight into `total` here,
+    // runtime seam: the paid runtime layer multiplies a runtime hot/cold weight into `total` here,
     // reading the per-unit runtime coverage and scaling the deterministic sum so a
     // hot path amplifies the blast. The four component sub-scores stay on the wire
-    // so E9 re-weights WITHOUT recomputing the signals. Free mode (E7) is the
-    // complete surface; E9 degrades cleanly to it when no runtime data.
+    // so it re-weights WITHOUT recomputing the signals. Free mode is the
+    // complete surface; the paid layer degrades cleanly to it when no runtime data.
     let total = fan_io + security_taint + risk_zone + change_shape;
 
     FocusScore {
@@ -643,7 +643,7 @@ mod tests {
         assert_eq!(map.review_here[0].file, "src/high.ts");
     }
 
-    // E8 done-condition (c): the symbol-level call chain (`fallow trace`) is
+    // done-condition (c): the symbol-level call chain (`fallow trace`) is
     // EXPLICITLY OFF the ranked path. The focus-map ranking inputs
     // (`FocusInputs`) carry NO trace / symbol-chain field, and the composite
     // `FocusScore.total` is the sum of EXACTLY the four documented components
@@ -665,7 +665,7 @@ mod tests {
             public_api_added: _,
             coordination_changed_files: _,
             taint_touched_files: _,
-            // NOTE: no `symbol_chain` / `trace` field exists. If E8 ever wired
+            // NOTE: no `symbol_chain` / `trace` field exists. If the trace ever wired
             // one in, this destructure would fail to compile.
         } = inputs(
             empty_facts,

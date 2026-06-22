@@ -1,4 +1,4 @@
-//! E3 ownership-aware reviewer routing (6.D).
+//! Ownership-aware reviewer routing (6.D).
 //!
 //! Per changed file, name the expert(s) to route the review to: CODEOWNERS
 //! declared owner plus git-blame / recency contributors, and flag a bus-factor-1

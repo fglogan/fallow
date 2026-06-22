@@ -619,7 +619,7 @@ pub fn print_clone_trace(trace: &CloneTrace, root: &Path, format: OutputFormat) 
     }
 }
 
-/// Print impact-closure trace results (E2). JSON only emits the structured
+/// Print impact-closure trace results. JSON only emits the structured
 /// closure; human renders a short summary.
 pub fn print_impact_closure_trace(
     trace: &fallow_core::trace::ImpactClosureTrace,

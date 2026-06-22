@@ -91,7 +91,7 @@ pub struct ModuleGraph {
 
 /// An edge in the module graph.
 ///
-/// Public surface (E8): `fallow trace` walks the raw per-symbol `imported_name`
+/// Public surface: `fallow trace` walks the raw per-symbol `imported_name`
 /// / `local_name` in BOTH directions (callers via `reverse_deps`, callees via
 /// outgoing edges), which the flattened summary structs cannot express. The
 /// field layout (and the `Edge == 32` size assertion below) is unchanged by the
@@ -279,7 +279,7 @@ impl ModuleGraph {
 
     /// Iterate the outgoing edges of `file_id` with full per-symbol data.
     ///
-    /// E8 (`fallow trace`) needs the raw `ImportedSymbol` set on each edge in
+    /// `fallow trace` needs the raw `ImportedSymbol` set on each edge in
     /// both directions, which the flattened summary structs cannot express.
     /// Returns an empty iterator for out-of-range file ids.
     pub fn outgoing_symbol_edges(

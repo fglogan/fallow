@@ -625,8 +625,8 @@ enum Command {
         #[arg(long, value_name = "FILE:EXPORT", conflicts_with = "file")]
         symbol: Option<String>,
 
-        /// OPT-IN: also attach the best-effort symbol-level call chain (E8
-        /// `fallow trace`) as the `symbol_chain` evidence section. Only
+        /// OPT-IN: also attach the best-effort symbol-level call chain
+        /// (`fallow trace`) as the `symbol_chain` evidence section. Only
         /// meaningful for a `--symbol` target. Default off (best-effort,
         /// syntactic, OFF the ranked path).
         #[arg(long)]
@@ -1196,7 +1196,7 @@ enum Command {
         )]
         max_decisions: usize,
 
-        /// (E5) Emit the agent-contract WALKTHROUGH GUIDE: the current digest
+        /// Emit the agent-contract WALKTHROUGH GUIDE: the current digest
         /// (brief + decision surface), the review direction, the JSON schema the
         /// agent must return, and a deterministic graph-snapshot hash pinned into
         /// the digest. The digest is built from the graph only (PR prose is never
@@ -1206,7 +1206,7 @@ enum Command {
         #[arg(long, conflicts_with = "walkthrough_file")]
         walkthrough_guide: bool,
 
-        /// (E5) Ingest an agent's judgment JSON and POST-VALIDATE it against the
+        /// Ingest an agent's judgment JSON and POST-VALIDATE it against the
         /// LIVE graph. Rejects any judgment whose `signal_id` fallow did not emit
         /// (anti-hallucination); refuses the whole payload as stale when the
         /// echoed graph-snapshot hash no longer matches (the tree moved). The
@@ -1216,7 +1216,7 @@ enum Command {
         #[arg(long, value_name = "PATH")]
         walkthrough_file: Option<PathBuf>,
 
-        /// (E7) Expand the de-prioritized units in the review brief's weighted
+        /// Expand the de-prioritized units in the review brief's weighted
         /// focus map ("show me what you de-prioritized"). The `deprioritized`
         /// escape-hatch list is ALWAYS present in `--format json` regardless; this
         /// flag only re-expands the collapse-by-default human focus render. Only
@@ -4310,7 +4310,7 @@ fn dispatch_audit_command(command: Command, dispatch: &DispatchContext<'_>) -> E
         unreachable!("audit dispatcher only handles audit commands");
     };
 
-    // E5: the walkthrough flags imply the brief path (the guide digest + the
+    // The walkthrough flags imply the brief path (the guide digest + the
     // graph-snapshot pin are brief-path data).
     let brief = brief || walkthrough_guide || walkthrough_file.is_some();
 
@@ -5169,12 +5169,12 @@ struct AuditDispatchArgs {
     gate_marker: Option<String>,
     brief: bool,
     max_decisions: usize,
-    /// (E5) Emit the agent-contract walkthrough guide instead of the brief body.
+    /// Emit the agent-contract walkthrough guide instead of the brief body.
     walkthrough_guide: bool,
-    /// (E5) Post-validate an agent's judgment JSON from this path against the
+    /// Post-validate an agent's judgment JSON from this path against the
     /// live graph.
     walkthrough_file: Option<PathBuf>,
-    /// (E7) Expand the de-prioritized units in the human focus map.
+    /// Expand the de-prioritized units in the human focus map.
     show_deprioritized: bool,
 }
 
@@ -5311,7 +5311,7 @@ fn run_resolved_audit(
     )
 }
 
-/// Dispatch `fallow decision-surface`: the separable E4 apex. Reuses the audit
+/// Dispatch `fallow decision-surface`: the separable apex. Reuses the audit
 /// input resolution in brief mode (changed-code scope) with all gating /
 /// coverage / baseline knobs defaulted, then renders ONLY the decision surface.
 fn dispatch_decision_surface(dispatch: &DispatchContext<'_>, max_decisions: usize) -> ExitCode {

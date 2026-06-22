@@ -8328,7 +8328,7 @@
           ]
         },
         {
-          "description": "`fallow review --walkthrough-guide --format json` (E5). The digest +\nschema the agent fetches: brief + decision surface, review direction, the\ngraph-snapshot pin, and the embedded agent schema. Graph-derived only\n(injection-resistant). Always exit 0.",
+          "description": "`fallow review --walkthrough-guide --format json`. The digest +\nschema the agent fetches: brief + decision surface, review direction, the\ngraph-snapshot pin, and the embedded agent schema. Graph-derived only\n(injection-resistant). Always exit 0.",
           "allOf": [
             {
               "$ref": "#/definitions/WalkthroughGuide"
@@ -8348,7 +8348,7 @@
           ]
         },
         {
-          "description": "`fallow review --walkthrough-file --format json` (E5). Post-validation\nof an agent's judgment JSON against the live graph: `accepted` (anchored,\nframing fenced), `rejected` (unanchored), and a `stale` flag. The verifier\nis the graph, not a second model. Always exit 0.",
+          "description": "`fallow review --walkthrough-file --format json`. Post-validation\nof an agent's judgment JSON against the live graph: `accepted` (anchored,\nframing fenced), `rejected` (unanchored), and a `stale` flag. The verifier\nis the graph, not a second model. Always exit 0.",
           "allOf": [
             {
               "$ref": "#/definitions/WalkthroughValidation"
@@ -15630,7 +15630,7 @@
           "$ref": "#/definitions/InspectEvidenceSection"
         },
         "impact_closure": {
-          "description": "E2 impact closure scoped to the inspected file as the seed: the transitive\naffected-but-not-in-diff set + coordination gap.",
+          "description": "Impact closure scoped to the inspected file as the seed: the transitive\naffected-but-not-in-diff set + coordination gap.",
           "$ref": "#/definitions/InspectEvidenceSection"
         },
         "symbol_chain": {
@@ -15642,7 +15642,7 @@
               "type": "null"
             }
           ],
-          "description": "E8 OPT-IN symbol-level call chain. Present only when `--symbol-chain` was\nrequested AND the target is a SYMBOL (best-effort, syntactic, OFF the\nranked path). `None` (omitted) by default: symbol-level chains are\nbest-effort and not part of the trusted ranked evidence."
+          "description": "OPT-IN symbol-level call chain. Present only when `--symbol-chain` was\nrequested AND the target is a SYMBOL (best-effort, syntactic, OFF the\nranked path). `None` (omitted) by default: symbol-level chains are\nbest-effort and not part of the trusted ranked evidence."
         }
       },
       "required": [
@@ -15843,7 +15843,7 @@
           "$ref": "#/definitions/GraphFacts"
         },
         "partition": {
-          "description": "Stage 2 (E6): the partition + order (by-module units + dependency-sensible\nreview order). The backbone the directed-review loop hands the agent.",
+          "description": "Stage 2: the partition + order (by-module units + dependency-sensible\nreview order). The backbone the directed-review loop hands the agent.",
           "$ref": "#/definitions/PartitionFacts"
         },
         "impact_closure": {
@@ -15851,11 +15851,11 @@
           "$ref": "#/definitions/ImpactClosureFacts"
         },
         "focus": {
-          "description": "Stage 4 (E7): the weighted focus map. A composite attention score per\nchanged-file unit (fan-in/out + security taint + risk zone + change shape),\nwith `review-here` / `not-prioritized` labels (NEVER `skip` in free mode),\na per-unit confidence flag, and the FULL `deprioritized` escape-hatch list\nso every de-prioritized piece is reachable. Stage 4 sits UNDER the decision\nsurface as drill-down.",
+          "description": "Stage 4: the weighted focus map. A composite attention score per\nchanged-file unit (fan-in/out + security taint + risk zone + change shape),\nwith `review-here` / `not-prioritized` labels (NEVER `skip` in free mode),\na per-unit confidence flag, and the FULL `deprioritized` escape-hatch list\nso every de-prioritized piece is reachable. Stage 4 sits UNDER the decision\nsurface as drill-down.",
           "$ref": "#/definitions/FocusMap"
         },
         "deltas": {
-          "description": "E3 (6.A): diff-aware deterministic deltas (boundary/cycle introduced +\nexports-aware public-API surface delta), new-vs-pre-existing.",
+          "description": "6.A: diff-aware deterministic deltas (boundary/cycle introduced +\nexports-aware public-API surface delta), new-vs-pre-existing.",
           "$ref": "#/definitions/ReviewDeltas"
         },
         "weakening": {
@@ -15863,14 +15863,14 @@
           "items": {
             "$ref": "#/definitions/WeakeningSignal"
           },
-          "description": "E3 (6.F, headline): reviewer-private weakening signals (tests\nremoved/skipped, thresholds lowered, suppressions added, security steps\nremoved). Advisory, never gates, never auto-posted."
+          "description": "6.F, headline: reviewer-private weakening signals (tests\nremoved/skipped, thresholds lowered, suppressions added, security steps\nremoved). Advisory, never gates, never auto-posted."
         },
         "routing": {
-          "description": "E3 (6.D): ownership-aware reviewer routing (per-file expert + bus-factor).",
+          "description": "6.D: ownership-aware reviewer routing (per-file expert + bus-factor).",
           "$ref": "#/definitions/RoutingFacts"
         },
         "decisions": {
-          "description": "E4 (6.G, the APEX): the decision surface. The ranked, capped,\nsignal_id-anchored set of consequential structural decisions, each framed\nas a judgment question with its routed expert. This is the only thing the\nbrief visibly leads with; the stages above are its drill-down derivation.",
+          "description": "6.G, the APEX: the decision surface. The ranked, capped,\nsignal_id-anchored set of consequential structural decisions, each framed\nas a judgment question with its routed expert. This is the only thing the\nbrief visibly leads with; the stages above are its drill-down derivation.",
           "$ref": "#/definitions/DecisionSurface"
         }
       },
@@ -16004,7 +16004,7 @@
         "reachable_from",
         "boundaries_touched"
       ],
-      "description": "Stage 1 of the brief: graph-derived orientation facts.\n\n`boundaries_touched` is derived from the run's boundary-violation zones;\n`reachable_from` is populated by the E2 impact closure (the affected-not-shown\nset: modules the changed code is reachable from / affects, none in the diff).\n`exports_added` / `api_width_delta` stay honestly stubbed (`0`) until the\nexport-surface delta lands (E3). The fields are present and correctly typed so\nvalues fill in later without a schema bump."
+      "description": "Stage 1 of the brief: graph-derived orientation facts.\n\n`boundaries_touched` is derived from the run's boundary-violation zones;\n`reachable_from` is populated by the impact closure (the affected-not-shown\nset: modules the changed code is reachable from / affects, none in the diff).\n`exports_added` / `api_width_delta` stay honestly stubbed (`0`) until the\nexport-surface delta lands. The fields are present and correctly typed so\nvalues fill in later without a schema bump."
     },
     "ImpactClosureFacts": {
       "type": "object",
@@ -16028,7 +16028,7 @@
         "affected_not_shown",
         "coordination_gap"
       ],
-      "description": "Stage 3 of the brief: the impact closure (E2). The transitive\naffected-but-not-in-diff set plus the coordination gap. The differentiator a\ndiff tool fundamentally cannot do, because it has no graph.\n\nHonest scope (ADR-001, syntactic): the coordination gap is an attention\npointer at the exact inter-module failure mode, NOT a correctness proof."
+      "description": "Stage 3 of the brief: the impact closure. The transitive\naffected-but-not-in-diff set plus the coordination gap. The differentiator a\ndiff tool fundamentally cannot do, because it has no graph.\n\nHonest scope (ADR-001, syntactic): the coordination gap is an attention\npointer at the exact inter-module failure mode, NOT a correctness proof."
     },
     "CoordinationGapFact": {
       "type": "object",
@@ -16091,7 +16091,7 @@
         "cycle_introduced",
         "public_api_added"
       ],
-      "description": "E3 diff-aware deterministic deltas (6.A), framed new-vs-pre-existing against\nthe audit base snapshot. Each entry is a brief summary/verdict line.\n\n`public_api` is batch-consolidated to ONE decision per change (E0 rule R1):\nthe `added` list carries the introduced public-export keys as evidence, but a\nreviewer reads \"the public surface widened by N\", never one decision per\nsymbol."
+      "description": "Diff-aware deterministic deltas (6.A), framed new-vs-pre-existing against\nthe audit base snapshot. Each entry is a brief summary/verdict line.\n\n`public_api` is batch-consolidated to ONE decision per change (rule R1):\nthe `added` list carries the introduced public-export keys as evidence, but a\nreviewer reads \"the public surface widened by N\", never one decision per\nsymbol."
     },
     "WeakeningSignal": {
       "type": "object",
@@ -16229,7 +16229,7 @@
           "items": {
             "type": "string"
           },
-          "description": "The routed expert(s) to ask, from E3 ownership routing. Empty when no\nownership signal is available for the anchor file."
+          "description": "The routed expert(s) to ask, from ownership routing. Empty when no\nownership signal is available for the anchor file."
         },
         "bus_factor_one": {
           "type": "boolean",
@@ -16448,7 +16448,7 @@
           "items": {
             "type": "string"
           },
-          "description": "The routed expert(s) to ask, from E3 ownership routing. Empty when no\nownership signal is available for the anchor file."
+          "description": "The routed expert(s) to ask, from ownership routing. Empty when no\nownership signal is available for the anchor file."
         },
         "bus_factor_one": {
           "type": "boolean",
@@ -16560,7 +16560,7 @@
         },
         "scoring_budget": {
           "type": "integer",
-          "description": "Per-unit review-effort budget: the E7 weighted-focus composite score for\nthis file. A cloud fan-out spends AI passes/verifiers PROPORTIONAL to this\n(higher = review harder); a local single-agent loop can ignore it."
+          "description": "Per-unit review-effort budget: the weighted-focus composite score for\nthis file. A cloud fan-out spends AI passes/verifiers PROPORTIONAL to this\n(higher = review harder); a local single-agent loop can ignore it."
         },
         "out_of_diff": {
           "type": "array",
@@ -16574,7 +16574,7 @@
           "items": {
             "type": "string"
           },
-          "description": "The routed expert(s) to ask, from E3 ownership routing."
+          "description": "The routed expert(s) to ask, from ownership routing."
         }
       },
       "required": [
@@ -16632,7 +16632,7 @@
       "type": "object",
       "properties": {
         "schema_version": {
-          "description": "Pinned to the E1 brief schema version (the spec versions the guide by\n`review_brief_schema_version`).",
+          "description": "Pinned to the brief schema version (the spec versions the guide by\n`review_brief_schema_version`).",
           "$ref": "#/definitions/ReviewBriefSchemaVersion"
         },
         "version": {
@@ -16681,7 +16681,7 @@
       "type": "object",
       "properties": {
         "schema_version": {
-          "description": "Pinned to the E1 brief schema version.",
+          "description": "Pinned to the brief schema version.",
           "$ref": "#/definitions/ReviewBriefSchemaVersion"
         },
         "version": {
@@ -16764,7 +16764,7 @@
         "units",
         "order"
       ],
-      "description": "Stage 2 of the brief: the partition + order (E6). The changed files split into\ncoherent BY-MODULE units (the only byte-identical-deterministic clustering\ndefinition straight from the graph), plus a dependency-sensible review ORDER\nover those units (definitions before consumers, mechanical/leaf units last,\nties broken by the path sort). Stage 2 sits UNDER the decision surface as a\ndrill-down; it is the backbone the directed-review loop hands the agent.\n\nFeature-cluster and concern partitioning are deferred (they need scoring\nheuristics whose tie-breaks are a fresh nondeterminism surface)."
+      "description": "Stage 2 of the brief: the partition + order. The changed files split into\ncoherent BY-MODULE units (the only byte-identical-deterministic clustering\ndefinition straight from the graph), plus a dependency-sensible review ORDER\nover those units (definitions before consumers, mechanical/leaf units last,\nties broken by the path sort). Stage 2 sits UNDER the decision surface as a\ndrill-down; it is the backbone the directed-review loop hands the agent.\n\nFeature-cluster and concern partitioning are deferred (they need scoring\nheuristics whose tie-breaks are a fresh nondeterminism surface)."
     },
     "ReviewUnitFact": {
       "type": "object",
@@ -16800,7 +16800,7 @@
           "description": "Not prioritized: below the line. NEVER \"skip\" (the reviewer is free to\nreview it anyway; the escape hatch enumerates every such unit)."
         }
       ],
-      "description": "The focus label for a review unit. EXACTLY two variants: `Skip` is NOT\nrepresentable, so the type system is the guarantee that free mode never emits\na `skip` label (safe explicit-skip is E9/paid, runtime-backed only). Mirrors\nE4's \"cut category not representable\" structural posture."
+      "description": "The focus label for a review unit. EXACTLY two variants: `Skip` is NOT\nrepresentable, so the type system is the guarantee that free mode never emits\na `skip` label (safe explicit-skip is paid, runtime-backed only). Mirrors\nthe decision surface's \"cut category not representable\" structural posture."
     },
     "ConfidenceFlag": {
       "oneOf": [
@@ -16838,7 +16838,7 @@
         },
         "total": {
           "type": "integer",
-          "description": "The summed total. E9 (paid) multiplies a runtime hot/cold weight in here."
+          "description": "The summed total. The paid runtime layer multiplies a runtime hot/cold weight in here."
         }
       },
       "required": [
@@ -16848,7 +16848,7 @@
         "change_shape",
         "total"
       ],
-      "description": "The composite attention score, with the four deterministic component\nsub-scores kept on the wire so the E9 runtime seam can re-weight `total`\nwithout recomputing the signals."
+      "description": "The composite attention score, with the four deterministic component\nsub-scores kept on the wire so the runtime seam can re-weight `total`\nwithout recomputing the signals."
     },
     "FocusUnit": {
       "type": "object",

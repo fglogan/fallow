@@ -1,4 +1,4 @@
-//! E5 agent-contract loop (the codiff pattern, graph-extended).
+//! Agent-contract loop (the codiff pattern, graph-extended).
 //!
 //! Closes the steer-the-agent loop. The tool owns the digest + prompt + schema;
 //! the agent owns judgment; fallow post-validates the agent's judgment against
@@ -59,14 +59,14 @@ pub struct DirectionUnit {
     /// The concern lens the agent should check for this unit, derived from the
     /// unit's risk signals (impact-closure consumers vs a plain touched file).
     pub concern_lens: String,
-    /// Per-unit review-effort budget: the E7 weighted-focus composite score for
+    /// Per-unit review-effort budget: the weighted-focus composite score for
     /// this file. A cloud fan-out spends AI passes/verifiers PROPORTIONAL to this
     /// (higher = review harder); a local single-agent loop can ignore it.
     pub scoring_budget: u32,
     /// Root-relative paths of modules affected by this unit but NOT in the diff
     /// (the out-of-diff context the agent must reason about).
     pub out_of_diff: Vec<String>,
-    /// The routed expert(s) to ask, from E3 ownership routing.
+    /// The routed expert(s) to ask, from ownership routing.
     pub expert: Vec<String>,
 }
 
@@ -119,7 +119,7 @@ fn agent_schema() -> AgentSchema {
     schemars(title = "fallow review --walkthrough-guide --format json")
 )]
 pub struct WalkthroughGuide {
-    /// Pinned to the E1 brief schema version (the spec versions the guide by
+    /// Pinned to the brief schema version (the spec versions the guide by
     /// `review_brief_schema_version`).
     pub schema_version: ReviewBriefSchemaVersion,
     /// Fallow CLI version that produced this guide.
@@ -204,7 +204,7 @@ pub struct RejectedJudgment {
     schemars(title = "fallow review --walkthrough-file --format json")
 )]
 pub struct WalkthroughValidation {
-    /// Pinned to the E1 brief schema version.
+    /// Pinned to the brief schema version.
     pub schema_version: ReviewBriefSchemaVersion,
     /// Fallow CLI version that produced this validation.
     pub version: String,
@@ -256,7 +256,7 @@ fn is_reviewable_source_unit(file: &str) -> bool {
 }
 
 /// Build the review direction. The SPINE is the change itself: every reviewable
-/// E7 focus unit (`review_here` + the `deprioritized` escape hatch), so the
+/// focus unit (`review_here` + the `deprioritized` escape hatch), so the
 /// direction is never empty when there is code to review. Ownership routing is a
 /// LEFT-JOINED overlay for the optional `expert` field, NOT the spine: sourcing
 /// the work-list from routing made it empty on solo / author's-own-PR changes (no

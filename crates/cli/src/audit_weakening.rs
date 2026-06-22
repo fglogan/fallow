@@ -1,4 +1,4 @@
-//! E3 weakening-signal pass (6.F), PROMOTED TO A HEADLINE per v6.
+//! Weakening-signal pass (6.F), PROMOTED TO A HEADLINE per v6.
 //!
 //! A diff-scoped base-vs-head pass over the changed files that flags the
 //! AI-era failure modes a green check hides: tests removed or skipped, coverage

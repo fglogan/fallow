@@ -543,7 +543,7 @@ use crate::MemberKind;
 /// caches from 180 can miss those synthetic `member_accesses` and surface false
 /// `unused-store-member` findings.
 ///
-/// Bumped to 183 for E11 (LLM-call sinks): the security sink argument collectors
+/// Bumped to 183 (LLM-call sinks): the security sink argument collectors
 /// (`collect_arg_idents` / `collect_arg_source_paths`) now recurse into array
 /// elements (and the source-path collector into object properties), so taint
 /// riding an object-in-array argument (`messages: [{ content: userInput }]`, the

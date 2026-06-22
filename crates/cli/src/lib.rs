@@ -33,7 +33,7 @@ pub mod audit;
     reason = "shared CLI library compiles bin-oriented support modules for reuse"
 )]
 pub mod audit_brief;
-/// E4 decision-surface extractor (stage 6 / 6.G): the apex of the review brief.
+/// Decision-surface extractor (stage 6 / 6.G): the apex of the review brief.
 /// Public so the schema-emit binary can derive the `DecisionSurface` types.
 #[allow(
     dead_code,
@@ -41,7 +41,7 @@ pub mod audit_brief;
     reason = "shared CLI library compiles bin-oriented support modules for reuse"
 )]
 pub mod audit_decision_surface;
-/// E7 weighted focus map (stage 4): the composite attention score per review unit
+/// Weighted focus map (stage 4): the composite attention score per review unit
 /// plus the no-skip labels, confidence flags, and escape hatch. Public so the
 /// schema-emit binary can derive the `FocusMap` types.
 #[allow(
@@ -50,7 +50,7 @@ pub mod audit_decision_surface;
     reason = "shared CLI library compiles bin-oriented support modules for reuse"
 )]
 pub mod audit_focus;
-/// E5 agent-contract loop (the codiff pattern, graph-extended): the walkthrough
+/// Agent-contract loop (the codiff pattern, graph-extended): the walkthrough
 /// guide (digest + schema + graph-snapshot pin) and the `--walkthrough-file`
 /// post-validation against the live graph. Public so the schema-emit binary can
 /// derive the guide + validation envelopes.

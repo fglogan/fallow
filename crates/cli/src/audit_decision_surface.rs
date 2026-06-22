@@ -1,4 +1,4 @@
-//! E4 decision-surface extractor (stage 6 / 6.G): THE product.
+//! Decision-surface extractor (stage 6 / 6.G): THE product.
 //!
 //! The apex of the review brief. A change embeds many decisions; almost all are
 //! mechanical and a few are consequential enough to need human taste. This
@@ -10,13 +10,13 @@
 //!
 //! ## The SOLID-3 (the ONLY categories that ship)
 //!
-//! Per the E0 verdict (`.plans/agentic-review-e0-verdict.md`) the decision
+//! Per the verdict (`.plans/agentic-review-e0-verdict.md`) the decision
 //! categories are NOT uniformly reliable on a syntactic engine (ADR-001). Exactly
 //! three are validated and shippable, each backed by a deterministic signal
-//! fallow already emits in E2/E3:
+//! fallow already emits:
 //!
-//! 1. **coupling/boundary** (E3 `boundary_introduced`): a new cross-zone edge.
-//! 2. **public-API/contract** (E3 `public_api_added` + E2 coordination gaps): a
+//! 1. **coupling/boundary** (`boundary_introduced`): a new cross-zone edge.
+//! 2. **public-API/contract** (`public_api_added` + coordination gaps): a
 //!    new exports-aware public surface, or a changed contract consumed by modules
 //!    outside the diff.
 //! 3. **dependency**: a new `package.json` dependency entry (the arm is present;
@@ -139,7 +139,7 @@ pub struct Decision {
     pub blast: u64,
     /// `blast * reversibility_weight`: the rank key (sorted descending).
     pub consequence: u64,
-    /// The routed expert(s) to ask, from E3 ownership routing. Empty when no
+    /// The routed expert(s) to ask, from ownership routing. Empty when no
     /// ownership signal is available for the anchor file.
     pub expert: Vec<String>,
     /// Whether the anchor file's only qualified owner is one person (bus-factor-1).
@@ -231,11 +231,11 @@ pub struct CoordinationAnchor {
 
 /// All inputs the extractor needs, gathered from the assembled brief data.
 pub struct DecisionInputs<'a> {
-    /// E3 diff-aware deltas (boundary + public-API). The candidate source.
+    /// Diff-aware deltas (boundary + public-API). The candidate source.
     pub deltas: &'a ReviewDeltas,
     /// Boundary anchors keyed by zone-pair, one representative per introduced edge.
     pub boundary_anchors: &'a [BoundaryAnchor],
-    /// E2 coordination gaps projected to the contract decision shape.
+    /// Coordination gaps projected to the contract decision shape.
     pub coordination: &'a [CoordinationAnchor],
     /// 1-based line of the first widened public-API export's declaration, so the
     /// public-API-surface decision anchors to a real line. `0` when unresolved.
@@ -243,7 +243,7 @@ pub struct DecisionInputs<'a> {
     /// Project-wide fan-in beyond the diff (impact-closure `affected_not_shown`).
     /// Used as the blast magnitude for boundary + public-API-surface decisions.
     pub affected_not_shown: u64,
-    /// E3 ownership routing (routed expert per file).
+    /// Ownership routing (routed expert per file).
     pub routing: &'a RoutingFacts,
     /// Per-anchor-file head source, for suppression checks. `None` for a file
     /// whose head content could not be read (the decision is then not suppressed).

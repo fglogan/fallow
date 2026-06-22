@@ -1,8 +1,8 @@
-//! Exports-aware public-export-key computation (E3, the hard 80% of 6.A).
+//! Exports-aware public-export-key computation (the hard 80% of 6.A).
 //!
 //! Given the set of *public-API entry points* (the `package.json` `exports`-mapped
 //! modules plus the no-`exports` source-index fallback; computed in core's
-//! `public_api_package_entry_points`, which already encodes E0 rule R4), this
+//! `public_api_package_entry_points`, which already encodes rule R4), this
 //! resolves the set of export symbols reachable through that public surface and
 //! returns one stable `"<rel_path>::<name>"` key per public export.
 //!

@@ -676,7 +676,7 @@ fn register_audit_brief_definitions(generator: &mut schemars::SchemaGenerator) {
     let _ = generator.subschema_for::<DecisionSurfaceOutput>();
 }
 
-/// Register the E5 `fallow review --walkthrough-guide` /
+/// Register the `fallow review --walkthrough-guide` /
 /// `--walkthrough-file` envelopes (the agent-contract loop).
 fn register_walkthrough_definitions(generator: &mut schemars::SchemaGenerator) {
     let _ = generator.subschema_for::<DirectionUnit>();
@@ -802,7 +802,7 @@ fn register_per_command_envelope_definitions(generator: &mut schemars::SchemaGen
     let _ = generator.subschema_for::<InspectEvidenceSection>();
     let _ = generator.subschema_for::<InspectSectionStatus>();
     let _ = generator.subschema_for::<InspectEvidenceScope>();
-    // E8 symbol-level call chain (`fallow trace`, `FallowOutput::Trace`).
+    // Symbol-level call chain (`fallow trace`, `FallowOutput::Trace`).
     let _ = generator.subschema_for::<fallow_core::trace_chain::SymbolChainTrace>();
     let _ = generator.subschema_for::<fallow_core::trace_chain::ChainHop>();
     let _ = generator.subschema_for::<fallow_core::trace_chain::UnresolvedCallee>();
@@ -993,12 +993,12 @@ const FALLOW_OUTPUT_VARIANTS: &[(&str, &[&str], &str)] = &[
     (
         "review-walkthrough-guide",
         &["WalkthroughGuide"],
-        "`fallow review --walkthrough-guide --format json` (E5). The digest +\nschema the agent fetches: brief + decision surface, review direction, the\ngraph-snapshot pin, and the embedded agent schema. Graph-derived only\n(injection-resistant). Always exit 0.",
+        "`fallow review --walkthrough-guide --format json`. The digest +\nschema the agent fetches: brief + decision surface, review direction, the\ngraph-snapshot pin, and the embedded agent schema. Graph-derived only\n(injection-resistant). Always exit 0.",
     ),
     (
         "review-walkthrough-validation",
         &["WalkthroughValidation"],
-        "`fallow review --walkthrough-file --format json` (E5). Post-validation\nof an agent's judgment JSON against the live graph: `accepted` (anchored,\nframing fenced), `rejected` (unanchored), and a `stale` flag. The verifier\nis the graph, not a second model. Always exit 0.",
+        "`fallow review --walkthrough-file --format json`. Post-validation\nof an agent's judgment JSON against the live graph: `accepted` (anchored,\nframing fenced), `rejected` (unanchored), and a `stale` flag. The verifier\nis the graph, not a second model. Always exit 0.",
     ),
 ];
 

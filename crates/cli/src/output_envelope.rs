@@ -558,10 +558,10 @@ pub struct InspectEvidence {
     pub duplication: InspectEvidenceSection,
     pub complexity: InspectEvidenceSection,
     pub security: InspectEvidenceSection,
-    /// E2 impact closure scoped to the inspected file as the seed: the transitive
+    /// Impact closure scoped to the inspected file as the seed: the transitive
     /// affected-but-not-in-diff set + coordination gap.
     pub impact_closure: InspectEvidenceSection,
-    /// E8 OPT-IN symbol-level call chain. Present only when `--symbol-chain` was
+    /// OPT-IN symbol-level call chain. Present only when `--symbol-chain` was
     /// requested AND the target is a SYMBOL (best-effort, syntactic, OFF the
     /// ranked path). `None` (omitted) by default: symbol-level chains are
     /// best-effort and not part of the trusted ranked evidence.
@@ -1151,7 +1151,7 @@ pub enum FallowOutput {
     /// `evidence`, and `warnings`; no `schema_version`.
     #[serde(rename = "inspect_target")]
     Inspect(InspectOutput),
-    /// `fallow trace <symbol> --format json` (E8 symbol-level call chains).
+    /// `fallow trace <symbol> --format json` (symbol-level call chains).
     /// Required `file`, `symbol`, `symbol_found`, `depth`, `best_effort`,
     /// `reason`; optional `callers`, `callees`, `unresolved_callees`. Its OWN
     /// surface, best-effort and EXPLICITLY OFF the ranked path: NEVER folded
@@ -1246,13 +1246,13 @@ pub enum FallowOutput {
     /// each with structured `actions[]`. Independently versioned; always exit 0.
     #[serde(rename = "decision-surface")]
     DecisionSurface(crate::audit_decision_surface::DecisionSurfaceOutput),
-    /// `fallow review --walkthrough-guide --format json` (E5). The digest +
+    /// `fallow review --walkthrough-guide --format json`. The digest +
     /// schema the agent fetches: the brief + decision surface, the review
     /// direction, the graph-snapshot pin, and the embedded agent schema. The
     /// digest is graph-derived only (injection-resistant). Always exit 0.
     #[serde(rename = "review-walkthrough-guide")]
     WalkthroughGuide(crate::audit_walkthrough::WalkthroughGuide),
-    /// `fallow review --walkthrough-file --format json` (E5). The post-validation
+    /// `fallow review --walkthrough-file --format json`. The post-validation
     /// of an agent's judgment JSON against the live graph: accepted (anchored,
     /// framing fenced), rejected (unanchored), and a stale flag (the tree moved).
     /// The verifier is the graph, never a second model. Always exit 0.

@@ -1,9 +1,9 @@
-//! Fan-in / fan-out + focus graph facts (E7): from a changed-file set, compute
+//! Fan-in / fan-out + focus graph facts: from a changed-file set, compute
 //! the per-file graph blast-radius signals (fan-IN = importers, fan-OUT = forward
 //! deps) and the two confidence-flag signals (dynamic dispatch, re-export
 //! indirection) that the weighted focus map (`audit_focus.rs`) consumes.
 //!
-//! This is the graph-crate half of the E7 focus map: all `ModuleGraph` access
+//! This is the graph-crate half of the focus map: all `ModuleGraph` access
 //! lives here (mirroring `impact_closure` / `partition_order`), so the CLI focus
 //! extractor stays a pure function of these resolved facts. The fan-in/out is the
 //! roadmap stage-4 "fan-in / fan-out (graph): reverse-deps + forward-deps; high
@@ -11,7 +11,7 @@
 //! "dynamically-wired / re-export-heavy code is not silently de-prioritized"
 //! guard.
 //!
-//! Determinism (matching E6): the engine is a pure function of
+//! Determinism (matching the partition + order engine): the engine is a pure function of
 //! `(graph, changed_file_ids)`. No timestamps, no randomness, no float scoring.
 //! No `FxHashMap` iteration order reaches output: every collection is sorted
 //! before serialization in the path-resolved view.

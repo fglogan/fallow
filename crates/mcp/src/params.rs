@@ -242,7 +242,7 @@ pub struct InspectTargetParams {
     pub threads: Option<usize>,
 
     /// OPT-IN (default off): also attach the best-effort symbol-level call chain
-    /// (E8 `fallow trace`) as the `symbol_chain` evidence section. Only
+    /// (`fallow trace`) as the `symbol_chain` evidence section. Only
     /// meaningful for a SYMBOL target. Best-effort, syntactic (ADR-001), and
     /// EXPLICITLY OFF the ranked path: resolved-vs-unresolved callees are
     /// reported honestly, the chain is never folded into the ranked brief and is

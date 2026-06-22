@@ -1,4 +1,4 @@
-//! Partition + order engine (E6): from a changed-file set, split the change into
+//! Partition + order engine: from a changed-file set, split the change into
 //! coherent, independently-reviewable UNITS and suggest a dependency-sensible
 //! review ORDER.
 //!

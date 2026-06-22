@@ -1,7 +1,7 @@
-//! E8 symbol-level call chains (`fallow trace <symbol> --callers --callees`).
+//! Symbol-level call chains (`fallow trace <symbol> --callers --callees`).
 //!
 //! Best-effort, syntactic (ADR-001), EXPLICITLY OFF the ranked path. This walk
-//! NEVER feeds the E7 focus map / ranking (verified by a dedicated test in the
+//! NEVER feeds the focus map / ranking (verified by a dedicated test in the
 //! CLI crate). It reports resolved-vs-unresolved callees HONESTLY: a referenced
 //! callee that the syntactic walk cannot resolve to an import-symbol edge is
 //! surfaced in [`SymbolChainTrace::unresolved_callees`], never silently dropped.

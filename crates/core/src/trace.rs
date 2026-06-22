@@ -477,7 +477,7 @@ fn format_reference_kind(kind: ReferenceKind) -> String {
     }
 }
 
-/// Result of computing the E2 impact closure for a single file as the seed: the
+/// Result of computing the impact closure for a single file as the seed: the
 /// transitive affected-but-not-in-diff set plus the coordination gap. Serializes
 /// as the `impact_closure` evidence section of `inspect_target`.
 #[derive(Debug, Serialize)]
@@ -503,7 +503,7 @@ pub struct ImpactClosureGap {
     pub note: String,
 }
 
-/// Compute the E2 impact closure for a single file as the seed.
+/// Compute the impact closure for a single file as the seed.
 ///
 /// Resolves `file_path` to a graph `FileId`, walks `reverse_deps` + re-export
 /// chains to the transitive affected set, and reports the coordination gap (the

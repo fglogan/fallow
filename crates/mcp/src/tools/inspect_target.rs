@@ -50,7 +50,7 @@ fn build_inspect_args(params: &InspectTargetParams) -> Result<Vec<String>, Strin
             require_non_empty("target.file", file)?;
             require_non_empty("target.export_name", export_name)?;
             args.extend(["--symbol".to_string(), format!("{file}:{export_name}")]);
-            // E8 OPT-IN: the symbol-level call chain is only meaningful for a
+            // OPT-IN: the symbol-level call chain is only meaningful for a
             // symbol target, and only attached when explicitly requested.
             if params.symbol_chain == Some(true) {
                 args.push("--symbol-chain".to_string());

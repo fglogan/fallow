@@ -1,9 +1,9 @@
-//! `fallow trace <symbol> --callers --callees [--depth N]`: E8 symbol-level
+//! `fallow trace <symbol> --callers --callees [--depth N]`: symbol-level
 //! call chains.
 //!
 //! Best-effort, syntactic (ADR-001), EXPLICITLY OFF the ranked path. The result
 //! is its OWN surface (`kind: "trace"`); it is NEVER folded into the ranked
-//! brief and is NEVER an input to the E7 focus map / ranking. Resolved-vs-
+//! brief and is NEVER an input to the focus map / ranking. Resolved-vs-
 //! unresolved callees are reported honestly: an unresolved callee is surfaced
 //! in `unresolved_callees`, never silently dropped.
 

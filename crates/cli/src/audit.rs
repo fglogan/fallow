@@ -85,17 +85,17 @@ pub struct AuditResult {
     pub dupes: Option<DupesResult>,
     pub health: Option<HealthResult>,
     pub elapsed: Duration,
-    /// E3 review-brief data, populated only on the brief path. The deltas are
+    /// Review-brief data, populated only on the brief path. The deltas are
     /// computed from the head sets vs the base snapshot; weakening + routing are
     /// computed from git over the changed files. `None` off the brief path.
     pub review_deltas: Option<crate::audit_brief::ReviewDeltas>,
     pub weakening_signals: Vec<weakening::WeakeningSignal>,
     pub routing: Option<routing::RoutingFacts>,
-    /// E4 decision surface (the apex): the ranked, capped, signal_id-anchored set
+    /// Decision surface (the apex): the ranked, capped, signal_id-anchored set
     /// of consequential structural decisions, each framed as a judgment question.
     /// Populated only on the brief path; `None` otherwise.
     pub decision_surface: Option<crate::audit_decision_surface::DecisionSurface>,
-    /// E5 deterministic graph-snapshot hash: a stable hash of the relevant HEAD
+    /// Deterministic graph-snapshot hash: a stable hash of the relevant HEAD
     /// graph + diff state (the six key sets plus the resolved base ref + head
     /// sha). Pinned into the walkthrough guide digest so a stale agent JSON
     /// (whose echoed hash != this) is REFUSED on reentry. The verifier is the
@@ -152,17 +152,17 @@ pub struct AuditOptions<'a> {
     /// audit analysis still runs and the verdict is still computed and carried
     /// informationally; it just never drives the exit code on this path.
     pub brief: bool,
-    /// E4 decision-surface cap (the working-memory limit). Default 4; clamped to
+    /// Decision-surface cap (the working-memory limit). Default 4; clamped to
     /// [3, 5] (4 plus or minus 1) by the extractor. Only consulted on the brief
     /// path.
     pub max_decisions: usize,
-    /// (E5) Emit the agent-contract walkthrough GUIDE (digest + schema + graph-
+    /// Emit the agent-contract walkthrough GUIDE (digest + schema + graph-
     /// snapshot pin) instead of the brief body. Implies `brief`. Always exit 0.
     pub walkthrough_guide: bool,
-    /// (E5) Path to an agent's judgment JSON to POST-VALIDATE against the live
+    /// Path to an agent's judgment JSON to POST-VALIDATE against the live
     /// graph. Implies `brief`. Always exit 0. `None` off the walkthrough path.
     pub walkthrough_file: Option<&'a std::path::Path>,
-    /// (E7) Expand the de-prioritized units in the human focus map ("show me what
+    /// Expand the de-prioritized units in the human focus map ("show me what
     /// you de-prioritized"). The `deprioritized` list is ALWAYS in the JSON
     /// regardless; this only re-expands the human render (collapse-by-default).
     /// Only consulted on the brief path.
@@ -512,13 +512,13 @@ pub struct AuditKeySnapshot {
     dead_code: FxHashSet<String>,
     health: FxHashSet<String>,
     dupes: FxHashSet<String>,
-    /// E3 review-brief delta substrate (populated only on the brief path; empty
+    /// Review-brief delta substrate (populated only on the brief path; empty
     /// otherwise). Cross-zone boundary EDGE keys (`<from_zone>->-<to_zone>`),
     /// one per distinct zone pair (R2 first-edge-only framing).
     boundary_edges: FxHashSet<String>,
-    /// E3: canonical circular-dependency keys (rotation-independent file set).
+    /// Canonical circular-dependency keys (rotation-independent file set).
     cycles: FxHashSet<String>,
-    /// E3: exports-aware public-export keys (`<rel_path>::<name>`), the surface
+    /// Exports-aware public-export keys (`<rel_path>::<name>`), the surface
     /// reachable through `package.json` `exports` + re-export reachability.
     public_api: FxHashSet<String>,
 }
@@ -987,7 +987,7 @@ fn current_keys_as_base_keys(
     dupes: Option<&DupesResult>,
     health: Option<&HealthResult>,
 ) -> AuditKeySnapshot {
-    // Reuse path (no behavioral change vs base): head IS base, so the E3 delta
+    // Reuse path (no behavioral change vs base): head IS base, so the delta
     // sets are the head's own keys, which makes every head-minus-base delta
     // empty. `public_api_keys` is the head set already computed on the brief
     // path; the boundary/cycle keys come from the head results.
@@ -1354,7 +1354,7 @@ fn run_audit_head_analyses(
         None
     };
     let dupes = run_audit_dupes(opts, changed_since, Some(changed_files), dupes_files)?;
-    // Compute the E2 impact closure AND the E3 exports-aware public-export key
+    // Compute the impact closure AND the exports-aware public-export key
     // set for the review brief BEFORE health consumes the shared parse (which
     // owns the retained graph). Both are stored on the check result so they
     // survive the graph drop.
@@ -1380,7 +1380,7 @@ fn run_audit_head_analyses(
     })
 }
 
-/// Compute the E2 impact closure for the review brief from the check result's
+/// Compute the impact closure for the review brief from the check result's
 /// retained graph against the changed-file set.
 ///
 /// Maps each changed absolute path to its graph `FileId`, walks `reverse_deps` +
@@ -1424,7 +1424,7 @@ fn compute_brief_impact_closure(
     Some(graph.closure_with_paths(&closure, root))
 }
 
-/// Compute the E6 partition + order for the review brief's stage 2 from the
+/// Compute the partition + order for the review brief's stage 2 from the
 /// check result's retained graph against the changed-file set.
 ///
 /// Maps each changed absolute path to its graph `FileId`, groups the changed
@@ -1508,7 +1508,7 @@ fn compute_brief_export_lines(
     Some(map)
 }
 
-/// Compute the E7 per-file focus graph facts (fan-in/out + the dynamic-dispatch /
+/// Compute the per-file focus graph facts (fan-in/out + the dynamic-dispatch /
 /// re-export-indirection confidence-flag signals) for the review brief's stage 4
 /// weighted focus map, from the check result's retained graph against the
 /// changed-file set.
@@ -1664,7 +1664,7 @@ fn assemble_audit_result(input: AuditAssemblyInput<'_>) -> Result<AuditResult, E
         base_snapshot.as_ref(),
     );
 
-    // E3 review-brief data: deltas (head-vs-base sets), weakening (base-vs-head
+    // Review-brief data: deltas (head-vs-base sets), weakening (base-vs-head
     // diff scan over the changed files), and ownership routing. Brief-path only.
     let (review_deltas, weakening_signals, routing) = if opts.brief {
         compute_brief_e3_data(
@@ -1678,8 +1678,8 @@ fn assemble_audit_result(input: AuditAssemblyInput<'_>) -> Result<AuditResult, E
         (None, Vec::new(), None)
     };
 
-    // E4 decision surface (the apex): classify the SOLID-3 candidates from the E3
-    // deltas + E2 coordination gaps, anchor each `signal_id`, rank, cap, and pair
+    // Decision surface (the apex): classify the SOLID-3 candidates from the
+    // deltas + coordination gaps, anchor each `signal_id`, rank, cap, and pair
     // the routed expert. Brief-path only.
     let decision_surface = if opts.brief {
         Some(compute_decision_surface(
@@ -1692,7 +1692,7 @@ fn assemble_audit_result(input: AuditAssemblyInput<'_>) -> Result<AuditResult, E
         None
     };
 
-    // E5 graph-snapshot hash (the staleness pin): a deterministic hash of the
+    // Graph-snapshot hash (the staleness pin): a deterministic hash of the
     // HEAD-side key sets plus the resolved base ref + head sha. Brief-path only.
     // The verifier is the graph: a mutated tree changes a key set, changes this
     // hash, and refuses a stale agent walkthrough on reentry.
@@ -1734,7 +1734,7 @@ fn assemble_audit_result(input: AuditAssemblyInput<'_>) -> Result<AuditResult, E
     }))
 }
 
-/// Compute the E5 deterministic graph-snapshot hash from the HEAD-side analysis
+/// Compute the deterministic graph-snapshot hash from the HEAD-side analysis
 /// results plus the resolved base ref + head sha. Reuses [`snapshot_from_results`]
 /// for the six key sets (dead_code / health / dupes / boundary_edges / cycles /
 /// public_api), each sorted, then folds in the base ref and head sha so the same
@@ -1779,8 +1779,8 @@ fn compute_graph_snapshot_hash(
     format!("graph:{:016x}", xxh3_64(&bytes))
 }
 
-/// Compute the E4 decision surface from the assembled brief inputs: gather the
-/// boundary anchors (one representative per introduced zone-pair), the E2
+/// Compute the decision surface from the assembled brief inputs: gather the
+/// boundary anchors (one representative per introduced zone-pair), the
 /// coordination gaps, and the impact-closure blast magnitude, then run the
 /// extractor. The cap is taken from the audit options (clamped to [3, 5] by the
 /// extractor). Returns an empty surface when no check result is available.
@@ -1818,7 +1818,7 @@ fn compute_decision_surface(
         });
     }
 
-    // E2 coordination gaps projected to the public-API/contract decision shape.
+    // Coordination gaps projected to the public-API/contract decision shape.
     // Aggregate per changed file: ONE contract decision per changed file (R1
     // batch-consolidate), counting its distinct non-diff consumers as the blast.
     let closure = check.impact_closure.as_ref();
@@ -1918,7 +1918,7 @@ fn aggregate_coordination_gaps(
     anchors
 }
 
-/// Compute the E3 review-brief data: the diff-aware deltas (head sets vs base
+/// Compute the review-brief data: the diff-aware deltas (head sets vs base
 /// snapshot), the weakening-signal pass (base-vs-head diff over the changed
 /// files), and ownership routing. Pure-ish: weakening + routing shell out to git
 /// (via [`BaseFileReader`] / churn), so this runs only on the brief path.
@@ -2247,7 +2247,7 @@ fn run_audit_check<'a>(
     retain_modules_for_health: bool,
 ) -> Result<Option<CheckResult>, ExitCode> {
     let filters = IssueFilters::default();
-    // The review brief needs the module graph for the E2 impact closure, which
+    // The review brief needs the module graph for the impact closure, which
     // rides the retained-modules path. Force retention on the brief path even
     // when health does not share the dead-code parse (mismatched production
     // modes), so the graph is available before health consumes the shared parse.
@@ -2544,7 +2544,7 @@ pub fn run_audit(opts: &AuditOptions<'_>, gate_marker: Option<&str>) -> ExitCode
                     attribution: Some(&attribution),
                 },
             );
-            // E5 walkthrough surfaces take priority over the brief body when
+            // Walkthrough surfaces take priority over the brief body when
             // requested. Both always exit 0.
             if opts.walkthrough_guide {
                 crate::audit_brief::print_walkthrough_guide_result(&result)
@@ -2569,7 +2569,7 @@ pub fn run_audit(opts: &AuditOptions<'_>, gate_marker: Option<&str>) -> ExitCode
 }
 
 /// Run the standalone `fallow decision-surface` command: the separable, cheap
-/// E4 apex. Executes the SAME changed-code analysis the review brief runs (it is
+/// apex. Executes the SAME changed-code analysis the review brief runs (it is
 /// the brief path, NOT the full project pipeline), then emits ONLY the decision
 /// surface envelope. Always exit 0 (the surface is advisory, never a gate).
 ///

@@ -1,4 +1,4 @@
-//! E3 diff-aware deterministic deltas for the review brief (6.A).
+//! Diff-aware deterministic deltas for the review brief (6.A).
 //!
 //! Three exports-aware / graph-structural deltas, framed new-vs-pre-existing
 //! against the audit base snapshot:

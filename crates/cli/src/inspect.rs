@@ -31,7 +31,7 @@ pub struct InspectOptions<'a> {
     pub production: bool,
     pub workspace: Option<&'a Vec<String>>,
     pub target: InspectTarget,
-    /// E8 OPT-IN: also run the best-effort symbol-level call chain
+    /// OPT-IN: also run the best-effort symbol-level call chain
     /// (`fallow trace`) and attach it as the `symbol_chain` evidence section.
     /// Only meaningful for a SYMBOL target. Default off (best-effort, off the
     /// ranked path).
@@ -178,7 +178,7 @@ fn build_inspect_evidence(
     }
 }
 
-/// Build the OPT-IN symbol-level call-chain section (E8). Returns `None` (the
+/// Build the OPT-IN symbol-level call-chain section. Returns `None` (the
 /// section is omitted) unless `--symbol-chain` was requested AND the target is a
 /// SYMBOL. Best-effort, syntactic, OFF the ranked path: it is attached as
 /// separate evidence, never folded into the trusted sections.

@@ -640,7 +640,7 @@ fn security_redos_regex_capture_records_literal_regex_application() {
 
 #[test]
 fn security_sink_arg_idents_recurse_into_array_nested_object() {
-    // E11: taint riding an object-in-array argument (the canonical OpenAI /
+    // taint riding an object-in-array argument (the canonical OpenAI /
     // Anthropic `messages: [{ content: x }]` chat shape) must surface on
     // `arg_idents`. `openai.chat.completions.create` is a member-call sink with
     // arg-index 0 carrying the nested array-of-objects.

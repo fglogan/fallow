@@ -25,7 +25,7 @@ use crate::audit::AuditResult;
 /// independently of the main `--format json` contract: the brief shape can grow
 /// without touching `report::SCHEMA_VERSION`.
 ///
-/// v2 (E7): adds the stage-4 weighted `focus` map (composite attention score per
+/// v2: adds the stage-4 weighted `focus` map (composite attention score per
 /// unit + no-skip labels + confidence flags + the `deprioritized` escape hatch).
 pub const REVIEW_BRIEF_SCHEMA_VERSION: u32 = 4;
 
@@ -107,10 +107,10 @@ pub struct DiffTriage {
 /// Stage 1 of the brief: graph-derived orientation facts.
 ///
 /// `boundaries_touched` is derived from the run's boundary-violation zones;
-/// `reachable_from` is populated by the E2 impact closure (the affected-not-shown
+/// `reachable_from` is populated by the impact closure (the affected-not-shown
 /// set: modules the changed code is reachable from / affects, none in the diff).
 /// `exports_added` / `api_width_delta` stay honestly stubbed (`0`) until the
-/// export-surface delta lands (E3). The fields are present and correctly typed so
+/// export-surface delta lands. The fields are present and correctly typed so
 /// values fill in later without a schema bump.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -129,7 +129,7 @@ pub struct GraphFacts {
     pub boundaries_touched: Vec<String>,
 }
 
-/// Stage 3 of the brief: the impact closure (E2). The transitive
+/// Stage 3 of the brief: the impact closure. The transitive
 /// affected-but-not-in-diff set plus the coordination gap. The differentiator a
 /// diff tool fundamentally cannot do, because it has no graph.
 ///
@@ -165,7 +165,7 @@ pub struct CoordinationGapFact {
 /// The honest-scope note stamped on every coordination-gap entry (ADR-001).
 const COORDINATION_GAP_NOTE: &str = "syntactic attention pointer, not a correctness proof";
 
-/// Stage 2 of the brief: the partition + order (E6). The changed files split into
+/// Stage 2 of the brief: the partition + order. The changed files split into
 /// coherent BY-MODULE units (the only byte-identical-deterministic clustering
 /// definition straight from the graph), plus a dependency-sensible review ORDER
 /// over those units (definitions before consumers, mechanical/leaf units last,
@@ -197,10 +197,10 @@ pub struct ReviewUnitFact {
     pub files: Vec<String>,
 }
 
-/// E3 diff-aware deterministic deltas (6.A), framed new-vs-pre-existing against
+/// Diff-aware deterministic deltas (6.A), framed new-vs-pre-existing against
 /// the audit base snapshot. Each entry is a brief summary/verdict line.
 ///
-/// `public_api` is batch-consolidated to ONE decision per change (E0 rule R1):
+/// `public_api` is batch-consolidated to ONE decision per change (rule R1):
 /// the `added` list carries the introduced public-export keys as evidence, but a
 /// reviewer reads "the public surface widened by N", never one decision per
 /// symbol.
@@ -220,7 +220,7 @@ pub struct ReviewDeltas {
     pub public_api_added: Vec<String>,
 }
 
-/// Build the E3 deltas from head sets vs a base set, sorted for determinism.
+/// Build the deltas from head sets vs a base set, sorted for determinism.
 #[must_use]
 #[allow(
     clippy::implicit_hasher,
@@ -263,28 +263,28 @@ pub struct ReviewBriefOutput {
     pub triage: DiffTriage,
     /// Stage 1: graph orientation facts.
     pub graph_facts: GraphFacts,
-    /// Stage 2 (E6): the partition + order (by-module units + dependency-sensible
+    /// Stage 2: the partition + order (by-module units + dependency-sensible
     /// review order). The backbone the directed-review loop hands the agent.
     pub partition: PartitionFacts,
     /// Stage 3: the impact closure (affected-not-shown + coordination gap).
     pub impact_closure: ImpactClosureFacts,
-    /// Stage 4 (E7): the weighted focus map. A composite attention score per
+    /// Stage 4: the weighted focus map. A composite attention score per
     /// changed-file unit (fan-in/out + security taint + risk zone + change shape),
     /// with `review-here` / `not-prioritized` labels (NEVER `skip` in free mode),
     /// a per-unit confidence flag, and the FULL `deprioritized` escape-hatch list
     /// so every de-prioritized piece is reachable. Stage 4 sits UNDER the decision
     /// surface as drill-down.
     pub focus: crate::audit_focus::FocusMap,
-    /// E3 (6.A): diff-aware deterministic deltas (boundary/cycle introduced +
+    /// 6.A: diff-aware deterministic deltas (boundary/cycle introduced +
     /// exports-aware public-API surface delta), new-vs-pre-existing.
     pub deltas: ReviewDeltas,
-    /// E3 (6.F, headline): reviewer-private weakening signals (tests
+    /// 6.F, headline: reviewer-private weakening signals (tests
     /// removed/skipped, thresholds lowered, suppressions added, security steps
     /// removed). Advisory, never gates, never auto-posted.
     pub weakening: Vec<crate::audit::weakening::WeakeningSignal>,
-    /// E3 (6.D): ownership-aware reviewer routing (per-file expert + bus-factor).
+    /// 6.D: ownership-aware reviewer routing (per-file expert + bus-factor).
     pub routing: crate::audit::routing::RoutingFacts,
-    /// E4 (6.G, the APEX): the decision surface. The ranked, capped,
+    /// 6.G, the APEX: the decision surface. The ranked, capped,
     /// signal_id-anchored set of consequential structural decisions, each framed
     /// as a judgment question with its routed expert. This is the only thing the
     /// brief visibly leads with; the stages above are its drill-down derivation.
@@ -333,13 +333,13 @@ pub fn build_triage(result: &AuditResult) -> DiffTriage {
     }
 }
 
-/// Derive the Stage 1 graph facts from the analysis results plus the E2 impact
+/// Derive the Stage 1 graph facts from the analysis results plus the impact
 /// closure.
 ///
 /// `boundaries_touched` is the deduped, sorted boundary-violation zone set;
 /// `reachable_from` is the impact closure's affected-not-shown set (modules the
 /// changed code reaches / affects, none in the diff). `exports_added` /
-/// `api_width_delta` stay stubbed until the export-surface delta (E3).
+/// `api_width_delta` stay stubbed until the export-surface delta.
 #[must_use]
 pub fn derive_graph_facts(
     results: &AnalysisResults,
@@ -419,13 +419,13 @@ fn build_partition_facts(result: &AuditResult) -> PartitionFacts {
     }
 }
 
-/// Build the Stage 4 (E7) weighted focus map from the audit result's retained
-/// per-file graph facts plus the E3 deltas / E2 coordination signals. Returns an
+/// Build the Stage 4 weighted focus map from the audit result's retained
+/// per-file graph facts plus the deltas / coordination signals. Returns an
 /// empty focus map when no graph facts were retained (off the brief path or no
 /// changed file mapped to a module).
 ///
 /// The boundary risk-zone signal reuses the `from_path` of boundary violations
-/// whose introduced edge is in `deltas.boundary_introduced` (the same E3 surface
+/// whose introduced edge is in `deltas.boundary_introduced` (the same surface
 /// the decision surface reads). The security taint signal is wired as an EMPTY
 /// slice today: the brief path runs the bare dead-code analysis, not the opt-in
 /// `fallow security` taint engine, so `results.security_findings` is empty. The
@@ -444,7 +444,7 @@ fn build_focus_map(result: &AuditResult, deltas: &ReviewDeltas) -> crate::audit_
     let root = &check.config.root;
 
     // Boundary risk-zone files: the importing `from_path` of each boundary
-    // violation whose introduced zone-pair edge is in the E3 delta set, deduped.
+    // violation whose introduced zone-pair edge is in the delta set, deduped.
     let mut seen_pairs: FxHashSet<String> = FxHashSet::default();
     let mut boundary_files: Vec<BoundaryZoneFile> = Vec::new();
     for finding in &check.results.boundary_violations {
@@ -493,7 +493,7 @@ fn build_focus_map(result: &AuditResult, deltas: &ReviewDeltas) -> crate::audit_
 /// touches, from any retained `security_findings` (anchor + every trace hop).
 ///
 /// Today the brief path runs the bare dead-code analysis, so `security_findings`
-/// is empty and this returns an empty Vec (the E7 security-taint seam contributes
+/// is empty and this returns an empty Vec (the security-taint seam contributes
 /// 0). The function is a pure projection over the findings slice, so the moment a
 /// future epic threads a security pass onto the brief, the focus map's taint
 /// signal lights up with no focus-map code change.
@@ -534,7 +534,7 @@ pub fn build_brief_output(result: &AuditResult) -> ReviewBriefOutput {
         },
         |check| derive_graph_facts(&check.results, closure),
     );
-    // E3 fills the previously-stubbed export facts from the exports-aware delta:
+    // The exports-aware delta fills the previously-stubbed export facts:
     // `exports_added` / `api_width_delta` count the public-API surface the change
     // widened, not raw internal churn.
     let added = deltas.public_api_added.len();
@@ -599,7 +599,7 @@ fn insert_brief_impact_closure_json(
     }
 }
 
-/// Insert the Stage 4 (E7) weighted focus map into the brief JSON map. The
+/// Insert the Stage 4 weighted focus map into the brief JSON map. The
 /// `deprioritized` escape-hatch list is ALWAYS present (every de-prioritized
 /// unit), so nothing is hidden regardless of `--show-deprioritized` (a
 /// human-rendering-only flag).
@@ -612,7 +612,7 @@ fn insert_brief_focus_json(
     }
 }
 
-/// Insert the E3 deltas / weakening / routing sections into the brief JSON map.
+/// Insert the deltas / weakening / routing sections into the brief JSON map.
 fn insert_brief_e3_json(
     obj: &mut serde_json::Map<String, serde_json::Value>,
     brief: &ReviewBriefOutput,
@@ -628,7 +628,7 @@ fn insert_brief_e3_json(
     }
 }
 
-/// Insert the E4 decision surface (the apex) into the brief JSON map.
+/// Insert the decision surface (the apex) into the brief JSON map.
 fn insert_brief_decisions_json(
     obj: &mut serde_json::Map<String, serde_json::Value>,
     brief: &ReviewBriefOutput,
@@ -692,7 +692,7 @@ fn build_brief_json(result: &AuditResult) -> Result<serde_json::Value, ExitCode>
         serde_json::Value::String(brief.command.clone()),
     );
 
-    // E4: the decision surface is the apex; it leads the JSON (collapse-by-
+    // The decision surface is the apex; it leads the JSON (collapse-by-
     // default), with the stages below as its drill-down derivation.
     insert_brief_decisions_json(&mut obj, &brief);
     insert_brief_triage_json(&mut obj, &brief);
@@ -728,7 +728,7 @@ fn print_brief_human(result: &AuditResult, quiet: bool, explain: bool, show_depr
 
     if !quiet {
         eprintln!();
-        // E4: the decision surface is the apex; it LEADS (collapse-by-default).
+        // The decision surface is the apex; it LEADS (collapse-by-default).
         print_decision_surface_human(&brief.decisions);
         // The upstream stages are the decision surface's drill-down derivation.
         eprintln!(
@@ -809,7 +809,7 @@ fn print_impact_closure_human(closure: &ImpactClosureFacts) {
     }
 }
 
-/// Print the Stage 4 (E7) weighted focus map on the human brief: the ranked
+/// Print the Stage 4 weighted focus map on the human brief: the ranked
 /// `review-here` units (with reason + any low-confidence flag), then the
 /// de-prioritized count as a collapsed escape hatch. `--show-deprioritized`
 /// re-expands the full de-prioritized list ("show me what you de-prioritized").
@@ -862,7 +862,7 @@ fn print_focus_human(focus: &crate::audit_focus::FocusMap, show_deprioritized: b
     }
 }
 
-/// Print the E3 diff-aware deltas (6.A): boundary/cycle introduced and the
+/// Print the diff-aware deltas (6.A): boundary/cycle introduced and the
 /// exports-aware public-API surface delta (batch-consolidated per R1). Caller
 /// has already gated on `!quiet`.
 fn print_deltas_human(deltas: &ReviewDeltas) {
@@ -881,7 +881,7 @@ fn print_deltas_human(deltas: &ReviewDeltas) {
     }
 }
 
-/// Print the E3 weakening signals (6.F headline). Advisory, reviewer-private.
+/// Print the weakening signals (6.F headline). Advisory, reviewer-private.
 fn print_weakening_human(signals: &[crate::audit::weakening::WeakeningSignal]) {
     if signals.is_empty() {
         return;
@@ -900,7 +900,7 @@ fn print_weakening_human(signals: &[crate::audit::weakening::WeakeningSignal]) {
     }
 }
 
-/// Print the E3 ownership routing (6.D): per-unit expert + bus-factor flag.
+/// Print the ownership routing (6.D): per-unit expert + bus-factor flag.
 fn print_routing_human(routing: &crate::audit::routing::RoutingFacts) {
     for unit in &routing.units {
         if unit.expert.is_empty() {
@@ -919,7 +919,7 @@ fn print_routing_human(routing: &crate::audit::routing::RoutingFacts) {
     }
 }
 
-/// Print the E4 decision surface (the apex, 6.G): the ranked, capped set of
+/// Print the decision surface (the apex, 6.G): the ranked, capped set of
 /// consequential structural decisions, each as a framed judgment question with
 /// its routed expert. Caller has already gated on `!quiet`. Leads the brief.
 fn print_decision_surface_human(surface: &crate::audit_decision_surface::DecisionSurface) {
@@ -1047,7 +1047,7 @@ pub fn print_decision_surface_result(result: &AuditResult, quiet: bool) -> ExitC
     }
 }
 
-/// (E5) Render the agent-contract WALKTHROUGH GUIDE: the digest (brief +
+/// Render the agent-contract WALKTHROUGH GUIDE: the digest (brief +
 /// decision surface), the review direction, the JSON schema the agent returns,
 /// and the deterministic graph-snapshot pin. JSON renders the
 /// `FallowOutput::WalkthroughGuide` envelope (`kind: "review-walkthrough-guide"`).
@@ -1065,7 +1065,7 @@ pub fn print_walkthrough_guide_result(result: &AuditResult) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// (E5) Ingest the agent's judgment JSON from `path` and POST-VALIDATE it against
+/// Ingest the agent's judgment JSON from `path` and POST-VALIDATE it against
 /// the live graph: reject unanchored signal_ids (anti-hallucination), refuse the
 /// whole payload when the echoed graph-snapshot hash is stale (the tree moved).
 /// JSON renders the `FallowOutput::WalkthroughValidation` envelope (`kind:

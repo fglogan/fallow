@@ -786,8 +786,8 @@ export type ReviewEffort = ("glance" | "review" | "deep_dive")
 /**
  * The focus label for a review unit. EXACTLY two variants: `Skip` is NOT
  * representable, so the type system is the guarantee that free mode never emits
- * a `skip` label (safe explicit-skip is E9/paid, runtime-backed only). Mirrors
- * E4's "cut category not representable" structural posture.
+ * a `skip` label (safe explicit-skip is paid, runtime-backed only). Mirrors
+ * the decision surface's "cut category not representable" structural posture.
  */
 export type FocusLabel = ("review-here" | "not-prioritized")
 /**
@@ -6499,7 +6499,7 @@ complexity: InspectEvidenceSection
 security: InspectEvidenceSection
 impact_closure: InspectEvidenceSection
 /**
- * E8 OPT-IN symbol-level call chain. Present only when `--symbol-chain` was
+ * OPT-IN symbol-level call chain. Present only when `--symbol-chain` was
  * requested AND the target is a SYMBOL (best-effort, syntactic, OFF the
  * ranked path). `None` (omitted) by default: symbol-level chains are
  * best-effort and not part of the trusted ranked evidence.
@@ -8514,7 +8514,7 @@ impact_closure: ImpactClosureFacts
 focus: FocusMap
 deltas: ReviewDeltas
 /**
- * E3 (6.F, headline): reviewer-private weakening signals (tests
+ * 6.F, headline: reviewer-private weakening signals (tests
  * removed/skipped, thresholds lowered, suppressions added, security steps
  * removed). Advisory, never gates, never auto-posted.
  */
@@ -8549,10 +8549,10 @@ review_effort: ReviewEffort
  * Stage 1 of the brief: graph-derived orientation facts.
  *
  * `boundaries_touched` is derived from the run's boundary-violation zones;
- * `reachable_from` is populated by the E2 impact closure (the affected-not-shown
+ * `reachable_from` is populated by the impact closure (the affected-not-shown
  * set: modules the changed code is reachable from / affects, none in the diff).
  * `exports_added` / `api_width_delta` stay honestly stubbed (`0`) until the
- * export-surface delta lands (E3). The fields are present and correctly typed so
+ * export-surface delta lands. The fields are present and correctly typed so
  * values fill in later without a schema bump.
  */
 export interface GraphFacts {
@@ -8578,7 +8578,7 @@ reachable_from: string[]
 boundaries_touched: string[]
 }
 /**
- * Stage 2 of the brief: the partition + order (E6). The changed files split into
+ * Stage 2 of the brief: the partition + order. The changed files split into
  * coherent BY-MODULE units (the only byte-identical-deterministic clustering
  * definition straight from the graph), plus a dependency-sensible review ORDER
  * over those units (definitions before consumers, mechanical/leaf units last,
@@ -8616,7 +8616,7 @@ module_dir: string
 files: string[]
 }
 /**
- * Stage 3 of the brief: the impact closure (E2). The transitive
+ * Stage 3 of the brief: the impact closure. The transitive
  * affected-but-not-in-diff set plus the coordination gap. The differentiator a
  * diff tool fundamentally cannot do, because it has no graph.
  *
@@ -8702,7 +8702,7 @@ confidence?: ConfidenceFlag[]
 }
 /**
  * The composite attention score, with the four deterministic component
- * sub-scores kept on the wire so the E9 runtime seam can re-weight `total`
+ * sub-scores kept on the wire so the runtime seam can re-weight `total`
  * without recomputing the signals.
  */
 export interface FocusScore {
@@ -8724,15 +8724,15 @@ risk_zone: number
  */
 change_shape: number
 /**
- * The summed total. E9 (paid) multiplies a runtime hot/cold weight in here.
+ * The summed total. The paid runtime layer multiplies a runtime hot/cold weight in here.
  */
 total: number
 }
 /**
- * E3 diff-aware deterministic deltas (6.A), framed new-vs-pre-existing against
+ * Diff-aware deterministic deltas (6.A), framed new-vs-pre-existing against
  * the audit base snapshot. Each entry is a brief summary/verdict line.
  *
- * `public_api` is batch-consolidated to ONE decision per change (E0 rule R1):
+ * `public_api` is batch-consolidated to ONE decision per change (rule R1):
  * the `added` list carries the introduced public-export keys as evidence, but a
  * reviewer reads "the public surface widened by N", never one decision per
  * symbol.
@@ -8864,7 +8864,7 @@ blast: number
  */
 consequence: number
 /**
- * The routed expert(s) to ask, from E3 ownership routing. Empty when no
+ * The routed expert(s) to ask, from ownership routing. Empty when no
  * ownership signal is available for the anchor file.
  */
 expert: string[]
@@ -8948,7 +8948,7 @@ file: string
  */
 concern_lens: string
 /**
- * Per-unit review-effort budget: the E7 weighted-focus composite score for
+ * Per-unit review-effort budget: the weighted-focus composite score for
  * this file. A cloud fan-out spends AI passes/verifiers PROPORTIONAL to this
  * (higher = review harder); a local single-agent loop can ignore it.
  */
@@ -8959,7 +8959,7 @@ scoring_budget: number
  */
 out_of_diff: string[]
 /**
- * The routed expert(s) to ask, from E3 ownership routing.
+ * The routed expert(s) to ask, from ownership routing.
  */
 expert: string[]
 }

@@ -250,7 +250,7 @@ pub struct TraceOptions {
     pub trace_export: Option<String>,
     pub trace_file: Option<String>,
     pub trace_dependency: Option<String>,
-    /// E2 impact closure for a single file as the seed: walk `reverse_deps` +
+    /// Impact closure for a single file as the seed: walk `reverse_deps` +
     /// re-export chains to the transitive affected set and report the
     /// coordination gap. Powers the `inspect_target` MCP tool's `impact_closure`
     /// evidence section.
@@ -321,27 +321,27 @@ pub struct CheckResult {
     pub timings: Option<fallow_core::trace::PipelineTimings>,
     /// Retained parse data for sharing with health (only populated when retain_modules_for_health=true).
     pub shared_parse: Option<crate::health::SharedParseData>,
-    /// Impact closure (E2) for the review brief: the transitive
+    /// Impact closure for the review brief: the transitive
     /// affected-but-not-in-diff set plus coordination gaps. Populated by the
     /// audit brief path from the retained graph against the changed-file set;
     /// `None` outside the brief path. Holds root-relative paths so it survives
     /// the graph drop and serializes directly.
     pub impact_closure: Option<fallow_core::graph::ImpactClosurePaths>,
-    /// Exports-aware public-export key set (E3) for the review brief: the
+    /// Exports-aware public-export key set for the review brief: the
     /// `<rel_path>::<name>` keys reachable through `package.json` `exports` +
     /// re-export reachability. Computed from the retained graph on the brief
     /// path before the graph is dropped; `None` outside the brief path. Diffed
     /// against the base snapshot's `public_api` set to produce the public-API
     /// surface delta.
     pub public_api_keys: Option<rustc_hash::FxHashSet<String>>,
-    /// Partition + order (E6) for the review brief's stage 2: the by-module
+    /// Partition + order for the review brief's stage 2: the by-module
     /// units the changed files cluster into, plus a dependency-sensible review
     /// order. Computed from the retained graph on the brief path against the
     /// changed-file set, before the graph is dropped; `None` outside the brief
     /// path. Holds root-relative paths so it survives the graph drop and
     /// serializes directly.
     pub partition_order: Option<fallow_core::graph::PartitionOrderPaths>,
-    /// Per-changed-file graph facts (E7) for the review brief's stage 4 weighted
+    /// Per-changed-file graph facts for the review brief's stage 4 weighted
     /// focus map: fan-in/out (blast radius) plus the dynamic-dispatch and
     /// re-export-indirection confidence-flag signals. Computed from the retained
     /// graph on the brief path against the changed-file set, before the graph is
