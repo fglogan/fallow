@@ -20,7 +20,7 @@ use oxc_ast::ast::*;
 use oxc_semantic::SemanticBuilder;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_types::extract::{ComponentEmit, ComponentProp};
+use plow_types::extract::{ComponentEmit, ComponentProp};
 
 /// Result of harvesting `defineProps` from a `<script setup>` program.
 #[derive(Debug, Default)]

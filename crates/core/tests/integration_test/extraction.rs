@@ -1,7 +1,7 @@
 use std::path::Path;
 
-use fallow_core::discover::FileId;
-use fallow_core::extract::parse_from_content;
+use plow_core::discover::FileId;
+use plow_core::extract::parse_from_content;
 
 #[test]
 fn dynamic_import_is_parsed() {
@@ -93,7 +93,7 @@ fn namespace_import_marks_all_exports_used() {
     assert_eq!(info.imports.len(), 1);
     assert_eq!(
         info.imports[0].imported_name,
-        fallow_core::extract::ImportedName::Namespace
+        plow_core::extract::ImportedName::Namespace
     );
 }
 
@@ -105,7 +105,7 @@ fn default_export_is_parsed() {
     assert_eq!(info.exports.len(), 1);
     assert_eq!(
         info.exports[0].name,
-        fallow_core::extract::ExportName::Default
+        plow_core::extract::ExportName::Default
     );
 }
 
@@ -117,11 +117,11 @@ fn destructured_exports_are_parsed() {
     assert_eq!(info.exports.len(), 2);
     assert_eq!(
         info.exports[0].name,
-        fallow_core::extract::ExportName::Named("a".to_string())
+        plow_core::extract::ExportName::Named("a".to_string())
     );
     assert_eq!(
         info.exports[1].name,
-        fallow_core::extract::ExportName::Named("b".to_string())
+        plow_core::extract::ExportName::Named("b".to_string())
     );
 }
 
@@ -133,7 +133,7 @@ fn side_effect_import_is_parsed() {
     assert_eq!(info.imports.len(), 1);
     assert_eq!(
         info.imports[0].imported_name,
-        fallow_core::extract::ImportedName::SideEffect
+        plow_core::extract::ImportedName::SideEffect
     );
     assert_eq!(info.imports[0].source, "./polyfills");
 }
@@ -197,7 +197,7 @@ export default class App {}
 
 #[test]
 fn extract_package_name_scoped() {
-    use fallow_core::resolve::extract_package_name;
+    use plow_core::resolve::extract_package_name;
 
     assert_eq!(extract_package_name("react"), "react");
     assert_eq!(extract_package_name("react/jsx-runtime"), "react");

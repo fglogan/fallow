@@ -2,7 +2,7 @@
 use oxc_ast::ast::*;
 use oxc_span::{GetSpan, Span};
 
-use fallow_types::extract::{
+use plow_types::extract::{
     SecurityControlSite, SinkArgKind, SinkLiteralValue, SinkShape, SinkSite,
     SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason, SkippedSecurityCalleeSite,
 };
@@ -328,7 +328,7 @@ fn push_source_path(path: String, out: &mut Vec<String>) {
 fn push_member_source_paths(path: &str, out: &mut Vec<String>) {
     // A public env var is build-inlined, not a secret source; record neither the
     // full path nor the `process.env` / `import.meta.env` object prefix (#890).
-    if fallow_types::extract::is_public_env_path(path) {
+    if plow_types::extract::is_public_env_path(path) {
         return;
     }
     push_source_path(path.to_string(), out);
@@ -349,7 +349,7 @@ fn collect_static_member_source_path(
     out: &mut Vec<String>,
 ) {
     if let Some(path) = flatten_member_path(expr) {
-        if fallow_types::extract::is_public_env_path(&path) {
+        if plow_types::extract::is_public_env_path(&path) {
             return;
         }
         push_member_source_paths(&path, out);

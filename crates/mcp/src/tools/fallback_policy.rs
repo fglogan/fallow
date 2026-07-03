@@ -115,7 +115,7 @@ mod tests {
                 continue;
             }
             let source = std::fs::read_to_string(&path).expect("read mcp tool source");
-            let invokes_cli = source.contains("run_tool(") || source.contains("run_fallow(");
+            let invokes_cli = source.contains("run_tool(") || source.contains("run_plow(");
             let is_unconditional = unconditional_cli_backed.contains(&file_name);
             let is_conditional = conditional_cli_backed.contains(&file_name);
 

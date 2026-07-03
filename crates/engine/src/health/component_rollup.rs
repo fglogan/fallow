@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use fallow_output::{
+use plow_output::{
     ComplexityViolation, ComponentRollup, DEFAULT_COGNITIVE_CRITICAL, DEFAULT_COGNITIVE_HIGH,
     DEFAULT_CYCLOMATIC_CRITICAL, DEFAULT_CYCLOMATIC_HIGH, ExceededThreshold,
     compute_finding_severity,
@@ -15,7 +15,7 @@ use fallow_output::{
 /// `<component>` `ComplexityViolation` whose `cyclomatic` / `cognitive` totals
 /// are `max(class) + template`. The rollup is anchored at the worst class
 /// function's `(path, line, col)` so an existing
-/// `// fallow-ignore-next-line complexity` placed above that function, or the
+/// `// plow-ignore-next-line complexity` placed above that function, or the
 /// `@Component` decorator on inline-template components, continues to hide both
 /// the per-function finding and the rollup. Per-function and per-`<template>`
 /// findings are not removed, the rollup is strictly additive.

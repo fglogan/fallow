@@ -1,4 +1,4 @@
-import type { FallowCheckResult } from "../src/types.js";
+import type { PlowCheckResult } from "../src/types.js";
 
 const issueCollectionKeys = [
   "unused_files",
@@ -42,20 +42,20 @@ const summaryKeys = [
   "unresolved_catalog_references",
   "unused_dependency_overrides",
   "misconfigured_dependency_overrides",
-] as const satisfies ReadonlyArray<keyof FallowCheckResult["summary"]>;
+] as const satisfies ReadonlyArray<keyof PlowCheckResult["summary"]>;
 
 type IssueCollectionKey = (typeof issueCollectionKeys)[number];
 
-const emptyIssueCollections = (): Pick<FallowCheckResult, IssueCollectionKey> =>
+const emptyIssueCollections = (): Pick<PlowCheckResult, IssueCollectionKey> =>
   Object.fromEntries(issueCollectionKeys.map((key) => [key, []])) as unknown as Pick<
-    FallowCheckResult,
+    PlowCheckResult,
     IssueCollectionKey
   >;
 
-const emptySummary = (): FallowCheckResult["summary"] =>
-  Object.fromEntries(summaryKeys.map((key) => [key, 0])) as unknown as FallowCheckResult["summary"];
+const emptySummary = (): PlowCheckResult["summary"] =>
+  Object.fromEntries(summaryKeys.map((key) => [key, 0])) as unknown as PlowCheckResult["summary"];
 
-export const emptyCheck = (): FallowCheckResult => ({
+export const emptyCheck = (): PlowCheckResult => ({
   schema_version: 7,
   version: "0.0.0-test",
   elapsed_ms: 0,

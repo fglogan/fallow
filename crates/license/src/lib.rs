@@ -1,6 +1,6 @@
-//! Offline Ed25519-signed license JWT verification for the fallow CLI.
+//! Offline Ed25519-signed license JWT verification for the plow CLI.
 //!
-//! This crate is the public-binary side of fallow's paid-feature gating. It
+//! This crate is the public-binary side of plow's paid-feature gating. It
 //! does NOT perform any network I/O; the license file is loaded from disk or
 //! environment, the signature is verified against a public key compiled in by
 //! the embedding binary, and the result is exposed as a [`LicenseStatus`].
@@ -9,9 +9,9 @@
 //!
 //! License material is sourced in this order (first match wins):
 //!
-//! 1. `$FALLOW_LICENSE` environment variable (full JWT string).
-//! 2. `$FALLOW_LICENSE_PATH` environment variable (path to a file containing the JWT).
-//! 3. `~/.fallow/license.jwt` (default path under the user's home directory).
+//! 1. `$PLOW_LICENSE` environment variable (full JWT string).
+//! 2. `$PLOW_LICENSE_PATH` environment variable (path to a file containing the JWT).
+//! 3. `~/.plow/license.jwt` (default path under the user's home directory).
 //!
 //! # Algorithm pinning
 //!
@@ -55,17 +55,17 @@ pub const WATERMARK_DAYS: u64 = 7;
 /// `pyjwt`, and `jjwt`. A JWT whose `iat` is more than this many seconds in
 /// the future relative to the local clock is rejected as
 /// [`LicenseError::ClockSkew`]. Override via
-/// `FALLOW_LICENSE_SKEW_TOLERANCE_SECONDS` (consumed by
+/// `PLOW_LICENSE_SKEW_TOLERANCE_SECONDS` (consumed by
 /// [`skew_tolerance_seconds_from_env`]).
 pub const DEFAULT_SKEW_TOLERANCE_SECONDS: i64 = 86_400;
 
 /// Env var name for overriding [`DEFAULT_SKEW_TOLERANCE_SECONDS`].
-pub const SKEW_TOLERANCE_ENV: &str = "FALLOW_LICENSE_SKEW_TOLERANCE_SECONDS";
+pub const SKEW_TOLERANCE_ENV: &str = "PLOW_LICENSE_SKEW_TOLERANCE_SECONDS";
 
-/// JWT claims emitted by `api.fallow.cloud` for fallow CLI licenses.
+/// JWT claims emitted by `api.plow.cloud` for plow CLI licenses.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LicenseClaims {
-    /// Issuer (typically `"https://api.fallow.cloud"`).
+    /// Issuer (typically `"https://api.plow.cloud"`).
     pub iss: String,
     /// Subject — opaque org identifier.
     pub sub: String,
@@ -73,7 +73,7 @@ pub struct LicenseClaims {
     pub tid: String,
     /// Number of seats licensed.
     pub seats: u32,
-    /// Tier string emitted by fallow-cloud: `pro`, `enterprise`, `trial`, `founding`.
+    /// Tier string emitted by plow-cloud: `pro`, `enterprise`, `trial`, `founding`.
     /// (`team` is the legacy name for `pro`; the server now emits `pro`.) The
     /// value is informational only: capability gating is on `features`, never on
     /// this string, so any tier value is tolerated.
@@ -234,7 +234,7 @@ impl std::fmt::Display for LicenseError {
             Self::BadSignature => write!(f, "JWT signature verification failed"),
             Self::Truncated { actual } => write!(
                 f,
-                "the token looks truncated (got {actual} chars; expected 700+). Did you copy the whole thing? Try: fallow license activate --from-file license.jwt"
+                "the token looks truncated (got {actual} chars; expected 700+). Did you copy the whole thing? Try: plow license activate --from-file license.jwt"
             ),
             Self::ClockSkew {
                 iat_seconds,
@@ -269,7 +269,7 @@ impl From<std::io::Error> for LicenseError {
 ///
 /// Delegates to [`verify_jwt_with_skew`] with [`DEFAULT_SKEW_TOLERANCE_SECONDS`]
 /// so existing callers retain the same signature; new code that needs to
-/// honor the `FALLOW_LICENSE_SKEW_TOLERANCE_SECONDS` env var should call
+/// honor the `PLOW_LICENSE_SKEW_TOLERANCE_SECONDS` env var should call
 /// [`verify_jwt_with_skew`] directly with [`skew_tolerance_seconds_from_env`].
 pub fn verify_jwt(
     raw_jwt: &str,
@@ -415,13 +415,13 @@ pub fn load_and_verify(
 ///
 /// Returns `Ok(None)` when no source provides material.
 pub fn load_raw_jwt() -> Result<Option<String>, LicenseError> {
-    if let Ok(jwt) = std::env::var("FALLOW_LICENSE") {
+    if let Ok(jwt) = std::env::var("PLOW_LICENSE") {
         let trimmed = normalize_jwt(&jwt);
         if !trimmed.is_empty() {
             return Ok(Some(trimmed));
         }
     }
-    if let Some(path) = resolve_license_path_env(std::env::var("FALLOW_LICENSE_PATH").ok()) {
+    if let Some(path) = resolve_license_path_env(std::env::var("PLOW_LICENSE_PATH").ok()) {
         return Ok(Some(read_jwt_file(&path)?));
     }
     let default = default_license_path();
@@ -431,10 +431,10 @@ pub fn load_raw_jwt() -> Result<Option<String>, LicenseError> {
     Ok(None)
 }
 
-/// Normalize a raw `$FALLOW_LICENSE_PATH` env value. Returns `None` when the
+/// Normalize a raw `$PLOW_LICENSE_PATH` env value. Returns `None` when the
 /// var is unset, empty, or whitespace-only so the caller falls through to
 /// default-path discovery; otherwise returns the trimmed path. Without this,
-/// shells that export `FALLOW_LICENSE_PATH=""` (empty-string) produced a
+/// shells that export `PLOW_LICENSE_PATH=""` (empty-string) produced a
 /// cryptic `license I/O error: No such file or directory` on `health
 /// --runtime-coverage` because `read_jwt_file(Path::new(""))` fails at the
 /// fs layer.
@@ -476,17 +476,17 @@ fn user_home_from_env(getenv: impl Fn(&str) -> Option<String>) -> Option<PathBuf
     None
 }
 
-/// Compute the canonical default license path (`~/.fallow/license.jwt`).
+/// Compute the canonical default license path (`~/.plow/license.jwt`).
 ///
 /// On Unix this reads `$HOME`; on Windows it falls back to `%USERPROFILE%`
 /// when `$HOME` is not set (native cmd / PowerShell). Falls back to
-/// `./.fallow/license.jwt` if neither resolves — exotic containers and
+/// `./.plow/license.jwt` if neither resolves — exotic containers and
 /// CI sandboxes being the usual suspects.
 #[must_use]
 pub fn default_license_path() -> PathBuf {
     user_home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join(".fallow")
+        .join(".plow")
         .join("license.jwt")
 }
 
@@ -516,7 +516,7 @@ pub fn current_unix_seconds() -> i64 {
 const SECONDS_PER_DAY: i64 = 86_400;
 
 /// Resolve the clock-skew tolerance (in seconds) from
-/// `FALLOW_LICENSE_SKEW_TOLERANCE_SECONDS`, falling back to
+/// `PLOW_LICENSE_SKEW_TOLERANCE_SECONDS`, falling back to
 /// [`DEFAULT_SKEW_TOLERANCE_SECONDS`] when the variable is unset, empty,
 /// whitespace-only, or unparsable.
 ///
@@ -610,7 +610,7 @@ mod tests {
 
     fn make_claims(exp: i64) -> LicenseClaims {
         LicenseClaims {
-            iss: "https://api.fallow.cloud".into(),
+            iss: "https://api.plow.cloud".into(),
             sub: "org_test".into(),
             tid: "tenant_test".into(),
             seats: 5,
@@ -755,7 +755,7 @@ mod tests {
     #[test]
     fn refresh_after_parses_when_present_and_defaults_to_none() {
         let with_refresh = serde_json::json!({
-            "iss": "https://api.fallow.cloud",
+            "iss": "https://api.plow.cloud",
             "sub": "org_test",
             "tid": "tenant_test",
             "seats": 5,
@@ -770,7 +770,7 @@ mod tests {
         assert_eq!(claims.refresh_after, Some(1_701_296_000));
 
         let without_refresh = serde_json::json!({
-            "iss": "https://api.fallow.cloud",
+            "iss": "https://api.plow.cloud",
             "sub": "org_test",
             "tid": "tenant_test",
             "seats": 5,
@@ -854,14 +854,14 @@ mod tests {
     #[test]
     fn resolve_license_path_env_returns_path_for_valid_value() {
         assert_eq!(
-            resolve_license_path_env(Some("/etc/fallow/license.jwt".to_owned())),
-            Some(PathBuf::from("/etc/fallow/license.jwt"))
+            resolve_license_path_env(Some("/etc/plow/license.jwt".to_owned())),
+            Some(PathBuf::from("/etc/plow/license.jwt"))
         );
     }
 
     fn make_claims_with_iat(iat: i64, exp: i64) -> LicenseClaims {
         LicenseClaims {
-            iss: "https://api.fallow.cloud".into(),
+            iss: "https://api.plow.cloud".into(),
             sub: "org_test".into(),
             tid: "tenant_test".into(),
             seats: 5,

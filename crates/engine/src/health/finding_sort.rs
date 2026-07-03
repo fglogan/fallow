@@ -1,4 +1,4 @@
-use fallow_output::{ComplexityViolation, ExceededThreshold, FindingSeverity};
+use plow_output::{ComplexityViolation, ExceededThreshold, FindingSeverity};
 
 use super::HealthSort;
 

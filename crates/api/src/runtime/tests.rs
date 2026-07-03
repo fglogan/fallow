@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use fallow_output::{CHECK_SCHEMA_VERSION, DiffIndex, HealthReport};
-use fallow_types::duplicates::{CloneInstance, DuplicationReport, DuplicationStats};
-use fallow_types::output::NextStep;
+use plow_output::{CHECK_SCHEMA_VERSION, DiffIndex, HealthReport};
+use plow_types::duplicates::{CloneInstance, DuplicationReport, DuplicationStats};
+use plow_types::output::NextStep;
 
 use super::*;
 use crate::runtime_json::{
@@ -38,12 +38,12 @@ impl ProgrammaticHealthRunner for FakeHealthRunner {
             workspace_diagnostics: vec![WorkspaceDiagnostic::new(
                 &self.root,
                 self.root.join("package.json"),
-                fallow_types::workspace::WorkspaceDiagnosticKind::UndeclaredWorkspace,
+                plow_types::workspace::WorkspaceDiagnosticKind::UndeclaredWorkspace,
             )],
             next_step_facts: ProgrammaticHealthNextStepFacts {
                 suggestions_enabled: true,
                 offer_setup: false,
-                impact_digest: Some(fallow_output::ImpactDigestCounts {
+                impact_digest: Some(plow_output::ImpactDigestCounts {
                     containment_count: 1,
                     resolved_total: 0,
                 }),
@@ -193,11 +193,11 @@ fn serialize_health_report_json_tags_meta_and_strips_paths() {
         workspace_diagnostics: vec![WorkspaceDiagnostic::new(
             Path::new("/repo"),
             PathBuf::from("/repo/package.json"),
-            fallow_types::workspace::WorkspaceDiagnosticKind::UndeclaredWorkspace,
+            plow_types::workspace::WorkspaceDiagnosticKind::UndeclaredWorkspace,
         )],
         next_steps: vec![NextStep {
             id: "inspect-health".to_string(),
-            command: "fallow health --format json".to_string(),
+            command: "plow health --format json".to_string(),
             reason: "inspect health details".to_string(),
         }],
         envelope_mode: RootEnvelopeMode::Tagged,
@@ -310,7 +310,7 @@ fn has_glob_no_package_json(diagnostics: &serde_json::Value) -> bool {
 /// Regression guard: the napi/api dead-code path must populate
 /// `workspace_diagnostics` and `next_steps` exactly like the CLI's
 /// `serialize_check_json` route does. The pre-fix code hardcoded both to
-/// empty, silently dropping the enrichment for `fallow/types` embedders.
+/// empty, silently dropping the enrichment for `plow/types` embedders.
 #[test]
 fn serialized_dead_code_carries_workspace_diagnostics_and_next_steps() {
     let project = enriched_project();
@@ -567,7 +567,7 @@ fn serialized_dead_code_explain_includes_output_owned_meta() {
     assert_eq!(json["kind"], "dead-code");
     assert_eq!(
         json["_meta"]["docs"].as_str(),
-        Some(fallow_output::CHECK_DOCS)
+        Some(plow_output::CHECK_DOCS)
     );
     assert!(json["_meta"]["rules"]["unused-export"].is_object());
 }
@@ -796,8 +796,8 @@ fn instance(path: &str, start_line: usize, end_line: usize) -> CloneInstance {
     }
 }
 
-fn group(instances: Vec<CloneInstance>) -> fallow_types::duplicates::CloneGroup {
-    fallow_types::duplicates::CloneGroup {
+fn group(instances: Vec<CloneInstance>) -> plow_types::duplicates::CloneGroup {
+    plow_types::duplicates::CloneGroup {
         instances,
         token_count: 10,
         line_count: 3,

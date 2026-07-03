@@ -1,18 +1,18 @@
 use std::path::{Path, PathBuf};
 
-use crate::FallowConfig;
+use crate::PlowConfig;
 
-/// Classification of whether fallow can apply config edits at `root`.
+/// Classification of whether plow can apply config edits at `root`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConfigFixPlan {
-    /// A fallow config file exists; append entries in place.
+    /// A plow config file exists; append entries in place.
     Edit { config_path: PathBuf },
-    /// No fallow config exists, but a workspace marker sits above `root`,
+    /// No plow config exists, but a workspace marker sits above `root`,
     /// so creating one inside this subpackage would fragment the monorepo.
     BlockedMonorepo { workspace_root: PathBuf },
-    /// No fallow config exists and config creation was disabled.
+    /// No plow config exists and config creation was disabled.
     BlockedNoCreate { target: PathBuf },
-    /// No fallow config exists; the writer can create one at `target`.
+    /// No plow config exists; the writer can create one at `target`.
     Create { target: PathBuf },
 }
 
@@ -28,7 +28,7 @@ pub fn classify_config_fix_plan(
             config_path: existing,
         };
     }
-    let target = root.join(".fallowrc.json");
+    let target = root.join(".plowrc.json");
     if let Some(workspace_root) = find_workspace_root_above(root) {
         return ConfigFixPlan::BlockedMonorepo { workspace_root };
     }
@@ -38,7 +38,7 @@ pub fn classify_config_fix_plan(
     ConfigFixPlan::Create { target }
 }
 
-/// Whether `fallow fix --yes` can apply config edits at `root` with default
+/// Whether `plow fix --yes` can apply config edits at `root` with default
 /// config-creation behavior. Drives JSON `auto_fixable` for config actions.
 #[must_use]
 pub fn is_config_fixable(root: &Path, explicit: Option<&PathBuf>) -> bool {
@@ -60,7 +60,7 @@ fn resolve_existing_config_path(root: &Path, explicit: Option<&PathBuf>) -> Opti
         }
         return None;
     }
-    FallowConfig::find_config_path(root)
+    PlowConfig::find_config_path(root)
 }
 
 fn find_workspace_root_above(start: &Path) -> Option<PathBuf> {
@@ -107,7 +107,7 @@ mod tests {
     #[test]
     fn config_fixable_true_when_config_exists() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join(".fallowrc.json"), "{}").unwrap();
+        std::fs::write(dir.path().join(".plowrc.json"), "{}").unwrap();
         assert!(is_config_fixable(dir.path(), None));
     }
 

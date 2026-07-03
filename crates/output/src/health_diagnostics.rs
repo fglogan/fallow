@@ -40,7 +40,7 @@ pub struct FrameworkHealthDiagnostics {
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct FrameworkHealthDetector {
-    /// Rule or detector ID, matching fallow's stable rule names where possible.
+    /// Rule or detector ID, matching plow's stable rule names where possible.
     pub id: String,
     /// Framework ID that made this detector relevant.
     pub framework: String,

@@ -9,7 +9,7 @@
 //! when some file instantiates it: a `<Tag>` in a template, a `:is`/`this=`
 //! binding, a `components: {}` / `app.component()` registration, an `h()` call,
 //! a Nuxt auto-import, or a lazy `() => import('./X.vue')`. All of those make the
-//! importing file REFERENCE the component binding, which fallow records (the
+//! importing file REFERENCE the component binding, which plow records (the
 //! binding is removed from `unused_import_bindings`, and Nuxt auto-imports add a
 //! synthetic resolved import). Only a bare barrel re-export
 //! (`export { default as Foo } from './Foo.vue'`) keeps a component reachable
@@ -36,7 +36,7 @@ use std::path::Path;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_types::extract::{
+use plow_types::extract::{
     AngularComponentSelector, ExportName, ImportedName, ModuleInfo,
     has_dynamic_custom_element_render,
 };
@@ -599,7 +599,7 @@ pub fn find_unrendered_lit_elements(input: &LitUnrenderedInput<'_>) -> Vec<Unren
             continue;
         }
         // Tooling-rendered abstain: an element defined under a docs / dev / demo
-        // directory is rendered by site / dev tooling fallow cannot parse
+        // directory is rendered by site / dev tooling plow cannot parse
         // (Nunjucks / EJS / Markdown templates, dev-server HTML injection, story
         // harnesses), so a "rendered nowhere" verdict there is FP-prone.
         // Relativized against the project root so an absolute-path prefix segment
@@ -635,7 +635,7 @@ pub fn find_unrendered_lit_elements(input: &LitUnrenderedInput<'_>) -> Vec<Unren
 }
 
 /// Whether a workspace-relative path lives under a directory that a docs / dev /
-/// demo site renders through tooling fallow cannot parse (Nunjucks / EJS /
+/// demo site renders through tooling plow cannot parse (Nunjucks / EJS /
 /// Markdown templates, dev-server HTML injection, story harnesses). The Lit
 /// `unrendered-component` arm abstains on such elements because their render
 /// sites are invisible, so a "rendered nowhere" verdict would be a false
@@ -770,7 +770,7 @@ fn emit_angular_component_findings(
     // A lazily-routed component declared with the bare loadComponent /
     // loadChildren form (`loadComponent: () => import('./x')`, no
     // `.then(m => m.X)`) is loaded through its module's DEFAULT export, which
-    // fallow's arrow-wrapped dynamic-import resolution credits as a `default`
+    // plow's arrow-wrapped dynamic-import resolution credits as a `default`
     // reference. Such a form has NO class name in the route config for
     // `entry_classes` to capture, so the default-export reference is the only
     // render-equivalence signal. Abstain when this file's default export carries
@@ -888,9 +888,9 @@ fn public_api_reexported_files(
 mod tests {
     use std::path::PathBuf;
 
-    use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
-    use fallow_types::extract::{ImportInfo, ReExportInfo};
     use oxc_span::Span;
+    use plow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
+    use plow_types::extract::{ImportInfo, ReExportInfo};
 
     use super::*;
     use crate::analyze::test_support::empty_module;

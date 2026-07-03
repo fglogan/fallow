@@ -5,13 +5,13 @@ expression: json_str
 [
   {
     "type": "issue",
-    "check_name": "fallow/unused-type",
+    "check_name": "plow/unused-type",
     "description": "Type export 'OldType' is never imported by other modules",
     "categories": [
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "deb0e9de35cc06d9",
+    "fingerprint": "08e7c60812746b38",
     "location": {
       "path": "src/types.ts",
       "lines": {

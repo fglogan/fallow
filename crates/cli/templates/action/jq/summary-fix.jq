@@ -2,9 +2,9 @@
 (.fixes | map(select(.type == "remove_dependency")) | length) as $deps |
 
 if (.fixes | length) == 0 then
-  "## Fallow — Auto-fix\n\nNo fixable issues found."
+  "## Plow — Auto-fix\n\nNo fixable issues found."
 else
-  "## Fallow — Auto-fix\n\n" +
+  "## Plow — Auto-fix\n\n" +
   (if .dry_run then "**Dry run**: would apply" else "Applied" end) +
   " **\(.fixes | length) fixes**" +
   (if .dry_run then "" else " (\(.total_fixed) succeeded)" end) + "\n\n" +

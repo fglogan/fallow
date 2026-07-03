@@ -3,7 +3,7 @@ paths:
   - "crates/graph/**"
 ---
 
-# fallow-graph crate
+# plow-graph crate
 
 Key modules:
 - `project.rs` — `ProjectState` struct: owns the file registry (stable FileIds sorted by path) and workspace metadata

@@ -15,8 +15,8 @@ use super::common::{create_config, fixture_path};
 fn detects_genuine_thin_wrapper() {
     let root = fixture_path("thin-wrapper");
     let mut config = create_config(root);
-    config.rules.thin_wrapper = fallow_config::Severity::Warn;
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    config.rules.thin_wrapper = plow_config::Severity::Warn;
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let wrappers = &results.thin_wrappers;
     assert_eq!(
@@ -52,8 +52,8 @@ fn detects_genuine_thin_wrapper() {
 fn abstains_on_every_ladder_case() {
     let root = fixture_path("thin-wrapper-abstain");
     let mut config = create_config(root);
-    config.rules.thin_wrapper = fallow_config::Severity::Warn;
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    config.rules.thin_wrapper = plow_config::Severity::Warn;
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.thin_wrappers.is_empty(),
@@ -75,7 +75,7 @@ fn abstains_on_every_ladder_case() {
 fn dormant_when_rule_off() {
     let root = fixture_path("thin-wrapper");
     let config = create_config(root); // rule defaults to off
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     assert!(
         results.thin_wrappers.is_empty(),
         "the thin-wrapper rule is off by default: {}",
@@ -90,8 +90,8 @@ fn dep_gated_to_react() {
     // The Vue fixture declares only `vue` (no react/react-dom/next/preact).
     let root = fixture_path("unused-component-prop");
     let mut config = create_config(root);
-    config.rules.thin_wrapper = fallow_config::Severity::Warn;
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    config.rules.thin_wrapper = plow_config::Severity::Warn;
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     assert!(
         results.thin_wrappers.is_empty(),
         "thin-wrapper must not fire on a non-React project"

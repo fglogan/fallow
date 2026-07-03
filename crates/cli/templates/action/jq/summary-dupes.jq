@@ -1,7 +1,7 @@
 if .stats.clone_groups == 0 then
-  "## Fallow — Code Duplication\n\nNo code duplication found.\n\n*Analyzed \(.stats.total_files) files in \(.elapsed_ms)ms*"
+  "## Plow — Code Duplication\n\nNo code duplication found.\n\n*Analyzed \(.stats.total_files) files in \(.elapsed_ms)ms*"
 else
-  "## Fallow — Code Duplication\n\nFound **\(.stats.clone_groups) clone groups** (\(.stats.clone_instances) instances) across \(.stats.files_with_clones) files in \(.elapsed_ms)ms\n\n" +
+  "## Plow — Code Duplication\n\nFound **\(.stats.clone_groups) clone groups** (\(.stats.clone_instances) instances) across \(.stats.files_with_clones) files in \(.elapsed_ms)ms\n\n" +
   "| Metric | Value |\n|--------|-------|\n" +
   "| Files analyzed | \(.stats.total_files) |\n" +
   "| Files with clones | \(.stats.files_with_clones) |\n" +

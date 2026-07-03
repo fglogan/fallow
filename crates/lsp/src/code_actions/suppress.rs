@@ -2,7 +2,7 @@
 //!
 //! Security findings are CANDIDATES, not confirmed bugs, so the actions are
 //! framed as "dismiss a candidate", never "fix" / "ignore" / "silence". Both
-//! actions are ADDITIVE (they insert a `// fallow-ignore-*` comment), unlike the
+//! actions are ADDITIVE (they insert a `// plow-ignore-*` comment), unlike the
 //! destructive remove/delete actions in `quick_fix.rs`, so re-validation only
 //! confirms the anchor line still exists rather than re-parsing a declaration.
 //!
@@ -21,16 +21,16 @@ use std::path::Path;
 use ls_types::*;
 use rustc_hash::FxHashSet;
 
-use fallow_api::EditorAnalysisResults as AnalysisResults;
-use fallow_api::editor_results::SecurityFindingKind;
+use plow_api::EditorAnalysisResults as AnalysisResults;
+use plow_api::editor_results::SecurityFindingKind;
 
 use crate::diagnostics::security::{security_diagnostic, security_label, security_token};
 
 /// Build suppress code actions for security candidates under the cursor.
 ///
-/// A file-level `// fallow-ignore-file <token>` dismissal is offered once per
+/// A file-level `// plow-ignore-file <token>` dismissal is offered once per
 /// distinct kind (both kinds honor file-level suppression). A line-level
-/// `// fallow-ignore-next-line <token>` dismissal is offered ONLY for
+/// `// plow-ignore-next-line <token>` dismissal is offered ONLY for
 /// `TaintedSink`: the `ClientServerLeak` detector honors only file-level
 /// suppression (`analyze/security/mod.rs`), so a line-level marker would be a
 /// dead no-op for it (the squiggle would reappear on the next analysis pass).
@@ -110,7 +110,7 @@ pub fn build_suppress_security_actions(
                 uri,
                 insert_before(
                     finding_line,
-                    format!("{indent}// fallow-ignore-next-line {token}\n"),
+                    format!("{indent}// plow-ignore-next-line {token}\n"),
                 ),
                 linked.clone(),
             ));
@@ -122,7 +122,7 @@ pub fn build_suppress_security_actions(
             actions.push(suppress_action(
                 format!("Dismiss this security candidate type in this file ({label})"),
                 uri,
-                insert_before(0, format!("// fallow-ignore-file {token}\n")),
+                insert_before(0, format!("// plow-ignore-file {token}\n")),
                 linked,
             ));
         }
@@ -189,7 +189,7 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    use fallow_api::editor_results::{SecurityFinding, SecurityFindingKind, SecuritySeverity};
+    use plow_api::editor_results::{SecurityFinding, SecurityFindingKind, SecuritySeverity};
 
     fn test_root() -> PathBuf {
         if cfg!(windows) {
@@ -202,7 +202,7 @@ mod tests {
     fn sink(path: PathBuf, line: u32) -> SecurityFinding {
         SecurityFinding {
             finding_id: String::new(),
-            candidate: fallow_api::editor_results::SecurityCandidate::default(),
+            candidate: plow_api::editor_results::SecurityCandidate::default(),
             taint_flow: None,
             attack_surface: None,
             kind: SecurityFindingKind::TaintedSink,
@@ -226,7 +226,7 @@ mod tests {
     fn leak(path: PathBuf, line: u32) -> SecurityFinding {
         SecurityFinding {
             finding_id: String::new(),
-            candidate: fallow_api::editor_results::SecurityCandidate::default(),
+            candidate: plow_api::editor_results::SecurityCandidate::default(),
             taint_flow: None,
             attack_surface: None,
             kind: SecurityFindingKind::ClientServerLeak,
@@ -297,11 +297,11 @@ mod tests {
         // Indentation is matched on the line-level insert.
         assert_eq!(
             first_edit_text(&actions[0]),
-            "  // fallow-ignore-next-line security-sink\n"
+            "  // plow-ignore-next-line security-sink\n"
         );
         assert_eq!(
             first_edit_text(&actions[1]),
-            "// fallow-ignore-file security-sink\n"
+            "// plow-ignore-file security-sink\n"
         );
     }
 
@@ -365,7 +365,7 @@ mod tests {
         assert!(!titles.iter().any(|t| t.contains("on this line")));
         assert_eq!(
             first_edit_text(&actions[0]),
-            "// fallow-ignore-file security-client-server-leak\n"
+            "// plow-ignore-file security-client-server-leak\n"
         );
     }
 

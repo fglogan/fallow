@@ -5,7 +5,7 @@
 //! components emit HTML via a tagged template whose tag is the identifier
 //! `html`. See issue #105 (till's follow-up comment).
 
-use fallow_types::extract::{ImportedName, SemanticFact};
+use plow_types::extract::{ImportedName, SemanticFact};
 
 use crate::tests::parse_ts;
 

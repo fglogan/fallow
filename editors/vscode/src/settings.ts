@@ -1,7 +1,7 @@
 /**
  * VS Code settings types. These shape `settings.json` entries under the
- * `fallow.*` namespace and are kept in sync with `contributes.configuration`
- * in `package.json`. They are NOT part of fallow's JSON output contract and
+ * `plow.*` namespace and are kept in sync with `contributes.configuration`
+ * in `package.json`. They are NOT part of plow's JSON output contract and
  * therefore stay hand-written (not derived from `docs/output-schema.json`).
  */
 

@@ -373,7 +373,7 @@ fn classify_v6_specifier(spec: &str, result: &mut PluginResult) {
     }
 }
 
-/// Convert a Node subpath-imports entry into a fallow path-alias pair.
+/// Convert a Node subpath-imports entry into a plow path-alias pair.
 ///
 /// Examples:
 /// - `"#controllers/*"` → `"./app/controllers/*.js"`

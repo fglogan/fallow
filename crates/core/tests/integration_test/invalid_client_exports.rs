@@ -1,12 +1,12 @@
-use fallow_config::{FallowConfig, OutputFormat, RulesConfig, Severity};
+use plow_config::{OutputFormat, PlowConfig, RulesConfig, Severity};
 
 use crate::common::fixture_path;
 
 /// Resolve a fixture with the `invalid-client-export` rule at `warn` (its
 /// default). The detector is gated on the project declaring `next`, which the
 /// fixture's `package.json` does.
-fn fixture_config(name: &str) -> fallow_config::ResolvedConfig {
-    FallowConfig {
+fn fixture_config(name: &str) -> plow_config::ResolvedConfig {
+    PlowConfig {
         rules: RulesConfig {
             invalid_client_export: Severity::Warn,
             ..RulesConfig::default()
@@ -19,7 +19,7 @@ fn fixture_config(name: &str) -> fallow_config::ResolvedConfig {
 #[test]
 fn use_client_metadata_export_is_flagged_once() {
     let config = fixture_config("invalid-client-export");
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let findings: Vec<(&str, String)> = results
         .invalid_client_exports
@@ -54,7 +54,7 @@ fn use_client_metadata_export_is_flagged_once() {
 #[test]
 fn default_export_and_hook_in_client_file_are_not_flagged() {
     let config = fixture_config("invalid-client-export");
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     // The clean client file (app/widget.tsx) exports only `default` and an
     // ordinary hook; neither is illegal, so nothing from it is flagged.
@@ -72,7 +72,7 @@ fn default_export_and_hook_in_client_file_are_not_flagged() {
 #[test]
 fn server_file_exporting_metadata_is_not_flagged() {
     let config = fixture_config("invalid-client-export");
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     // The server file (no "use client") exporting `metadata` is the
     // legitimate pattern and must never be flagged.
@@ -90,7 +90,7 @@ fn server_file_exporting_metadata_is_not_flagged() {
 #[test]
 fn no_findings_when_next_is_absent() {
     let config = fixture_config("invalid-client-export-no-next");
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.invalid_client_exports.is_empty(),

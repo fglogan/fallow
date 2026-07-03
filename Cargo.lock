@@ -970,150 +970,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fallow-api"
-version = "2.104.0"
-dependencies = [
- "dunce",
- "fallow-config",
- "fallow-engine",
- "fallow-output",
- "fallow-types",
- "globset",
- "rayon",
- "rustc-hash 2.1.2",
- "schemars",
- "serde",
- "serde_json",
- "tempfile",
- "xxhash-rust",
-]
-
-[[package]]
-name = "fallow-benchmarks"
-version = "2.104.0"
-dependencies = [
- "criterion2",
- "fallow-api",
- "fallow-core",
- "fallow-types",
- "tempfile",
-]
-
-[[package]]
-name = "fallow-cli"
-version = "2.104.0"
-dependencies = [
- "base64",
- "bitcode",
- "clap",
- "colored 3.1.1",
- "dunce",
- "ed25519-dalek",
- "fallow-api",
- "fallow-config",
- "fallow-cov-protocol",
- "fallow-engine",
- "fallow-license",
- "fallow-output",
- "fallow-types",
- "fallow-v8-coverage",
- "globset",
- "http",
- "httpdate",
- "ignore",
- "insta",
- "jsonc-parser",
- "miette",
- "notify",
- "oxc_coverage_instrument",
- "proc-macro2",
- "proptest",
- "rayon",
- "rustc-hash 2.1.2",
- "schemars",
- "semver",
- "serde",
- "serde_json",
- "serde_yaml_ng",
- "sha2 0.11.0",
- "signal-hook",
- "similar 3.1.1",
- "srcmap-sourcemap",
- "syn 2.0.118",
- "tempfile",
- "toml",
- "tracing",
- "tracing-subscriber",
- "ureq",
- "url",
- "windows-sys 0.61.2",
- "xxhash-rust",
-]
-
-[[package]]
-name = "fallow-config"
-version = "2.104.0"
-dependencies = [
- "dunce",
- "fallow-types",
- "glob",
- "globset",
- "jsonc-parser",
- "miette",
- "proptest",
- "regex",
- "rustc-hash 2.1.2",
- "schemars",
- "serde",
- "serde_json",
- "serde_yaml_ng",
- "tempfile",
- "toml",
- "toml_edit",
- "tracing",
- "ureq",
- "xxhash-rust",
-]
-
-[[package]]
-name = "fallow-core"
-version = "2.104.0"
-dependencies = [
- "bitcode",
- "criterion2",
- "dhat",
- "dunce",
- "fallow-config",
- "fallow-extract",
- "fallow-graph",
- "fallow-types",
- "glob",
- "globset",
- "ignore",
- "indicatif",
- "oxc_allocator",
- "oxc_ast",
- "oxc_ast_visit",
- "oxc_parser",
- "oxc_semantic",
- "oxc_span",
- "oxc_str",
- "oxc_syntax",
- "proptest",
- "rayon",
- "regex",
- "rustc-hash 2.1.2",
- "serde",
- "serde_json",
- "serde_yaml_ng",
- "tempfile",
- "toml",
- "tracing",
- "tracing-subscriber",
- "xxhash-rust",
-]
-
-[[package]]
 name = "fallow-cov-protocol"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1122,165 +978,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
-]
-
-[[package]]
-name = "fallow-engine"
-version = "2.104.0"
-dependencies = [
- "colored 3.1.1",
- "dunce",
- "fallow-config",
- "fallow-core",
- "fallow-extract",
- "fallow-graph",
- "fallow-output",
- "fallow-types",
- "globset",
- "oxc_coverage_instrument",
- "oxc_span",
- "rustc-hash 2.1.2",
- "serde",
- "serde_json",
- "tempfile",
- "toml",
- "tracing",
- "xxhash-rust",
-]
-
-[[package]]
-name = "fallow-extract"
-version = "2.104.0"
-dependencies = [
- "bitcode",
- "fallow-cov-protocol",
- "fallow-types",
- "lightningcss",
- "oxc_allocator",
- "oxc_ast",
- "oxc_ast_visit",
- "oxc_parser",
- "oxc_semantic",
- "oxc_span",
- "oxc_str",
- "proptest",
- "rayon",
- "regex",
- "rustc-hash 2.1.2",
- "tracing",
- "xxhash-rust",
-]
-
-[[package]]
-name = "fallow-graph"
-version = "2.104.0"
-dependencies = [
- "dunce",
- "fallow-config",
- "fallow-types",
- "fixedbitset",
- "globset",
- "jsonc-parser",
- "oxc_resolver",
- "oxc_span",
- "postcard",
- "proptest",
- "rayon",
- "rustc-hash 2.1.2",
- "serde",
- "serde_json",
- "tempfile",
- "tracing",
-]
-
-[[package]]
-name = "fallow-license"
-version = "2.104.0"
-dependencies = [
- "base64",
- "ed25519-dalek",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "fallow-lsp"
-version = "2.104.0"
-dependencies = [
- "fallow-api",
- "fallow-config",
- "fallow-types",
- "futures",
- "ls-types",
- "rustc-hash 2.1.2",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tower",
- "tower-lsp-server",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "fallow-mcp"
-version = "2.104.0"
-dependencies = [
- "fallow-api",
- "fallow-types",
- "regex",
- "rmcp",
- "rquickjs",
- "schemars",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "fallow-node"
-version = "2.104.0"
-dependencies = [
- "fallow-api",
- "napi",
- "napi-build",
- "napi-derive",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
-name = "fallow-output"
-version = "2.104.0"
-dependencies = [
- "fallow-types",
- "rustc-hash 2.1.2",
- "schemars",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "fallow-types"
-version = "2.104.0"
-dependencies = [
- "bitcode",
- "oxc_span",
- "proptest",
- "schemars",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "fallow-v8-coverage"
-version = "2.104.0"
-dependencies = [
- "proptest",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -2902,6 +2599,309 @@ checksum = "f950b2377845cebe5cf8b5165cb3cc1a5e0fa5cfa3e1f7f55707d8fd82e0a7b7"
 dependencies = [
  "der",
  "spki",
+]
+
+[[package]]
+name = "plow-api"
+version = "2.104.0"
+dependencies = [
+ "dunce",
+ "globset",
+ "plow-config",
+ "plow-engine",
+ "plow-output",
+ "plow-types",
+ "rayon",
+ "rustc-hash 2.1.2",
+ "schemars",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "xxhash-rust",
+]
+
+[[package]]
+name = "plow-benchmarks"
+version = "2.104.0"
+dependencies = [
+ "criterion2",
+ "plow-api",
+ "plow-core",
+ "plow-types",
+ "tempfile",
+]
+
+[[package]]
+name = "plow-cli"
+version = "2.104.0"
+dependencies = [
+ "base64",
+ "bitcode",
+ "clap",
+ "colored 3.1.1",
+ "dunce",
+ "ed25519-dalek",
+ "fallow-cov-protocol",
+ "globset",
+ "http",
+ "httpdate",
+ "ignore",
+ "insta",
+ "jsonc-parser",
+ "miette",
+ "notify",
+ "oxc_coverage_instrument",
+ "plow-api",
+ "plow-config",
+ "plow-engine",
+ "plow-license",
+ "plow-output",
+ "plow-types",
+ "plow-v8-coverage",
+ "proc-macro2",
+ "proptest",
+ "rayon",
+ "rustc-hash 2.1.2",
+ "schemars",
+ "semver",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+ "sha2 0.11.0",
+ "signal-hook",
+ "similar 3.1.1",
+ "srcmap-sourcemap",
+ "syn 2.0.118",
+ "tempfile",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "ureq",
+ "url",
+ "windows-sys 0.61.2",
+ "xxhash-rust",
+]
+
+[[package]]
+name = "plow-config"
+version = "2.104.0"
+dependencies = [
+ "dunce",
+ "glob",
+ "globset",
+ "jsonc-parser",
+ "miette",
+ "plow-types",
+ "proptest",
+ "regex",
+ "rustc-hash 2.1.2",
+ "schemars",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+ "tempfile",
+ "toml",
+ "toml_edit",
+ "tracing",
+ "ureq",
+ "xxhash-rust",
+]
+
+[[package]]
+name = "plow-core"
+version = "2.104.0"
+dependencies = [
+ "bitcode",
+ "criterion2",
+ "dhat",
+ "dunce",
+ "glob",
+ "globset",
+ "ignore",
+ "indicatif",
+ "oxc_allocator",
+ "oxc_ast",
+ "oxc_ast_visit",
+ "oxc_parser",
+ "oxc_semantic",
+ "oxc_span",
+ "oxc_str",
+ "oxc_syntax",
+ "plow-config",
+ "plow-extract",
+ "plow-graph",
+ "plow-types",
+ "proptest",
+ "rayon",
+ "regex",
+ "rustc-hash 2.1.2",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+ "tempfile",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "xxhash-rust",
+]
+
+[[package]]
+name = "plow-engine"
+version = "2.104.0"
+dependencies = [
+ "colored 3.1.1",
+ "dunce",
+ "globset",
+ "oxc_coverage_instrument",
+ "oxc_span",
+ "plow-config",
+ "plow-core",
+ "plow-extract",
+ "plow-graph",
+ "plow-output",
+ "plow-types",
+ "rustc-hash 2.1.2",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml",
+ "tracing",
+ "xxhash-rust",
+]
+
+[[package]]
+name = "plow-extract"
+version = "2.104.0"
+dependencies = [
+ "bitcode",
+ "fallow-cov-protocol",
+ "lightningcss",
+ "oxc_allocator",
+ "oxc_ast",
+ "oxc_ast_visit",
+ "oxc_parser",
+ "oxc_semantic",
+ "oxc_span",
+ "oxc_str",
+ "plow-types",
+ "proptest",
+ "rayon",
+ "regex",
+ "rustc-hash 2.1.2",
+ "tracing",
+ "xxhash-rust",
+]
+
+[[package]]
+name = "plow-graph"
+version = "2.104.0"
+dependencies = [
+ "dunce",
+ "fixedbitset",
+ "globset",
+ "jsonc-parser",
+ "oxc_resolver",
+ "oxc_span",
+ "plow-config",
+ "plow-types",
+ "postcard",
+ "proptest",
+ "rayon",
+ "rustc-hash 2.1.2",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tracing",
+]
+
+[[package]]
+name = "plow-license"
+version = "2.104.0"
+dependencies = [
+ "base64",
+ "ed25519-dalek",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "plow-lsp"
+version = "2.104.0"
+dependencies = [
+ "futures",
+ "ls-types",
+ "plow-api",
+ "plow-config",
+ "plow-types",
+ "rustc-hash 2.1.2",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tower",
+ "tower-lsp-server",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "plow-mcp"
+version = "2.104.0"
+dependencies = [
+ "plow-api",
+ "plow-types",
+ "regex",
+ "rmcp",
+ "rquickjs",
+ "schemars",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "plow-node"
+version = "2.104.0"
+dependencies = [
+ "napi",
+ "napi-build",
+ "napi-derive",
+ "plow-api",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "plow-output"
+version = "2.104.0"
+dependencies = [
+ "plow-types",
+ "rustc-hash 2.1.2",
+ "schemars",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "plow-types"
+version = "2.104.0"
+dependencies = [
+ "bitcode",
+ "oxc_span",
+ "proptest",
+ "schemars",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "plow-v8-coverage"
+version = "2.104.0"
+dependencies = [
+ "proptest",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

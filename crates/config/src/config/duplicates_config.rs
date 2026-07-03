@@ -201,7 +201,7 @@ impl ResolvedNormalization {
 
 /// Detection mode controlling how aggressively tokens are normalized.
 ///
-/// Since fallow uses AST-based tokenization (not lexer-based), whitespace and
+/// Since plow uses AST-based tokenization (not lexer-based), whitespace and
 /// comments are inherently absent from the token stream. The `Strict` and `Mild`
 /// modes are currently equivalent. `Weak` mode additionally blinds string
 /// literals. `Semantic` mode blinds all identifiers and literal values for

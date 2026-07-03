@@ -4,7 +4,7 @@ import { appendFeedItem } from "./feed";
 import type { WalkthroughDocument } from "../model/walkthrough";
 
 export const INSPECT_PORT = 7787;
-const SELECT_PATH = "/fallow-select";
+const SELECT_PATH = "/plow-select";
 
 const CORS = {
   "access-control-allow-origin": "*",

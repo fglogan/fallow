@@ -1,5 +1,5 @@
 use crate::duplicates::{self, DuplicationReport};
-use fallow_output::{
+use plow_output::{
     COGNITIVE_EXTRACTION_THRESHOLD, CloneSiblingEvidence, Confidence, ContributingFactor,
     DirectCallerEvidence, EffortEstimate, EvidenceFunction, FileHealthScore, HotspotEntry,
     RecommendationCategory, RefactoringTarget, TargetEvidence, TargetThresholds,
@@ -1001,7 +1001,7 @@ mod tests {
             path.clone(),
             vec![DirectCallerEvidence {
                 path: caller_path.clone(),
-                symbols: vec![fallow_output::DirectCallerSymbolEvidence {
+                symbols: vec![plow_output::DirectCallerSymbolEvidence {
                     imported: "foo".into(),
                     local: "fooAlias".into(),
                     type_only: false,

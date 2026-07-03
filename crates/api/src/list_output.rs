@@ -1,11 +1,11 @@
 //! Shared list command JSON output assembly.
 
-use fallow_output::{
+use plow_output::{
     ListEntryPointOutput, ListOutput, ListPluginOutput, RootEnvelopeMode, WorkspacesOutput,
 };
 use serde::Serialize;
 
-/// Root envelope mode for a `fallow list --format json` payload.
+/// Root envelope mode for a `plow list --format json` payload.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ListJsonEnvelope {
     /// Emit the historical plain object without a `kind` field.
@@ -16,7 +16,7 @@ pub enum ListJsonEnvelope {
     Workspaces,
 }
 
-/// Section data for serializing a `fallow list --format json` payload.
+/// Section data for serializing a `plow list --format json` payload.
 pub struct ListJsonOutputInput<Boundaries, Diagnostic> {
     pub plugins: Option<Vec<String>>,
     pub files: Option<Vec<String>>,
@@ -60,7 +60,7 @@ pub fn build_list_json_output<Boundaries, Diagnostic>(
     }
 }
 
-/// Serialize a typed `fallow list --format json` payload.
+/// Serialize a typed `plow list --format json` payload.
 ///
 /// # Errors
 ///
@@ -79,17 +79,17 @@ where
     match envelope {
         ListJsonEnvelope::Plain => serde_json::to_value(output),
         ListJsonEnvelope::Boundaries => {
-            fallow_output::serialize_list_boundaries_json_output(output, mode)
+            plow_output::serialize_list_boundaries_json_output(output, mode)
         }
         ListJsonEnvelope::Workspaces => {
-            fallow_output::serialize_list_workspaces_json_output(output, mode)
+            plow_output::serialize_list_workspaces_json_output(output, mode)
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use fallow_output::ListEntryPointOutput;
+    use plow_output::ListEntryPointOutput;
     use serde_json::json;
 
     use super::*;

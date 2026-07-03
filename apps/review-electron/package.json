@@ -1,8 +1,8 @@
 {
-  "name": "@fallow/review-electron",
+  "name": "@plow/review-electron",
   "private": true,
   "version": "0.0.0",
-  "description": "Native Electron Fallow code-review app: grounded review walkthrough + live-app inspector, fed back to a coding agent.",
+  "description": "Native Electron Plow code-review app: grounded review walkthrough + live-app inspector, fed back to a coding agent.",
   "main": "out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -49,8 +49,8 @@
     "vitest": "^2.1.8"
   },
   "build": {
-    "appId": "dev.fallow.review",
-    "productName": "Fallow Review",
+    "appId": "dev.plow.review",
+    "productName": "Plow Review",
     "files": [
       "out/**/*",
       "package.json"

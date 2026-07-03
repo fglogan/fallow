@@ -40,7 +40,7 @@ pub fn filter_disabled_diagnostics(
 /// non-object (string / number / array), the existing value is left alone
 /// and `changedSince` is not stamped on that one diagnostic; that case is
 /// not used by `build_diagnostics` today and is logged via the structured
-/// fact that `data` for any fallow diagnostic should be an object.
+/// fact that `data` for any plow diagnostic should be an object.
 pub fn attach_changed_since_data(
     diagnostics_by_file: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     changed_since: Option<&str>,

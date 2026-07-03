@@ -3,11 +3,11 @@
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use fallow_config::{DuplicatesConfig, ResolvedConfig};
-use fallow_types::discover::DiscoveredFile;
-use fallow_types::extract::{ModuleInfo, ParseResult};
-use fallow_types::source_fingerprint::SourceFingerprint;
-use fallow_types::workspace::WorkspaceDiagnostic;
+use plow_config::{DuplicatesConfig, ResolvedConfig};
+use plow_types::discover::DiscoveredFile;
+use plow_types::extract::{ModuleInfo, ParseResult};
+use plow_types::source_fingerprint::SourceFingerprint;
+use plow_types::workspace::WorkspaceDiagnostic;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
@@ -143,7 +143,7 @@ impl AnalysisSession {
         let discovery = core_backend::prepare_analysis_discovery(&project_config.config);
         let workspace_diagnostics = merge_workspace_diagnostics(
             project_config.workspace_diagnostics,
-            fallow_config::workspace_diagnostics_for(&project_config.config.root),
+            plow_config::workspace_diagnostics_for(&project_config.config.root),
         );
         Self {
             config: project_config.config,
@@ -424,7 +424,7 @@ fn parse_files_with_config(
     let cache = if config.no_cache {
         None
     } else {
-        fallow_extract::cache::CacheStore::load(
+        plow_extract::cache::CacheStore::load(
             &config.cache_dir,
             config.cache_config_hash,
             crate::resolve_cache_max_size_bytes(config),

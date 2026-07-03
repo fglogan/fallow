@@ -7,7 +7,7 @@
 use oxc_ast::ast::*;
 use oxc_span::Span;
 
-use fallow_types::extract::{SecurityControlKind, SecurityControlSite};
+use plow_types::extract::{SecurityControlKind, SecurityControlSite};
 
 use super::{
     ModuleInfoExtractor, callee_leaf_name, expression_has_boundary_validation_keys,

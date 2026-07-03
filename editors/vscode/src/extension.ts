@@ -1,5 +1,5 @@
 // VS Code injects this module into the extension host at runtime.
-// fallow-ignore-next-line unlisted-dependency
+// plow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
 import {
   buildCleanAnalysisSummary,
@@ -100,8 +100,8 @@ import { coverageWatermarkMessage } from "./coverage-utils.js";
 import { killActiveChildren } from "./process-registry.js";
 import type {
   AuditOutput,
-  FallowCheckResult,
-  FallowDupesResult,
+  PlowCheckResult,
+  PlowDupesResult,
   HealthOutput,
   RuntimeCoverageReport,
 } from "./types.js";
@@ -127,11 +127,11 @@ const AUDIT_SAVE_DEBOUNCE_MS = 600;
  * filter leaves the fully-muted state, so each distinct hide-all episode is
  * nudged exactly once instead of on every window reload.
  */
-const MUTED_ALL_NUDGE_KEY = "fallow.mutedAllNudgeShown.v1";
+const MUTED_ALL_NUDGE_KEY = "plow.mutedAllNudgeShown.v1";
 
 let outputChannel: vscode.LogOutputChannel;
-let lastCheckResult: FallowCheckResult | null = null;
-let lastDupesResult: FallowDupesResult | null = null;
+let lastCheckResult: PlowCheckResult | null = null;
+let lastDupesResult: PlowDupesResult | null = null;
 let lastHealthResult: HealthOutput | null = null;
 let lastCoverageReport: RuntimeCoverageReport | null = null;
 let lastAuditResult: AuditOutput | null = null;
@@ -146,10 +146,10 @@ let activeDiagnosticFilter: DiagnosticFilter | null = null;
 // from the dead-code analysis: toggling security never re-runs the main
 // analysis, and dead-code config changes never trigger a security re-run (#902).
 const SECURITY_CONFIG_KEYS = [
-  "fallow.security.enabled",
-  "fallow.configPath",
-  "fallow.changedSince",
-  "fallow.workspace",
+  "plow.security.enabled",
+  "plow.configPath",
+  "plow.changedSince",
+  "plow.workspace",
 ] as const;
 
 export interface ExtensionApi {
@@ -160,14 +160,14 @@ export interface ExtensionApi {
 }
 
 export const activate = async (context: vscode.ExtensionContext): Promise<ExtensionApi> => {
-  outputChannel = vscode.window.createOutputChannel("Fallow", { log: true });
+  outputChannel = vscode.window.createOutputChannel("Plow", { log: true });
   context.subscriptions.push(outputChannel);
 
   const statusBar = createStatusBar();
   context.subscriptions.push(statusBar);
 
   // License indicator: a second status-bar item, created only when enabled
-  // (`fallow.license.showStatusBar`). Decoupled from the analysis path, so it
+  // (`plow.license.showStatusBar`). Decoupled from the analysis path, so it
   // adds no latency to sidebar reveal or `runAnalysis` (#902).
   // Pushed to subscriptions for teardown and disposed directly in deactivate(),
   // matching the main analysis status-bar pattern above (no extra
@@ -186,7 +186,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   // path (#902). When disabled, the command still runs and reports its verdict
   // via an information message instead of the status bar.
   //
-  // The item is created/disposed LIVE when `fallow.audit.statusBar.enabled`
+  // The item is created/disposed LIVE when `plow.audit.statusBar.enabled`
   // toggles (see the config-change handler), so it never needs a window reload.
   // Lifecycle goes through the module's create/dispose helpers (which own the
   // singleton item) rather than pushing the raw item to `subscriptions`, so a
@@ -219,9 +219,9 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   });
   registerDiagnosticMuteUi(context, diagnosticFilter);
 
-  // Once-ever nudge: when EVERY Fallow finding is hidden (the "Hide All"
+  // Once-ever nudge: when EVERY Plow finding is hidden (the "Hide All"
   // toggle), users who reinstalled often don't realize the mute state persisted
-  // in workspaceState (it survives uninstall and deleting the `.fallow` folder),
+  // in workspaceState (it survives uninstall and deleting the `.plow` folder),
   // so it looks like findings vanished for good. Surface a single dismissible
   // prompt wired to the escape-hatch command so a stuck-muted workspace is
   // recoverable without knowing the command name. Gated by a persisted flag so
@@ -230,11 +230,11 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     void (async () => {
       await context.workspaceState.update(MUTED_ALL_NUDGE_KEY, true);
       const choice = await vscode.window.showInformationMessage(
-        "Fallow findings are hidden in this workspace (Hide All is on). CI and the CLI still report everything.",
+        "Plow findings are hidden in this workspace (Hide All is on). CI and the CLI still report everything.",
         "Show all findings",
       );
       if (choice === "Show all findings") {
-        await vscode.commands.executeCommand("fallow.resetDiagnosticFilters");
+        await vscode.commands.executeCommand("plow.resetDiagnosticFilters");
       }
     })();
   }
@@ -258,11 +258,11 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
       return;
     }
     updateStatusBarFromLsp(params);
-    void vscode.commands.executeCommand("setContext", "fallow.hasAnalyzed", true);
+    void vscode.commands.executeCommand("setContext", "plow.hasAnalyzed", true);
   };
 
   // Always-visible diagnostics on/off toggle, just right of the audit item.
-  // Gated on `fallow.diagnostics.statusBar` (default on) and created/disposed
+  // Gated on `plow.diagnostics.statusBar` (default on) and created/disposed
   // LIVE when the setting toggles, mirroring the audit status-bar handling, so
   // it never needs a window reload. Lifecycle goes through the module's
   // create/dispose helpers (which own the singleton item + its filter
@@ -287,7 +287,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
 
   // Expose the health-enabled state to `viewsWelcome` / `menus` `when` clauses.
   const syncHealthEnabledContext = (): void => {
-    void vscode.commands.executeCommand("setContext", "fallow.health.enabled", getHealthEnabled());
+    void vscode.commands.executeCommand("setContext", "plow.health.enabled", getHealthEnabled());
   };
   syncHealthEnabledContext();
 
@@ -298,7 +298,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   const syncSecurityEnabledContext = (): void => {
     void vscode.commands.executeCommand(
       "setContext",
-      "fallow.security.enabled",
+      "plow.security.enabled",
       getSecurityEnabled(),
     );
   };
@@ -357,7 +357,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     return await vscode.window.withProgress(
       {
         location: vscode.ProgressLocation.Notification,
-        title: "Fallow: Analyzing...",
+        title: "Plow: Analyzing...",
         cancellable: false,
       },
       async () => {
@@ -369,7 +369,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
           lastDupesResult = dupes;
           updateViews();
           probeWorkspaceVisibility();
-          void vscode.commands.executeCommand("setContext", "fallow.hasAnalyzed", true);
+          void vscode.commands.executeCommand("setContext", "plow.hasAnalyzed", true);
 
           const issueCount = countCheckIssues(check);
           const duplicateGroupCount = countDuplicationGroups(dupes);
@@ -377,24 +377,24 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
           if (issueCount > 0) {
             void vscode.window
               .showInformationMessage(
-                `Fallow: found ${issueCount} issue${issueCount === 1 ? "" : "s"}. Open the Fallow sidebar to explore.`,
+                `Plow: found ${issueCount} issue${issueCount === 1 ? "" : "s"}. Open the Plow sidebar to explore.`,
                 "Open Sidebar",
               )
               .then((choice) => {
                 if (choice === "Open Sidebar") {
-                  void vscode.commands.executeCommand("fallow.deadCode.focus");
+                  void vscode.commands.executeCommand("plow.deadCode.focus");
                 }
                 return undefined;
               });
           } else if (duplicateGroupCount > 0) {
             void vscode.window
               .showInformationMessage(
-                `Fallow: found ${duplicateGroupCount} duplicate-code group${duplicateGroupCount === 1 ? "" : "s"}. Open the Fallow sidebar to explore.`,
+                `Plow: found ${duplicateGroupCount} duplicate-code group${duplicateGroupCount === 1 ? "" : "s"}. Open the Plow sidebar to explore.`,
                 "Open Sidebar",
               )
               .then((choice) => {
                 if (choice === "Open Sidebar") {
-                  void vscode.commands.executeCommand("fallow.duplicates.focus");
+                  void vscode.commands.executeCommand("plow.duplicates.focus");
                 }
                 return undefined;
               });
@@ -509,11 +509,11 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     }
   };
 
-  // Run `fallow security` and update the Security Candidates view. Findings are
+  // Run `plow security` and update the Security Candidates view. Findings are
   // UNVERIFIED candidates (#903), so the toast says so explicitly and never uses
   // "vulnerability"/"confirmed".
   //
-  // `fallow.hasAnalyzedSecurity` (which paints the "No security candidates
+  // `plow.hasAnalyzedSecurity` (which paints the "No security candidates
   // found" all-clear) is set ONLY after a genuinely completed scan, never after
   // a failed or older-CLI run: a false clean bill on a security surface is the
   // worst failure mode here, so the actionable enable/scan welcome stays in
@@ -525,25 +525,25 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     return await vscode.window.withProgress(
       {
         location: vscode.ProgressLocation.Notification,
-        title: "Fallow: Scanning for security candidates...",
+        title: "Plow: Scanning for security candidates...",
         cancellable: false,
       },
       async () => {
         const result = await runSecurityAnalysis(context, outputChannel);
         if (!result.ok) {
           // Leave the existing view/welcome untouched on failure: do NOT flip
-          // `fallow.hasAnalyzedSecurity`, so a failed/unsupported scan never
+          // `plow.hasAnalyzedSecurity`, so a failed/unsupported scan never
           // paints a false "No security candidates found" all-clear.
           return !result.retryable;
         }
 
         securityProvider.update(result.data);
-        void vscode.commands.executeCommand("setContext", "fallow.hasAnalyzedSecurity", true);
+        void vscode.commands.executeCommand("setContext", "plow.hasAnalyzedSecurity", true);
 
         const count = countSecurityFindings(result.data);
         if (count > 0) {
           void vscode.window.showInformationMessage(
-            `Fallow: found ${count} security candidate${count === 1 ? "" : "s"}. These are NOT verified vulnerabilities; verify each before acting.`,
+            `Plow: found ${count} security candidate${count === 1 ? "" : "s"}. These are NOT verified vulnerabilities; verify each before acting.`,
           );
         }
         return true;
@@ -551,22 +551,22 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     );
   };
 
-  const deadCodeView = vscode.window.createTreeView("fallow.deadCode", {
+  const deadCodeView = vscode.window.createTreeView("plow.deadCode", {
     treeDataProvider: deadCodeProvider,
   });
   deadCodeProvider.setView(deadCodeView);
-  const duplicatesView = vscode.window.createTreeView("fallow.duplicates", {
+  const duplicatesView = vscode.window.createTreeView("plow.duplicates", {
     treeDataProvider: duplicatesProvider,
   });
-  const healthView = vscode.window.createTreeView("fallow.health", {
+  const healthView = vscode.window.createTreeView("plow.health", {
     treeDataProvider: healthProvider,
   });
   healthProvider.setView(healthView);
-  const securityView = vscode.window.createTreeView("fallow.security", {
+  const securityView = vscode.window.createTreeView("plow.security", {
     treeDataProvider: securityProvider,
   });
   securityProvider.setView(securityView);
-  const coverageView = vscode.window.createTreeView("fallow.runtimeCoverage", {
+  const coverageView = vscode.window.createTreeView("plow.runtimeCoverage", {
     treeDataProvider: coverageProvider,
   });
   coverageProvider.setView(coverageView);
@@ -671,7 +671,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   const runSecurityAnalysisCommand = async (): Promise<void> => {
     if (!getSecurityEnabled()) {
       void vscode.window.showInformationMessage(
-        "Fallow: enable `fallow.security.enabled` to scan for security candidates.",
+        "Plow: enable `plow.security.enabled` to scan for security candidates.",
       );
       return;
     }
@@ -691,7 +691,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     await vscode.window.withProgress(
       {
         location: vscode.ProgressLocation.Notification,
-        title: "Fallow: Loading runtime coverage...",
+        title: "Plow: Loading runtime coverage...",
         cancellable: false,
       },
       async () => {
@@ -702,14 +702,14 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
         if (report) {
           lastCoverageReport = report;
           coverageProvider.update(report);
-          void vscode.commands.executeCommand("setContext", "fallow.hasCoverage", true);
+          void vscode.commands.executeCommand("setContext", "plow.hasCoverage", true);
 
           // A grace/trial watermark means these candidates were produced under a
           // stale or expired license: surface it once per load so "Safe to
           // Delete" rows are not mistaken for authoritative deletions.
           const watermark = coverageWatermarkMessage(report);
           if (watermark) {
-            void vscode.window.showWarningMessage(`Fallow runtime coverage: ${watermark}`);
+            void vscode.window.showWarningMessage(`Plow runtime coverage: ${watermark}`);
           }
         }
       },
@@ -740,19 +740,19 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
 
   // Register commands
   context.subscriptions.push(
-    vscode.commands.registerCommand("fallow.analyze", runCliAnalysisCommand),
+    vscode.commands.registerCommand("plow.analyze", runCliAnalysisCommand),
   );
   context.subscriptions.push(
-    vscode.commands.registerCommand("fallow.reloadAnalysis", runCliAnalysisCommand),
+    vscode.commands.registerCommand("plow.reloadAnalysis", runCliAnalysisCommand),
   );
   context.subscriptions.push(
-    vscode.commands.registerCommand("fallow.health.reload", runHealthAnalysisCommand),
+    vscode.commands.registerCommand("plow.health.reload", runHealthAnalysisCommand),
   );
   context.subscriptions.push(
-    vscode.commands.registerCommand("fallow.analyzeSecurity", runSecurityAnalysisCommand),
+    vscode.commands.registerCommand("plow.analyzeSecurity", runSecurityAnalysisCommand),
   );
   context.subscriptions.push(
-    vscode.commands.registerCommand("fallow.inspectActiveFile", () =>
+    vscode.commands.registerCommand("plow.inspectActiveFile", () =>
       runInspectActiveFile(context, outputChannel),
     ),
   );
@@ -770,7 +770,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   };
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("fallow.selectWorkspace", async () => {
+    vscode.commands.registerCommand("plow.selectWorkspace", async () => {
       await showWorkspacePicker(
         context,
         (forceRefresh) => runWorkspaces(context, forceRefresh, outputChannel),
@@ -780,7 +780,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("fallow.clearWorkspace", async () => {
+    vscode.commands.registerCommand("plow.clearWorkspace", async () => {
       const changed = await clearWorkspaceScope(context);
       if (changed) {
         onWorkspaceScopeChange();
@@ -789,23 +789,23 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("fallow.loadCoverage", async () => {
+    vscode.commands.registerCommand("plow.loadCoverage", async () => {
       coverageLoadAttempted = true;
       await loadCoverage();
     }),
   );
   context.subscriptions.push(
-    vscode.commands.registerCommand("fallow.reloadCoverage", async () => {
+    vscode.commands.registerCommand("plow.reloadCoverage", async () => {
       coverageLoadAttempted = true;
       await loadCoverage();
     }),
   );
   context.subscriptions.push(
-    vscode.commands.registerCommand("fallow.clearCoverage", () => {
+    vscode.commands.registerCommand("plow.clearCoverage", () => {
       lastCoverageReport = null;
       coverageLoadAttempted = false;
       coverageProvider.update(null);
-      void vscode.commands.executeCommand("setContext", "fallow.hasCoverage", false);
+      void vscode.commands.executeCommand("setContext", "plow.hasCoverage", false);
     }),
   );
 
@@ -829,7 +829,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     const suffix = count > 0 ? ` (${count} gating candidate${count === 1 ? "" : "s"})` : "";
     const scope = auditScopeSummary(audit);
     void vscode.window
-      .showInformationMessage(`Fallow audit: ${audit.verdict}${suffix} - ${scope}`, "Details")
+      .showInformationMessage(`Plow audit: ${audit.verdict}${suffix} - ${scope}`, "Details")
       .then((choice) => {
         if (choice === "Details") {
           outputChannel.show();
@@ -843,7 +843,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     await vscode.window.withProgress(
       {
         location: vscode.ProgressLocation.Window,
-        title: "Fallow: Auditing changes...",
+        title: "Plow: Auditing changes...",
         cancellable: false,
       },
       async () => {
@@ -867,7 +867,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
       },
     );
   };
-  context.subscriptions.push(vscode.commands.registerCommand("fallow.audit", runAuditCommand));
+  context.subscriptions.push(vscode.commands.registerCommand("plow.audit", runAuditCommand));
 
   // Opt-in re-run on save (default off; #902). Debounced and scoped to
   // JS/TS-family saves so it cannot regress idle latency on unrelated files.
@@ -904,7 +904,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   });
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("fallow.fix", async () => {
+    vscode.commands.registerCommand("plow.fix", async () => {
       // Save dirty editors first so the fix works on up-to-date content
       await vscode.workspace.saveAll(false);
       await runFix(context, false);
@@ -917,81 +917,81 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("fallow.fixDryRun", async () => {
+    vscode.commands.registerCommand("plow.fixDryRun", async () => {
       await runFix(context, true);
     }),
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("fallow.restart", async () => {
+    vscode.commands.registerCommand("plow.restart", async () => {
       outputChannel.appendLine("Restarting language server...");
       await restartClient(context, outputChannel, diagnosticFilter, onAnalysisComplete);
     }),
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("fallow.resetDiagnosticFilters", async () => {
+    vscode.commands.registerCommand("plow.resetDiagnosticFilters", async () => {
       // Escape hatch for a stuck-hidden workspace. Mute state lives in
       // workspaceState, so it survives uninstall/reinstall and deleting the
-      // `.fallow` folder; the only in-editor way out is to clear it here. The
+      // `.plow` folder; the only in-editor way out is to clear it here. The
       // restart then re-opens every document, reproducing the close-and-reopen
       // workaround for all open files at once, which is the path proven to
       // re-render hidden findings (discussion #287).
       diagnosticFilter.clearAllMutes();
       diagnosticFilter.setMutedAll(false);
       outputChannel.appendLine(
-        "Cleared Fallow diagnostic filters; restarting language server to re-render findings...",
+        "Cleared Plow diagnostic filters; restarting language server to re-render findings...",
       );
       await restartClient(context, outputChannel, diagnosticFilter, onAnalysisComplete);
-      void vscode.window.setStatusBarMessage("Fallow: showing all findings", 4000);
+      void vscode.window.setStatusBarMessage("Plow: showing all findings", 4000);
     }),
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("fallow.showOutput", () => {
+    vscode.commands.registerCommand("plow.showOutput", () => {
       outputChannel.show();
     }),
   );
 
-  // Open the Fallow sidebar (used by walkthrough completion event)
+  // Open the Plow sidebar (used by walkthrough completion event)
   context.subscriptions.push(
-    vscode.commands.registerCommand("fallow.openSidebar", () => {
-      void vscode.commands.executeCommand("fallow.deadCode.focus");
+    vscode.commands.registerCommand("plow.openSidebar", () => {
+      void vscode.commands.executeCommand("plow.deadCode.focus");
     }),
   );
 
-  // Open Fallow settings (used by walkthrough completion event)
+  // Open Plow settings (used by walkthrough completion event)
   context.subscriptions.push(
-    vscode.commands.registerCommand("fallow.openSettings", () => {
-      void vscode.commands.executeCommand("workbench.action.openSettings", "fallow");
+    vscode.commands.registerCommand("plow.openSettings", () => {
+      void vscode.commands.executeCommand("workbench.action.openSettings", "plow");
     }),
   );
 
   // License management commands (activate / status / refresh / deactivate).
   // All are one-shot CLI invocations; none touch the analysis path.
   context.subscriptions.push(
-    vscode.commands.registerCommand("fallow.license.activate", () =>
+    vscode.commands.registerCommand("plow.license.activate", () =>
       activateLicenseCommand(context, outputChannel),
     ),
   );
   context.subscriptions.push(
-    vscode.commands.registerCommand("fallow.license.status", () =>
+    vscode.commands.registerCommand("plow.license.status", () =>
       licenseStatusCommand(context, outputChannel),
     ),
   );
   context.subscriptions.push(
-    vscode.commands.registerCommand("fallow.license.refresh", () =>
+    vscode.commands.registerCommand("plow.license.refresh", () =>
       refreshLicenseCommand(context, outputChannel),
     ),
   );
   context.subscriptions.push(
-    vscode.commands.registerCommand("fallow.license.deactivate", () =>
+    vscode.commands.registerCommand("plow.license.deactivate", () =>
       deactivateLicenseCommand(context, outputChannel),
     ),
   );
 
   // Fallback command for Code Lens items with 0 references (display-only)
-  context.subscriptions.push(vscode.commands.registerCommand("fallow.noop", () => {}));
+  context.subscriptions.push(vscode.commands.registerCommand("plow.noop", () => {}));
 
   context.subscriptions.push(
     vscode.commands.registerCommand(OPEN_FILE_COMMAND, openFileCommandHandler),
@@ -1005,7 +1005,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   // types, then delegate to the built-in.
   context.subscriptions.push(
     vscode.commands.registerCommand(
-      "fallow.showReferences",
+      "plow.showReferences",
       (
         uri: string,
         position: { line: number; character: number },
@@ -1045,16 +1045,16 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
       const needsDiagnosticRefresh = affectsAnyConfiguration(e, DIAGNOSTIC_RENDER_CONFIG_KEYS);
       const affectsSecurity = affectsAnyConfiguration(e, SECURITY_CONFIG_KEYS);
 
-      if (e.affectsConfiguration("fallow.workspace")) {
+      if (e.affectsConfiguration("plow.workspace")) {
         // Keep the picker label in sync with a pinned-default setting change.
         // The workspaceState override (if any) still wins inside the picker. The
         // dead-code/dupes sidebar + status bar re-run is handled by the
-        // REANALYSIS_CONFIG_KEYS path below (`fallow.workspace` is a member), so
+        // REANALYSIS_CONFIG_KEYS path below (`plow.workspace` is a member), so
         // a workspace change both refreshes the label and re-analyzes.
         refreshWorkspacePicker(context);
       }
 
-      if (e.affectsConfiguration("fallow.audit.statusBar.enabled")) {
+      if (e.affectsConfiguration("plow.audit.statusBar.enabled")) {
         // Create/dispose the audit status-bar item live (mirrors the health
         // status-bar handling) so toggling the setting never needs a window
         // reload. The runOnSave path and reportAuditVerdict both read the item's
@@ -1062,13 +1062,13 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
         syncAuditStatusBar();
       }
 
-      if (e.affectsConfiguration("fallow.diagnostics.statusBar")) {
+      if (e.affectsConfiguration("plow.diagnostics.statusBar")) {
         // Create/dispose the diagnostics toggle item live, same as the audit
         // item, so flipping the setting never needs a window reload.
         syncDiagnosticStatusBar();
       }
 
-      if (e.affectsConfiguration("fallow.diagnostics.mutedCategories")) {
+      if (e.affectsConfiguration("plow.diagnostics.mutedCategories")) {
         diagnosticFilter.updateBaselineMutedCategories(getMutedDiagnosticCategories());
       }
 
@@ -1096,10 +1096,10 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
         // trigger when they have not).
         syncHealthEnabledContext();
         const onlyStatusBarChanged =
-          e.affectsConfiguration("fallow.health.statusBar") &&
-          !e.affectsConfiguration("fallow.health.enabled") &&
-          !e.affectsConfiguration("fallow.health.hotspots") &&
-          !e.affectsConfiguration("fallow.health.topFindings");
+          e.affectsConfiguration("plow.health.statusBar") &&
+          !e.affectsConfiguration("plow.health.enabled") &&
+          !e.affectsConfiguration("plow.health.hotspots") &&
+          !e.affectsConfiguration("plow.health.topFindings");
         if (onlyStatusBarChanged) {
           updateStatusBarHealth(lastHealthResult);
         } else if (healthAnalysisRan) {
@@ -1114,20 +1114,20 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
 
       // `complexity.afterText` is render-only (the inline tier on/off): re-render
       // from the cached findings without respawning health.
-      if (e.affectsConfiguration("fallow.complexity.afterText")) {
+      if (e.affectsConfiguration("plow.complexity.afterText")) {
         complexityDecorations.renderVisibleEditors();
       }
 
       // `health.inlineComplexity` toggles the extension's complexity lens (no
       // longer an LSP option), so refresh decorations + lenses live, no respawn.
-      if (e.affectsConfiguration("fallow.health.inlineComplexity")) {
+      if (e.affectsConfiguration("plow.health.inlineComplexity")) {
         complexityDecorations.refresh();
       }
 
       if (affectsSecurity) {
         // Keep the enabled-context (welcome split + scan-button gate) in sync
         // when the opt-in toggles.
-        if (e.affectsConfiguration("fallow.security.enabled")) {
+        if (e.affectsConfiguration("plow.security.enabled")) {
           syncSecurityEnabledContext();
         }
         // Security keys are disjoint from REANALYSIS_CONFIG_KEYS, so this never
@@ -1141,7 +1141,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
         } else {
           securityAnalysisRan = false;
           securityProvider.update(null);
-          void vscode.commands.executeCommand("setContext", "fallow.hasAnalyzedSecurity", false);
+          void vscode.commands.executeCommand("setContext", "plow.hasAnalyzedSecurity", false);
         }
       }
 
@@ -1149,7 +1149,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
       // REANALYSIS_CONFIG_KEYS (#902): re-run coverage when the capture path
       // changes, but only if a capture was already loaded, so changing the
       // setting never kicks off work for a user who has not opted in.
-      if (e.affectsConfiguration("fallow.coverage.capturePath") && lastCoverageReport) {
+      if (e.affectsConfiguration("plow.coverage.capturePath") && lastCoverageReport) {
         void loadCoverage();
       }
     }),
@@ -1164,7 +1164,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     context.subscriptions.push({ dispose: () => void stopClient(outputChannel) });
   }
 
-  // Opt-in license probe on startup (`fallow.license.refreshOnStartup`,
+  // Opt-in license probe on startup (`plow.license.refreshOnStartup`,
   // default false). Fire-and-forget so it never blocks activation or sidebar
   // reveal (#902); the indicator updates asynchronously when it resolves.
   if (licenseStatusBar && getLicenseRefreshOnStartup()) {
@@ -1172,12 +1172,12 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   }
 
   // Show walkthrough on first install
-  const walkthroughShown = context.globalState.get<boolean>("fallow.walkthroughShown");
+  const walkthroughShown = context.globalState.get<boolean>("plow.walkthroughShown");
   if (!walkthroughShown) {
-    void context.globalState.update("fallow.walkthroughShown", true);
+    void context.globalState.update("plow.walkthroughShown", true);
     void vscode.commands.executeCommand(
       "workbench.action.openWalkthrough",
-      "fallow-rs.fallow-vscode#fallow.gettingStarted",
+      "plow-rs.plow-vscode#plow.gettingStarted",
       false,
     );
   }

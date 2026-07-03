@@ -1,6 +1,6 @@
 use std::process::ExitCode;
 
-use fallow_engine::clear_ambient_git_env;
+use plow_engine::clear_ambient_git_env;
 
 use crate::error::emit_error;
 
@@ -77,11 +77,11 @@ fn detect_remote_default_ref(root: &std::path::Path) -> Option<String> {
     None
 }
 
-/// Auto-detect the base ref for `fallow audit` when no `--base` / env override
+/// Auto-detect the base ref for `plow audit` when no `--base` / env override
 /// is set.
 ///
 /// The base is the `git merge-base` (fork point) against the branch's upstream
-/// or the remote default, mirroring the `fallow hooks install --target git`
+/// or the remote default, mirroring the `plow hooks install --target git`
 /// pre-commit hook (issue #242). Resolving to the merge-base SHA, rather than a
 /// bare branch name, fixes the long-standing bug where the default branch was
 /// discovered via `origin/HEAD` but returned as the bare name `main` (issue
@@ -154,7 +154,7 @@ pub fn get_head_sha(root: &std::path::Path) -> Option<String> {
     }
 }
 
-/// Parse a raw `FALLOW_AUDIT_BASE` value: trim, treat empty / whitespace-only as
+/// Parse a raw `PLOW_AUDIT_BASE` value: trim, treat empty / whitespace-only as
 /// unset. Pure helper so the trimming logic is testable without mutating env.
 pub fn parse_audit_base_override(raw: Option<String>) -> Option<String> {
     let trimmed = raw?.trim().to_string();
@@ -165,16 +165,16 @@ pub fn parse_audit_base_override(raw: Option<String>) -> Option<String> {
     }
 }
 
-/// The `FALLOW_AUDIT_BASE` override (trimmed), or `None` when unset / empty.
+/// The `PLOW_AUDIT_BASE` override (trimmed), or `None` when unset / empty.
 /// Lets a downstream consumer pin the base without editing the generated agent
-/// gate script (issue #1168), e.g. `FALLOW_AUDIT_BASE=upstream/main` on a fork.
+/// gate script (issue #1168), e.g. `PLOW_AUDIT_BASE=upstream/main` on a fork.
 fn audit_base_env_override() -> Option<String> {
-    parse_audit_base_override(std::env::var("FALLOW_AUDIT_BASE").ok())
+    parse_audit_base_override(std::env::var("PLOW_AUDIT_BASE").ok())
 }
 
 /// Resolve the base ref and an optional human-readable provenance for the scope
 /// line. Precedence: explicit `--changed-since` / `--base` flag, then the
-/// `FALLOW_AUDIT_BASE` env override, then auto-detection.
+/// `PLOW_AUDIT_BASE` env override, then auto-detection.
 pub fn resolve_base_ref(opts: &AuditOptions<'_>) -> Result<(String, Option<String>), ExitCode> {
     if let Some(ref_str) = opts.changed_since {
         return Ok((ref_str.to_string(), None));
@@ -182,12 +182,12 @@ pub fn resolve_base_ref(opts: &AuditOptions<'_>) -> Result<(String, Option<Strin
     if let Some(env_ref) = audit_base_env_override() {
         if let Err(e) = crate::validate::validate_git_ref(&env_ref) {
             return Err(emit_error(
-                &format!("FALLOW_AUDIT_BASE='{env_ref}' is not a valid git ref: {e}"),
+                &format!("PLOW_AUDIT_BASE='{env_ref}' is not a valid git ref: {e}"),
                 2,
                 opts.output,
             ));
         }
-        let description = format!("FALLOW_AUDIT_BASE={env_ref}");
+        let description = format!("PLOW_AUDIT_BASE={env_ref}");
         return Ok((env_ref, Some(description)));
     }
     let Some(detected) = auto_detect_base_ref(opts.root) else {

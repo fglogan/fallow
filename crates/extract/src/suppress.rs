@@ -1,17 +1,17 @@
 //! Inline suppression comment parsing.
 //!
-//! Parses `fallow-ignore-file` and `fallow-ignore-next-line` comments from
+//! Parses `plow-ignore-file` and `plow-ignore-next-line` comments from
 //! source files, supporting `//`, `/* */`, and `<!-- -->` styles.
 
 use oxc_ast::ast::Comment;
 
-pub use fallow_types::suppress::{
+pub use plow_types::suppress::{
     IssueKind, Suppression, SuppressionTarget, UnknownSuppressionKind, parse_suppression_target,
 };
 
 /// Parsed suppressions plus any tokens that did not resolve to a known kind.
 ///
-/// `unknown_kinds` are tokens from a `// fallow-ignore-*` marker that did
+/// `unknown_kinds` are tokens from a `// plow-ignore-*` marker that did
 /// not parse to any `IssueKind`. Known tokens on the same marker are still
 /// recorded as normal `Suppression` entries.
 #[derive(Debug, Default, Clone)]
@@ -125,7 +125,7 @@ fn push_suppressions(parsed: &mut ParsedSuppressions, line: u32, comment_line: u
         }));
 }
 
-/// Parse all fallow suppression comments from a file's comment list.
+/// Parse all plow suppression comments from a file's comment list.
 ///
 /// Unknown tokens are collected into `unknown_kinds` rather than discarding
 /// the whole marker.
@@ -143,11 +143,11 @@ pub fn parse_suppressions(comments: &[Comment], source: &str) -> ParsedSuppressi
             [content_span.start as usize..content_span.end.min(source.len() as u32) as usize];
         let trimmed = text.trim();
 
-        if let Some(rest) = trimmed.strip_prefix("fallow-ignore-file") {
+        if let Some(rest) = trimmed.strip_prefix("plow-ignore-file") {
             let rest = rest.trim();
             let src_comment_line = byte_offset_to_line(source, comment.span.start);
             push_suppressions(&mut parsed, 0, src_comment_line, rest);
-        } else if let Some(rest) = trimmed.strip_prefix("fallow-ignore-next-line") {
+        } else if let Some(rest) = trimmed.strip_prefix("plow-ignore-next-line") {
             let rest = rest.trim();
             let src_comment_line = byte_offset_to_line(source, comment.span.start);
             let suppressed_line = src_comment_line + 1;
@@ -184,11 +184,11 @@ pub fn parse_suppressions_from_source(source: &str) -> ParsedSuppressions {
             continue;
         };
 
-        if let Some(rest) = text.strip_prefix("fallow-ignore-file") {
+        if let Some(rest) = text.strip_prefix("plow-ignore-file") {
             let rest = rest.trim();
             let src_comment_line = (line_idx as u32) + 1;
             push_suppressions(&mut parsed, 0, src_comment_line, rest);
-        } else if let Some(rest) = text.strip_prefix("fallow-ignore-next-line") {
+        } else if let Some(rest) = text.strip_prefix("plow-ignore-next-line") {
             let rest = rest.trim();
             let src_comment_line = (line_idx as u32) + 1;
             let suppressed_line = src_comment_line + 1;
@@ -206,7 +206,7 @@ mod tests {
 
     #[test]
     fn parse_file_wide_suppression() {
-        let source = "// fallow-ignore-file\nexport const foo = 1;\n";
+        let source = "// plow-ignore-file\nexport const foo = 1;\n";
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 0);
@@ -215,7 +215,7 @@ mod tests {
 
     #[test]
     fn parse_file_wide_suppression_with_kind() {
-        let source = "// fallow-ignore-file unused-export\nexport const foo = 1;\n";
+        let source = "// plow-ignore-file unused-export\nexport const foo = 1;\n";
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 0);
@@ -227,8 +227,7 @@ mod tests {
 
     #[test]
     fn parse_next_line_suppression() {
-        let source =
-            "import { x } from './x';\n// fallow-ignore-next-line\nexport const foo = 1;\n";
+        let source = "import { x } from './x';\n// plow-ignore-next-line\nexport const foo = 1;\n";
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 3); // suppresses line 3 (the export)
@@ -237,7 +236,7 @@ mod tests {
 
     #[test]
     fn parse_next_line_suppression_with_kind() {
-        let source = "// fallow-ignore-next-line unused-export\nexport const foo = 1;\n";
+        let source = "// plow-ignore-next-line unused-export\nexport const foo = 1;\n";
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 2);
@@ -249,7 +248,8 @@ mod tests {
 
     #[test]
     fn parse_next_line_suppression_with_reason() {
-        let source = "// fallow-ignore-next-line unused-export -- legacy public API\nexport const foo = 1;\n";
+        let source =
+            "// plow-ignore-next-line unused-export -- legacy public API\nexport const foo = 1;\n";
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].reason.as_deref(), Some("legacy public API"));
@@ -261,7 +261,7 @@ mod tests {
 
     #[test]
     fn parse_blanket_file_suppression_with_reason() {
-        let source = "// fallow-ignore-file -- generated route map\nexport const foo = 1;\n";
+        let source = "// plow-ignore-file -- generated route map\nexport const foo = 1;\n";
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 0);
@@ -274,8 +274,7 @@ mod tests {
 
     #[test]
     fn parse_next_line_suppression_with_comma_kind_list() {
-        let source =
-            "// fallow-ignore-next-line unused-export, complexity\nexport const foo = 1;\n";
+        let source = "// plow-ignore-next-line unused-export, complexity\nexport const foo = 1;\n";
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 2);
         assert_eq!(suppressions[0].line, 2);
@@ -292,7 +291,7 @@ mod tests {
 
     #[test]
     fn parse_next_line_suppression_with_space_kind_list() {
-        let source = "// fallow-ignore-next-line unused-export complexity\nexport const foo = 1;\n";
+        let source = "// plow-ignore-next-line unused-export complexity\nexport const foo = 1;\n";
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 2);
         assert_eq!(suppressions[0].line, 2);
@@ -310,7 +309,7 @@ mod tests {
     #[test]
     fn parse_scoped_policy_suppression() {
         let source =
-            "// fallow-ignore-next-line policy-violation:team-policy/no-child-process\nexec();\n";
+            "// plow-ignore-next-line policy-violation:team-policy/no-child-process\nexec();\n";
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 2);
@@ -323,7 +322,7 @@ mod tests {
 
     #[test]
     fn parse_scoped_policy_suppression_mixed_with_regular_kind() {
-        let source = "// fallow-ignore-next-line policy-violation:team-policy/no-child-process, unused-export\nexec();\n";
+        let source = "// plow-ignore-next-line policy-violation:team-policy/no-child-process, unused-export\nexec();\n";
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 2);
         assert!(suppressions[0].policy_rule_target().is_some());
@@ -336,7 +335,7 @@ mod tests {
     #[test]
     fn parse_malformed_scoped_policy_suppression_as_unknown() {
         let source =
-            "// fallow-ignore-next-line policy-violation:team-policy/no:child-process\nexec();\n";
+            "// plow-ignore-next-line policy-violation:team-policy/no:child-process\nexec();\n";
         let parsed = parse_suppressions_from_source(source);
         assert!(parsed.suppressions.is_empty());
         assert_eq!(parsed.unknown_kinds.len(), 1);
@@ -348,7 +347,7 @@ mod tests {
 
     #[test]
     fn parse_unknown_kind_surfaces_as_unknown() {
-        let source = "// fallow-ignore-next-line typo-kind\nexport const foo = 1;\n";
+        let source = "// plow-ignore-next-line typo-kind\nexport const foo = 1;\n";
         let parsed = parse_suppressions_from_source(source);
         assert!(
             parsed.suppressions.is_empty(),
@@ -362,7 +361,7 @@ mod tests {
 
     #[test]
     fn parse_partial_accept_known_kinds_recorded() {
-        let source = "// fallow-ignore-next-line unused-export, complexity-typo -- tracked migration\nexport const foo = 1;\n";
+        let source = "// plow-ignore-next-line unused-export, complexity-typo -- tracked migration\nexport const foo = 1;\n";
         let parsed = parse_suppressions_from_source(source);
         assert_eq!(parsed.suppressions.len(), 1);
         assert_eq!(parsed.suppressions[0].line, 2);
@@ -386,7 +385,7 @@ mod tests {
 
     #[test]
     fn parse_multiple_unknown_kinds_each_recorded() {
-        let source = "// fallow-ignore-next-line typo-a, typo-b typo-c\nexport const foo = 1;\n";
+        let source = "// plow-ignore-next-line typo-a, typo-b typo-c\nexport const foo = 1;\n";
         let parsed = parse_suppressions_from_source(source);
         assert!(parsed.suppressions.is_empty());
         assert_eq!(parsed.unknown_kinds.len(), 3);
@@ -400,7 +399,7 @@ mod tests {
 
     #[test]
     fn parse_unknown_kind_file_level_carries_is_file_level() {
-        let source = "// fallow-ignore-file typo-kind\nexport const foo = 1;\n";
+        let source = "// plow-ignore-file typo-kind\nexport const foo = 1;\n";
         let parsed = parse_suppressions_from_source(source);
         assert!(parsed.suppressions.is_empty());
         assert_eq!(parsed.unknown_kinds.len(), 1);
@@ -410,7 +409,7 @@ mod tests {
 
     #[test]
     fn parse_unknown_kind_deduplicates_repeats() {
-        let source = "// fallow-ignore-next-line typo, typo\nexport const foo = 1;\n";
+        let source = "// plow-ignore-next-line typo, typo\nexport const foo = 1;\n";
         let parsed = parse_suppressions_from_source(source);
         assert_eq!(parsed.unknown_kinds.len(), 1);
     }
@@ -421,7 +420,7 @@ mod tests {
         use oxc_parser::Parser;
         use oxc_span::SourceType;
 
-        let source = "// fallow-ignore-file\n// fallow-ignore-next-line unused-export\nexport const foo = 1;\nexport const bar = 2;\n";
+        let source = "// plow-ignore-file\n// plow-ignore-next-line unused-export\nexport const foo = 1;\nexport const bar = 2;\n";
         let allocator = Allocator::default();
         let parser_return = Parser::new(&allocator, source, SourceType::mjs()).parse();
 
@@ -440,7 +439,7 @@ mod tests {
 
     #[test]
     fn parse_block_comment_suppression() {
-        let source = "/* fallow-ignore-file */\nexport const foo = 1;\n";
+        let source = "/* plow-ignore-file */\nexport const foo = 1;\n";
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 0);
@@ -449,7 +448,7 @@ mod tests {
 
     #[test]
     fn parse_html_comment_file_suppression() {
-        let source = "<!-- fallow-ignore-file complexity -->\n@if (enabled) { <p /> }\n";
+        let source = "<!-- plow-ignore-file complexity -->\n@if (enabled) { <p /> }\n";
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 0);
@@ -461,7 +460,7 @@ mod tests {
 
     #[test]
     fn parse_block_comment_next_line_suppression() {
-        let source = "/* fallow-ignore-next-line unused-export */\nexport const foo = 1;\n";
+        let source = "/* plow-ignore-next-line unused-export */\nexport const foo = 1;\n";
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 2);
@@ -473,7 +472,7 @@ mod tests {
 
     #[test]
     fn parse_html_comment_next_line_suppression() {
-        let source = "<!-- fallow-ignore-next-line complexity -->\n@if (enabled) { <p /> }\n";
+        let source = "<!-- plow-ignore-next-line complexity -->\n@if (enabled) { <p /> }\n";
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 2);
@@ -485,7 +484,7 @@ mod tests {
 
     #[test]
     fn parse_multiple_suppressions_on_adjacent_lines() {
-        let source = "// fallow-ignore-next-line unused-export\n// fallow-ignore-next-line unused-type\nexport const foo = 1;\nexport type Bar = string;\n";
+        let source = "// plow-ignore-next-line unused-export\n// plow-ignore-next-line unused-type\nexport const foo = 1;\nexport type Bar = string;\n";
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 2);
         assert_eq!(suppressions[0].line, 2);
@@ -502,7 +501,7 @@ mod tests {
 
     #[test]
     fn parse_file_wide_and_next_line_combined() {
-        let source = "// fallow-ignore-file unused-file\n// fallow-ignore-next-line unused-export\nexport const foo = 1;\n";
+        let source = "// plow-ignore-file unused-file\n// plow-ignore-next-line unused-export\nexport const foo = 1;\n";
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 2);
         assert_eq!(suppressions[0].line, 0);
@@ -535,7 +534,7 @@ mod tests {
             ("circular-dependencies", IssueKind::CircularDependency),
         ];
         for (token, expected_kind) in &kinds {
-            let source = format!("// fallow-ignore-file {token}\nexport const foo = 1;\n");
+            let source = format!("// plow-ignore-file {token}\nexport const foo = 1;\n");
             let suppressions = parse_suppressions_from_source(&source).suppressions;
             assert_eq!(suppressions.len(), 1, "Expected 1 suppression for {token}");
             assert_eq!(suppressions[0].issue_kind_target(), Some(*expected_kind));
@@ -544,7 +543,7 @@ mod tests {
 
     #[test]
     fn parse_block_comment_with_whitespace() {
-        let source = "/*  fallow-ignore-file  */\nexport const foo = 1;\n";
+        let source = "/*  plow-ignore-file  */\nexport const foo = 1;\n";
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 0);
@@ -566,7 +565,7 @@ mod tests {
 
     #[test]
     fn parse_suppression_not_at_line_start_ignored() {
-        let source = "export const foo = 1; // fallow-ignore-file\n";
+        let source = "export const foo = 1; // plow-ignore-file\n";
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert!(
             suppressions.is_empty(),
@@ -576,7 +575,7 @@ mod tests {
 
     #[test]
     fn parse_block_comment_without_closing_ignored() {
-        let source = "/* fallow-ignore-file\nexport const foo = 1;\n";
+        let source = "/* plow-ignore-file\nexport const foo = 1;\n";
         let suppressions = parse_suppressions_from_source(source).suppressions;
         assert!(suppressions.is_empty());
     }
@@ -602,7 +601,7 @@ mod tests {
         use oxc_parser::Parser;
         use oxc_span::SourceType;
 
-        let source = "/* fallow-ignore-file unused-file */\nexport const foo = 1;\n";
+        let source = "/* plow-ignore-file unused-file */\nexport const foo = 1;\n";
         let allocator = Allocator::default();
         let parser_return = Parser::new(&allocator, source, SourceType::mjs()).parse();
 
@@ -621,7 +620,7 @@ mod tests {
         use oxc_parser::Parser;
         use oxc_span::SourceType;
 
-        let source = "// fallow-ignore-next-line nonexistent-kind\nexport const foo = 1;\n";
+        let source = "// plow-ignore-next-line nonexistent-kind\nexport const foo = 1;\n";
         let allocator = Allocator::default();
         let parser_return = Parser::new(&allocator, source, SourceType::mjs()).parse();
 

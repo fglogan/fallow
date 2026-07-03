@@ -4,7 +4,7 @@ use super::common::{create_config, fixture_path};
 
 fn unused_file_paths(
     root: &std::path::Path,
-    results: &fallow_types::results::AnalysisResults,
+    results: &plow_types::results::AnalysisResults,
 ) -> Vec<String> {
     results
         .unused_files
@@ -25,7 +25,7 @@ fn unused_file_paths(
 fn vercel_ts_config_is_not_reported_as_unused() {
     let root = fixture_path("issue-820-vercel-ts-config");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_paths = unused_file_paths(&root, &results);
     assert!(

@@ -22,7 +22,7 @@ interface AuditArgsOptions {
 }
 
 /**
- * Build the argument vector for an on-demand `fallow audit` run. Kept pure (no
+ * Build the argument vector for an on-demand `plow audit` run. Kept pure (no
  * config / VS Code access) so the flag-forwarding rules can be unit-tested.
  *
  * `audit` is the first positional (the subcommand selector) and must precede
@@ -220,7 +220,7 @@ export const buildAuditTooltipMarkdown = (
 ): string => {
   const presentation = auditVerdictPresentation(audit.verdict);
   const count = gatingCount(audit);
-  const lines: string[] = [`**Fallow Audit** - ${AUDIT_CANDIDATE_HEADER}\n`];
+  const lines: string[] = [`**Plow Audit** - ${AUDIT_CANDIDATE_HEADER}\n`];
 
   const base = formatAuditBase(audit, escapeMarkdownText);
   const fileWord = audit.changed_files_count === 1 ? "file" : "files";
@@ -246,19 +246,19 @@ export const buildAuditTooltipMarkdown = (
 
   lines.push("\n---\n");
   lines.push(
-    "[$(sync) Re-run](command:fallow.audit) · [$(output) Details](command:fallow.showOutput)",
+    "[$(sync) Re-run](command:plow.audit) · [$(output) Details](command:plow.showOutput)",
   );
 
   return lines.join("\n\n");
 };
 
 /**
- * Parse `fallow audit --format json` stdout into a typed `AuditOutput`.
+ * Parse `plow audit --format json` stdout into a typed `AuditOutput`.
  *
  * Returns null on empty / whitespace stdout (no result to render) and on any
  * payload that is not a real audit envelope: a non-`"audit"` `command`, a
  * missing `verdict`, or a parse error. Audit exits 1 on a `fail` verdict, which
- * `execFallow` treats as success (it resolves stdout for exit codes 0 and 1),
+ * `execPlow` treats as success (it resolves stdout for exit codes 0 and 1),
  * so a `fail` verdict still yields parseable stdout and a non-null result here.
  */
 export const parseAuditOutput = (stdout: string): AuditOutput | null => {

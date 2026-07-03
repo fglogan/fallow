@@ -3,7 +3,7 @@
 use serde::Serialize;
 use serde_json::Value;
 
-/// Inputs for building `fallow fix --format json`.
+/// Inputs for building `plow fix --format json`.
 #[derive(Clone, Copy)]
 pub struct FixJsonOutputInput<'a> {
     pub dry_run: bool,
@@ -13,10 +13,10 @@ pub struct FixJsonOutputInput<'a> {
     pub skipped_low_confidence_exports: usize,
 }
 
-/// JSON root emitted by `fallow fix --format json`.
+/// JSON root emitted by `plow fix --format json`.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(feature = "schema", schemars(title = "fallow fix --format json"))]
+#[cfg_attr(feature = "schema", schemars(title = "plow fix --format json"))]
 pub struct FixJsonOutput<'a> {
     pub dry_run: bool,
     pub fixes: &'a [Value],

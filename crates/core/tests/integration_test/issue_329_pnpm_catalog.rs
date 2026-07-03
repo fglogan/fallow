@@ -8,7 +8,7 @@ use super::common::{create_config, fixture_path};
 fn detects_unused_default_and_named_catalog_entries() {
     let root = fixture_path("issue-329-pnpm-catalog");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let mut expected: FxHashSet<(&str, &str)> = FxHashSet::default();
     for entry in [
@@ -47,7 +47,7 @@ fn detects_unused_default_and_named_catalog_entries() {
 fn hardcoded_consumers_are_surfaced() {
     let root = fixture_path("issue-329-pnpm-catalog");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let hardcoded = results
         .unused_catalog_entries
@@ -68,7 +68,7 @@ fn hardcoded_consumers_are_surfaced() {
 fn catalog_entries_are_sorted_default_first() {
     let root = fixture_path("issue-329-pnpm-catalog");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let names: Vec<&str> = results
         .unused_catalog_entries
@@ -88,7 +88,7 @@ fn catalog_entries_are_sorted_default_first() {
 fn path_is_relative_pnpm_workspace_yaml() {
     let root = fixture_path("issue-329-pnpm-catalog");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     for entry in &results.unused_catalog_entries {
         let entry = &entry.entry;

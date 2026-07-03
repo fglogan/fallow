@@ -11,7 +11,7 @@ use super::common::{create_config, fixture_path};
 fn credits_components_rendered_through_namespace_reexport() {
     let root = fixture_path("unrendered-component-namespace");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let flagged: Vec<&str> = results
         .unrendered_components
         .iter()
@@ -57,7 +57,7 @@ fn credits_components_rendered_through_namespace_import() {
     // per-edge name walk on the namespace-import arm dropped.
     let root = fixture_path("unrendered-component-namespace-import");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let flagged: Vec<&str> = results
         .unrendered_components
         .iter()

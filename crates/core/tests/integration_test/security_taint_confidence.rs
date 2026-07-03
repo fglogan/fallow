@@ -1,8 +1,8 @@
 //! Integration tests for taint confidence tiering + trace anchoring (#1093) and
 //! the ORM-source receiver gate (#1092).
 
-use fallow_config::Severity;
-use fallow_core::results::{
+use plow_config::Severity;
+use plow_core::results::{
     AnalysisResults, SecurityFinding, SecurityFindingKind, TaintConfidence, TraceHopRole,
 };
 
@@ -13,7 +13,7 @@ fn analyze_fixture(name: &str) -> AnalysisResults {
     let config = create_config_with_rules(root, |rules| {
         rules.security_sink = Severity::Warn;
     });
-    fallow_core::analyze(&config).expect("analysis should succeed")
+    plow_core::analyze(&config).expect("analysis should succeed")
 }
 
 fn tainted_sinks(results: &AnalysisResults) -> Vec<&SecurityFinding> {

@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use fallow_config::OutputFormat;
+use plow_config::OutputFormat;
 use serde_json::Value;
 
 use crate::api::{ResponseBodyReader, sanitize_network_error, try_api_agent};
@@ -138,11 +138,11 @@ fn emit_reconcile_result(
     plan: &ReconcilePlan,
     applied: &ApplyResult,
 ) -> ExitCode {
-    let envelope_struct = fallow_output::ReviewReconcileOutput {
-        schema: fallow_output::ReviewReconcileSchema::V1,
+    let envelope_struct = plow_output::ReviewReconcileOutput {
+        schema: plow_output::ReviewReconcileSchema::V1,
         provider: match provider {
-            CiProvider::Github => fallow_output::ReviewProvider::Github,
-            CiProvider::Gitlab => fallow_output::ReviewProvider::Gitlab,
+            CiProvider::Github => plow_output::ReviewProvider::Github,
+            CiProvider::Gitlab => plow_output::ReviewProvider::Gitlab,
         },
         target: target.map(str::to_owned),
         dry_run: opts.dry_run,
@@ -161,7 +161,7 @@ fn emit_reconcile_result(
         failed_fingerprints: applied.failed_fingerprints.iter().cloned().collect(),
         unapplied_fingerprints: applied.unapplied_fingerprints.iter().cloned().collect(),
     };
-    match fallow_output::serialize_review_reconcile_json_output(
+    match plow_output::serialize_review_reconcile_json_output(
         envelope_struct,
         crate::output_runtime::current_root_envelope_mode(),
         crate::output_runtime::telemetry_analysis_run_id().as_deref(),
@@ -170,7 +170,7 @@ fn emit_reconcile_result(
         Err(e) => emit_error(
             &format!("JSON serialization error: {e}"),
             2,
-            fallow_config::OutputFormat::Json,
+            plow_config::OutputFormat::Json,
         ),
     }
 }
@@ -330,7 +330,7 @@ fn load_github_state(
         }
         for comment in comments {
             let body = comment.get("body").and_then(Value::as_str).unwrap_or("");
-            if let Some(fingerprint) = extract_fallow_fingerprint(body) {
+            if let Some(fingerprint) = extract_plow_fingerprint(body) {
                 state.fingerprints.insert(fingerprint.clone());
                 if let Some(id) = comment.get("id").and_then(Value::as_u64) {
                     state
@@ -341,7 +341,7 @@ fn load_github_state(
                 }
             }
             if is_github_bot_comment(comment)
-                && let Some(fingerprint) = extract_marker(body, "fallow-resolved-fingerprint:")
+                && let Some(fingerprint) = extract_marker(body, "plow-resolved-fingerprint:")
             {
                 state.github_resolved_markers.insert(fingerprint);
             }
@@ -429,7 +429,7 @@ fn load_github_review_threads(
     Ok(())
 }
 
-/// Record fallow fingerprints found in an unresolved GitHub review thread's
+/// Record plow fingerprints found in an unresolved GitHub review thread's
 /// comment bodies, mapping each to the thread id for later resolution.
 fn collect_github_thread_fingerprints(state: &mut ProviderState, thread: &Value) {
     if thread
@@ -449,7 +449,7 @@ fn collect_github_thread_fingerprints(state: &mut ProviderState, thread: &Value)
         .flatten();
     for comment in comments {
         let body = comment.get("body").and_then(Value::as_str).unwrap_or("");
-        if let Some(fingerprint) = extract_fallow_fingerprint(body) {
+        if let Some(fingerprint) = extract_plow_fingerprint(body) {
             state.fingerprints.insert(fingerprint.clone());
             state
                 .github_threads_by_fingerprint
@@ -804,7 +804,7 @@ fn load_gitlab_state(
     Ok(state)
 }
 
-/// Record fallow fingerprints and resolved markers found in a GitLab
+/// Record plow fingerprints and resolved markers found in a GitLab
 /// discussion's note bodies, mapping each fingerprint to the discussion id.
 fn collect_gitlab_discussion_fingerprints(state: &mut ProviderState, discussion: &Value) {
     let Some(discussion_id) = discussion.get("id").and_then(Value::as_str) else {
@@ -817,7 +817,7 @@ fn collect_gitlab_discussion_fingerprints(state: &mut ProviderState, discussion:
         .flatten();
     for note in notes {
         let body = note.get("body").and_then(Value::as_str).unwrap_or("");
-        if let Some(fingerprint) = extract_fallow_fingerprint(body) {
+        if let Some(fingerprint) = extract_plow_fingerprint(body) {
             state.fingerprints.insert(fingerprint.clone());
             state
                 .gitlab_discussions_by_fingerprint
@@ -826,7 +826,7 @@ fn collect_gitlab_discussion_fingerprints(state: &mut ProviderState, discussion:
                 .push(discussion_id.to_owned());
         }
         if is_gitlab_bot_note(note)
-            && let Some(fingerprint) = extract_marker(body, "fallow-resolved-fingerprint:")
+            && let Some(fingerprint) = extract_marker(body, "plow-resolved-fingerprint:")
         {
             state.gitlab_resolved_markers.insert(fingerprint);
         }
@@ -1111,7 +1111,7 @@ fn github_get_json(agent: &ureq::Agent, url: &str, token: &str) -> Result<Value,
             .header("Authorization", &format!("Bearer {token}"))
             .header("Accept", "application/vnd.github+json")
             .header("X-GitHub-Api-Version", "2022-11-28")
-            .header("User-Agent", "fallow-cli")
+            .header("User-Agent", "plow-cli")
             .call()
     })
 }
@@ -1128,7 +1128,7 @@ fn github_post_json(
             .header("Authorization", &format!("Bearer {token}"))
             .header("Accept", "application/vnd.github+json")
             .header("X-GitHub-Api-Version", "2022-11-28")
-            .header("User-Agent", "fallow-cli")
+            .header("User-Agent", "plow-cli")
             .send_json(payload)
     })
 }
@@ -1138,7 +1138,7 @@ fn gitlab_get_json(agent: &ureq::Agent, url: &str, token: &str) -> Result<Value,
         agent
             .get(url)
             .header("PRIVATE-TOKEN", token)
-            .header("User-Agent", "fallow-cli")
+            .header("User-Agent", "plow-cli")
             .call()
     })
 }
@@ -1154,7 +1154,7 @@ fn gitlab_post_json(
             .post(url)
             .header("PRIVATE-TOKEN", token)
             .header("Content-Type", "application/json")
-            .header("User-Agent", "fallow-cli")
+            .header("User-Agent", "plow-cli")
             .send_json(payload)
     })
 }
@@ -1170,7 +1170,7 @@ fn gitlab_put_json(
             .put(url)
             .header("PRIVATE-TOKEN", token)
             .header("Content-Type", "application/json")
-            .header("User-Agent", "fallow-cli")
+            .header("User-Agent", "plow-cli")
             .send_json(payload)
     })
 }
@@ -1181,7 +1181,7 @@ fn gitlab_put_json(
 /// `Retry-After: 86400` would otherwise stall the runner for a whole day.
 /// 60s is enough headroom for genuine GitHub / GitLab rate-limit recovery
 /// while bounding worst-case workflow latency at `RETRY_MAX_WAIT_SECONDS *
-/// FALLOW_API_RETRIES = 180s` for the default retry count.
+/// PLOW_API_RETRIES = 180s` for the default retry count.
 const RETRY_MAX_WAIT_SECONDS: u64 = 60;
 
 /// Return `true` for HTTP statuses worth retrying (rate-limit + transient
@@ -1201,7 +1201,7 @@ const fn should_retry_status(status: u16) -> bool {
 /// 5xx codes (`500`, `501`, ...) surface immediately so persistent server
 /// faults don't burn the full retry budget.
 ///
-/// `FALLOW_API_RETRIES` (default 3) caps the total attempts; `FALLOW_API_RETRY_DELAY`
+/// `PLOW_API_RETRIES` (default 3) caps the total attempts; `PLOW_API_RETRY_DELAY`
 /// (default 2s) is the floor between attempts. The actual sleep uses
 /// `Retry-After` from the server when present, falling back to the floor;
 /// either way it's clamped to `RETRY_MAX_WAIT_SECONDS` so a runaway server
@@ -1226,7 +1226,7 @@ where
                         "transient server error"
                     };
                     eprintln!(
-                        "fallow: {provider} {label} ({status}); retrying in {wait}s ({attempt}/{max_attempts})"
+                        "plow: {provider} {label} ({status}); retrying in {wait}s ({attempt}/{max_attempts})"
                     );
                     std::thread::sleep(std::time::Duration::from_secs(wait));
                     continue;
@@ -1249,7 +1249,7 @@ where
 /// 2. `Retry-After` HTTP-date: not parsed; emit a one-time warning and fall
 ///    back to the floor delay so the user knows their server's Retry-After
 ///    contract was ignored.
-/// 3. `floor_delay` from `FALLOW_API_RETRY_DELAY`, clamped to the ceiling.
+/// 3. `floor_delay` from `PLOW_API_RETRY_DELAY`, clamped to the ceiling.
 fn compute_retry_wait(headers: &http::HeaderMap, floor_delay: u64, provider: &str) -> u64 {
     if let Some(seconds) = parse_retry_after(headers) {
         return seconds.clamp(1, RETRY_MAX_WAIT_SECONDS);
@@ -1259,7 +1259,7 @@ fn compute_retry_wait(headers: &http::HeaderMap, floor_delay: u64, provider: &st
         .and_then(|value| value.to_str().ok())
     {
         eprintln!(
-            "fallow: {provider} returned non-numeric Retry-After {raw:?}; \
+            "plow: {provider} returned non-numeric Retry-After {raw:?}; \
              falling back to {floor_delay}s floor"
         );
     }
@@ -1267,7 +1267,7 @@ fn compute_retry_wait(headers: &http::HeaderMap, floor_delay: u64, provider: &st
 }
 
 fn retries_from_env() -> u32 {
-    std::env::var("FALLOW_API_RETRIES")
+    std::env::var("PLOW_API_RETRIES")
         .ok()
         .and_then(|value| value.parse::<u32>().ok())
         .filter(|value| *value > 0)
@@ -1275,7 +1275,7 @@ fn retries_from_env() -> u32 {
 }
 
 fn retry_delay_from_env() -> u64 {
-    std::env::var("FALLOW_API_RETRY_DELAY")
+    std::env::var("PLOW_API_RETRY_DELAY")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
         .unwrap_or(2)
@@ -1307,14 +1307,14 @@ fn read_json_response(
 /// Determine whether a GitHub PR review comment was authored by a bot account.
 ///
 /// We trust resolved-fingerprint markers only from bot identities so a human
-/// commenter can't paste `<!-- fallow-resolved-fingerprint: <fp> -->` into
+/// commenter can't paste `<!-- plow-resolved-fingerprint: <fp> -->` into
 /// their own comment and trick the apply step into skipping a legitimate
 /// "Resolved in `<sha>`" reply on a stale finding.
 ///
 /// GitHub identifies bot identities through `user.type == "Bot"` (e.g.
 /// `github-actions[bot]`, `dependabot[bot]`, custom GitHub Apps). The
-/// fallback `FALLOW_BOT_LOGIN` env var lets self-hosted runners pin a
-/// specific human-account login that posts on behalf of fallow when no Bot
+/// fallback `PLOW_BOT_LOGIN` env var lets self-hosted runners pin a
+/// specific human-account login that posts on behalf of plow when no Bot
 /// type is available (uncommon but supported for legacy setups).
 fn is_github_bot_comment(comment: &Value) -> bool {
     let user = comment.get("user");
@@ -1324,7 +1324,7 @@ fn is_github_bot_comment(comment: &Value) -> bool {
     }
     let login = user.and_then(|u| u.get("login")).and_then(Value::as_str);
     if let Some(login) = login
-        && let Ok(allow) = std::env::var("FALLOW_BOT_LOGIN")
+        && let Ok(allow) = std::env::var("PLOW_BOT_LOGIN")
         && !allow.trim().is_empty()
         && login == allow.trim()
     {
@@ -1338,7 +1338,7 @@ fn is_github_bot_comment(comment: &Value) -> bool {
 /// GitLab marks bot-authored notes with `system: true` (system-generated)
 /// or, for project access tokens, the author's `bot: true` flag. Personal
 /// access tokens posting on behalf of a human carry the human's identity;
-/// callers that use a PAT must set `FALLOW_BOT_LOGIN` to the human's
+/// callers that use a PAT must set `PLOW_BOT_LOGIN` to the human's
 /// username (or the project access token's bot username) to opt in.
 fn is_gitlab_bot_note(note: &Value) -> bool {
     if note.get("system").and_then(Value::as_bool).unwrap_or(false) {
@@ -1356,7 +1356,7 @@ fn is_gitlab_bot_note(note: &Value) -> bool {
         .and_then(|a| a.get("username"))
         .and_then(Value::as_str);
     if let Some(username) = username
-        && let Ok(allow) = std::env::var("FALLOW_BOT_LOGIN")
+        && let Ok(allow) = std::env::var("PLOW_BOT_LOGIN")
         && !allow.trim().is_empty()
         && username == allow.trim()
     {
@@ -1375,8 +1375,8 @@ fn extract_marker(body: &str, marker: &str) -> Option<String> {
     (!value.is_empty()).then(|| value.to_owned())
 }
 
-/// Extract a fallow fingerprint from any v1 or v2 marker shape in `body`.
-/// v2 (`<!-- fallow-fingerprint:v2: <fp> -->`) wins over v1 because the v2
+/// Extract a plow fingerprint from any v1 or v2 marker shape in `body`.
+/// v2 (`<!-- plow-fingerprint:v2: <fp> -->`) wins over v1 because the v2
 /// marker's text also matches the v1 substring search, so the v2-first
 /// check has to run first or the v1 fallback would skip past `v2:` and
 /// return the literal `"v2:"` as the extracted fingerprint.
@@ -1384,9 +1384,9 @@ fn extract_marker(body: &str, marker: &str) -> Option<String> {
 /// Returns the raw fingerprint string with any kind prefix preserved
 /// (`merged:<hex>` stays `merged:<hex>`). Consumers match the returned
 /// string against the comment's `fingerprint` field verbatim.
-fn extract_fallow_fingerprint(body: &str) -> Option<String> {
-    extract_marker(body, "fallow-fingerprint:v2:")
-        .or_else(|| extract_marker(body, "fallow-fingerprint:"))
+fn extract_plow_fingerprint(body: &str) -> Option<String> {
+    extract_marker(body, "plow-fingerprint:v2:")
+        .or_else(|| extract_marker(body, "plow-fingerprint:"))
 }
 
 /// Compute the idempotency marker for a (fingerprint, sha) pair. The marker
@@ -1404,9 +1404,9 @@ fn resolved_body(fingerprint: &str, sha: Option<&str>) -> String {
     let marker = resolved_marker_key(fingerprint, sha);
     match sha.and_then(|value| value.get(..7)) {
         Some(short) => {
-            format!("Resolved in `{short}`.\n\n<!-- fallow-resolved-fingerprint: {marker} -->")
+            format!("Resolved in `{short}`.\n\n<!-- plow-resolved-fingerprint: {marker} -->")
         }
-        None => format!("Resolved.\n\n<!-- fallow-resolved-fingerprint: {marker} -->"),
+        None => format!("Resolved.\n\n<!-- plow-resolved-fingerprint: {marker} -->"),
     }
 }
 
@@ -1438,8 +1438,8 @@ mod tests {
     fn extracts_fingerprint_marker() {
         assert_eq!(
             extract_marker(
-                "**error**\n\n<!-- fallow-fingerprint: abc123 -->",
-                "fallow-fingerprint:",
+                "**error**\n\n<!-- plow-fingerprint: abc123 -->",
+                "plow-fingerprint:",
             )
             .as_deref(),
             Some("abc123")
@@ -1449,15 +1449,13 @@ mod tests {
     #[test]
     fn extracts_fingerprint_from_v2_marker() {
         assert_eq!(
-            extract_fallow_fingerprint(
-                "**error**\n\n<!-- fallow-fingerprint:v2: abc1234567890def -->"
-            )
-            .as_deref(),
+            extract_plow_fingerprint("**error**\n\n<!-- plow-fingerprint:v2: abc1234567890def -->")
+                .as_deref(),
             Some("abc1234567890def")
         );
         assert_eq!(
-            extract_fallow_fingerprint(
-                "**error**\n\n<!-- fallow-fingerprint:v2: merged:0123456789abcdef -->"
+            extract_plow_fingerprint(
+                "**error**\n\n<!-- plow-fingerprint:v2: merged:0123456789abcdef -->"
             )
             .as_deref(),
             Some("merged:0123456789abcdef")
@@ -1465,19 +1463,18 @@ mod tests {
     }
 
     #[test]
-    fn extract_fallow_fingerprint_falls_back_to_v1_shape() {
+    fn extract_plow_fingerprint_falls_back_to_v1_shape() {
         assert_eq!(
-            extract_fallow_fingerprint("**error**\n\n<!-- fallow-fingerprint: abc123 -->")
-                .as_deref(),
+            extract_plow_fingerprint("**error**\n\n<!-- plow-fingerprint: abc123 -->").as_deref(),
             Some("abc123")
         );
     }
 
     #[test]
-    fn extract_fallow_fingerprint_does_not_match_unrelated_body() {
-        assert_eq!(extract_fallow_fingerprint("plain comment body"), None);
+    fn extract_plow_fingerprint_does_not_match_unrelated_body() {
+        assert_eq!(extract_plow_fingerprint("plain comment body"), None);
         assert_eq!(
-            extract_fallow_fingerprint("fallow-fingerprint:v2: deadbeef").as_deref(),
+            extract_plow_fingerprint("plow-fingerprint:v2: deadbeef").as_deref(),
             Some("deadbeef")
         );
     }
@@ -1584,7 +1581,7 @@ mod tests {
         };
         assert_eq!(fingerprint, "fp-a");
         assert_eq!(discussion_id, "discussion-a");
-        assert!(body.contains("fallow-resolved-fingerprint: fp-a@1234567"));
+        assert!(body.contains("plow-resolved-fingerprint: fp-a@1234567"));
         let GitlabApplyOperation::ResolveDiscussion {
             fingerprint,
             discussion_id,
@@ -1619,12 +1616,12 @@ mod tests {
     fn github_bot_check_rejects_human_user_type() {
         let comment = serde_json::json!({
             "user": { "type": "User", "login": "alice" },
-            "body": "<!-- fallow-resolved-fingerprint: abc123 -->",
+            "body": "<!-- plow-resolved-fingerprint: abc123 -->",
         });
         assert!(!is_github_bot_comment(&comment));
     }
 
-    // Serializes the FALLOW_BOT_LOGIN env-mutating tests so the GitHub and
+    // Serializes the PLOW_BOT_LOGIN env-mutating tests so the GitHub and
     // GitLab override cases cannot overwrite each other's value when run in
     // parallel (which raced and failed on Windows CI).
     static BOT_LOGIN_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -1639,16 +1636,16 @@ mod tests {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let comment = serde_json::json!({
-            "user": { "type": "User", "login": "fallow-bot-account" },
+            "user": { "type": "User", "login": "plow-bot-account" },
         });
         // SAFETY: serialized by BOT_LOGIN_ENV_LOCK; cleared before returning.
         unsafe {
-            std::env::set_var("FALLOW_BOT_LOGIN", "fallow-bot-account");
+            std::env::set_var("PLOW_BOT_LOGIN", "plow-bot-account");
         }
         assert!(is_github_bot_comment(&comment));
         // SAFETY: Restore the process environment after the scoped override.
         unsafe {
-            std::env::remove_var("FALLOW_BOT_LOGIN");
+            std::env::remove_var("PLOW_BOT_LOGIN");
         }
     }
 
@@ -1749,7 +1746,7 @@ mod tests {
     fn resolved_body_includes_short_sha_and_per_sha_marker() {
         let body = resolved_body("abc", Some("1234567890"));
         assert!(body.contains("`1234567`"));
-        assert!(body.contains("fallow-resolved-fingerprint: abc@1234567"));
+        assert!(body.contains("plow-resolved-fingerprint: abc@1234567"));
     }
 
     // --- envelope_fingerprints / envelope_comments_len (lines 183-200) ---
@@ -1815,39 +1812,36 @@ mod tests {
         assert_eq!(envelope_comments_len(&value), 0);
     }
 
-    // --- extract_fallow_fingerprint: v2-first ordering (lines 1376-1388) ---
+    // --- extract_plow_fingerprint: v2-first ordering (lines 1376-1388) ---
 
     #[test]
-    fn extract_fallow_fingerprint_v2_wins_over_v1_substring_prefix() {
+    fn extract_plow_fingerprint_v2_wins_over_v1_substring_prefix() {
         // v1 extraction would grab "v2:" as the fingerprint if it ran first
-        // because "fallow-fingerprint:" is a prefix of "fallow-fingerprint:v2:".
+        // because "plow-fingerprint:" is a prefix of "plow-fingerprint:v2:".
         // Verify the v2-first order returns the real fingerprint.
-        let body = "<!-- fallow-fingerprint:v2: realfp123 -->";
-        assert_eq!(
-            extract_fallow_fingerprint(body).as_deref(),
-            Some("realfp123")
-        );
+        let body = "<!-- plow-fingerprint:v2: realfp123 -->";
+        assert_eq!(extract_plow_fingerprint(body).as_deref(), Some("realfp123"));
     }
 
     #[test]
-    fn extract_fallow_fingerprint_v2_preserves_merged_prefix() {
-        let body = "<!-- fallow-fingerprint:v2: merged:deadbeefcafe0123 -->";
+    fn extract_plow_fingerprint_v2_preserves_merged_prefix() {
+        let body = "<!-- plow-fingerprint:v2: merged:deadbeefcafe0123 -->";
         assert_eq!(
-            extract_fallow_fingerprint(body).as_deref(),
+            extract_plow_fingerprint(body).as_deref(),
             Some("merged:deadbeefcafe0123")
         );
     }
 
     #[test]
-    fn extract_fallow_fingerprint_returns_none_for_empty_body() {
-        assert_eq!(extract_fallow_fingerprint(""), None);
+    fn extract_plow_fingerprint_returns_none_for_empty_body() {
+        assert_eq!(extract_plow_fingerprint(""), None);
     }
 
     #[test]
-    fn extract_fallow_fingerprint_v1_shape_in_multiline_body() {
-        let body = "Some finding text.\n\n<!-- fallow-fingerprint: abc123def456 -->\n";
+    fn extract_plow_fingerprint_v1_shape_in_multiline_body() {
+        let body = "Some finding text.\n\n<!-- plow-fingerprint: abc123def456 -->\n";
         assert_eq!(
-            extract_fallow_fingerprint(body).as_deref(),
+            extract_plow_fingerprint(body).as_deref(),
             Some("abc123def456")
         );
     }
@@ -1856,32 +1850,32 @@ mod tests {
 
     #[test]
     fn extract_marker_stops_at_whitespace() {
-        let body = "fallow-fingerprint: abc def";
+        let body = "plow-fingerprint: abc def";
         assert_eq!(
-            extract_marker(body, "fallow-fingerprint:").as_deref(),
+            extract_marker(body, "plow-fingerprint:").as_deref(),
             Some("abc")
         );
     }
 
     #[test]
     fn extract_marker_stops_at_closing_angle_bracket() {
-        let body = "<!-- fallow-fingerprint: abc123 -->";
+        let body = "<!-- plow-fingerprint: abc123 -->";
         assert_eq!(
-            extract_marker(body, "fallow-fingerprint:").as_deref(),
+            extract_marker(body, "plow-fingerprint:").as_deref(),
             Some("abc123")
         );
     }
 
     #[test]
     fn extract_marker_returns_none_when_marker_absent() {
-        assert_eq!(extract_marker("plain text", "fallow-fingerprint:"), None);
+        assert_eq!(extract_marker("plain text", "plow-fingerprint:"), None);
     }
 
     #[test]
     fn extract_marker_returns_none_when_value_is_empty_after_trim() {
         // marker present but nothing follows except whitespace + end
-        let body = "fallow-fingerprint:   ";
-        assert_eq!(extract_marker(body, "fallow-fingerprint:"), None);
+        let body = "plow-fingerprint:   ";
+        assert_eq!(extract_marker(body, "plow-fingerprint:"), None);
     }
 
     // --- reconcile_sets: all three set states (line 232-240) ---
@@ -2005,7 +1999,7 @@ mod tests {
             "id": "thread-1",
             "isResolved": true,
             "comments": { "nodes": [
-                { "body": "<!-- fallow-fingerprint:v2: fp-should-skip -->" }
+                { "body": "<!-- plow-fingerprint:v2: fp-should-skip -->" }
             ]}
         });
         let mut state = ProviderState::default();
@@ -2019,7 +2013,7 @@ mod tests {
         let thread = serde_json::json!({
             "isResolved": false,
             "comments": { "nodes": [
-                { "body": "<!-- fallow-fingerprint:v2: fp-noid -->" }
+                { "body": "<!-- plow-fingerprint:v2: fp-noid -->" }
             ]}
         });
         let mut state = ProviderState::default();
@@ -2033,7 +2027,7 @@ mod tests {
             "id": "thread-unresolved",
             "isResolved": false,
             "comments": { "nodes": [
-                { "body": "<!-- fallow-fingerprint:v2: fp-active -->" }
+                { "body": "<!-- plow-fingerprint:v2: fp-active -->" }
             ]}
         });
         let mut state = ProviderState::default();
@@ -2065,7 +2059,7 @@ mod tests {
     fn collect_gitlab_discussion_fingerprints_skips_discussion_without_id() {
         let discussion = serde_json::json!({
             "notes": [
-                { "body": "<!-- fallow-fingerprint:v2: fp-x -->" }
+                { "body": "<!-- plow-fingerprint:v2: fp-x -->" }
             ]
         });
         let mut state = ProviderState::default();
@@ -2078,7 +2072,7 @@ mod tests {
         let discussion = serde_json::json!({
             "id": "disc-99",
             "notes": [
-                { "body": "<!-- fallow-fingerprint:v2: fp-gitlab -->" }
+                { "body": "<!-- plow-fingerprint:v2: fp-gitlab -->" }
             ]
         });
         let mut state = ProviderState::default();
@@ -2097,7 +2091,7 @@ mod tests {
             "notes": [
                 {
                     "system": true,
-                    "body": "<!-- fallow-resolved-fingerprint: fp-resolved -->"
+                    "body": "<!-- plow-resolved-fingerprint: fp-resolved -->"
                 }
             ]
         });
@@ -2114,7 +2108,7 @@ mod tests {
                 {
                     "system": false,
                     "author": { "bot": false, "username": "alice" },
-                    "body": "<!-- fallow-resolved-fingerprint: fp-human -->"
+                    "body": "<!-- plow-resolved-fingerprint: fp-human -->"
                 }
             ]
         });
@@ -2217,7 +2211,7 @@ mod tests {
             body.contains("Resolved."),
             "no-sha body should say Resolved. without a commit hash"
         );
-        assert!(body.contains("fallow-resolved-fingerprint: fp-nosha"));
+        assert!(body.contains("plow-resolved-fingerprint: fp-nosha"));
     }
 
     // --- stage_gitlab_operations: additional paths (lines 969-1000) ---
@@ -2310,7 +2304,7 @@ mod tests {
             body.contains("Resolved."),
             "no-sha gitlab body should say Resolved."
         );
-        assert!(body.contains("fallow-resolved-fingerprint: fp-gl-nosha"));
+        assert!(body.contains("plow-resolved-fingerprint: fp-gl-nosha"));
     }
 
     // --- resolved_marker_key / resolved_body: edge cases (lines 1394-1409) ---
@@ -2330,7 +2324,7 @@ mod tests {
     fn resolved_body_without_sha_omits_backtick_and_uses_bare_marker() {
         let body = resolved_body("fp-x", None);
         assert!(!body.contains('`'), "no backtick when sha is None");
-        assert!(body.contains("fallow-resolved-fingerprint: fp-x"));
+        assert!(body.contains("plow-resolved-fingerprint: fp-x"));
     }
 
     // --- url_encode_path_segment (lines 1415-1429) ---
@@ -2372,14 +2366,14 @@ mod tests {
     }
 
     #[test]
-    fn github_bot_check_returns_false_when_fallow_bot_login_not_set_and_type_not_bot() {
+    fn github_bot_check_returns_false_when_plow_bot_login_not_set_and_type_not_bot() {
         let comment = serde_json::json!({
             "user": { "type": "User", "login": "someperson" },
         });
         assert!(!is_github_bot_comment(&comment));
     }
 
-    // --- is_gitlab_bot_note: FALLOW_BOT_LOGIN path (lines 1356-1364) ---
+    // --- is_gitlab_bot_note: PLOW_BOT_LOGIN path (lines 1356-1364) ---
 
     #[test]
     #[allow(
@@ -2392,16 +2386,16 @@ mod tests {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let note = serde_json::json!({
             "system": false,
-            "author": { "bot": false, "username": "fallow-gl-bot" },
+            "author": { "bot": false, "username": "plow-gl-bot" },
         });
         // SAFETY: serialized by BOT_LOGIN_ENV_LOCK; cleared before returning.
         unsafe {
-            std::env::set_var("FALLOW_BOT_LOGIN", "fallow-gl-bot");
+            std::env::set_var("PLOW_BOT_LOGIN", "plow-gl-bot");
         }
         assert!(is_gitlab_bot_note(&note));
         // SAFETY: Restore the process environment after the scoped override.
         unsafe {
-            std::env::remove_var("FALLOW_BOT_LOGIN");
+            std::env::remove_var("PLOW_BOT_LOGIN");
         }
     }
 

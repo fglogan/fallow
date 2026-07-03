@@ -37,15 +37,15 @@ jobs:
         with:
           version: 9
 
-      - name: Build fallow
-        run: cargo build --release -p fallow-cli
+      - name: Build plow
+        run: cargo build --release -p plow-cli
 
       - name: Run real-world benchmarks
         id: bench
         run: |
           ./benchmarks/bench-ci.sh \
-            --fallow-bin ./target/release/fallow \
-            --clone-dir /tmp/fallow-bench-ci \
+            --plow-bin ./target/release/plow \
+            --clone-dir /tmp/plow-bench-ci \
             --runs 3 \
             > bench-real-world.json \
             2> >(tee bench-real-world-stderr.txt >&2)
@@ -55,7 +55,7 @@ jobs:
         if: always() && steps.bench.outcome != 'skipped'
         uses: ./.github/actions/store-benchmark
         with:
-          name: Fallow Real-World Benchmarks
+          name: Plow Real-World Benchmarks
           tool: customSmallerIsBetter
           output-file-path: bench-real-world.json
           data-dir: bench-real-world

@@ -17,7 +17,7 @@ import type {
 } from "../src/types.js";
 
 const hotPath = (overrides: Partial<RuntimeCoverageHotPath>): RuntimeCoverageHotPath => ({
-  id: "fallow:hot:0",
+  id: "plow:hot:0",
   path: "src/a.ts",
   function: "fn",
   line: 1,
@@ -31,7 +31,7 @@ const finding = (
   verdict: RuntimeCoverageVerdict,
   overrides: Partial<RuntimeCoverageFinding> = {},
 ): RuntimeCoverageFinding => ({
-  id: "fallow:prod:0",
+  id: "plow:prod:0",
   path: "src/a.ts",
   function: "fn",
   line: 1,
@@ -199,46 +199,46 @@ describe("buildCoverageGateMessage", () => {
     const out = buildCoverageGateMessage(
       3,
       envelope("Continuous runtime monitoring requires a valid license or trial.", 3),
-      "fallow exited with code 3",
+      "plow exited with code 3",
     );
     expect(out).toContain("Continuous runtime monitoring requires a valid license or trial.");
-    expect(out).toContain("fallow license activate");
+    expect(out).toContain("plow license activate");
   });
 
   it("special-cases a missing sidecar (exit 4) with a setup next-step", () => {
     const out = buildCoverageGateMessage(
       4,
-      envelope("fallow-cov sidecar not found.", 4),
-      "fallow exited with code 4",
+      envelope("plow-cov sidecar not found.", 4),
+      "plow exited with code 4",
     );
-    expect(out).toContain("fallow-cov sidecar not found.");
-    expect(out).toContain("fallow coverage setup");
+    expect(out).toContain("plow-cov sidecar not found.");
+    expect(out).toContain("plow coverage setup");
   });
 
   it("special-cases an invalid sidecar (exit 5) with a setup next-step", () => {
     const out = buildCoverageGateMessage(
       5,
       envelope("sidecar signature verification failed.", 5),
-      "fallow exited with code 5",
+      "plow exited with code 5",
     );
-    expect(out).toContain("fallow coverage setup");
+    expect(out).toContain("plow coverage setup");
   });
 
   it("surfaces the structured message verbatim for other non-zero codes", () => {
     const out = buildCoverageGateMessage(
       2,
       envelope("runtime coverage report was not produced", 2),
-      "fallow exited with code 2",
+      "plow exited with code 2",
     );
     expect(out).toBe("runtime coverage report was not produced");
   });
 
   it("falls back to the rejection message when stdout is not structured JSON", () => {
-    expect(buildCoverageGateMessage(3, "some stderr noise", "fallow exited with code 3")).toContain(
-      "fallow exited with code 3",
+    expect(buildCoverageGateMessage(3, "some stderr noise", "plow exited with code 3")).toContain(
+      "plow exited with code 3",
     );
-    expect(buildCoverageGateMessage(3, "", "fallow exited with code 3")).toContain(
-      "fallow license activate",
+    expect(buildCoverageGateMessage(3, "", "plow exited with code 3")).toContain(
+      "plow license activate",
     );
   });
 });
@@ -255,7 +255,7 @@ describe("coverageWatermarkMessage", () => {
   it("warns about a license-expired grace watermark with a refresh hint", () => {
     const message = coverageWatermarkMessage(withWatermark("license-expired-grace"));
     expect(message).toContain("grace");
-    expect(message).toContain("fallow license refresh");
+    expect(message).toContain("plow license refresh");
   });
 
   it("warns about an expired trial watermark", () => {

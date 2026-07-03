@@ -48,7 +48,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "type": "suppress-line",
           "auto_fixable": false,
           "description": "Suppress with an inline comment above the duplicated code",
-          "comment": "// fallow-ignore-next-line code-duplication"
+          "comment": "// plow-ignore-next-line code-duplication"
         }
       ]
     },
@@ -84,7 +84,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "type": "suppress-line",
           "auto_fixable": false,
           "description": "Suppress with an inline comment above the duplicated code",
-          "comment": "// fallow-ignore-next-line code-duplication"
+          "comment": "// plow-ignore-next-line code-duplication"
         }
       ]
     }
@@ -106,7 +106,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
   "next_steps": [
     {
       "id": "trace-clone",
-      "command": "fallow dupes --trace dup:71c373ff",
+      "command": "plow dupes --trace dup:71c373ff",
       "reason": "see sibling locations and an extract-function suggestion"
     }
   ],
@@ -160,7 +160,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
               "type": "suppress-line",
               "auto_fixable": false,
               "description": "Suppress with an inline comment above the duplicated code",
-              "comment": "// fallow-ignore-next-line code-duplication"
+              "comment": "// plow-ignore-next-line code-duplication"
             }
           ]
         }
@@ -225,7 +225,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
               "type": "suppress-line",
               "auto_fixable": false,
               "description": "Suppress with an inline comment above the duplicated code",
-              "comment": "// fallow-ignore-next-line code-duplication"
+              "comment": "// plow-ignore-next-line code-duplication"
             }
           ]
         }

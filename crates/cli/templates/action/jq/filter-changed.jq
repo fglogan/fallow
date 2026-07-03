@@ -1,8 +1,8 @@
-# Filter fallow results to only include issues in changed files.
+# Filter plow results to only include issues in changed files.
 # Usage: jq --argjson changed '["src/a.ts","src/b.ts"]' -f filter-changed.jq results.json
 #
 # Handles single-command output (check, dupes, health) and combined output.
-# Paths in $changed must be relative to the project root (matching fallow JSON paths).
+# Paths in $changed must be relative to the project root (matching plow JSON paths).
 
 def in_changed: . as $path | $changed | any(. == $path);
 

@@ -14,7 +14,7 @@ use super::common::{create_config, create_config_with_unused_props_ignore, fixtu
 fn without_pattern_both_underscore_and_plain_props_flag() {
     let root = fixture_path("issue-1648-underscore-props");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let flagged: Vec<&str> = results
         .unused_component_props
@@ -44,7 +44,7 @@ fn without_pattern_both_underscore_and_plain_props_flag() {
 fn ignore_pattern_exempts_underscore_local_keeps_plain_prop() {
     let root = fixture_path("issue-1648-underscore-props");
     let config = create_config_with_unused_props_ignore(root, "^_");
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let flagged: Vec<&str> = results
         .unused_component_props

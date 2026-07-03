@@ -1,12 +1,12 @@
 use std::path::{Path, PathBuf};
 
-use fallow_api::{
+use ls_types::MessageType;
+use plow_api::{
     EditorAnalysisOutput, EditorAnalysisResults as AnalysisResults,
     EditorAnalysisSession as AnalysisSession, EditorDuplicationReport as DuplicationReport,
     EditorInlineComplexityFinding as InlineComplexityFinding,
 };
-use fallow_config::DuplicatesConfig;
-use ls_types::MessageType;
+use plow_config::DuplicatesConfig;
 
 use crate::initialization::LspDuplicationOptions;
 use crate::protocol::config_load_error_detail;
@@ -68,7 +68,7 @@ pub fn analyze_project_root(input: &mut ProjectRootAnalysisInput<'_>) {
     let session =
         match AnalysisSession::load_with_config(input.project_root, input.config_path, |config| {
             // Override the project config's production resolution when the
-            // editor forwarded an explicit `fallow.production` (on/off).
+            // editor forwarded an explicit `plow.production` (on/off).
             // Mirrors the CLI-driven sidebar receiving
             // `--production`/`--no-production`, so the two surfaces agree;
             // `None` leaves the project config in force (issue #1055).
@@ -135,7 +135,7 @@ fn run_typed_project_analysis(
         if input.inline_complexity_enabled {
             input
                 .merged_inline_complexity
-                .extend(fallow_api::collect_inline_complexity(
+                .extend(plow_api::collect_inline_complexity(
                     session.config(),
                     &output.dead_code,
                 ));
@@ -204,10 +204,10 @@ fn apply_changed_since_filter(
 ) -> Option<(MessageType, String)> {
     let git_ref = changed_since?;
 
-    match fallow_api::try_get_changed_files_with_toplevel(root, toplevel, git_ref) {
+    match plow_api::try_get_changed_files_with_toplevel(root, toplevel, git_ref) {
         Ok(changed) => {
             analysis.filter_by_changed_files(&changed, root);
-            fallow_api::filter_inline_complexity_by_changed_files(inline_complexity, &changed);
+            plow_api::filter_inline_complexity_by_changed_files(inline_complexity, &changed);
             Some((
                 MessageType::INFO,
                 format!(

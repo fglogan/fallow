@@ -1,37 +1,37 @@
 # Telemetry
 
-Fallow's product telemetry is opt-in and off by default. It exists to improve agent, CI, JSON, MCP, and editor workflows.
+Plow's product telemetry is opt-in and off by default. It exists to improve agent, CI, JSON, MCP, and editor workflows.
 
-Fallow does not collect repository names, file paths, package names, dependency names, workspace names, source code, config values, environment variable names or values, raw command lines, raw errors, or stack traces.
+Plow does not collect repository names, file paths, package names, dependency names, workspace names, source code, config values, environment variable names or values, raw command lines, raw errors, or stack traces.
 
-To keep telemetry off everywhere, set `FALLOW_TELEMETRY_DISABLED=1` or `DO_NOT_TRACK=1`.
+To keep telemetry off everywhere, set `PLOW_TELEMETRY_DISABLED=1` or `DO_NOT_TRACK=1`.
 
 ## Commands
 
 ```bash
-fallow telemetry status
-fallow telemetry enable
-fallow telemetry disable
-fallow telemetry inspect --example
+plow telemetry status
+plow telemetry enable
+plow telemetry disable
+plow telemetry inspect --example
 ```
 
 Inspect the exact payload for a real command without sending it:
 
 ```bash
-FALLOW_TELEMETRY=inspect fallow audit --format json --quiet
+PLOW_TELEMETRY=inspect plow audit --format json --quiet
 ```
 
-`FALLOW_TELEMETRY_DEBUG=1` forces inspect mode and outranks `FALLOW_TELEMETRY`.
+`PLOW_TELEMETRY_DEBUG=1` forces inspect mode and outranks `PLOW_TELEMETRY`.
 
 ## Environment Controls
 
 Precedence:
 
 ```text
-DO_NOT_TRACK / FALLOW_TELEMETRY_DISABLED   (admin/fleet kill switch)
-> FALLOW_TELEMETRY_DEBUG                     (forces inspect mode)
-> FALLOW_TELEMETRY                           (per-shell override)
-> CI: off unless FALLOW_TELEMETRY is set
+DO_NOT_TRACK / PLOW_TELEMETRY_DISABLED   (admin/fleet kill switch)
+> PLOW_TELEMETRY_DEBUG                     (forces inspect mode)
+> PLOW_TELEMETRY                           (per-shell override)
+> CI: off unless PLOW_TELEMETRY is set
 > user telemetry config
 > default: off
 ```
@@ -39,7 +39,7 @@ DO_NOT_TRACK / FALLOW_TELEMETRY_DISABLED   (admin/fleet kill switch)
 Disable telemetry globally in CI or managed environments:
 
 ```bash
-export FALLOW_TELEMETRY_DISABLED=1
+export PLOW_TELEMETRY_DISABLED=1
 ```
 
 Or use the conventional disable flag:
@@ -51,15 +51,15 @@ export DO_NOT_TRACK=1
 Enable explicitly in CI:
 
 ```bash
-export FALLOW_TELEMETRY=on
+export PLOW_TELEMETRY=on
 ```
 
-CI telemetry is off unless it is explicitly enabled in that CI environment. A developer's local `fallow telemetry enable` does not silently enable organization CI telemetry.
+CI telemetry is off unless it is explicitly enabled in that CI environment. A developer's local `plow telemetry enable` does not silently enable organization CI telemetry.
 
 Agents and wrappers can identify their integration with one normalized allowlisted value:
 
 ```bash
-export FALLOW_AGENT_SOURCE=codex
+export PLOW_AGENT_SOURCE=codex
 ```
 
 Accepted values are `codex`, `claude_code`, `cursor`, `copilot`, `opencode`, `aider`, `roo`, `windsurf`, `gemini`, `cline`, `continue`, `zed`, `goose`, `other_known`, `unknown`, and `none`. Hyphen aliases such as `claude-code` and CLI aliases such as `gemini_cli` / `antigravity` (both map to `gemini`) are normalized. Unrecognized values are ignored rather than uploaded.
@@ -72,7 +72,7 @@ V2 events are workflow-level and coarse:
 {
   "schema_version": 2,
   "event": "workflow_completed",
-  "fallow_version": "2.85.0",
+  "plow_version": "2.85.0",
   "workflow": "audit",
   "integration_surface": "mcp",
   "invocation_context": "agent",
@@ -112,7 +112,7 @@ Field purposes:
 | Field | Purpose |
 | --- | --- |
 | `workflow` | Prioritize the audit, dead-code, health, duplication, CI, runtime-coverage setup, impact, security, fix, explain, project-inventory, setup, and license workflows. Project-inventory, setup, and license are coarse buckets and do not expose raw commands, config values, repository identifiers, or license identifiers. |
-| `integration_surface` | Understand whether Fallow is used through human CLI, CLI JSON, MCP, CI, editor, or programmatic surfaces. |
+| `integration_surface` | Understand whether Plow is used through human CLI, CLI JSON, MCP, CI, editor, or programmatic surfaces. |
 | `invocation_context` | Separate human, CI, editor, and agent-driven use without uploading detection evidence. |
 | `agent_source` | Improve compatibility with specific agent integrations using a documented allowlist. |
 | `output_format` / `quiet` | Protect the output contracts that users and agents rely on most. |
@@ -137,13 +137,13 @@ Field purposes:
 
 ## Integration surfaces
 
-The MCP server runs cleanly-mapped analysis tools in-process through `fallow-api` and falls back to invoking the CLI for CLI-only surfaces. Fallback subprocesses are tagged via the `FALLOW_INTEGRATION_SURFACE` and `FALLOW_MCP_TOOL` environment variables so their single CLI telemetry event is attributed to the `mcp` surface and the specific tool, instead of looking like any other `cli_json` run. Code Mode snippets can make several read-only host calls; spawned CLI events are attributed to `code_execute`, not to free-form code text or nested helper names. No second event is emitted for CLI fallbacks, and API-backed MCP analysis emits no telemetry today. `FALLOW_MCP_TOOL` is validated CLI-side against a fixed allowlist of tool names; any other value is dropped.
+The MCP server runs cleanly-mapped analysis tools in-process through `plow-api` and falls back to invoking the CLI for CLI-only surfaces. Fallback subprocesses are tagged via the `PLOW_INTEGRATION_SURFACE` and `PLOW_MCP_TOOL` environment variables so their single CLI telemetry event is attributed to the `mcp` surface and the specific tool, instead of looking like any other `cli_json` run. Code Mode snippets can make several read-only host calls; spawned CLI events are attributed to `code_execute`, not to free-form code text or nested helper names. No second event is emitted for CLI fallbacks, and API-backed MCP analysis emits no telemetry today. `PLOW_MCP_TOOL` is validated CLI-side against a fixed allowlist of tool names; any other value is dropped.
 
 The LSP server, VS Code extension, N-API bindings, MCP API-backed tools, and programmatic embedding run analysis in-process rather than by spawning the CLI, so the environment-variable tagging does not reach them and they emit no telemetry today. Their `integration_surface` values are reserved for when a future shared telemetry layer lets them emit directly.
 
 ## Agent Source
 
-When telemetry is enabled and a run is classified as agent-driven, Fallow may emit one normalized `agent_source` value:
+When telemetry is enabled and a run is classified as agent-driven, Plow may emit one normalized `agent_source` value:
 
 ```text
 none
@@ -164,15 +164,15 @@ other_known
 unknown
 ```
 
-`none` appears in the list because it is the internal default before a run is classified, but it is never sent: `agent_source` is only emitted for runs Fallow identifies as agent-driven, and those are never `none`. Agents not on the list (for example enterprise IDE assistants) are grouped under `other_known`.
+`none` appears in the list because it is the internal default before a run is classified, but it is never sent: `agent_source` is only emitted for runs Plow identifies as agent-driven, and those are never `none`. Agents not on the list (for example enterprise IDE assistants) are grouped under `other_known`.
 
-Fallow does not upload raw MCP client info, process names, parent process paths, editor identifiers, extension names, environment variable names, model names, account IDs, organization IDs, prompts, versions, or free-form vendor strings. Agent wrappers should use `FALLOW_AGENT_SOURCE=<allowlisted-value>` when the user has enabled telemetry; ambiguous sources emit `unknown`. **Setting `FALLOW_AGENT_SOURCE` never enables telemetry by itself and uploads no codebase content.**
+Plow does not upload raw MCP client info, process names, parent process paths, editor identifiers, extension names, environment variable names, model names, account IDs, organization IDs, prompts, versions, or free-form vendor strings. Agent wrappers should use `PLOW_AGENT_SOURCE=<allowlisted-value>` when the user has enabled telemetry; ambiguous sources emit `unknown`. **Setting `PLOW_AGENT_SOURCE` never enables telemetry by itself and uploads no codebase content.**
 
-When several agent environments coexist (for example one agent running inside another), heuristic `agent_source` attribution is best-effort and depends on environment iteration order. Set `FALLOW_AGENT_SOURCE` explicitly for deterministic attribution.
+When several agent environments coexist (for example one agent running inside another), heuristic `agent_source` attribution is best-effort and depends on environment iteration order. Set `PLOW_AGENT_SOURCE` explicitly for deterministic attribution.
 
 ## What Is Never Collected
 
-Fallow telemetry must not include:
+Plow telemetry must not include:
 
 - repository, organization, project, branch, or git remote names
 - file paths, import specifiers, source snippets, or stack traces
@@ -188,26 +188,26 @@ Fallow telemetry must not include:
 
 Hashing these values is not used as a workaround.
 
-The one exception is the anonymous install grouping token (see "Agent Follow-up" and "Transport And Server Privacy" below). It is a freshly random value, never derived from your machine, user account, repository, project, file paths, environment, or any cloud response. It is created only after you explicitly opt in (or set `FALLOW_TELEMETRY=on`), deleted when you run `fallow telemetry disable`, and sent only as a private transport header for server-side grouping, never as an event property. It lets aggregate dashboards count distinct workflows per install instead of per run, which is why it is stable per install while still carrying none of the identifiers listed above.
+The one exception is the anonymous install grouping token (see "Agent Follow-up" and "Transport And Server Privacy" below). It is a freshly random value, never derived from your machine, user account, repository, project, file paths, environment, or any cloud response. It is created only after you explicitly opt in (or set `PLOW_TELEMETRY=on`), deleted when you run `plow telemetry disable`, and sent only as a private transport header for server-side grouping, never as an event property. It lets aggregate dashboards count distinct workflows per install instead of per run, which is why it is stable per install while still carrying none of the identifiers listed above.
 
 ## Agent Follow-up
 
-The `--parent-run` flag is hidden from `--help`. `--parent-run` accepts only short ASCII tokens with letters, numbers, `_`, and `-`; paths and free-form values are dropped before upload. Inspect mode and JSON event properties never include the raw token. Instead, events expose `has_parent_run`, `run_role`, and `followup_kind` so aggregate dashboards can distinguish root runs from follow-up work. When telemetry is uploaded, a sanitized parent-run token may be sent as a private transport correlation header for server-side `distinct_id` grouping, not as an event property. JSON object outputs include `_meta.telemetry.analysis_run_id`, a short local ephemeral token that agents may pass back via `--parent-run` on a later command so Fallow can measure whether follow-up work improved aggregate findings. The token is not derived from repository, path, user, machine, project, or cloud response data.
+The `--parent-run` flag is hidden from `--help`. `--parent-run` accepts only short ASCII tokens with letters, numbers, `_`, and `-`; paths and free-form values are dropped before upload. Inspect mode and JSON event properties never include the raw token. Instead, events expose `has_parent_run`, `run_role`, and `followup_kind` so aggregate dashboards can distinguish root runs from follow-up work. When telemetry is uploaded, a sanitized parent-run token may be sent as a private transport correlation header for server-side `distinct_id` grouping, not as an event property. JSON object outputs include `_meta.telemetry.analysis_run_id`, a short local ephemeral token that agents may pass back via `--parent-run` on a later command so Plow can measure whether follow-up work improved aggregate findings. The token is not derived from repository, path, user, machine, project, or cloud response data.
 
-Separately, when telemetry is enabled Fallow keeps one anonymous install grouping token in `telemetry.json`. It is minted the moment you opt in (`fallow telemetry enable`, or the first upload after `FALLOW_TELEMETRY=on`), reused unchanged on later runs, and deleted when you run `fallow telemetry disable`. It is a freshly random value, never derived from your machine, user, repository, project, file paths, environment, or cloud responses. Like the parent-run token, it is sent only as a private transport header (`X-Fallow-Install`) for server-side grouping, never as an event property, so the events Fallow serializes still carry no identifiers. It exists so aggregate dashboards can count distinct workflows per install per week rather than per run. `fallow telemetry status` reports only whether the token is present (never the token itself); `fallow telemetry inspect --example` lists the transport headers alongside the example payload.
+Separately, when telemetry is enabled Plow keeps one anonymous install grouping token in `telemetry.json`. It is minted the moment you opt in (`plow telemetry enable`, or the first upload after `PLOW_TELEMETRY=on`), reused unchanged on later runs, and deleted when you run `plow telemetry disable`. It is a freshly random value, never derived from your machine, user, repository, project, file paths, environment, or cloud responses. Like the parent-run token, it is sent only as a private transport header (`X-Plow-Install`) for server-side grouping, never as an event property, so the events Plow serializes still carry no identifiers. It exists so aggregate dashboards can count distinct workflows per install per week rather than per run. `plow telemetry status` reports only whether the token is present (never the token itself); `plow telemetry inspect --example` lists the transport headers alongside the example payload.
 
-Agents must not enable telemetry automatically. `fallow telemetry enable` requires explicit user action in a human-controlled shell or explicit CI environment configuration.
+Agents must not enable telemetry automatically. `plow telemetry enable` requires explicit user action in a human-controlled shell or explicit CI environment configuration.
 
 ## Transport And Server Privacy
 
 When telemetry is enabled and sending events:
 
-- requests are HTTPS POST JSON to `https://api.fallow.cloud/v1/telemetry/events` (override the host with `FALLOW_API_URL`)
+- requests are HTTPS POST JSON to `https://api.plow.cloud/v1/telemetry/events` (override the host with `PLOW_API_URL`)
 - no cookies are used
 - telemetry requests do not carry an authentication token
-- two private headers may accompany the request, both for server-side grouping and never written into the event body: `X-Fallow-Parent-Run` (a sanitized per-run correlation token, only when `--parent-run` was passed) and `X-Fallow-Install` (the anonymous random install grouping token described under "Agent Follow-up"). The install token is deleted on `fallow telemetry disable`
-- your command never waits on the network: at exit Fallow appends the event to a small local spool file (`telemetry-spool.jsonl`, next to `telemetry.json` in your config directory), which is sub-millisecond and network-free, so telemetry adds no latency to the run
-- a later telemetry-enabled run uploads the spooled events on a background thread while it works, so a fast run now defers its event instead of dropping it; delivery is still best-effort and the spool is bounded, so events on a machine that stays offline (or never runs Fallow again) may be dropped, and counts remain a rough, biased sample rather than an exact usage count
+- two private headers may accompany the request, both for server-side grouping and never written into the event body: `X-Plow-Parent-Run` (a sanitized per-run correlation token, only when `--parent-run` was passed) and `X-Plow-Install` (the anonymous random install grouping token described under "Agent Follow-up"). The install token is deleted on `plow telemetry disable`
+- your command never waits on the network: at exit Plow appends the event to a small local spool file (`telemetry-spool.jsonl`, next to `telemetry.json` in your config directory), which is sub-millisecond and network-free, so telemetry adds no latency to the run
+- a later telemetry-enabled run uploads the spooled events on a background thread while it works, so a fast run now defers its event instead of dropping it; delivery is still best-effort and the spool is bounded, so events on a machine that stays offline (or never runs Plow again) may be dropped, and counts remain a rough, biased sample rather than an exact usage count
 - network errors are ignored and never affect command output or exit code
 - telemetry is never written to stdout
 - server-side handling must not enrich telemetry with customer, repository, organization, git, package-registry, or license data

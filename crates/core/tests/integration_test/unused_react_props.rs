@@ -10,7 +10,7 @@ use super::common::{create_config, fixture_path};
 fn flags_unused_react_prop_and_abstains_on_every_ladder_case() {
     let root = fixture_path("unused-react-prop");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let flagged: Vec<(&str, &str)> = results
         .unused_component_props
@@ -96,14 +96,14 @@ fn flags_unused_react_prop_and_abstains_on_every_ladder_case() {
     );
 }
 
-/// Suppress-token round-trip: `// fallow-ignore-next-line unused-component-prop`
+/// Suppress-token round-trip: `// plow-ignore-next-line unused-component-prop`
 /// above a React prop drops the finding AND is not reported stale (the
 /// framework detector consumes the suppression before stale detection runs).
 #[test]
 fn inline_suppression_drops_react_prop_and_is_not_stale() {
     let root = fixture_path("unused-react-prop-suppress");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.unused_component_props.is_empty(),
@@ -119,10 +119,10 @@ fn inline_suppression_drops_react_prop_and_is_not_stale() {
         .stale_suppressions
         .iter()
         .filter_map(|s| match &s.origin {
-            fallow_types::results::SuppressionOrigin::Comment { issue_kind, .. } => {
+            plow_types::results::SuppressionOrigin::Comment { issue_kind, .. } => {
                 issue_kind.as_deref()
             }
-            fallow_types::results::SuppressionOrigin::JsdocTag { .. } => None,
+            plow_types::results::SuppressionOrigin::JsdocTag { .. } => None,
         })
         .collect();
     assert!(
@@ -141,7 +141,7 @@ fn react_arm_is_dep_gated() {
     // component-name = file-stem shaped.
     let root = fixture_path("unused-component-prop");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     // Every finding's path is a `.vue` file (the React arm only emits `.jsx`/`.tsx`).
     for finding in &results.unused_component_props {
         let ext = finding

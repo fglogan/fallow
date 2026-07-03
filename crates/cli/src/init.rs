@@ -1,8 +1,8 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use fallow_config::{ExternalPluginDef, FallowConfig, PackageJson};
-use fallow_engine::clear_ambient_git_env;
+use plow_config::{ExternalPluginDef, PackageJson, PlowConfig};
+use plow_engine::clear_ambient_git_env;
 
 use crate::validate;
 
@@ -33,25 +33,25 @@ This file gives coding agents project-specific context. Keep it short and update
 - Test:
 - Typecheck or lint:
 
-## Fallow
+## Plow
 
-- Use `fallow audit --format json --quiet` before committing AI-generated changes.
-- Use `fallow dead-code --format json --quiet`, `fallow dupes --format json --quiet`, and `fallow health --format json --quiet` for targeted checks.
-- Use `fallow list --entry-points --format json --quiet` and `fallow list --boundaries --format json --quiet` to inspect project shape.
+- Use `plow audit --format json --quiet` before committing AI-generated changes.
+- Use `plow dead-code --format json --quiet`, `plow dupes --format json --quiet`, and `plow health --format json --quiet` for targeted checks.
+- Use `plow list --entry-points --format json --quiet` and `plow list --boundaries --format json --quiet` to inspect project shape.
 
 <!-- generated:task-matrix:start -->
 | When the agent is about to... | Run |
 |---|---|
-| delete an "unused" export or file | `fallow dead-code --trace <file>:<export>` |
-| delete an "unused" dependency | `fallow dead-code --trace-dependency <name>` |
-| commit or open a PR | `fallow audit --base <ref>` |
-| prioritize refactoring | `fallow health --hotspots --targets` |
-| ask who owns code | `fallow health --ownership` |
-| check untested-but-reachable code | `fallow health --coverage-gaps` |
-| consolidate duplication | `fallow dupes --trace dup:<fingerprint>` |
-| find feature flags | `fallow flags` |
-| surface security candidates | `fallow security` |
-| understand a finding | `fallow explain <issue-type>` |
+| delete an "unused" export or file | `plow dead-code --trace <file>:<export>` |
+| delete an "unused" dependency | `plow dead-code --trace-dependency <name>` |
+| commit or open a PR | `plow audit --base <ref>` |
+| prioritize refactoring | `plow health --hotspots --targets` |
+| ask who owns code | `plow health --ownership` |
+| check untested-but-reachable code | `plow health --coverage-gaps` |
+| consolidate duplication | `plow dupes --trace dup:<fingerprint>` |
+| find feature flags | `plow flags` |
+| surface security candidates | `plow security` |
+| understand a finding | `plow explain <issue-type>` |
 | scope a monorepo | `--workspace <glob> / --changed-workspaces <ref>` (global flags, prefix any command) |
 <!-- generated:task-matrix:end -->
 
@@ -222,9 +222,9 @@ fn read_pnpm_workspace_patterns(root: &Path) -> Vec<String> {
 
 /// Build a JSON config string tailored to the detected project.
 ///
-/// Used by `fallow init` (where this is the canonical scaffold) and by
-/// `fallow fix`'s missing-config fallback (so the seed file produced when
-/// auto-applying duplicate-export config rules matches what `fallow init`
+/// Used by `plow init` (where this is the canonical scaffold) and by
+/// `plow fix`'s missing-config fallback (so the seed file produced when
+/// auto-applying duplicate-export config rules matches what `plow init`
 /// would have written, framework detection and all).
 #[expect(
     clippy::expect_used,
@@ -232,7 +232,7 @@ fn read_pnpm_workspace_patterns(root: &Path) -> Vec<String> {
 )]
 pub fn build_json_config(info: &ProjectInfo) -> String {
     let mut config = serde_json::json!({
-        "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+        "$schema": "https://raw.githubusercontent.com/fglogan/genesis-plow/main/schema.json",
     });
 
     add_json_entry_config(&mut config, info);
@@ -339,11 +339,11 @@ This file gives coding agents project-specific context. Keep it short and update
 - Test:{test_suffix}
 - Typecheck or lint:{typecheck_suffix}
 
-## Fallow
+## Plow
 
-- Use `fallow audit --format json --quiet` before committing AI-generated changes.
-- Use `fallow dead-code --format json --quiet`, `fallow dupes --format json --quiet`, and `fallow health --format json --quiet` for targeted checks.
-- Use `fallow list --entry-points --format json --quiet` and `fallow list --boundaries --format json --quiet` to inspect project shape.
+- Use `plow audit --format json --quiet` before committing AI-generated changes.
+- Use `plow dead-code --format json --quiet`, `plow dupes --format json --quiet`, and `plow health --format json --quiet` for targeted checks.
+- Use `plow list --entry-points --format json --quiet` and `plow list --boundaries --format json --quiet` to inspect project shape.
 
 {task_matrix_block}
 
@@ -384,7 +384,7 @@ fn build_agents_guide_prefill(info: &ProjectInfo) -> AgentsGuidePrefill {
         !install_line.is_empty() || !test_line.is_empty() || !typecheck_line.is_empty();
 
     let provenance_comment = if any_commands_prefilled {
-        "<!-- fallow init prefilled these from package.json; confirm before relying on them -->\n"
+        "<!-- plow init prefilled these from package.json; confirm before relying on them -->\n"
     } else {
         ""
     };
@@ -475,8 +475,8 @@ fn agents_module_boundaries_line(info: &ProjectInfo) -> String {
 /// Build a TOML config string tailored to the detected project.
 fn build_toml_config(info: &ProjectInfo) -> String {
     let mut lines = vec![
-        "# fallow.toml - Codebase analysis configuration".to_string(),
-        "# See https://docs.fallow.tools for documentation".to_string(),
+        "# plow.toml - Codebase analysis configuration".to_string(),
+        "# See https://docs.genesis-plow.dev for documentation".to_string(),
         String::new(),
     ];
 
@@ -632,7 +632,7 @@ pub fn run_init(opts: &InitOptions<'_>) -> ExitCode {
 
 /// `init --decline`: persist a deliberate "stay unconfigured" decision so the
 /// first-contact setup hint and the `setup` next-step stop appearing for this
-/// project. Storage is a field in the existing Impact store under `.fallow/`
+/// project. Storage is a field in the existing Impact store under `.plow/`
 /// (no new state file); this neither enables Impact tracking nor writes a
 /// config file.
 fn run_init_decline(root: &Path, quiet: bool) -> ExitCode {
@@ -641,9 +641,9 @@ fn run_init_decline(root: &Path, quiet: bool) -> ExitCode {
         println!(
             "{}",
             if newly {
-                "Fallow setup hints disabled for this project."
+                "Plow setup hints disabled for this project."
             } else {
-                "Fallow setup hints were already disabled for this project."
+                "Plow setup hints were already disabled for this project."
             }
         );
     }
@@ -651,12 +651,7 @@ fn run_init_decline(root: &Path, quiet: bool) -> ExitCode {
 }
 
 fn run_init_config(root: &Path, use_toml: bool) -> ExitCode {
-    let existing_names = [
-        ".fallowrc.json",
-        ".fallowrc.jsonc",
-        "fallow.toml",
-        ".fallow.toml",
-    ];
+    let existing_names = [".plowrc.json", ".plowrc.jsonc", "plow.toml", ".plow.toml"];
     for name in &existing_names {
         let path = root.join(name);
         if path.exists() {
@@ -668,21 +663,21 @@ fn run_init_config(root: &Path, use_toml: bool) -> ExitCode {
     let info = detect_project(root);
 
     if use_toml {
-        let config_path = root.join("fallow.toml");
+        let config_path = root.join("plow.toml");
         let config_content = build_toml_config(&info);
         if let Err(e) = std::fs::write(&config_path, config_content) {
-            eprintln!("Error: Failed to write fallow.toml: {e}");
+            eprintln!("Error: Failed to write plow.toml: {e}");
             return ExitCode::from(2);
         }
-        eprintln!("Created fallow.toml");
+        eprintln!("Created plow.toml");
     } else {
-        let config_path = root.join(".fallowrc.json");
+        let config_path = root.join(".plowrc.json");
         let config_content = build_json_config(&info);
         if let Err(e) = std::fs::write(&config_path, config_content) {
-            eprintln!("Error: Failed to write .fallowrc.json: {e}");
+            eprintln!("Error: Failed to write .plowrc.json: {e}");
             return ExitCode::from(2);
         }
-        eprintln!("Created .fallowrc.json");
+        eprintln!("Created .plowrc.json");
     }
 
     print_detection_summary(&info);
@@ -709,9 +704,9 @@ fn run_init_agents(root: &Path) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// Ensure `.fallow/` is listed in the project's `.gitignore`.
+/// Ensure `.plow/` is listed in the project's `.gitignore`.
 ///
-/// If `.gitignore` exists and already contains `.fallow` (with or without
+/// If `.gitignore` exists and already contains `.plow` (with or without
 /// trailing slash), this is a no-op. Otherwise the entry is appended (or
 /// the file is created).
 fn ensure_gitignore(root: &Path) {
@@ -720,7 +715,7 @@ fn ensure_gitignore(root: &Path) {
 
     let already_ignored = existing.lines().any(|line| {
         let trimmed = line.trim();
-        trimmed == ".fallow" || trimmed == ".fallow/"
+        trimmed == ".plow" || trimmed == ".plow/"
     });
 
     if already_ignored {
@@ -729,9 +724,9 @@ fn ensure_gitignore(root: &Path) {
 
     let is_new = existing.is_empty();
     let entry = if is_new || existing.ends_with('\n') {
-        ".fallow/\n"
+        ".plow/\n"
     } else {
-        "\n.fallow/\n"
+        "\n.plow/\n"
     };
 
     let mut contents = existing;
@@ -743,9 +738,9 @@ fn ensure_gitignore(root: &Path) {
     }
 
     if is_new {
-        eprintln!("Created .gitignore with .fallow/ entry");
+        eprintln!("Created .gitignore with .plow/ entry");
     } else {
-        eprintln!("Added .fallow/ to .gitignore");
+        eprintln!("Added .plow/ to .gitignore");
     }
 }
 
@@ -767,7 +762,7 @@ fn detect_default_branch(root: &Path) -> Option<String> {
     None
 }
 
-pub const GIT_HOOK_MARKER: &str = "# Generated by fallow hooks install --target git.";
+pub const GIT_HOOK_MARKER: &str = "# Generated by plow hooks install --target git.";
 
 /// Hint printed when an existing pre-commit hook prevents installation.
 /// Mirrors the resolution block emitted by [`run_git_hooks_install`] so the
@@ -776,14 +771,14 @@ fn existing_hook_hint(hook_path: &str, fallback_base_ref: &str) -> String {
     format!(
         r#"Error: {hook_path} already exists. Add the following block to your existing hook:
 
-  command -v fallow >/dev/null 2>&1 || exit 0
+  command -v plow >/dev/null 2>&1 || exit 0
   UPSTREAM="$(git rev-parse --abbrev-ref --symbolic-full-name '@{{upstream}}' 2>/dev/null || true)"
   if [ -n "$UPSTREAM" ]; then
     BASE="$(git merge-base "$UPSTREAM" HEAD 2>/dev/null || echo "$UPSTREAM")"
   else
     BASE="{fallback_base_ref}"
   fi
-  fallow audit --base "$BASE" --quiet --gate-marker pre-commit"#
+  plow audit --base "$BASE" --quiet --gate-marker pre-commit"#
     )
 }
 
@@ -795,16 +790,16 @@ fn lefthook_hint(fallback_base_ref: &str) -> String {
 
   pre-commit:
     commands:
-      fallow:
+      plow:
         run: |
-          command -v fallow >/dev/null 2>&1 || exit 0
+          command -v plow >/dev/null 2>&1 || exit 0
           UPSTREAM="$(git rev-parse --abbrev-ref --symbolic-full-name '@{{upstream}}' 2>/dev/null || true)"
           if [ -n "$UPSTREAM" ]; then
             BASE="$(git merge-base "$UPSTREAM" HEAD 2>/dev/null || echo "$UPSTREAM")"
           else
             BASE="{fallback_base_ref}"
           fi
-          fallow audit --base "$BASE" --quiet --gate-marker pre-commit"#
+          plow audit --base "$BASE" --quiet --gate-marker pre-commit"#
     )
 }
 
@@ -886,7 +881,7 @@ pub fn run_git_hooks_install(opts: &GitHooksInstallOptions<'_>) -> ExitCode {
     }
 
     eprintln!(
-        "\nThe hook runs `fallow audit` against the merge-base with the current branch upstream, \
+        "\nThe hook runs `plow audit` against the merge-base with the current branch upstream, \
          falling back to `{fallback_base_ref}` when no upstream is set (gate=new-only by default)."
     );
     eprintln!("To skip the hook on a single commit: git commit --no-verify");
@@ -898,14 +893,14 @@ fn build_pre_commit_hook_content(fallback_base_ref: &str) -> String {
     format!(
         r#"#!/bin/sh
 {GIT_HOOK_MARKER}
-# fallow pre-commit hook -- gate commits on dead code, complexity, and duplication.
+# plow pre-commit hook -- gate commits on dead code, complexity, and duplication.
 # Audit defaults to gate=new-only, so inherited findings on touched files do not block
 # commits; only findings introduced by the changeset fail the gate. Set audit.gate = "all"
-# in fallow.toml to fail on every finding in changed files.
+# in plow.toml to fail on every finding in changed files.
 # Remove or edit this file to change the hook behavior.
 # Bypass on a single commit with: git commit --no-verify
 
-command -v fallow >/dev/null 2>&1 || exit 0
+command -v plow >/dev/null 2>&1 || exit 0
 UPSTREAM="$(git rev-parse --abbrev-ref --symbolic-full-name '@{{upstream}}' 2>/dev/null || true)"
 if [ -n "$UPSTREAM" ]; then
   # Diff against the merge-base with the upstream so feature branches forked off
@@ -915,7 +910,7 @@ if [ -n "$UPSTREAM" ]; then
 else
   BASE="{fallback_base_ref}"
 fi
-fallow audit --base "$BASE" --quiet --gate-marker pre-commit
+plow audit --base "$BASE" --quiet --gate-marker pre-commit
 "#
     )
 }
@@ -960,7 +955,7 @@ pub fn run_git_hooks_uninstall(opts: &GitHooksUninstallOptions<'_>) -> ExitCode 
         HookTarget::Husky(path) | HookTarget::GitHooks(path) => path,
         HookTarget::Lefthook => {
             eprintln!(
-                "Lefthook detected. Remove the fallow command from your lefthook.yml manually."
+                "Lefthook detected. Remove the plow command from your lefthook.yml manually."
             );
             return ExitCode::SUCCESS;
         }
@@ -987,7 +982,7 @@ pub fn run_git_hooks_uninstall(opts: &GitHooksUninstallOptions<'_>) -> ExitCode 
 
     if !content.contains(GIT_HOOK_MARKER) && !opts.force {
         eprintln!(
-            "Error: {} was not generated by fallow. Re-run with --force to remove it anyway.",
+            "Error: {} was not generated by plow. Re-run with --force to remove it anyway.",
             display_hook_path(opts.root, &hook_path)
         );
         return ExitCode::from(2);
@@ -1029,7 +1024,7 @@ fn write_hook(path: &Path, content: &str) -> std::io::Result<()> {
 }
 
 pub fn run_config_schema() -> ExitCode {
-    let schema = FallowConfig::json_schema();
+    let schema = PlowConfig::json_schema();
     match serde_json::to_string_pretty(&schema) {
         Ok(json) => {
             println!("{json}");
@@ -1057,7 +1052,7 @@ pub fn run_plugin_schema() -> ExitCode {
 }
 
 pub fn run_rule_pack_schema() -> ExitCode {
-    let schema = fallow_config::RulePackDef::json_schema();
+    let schema = plow_config::RulePackDef::json_schema();
     match serde_json::to_string_pretty(&schema) {
         Ok(json) => {
             println!("{json}");
@@ -1121,7 +1116,7 @@ mod tests {
         let root = dir.path();
         let exit = run_init(&config_opts(root, false));
         assert_eq!(exit, ExitCode::SUCCESS);
-        let path = root.join(".fallowrc.json");
+        let path = root.join(".plowrc.json");
         assert!(path.exists());
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(content.contains("$schema"));
@@ -1134,37 +1129,37 @@ mod tests {
         let root = dir.path();
         let exit = run_init(&config_opts(root, true));
         assert_eq!(exit, ExitCode::SUCCESS);
-        let path = root.join("fallow.toml");
+        let path = root.join("plow.toml");
         assert!(path.exists());
         let content = std::fs::read_to_string(&path).unwrap();
-        assert!(content.contains("fallow.toml"));
+        assert!(content.contains("plow.toml"));
         assert!(content.contains("entry"));
         assert!(content.contains("[rules]"));
     }
 
     #[test]
-    fn init_fails_if_fallowrc_json_exists() {
+    fn init_fails_if_plowrc_json_exists() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        std::fs::write(root.join(".fallowrc.json"), "{}").unwrap();
+        std::fs::write(root.join(".plowrc.json"), "{}").unwrap();
         let exit = run_init(&config_opts(root, false));
         assert_eq!(exit, ExitCode::from(2));
     }
 
     #[test]
-    fn init_fails_if_fallow_toml_exists() {
+    fn init_fails_if_plow_toml_exists() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        std::fs::write(root.join("fallow.toml"), "").unwrap();
+        std::fs::write(root.join("plow.toml"), "").unwrap();
         let exit = run_init(&config_opts(root, false));
         assert_eq!(exit, ExitCode::from(2));
     }
 
     #[test]
-    fn init_fails_if_dot_fallow_toml_exists() {
+    fn init_fails_if_dot_plow_toml_exists() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        std::fs::write(root.join(".fallow.toml"), "").unwrap();
+        std::fs::write(root.join(".plow.toml"), "").unwrap();
         let exit = run_init(&config_opts(root, true));
         assert_eq!(exit, ExitCode::from(2));
     }
@@ -1174,7 +1169,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         run_init(&config_opts(root, false));
-        let content = std::fs::read_to_string(root.join(".fallowrc.json")).unwrap();
+        let content = std::fs::read_to_string(root.join(".plowrc.json")).unwrap();
         let parsed = parse_jsonc_config(&content);
         assert!(parsed.is_object());
         assert!(parsed["$schema"].is_string());
@@ -1186,7 +1181,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         run_init(&config_opts(root, false));
-        let content = std::fs::read_to_string(root.join(".fallowrc.json")).unwrap();
+        let content = std::fs::read_to_string(root.join(".plowrc.json")).unwrap();
         let parsed = parse_jsonc_config(&content);
         assert_eq!(
             parsed["duplicates"]["minOccurrences"], 3,
@@ -1199,7 +1194,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         run_init(&config_opts(root, true));
-        let content = std::fs::read_to_string(root.join("fallow.toml")).unwrap();
+        let content = std::fs::read_to_string(root.join("plow.toml")).unwrap();
         assert!(
             content.contains("minOccurrences = 3"),
             "fresh installs default minOccurrences to 3 to hide pair-only noise"
@@ -1211,8 +1206,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         run_init(&config_opts(root, true));
-        assert!(!root.join(".fallowrc.json").exists());
-        assert!(root.join("fallow.toml").exists());
+        assert!(!root.join(".plowrc.json").exists());
+        assert!(root.join("plow.toml").exists());
     }
 
     #[test]
@@ -1220,15 +1215,15 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         run_init(&config_opts(root, false));
-        assert!(!root.join("fallow.toml").exists());
-        assert!(root.join(".fallowrc.json").exists());
+        assert!(!root.join("plow.toml").exists());
+        assert!(root.join(".plowrc.json").exists());
     }
 
     #[test]
     fn init_existing_config_blocks_both_formats() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        std::fs::write(root.join(".fallowrc.json"), "{}").unwrap();
+        std::fs::write(root.join(".plowrc.json"), "{}").unwrap();
         assert_eq!(run_init(&config_opts(root, false)), ExitCode::from(2));
         assert_eq!(run_init(&config_opts(root, true)), ExitCode::from(2));
     }
@@ -1244,13 +1239,13 @@ mod tests {
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(content.contains("# AGENTS.md"));
         assert!(content.contains("Project Overview"));
-        assert!(content.contains("fallow audit --format json --quiet"));
+        assert!(content.contains("plow audit --format json --quiet"));
         // The task-to-command matrix renders into the scaffolded guide.
         assert!(content.contains("When the agent is about to"));
-        assert!(content.contains("fallow dead-code --trace <file>:<export>"));
+        assert!(content.contains("plow dead-code --trace <file>:<export>"));
         assert!(content.contains("<!-- generated:task-matrix:start -->"));
-        assert!(!root.join(".fallowrc.json").exists());
-        assert!(!root.join("fallow.toml").exists());
+        assert!(!root.join(".plowrc.json").exists());
+        assert!(!root.join("plow.toml").exists());
     }
 
     #[test]
@@ -1342,7 +1337,7 @@ mod tests {
         );
         assert!(
             content.contains(
-                "<!-- fallow init prefilled these from package.json; confirm before relying on them -->"
+                "<!-- plow init prefilled these from package.json; confirm before relying on them -->"
             ),
             "Provenance comment"
         );
@@ -1471,7 +1466,7 @@ mod tests {
         );
         // No provenance comment when nothing was prefilled.
         assert!(
-            !content.contains("fallow init prefilled"),
+            !content.contains("plow init prefilled"),
             "No provenance comment for empty project"
         );
     }
@@ -1527,13 +1522,13 @@ mod tests {
         let hook_path = root.join(".git/hooks/pre-commit");
         assert!(hook_path.exists());
         let content = std::fs::read_to_string(&hook_path).unwrap();
-        assert!(content.contains("fallow audit"));
-        assert!(content.contains("fallow audit --base \"$BASE\" --quiet"));
+        assert!(content.contains("plow audit"));
+        assert!(content.contains("plow audit --base \"$BASE\" --quiet"));
         assert!(content.contains(GIT_HOOK_MARKER));
         assert!(content.contains("@{upstream}"));
         assert!(content.contains("git merge-base \"$UPSTREAM\" HEAD"));
         assert!(content.contains("BASE=\"main\""));
-        assert!(content.contains("command -v fallow"));
+        assert!(content.contains("command -v plow"));
         assert!(content.contains("gate=new-only"));
         assert!(content.contains("\n  BASE=\""));
     }
@@ -1548,7 +1543,7 @@ mod tests {
         let content = std::fs::read_to_string(root.join(".git/hooks/pre-commit")).unwrap();
         assert!(content.contains("BASE=\"develop\""));
         assert!(!content.contains("--base develop"));
-        assert!(content.contains("fallow audit --base \"$BASE\" --quiet"));
+        assert!(content.contains("plow audit --base \"$BASE\" --quiet"));
     }
 
     #[test]
@@ -1566,7 +1561,7 @@ mod tests {
         assert!(content.contains(GIT_HOOK_MARKER));
         assert!(content.contains("@{upstream}"));
         assert!(content.contains("git merge-base \"$UPSTREAM\" HEAD"));
-        assert!(content.contains("fallow audit --base \"$BASE\" --quiet"));
+        assert!(content.contains("plow audit --base \"$BASE\" --quiet"));
     }
 
     #[test]
@@ -1583,11 +1578,11 @@ mod tests {
     fn existing_hook_hint_includes_resolution_block() {
         let hint = existing_hook_hint(".git/hooks/pre-commit", "main");
         assert!(hint.contains(".git/hooks/pre-commit already exists"));
-        assert!(hint.contains("command -v fallow"));
+        assert!(hint.contains("command -v plow"));
         assert!(hint.contains("@{upstream}"));
         assert!(hint.contains("git merge-base \"$UPSTREAM\" HEAD"));
         assert!(hint.contains("BASE=\"main\""));
-        assert!(hint.contains("fallow audit --base \"$BASE\" --quiet"));
+        assert!(hint.contains("plow audit --base \"$BASE\" --quiet"));
     }
 
     #[test]
@@ -1599,7 +1594,7 @@ mod tests {
         assert!(hint.contains("@{upstream}"));
         assert!(hint.contains("git merge-base \"$UPSTREAM\" HEAD"));
         assert!(hint.contains("BASE=\"develop\""));
-        assert!(hint.contains("fallow audit --base \"$BASE\" --quiet"));
+        assert!(hint.contains("plow audit --base \"$BASE\" --quiet"));
     }
 
     #[test]
@@ -1704,12 +1699,12 @@ mod tests {
     }
 
     #[test]
-    fn init_creates_gitignore_with_fallow_entry() {
+    fn init_creates_gitignore_with_plow_entry() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         run_init(&config_opts(root, false));
         let content = std::fs::read_to_string(root.join(".gitignore")).unwrap();
-        assert!(content.contains(".fallow/"));
+        assert!(content.contains(".plow/"));
     }
 
     #[test]
@@ -1720,27 +1715,27 @@ mod tests {
         run_init(&config_opts(root, false));
         let content = std::fs::read_to_string(root.join(".gitignore")).unwrap();
         assert!(content.starts_with("node_modules/\n"));
-        assert!(content.contains(".fallow/"));
+        assert!(content.contains(".plow/"));
     }
 
     #[test]
     fn init_does_not_duplicate_gitignore_entry() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        std::fs::write(root.join(".gitignore"), "node_modules/\n.fallow/\n").unwrap();
+        std::fs::write(root.join(".gitignore"), "node_modules/\n.plow/\n").unwrap();
         run_init(&config_opts(root, false));
         let content = std::fs::read_to_string(root.join(".gitignore")).unwrap();
-        assert_eq!(content.matches(".fallow").count(), 1);
+        assert_eq!(content.matches(".plow").count(), 1);
     }
 
     #[test]
-    fn init_recognizes_fallow_without_trailing_slash() {
+    fn init_recognizes_plow_without_trailing_slash() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        std::fs::write(root.join(".gitignore"), ".fallow\n").unwrap();
+        std::fs::write(root.join(".gitignore"), ".plow\n").unwrap();
         run_init(&config_opts(root, false));
         let content = std::fs::read_to_string(root.join(".gitignore")).unwrap();
-        assert_eq!(content.matches(".fallow").count(), 1);
+        assert_eq!(content.matches(".plow").count(), 1);
     }
 
     #[test]
@@ -1750,7 +1745,7 @@ mod tests {
         std::fs::write(root.join(".gitignore"), "node_modules/").unwrap();
         run_init(&config_opts(root, false));
         let content = std::fs::read_to_string(root.join(".gitignore")).unwrap();
-        assert_eq!(content, "node_modules/\n.fallow/\n");
+        assert_eq!(content, "node_modules/\n.plow/\n");
     }
 
     #[test]
@@ -1759,7 +1754,7 @@ mod tests {
         let root = dir.path();
         run_init(&config_opts(root, true));
         let content = std::fs::read_to_string(root.join(".gitignore")).unwrap();
-        assert!(content.contains(".fallow/"));
+        assert!(content.contains(".plow/"));
     }
 
     #[test]
@@ -2049,7 +2044,7 @@ mod tests {
         let exit = run_init(&config_opts(root, false));
         assert_eq!(exit, ExitCode::SUCCESS);
 
-        let content = std::fs::read_to_string(root.join(".fallowrc.json")).unwrap();
+        let content = std::fs::read_to_string(root.join(".plowrc.json")).unwrap();
         let parsed = parse_jsonc_config(&content);
         assert!(parsed["workspaces"]["packages"].is_array());
         assert!(content.contains("{ts,tsx,js,jsx}"));
@@ -2068,7 +2063,7 @@ mod tests {
         let exit = run_init(&config_opts(root, true));
         assert_eq!(exit, ExitCode::SUCCESS);
 
-        let content = std::fs::read_to_string(root.join("fallow.toml")).unwrap();
+        let content = std::fs::read_to_string(root.join("plow.toml")).unwrap();
         assert!(content.contains("[workspaces]"));
         assert!(content.contains("apps/*"));
     }
@@ -2077,21 +2072,21 @@ mod tests {
 #[cfg(test)]
 mod config_schema_drift {
     //! Drift gate for the committed root `schema.json` (the JSON Schema for
-    //! `.fallowrc.json`). Mirrors the `docs/output-schema.json` drift gate in
+    //! `.plowrc.json`). Mirrors the `docs/output-schema.json` drift gate in
     //! `crates/cli/src/bin/schema_emit.rs` but is much simpler because
-    //! `schema.json` is fully derived from `FallowConfig::json_schema()` with
+    //! `schema.json` is fully derived from `PlowConfig::json_schema()` with
     //! no hand-written sections to merge: the committed file is the literal
-    //! pretty-printed serde_json output of [`FallowConfig::json_schema`].
+    //! pretty-printed serde_json output of [`PlowConfig::json_schema`].
     //!
     //! On failure, regenerate via:
-    //!   cargo run --bin fallow -- config-schema > schema.json
+    //!   cargo run --bin plow -- config-schema > schema.json
     //!
     //! The CI `rust:` paths-filter at `.github/workflows/ci.yml` also matches
     //! edits to `schema.json` directly, so a PR that only touches the
     //! committed schema still triggers this test rather than slipping through
     //! to a push-time failure on main.
 
-    use super::FallowConfig;
+    use super::PlowConfig;
 
     /// Embedded copy of the committed root `schema.json`. `include_str!`
     /// paths must resolve INSIDE the crates.io tarball, which contains only
@@ -2107,10 +2102,10 @@ mod config_schema_drift {
 
     #[test]
     fn schema_json_in_sync_with_derived() {
-        let derived = FallowConfig::json_schema();
+        let derived = PlowConfig::json_schema();
         assert!(
             derived.is_object(),
-            "FallowConfig::json_schema() did not produce a JSON object (got `{derived}`); \
+            "PlowConfig::json_schema() did not produce a JSON object (got `{derived}`); \
              schemars or serde_json may have regressed."
         );
 
@@ -2120,7 +2115,7 @@ mod config_schema_drift {
         assert_eq!(
             committed, derived,
             "\nschema.json drift detected.\n\
-             Regenerate: cargo run --bin fallow -- config-schema > schema.json\n\
+             Regenerate: cargo run --bin plow -- config-schema > schema.json\n\
              Usually triggered by edits to #[derive(JsonSchema)] structs or /// docstrings in crates/config/.\n"
         );
     }

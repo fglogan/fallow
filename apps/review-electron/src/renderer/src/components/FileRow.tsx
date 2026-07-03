@@ -20,7 +20,7 @@ type Props = {
 };
 
 const FAN_IN_TONE: Record<SignalTone, string> = {
-  hub: "text-fallow-amber",
+  hub: "text-plow-amber",
   elevated: "text-foreground",
   muted: "text-muted-foreground",
 };
@@ -93,10 +93,10 @@ export const FileRow = ({
           </span>
           <span className="flex shrink-0 items-center gap-1.5">
             {signal.security && (
-              <ShieldAlert className="size-3.5 text-fallow-red" aria-label="security taint" />
+              <ShieldAlert className="size-3.5 text-plow-red" aria-label="security taint" />
             )}
             {signal.riskZone && (
-              <TriangleAlert className="size-3.5 text-fallow-amber" aria-label="risk zone" />
+              <TriangleAlert className="size-3.5 text-plow-amber" aria-label="risk zone" />
             )}
             {signal.fanIn >= 2 && (
               <span

@@ -33,22 +33,22 @@ const parseInteger = (value, fallback) => {
 
 const parseArgs = (argv) => {
   const args = {
-    targetVersion: process.env.FALLOW_TELEMETRY_TARGET_VERSION ?? null,
+    targetVersion: process.env.PLOW_TELEMETRY_TARGET_VERSION ?? null,
     fixturePath: null,
-    windowDays: parseInteger(process.env.FALLOW_TELEMETRY_WINDOW_DAYS, DEFAULT_WINDOW_DAYS),
+    windowDays: parseInteger(process.env.PLOW_TELEMETRY_WINDOW_DAYS, DEFAULT_WINDOW_DAYS),
     minTargetEvents: parseInteger(
-      process.env.FALLOW_TELEMETRY_MIN_TARGET_EVENTS,
+      process.env.PLOW_TELEMETRY_MIN_TARGET_EVENTS,
       DEFAULT_MIN_TARGET_EVENTS,
     ),
     minBaselineEvents: parseInteger(
-      process.env.FALLOW_TELEMETRY_MIN_BASELINE_EVENTS,
+      process.env.PLOW_TELEMETRY_MIN_BASELINE_EVENTS,
       DEFAULT_MIN_BASELINE_EVENTS,
     ),
     maxDeltaPoints: parseNumber(
-      process.env.FALLOW_TELEMETRY_MAX_DELTA_POINTS,
+      process.env.PLOW_TELEMETRY_MAX_DELTA_POINTS,
       DEFAULT_MAX_DELTA_POINTS,
     ),
-    maxMultiplier: parseNumber(process.env.FALLOW_TELEMETRY_MAX_MULTIPLIER, DEFAULT_MAX_MULTIPLIER),
+    maxMultiplier: parseNumber(process.env.PLOW_TELEMETRY_MAX_MULTIPLIER, DEFAULT_MAX_MULTIPLIER),
   };
 
   for (let index = 2; index < argv.length; index += 1) {
@@ -93,7 +93,7 @@ const parseArgs = (argv) => {
   }
 
   if (typeof args.targetVersion !== "string" || args.targetVersion.trim() === "") {
-    throw new Error("missing target version, pass --target or FALLOW_TELEMETRY_TARGET_VERSION");
+    throw new Error("missing target version, pass --target or PLOW_TELEMETRY_TARGET_VERSION");
   }
   return { ...args, targetVersion: normalizeVersion(args.targetVersion) };
 };
@@ -221,13 +221,13 @@ export const computeGate = ({
 
 const telemetryQuery = (windowDays) => `
 SELECT
-  properties.fallow_version AS version,
+  properties.plow_version AS version,
   count() AS events,
   sum(if(event = 'workflow_failed', 1, 0)) AS failed
 FROM events
 WHERE timestamp >= now() - INTERVAL ${windowDays} DAY
   AND event IN ('workflow_completed', 'workflow_failed')
-  AND notEmpty(toString(properties.fallow_version))
+  AND notEmpty(toString(properties.plow_version))
 GROUP BY version
 ORDER BY events DESC
 LIMIT 200
@@ -242,7 +242,7 @@ const posthogRows = async ({ host, projectId, apiKey, windowDays }) => {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      name: "fallow release telemetry fail-rate gate",
+      name: "plow release telemetry fail-rate gate",
       query: {
         kind: "HogQLQuery",
         query: telemetryQuery(windowDays),

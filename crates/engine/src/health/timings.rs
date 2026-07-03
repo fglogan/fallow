@@ -2,7 +2,7 @@
 
 use std::time::Instant;
 
-use fallow_output::HealthTimings;
+use plow_output::HealthTimings;
 
 use super::HealthExecutionOptions;
 

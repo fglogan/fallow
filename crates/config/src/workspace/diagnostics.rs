@@ -3,9 +3,9 @@
 //! Surfaces malformed `package.json`, unreachable glob matches, missing
 //! tsconfig references, undeclared workspaces, and source files skipped during
 //! source discovery as typed [`WorkspaceDiagnostic`] values. Each diagnostic
-//! also emits a deduplicated `tracing::warn!` so users running fallow with
-//! default tracing filters see the cause of "fallow doesn't see my package" or
-//! "fallow ate all my memory."
+//! also emits a deduplicated `tracing::warn!` so users running plow with
+//! default tracing filters see the cause of "plow doesn't see my package" or
+//! "plow ate all my memory."
 //!
 //! Repeated `GlobMatchedNoPackageJson` diagnostics are aggregated by glob
 //! pattern at emission time so a wide glob matching hundreds of package-less
@@ -23,10 +23,10 @@ use std::sync::{Mutex, OnceLock};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-pub use fallow_types::workspace::{WorkspaceDiagnostic, WorkspaceDiagnosticKind};
+pub use plow_types::workspace::{WorkspaceDiagnostic, WorkspaceDiagnosticKind};
 
 /// Render `path` relative to `root` with forward slashes. Mirrors the private
-/// helper of the same name in `fallow_types::workspace`, kept here for the
+/// helper of the same name in `plow_types::workspace`, kept here for the
 /// aggregated stderr-message builders ([`build_glob_group_message`] and
 /// [`build_tsconfig_refs_message`]) so the per-instance and aggregated message
 /// surfaces format paths identically (the forward-slash normalisation is
@@ -57,7 +57,7 @@ impl std::fmt::Display for WorkspaceLoadError {
             Self::MalformedRootPackageJson { path, error } => write!(
                 f,
                 "root package.json at '{}' is not valid JSON ({error}). \
-                 Fix the syntax before re-running fallow.",
+                 Fix the syntax before re-running plow.",
                 path.display()
             ),
         }
@@ -192,7 +192,7 @@ pub(super) fn emit_diagnostics(root: &Path, diagnostics: &[WorkspaceDiagnostic])
 
     for plan in plan_warnings(root, diagnostics) {
         if should_emit(plan.dedupe_key) {
-            tracing::warn!("fallow: {}", plan.message);
+            tracing::warn!("plow: {}", plan.message);
         }
     }
 }
@@ -292,8 +292,8 @@ pub fn capture_workspace_warnings<F: FnOnce() -> R, R>(body: F) -> (R, Vec<Works
 /// canonical root. Populated by callers that run
 /// [`super::discover_workspaces_with_diagnostics`] and (after config load
 /// completes) by the analysis pipeline's `find_undeclared_workspaces_*`
-/// pass. Consumers (`fallow list --workspaces`, the JSON envelope on
-/// `fallow dead-code / dupes / health`) read via [`workspace_diagnostics_for`].
+/// pass. Consumers (`plow list --workspaces`, the JSON envelope on
+/// `plow dead-code / dupes / health`) read via [`workspace_diagnostics_for`].
 ///
 /// Canonicalisation matches the dedupe-key canonicalisation in
 /// [`plan_warnings`]: two callers on the same physical root coalesce, and
@@ -419,7 +419,7 @@ pub fn workspace_diagnostics_for(root: &Path) -> Vec<WorkspaceDiagnostic> {
 
 /// Directories that are conventionally NOT workspace packages even when a
 /// glob like `packages/*` matches them. Mirrors pnpm/npm/yarn behavior of
-/// silently filtering these out, and extends fallow's existing
+/// silently filtering these out, and extends plow's existing
 /// `should_skip_workspace_scan_dir` list with build artifacts and tooling
 /// caches.
 #[must_use]
@@ -518,7 +518,7 @@ mod tests {
     fn stash_preserves_appended_skipped_large_file_across_restash() {
         // Unique synthetic root so the process-global registry does not collide
         // with sibling tests.
-        let root = Path::new("/fallow-test-1086-stash-preserve");
+        let root = Path::new("/plow-test-1086-stash-preserve");
         let undeclared = || {
             WorkspaceDiagnostic::new(
                 root,
@@ -564,7 +564,7 @@ mod tests {
 
     #[test]
     fn clear_source_discovery_drops_stale_skip_keeps_workspace_diag() {
-        let root = Path::new("/fallow-test-1086-clear-stale");
+        let root = Path::new("/plow-test-1086-clear-stale");
         stash_workspace_diagnostics(
             root,
             vec![WorkspaceDiagnostic::new(

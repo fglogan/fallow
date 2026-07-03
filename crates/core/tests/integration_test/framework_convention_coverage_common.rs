@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use fallow_core::results::AnalysisResults;
+use plow_core::results::AnalysisResults;
 
 pub fn normalize_path(root: &Path, path: &Path) -> String {
     path.strip_prefix(root)

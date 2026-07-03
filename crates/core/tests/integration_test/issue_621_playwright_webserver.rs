@@ -7,7 +7,7 @@ use super::common::{create_config, fixture_path};
 fn web_server_command_credits_deps_and_script_entries() {
     let root = fixture_path("issue-621-playwright-webserver-command");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_deps: Vec<&str> = results
         .unused_dependencies
@@ -54,7 +54,7 @@ fn web_server_command_credits_deps_and_script_entries() {
 fn nested_web_server_command_resolves_from_config_dir() {
     let root = fixture_path("issue-621-playwright-webserver-nested");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files: Vec<String> = results
         .unused_files

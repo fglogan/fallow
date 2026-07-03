@@ -10,7 +10,7 @@ use super::common::{create_config, fixture_path};
 fn flags_dead_lit_state_but_credits_used_state_and_property() {
     let root = fixture_path("lit-unused-state");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let flagged: Vec<&str> = results
         .unused_class_members

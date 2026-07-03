@@ -1,12 +1,12 @@
-use fallow_config::{FallowConfig, OutputFormat, RulesConfig, Severity};
+use plow_config::{OutputFormat, PlowConfig, RulesConfig, Severity};
 
 use crate::common::fixture_path;
 
 /// Resolve a fixture with both route-tree rules pinned to `warn` (both default
 /// to `error`; pinning here keeps severity off the finding-vec assertions). The
 /// detectors are gated on the project declaring `next`.
-fn fixture_config(name: &str) -> fallow_config::ResolvedConfig {
-    FallowConfig {
+fn fixture_config(name: &str) -> plow_config::ResolvedConfig {
+    PlowConfig {
         rules: RulesConfig {
             route_collision: Severity::Warn,
             dynamic_segment_name_conflict: Severity::Warn,
@@ -17,7 +17,7 @@ fn fixture_config(name: &str) -> fallow_config::ResolvedConfig {
     .resolve(fixture_path(name), OutputFormat::Human, 4, true, true, None)
 }
 
-fn collision_urls(results: &fallow_core::results::AnalysisResults) -> Vec<String> {
+fn collision_urls(results: &plow_core::results::AnalysisResults) -> Vec<String> {
     let mut urls: Vec<String> = results
         .route_collisions
         .iter()
@@ -35,9 +35,9 @@ fn norm(path: &std::path::Path) -> String {
 #[test]
 fn route_group_pages_collide_at_shared_url() {
     let config = fixture_config("nextjs-route-tree");
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
-    let about: Vec<&fallow_core::results::RouteCollisionFinding> = results
+    let about: Vec<&plow_core::results::RouteCollisionFinding> = results
         .route_collisions
         .iter()
         .filter(|c| c.collision.url == "/about")
@@ -69,7 +69,7 @@ fn route_handlers_collide_via_groups() {
     // Diego's BFF case: two `route.ts` handlers under different groups both own
     // /api/health. page and route share one URL-owner namespace.
     let config = fixture_config("nextjs-route-tree");
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let api = results
         .route_collisions
@@ -90,7 +90,7 @@ fn parallel_slot_siblings_do_not_collide() {
     // both resolve to /members but render side-by-side in different parallel
     // slots, so they must NOT be reported as a collision.
     let config = fixture_config("nextjs-route-tree");
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         !results
@@ -105,7 +105,7 @@ fn parallel_slot_siblings_do_not_collide() {
 #[test]
 fn single_page_does_not_collide() {
     let config = fixture_config("nextjs-route-tree");
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         !results
@@ -121,9 +121,9 @@ fn single_page_does_not_collide() {
 fn dynamic_segment_name_conflict_at_shared_position() {
     // app/blog/[id] and app/blog/[slug] use different slug names at /blog.
     let config = fixture_config("nextjs-route-tree");
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
-    let blog: Vec<&fallow_core::results::DynamicSegmentNameConflictFinding> = results
+    let blog: Vec<&plow_core::results::DynamicSegmentNameConflictFinding> = results
         .dynamic_segment_name_conflicts
         .iter()
         .filter(|c| c.conflict.position == "/blog")
@@ -151,7 +151,7 @@ fn dynamic_segment_conflict_is_not_a_route_collision() {
     // [id] vs [slug] differ by name, so route-collision keeps them distinct
     // (the conflict is the dynamic-segment-name-conflict detector's job).
     let config = fixture_config("nextjs-route-tree");
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         !results
@@ -169,7 +169,7 @@ fn monorepo_two_apps_sharing_url_do_not_collide() {
     // both resolve to /about but are independent Next apps with separate builds,
     // so they must NOT collide.
     let config = fixture_config("nextjs-route-tree-monorepo");
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.route_collisions.is_empty(),
@@ -192,9 +192,9 @@ fn gate_arms_when_next_is_declared_only_in_a_sub_app() {
     // a monorepo whose Next dep is confined to a bundled demo/example app is
     // still in scope. The finding anchors to the demo app, never packages/ui.
     let config = fixture_config("nextjs-route-tree-monorepo-subapp");
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
-    let blog: Vec<&fallow_core::results::DynamicSegmentNameConflictFinding> = results
+    let blog: Vec<&plow_core::results::DynamicSegmentNameConflictFinding> = results
         .dynamic_segment_name_conflicts
         .iter()
         .filter(|c| c.conflict.position == "/blog")
@@ -222,7 +222,7 @@ fn gate_arms_when_next_is_declared_only_in_a_sub_app() {
 #[test]
 fn no_findings_when_next_is_absent() {
     let config = fixture_config("nextjs-route-tree-no-next");
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.route_collisions.is_empty() && results.dynamic_segment_name_conflicts.is_empty(),

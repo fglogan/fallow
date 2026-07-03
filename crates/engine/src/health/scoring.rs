@@ -1,4 +1,4 @@
-use fallow_output::{DirectCallerEvidence, DirectCallerSymbolEvidence, FileHealthScore};
+use plow_output::{DirectCallerEvidence, DirectCallerSymbolEvidence, FileHealthScore};
 
 use super::coverage_gaps::compute_coverage_gaps;
 pub(super) use super::coverage_gaps::{CoverageGapData, build_coverage_summary};
@@ -28,13 +28,13 @@ pub struct FileScoreOutput {
     /// opt-in `prop-drilling` rule is off, since the detector populates no chains
     /// then). Drives the small capped health penalty, the hotspot surface, and
     /// the `health --format json` `prop_drilling_chains` array.
-    pub prop_drilling_chains: Vec<fallow_types::output_dead_code::PropDrillingChainFinding>,
+    pub prop_drilling_chains: Vec<plow_types::output_dead_code::PropDrillingChainFinding>,
     /// Per-component render fan-in (JSX render SITES + distinct parents) plus the
     /// precomputed concentration aggregates, cloned from the analysis results.
     /// `None` on non-React projects. Descriptive blast-radius signal: feeds the
     /// `VitalSigns` render-fan-in aggregates and the hotspot/react drill-down
     /// `rendered in N places` line (keyed back to file paths).
-    pub render_fan_in: Option<fallow_types::results::RenderFanInMetric>,
+    pub render_fan_in: Option<plow_types::results::RenderFanInMetric>,
     /// Per-path snapshot of analysis findings, used to recompute
     /// [`crate::vital_signs::AnalysisCounts`] for an arbitrary subset of files
     /// (workspace scoping, `--group-by` partitioning).
@@ -56,7 +56,7 @@ pub struct FileScoreOutput {
 }
 
 struct FileScoreOutputParts<'a> {
-    graph: &'a fallow_graph::graph::ModuleGraph,
+    graph: &'a plow_graph::graph::ModuleGraph,
     file_paths: &'a rustc_hash::FxHashMap<crate::discover::FileId, &'a std::path::PathBuf>,
     results: &'a crate::results::AnalysisResults,
     scores: Vec<FileHealthScore>,
@@ -209,7 +209,7 @@ pub(super) fn aggregate_complexity(module: &crate::source::ModuleInfo) -> (u32, 
 /// value exports.
 pub(super) fn compute_dead_code_ratio(
     path: &std::path::Path,
-    exports: &[fallow_graph::graph::ExportSymbol],
+    exports: &[plow_graph::graph::ExportSymbol],
     unused_files: &rustc_hash::FxHashSet<&std::path::Path>,
     unused_exports_by_path: &rustc_hash::FxHashMap<&std::path::Path, usize>,
 ) -> f64 {
@@ -252,7 +252,7 @@ pub(super) const CRAP_THRESHOLD: f64 = 30.0;
     reason = "cc * cc + cc matches the CRAP formula specification"
 )]
 fn compute_crap_scores_binary(
-    complexity: &[fallow_types::extract::FunctionComplexity],
+    complexity: &[plow_types::extract::FunctionComplexity],
     is_test_reachable: bool,
 ) -> (f64, usize) {
     if complexity.is_empty() {
@@ -290,14 +290,14 @@ pub struct PerFunctionCrap {
     /// Bucketed coverage tier used to drive action selection in JSON output.
     /// Populated for both Istanbul-matched and estimated CRAP rows so the
     /// action builder does not need to recompute reachability state.
-    pub coverage_tier: fallow_output::CoverageTier,
+    pub coverage_tier: plow_output::CoverageTier,
     /// Provenance of `coverage_tier` and `crap`. `Istanbul` for direct fnMap
     /// matches, `Estimated` for graph-based fallbacks against the finding's
     /// own file, `EstimatedComponentInherited` for the template-inherit path
     /// that reaches the owning Angular `.component.ts` through the inverse
     /// `templateUrl` edge. Threaded into `ComplexityViolation.coverage_source` by
     /// `merge_crap_findings`.
-    pub coverage_source: fallow_output::CoverageSource,
+    pub coverage_source: plow_output::CoverageSource,
 }
 
 /// Istanbul CRAP result: CRAP scores plus match statistics.
@@ -323,7 +323,7 @@ pub(super) struct IstanbulCrapResult {
 ///
 /// Returns CRAP scores and match statistics for reporting.
 fn compute_crap_scores_istanbul(
-    complexity: &[fallow_types::extract::FunctionComplexity],
+    complexity: &[plow_types::extract::FunctionComplexity],
     file_coverage: Option<&IstanbulFileCoverage>,
     is_test_reachable: bool,
 ) -> IstanbulCrapResult {
@@ -374,15 +374,15 @@ fn compute_crap_scores_istanbul(
     reason = "cc * cc + cc matches the CRAP formula specification"
 )]
 fn crap_for_function(
-    f: &fallow_types::extract::FunctionComplexity,
+    f: &plow_types::extract::FunctionComplexity,
     file_coverage: Option<&IstanbulFileCoverage>,
     is_test_reachable: bool,
     matched: &mut usize,
 ) -> (
     f64,
     Option<f64>,
-    fallow_output::CoverageTier,
-    fallow_output::CoverageSource,
+    plow_output::CoverageTier,
+    plow_output::CoverageSource,
 ) {
     let cc = f64::from(f.cyclomatic);
     let lookup = file_coverage.and_then(|fc| fc.lookup(f.name.as_str(), f.line, f.col));
@@ -391,23 +391,23 @@ fn crap_for_function(
         return (
             crap_formula(cc, cov_pct),
             Some(cov_pct),
-            fallow_output::CoverageTier::from_pct(cov_pct),
-            fallow_output::CoverageSource::Istanbul,
+            plow_output::CoverageTier::from_pct(cov_pct),
+            plow_output::CoverageSource::Istanbul,
         );
     }
     if is_test_reachable {
         return (
             cc,
             None,
-            fallow_output::CoverageTier::from_pct(INDIRECT_TEST_COVERAGE_ESTIMATE),
-            fallow_output::CoverageSource::Estimated,
+            plow_output::CoverageTier::from_pct(INDIRECT_TEST_COVERAGE_ESTIMATE),
+            plow_output::CoverageSource::Estimated,
         );
     }
     (
         cc * cc + cc,
         None,
-        fallow_output::CoverageTier::None,
-        fallow_output::CoverageSource::Estimated,
+        plow_output::CoverageTier::None,
+        plow_output::CoverageSource::Estimated,
     )
 }
 
@@ -438,10 +438,10 @@ pub(super) struct EstimatedCrapResult {
 }
 
 fn compute_crap_scores_estimated(
-    complexity: &[fallow_types::extract::FunctionComplexity],
+    complexity: &[plow_types::extract::FunctionComplexity],
     test_referenced_exports: &rustc_hash::FxHashSet<String>,
     is_test_reachable: bool,
-    coverage_source: fallow_output::CoverageSource,
+    coverage_source: plow_output::CoverageSource,
 ) -> EstimatedCrapResult {
     if complexity.is_empty() {
         return EstimatedCrapResult {
@@ -473,7 +473,7 @@ fn compute_crap_scores_estimated(
             col: f.col,
             crap: crap_rounded,
             coverage_pct: None,
-            coverage_tier: fallow_output::CoverageTier::from_pct(estimated_coverage),
+            coverage_tier: plow_output::CoverageTier::from_pct(estimated_coverage),
             coverage_source,
         });
     }
@@ -530,7 +530,7 @@ pub(super) struct TemplateInheritContext {
 /// Templates with zero non-test `.ts` owners receive no entry, so the
 /// scoring loop falls through to the existing path unchanged.
 fn build_template_inherit_contexts(
-    graph: &fallow_graph::graph::ModuleGraph,
+    graph: &plow_graph::graph::ModuleGraph,
     module_by_id: &rustc_hash::FxHashMap<crate::discover::FileId, &crate::source::ModuleInfo>,
     file_paths: &rustc_hash::FxHashMap<crate::discover::FileId, &std::path::PathBuf>,
 ) -> rustc_hash::FxHashMap<crate::discover::FileId, TemplateInheritContext> {
@@ -546,8 +546,8 @@ fn build_template_inherit_contexts(
 }
 
 fn template_inherit_context_for_node(
-    node: &fallow_graph::graph::ModuleNode,
-    graph: &fallow_graph::graph::ModuleGraph,
+    node: &plow_graph::graph::ModuleNode,
+    graph: &plow_graph::graph::ModuleGraph,
     module_by_id: &rustc_hash::FxHashMap<crate::discover::FileId, &crate::source::ModuleInfo>,
     file_paths: &rustc_hash::FxHashMap<crate::discover::FileId, &std::path::PathBuf>,
 ) -> Option<TemplateInheritContext> {
@@ -559,7 +559,7 @@ fn template_inherit_context_for_node(
 }
 
 fn is_template_inherit_candidate(
-    node: &fallow_graph::graph::ModuleNode,
+    node: &plow_graph::graph::ModuleNode,
     module_by_id: &rustc_hash::FxHashMap<crate::discover::FileId, &crate::source::ModuleInfo>,
     file_paths: &rustc_hash::FxHashMap<crate::discover::FileId, &std::path::PathBuf>,
 ) -> bool {
@@ -583,7 +583,7 @@ fn is_template_inherit_candidate(
 
 fn template_inherit_context_from_importers(
     importers: &[crate::discover::FileId],
-    graph: &fallow_graph::graph::ModuleGraph,
+    graph: &plow_graph::graph::ModuleGraph,
     module_by_id: &rustc_hash::FxHashMap<crate::discover::FileId, &crate::source::ModuleInfo>,
     file_paths: &rustc_hash::FxHashMap<crate::discover::FileId, &std::path::PathBuf>,
 ) -> Option<TemplateInheritContext> {
@@ -619,10 +619,10 @@ fn template_inherit_context_from_importers(
 
 fn template_owner<'a>(
     importer_id: crate::discover::FileId,
-    graph: &'a fallow_graph::graph::ModuleGraph,
+    graph: &'a plow_graph::graph::ModuleGraph,
     module_by_id: &rustc_hash::FxHashMap<crate::discover::FileId, &crate::source::ModuleInfo>,
     file_paths: &'a rustc_hash::FxHashMap<crate::discover::FileId, &std::path::PathBuf>,
-) -> Option<(&'a fallow_graph::graph::ModuleNode, &'a std::path::PathBuf)> {
+) -> Option<(&'a plow_graph::graph::ModuleNode, &'a std::path::PathBuf)> {
     let owner_node = graph.modules.get(importer_id.0 as usize)?;
     let owner_path = *file_paths.get(&importer_id)?;
     if !is_template_owner_path(owner_path) || graph.test_entry_points.contains(&importer_id) {
@@ -650,8 +650,8 @@ fn is_template_owner_path(path: &std::path::Path) -> bool {
 /// This is the per-function signal: if an export named "foo" has a reference from
 /// a test-reachable module, the function "foo" is considered directly tested.
 fn build_test_referenced_exports(
-    exports: &[fallow_graph::graph::ExportSymbol],
-    graph_modules: &[fallow_graph::graph::ModuleNode],
+    exports: &[plow_graph::graph::ExportSymbol],
+    graph_modules: &[plow_graph::graph::ModuleNode],
 ) -> rustc_hash::FxHashSet<String> {
     let mut set = rustc_hash::FxHashSet::default();
     for export in exports {
@@ -661,7 +661,7 @@ fn build_test_referenced_exports(
         let has_test_ref = export.references.iter().any(|reference| {
             graph_modules
                 .get(reference.from_file.0 as usize)
-                .is_some_and(fallow_graph::graph::ModuleNode::is_test_reachable)
+                .is_some_and(plow_graph::graph::ModuleNode::is_test_reachable)
         });
         if has_test_ref {
             set.insert(export.name.to_string());
@@ -671,7 +671,7 @@ fn build_test_referenced_exports(
 }
 
 fn collect_direct_callers(
-    graph: &fallow_graph::graph::ModuleGraph,
+    graph: &plow_graph::graph::ModuleGraph,
     file_paths: &rustc_hash::FxHashMap<crate::discover::FileId, &std::path::PathBuf>,
 ) -> rustc_hash::FxHashMap<std::path::PathBuf, Vec<DirectCallerEvidence>> {
     let mut callers_by_target = rustc_hash::FxHashMap::default();
@@ -730,14 +730,14 @@ const ANONYMOUS_FALLBACK_MAX_COLUMN_DRIFT: u32 = 16;
 /// derived from Istanbul `coverage-final.json`.
 pub struct IstanbulFileCoverage {
     /// Per-function coverage percentages, keyed by (name, line, col). Lines
-    /// are 1-based and columns are 0-based, matching both fallow's
+    /// are 1-based and columns are 0-based, matching both plow's
     /// `FunctionComplexity` positions and Istanbul `Position`s.
     ///
     /// Istanbul producers are not consistent about `FnEntry.line`: some use
     /// the declaration line, while others use the body start. The loader
     /// therefore indexes both the producer's effective line and
     /// `decl.start`, so multiline TypeScript signatures still match the
-    /// function start that fallow extracts.
+    /// function start that plow extracts.
     functions: rustc_hash::FxHashMap<(String, u32, u32), f64>,
 }
 
@@ -753,7 +753,7 @@ impl IstanbulFileCoverage {
     ///    Bail only if two candidates tie on distance, which would be
     ///    genuinely ambiguous.
     ///
-    /// Step 3 covers arrow-function exports where fallow extracts the binding
+    /// Step 3 covers arrow-function exports where plow extracts the binding
     /// identifier (`const myHandler = () => {...}` yields `myHandler`) while
     /// Istanbul records the function as anonymous. `load_istanbul_coverage`
     /// indexes declaration aliases so standard Istanbul producers still
@@ -864,7 +864,7 @@ pub(super) fn auto_detect_coverage(root: &std::path::Path) -> Option<std::path::
     candidates.into_iter().find(|p| p.is_file())
 }
 
-/// Resolve a relative path against the fallow project root. Returns `path`
+/// Resolve a relative path against the plow project root. Returns `path`
 /// unchanged when it is absolute or `project_root` is `None`. Matches the
 /// convention every other path-shaped CLI input uses, so a monorepo CI run
 /// invoked from the workspace root with `--root sub-project` finds
@@ -873,7 +873,7 @@ pub fn resolve_relative_to_root(
     path: &std::path::Path,
     project_root: Option<&std::path::Path>,
 ) -> std::path::PathBuf {
-    if fallow_types::path_util::is_absolute_path_any_platform(path) {
+    if plow_types::path_util::is_absolute_path_any_platform(path) {
         return path.to_path_buf();
     }
     match project_root {
@@ -979,7 +979,7 @@ fn effective_istanbul_fn_line(fn_entry: &oxc_coverage_instrument::FnEntry) -> u3
 
 /// Effective 0-based start column for an Istanbul function entry. `FnEntry`
 /// has no top-level `column` field, so we always read it off
-/// `decl.start.column`. Both fallow's `FunctionComplexity.col` and Istanbul's
+/// `decl.start.column`. Both plow's `FunctionComplexity.col` and Istanbul's
 /// `Position::column` are 0-based, so they match directly.
 fn effective_istanbul_fn_col(fn_entry: &oxc_coverage_instrument::FnEntry) -> u32 {
     fn_entry.decl.start.column
@@ -1065,7 +1065,7 @@ pub(super) fn compute_maintainability_index(
     fan_out: usize,
     lines: u32,
 ) -> f64 {
-    let dampening = (f64::from(lines) / fallow_output::MI_DENSITY_MIN_LINES).min(1.0);
+    let dampening = (f64::from(lines) / plow_output::MI_DENSITY_MIN_LINES).min(1.0);
     let fan_out_penalty = ((fan_out as f64).ln_1p() * 4.0).min(15.0);
     #[expect(
         clippy::suboptimal_flops,
@@ -1217,7 +1217,7 @@ pub(super) fn compute_file_scores(
 
 /// Read-only inputs threaded into the per-node file-score loop.
 struct FileScoreLoopCtx<'a> {
-    graph: &'a fallow_graph::graph::ModuleGraph,
+    graph: &'a plow_graph::graph::ModuleGraph,
     file_paths: &'a rustc_hash::FxHashMap<crate::discover::FileId, &'a std::path::PathBuf>,
     module_by_id: &'a rustc_hash::FxHashMap<crate::discover::FileId, &'a crate::source::ModuleInfo>,
     unused_files: &'a rustc_hash::FxHashSet<&'a std::path::Path>,
@@ -1291,7 +1291,7 @@ fn finalize_file_score_list(
 fn compute_one_file_score(
     acc: &mut FileScoreAccumulator,
     ctx: &FileScoreLoopCtx<'_>,
-    node: &fallow_graph::graph::ModuleNode,
+    node: &plow_graph::graph::ModuleNode,
     path: &std::path::Path,
 ) -> FileHealthScore {
     let fan_in = ctx
@@ -1351,7 +1351,7 @@ fn compute_one_file_score(
 /// Compute the rounded dead-code-ratio, complexity-density, and
 /// maintainability-index metrics for one file.
 fn compute_file_score_metrics(
-    node: &fallow_graph::graph::ModuleNode,
+    node: &plow_graph::graph::ModuleNode,
     path: &std::path::Path,
     ctx: &FileScoreLoopCtx<'_>,
     total_cyclomatic: u32,
@@ -1446,7 +1446,7 @@ fn build_template_inherit_provenance(
 
 fn record_entry_point(
     entry_points: &mut rustc_hash::FxHashSet<std::path::PathBuf>,
-    node: &fallow_graph::graph::ModuleNode,
+    node: &plow_graph::graph::ModuleNode,
     path: &std::path::Path,
 ) {
     if node.is_entry_point() {
@@ -1456,7 +1456,7 @@ fn record_entry_point(
 
 fn record_unused_file_export_names(
     path: &std::path::Path,
-    exports: &[fallow_graph::graph::ExportSymbol],
+    exports: &[plow_graph::graph::ExportSymbol],
     unused_files: &rustc_hash::FxHashSet<&std::path::Path>,
     unused_export_names: &mut rustc_hash::FxHashMap<std::path::PathBuf, Vec<String>>,
 ) {
@@ -1515,9 +1515,9 @@ impl FileScoreCrap {
 }
 
 fn compute_file_score_crap(
-    node: &fallow_graph::graph::ModuleNode,
+    node: &plow_graph::graph::ModuleNode,
     module: Option<&crate::source::ModuleInfo>,
-    graph: &fallow_graph::graph::ModuleGraph,
+    graph: &plow_graph::graph::ModuleGraph,
     template_inherit: Option<&TemplateInheritContext>,
     istanbul_coverage: Option<&IstanbulCoverage>,
     path: &std::path::Path,
@@ -1528,7 +1528,7 @@ fn compute_file_score_crap(
 
     let is_coverage_suppressed = crate::suppress::is_file_suppressed(
         &module.suppressions,
-        fallow_types::suppress::IssueKind::CoverageGaps,
+        plow_types::suppress::IssueKind::CoverageGaps,
     );
     let is_test_reachable = node.is_test_reachable() || is_coverage_suppressed;
     let resolution = resolve_crap_coverage(template_inherit, istanbul_coverage, path);
@@ -1553,7 +1553,7 @@ fn compute_template_inherited_crap(
         &module.complexity,
         &inherit_ctx.test_referenced_exports,
         inherit_ctx.is_test_reachable,
-        fallow_output::CoverageSource::EstimatedComponentInherited,
+        plow_output::CoverageSource::EstimatedComponentInherited,
     ))
 }
 
@@ -1571,8 +1571,8 @@ fn compute_istanbul_file_crap(
 
 fn compute_static_file_crap(
     module: &crate::source::ModuleInfo,
-    exports: &[fallow_graph::graph::ExportSymbol],
-    graph_modules: &[fallow_graph::graph::ModuleNode],
+    exports: &[plow_graph::graph::ExportSymbol],
+    graph_modules: &[plow_graph::graph::ModuleNode],
     is_test_reachable: bool,
 ) -> FileScoreCrap {
     let test_refs = build_test_referenced_exports(exports, graph_modules);
@@ -1580,7 +1580,7 @@ fn compute_static_file_crap(
         &module.complexity,
         &test_refs,
         is_test_reachable,
-        fallow_output::CoverageSource::Estimated,
+        plow_output::CoverageSource::Estimated,
     ))
 }
 
@@ -1603,7 +1603,7 @@ fn prepare_file_score_coverage_setup<'a>(
     modules: &'a [crate::source::ModuleInfo],
     file_paths: &rustc_hash::FxHashMap<crate::discover::FileId, &std::path::PathBuf>,
     results: &crate::results::AnalysisResults,
-    graph: &fallow_graph::graph::ModuleGraph,
+    graph: &plow_graph::graph::ModuleGraph,
     root: &std::path::Path,
 ) -> FileScoreCoverageSetup<'a> {
     let module_by_id: rustc_hash::FxHashMap<_, _> =
@@ -1703,7 +1703,7 @@ fn collect_unused_export_names(
 }
 
 fn build_analysis_counts_snapshot(
-    graph: &fallow_graph::graph::ModuleGraph,
+    graph: &plow_graph::graph::ModuleGraph,
     file_paths: &rustc_hash::FxHashMap<crate::discover::FileId, &std::path::PathBuf>,
     results: &crate::results::AnalysisResults,
     unused_deps: usize,
@@ -1904,7 +1904,7 @@ mod tests {
         let unused_files = rustc_hash::FxHashSet::default();
         let unused_map = rustc_hash::FxHashMap::default();
         let path = std::path::Path::new("/src/foo.ts");
-        let exports: Vec<fallow_graph::graph::ExportSymbol> = vec![];
+        let exports: Vec<plow_graph::graph::ExportSymbol> = vec![];
 
         let ratio = compute_dead_code_ratio(path, &exports, &unused_files, &unused_map);
         assert!((ratio).abs() < f64::EPSILON);
@@ -1917,7 +1917,7 @@ mod tests {
         let path = std::path::Path::new("/src/foo.ts");
         unused_files.insert(path);
         let unused_map = rustc_hash::FxHashMap::default();
-        let exports: Vec<fallow_graph::graph::ExportSymbol> = vec![];
+        let exports: Vec<plow_graph::graph::ExportSymbol> = vec![];
 
         let ratio = compute_dead_code_ratio(path, &exports, &unused_files, &unused_map);
         assert!((ratio - 1.0).abs() < f64::EPSILON);
@@ -1929,7 +1929,7 @@ mod tests {
         let path = std::path::Path::new("/src/foo.ts");
 
         let exports = vec![
-            fallow_graph::graph::ExportSymbol {
+            plow_graph::graph::ExportSymbol {
                 name: crate::source::ExportName::Named("a".into()),
                 is_type_only: false,
                 is_side_effect_used: false,
@@ -1939,7 +1939,7 @@ mod tests {
                 references: vec![],
                 members: vec![],
             },
-            fallow_graph::graph::ExportSymbol {
+            plow_graph::graph::ExportSymbol {
                 name: crate::source::ExportName::Named("b".into()),
                 is_type_only: false,
                 is_side_effect_used: false,
@@ -1949,7 +1949,7 @@ mod tests {
                 references: vec![],
                 members: vec![],
             },
-            fallow_graph::graph::ExportSymbol {
+            plow_graph::graph::ExportSymbol {
                 name: crate::source::ExportName::Named("c".into()),
                 is_type_only: false,
                 is_side_effect_used: false,
@@ -1959,7 +1959,7 @@ mod tests {
                 references: vec![],
                 members: vec![],
             },
-            fallow_graph::graph::ExportSymbol {
+            plow_graph::graph::ExportSymbol {
                 name: crate::source::ExportName::Named("MyType".into()),
                 is_type_only: true,
                 is_side_effect_used: false,
@@ -1984,7 +1984,7 @@ mod tests {
         let unused_files = rustc_hash::FxHashSet::default();
         let path = std::path::Path::new("/src/types.ts");
 
-        let exports = vec![fallow_graph::graph::ExportSymbol {
+        let exports = vec![plow_graph::graph::ExportSymbol {
             name: crate::source::ExportName::Named("Foo".into()),
             is_type_only: true,
             is_side_effect_used: false,
@@ -2160,7 +2160,7 @@ mod tests {
             has_dynamic_component_render: false,
             has_dynamic_dispatch: false,
             line_offsets: vec![0, 10, 20, 30, 40], // 5 lines
-            complexity: vec![fallow_types::extract::FunctionComplexity {
+            complexity: vec![plow_types::extract::FunctionComplexity {
                 name: "doStuff".into(),
                 line: 1,
                 col: 0,
@@ -2263,7 +2263,7 @@ mod tests {
             has_dynamic_dispatch: false,
             line_offsets: vec![0, 10, 20], // 3 lines
             complexity: vec![
-                fallow_types::extract::FunctionComplexity {
+                plow_types::extract::FunctionComplexity {
                     name: "a".into(),
                     line: 1,
                     col: 0,
@@ -2277,7 +2277,7 @@ mod tests {
                     source_hash: None,
                     contributions: Vec::new(),
                 },
-                fallow_types::extract::FunctionComplexity {
+                plow_types::extract::FunctionComplexity {
                     name: "b".into(),
                     line: 2,
                     col: 0,
@@ -2350,7 +2350,7 @@ mod tests {
         let path = std::path::Path::new("/src/foo.ts");
 
         let exports = vec![
-            fallow_graph::graph::ExportSymbol {
+            plow_graph::graph::ExportSymbol {
                 name: crate::source::ExportName::Named("a".into()),
                 is_type_only: false,
                 is_side_effect_used: false,
@@ -2360,7 +2360,7 @@ mod tests {
                 references: vec![],
                 members: vec![],
             },
-            fallow_graph::graph::ExportSymbol {
+            plow_graph::graph::ExportSymbol {
                 name: crate::source::ExportName::Named("b".into()),
                 is_type_only: false,
                 is_side_effect_used: false,
@@ -2385,7 +2385,7 @@ mod tests {
         let unused_files = rustc_hash::FxHashSet::default();
         let path = std::path::Path::new("/src/foo.ts");
 
-        let exports = vec![fallow_graph::graph::ExportSymbol {
+        let exports = vec![plow_graph::graph::ExportSymbol {
             name: crate::source::ExportName::Named("a".into()),
             is_type_only: false,
             is_side_effect_used: false,
@@ -2409,7 +2409,7 @@ mod tests {
         let unused_files = rustc_hash::FxHashSet::default();
         let path = std::path::Path::new("/src/clean.ts");
 
-        let exports = vec![fallow_graph::graph::ExportSymbol {
+        let exports = vec![plow_graph::graph::ExportSymbol {
             name: crate::source::ExportName::Named("used".into()),
             is_type_only: false,
             is_side_effect_used: false,
@@ -2487,8 +2487,8 @@ mod tests {
     fn build_test_graph(
         files: &[crate::discover::DiscoveredFile],
         entry_point_paths: &[std::path::PathBuf],
-        resolved_modules: &[fallow_graph::resolve::ResolvedModule],
-    ) -> fallow_graph::graph::ModuleGraph {
+        resolved_modules: &[plow_graph::resolve::ResolvedModule],
+    ) -> plow_graph::graph::ModuleGraph {
         let entry_points: Vec<crate::discover::EntryPoint> = entry_point_paths
             .iter()
             .map(|p| crate::discover::EntryPoint {
@@ -2496,14 +2496,14 @@ mod tests {
                 source: crate::discover::EntryPointSource::PackageJsonMain,
             })
             .collect();
-        fallow_graph::graph::ModuleGraph::build(resolved_modules, &entry_points, files)
+        plow_graph::graph::ModuleGraph::build(resolved_modules, &entry_points, files)
     }
 
     /// Helper to create a `ModuleInfo` with given complexity and line count.
     fn make_module_info(
         file_id: u32,
         line_count: usize,
-        functions: Vec<fallow_types::extract::FunctionComplexity>,
+        functions: Vec<plow_types::extract::FunctionComplexity>,
     ) -> crate::source::ModuleInfo {
         crate::source::ModuleInfo {
             file_id: crate::discover::FileId(file_id),
@@ -2695,7 +2695,7 @@ mod tests {
         let file_paths = rustc_hash::FxHashMap::default();
 
         let output = crate::DeadCodeAnalysisArtifacts {
-            results: fallow_types::results::AnalysisResults::default(),
+            results: plow_types::results::AnalysisResults::default(),
             timings: None,
             graph: Some(crate::module_graph::RetainedModuleGraph::from(graph)),
             modules: None,
@@ -2727,7 +2727,7 @@ mod tests {
         let file_paths = rustc_hash::FxHashMap::default();
 
         let output = crate::DeadCodeAnalysisArtifacts {
-            results: fallow_types::results::AnalysisResults::default(),
+            results: plow_types::results::AnalysisResults::default(),
             timings: None,
             graph: None,
             modules: None,
@@ -2760,10 +2760,10 @@ mod tests {
             size_bytes: 100,
         }];
 
-        let resolved_modules = vec![fallow_graph::resolve::ResolvedModule {
+        let resolved_modules = vec![plow_graph::resolve::ResolvedModule {
             file_id: crate::discover::FileId(0),
             path: path_a.clone(),
-            exports: vec![fallow_types::extract::ExportInfo {
+            exports: vec![plow_types::extract::ExportInfo {
                 name: crate::source::ExportName::Named("foo".into()),
                 local_name: None,
                 is_type_only: false,
@@ -2782,7 +2782,7 @@ mod tests {
         let modules = vec![make_module_info(
             0,
             10,
-            vec![fallow_types::extract::FunctionComplexity {
+            vec![plow_types::extract::FunctionComplexity {
                 name: "foo".into(),
                 line: 1,
                 col: 0,
@@ -2803,7 +2803,7 @@ mod tests {
         file_paths.insert(crate::discover::FileId(0), &files[0].path);
 
         let output = crate::DeadCodeAnalysisArtifacts {
-            results: fallow_types::results::AnalysisResults::default(),
+            results: plow_types::results::AnalysisResults::default(),
             timings: None,
             graph: Some(crate::module_graph::RetainedModuleGraph::from(graph)),
             modules: None,
@@ -2843,7 +2843,7 @@ mod tests {
             size_bytes: 50,
         }];
 
-        let resolved_modules = vec![fallow_graph::resolve::ResolvedModule {
+        let resolved_modules = vec![plow_graph::resolve::ResolvedModule {
             file_id: crate::discover::FileId(0),
             path: path_a.clone(),
             ..Default::default()
@@ -2858,7 +2858,7 @@ mod tests {
         file_paths.insert(crate::discover::FileId(0), &files[0].path);
 
         let output = crate::DeadCodeAnalysisArtifacts {
-            results: fallow_types::results::AnalysisResults::default(),
+            results: plow_types::results::AnalysisResults::default(),
             timings: None,
             graph: Some(crate::module_graph::RetainedModuleGraph::from(graph)),
             modules: None,
@@ -2897,12 +2897,12 @@ mod tests {
         ];
 
         let resolved_modules = vec![
-            fallow_graph::resolve::ResolvedModule {
+            plow_graph::resolve::ResolvedModule {
                 file_id: crate::discover::FileId(0),
                 path: path_a,
                 ..Default::default()
             },
-            fallow_graph::resolve::ResolvedModule {
+            plow_graph::resolve::ResolvedModule {
                 file_id: crate::discover::FileId(1),
                 path: path_b.clone(),
                 ..Default::default()
@@ -2915,7 +2915,7 @@ mod tests {
             make_module_info(
                 0,
                 10,
-                vec![fallow_types::extract::FunctionComplexity {
+                vec![plow_types::extract::FunctionComplexity {
                     name: "fn_a".into(),
                     line: 1,
                     col: 0,
@@ -2933,7 +2933,7 @@ mod tests {
             make_module_info(
                 1,
                 10,
-                vec![fallow_types::extract::FunctionComplexity {
+                vec![plow_types::extract::FunctionComplexity {
                     name: "fn_b".into(),
                     line: 1,
                     col: 0,
@@ -2960,7 +2960,7 @@ mod tests {
         changed.insert(path_b);
 
         let output = crate::DeadCodeAnalysisArtifacts {
-            results: fallow_types::results::AnalysisResults::default(),
+            results: plow_types::results::AnalysisResults::default(),
             timings: None,
             graph: Some(crate::module_graph::RetainedModuleGraph::from(graph)),
             modules: None,
@@ -3000,12 +3000,12 @@ mod tests {
         ];
 
         let resolved_modules = vec![
-            fallow_graph::resolve::ResolvedModule {
+            plow_graph::resolve::ResolvedModule {
                 file_id: crate::discover::FileId(0),
                 path: path_a.clone(),
                 ..Default::default()
             },
-            fallow_graph::resolve::ResolvedModule {
+            plow_graph::resolve::ResolvedModule {
                 file_id: crate::discover::FileId(1),
                 path: path_b,
                 ..Default::default()
@@ -3018,7 +3018,7 @@ mod tests {
             make_module_info(
                 0,
                 10,
-                vec![fallow_types::extract::FunctionComplexity {
+                vec![plow_types::extract::FunctionComplexity {
                     name: "complex_fn".into(),
                     line: 1,
                     col: 0,
@@ -3036,7 +3036,7 @@ mod tests {
             make_module_info(
                 1,
                 100,
-                vec![fallow_types::extract::FunctionComplexity {
+                vec![plow_types::extract::FunctionComplexity {
                     name: "simple_fn".into(),
                     line: 1,
                     col: 0,
@@ -3059,7 +3059,7 @@ mod tests {
         file_paths.insert(crate::discover::FileId(1), &files[1].path);
 
         let output = crate::DeadCodeAnalysisArtifacts {
-            results: fallow_types::results::AnalysisResults::default(),
+            results: plow_types::results::AnalysisResults::default(),
             timings: None,
             graph: Some(crate::module_graph::RetainedModuleGraph::from(graph)),
             modules: None,
@@ -3091,10 +3091,10 @@ mod tests {
             size_bytes: 100,
         }];
 
-        let resolved_modules = vec![fallow_graph::resolve::ResolvedModule {
+        let resolved_modules = vec![plow_graph::resolve::ResolvedModule {
             file_id: crate::discover::FileId(0),
             path: path_a.clone(),
-            exports: vec![fallow_types::extract::ExportInfo {
+            exports: vec![plow_types::extract::ExportInfo {
                 name: crate::source::ExportName::Named("orphan".into()),
                 local_name: None,
                 is_type_only: false,
@@ -3113,7 +3113,7 @@ mod tests {
         let modules = vec![make_module_info(
             0,
             10,
-            vec![fallow_types::extract::FunctionComplexity {
+            vec![plow_types::extract::FunctionComplexity {
                 name: "orphan".into(),
                 line: 1,
                 col: 0,
@@ -3133,10 +3133,10 @@ mod tests {
             rustc_hash::FxHashMap::default();
         file_paths.insert(crate::discover::FileId(0), &files[0].path);
 
-        let mut results = fallow_types::results::AnalysisResults::default();
+        let mut results = plow_types::results::AnalysisResults::default();
         results.unused_files.push(
-            fallow_types::output_dead_code::UnusedFileFinding::with_actions(
-                fallow_types::results::UnusedFile {
+            plow_types::output_dead_code::UnusedFileFinding::with_actions(
+                plow_types::results::UnusedFile {
                     path: path_a.clone(),
                 },
             ),
@@ -3182,7 +3182,7 @@ mod tests {
             size_bytes: 500,
         }];
 
-        let resolved_modules = vec![fallow_graph::resolve::ResolvedModule {
+        let resolved_modules = vec![plow_graph::resolve::ResolvedModule {
             file_id: crate::discover::FileId(0),
             path: path_a.clone(),
             ..Default::default()
@@ -3194,7 +3194,7 @@ mod tests {
             0,
             50,
             vec![
-                fallow_types::extract::FunctionComplexity {
+                plow_types::extract::FunctionComplexity {
                     name: "high".into(),
                     line: 1,
                     col: 0,
@@ -3208,7 +3208,7 @@ mod tests {
                     source_hash: None,
                     contributions: Vec::new(),
                 },
-                fallow_types::extract::FunctionComplexity {
+                plow_types::extract::FunctionComplexity {
                     name: "medium".into(),
                     line: 11,
                     col: 0,
@@ -3222,7 +3222,7 @@ mod tests {
                     source_hash: None,
                     contributions: Vec::new(),
                 },
-                fallow_types::extract::FunctionComplexity {
+                plow_types::extract::FunctionComplexity {
                     name: "low".into(),
                     line: 21,
                     col: 0,
@@ -3236,7 +3236,7 @@ mod tests {
                     source_hash: None,
                     contributions: Vec::new(),
                 },
-                fallow_types::extract::FunctionComplexity {
+                plow_types::extract::FunctionComplexity {
                     name: "trivial".into(),
                     line: 31,
                     col: 0,
@@ -3258,7 +3258,7 @@ mod tests {
         file_paths.insert(crate::discover::FileId(0), &files[0].path);
 
         let output = crate::DeadCodeAnalysisArtifacts {
-            results: fallow_types::results::AnalysisResults::default(),
+            results: plow_types::results::AnalysisResults::default(),
             timings: None,
             graph: Some(crate::module_graph::RetainedModuleGraph::from(graph)),
             modules: None,
@@ -3309,12 +3309,12 @@ mod tests {
         ];
 
         let resolved_modules = vec![
-            fallow_graph::resolve::ResolvedModule {
+            plow_graph::resolve::ResolvedModule {
                 file_id: crate::discover::FileId(0),
                 path: path_a.clone(),
                 ..Default::default()
             },
-            fallow_graph::resolve::ResolvedModule {
+            plow_graph::resolve::ResolvedModule {
                 file_id: crate::discover::FileId(1),
                 path: path_b.clone(),
                 ..Default::default()
@@ -3327,7 +3327,7 @@ mod tests {
             make_module_info(
                 0,
                 10,
-                vec![fallow_types::extract::FunctionComplexity {
+                vec![plow_types::extract::FunctionComplexity {
                     name: "fn_a".into(),
                     line: 1,
                     col: 0,
@@ -3345,7 +3345,7 @@ mod tests {
             make_module_info(
                 1,
                 10,
-                vec![fallow_types::extract::FunctionComplexity {
+                vec![plow_types::extract::FunctionComplexity {
                     name: "fn_b".into(),
                     line: 1,
                     col: 0,
@@ -3367,10 +3367,10 @@ mod tests {
         file_paths.insert(crate::discover::FileId(0), &files[0].path);
         file_paths.insert(crate::discover::FileId(1), &files[1].path);
 
-        let mut results = fallow_types::results::AnalysisResults::default();
+        let mut results = plow_types::results::AnalysisResults::default();
         results.circular_dependencies.push(
-            fallow_types::output_dead_code::CircularDependencyFinding::with_actions(
-                fallow_types::results::CircularDependency {
+            plow_types::output_dead_code::CircularDependencyFinding::with_actions(
+                plow_types::results::CircularDependency {
                     files: vec![path_a.clone(), path_b.clone()],
                     length: 2,
                     line: 1,
@@ -3422,11 +3422,11 @@ mod tests {
             size_bytes: 100,
         }];
 
-        let resolved_modules = vec![fallow_graph::resolve::ResolvedModule {
+        let resolved_modules = vec![plow_graph::resolve::ResolvedModule {
             file_id: crate::discover::FileId(0),
             path: path_a.clone(),
             exports: vec![
-                fallow_types::extract::ExportInfo {
+                plow_types::extract::ExportInfo {
                     name: crate::source::ExportName::Named("foo".into()),
                     local_name: None,
                     is_type_only: false,
@@ -3437,7 +3437,7 @@ mod tests {
                     is_side_effect_used: false,
                     super_class: None,
                 },
-                fallow_types::extract::ExportInfo {
+                plow_types::extract::ExportInfo {
                     name: crate::source::ExportName::Named("bar".into()),
                     local_name: None,
                     is_type_only: false,
@@ -3457,7 +3457,7 @@ mod tests {
         let mut module = make_module_info(
             0,
             10,
-            vec![fallow_types::extract::FunctionComplexity {
+            vec![plow_types::extract::FunctionComplexity {
                 name: "fn_a".into(),
                 line: 1,
                 col: 0,
@@ -3473,7 +3473,7 @@ mod tests {
             }],
         );
         module.exports = vec![
-            fallow_types::extract::ExportInfo {
+            plow_types::extract::ExportInfo {
                 name: crate::source::ExportName::Named("foo".into()),
                 local_name: None,
                 is_type_only: false,
@@ -3484,7 +3484,7 @@ mod tests {
                 is_side_effect_used: false,
                 super_class: None,
             },
-            fallow_types::extract::ExportInfo {
+            plow_types::extract::ExportInfo {
                 name: crate::source::ExportName::Named("bar".into()),
                 local_name: None,
                 is_type_only: false,
@@ -3502,10 +3502,10 @@ mod tests {
             rustc_hash::FxHashMap::default();
         file_paths.insert(crate::discover::FileId(0), &files[0].path);
 
-        let mut results = fallow_types::results::AnalysisResults::default();
+        let mut results = plow_types::results::AnalysisResults::default();
         results.unused_exports.push(
-            fallow_types::output_dead_code::UnusedExportFinding::with_actions(
-                fallow_types::results::UnusedExport {
+            plow_types::output_dead_code::UnusedExportFinding::with_actions(
+                plow_types::results::UnusedExport {
                     path: path_a.clone(),
                     export_name: "foo".into(),
                     is_type_only: false,
@@ -3517,8 +3517,8 @@ mod tests {
             ),
         );
         results.unused_types.push(
-            fallow_types::output_dead_code::UnusedTypeFinding::with_actions(
-                fallow_types::results::UnusedExport {
+            plow_types::output_dead_code::UnusedTypeFinding::with_actions(
+                plow_types::results::UnusedExport {
                     path: path_a,
                     export_name: "MyType".into(),
                     is_type_only: true,
@@ -3530,10 +3530,10 @@ mod tests {
             ),
         );
         results.unused_dependencies.push(
-            fallow_types::output_dead_code::UnusedDependencyFinding::with_actions(
-                fallow_types::results::UnusedDependency {
+            plow_types::output_dead_code::UnusedDependencyFinding::with_actions(
+                plow_types::results::UnusedDependency {
                     package_name: "lodash".into(),
-                    location: fallow_types::results::DependencyLocation::Dependencies,
+                    location: plow_types::results::DependencyLocation::Dependencies,
                     path: std::path::PathBuf::from("/package.json"),
                     line: 1,
                     used_in_workspaces: Vec::new(),
@@ -3579,11 +3579,11 @@ mod tests {
             size_bytes: 100,
         }];
 
-        let resolved_modules = vec![fallow_graph::resolve::ResolvedModule {
+        let resolved_modules = vec![plow_graph::resolve::ResolvedModule {
             file_id: crate::discover::FileId(0),
             path: path_a.clone(),
             exports: vec![
-                fallow_types::extract::ExportInfo {
+                plow_types::extract::ExportInfo {
                     name: crate::source::ExportName::Named("foo".into()),
                     local_name: None,
                     is_type_only: false,
@@ -3594,7 +3594,7 @@ mod tests {
                     is_side_effect_used: false,
                     super_class: None,
                 },
-                fallow_types::extract::ExportInfo {
+                plow_types::extract::ExportInfo {
                     name: crate::source::ExportName::Named("bar".into()),
                     local_name: None,
                     is_type_only: false,
@@ -3605,7 +3605,7 @@ mod tests {
                     is_side_effect_used: false,
                     super_class: None,
                 },
-                fallow_types::extract::ExportInfo {
+                plow_types::extract::ExportInfo {
                     name: crate::source::ExportName::Named("baz".into()),
                     local_name: None,
                     is_type_only: false,
@@ -3625,7 +3625,7 @@ mod tests {
         let mut module = make_module_info(
             0,
             10,
-            vec![fallow_types::extract::FunctionComplexity {
+            vec![plow_types::extract::FunctionComplexity {
                 name: "fn_a".into(),
                 line: 1,
                 col: 0,
@@ -3641,7 +3641,7 @@ mod tests {
             }],
         );
         module.exports = vec![
-            fallow_types::extract::ExportInfo {
+            plow_types::extract::ExportInfo {
                 name: crate::source::ExportName::Named("foo".into()),
                 local_name: None,
                 is_type_only: false,
@@ -3652,7 +3652,7 @@ mod tests {
                 is_side_effect_used: false,
                 super_class: None,
             },
-            fallow_types::extract::ExportInfo {
+            plow_types::extract::ExportInfo {
                 name: crate::source::ExportName::Named("bar".into()),
                 local_name: None,
                 is_type_only: false,
@@ -3670,11 +3670,11 @@ mod tests {
             rustc_hash::FxHashMap::default();
         file_paths.insert(crate::discover::FileId(0), &files[0].path);
 
-        let mut results = fallow_types::results::AnalysisResults::default();
+        let mut results = plow_types::results::AnalysisResults::default();
         for name in ["foo", "bar", "baz"] {
             results.unused_exports.push(
-                fallow_types::output_dead_code::UnusedExportFinding::with_actions(
-                    fallow_types::results::UnusedExport {
+                plow_types::output_dead_code::UnusedExportFinding::with_actions(
+                    plow_types::results::UnusedExport {
                         path: path_a.clone(),
                         export_name: name.into(),
                         is_type_only: false,
@@ -3719,7 +3719,7 @@ mod tests {
             size_bytes: 100,
         }];
 
-        let resolved_modules = vec![fallow_graph::resolve::ResolvedModule {
+        let resolved_modules = vec![plow_graph::resolve::ResolvedModule {
             file_id: crate::discover::FileId(0),
             path: path_a,
             ..Default::default()
@@ -3730,7 +3730,7 @@ mod tests {
         let modules = vec![make_module_info(
             0,
             10,
-            vec![fallow_types::extract::FunctionComplexity {
+            vec![plow_types::extract::FunctionComplexity {
                 name: "fn_a".into(),
                 line: 1,
                 col: 0,
@@ -3750,7 +3750,7 @@ mod tests {
             rustc_hash::FxHashMap::default();
 
         let output = crate::DeadCodeAnalysisArtifacts {
-            results: fallow_types::results::AnalysisResults::default(),
+            results: plow_types::results::AnalysisResults::default(),
             timings: None,
             graph: Some(crate::module_graph::RetainedModuleGraph::from(graph)),
             modules: None,
@@ -3780,7 +3780,7 @@ mod tests {
             size_bytes: 100,
         }];
 
-        let resolved_modules = vec![fallow_graph::resolve::ResolvedModule {
+        let resolved_modules = vec![plow_graph::resolve::ResolvedModule {
             file_id: crate::discover::FileId(0),
             path: path_a.clone(),
             ..Default::default()
@@ -3791,7 +3791,7 @@ mod tests {
         let modules = vec![make_module_info(
             0,
             100,
-            vec![fallow_types::extract::FunctionComplexity {
+            vec![plow_types::extract::FunctionComplexity {
                 name: "fn".into(),
                 line: 1,
                 col: 0,
@@ -3812,7 +3812,7 @@ mod tests {
         file_paths.insert(crate::discover::FileId(0), &files[0].path);
 
         let output = crate::DeadCodeAnalysisArtifacts {
-            results: fallow_types::results::AnalysisResults::default(),
+            results: plow_types::results::AnalysisResults::default(),
             timings: None,
             graph: Some(crate::module_graph::RetainedModuleGraph::from(graph)),
             modules: None,
@@ -3844,11 +3844,11 @@ mod tests {
             size_bytes: 100,
         }];
 
-        let resolved_modules = vec![fallow_graph::resolve::ResolvedModule {
+        let resolved_modules = vec![plow_graph::resolve::ResolvedModule {
             file_id: crate::discover::FileId(0),
             path: path_a.clone(),
             exports: vec![
-                fallow_types::extract::ExportInfo {
+                plow_types::extract::ExportInfo {
                     name: crate::source::ExportName::Named("a".into()),
                     local_name: None,
                     is_type_only: false,
@@ -3859,7 +3859,7 @@ mod tests {
                     is_side_effect_used: false,
                     super_class: None,
                 },
-                fallow_types::extract::ExportInfo {
+                plow_types::extract::ExportInfo {
                     name: crate::source::ExportName::Named("b".into()),
                     local_name: None,
                     is_type_only: false,
@@ -3870,7 +3870,7 @@ mod tests {
                     is_side_effect_used: false,
                     super_class: None,
                 },
-                fallow_types::extract::ExportInfo {
+                plow_types::extract::ExportInfo {
                     name: crate::source::ExportName::Named("T".into()),
                     local_name: None,
                     is_type_only: true,
@@ -3890,7 +3890,7 @@ mod tests {
         let modules = vec![make_module_info(
             0,
             10,
-            vec![fallow_types::extract::FunctionComplexity {
+            vec![plow_types::extract::FunctionComplexity {
                 name: "fn_a".into(),
                 line: 1,
                 col: 0,
@@ -3911,7 +3911,7 @@ mod tests {
         file_paths.insert(crate::discover::FileId(0), &files[0].path);
 
         let output = crate::DeadCodeAnalysisArtifacts {
-            results: fallow_types::results::AnalysisResults::default(),
+            results: plow_types::results::AnalysisResults::default(),
             timings: None,
             graph: Some(crate::module_graph::RetainedModuleGraph::from(graph)),
             modules: None,
@@ -3941,7 +3941,7 @@ mod tests {
             size_bytes: 100,
         }];
 
-        let resolved_modules = vec![fallow_graph::resolve::ResolvedModule {
+        let resolved_modules = vec![plow_graph::resolve::ResolvedModule {
             file_id: crate::discover::FileId(0),
             path: path_a.clone(),
             ..Default::default()
@@ -3952,7 +3952,7 @@ mod tests {
         let modules = vec![make_module_info(
             0,
             10,
-            vec![fallow_types::extract::FunctionComplexity {
+            vec![plow_types::extract::FunctionComplexity {
                 name: "trivial".into(),
                 line: 1,
                 col: 0,
@@ -3973,7 +3973,7 @@ mod tests {
         file_paths.insert(crate::discover::FileId(0), &files[0].path);
 
         let output = crate::DeadCodeAnalysisArtifacts {
-            results: fallow_types::results::AnalysisResults::default(),
+            results: plow_types::results::AnalysisResults::default(),
             timings: None,
             graph: Some(crate::module_graph::RetainedModuleGraph::from(graph)),
             modules: None,
@@ -3994,8 +3994,8 @@ mod tests {
         assert!(!result.top_complex_fns.contains_key(&path_a));
     }
 
-    fn make_fn_complexity(cyclomatic: u16) -> fallow_types::extract::FunctionComplexity {
-        fallow_types::extract::FunctionComplexity {
+    fn make_fn_complexity(cyclomatic: u16) -> plow_types::extract::FunctionComplexity {
+        plow_types::extract::FunctionComplexity {
             name: "test_fn".into(),
             line: 1,
             col: 0,
@@ -4136,7 +4136,7 @@ mod tests {
             &funcs,
             &refs,
             true,
-            fallow_output::CoverageSource::Estimated,
+            plow_output::CoverageSource::Estimated,
         );
         let (max, above) = (result.max_crap, result.above_threshold);
         assert!((max - 10.3).abs() < 0.1);
@@ -4151,7 +4151,7 @@ mod tests {
             &funcs,
             &refs,
             true,
-            fallow_output::CoverageSource::Estimated,
+            plow_output::CoverageSource::Estimated,
         );
         let (max, above) = (result.max_crap, result.above_threshold);
         assert!((max - 31.6).abs() < 0.1);
@@ -4166,7 +4166,7 @@ mod tests {
             &funcs,
             &refs,
             false,
-            fallow_output::CoverageSource::Estimated,
+            plow_output::CoverageSource::Estimated,
         );
         let (max, above) = (result.max_crap, result.above_threshold);
         assert!((max - 30.0).abs() < f64::EPSILON);
@@ -4182,7 +4182,7 @@ mod tests {
             &funcs,
             &refs,
             true,
-            fallow_output::CoverageSource::Estimated,
+            plow_output::CoverageSource::Estimated,
         );
         let (max, above) = (result.max_crap, result.above_threshold);
         assert!(max < 3.0);
@@ -4192,20 +4192,16 @@ mod tests {
     #[test]
     fn estimated_crap_empty() {
         let refs = rustc_hash::FxHashSet::default();
-        let result = compute_crap_scores_estimated(
-            &[],
-            &refs,
-            true,
-            fallow_output::CoverageSource::Estimated,
-        );
+        let result =
+            compute_crap_scores_estimated(&[], &refs, true, plow_output::CoverageSource::Estimated);
         let (max, above) = (result.max_crap, result.above_threshold);
         assert!((max).abs() < f64::EPSILON);
         assert_eq!(above, 0);
     }
 
-    fn make_export(name: &str, is_type_only: bool) -> fallow_graph::graph::ExportSymbol {
-        fallow_graph::graph::ExportSymbol {
-            name: fallow_types::extract::ExportName::Named(name.into()),
+    fn make_export(name: &str, is_type_only: bool) -> plow_graph::graph::ExportSymbol {
+        plow_graph::graph::ExportSymbol {
+            name: plow_types::extract::ExportName::Named(name.into()),
             is_type_only,
             is_side_effect_used: false,
             visibility: crate::source::VisibilityTag::None,
@@ -4617,16 +4613,16 @@ mod tests {
 
     #[test]
     fn build_test_refs_empty() {
-        let exports: Vec<fallow_graph::graph::ExportSymbol> = vec![];
-        let modules: Vec<fallow_graph::graph::ModuleNode> = vec![];
+        let exports: Vec<plow_graph::graph::ExportSymbol> = vec![];
+        let modules: Vec<plow_graph::graph::ModuleNode> = vec![];
         let refs = build_test_referenced_exports(&exports, &modules);
         assert!(refs.is_empty());
     }
 
     #[test]
     fn build_test_refs_empty_inputs() {
-        let exports: Vec<fallow_graph::graph::ExportSymbol> = vec![];
-        let modules: Vec<fallow_graph::graph::ModuleNode> = vec![];
+        let exports: Vec<plow_graph::graph::ExportSymbol> = vec![];
+        let modules: Vec<plow_graph::graph::ModuleNode> = vec![];
         let refs = build_test_referenced_exports(&exports, &modules);
         assert!(refs.is_empty());
     }
@@ -4673,7 +4669,7 @@ mod tests {
             &funcs,
             &refs,
             true,
-            fallow_output::CoverageSource::Estimated,
+            plow_output::CoverageSource::Estimated,
         );
         let (max, above) = (result.max_crap, result.above_threshold);
         assert!(max > 10.0);

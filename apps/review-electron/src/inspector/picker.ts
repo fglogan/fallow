@@ -4,7 +4,7 @@ export type PickerOptions = { bridgeUrl: string };
 
 /**
  * In-page element picker (injected into the app-under-review in dev). Highlights
- * the element under the cursor; on click, reads its `data-fallow-source` and
+ * the element under the cursor; on click, reads its `data-plow-source` and
  * POSTs the selection to the Electron host's localhost bridge. Returns a stop fn.
  */
 export const startInspector = ({ bridgeUrl }: PickerOptions): (() => void) => {

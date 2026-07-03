@@ -5,7 +5,7 @@ use oxc_ast::ast::*;
 use oxc_span::GetSpan;
 
 use crate::MemberAccess;
-use fallow_types::extract::{MemberInfo, MemberKind};
+use plow_types::extract::{MemberInfo, MemberKind};
 
 use super::{
     BindingTarget, ModuleInfoExtractor, extract_arrow_return_expr,

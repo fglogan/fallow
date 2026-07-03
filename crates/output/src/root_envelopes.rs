@@ -1,7 +1,7 @@
 //! Root JSON output envelopes shared by CLI and programmatic consumers.
 
-use fallow_types::envelope::{ElapsedMs, Meta, SchemaVersion, TelemetryMeta, ToolVersion};
-use fallow_types::output::NextStep;
+use plow_types::envelope::{ElapsedMs, Meta, SchemaVersion, TelemetryMeta, ToolVersion};
+use plow_types::output::NextStep;
 use serde::Serialize;
 
 /// JSON root envelope discriminator policy.
@@ -10,7 +10,7 @@ pub enum RootEnvelopeMode {
     Tagged,
 }
 
-/// Serialize a typed fallow root envelope with the requested discriminator
+/// Serialize a typed plow root envelope with the requested discriminator
 /// mode.
 ///
 /// # Errors
@@ -29,7 +29,7 @@ pub fn serialize_json_root_output<T: Serialize>(
 ///
 /// Use this for command surfaces whose runtime shape is already a typed
 /// envelope struct and does not need to pass through the schema-only
-/// [`FallowOutput`] enum just to get a top-level `kind`.
+/// [`PlowOutput`] enum just to get a top-level `kind`.
 ///
 /// # Errors
 ///
@@ -45,7 +45,7 @@ pub fn serialize_named_json_output<T: Serialize>(
     Ok(value)
 }
 
-/// Serialize a typed `fallow audit --format json` envelope with the standard
+/// Serialize a typed `plow audit --format json` envelope with the standard
 /// root discriminator policy.
 ///
 /// # Errors
@@ -78,7 +78,7 @@ where
     Ok(value)
 }
 
-/// Serialize a typed bare `fallow --format json` combined envelope with the
+/// Serialize a typed bare `plow --format json` combined envelope with the
 /// standard root discriminator policy.
 ///
 /// # Errors
@@ -136,10 +136,10 @@ pub fn attach_telemetry_meta(value: &mut serde_json::Value, analysis_run_id: Opt
     }
 }
 
-/// `fallow audit --format json` envelope.
+/// `plow audit --format json` envelope.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(feature = "schema", schemars(title = "fallow audit --format json"))]
+#[cfg_attr(feature = "schema", schemars(title = "plow audit --format json"))]
 pub struct AuditOutput<Verdict, Summary, Attribution, DeadCode, Duplication, Complexity> {
     pub schema_version: SchemaVersion,
     pub version: ToolVersion,
@@ -148,8 +148,8 @@ pub struct AuditOutput<Verdict, Summary, Attribution, DeadCode, Duplication, Com
     pub changed_files_count: u32,
     pub base_ref: String,
     /// Human-readable provenance of `base_ref`, e.g. `merge-base with
-    /// origin/main`, `local main`, or `FALLOW_AUDIT_BASE=upstream/main`.
-    /// Present when the base was auto-detected or set via `FALLOW_AUDIT_BASE`;
+    /// origin/main`, `local main`, or `PLOW_AUDIT_BASE=upstream/main`.
+    /// Present when the base was auto-detected or set via `PLOW_AUDIT_BASE`;
     /// absent for an explicit `--base` (the ref the user typed is already
     /// self-describing).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -183,12 +183,12 @@ pub enum AuditCommand {
     Audit,
 }
 
-/// Bare `fallow --format json` envelope.
+/// Bare `plow --format json` envelope.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
     feature = "schema",
-    schemars(title = "fallow --format json (bare, combined)")
+    schemars(title = "plow --format json (bare, combined)")
 )]
 pub struct CombinedOutput<Check, Dupes, Health> {
     pub schema_version: SchemaVersion,
@@ -222,8 +222,8 @@ pub struct CombinedMeta {
     pub telemetry: Option<TelemetryMeta>,
 }
 
-/// Typed root of every fallow JSON envelope shape that serializes as a JSON
-/// object and participates in the documented `FallowOutput` contract. The
+/// Typed root of every plow JSON envelope shape that serializes as a JSON
+/// object and participates in the documented `PlowOutput` contract. The
 /// schema derived from this enum drives the document-root `oneOf` in
 /// `docs/output-schema.json`.
 ///
@@ -236,19 +236,19 @@ pub struct CombinedMeta {
 ///   (`#[serde(transparent)]`) per the Code Climate / GitLab Code Quality
 ///   spec; `#[serde(tag = ...)]` cannot internally tag a non-object
 ///   variant and wrapping the array would break the spec. The root schema
-///   carries it as a sibling `oneOf` branch alongside `FallowOutput`.
+///   carries it as a sibling `oneOf` branch alongside `PlowOutput`.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
     feature = "schema",
-    schemars(title = "fallow --format json (typed root)")
+    schemars(title = "plow --format json (typed root)")
 )]
 #[serde(tag = "kind")]
 #[allow(
     dead_code,
     reason = "some variants are schema-emit only, but runtime roots serialize through this enum where practical"
 )]
-pub enum FallowOutput<
+pub enum PlowOutput<
     Audit,
     Explain,
     Inspect,
@@ -276,89 +276,89 @@ pub enum FallowOutput<
     WalkthroughGuide,
     WalkthroughValidation,
 > {
-    /// `fallow audit --format json`.
+    /// `plow audit --format json`.
     #[serde(rename = "audit")]
     Audit(Audit),
-    /// `fallow explain <issue-type> --format json`.
+    /// `plow explain <issue-type> --format json`.
     #[serde(rename = "explain")]
     Explain(Explain),
-    /// `fallow inspect --format json`.
+    /// `plow inspect --format json`.
     #[serde(rename = "inspect_target")]
     Inspect(Inspect),
-    /// `fallow trace <symbol> --format json`.
+    /// `plow trace <symbol> --format json`.
     #[serde(rename = "trace")]
     Trace(Trace),
-    /// `fallow --format review-github` / `--format review-gitlab`.
+    /// `plow --format review-github` / `--format review-gitlab`.
     #[serde(rename = "review-envelope")]
     ReviewEnvelope(ReviewEnvelope),
-    /// `fallow ci reconcile-review --format json`.
+    /// `plow ci reconcile-review --format json`.
     #[serde(rename = "review-reconcile")]
     ReviewReconcile(ReviewReconcile),
-    /// `fallow coverage setup --json`.
+    /// `plow coverage setup --json`.
     #[serde(rename = "coverage-setup")]
     CoverageSetup(CoverageSetup),
-    /// `fallow coverage analyze --format json`.
+    /// `plow coverage analyze --format json`.
     #[serde(rename = "coverage-analyze")]
     CoverageAnalyze(CoverageAnalyze),
-    /// `fallow list --boundaries --format json`.
+    /// `plow list --boundaries --format json`.
     #[serde(rename = "list-boundaries")]
     ListBoundaries(ListBoundaries),
-    /// `fallow workspaces --format json`.
+    /// `plow workspaces --format json`.
     #[serde(rename = "list-workspaces")]
     Workspaces(Workspaces),
-    /// `fallow health --format json`.
+    /// `plow health --format json`.
     #[serde(rename = "health")]
     Health(Health),
-    /// `fallow dupes --format json`.
+    /// `plow dupes --format json`.
     #[serde(rename = "dupes")]
     Dupes(Dupes),
-    /// `fallow dead-code --format json --group-by <mode>`.
+    /// `plow dead-code --format json --group-by <mode>`.
     #[serde(rename = "dead-code-grouped")]
     CheckGrouped(CheckGrouped),
-    /// `fallow impact --format json`.
+    /// `plow impact --format json`.
     #[serde(rename = "impact")]
     Impact(Impact),
-    /// `fallow impact --all --format json`.
+    /// `plow impact --all --format json`.
     #[serde(rename = "impact-cross-repo")]
     ImpactCrossRepo(ImpactCrossRepo),
-    /// `fallow security --summary --format json`.
+    /// `plow security --summary --format json`.
     #[serde(rename = "security")]
     SecuritySummary(SecuritySummary),
-    /// `fallow security --format json`.
+    /// `plow security --format json`.
     #[serde(rename = "security")]
     Security(Security),
-    /// `fallow security survivors --format json`.
+    /// `plow security survivors --format json`.
     #[serde(rename = "security-survivors")]
     SecuritySurvivors(SecuritySurvivors),
-    /// `fallow security blind-spots --format json`.
+    /// `plow security blind-spots --format json`.
     #[serde(rename = "security-blind-spots")]
     SecurityBlindSpots(SecurityBlindSpots),
-    /// `fallow dead-code --format json`.
+    /// `plow dead-code --format json`.
     #[serde(rename = "dead-code")]
     Check(Check),
-    /// Bare `fallow --format json`.
+    /// Bare `plow --format json`.
     #[serde(rename = "combined")]
     Combined(Combined),
-    /// `fallow flags --format json`.
+    /// `plow flags --format json`.
     #[serde(rename = "feature-flags")]
     FeatureFlags(FeatureFlags),
-    /// `fallow audit --brief --format json`.
+    /// `plow audit --brief --format json`.
     #[serde(rename = "audit-brief")]
     AuditBrief(AuditBrief),
-    /// `fallow decision-surface --format json`.
+    /// `plow decision-surface --format json`.
     #[serde(rename = "decision-surface")]
     DecisionSurface(DecisionSurface),
-    /// `fallow review --walkthrough-guide --format json`.
+    /// `plow review --walkthrough-guide --format json`.
     #[serde(rename = "review-walkthrough-guide")]
     WalkthroughGuide(WalkthroughGuide),
-    /// `fallow review --walkthrough-file --format json`.
+    /// `plow review --walkthrough-file --format json`.
     #[serde(rename = "review-walkthrough-validation")]
     WalkthroughValidation(WalkthroughValidation),
 }
 
 #[cfg(test)]
 mod tests {
-    use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
+    use plow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
     use serde_json::json;
 
     use super::*;

@@ -9,7 +9,7 @@ use super::common::{create_config, fixture_path};
 fn rspress_theme_virtual_module_is_not_unlisted_or_unresolved() {
     let root = fixture_path("issue-756-rspress-theme");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unlisted: Vec<&str> = results
         .unlisted_dependencies

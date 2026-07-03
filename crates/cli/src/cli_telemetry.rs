@@ -1,6 +1,6 @@
 use std::process::ExitCode;
 
-use fallow_config::OutputFormat;
+use plow_config::OutputFormat;
 
 use super::{Cli, Command, setup_tracing};
 use crate::cli_format::FormatConfig;

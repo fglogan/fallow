@@ -1,5 +1,5 @@
 use super::{HealthOptions, coverage_intelligence, scoring};
-use fallow_output::{
+use plow_output::{
     ComplexityViolation, HealthReport, HealthSummary, HotspotEntry, HotspotSummary,
     LargeFunctionEntry, RefactoringTarget, TargetThresholds,
 };
@@ -7,7 +7,7 @@ use fallow_output::{
 pub(super) struct HealthReportAssembly {
     pub(super) report_coverage_gaps: bool,
     pub(super) findings: Vec<ComplexityViolation>,
-    pub(super) threshold_overrides: Vec<fallow_output::ThresholdOverrideState>,
+    pub(super) threshold_overrides: Vec<plow_output::ThresholdOverrideState>,
     pub(super) files_analyzed: usize,
     pub(super) total_functions: usize,
     pub(super) total_above_threshold: usize,
@@ -16,17 +16,17 @@ pub(super) struct HealthReportAssembly {
     pub(super) max_crap: f64,
     pub(super) files_scored: Option<usize>,
     pub(super) average_maintainability: Option<f64>,
-    pub(super) vital_signs: fallow_output::VitalSigns,
-    pub(super) health_score: Option<fallow_output::HealthScore>,
+    pub(super) vital_signs: plow_output::VitalSigns,
+    pub(super) health_score: Option<plow_output::HealthScore>,
     pub(super) score_output: Option<scoring::FileScoreOutput>,
     pub(super) hotspots: Vec<HotspotEntry>,
     pub(super) hotspot_summary: Option<HotspotSummary>,
     pub(super) targets: Vec<RefactoringTarget>,
     pub(super) target_thresholds: Option<TargetThresholds>,
-    pub(super) health_trend: Option<fallow_output::HealthTrend>,
+    pub(super) health_trend: Option<plow_output::HealthTrend>,
     pub(super) has_istanbul_coverage: bool,
-    pub(super) runtime_coverage: Option<fallow_output::RuntimeCoverageReport>,
-    pub(super) framework_health: Option<fallow_output::FrameworkHealthDiagnostics>,
+    pub(super) runtime_coverage: Option<plow_output::RuntimeCoverageReport>,
+    pub(super) framework_health: Option<plow_output::FrameworkHealthDiagnostics>,
     pub(super) large_functions: Vec<LargeFunctionEntry>,
     pub(super) sev_critical: usize,
     pub(super) sev_high: usize,
@@ -55,7 +55,7 @@ struct HealthSummaryAssembly<'a> {
 /// Assemble the final `HealthReport` from all computed data.
 pub(super) fn assemble_health_report(
     opts: &HealthOptions<'_>,
-    action_ctx: &fallow_output::HealthActionContext,
+    action_ctx: &plow_output::HealthActionContext,
     assembly: HealthReportAssembly,
 ) -> HealthReport {
     // The summary reads the assembly by reference (scalars, findings, and the
@@ -97,7 +97,7 @@ fn build_summary_from_assembly(
 /// Consume the assembly and the precomputed summary into the final report.
 fn build_health_report(
     opts: &HealthOptions<'_>,
-    action_ctx: &fallow_output::HealthActionContext,
+    action_ctx: &plow_output::HealthActionContext,
     assembly: HealthReportAssembly,
     summary: HealthSummary,
 ) -> HealthReport {
@@ -152,12 +152,12 @@ fn build_health_report(
 
 /// Score-output-derived report sections built before the struct assembly.
 struct ReportPrelude {
-    coverage_gaps: Option<fallow_output::CoverageGaps>,
-    prop_drilling_chains: Vec<fallow_types::output_dead_code::PropDrillingChainFinding>,
+    coverage_gaps: Option<plow_output::CoverageGaps>,
+    prop_drilling_chains: Vec<plow_types::output_dead_code::PropDrillingChainFinding>,
     render_fan_in_top: rustc_hash::FxHashMap<std::path::PathBuf, (String, u32)>,
-    file_scores: Vec<fallow_output::FileHealthScore>,
-    report_hotspots: Vec<fallow_output::HotspotEntry>,
-    report_hotspot_summary: Option<fallow_output::HotspotSummary>,
+    file_scores: Vec<plow_output::FileHealthScore>,
+    report_hotspots: Vec<plow_output::HotspotEntry>,
+    report_hotspot_summary: Option<plow_output::HotspotSummary>,
 }
 
 /// Build the score-output-derived report sections, consuming `score_output`,
@@ -165,8 +165,8 @@ struct ReportPrelude {
 fn compute_report_prelude(
     opts: &HealthOptions<'_>,
     score_output: Option<super::scoring::FileScoreOutput>,
-    hotspots: Vec<fallow_output::HotspotEntry>,
-    hotspot_summary: Option<fallow_output::HotspotSummary>,
+    hotspots: Vec<plow_output::HotspotEntry>,
+    hotspot_summary: Option<plow_output::HotspotSummary>,
     report_coverage_gaps: bool,
 ) -> ReportPrelude {
     let coverage_gaps = build_report_coverage_gaps(report_coverage_gaps, score_output.as_ref());
@@ -200,7 +200,7 @@ fn compute_report_prelude(
 fn build_prop_drilling_chains(
     opts: &HealthOptions<'_>,
     score_output: Option<&super::scoring::FileScoreOutput>,
-) -> Vec<fallow_types::output_dead_code::PropDrillingChainFinding> {
+) -> Vec<plow_types::output_dead_code::PropDrillingChainFinding> {
     if opts.score_only_output {
         Vec::new()
     } else {
@@ -213,21 +213,21 @@ fn build_prop_drilling_chains(
 /// Pieces consumed by the `HealthReport` struct literal builder.
 struct HealthReportStructParts {
     summary: HealthSummary,
-    threshold_overrides: Vec<fallow_output::ThresholdOverrideState>,
-    vital_signs: fallow_output::VitalSigns,
-    health_score: Option<fallow_output::HealthScore>,
+    threshold_overrides: Vec<plow_output::ThresholdOverrideState>,
+    vital_signs: plow_output::VitalSigns,
+    health_score: Option<plow_output::HealthScore>,
     findings: Vec<ComplexityViolation>,
-    file_scores: Vec<fallow_output::FileHealthScore>,
-    coverage_gaps: Option<fallow_output::CoverageGaps>,
-    prop_drilling_chains: Vec<fallow_types::output_dead_code::PropDrillingChainFinding>,
-    report_hotspots: Vec<fallow_output::HotspotEntry>,
-    report_hotspot_summary: Option<fallow_output::HotspotSummary>,
-    runtime_coverage: Option<fallow_output::RuntimeCoverageReport>,
-    large_functions: Vec<fallow_output::LargeFunctionEntry>,
-    targets: Vec<fallow_output::RefactoringTarget>,
-    target_thresholds: Option<fallow_output::TargetThresholds>,
-    health_trend: Option<fallow_output::HealthTrend>,
-    framework_health: Option<fallow_output::FrameworkHealthDiagnostics>,
+    file_scores: Vec<plow_output::FileHealthScore>,
+    coverage_gaps: Option<plow_output::CoverageGaps>,
+    prop_drilling_chains: Vec<plow_types::output_dead_code::PropDrillingChainFinding>,
+    report_hotspots: Vec<plow_output::HotspotEntry>,
+    report_hotspot_summary: Option<plow_output::HotspotSummary>,
+    runtime_coverage: Option<plow_output::RuntimeCoverageReport>,
+    large_functions: Vec<plow_output::LargeFunctionEntry>,
+    targets: Vec<plow_output::RefactoringTarget>,
+    target_thresholds: Option<plow_output::TargetThresholds>,
+    health_trend: Option<plow_output::HealthTrend>,
+    framework_health: Option<plow_output::FrameworkHealthDiagnostics>,
     render_fan_in_top: rustc_hash::FxHashMap<std::path::PathBuf, (String, u32)>,
 }
 
@@ -235,7 +235,7 @@ struct HealthReportStructParts {
 /// (unless score-only) filling `coverage_intelligence` from the built report.
 fn build_health_report_struct(
     opts: &HealthOptions<'_>,
-    action_ctx: &fallow_output::HealthActionContext,
+    action_ctx: &plow_output::HealthActionContext,
     parts: HealthReportStructParts,
 ) -> HealthReport {
     let mut report = HealthReport {
@@ -304,7 +304,7 @@ fn fill_coverage_intelligence(report: &mut HealthReport, opts: &HealthOptions<'_
 fn build_report_coverage_gaps(
     report_coverage_gaps: bool,
     score_output: Option<&super::scoring::FileScoreOutput>,
-) -> Option<fallow_output::CoverageGaps> {
+) -> Option<plow_output::CoverageGaps> {
     report_coverage_gaps.then(|| score_output.map(|o| o.coverage.report.clone()))?
 }
 
@@ -340,11 +340,11 @@ fn build_render_fan_in_top(
 
 fn report_hotspot_data(
     opts: &HealthOptions<'_>,
-    hotspots: Vec<fallow_output::HotspotEntry>,
-    hotspot_summary: Option<fallow_output::HotspotSummary>,
+    hotspots: Vec<plow_output::HotspotEntry>,
+    hotspot_summary: Option<plow_output::HotspotSummary>,
 ) -> (
-    Vec<fallow_output::HotspotEntry>,
-    Option<fallow_output::HotspotSummary>,
+    Vec<plow_output::HotspotEntry>,
+    Option<plow_output::HotspotSummary>,
 ) {
     if opts.hotspots {
         (hotspots, hotspot_summary)
@@ -414,12 +414,12 @@ fn summary_average_maintainability(
 fn summary_coverage_source_consistency(
     opts: &HealthOptions<'_>,
     findings: &[ComplexityViolation],
-) -> Option<fallow_output::CoverageSourceConsistency> {
+) -> Option<plow_output::CoverageSourceConsistency> {
     if opts.score_only_output || !opts.complexity {
         return None;
     }
 
-    fallow_output::summarize_coverage_source_consistency(
+    plow_output::summarize_coverage_source_consistency(
         findings
             .iter()
             .filter_map(|finding| finding.coverage_source),
@@ -430,7 +430,7 @@ fn summary_coverage_model(
     opts: &HealthOptions<'_>,
     report_coverage_gaps: bool,
     has_istanbul_coverage: bool,
-) -> Option<fallow_output::CoverageModel> {
+) -> Option<plow_output::CoverageModel> {
     if opts.score_only_output
         || !(opts.file_scores || report_coverage_gaps || opts.hotspots || opts.targets)
     {
@@ -438,9 +438,9 @@ fn summary_coverage_model(
     }
 
     Some(if has_istanbul_coverage {
-        fallow_output::CoverageModel::Istanbul
+        plow_output::CoverageModel::Istanbul
     } else {
-        fallow_output::CoverageModel::StaticEstimated
+        plow_output::CoverageModel::StaticEstimated
     })
 }
 
@@ -459,8 +459,8 @@ fn summary_istanbul_counts(
 
 fn build_report_threshold_overrides(
     opts: &HealthOptions<'_>,
-    threshold_overrides: Vec<fallow_output::ThresholdOverrideState>,
-) -> Vec<fallow_output::ThresholdOverrideState> {
+    threshold_overrides: Vec<plow_output::ThresholdOverrideState>,
+) -> Vec<plow_output::ThresholdOverrideState> {
     if opts.score_only_output {
         Vec::new()
     } else {
@@ -471,7 +471,7 @@ fn build_report_threshold_overrides(
 fn build_report_file_scores(
     opts: &HealthOptions<'_>,
     score_output: Option<super::scoring::FileScoreOutput>,
-) -> Vec<fallow_output::FileHealthScore> {
+) -> Vec<plow_output::FileHealthScore> {
     if opts.score_only_output || !opts.file_scores {
         return Vec::new();
     }
@@ -485,51 +485,51 @@ fn build_report_file_scores(
 
 fn build_report_findings(
     opts: &HealthOptions<'_>,
-    action_ctx: &fallow_output::HealthActionContext,
-    findings: Vec<fallow_output::ComplexityViolation>,
-) -> Vec<fallow_output::HealthFinding> {
+    action_ctx: &plow_output::HealthActionContext,
+    findings: Vec<plow_output::ComplexityViolation>,
+) -> Vec<plow_output::HealthFinding> {
     if !opts.complexity {
         return Vec::new();
     }
 
     findings
         .into_iter()
-        .map(|v| fallow_output::HealthFinding::with_actions(v, action_ctx))
+        .map(|v| plow_output::HealthFinding::with_actions(v, action_ctx))
         .collect()
 }
 
 fn build_report_hotspots(
     opts: &HealthOptions<'_>,
-    hotspots: Vec<fallow_output::HotspotEntry>,
-) -> Vec<fallow_output::HotspotFinding> {
+    hotspots: Vec<plow_output::HotspotEntry>,
+) -> Vec<plow_output::HotspotFinding> {
     hotspots
         .into_iter()
-        .map(|h| fallow_output::HotspotFinding::with_actions(h, opts.root))
+        .map(|h| plow_output::HotspotFinding::with_actions(h, opts.root))
         .collect()
 }
 
 fn build_report_targets(
     opts: &HealthOptions<'_>,
-    targets: Vec<fallow_output::RefactoringTarget>,
-) -> Vec<fallow_output::RefactoringTargetFinding> {
+    targets: Vec<plow_output::RefactoringTarget>,
+) -> Vec<plow_output::RefactoringTargetFinding> {
     if opts.score_only_output {
         return Vec::new();
     }
 
     targets
         .into_iter()
-        .map(fallow_output::RefactoringTargetFinding::with_actions)
+        .map(plow_output::RefactoringTargetFinding::with_actions)
         .collect()
 }
 
 fn build_health_actions_meta(
-    action_ctx: &fallow_output::HealthActionContext,
-) -> Option<fallow_output::HealthActionsMeta> {
+    action_ctx: &plow_output::HealthActionContext,
+) -> Option<plow_output::HealthActionsMeta> {
     if !action_ctx.opts.omit_suppress_line {
         return None;
     }
 
-    Some(fallow_output::HealthActionsMeta {
+    Some(plow_output::HealthActionsMeta {
         suppression_hints_omitted: true,
         reason: action_ctx
             .opts

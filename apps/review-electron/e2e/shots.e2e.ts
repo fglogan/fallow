@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 
 const appDir = resolve(__dirname, "..");
 const worktreeRoot = resolve(appDir, "..", "..");
-const shots = process.env["FALLOW_REVIEW_SHOTS_DIR"] ?? "/tmp/fallow-review-qa";
+const shots = process.env["PLOW_REVIEW_SHOTS_DIR"] ?? "/tmp/plow-review-qa";
 
 const safe = async (fn: () => Promise<void>): Promise<void> => {
   try {
@@ -22,7 +22,7 @@ test("capture screens for design QA", async () => {
     cwd: worktreeRoot,
     env: {
       ...process.env,
-      FALLOW_BIN: process.env["FALLOW_BIN"] ?? resolve(worktreeRoot, "target", "release", "fallow"),
+      PLOW_BIN: process.env["PLOW_BIN"] ?? resolve(worktreeRoot, "target", "release", "plow"),
     } as Record<string, string>,
   });
   const win = await app.firstWindow();
@@ -30,7 +30,7 @@ test("capture screens for design QA", async () => {
   await win.getByRole("button", { name: "Load review" }).click();
   await safe(async () => {
     // The real review takes a beat; capture the loading state before it resolves.
-    await win.getByText(/running fallow review/).waitFor({ timeout: 3000 });
+    await win.getByText(/running plow review/).waitFor({ timeout: 3000 });
     await win.screenshot({ path: `${shots}/11-loading.png` });
   });
   await win.getByTestId("review-loaded").waitFor({ timeout: 150_000 });
@@ -72,7 +72,7 @@ test("capture screens for design QA", async () => {
 
   await safe(async () => {
     // Simulate the in-page picker posting a selection to the localhost bridge.
-    await fetch("http://127.0.0.1:7787/fallow-select", {
+    await fetch("http://127.0.0.1:7787/plow-select", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -147,12 +147,12 @@ test("capture screens for design QA", async () => {
   await app.close();
 });
 
-// Separate launch with a bad engine path so `fallow review` fails: QA the error.
+// Separate launch with a bad engine path so `plow review` fails: QA the error.
 test("capture the review error state", async () => {
   const app: ElectronApplication = await electron.launch({
     args: [resolve(appDir, "out", "main", "index.js")],
     cwd: worktreeRoot,
-    env: { ...process.env, FALLOW_BIN: "/nonexistent/fallow-bin" } as Record<string, string>,
+    env: { ...process.env, PLOW_BIN: "/nonexistent/plow-bin" } as Record<string, string>,
   });
   const win = await app.firstWindow();
   await safe(async () => {
@@ -163,17 +163,17 @@ test("capture the review error state", async () => {
   await app.close();
 });
 
-// Fixture-backed: point FALLOW_BIN at a stub that emits the with-decisions
+// Fixture-backed: point PLOW_BIN at a stub that emits the with-decisions
 // brief, so the (otherwise all-additions) review renders the decision surface.
 test("capture the decision surface", async () => {
   const fixture = resolve(appDir, "fixtures", "sample-review-with-decisions.json");
-  const stub = "/tmp/fallow-review-stub.sh";
+  const stub = "/tmp/plow-review-stub.sh";
   writeFileSync(stub, `#!/bin/sh\ncat ${JSON.stringify(fixture)}\n`);
   chmodSync(stub, 0o755);
   const app: ElectronApplication = await electron.launch({
     args: [resolve(appDir, "out", "main", "index.js")],
     cwd: worktreeRoot,
-    env: { ...process.env, FALLOW_BIN: stub } as Record<string, string>,
+    env: { ...process.env, PLOW_BIN: stub } as Record<string, string>,
   });
   const win = await app.firstWindow();
   await safe(async () => {

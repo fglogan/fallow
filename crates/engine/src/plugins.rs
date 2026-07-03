@@ -2,19 +2,17 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_config::{ExternalPluginDef, PackageJson};
+use plow_config::{ExternalPluginDef, PackageJson};
 
 pub mod registry {
     /// Invalid user-authored regex extracted from a plugin config file.
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct PluginRegexValidationError {
-        pub(super) inner: fallow_core::plugins::registry::PluginRegexValidationError,
+        pub(super) inner: plow_core::plugins::registry::PluginRegexValidationError,
     }
 
-    impl From<fallow_core::plugins::registry::PluginRegexValidationError>
-        for PluginRegexValidationError
-    {
-        fn from(inner: fallow_core::plugins::registry::PluginRegexValidationError) -> Self {
+    impl From<plow_core::plugins::registry::PluginRegexValidationError> for PluginRegexValidationError {
+        fn from(inner: plow_core::plugins::registry::PluginRegexValidationError) -> Self {
             Self { inner }
         }
     }
@@ -22,7 +20,7 @@ pub mod registry {
     /// Names of every built-in framework plugin in registry order.
     #[must_use]
     pub fn builtin_plugin_names() -> Vec<&'static str> {
-        fallow_core::plugins::registry::builtin_plugin_names()
+        plow_core::plugins::registry::builtin_plugin_names()
     }
 
     /// Format plugin regex validation errors for user-facing diagnostics.
@@ -32,18 +30,18 @@ pub mod registry {
             .iter()
             .map(|error| error.inner.clone())
             .collect::<Vec<_>>();
-        fallow_core::plugins::registry::format_plugin_regex_errors(&core_errors)
+        plow_core::plugins::registry::format_plugin_regex_errors(&core_errors)
     }
 }
 
 /// Aggregated results from all active plugins for a project.
 #[derive(Debug, Clone, Default)]
 pub struct AggregatedPluginResult {
-    inner: fallow_core::plugins::AggregatedPluginResult,
+    inner: plow_core::plugins::AggregatedPluginResult,
 }
 
 impl AggregatedPluginResult {
-    pub(crate) const fn as_core(&self) -> &fallow_core::plugins::AggregatedPluginResult {
+    pub(crate) const fn as_core(&self) -> &plow_core::plugins::AggregatedPluginResult {
         &self.inner
     }
 
@@ -63,15 +61,15 @@ impl AggregatedPluginResult {
     }
 }
 
-impl From<fallow_core::plugins::AggregatedPluginResult> for AggregatedPluginResult {
-    fn from(inner: fallow_core::plugins::AggregatedPluginResult) -> Self {
+impl From<plow_core::plugins::AggregatedPluginResult> for AggregatedPluginResult {
+    fn from(inner: plow_core::plugins::AggregatedPluginResult) -> Self {
         Self { inner }
     }
 }
 
 /// Registry of all available plugins.
 pub struct PluginRegistry {
-    inner: fallow_core::plugins::PluginRegistry,
+    inner: plow_core::plugins::PluginRegistry,
 }
 
 impl PluginRegistry {
@@ -79,7 +77,7 @@ impl PluginRegistry {
     #[must_use]
     pub fn new(external: Vec<ExternalPluginDef>) -> Self {
         Self {
-            inner: fallow_core::plugins::PluginRegistry::new(external),
+            inner: plow_core::plugins::PluginRegistry::new(external),
         }
     }
 
@@ -120,7 +118,7 @@ mod tests {
         let registry = PluginRegistry::default();
         let result = registry
             .try_run(
-                &fallow_config::PackageJson::default(),
+                &plow_config::PackageJson::default(),
                 &PathBuf::from("/repo"),
                 &[],
             )

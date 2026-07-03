@@ -3,42 +3,42 @@
 # Shared helpers for GitLab MR integration scripts.
 
 # Track mktemp files so an EXIT trap cleans them up on signal or early exit.
-_FALLOW_TMPS=()
-trap 'rm -f "${_FALLOW_TMPS[@]:-}"' EXIT
+_PLOW_TMPS=()
+trap 'rm -f "${_PLOW_TMPS[@]:-}"' EXIT
 
-FALLOW_RENDER_ARGS=()
+PLOW_RENDER_ARGS=()
 
-prepare_fallow_render_args() {
+prepare_plow_render_args() {
   local format=$1
-  [ -f fallow-analysis-args.sh ] || return 1
+  [ -f plow-analysis-args.sh ] || return 1
   # shellcheck disable=SC1091
-  source fallow-analysis-args.sh
-  FALLOW_RENDER_ARGS=("${FALLOW_ANALYSIS_ARGS[@]}")
+  source plow-analysis-args.sh
+  PLOW_RENDER_ARGS=("${PLOW_ANALYSIS_ARGS[@]}")
   local replaced=false
-  for i in "${!FALLOW_RENDER_ARGS[@]}"; do
-    if [ "${FALLOW_RENDER_ARGS[$i]}" = "--format" ] && [ $((i + 1)) -lt "${#FALLOW_RENDER_ARGS[@]}" ]; then
-      FALLOW_RENDER_ARGS[$((i + 1))]="$format"
+  for i in "${!PLOW_RENDER_ARGS[@]}"; do
+    if [ "${PLOW_RENDER_ARGS[$i]}" = "--format" ] && [ $((i + 1)) -lt "${#PLOW_RENDER_ARGS[@]}" ]; then
+      PLOW_RENDER_ARGS[$((i + 1))]="$format"
       replaced=true
       break
     fi
   done
   if [ "$replaced" != "true" ]; then
-    FALLOW_RENDER_ARGS+=(--format "$format")
+    PLOW_RENDER_ARGS+=(--format "$format")
   fi
-  if [ -z "${FALLOW_DIFF_FILE:-}" ] && [ -n "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}" ]; then
-    if git diff "${CI_MERGE_REQUEST_DIFF_BASE_SHA}..HEAD" > fallow-mr.diff 2>fallow-mr-diff-stderr.log; then
-      export FALLOW_DIFF_FILE="$PWD/fallow-mr.diff"
+  if [ -z "${PLOW_DIFF_FILE:-}" ] && [ -n "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}" ]; then
+    if git diff "${CI_MERGE_REQUEST_DIFF_BASE_SHA}..HEAD" > plow-mr.diff 2>plow-mr-diff-stderr.log; then
+      export PLOW_DIFF_FILE="$PWD/plow-mr.diff"
     else
       echo "WARNING: Failed to fetch MR diff; diff filter disabled, reporting all findings"
-      rm -f fallow-mr.diff
+      rm -f plow-mr.diff
     fi
   fi
-  export FALLOW_DIFF_FILTER="${FALLOW_DIFF_FILTER:-added}"
+  export PLOW_DIFF_FILTER="${PLOW_DIFF_FILTER:-added}"
 }
 
 curl_retry() {
-  local attempts="${FALLOW_API_RETRIES:-3}"
-  local delay="${FALLOW_API_RETRY_DELAY:-2}"
+  local attempts="${PLOW_API_RETRIES:-3}"
+  local delay="${PLOW_API_RETRY_DELAY:-2}"
   local attempt=1
   local err out
   err=$(mktemp)

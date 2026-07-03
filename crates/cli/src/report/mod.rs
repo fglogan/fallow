@@ -18,25 +18,25 @@ use std::path::Path;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use fallow_api::DuplicationGrouping;
-use fallow_config::{OutputFormat, RulesConfig, Severity};
-use fallow_types::duplicates::DuplicationReport;
-use fallow_types::results::AnalysisResults;
-use fallow_types::trace::{
+use plow_api::DuplicationGrouping;
+use plow_config::{OutputFormat, RulesConfig, Severity};
+use plow_types::duplicates::DuplicationReport;
+use plow_types::results::AnalysisResults;
+use plow_types::trace::{
     CloneTrace, DependencyTrace, ExportTrace, FileTrace, ImpactClosureTrace, PipelineTimings,
 };
 
 use crate::report::sink::outln;
 
+pub use grouping::OwnershipResolver;
+pub use human::health::{render_health_score, render_health_trend};
 #[allow(
     unused_imports,
     reason = "used by binary crate modules (combined.rs, audit.rs)"
 )]
-pub use fallow_output::strip_root_prefix;
-pub use grouping::OwnershipResolver;
-pub use human::health::{render_health_score, render_health_trend};
+pub use plow_output::strip_root_prefix;
 
-/// The three line-groups of a human `fallow review --walkthrough` render: the
+/// The three line-groups of a human `plow review --walkthrough` render: the
 /// orientation header and final status (stderr), and the staged tour body
 /// (stdout). The entry point in `audit_brief.rs` owns the stream split; this
 /// keeps the pure line builder behind the private `human` module while exposing
@@ -56,7 +56,7 @@ pub struct WalkthroughHumanRender {
 /// formats consistent on the same on-disk `--mark-viewed` state.
 #[must_use]
 pub fn walkthrough_viewed_files(
-    guide: &fallow_output::StandardWalkthroughGuide,
+    guide: &plow_output::StandardWalkthroughGuide,
     viewed: &crate::walkthrough_state::ViewedState,
 ) -> Vec<String> {
     human::walkthrough::viewed_files_for(guide, viewed)
@@ -67,7 +67,7 @@ pub fn walkthrough_viewed_files(
 /// Cleared panel.
 #[must_use]
 pub fn build_walkthrough_human(
-    guide: &fallow_output::StandardWalkthroughGuide,
+    guide: &plow_output::StandardWalkthroughGuide,
     viewed: &crate::walkthrough_state::ViewedState,
     show_cleared: bool,
 ) -> WalkthroughHumanRender {
@@ -103,18 +103,18 @@ pub struct ReportContext<'a> {
     /// already prints section headers, so it disables this to avoid duplicate
     /// "Dead Code" / "Dead Code Summary" headings.
     pub summary_heading: bool,
-    /// Human-only: print a one-line hint pointing at `fallow explain`.
+    /// Human-only: print a one-line hint pointing at `plow explain`.
     pub show_explain_tip: bool,
     /// When a baseline was loaded: (total entries in baseline, entries that matched).
     pub baseline_matched: Option<(usize, usize)>,
-    /// Whether config-edit actions can be applied by `fallow fix`.
+    /// Whether config-edit actions can be applied by `plow fix`.
     ///
     /// This is caller-provided because an explicit `--config` path is fixable
     /// even when default config discovery from the root would find nothing.
     pub config_fixable: bool,
     /// When set, the human health renderer skips the `● Health score:` and
     /// trend table sections because they have already been rendered upstream
-    /// (combined-mode orientation header). Standalone `fallow health` keeps
+    /// (combined-mode orientation header). Standalone `plow health` keeps
     /// the default `false` and renders both sections inline.
     pub skip_score_and_trend: bool,
     /// Human-only: whether `--css` was requested. When `true` but no stylesheet
@@ -213,7 +213,7 @@ fn relative_uri(path: &Path, root: &Path) -> String {
 /// SARIF validation warnings (e.g., Next.js dynamic routes like `[slug]`).
 #[must_use]
 pub fn normalize_uri(path_str: &str) -> String {
-    fallow_output::normalize_uri(path_str)
+    plow_output::normalize_uri(path_str)
 }
 
 /// Severity level for human-readable output.
@@ -304,7 +304,7 @@ fn print_results_ci_comment(
     output: OutputFormat,
 ) -> ExitCode {
     let issues = codeclimate::api_codeclimate_issues(results, ctx.root, ctx.rules);
-    let value = fallow_output::codeclimate_issues_to_value(&issues);
+    let value = plow_output::codeclimate_issues_to_value(&issues);
     print_ci_comment_format("dead-code", &value, output).unwrap_or_else(|| {
         eprintln!("Error: badge format is only supported for the health command");
         ExitCode::from(2)
@@ -415,7 +415,7 @@ fn print_duplication_ci_comment(
     output: OutputFormat,
 ) -> ExitCode {
     let issues = codeclimate::api_duplication_codeclimate_issues(report, root);
-    let value = fallow_output::codeclimate_issues_to_value(&issues);
+    let value = plow_output::codeclimate_issues_to_value(&issues);
     print_ci_comment_format("dupes", &value, output).unwrap_or_else(|| {
         eprintln!("Error: badge format is only supported for the health command");
         ExitCode::from(2)
@@ -527,8 +527,8 @@ fn warn_dupes_grouping_unsupported(grouping: &DuplicationGrouping, format: &str)
 ///   richer grouped envelope.
 #[must_use]
 pub fn print_health_report(
-    report: &fallow_output::HealthReport,
-    grouping: Option<&fallow_output::HealthGrouping>,
+    report: &plow_output::HealthReport,
+    grouping: Option<&plow_output::HealthGrouping>,
     group_resolver: Option<&grouping::OwnershipResolver>,
     ctx: &ReportContext<'_>,
     output: OutputFormat,
@@ -581,8 +581,8 @@ pub fn print_health_report(
 
 /// Render the human-format health report, including the per-group summary block.
 fn print_health_human_report(
-    report: &fallow_output::HealthReport,
-    grouping: Option<&fallow_output::HealthGrouping>,
+    report: &plow_output::HealthReport,
+    grouping: Option<&plow_output::HealthGrouping>,
     ctx: &ReportContext<'_>,
 ) {
     if ctx.summary {
@@ -606,19 +606,19 @@ fn print_health_human_report(
 
 /// Render the CI comment / review fallback arms for health results.
 fn print_health_ci_comment(
-    report: &fallow_output::HealthReport,
+    report: &plow_output::HealthReport,
     root: &Path,
     output: OutputFormat,
 ) -> ExitCode {
     let issues = codeclimate::api_health_codeclimate_issues(report, root);
-    let value = fallow_output::codeclimate_issues_to_value(&issues);
+    let value = plow_output::codeclimate_issues_to_value(&issues);
     print_ci_comment_format("health", &value, output).unwrap_or_else(|| {
         eprintln!("Error: badge format is only supported for the health command");
         ExitCode::from(2)
     })
 }
 
-fn warn_grouping_unsupported(grouping: Option<&fallow_output::HealthGrouping>, format: &str) {
+fn warn_grouping_unsupported(grouping: Option<&plow_output::HealthGrouping>, format: &str) {
     if let Some(g) = grouping {
         eprintln!(
             "note: --group-by {} is not supported for {format} output, falling back to \
@@ -632,7 +632,7 @@ fn warn_grouping_unsupported(grouping: Option<&fallow_output::HealthGrouping>, f
 ///
 /// Only emits output in human format to avoid corrupting structured JSON/SARIF output.
 pub fn print_cross_reference_findings(
-    cross_ref: &fallow_engine::CrossReferenceResult,
+    cross_ref: &plow_engine::CrossReferenceResult,
     root: &Path,
     quiet: bool,
     output: OutputFormat,
@@ -709,7 +709,7 @@ pub fn print_performance(timings: &PipelineTimings, format: OutputFormat) {
 
 /// Print health pipeline performance timings.
 /// In JSON mode, outputs to stderr to avoid polluting the JSON analysis output on stdout.
-pub fn print_health_performance(timings: &fallow_output::HealthTimings, format: OutputFormat) {
+pub fn print_health_performance(timings: &plow_output::HealthTimings, format: OutputFormat) {
     match format {
         OutputFormat::Json => match serde_json::to_string_pretty(timings) {
             Ok(json) => eprintln!("{json}"),
@@ -719,26 +719,6 @@ pub fn print_health_performance(timings: &fallow_output::HealthTimings, format: 
     }
 }
 
-#[allow(
-    unused_imports,
-    reason = "target-dependent: used in lib, unused in bin"
-)]
-pub use fallow_api::build_compact_lines;
-#[allow(
-    unused_imports,
-    reason = "target-dependent: used in lib, unused in bin"
-)]
-pub use fallow_api::build_duplication_markdown;
-#[allow(
-    unused_imports,
-    reason = "target-dependent: used in lib, unused in bin"
-)]
-pub use fallow_api::build_health_markdown;
-#[allow(
-    unused_imports,
-    reason = "target-dependent: used in lib, unused in bin"
-)]
-pub use fallow_api::build_markdown;
 #[allow(
     clippy::redundant_pub_crate,
     reason = "pub(crate) deliberately limits visibility, report is pub but these are internal"
@@ -754,6 +734,26 @@ pub(crate) use json::api_check_json_payload_with_config_fixable;
     reason = "target-dependent: report is public in lib, private in bin, but these adapters remain crate-internal"
 )]
 pub(crate) use json::{build_baseline_deltas_output, check_json_extras};
+#[allow(
+    unused_imports,
+    reason = "target-dependent: used in lib, unused in bin"
+)]
+pub use plow_api::build_compact_lines;
+#[allow(
+    unused_imports,
+    reason = "target-dependent: used in lib, unused in bin"
+)]
+pub use plow_api::build_duplication_markdown;
+#[allow(
+    unused_imports,
+    reason = "target-dependent: used in lib, unused in bin"
+)]
+pub use plow_api::build_health_markdown;
+#[allow(
+    unused_imports,
+    reason = "target-dependent: used in lib, unused in bin"
+)]
+pub use plow_api::build_markdown;
 #[allow(
     unused_imports,
     reason = "target-dependent: used in lib, unused in bin"

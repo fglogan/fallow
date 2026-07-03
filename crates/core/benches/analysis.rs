@@ -5,7 +5,7 @@
 )]
 #![expect(
     deprecated,
-    reason = "ADR-008: benchmark exercises the workspace path-dep fallow_core::analyze surface"
+    reason = "ADR-008: benchmark exercises the workspace path-dep plow_core::analyze surface"
 )]
 
 use std::path::PathBuf;
@@ -18,17 +18,17 @@ mod helpers;
 
 struct ParseFileInput {
     _temp_dir: TempDir,
-    file: fallow_core::discover::DiscoveredFile,
+    file: plow_core::discover::DiscoveredFile,
 }
 
 struct ConfigInput {
     _temp_dir: TempDir,
-    config: fallow_config::ResolvedConfig,
+    config: plow_config::ResolvedConfig,
 }
 
 fn create_parse_file_input() -> ParseFileInput {
     let temp_dir = tempfile::Builder::new()
-        .prefix("fallow-bench-parse-")
+        .prefix("plow-bench-parse-")
         .tempdir()
         .unwrap();
 
@@ -110,8 +110,8 @@ export default function App({ name, age }: Props) {
     )
     .unwrap();
 
-    let file = fallow_core::discover::DiscoveredFile {
-        id: fallow_core::discover::FileId(0),
+    let file = plow_core::discover::DiscoveredFile {
+        id: plow_core::discover::FileId(0),
         path: test_file.clone(),
         size_bytes: std::fs::metadata(&test_file).unwrap().len(),
     };
@@ -126,7 +126,7 @@ fn parse_single_file(c: &mut Criterion) {
     c.bench_function("parse_single_file", |bencher| {
         bencher.iter_batched_ref(
             create_parse_file_input,
-            |input| fallow_core::extract::parse_single_file(&input.file),
+            |input| plow_core::extract::parse_single_file(&input.file),
             BatchSize::LargeInput,
         );
     });
@@ -134,7 +134,7 @@ fn parse_single_file(c: &mut Criterion) {
 
 fn create_full_pipeline_input() -> ConfigInput {
     let temp_dir = tempfile::Builder::new()
-        .prefix("fallow-bench-project-")
+        .prefix("plow-bench-project-")
         .tempdir()
         .unwrap();
     let root = temp_dir.path().to_path_buf();
@@ -179,7 +179,7 @@ fn full_pipeline_10_files(c: &mut Criterion) {
     c.bench_function("full_pipeline_10_files", |bencher| {
         bencher.iter_batched_ref(
             create_full_pipeline_input,
-            |input| fallow_core::analyze(&input.config),
+            |input| plow_core::analyze(&input.config),
             BatchSize::LargeInput,
         );
     });
@@ -197,7 +197,7 @@ fn full_pipeline_100_files(c: &mut Criterion) {
     c.bench_function("full_pipeline_100_files", |bencher| {
         bencher.iter_batched_ref(
             || create_synthetic_config_input("100", 100),
-            |input| fallow_core::analyze(&input.config),
+            |input| plow_core::analyze(&input.config),
             BatchSize::LargeInput,
         );
     });
@@ -207,16 +207,16 @@ fn full_pipeline_1000_files(c: &mut Criterion) {
     c.bench_function("full_pipeline_1000_files", |bencher| {
         bencher.iter_batched_ref(
             || create_synthetic_config_input("1000", 1000),
-            |input| fallow_core::analyze(&input.config),
+            |input| plow_core::analyze(&input.config),
             BatchSize::LargeInput,
         );
     });
 }
 
 struct ReExportInput {
-    files: Vec<fallow_core::discover::DiscoveredFile>,
-    resolved_modules: Vec<fallow_core::resolve::ResolvedModule>,
-    entry_points: Vec<fallow_core::discover::EntryPoint>,
+    files: Vec<plow_core::discover::DiscoveredFile>,
+    resolved_modules: Vec<plow_core::resolve::ResolvedModule>,
+    entry_points: Vec<plow_core::discover::EntryPoint>,
 }
 
 #[expect(
@@ -228,11 +228,11 @@ struct ReExportInput {
     reason = "benchmark with extensive fixture setup"
 )]
 fn create_re_export_input() -> ReExportInput {
-    use fallow_core::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
-    use fallow_core::extract::{
+    use plow_core::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
+    use plow_core::extract::{
         ExportInfo, ExportName, ImportInfo, ImportedName, ReExportInfo, VisibilityTag,
     };
-    use fallow_core::resolve::{ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport};
+    use plow_core::resolve::{ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport};
 
     let source_count = 20;
     let barrel_count = 10;
@@ -440,7 +440,7 @@ fn resolve_re_export_chains(c: &mut Criterion) {
         bencher.iter_batched_ref(
             create_re_export_input,
             |input| {
-                fallow_core::graph::ModuleGraph::build(
+                plow_core::graph::ModuleGraph::build(
                     &input.resolved_modules,
                     &input.entry_points,
                     &input.files,
@@ -455,9 +455,9 @@ fn resolve_re_export_chains(c: &mut Criterion) {
     clippy::too_many_lines,
     reason = "benchmark with extensive fixture setup"
 )]
-fn create_cache_round_trip_input() -> fallow_core::extract::ModuleInfo {
-    use fallow_core::discover::FileId;
-    use fallow_core::extract::{
+fn create_cache_round_trip_input() -> plow_core::extract::ModuleInfo {
+    use plow_core::discover::FileId;
+    use plow_core::extract::{
         DynamicImportInfo, ExportInfo, ExportName, ImportInfo, ImportedName, MemberAccess,
         MemberInfo, MemberKind, ModuleInfo, ReExportInfo, RequireCallInfo, VisibilityTag,
     };
@@ -747,9 +747,9 @@ fn create_cache_round_trip_input() -> fallow_core::extract::ModuleInfo {
 }
 
 fn cache_round_trip(c: &mut Criterion) {
-    use fallow_core::cache::{cached_to_module, module_to_cached};
-    use fallow_core::discover::FileId;
-    use fallow_types::source_fingerprint::SourceFingerprint;
+    use plow_core::cache::{cached_to_module, module_to_cached};
+    use plow_core::discover::FileId;
+    use plow_types::source_fingerprint::SourceFingerprint;
 
     c.bench_function("cache_round_trip", |bencher| {
         bencher.iter_batched_ref(
@@ -763,16 +763,14 @@ fn cache_round_trip(c: &mut Criterion) {
     });
 }
 
-fn make_hashed_tokens(hashes: &[u64]) -> Vec<fallow_core::duplicates::normalize::HashedToken> {
+fn make_hashed_tokens(hashes: &[u64]) -> Vec<plow_core::duplicates::normalize::HashedToken> {
     hashes
         .iter()
         .enumerate()
-        .map(
-            |(i, &hash)| fallow_core::duplicates::normalize::HashedToken {
-                hash,
-                original_index: i,
-            },
-        )
+        .map(|(i, &hash)| plow_core::duplicates::normalize::HashedToken {
+            hash,
+            original_index: i,
+        })
         .collect()
 }
 
@@ -780,9 +778,9 @@ fn make_hashed_tokens(hashes: &[u64]) -> Vec<fallow_core::duplicates::normalize:
     clippy::cast_possible_truncation,
     reason = "bench span values are trivially small"
 )]
-fn make_file_tokens_for(count: usize) -> fallow_core::duplicates::tokenize::FileTokens {
-    use fallow_core::duplicates::tokenize::{FileTokens, SourceToken, TokenKind};
+fn make_file_tokens_for(count: usize) -> plow_core::duplicates::tokenize::FileTokens {
     use oxc_span::Span;
+    use plow_core::duplicates::tokenize::{FileTokens, SourceToken, TokenKind};
 
     let tokens: Vec<SourceToken> = (0..count)
         .map(|i| SourceToken {
@@ -809,8 +807,8 @@ fn make_file_tokens_for(count: usize) -> fallow_core::duplicates::tokenize::File
 
 type DupeInput = Vec<(
     PathBuf,
-    Vec<fallow_core::duplicates::normalize::HashedToken>,
-    fallow_core::duplicates::tokenize::FileTokens,
+    Vec<plow_core::duplicates::normalize::HashedToken>,
+    plow_core::duplicates::tokenize::FileTokens,
 )>;
 
 /// Build N identical files with `tokens_per_file` tokens each.
@@ -862,7 +860,7 @@ fn make_interval_pressure_files(n: usize, blocks: usize, block_tokens: usize) ->
 }
 
 fn dupe_detect_2x500_identical(c: &mut Criterion) {
-    use fallow_core::duplicates::detect::CloneDetector;
+    use plow_core::duplicates::detect::CloneDetector;
     let data = make_identical_files(2, 500);
     c.bench_function("dupe_detect_2x500_identical", |bencher| {
         bencher.iter_batched(
@@ -874,7 +872,7 @@ fn dupe_detect_2x500_identical(c: &mut Criterion) {
 }
 
 fn dupe_detect_2x2000_identical(c: &mut Criterion) {
-    use fallow_core::duplicates::detect::CloneDetector;
+    use plow_core::duplicates::detect::CloneDetector;
     let data = make_identical_files(2, 2000);
     c.bench_function("dupe_detect_2x2000_identical", |bencher| {
         bencher.iter_batched(
@@ -886,7 +884,7 @@ fn dupe_detect_2x2000_identical(c: &mut Criterion) {
 }
 
 fn dupe_detect_10x500_identical(c: &mut Criterion) {
-    use fallow_core::duplicates::detect::CloneDetector;
+    use plow_core::duplicates::detect::CloneDetector;
     let data = make_identical_files(10, 500);
     c.bench_function("dupe_detect_10x500_identical", |bencher| {
         bencher.iter_batched(
@@ -898,7 +896,7 @@ fn dupe_detect_10x500_identical(c: &mut Criterion) {
 }
 
 fn dupe_detect_50x200_diverse(c: &mut Criterion) {
-    use fallow_core::duplicates::detect::CloneDetector;
+    use plow_core::duplicates::detect::CloneDetector;
     let data = make_diverse_files(50, 200);
     c.bench_function("dupe_detect_50x200_diverse", |bencher| {
         bencher.iter_batched(
@@ -910,7 +908,7 @@ fn dupe_detect_50x200_diverse(c: &mut Criterion) {
 }
 
 fn dupe_detect_100x200_mixed(c: &mut Criterion) {
-    use fallow_core::duplicates::detect::CloneDetector;
+    use plow_core::duplicates::detect::CloneDetector;
     let hashes: Vec<u64> = (1..=200).collect();
     let data: DupeInput = (0..100)
         .map(|i| {
@@ -939,7 +937,7 @@ fn dupe_detect_100x200_mixed(c: &mut Criterion) {
 }
 
 fn dupe_detect_100x200_mixed_focused(c: &mut Criterion) {
-    use fallow_core::duplicates::detect::CloneDetector;
+    use plow_core::duplicates::detect::CloneDetector;
     use rustc_hash::FxHashSet;
 
     let hashes: Vec<u64> = (1..=200).collect();
@@ -971,7 +969,7 @@ fn dupe_detect_100x200_mixed_focused(c: &mut Criterion) {
 }
 
 fn dupe_detect_80x20x80_interval_pressure(c: &mut Criterion) {
-    use fallow_core::duplicates::detect::CloneDetector;
+    use plow_core::duplicates::detect::CloneDetector;
     let data = make_interval_pressure_files(80, 20, 80);
     c.bench_function("dupe_detect_80x20x80_interval_pressure", |bencher| {
         bencher.iter_batched(
@@ -983,7 +981,7 @@ fn dupe_detect_80x20x80_interval_pressure(c: &mut Criterion) {
 }
 
 fn dupe_detect_2x5000_identical(c: &mut Criterion) {
-    use fallow_core::duplicates::detect::CloneDetector;
+    use plow_core::duplicates::detect::CloneDetector;
     let data = make_identical_files(2, 5000);
     c.bench_function("dupe_detect_2x5000_identical", |bencher| {
         bencher.iter_batched(

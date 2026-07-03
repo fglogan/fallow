@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use fallow_config::{ConfigOverride, FallowConfig, OutputFormat, PartialRulesConfig, RulesConfig};
+use plow_config::{ConfigOverride, OutputFormat, PartialRulesConfig, PlowConfig, RulesConfig};
 
 pub fn fixture_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -13,8 +13,8 @@ pub fn fixture_path(name: &str) -> PathBuf {
         .join(name)
 }
 
-pub fn create_config(root: PathBuf) -> fallow_config::ResolvedConfig {
-    FallowConfig {
+pub fn create_config(root: PathBuf) -> plow_config::ResolvedConfig {
+    PlowConfig {
         schema: None,
         extends: vec![],
         entry: vec![],
@@ -26,31 +26,31 @@ pub fn create_config(root: PathBuf) -> fallow_config::ResolvedConfig {
         ignore_exports: vec![],
         ignore_catalog_references: vec![],
         ignore_dependency_overrides: vec![],
-        ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+        ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
-        unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
-        duplicates: fallow_config::DuplicatesConfig::default(),
-        health: fallow_config::HealthConfig::default(),
+        unused_component_props: plow_config::UnusedComponentPropsConfig::default(),
+        duplicates: plow_config::DuplicatesConfig::default(),
+        health: plow_config::HealthConfig::default(),
         rules: RulesConfig::default(),
-        boundaries: fallow_config::BoundaryConfig::default(),
+        boundaries: plow_config::BoundaryConfig::default(),
         production: false.into(),
         plugins: vec![],
         rule_packs: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
-        audit: fallow_config::AuditConfig::default(),
+        audit: plow_config::AuditConfig::default(),
         codeowners: None,
         public_packages: vec![],
-        flags: fallow_config::FlagsConfig::default(),
-        security: fallow_config::SecurityConfig::default(),
-        fix: fallow_config::FixConfig::default(),
-        resolve: fallow_config::ResolveConfig::default(),
+        flags: plow_config::FlagsConfig::default(),
+        security: plow_config::SecurityConfig::default(),
+        fix: plow_config::FixConfig::default(),
+        resolve: plow_config::ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
         auto_imports: false,
-        cache: fallow_config::CacheConfig::default(),
+        cache: plow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None)
 }
@@ -60,9 +60,9 @@ pub fn create_config(root: PathBuf) -> fallow_config::ResolvedConfig {
 pub fn create_config_with_unused_props_ignore(
     root: PathBuf,
     ignore_pattern: &str,
-) -> fallow_config::ResolvedConfig {
-    FallowConfig {
-        unused_component_props: fallow_config::UnusedComponentPropsConfig {
+) -> plow_config::ResolvedConfig {
+    PlowConfig {
+        unused_component_props: plow_config::UnusedComponentPropsConfig {
             ignore_pattern: Some(ignore_pattern.to_string()),
         },
         ..Default::default()
@@ -73,8 +73,8 @@ pub fn create_config_with_unused_props_ignore(
 pub fn create_config_with_cache(
     root: PathBuf,
     cache_dir: std::path::PathBuf,
-) -> fallow_config::ResolvedConfig {
-    let mut config = FallowConfig {
+) -> plow_config::ResolvedConfig {
+    let mut config = PlowConfig {
         schema: None,
         extends: vec![],
         entry: vec![],
@@ -86,44 +86,44 @@ pub fn create_config_with_cache(
         ignore_exports: vec![],
         ignore_catalog_references: vec![],
         ignore_dependency_overrides: vec![],
-        ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+        ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
-        unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
-        duplicates: fallow_config::DuplicatesConfig::default(),
-        health: fallow_config::HealthConfig::default(),
+        unused_component_props: plow_config::UnusedComponentPropsConfig::default(),
+        duplicates: plow_config::DuplicatesConfig::default(),
+        health: plow_config::HealthConfig::default(),
         rules: RulesConfig::default(),
-        boundaries: fallow_config::BoundaryConfig::default(),
+        boundaries: plow_config::BoundaryConfig::default(),
         production: false.into(),
         plugins: vec![],
         rule_packs: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
-        audit: fallow_config::AuditConfig::default(),
+        audit: plow_config::AuditConfig::default(),
         codeowners: None,
         public_packages: vec![],
-        flags: fallow_config::FlagsConfig::default(),
-        security: fallow_config::SecurityConfig::default(),
-        fix: fallow_config::FixConfig::default(),
-        resolve: fallow_config::ResolveConfig::default(),
+        flags: plow_config::FlagsConfig::default(),
+        security: plow_config::SecurityConfig::default(),
+        fix: plow_config::FixConfig::default(),
+        resolve: plow_config::ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
         auto_imports: false,
-        cache: fallow_config::CacheConfig::default(),
+        cache: plow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, false, true, None); // no_cache = false to enable caching
     config.cache_dir = cache_dir;
     config
 }
 
-pub fn create_config_with_rules<F>(root: PathBuf, modify: F) -> fallow_config::ResolvedConfig
+pub fn create_config_with_rules<F>(root: PathBuf, modify: F) -> plow_config::ResolvedConfig
 where
     F: FnOnce(&mut RulesConfig),
 {
     let mut rules = RulesConfig::default();
     modify(&mut rules);
-    FallowConfig {
+    PlowConfig {
         schema: None,
         extends: vec![],
         entry: vec![],
@@ -135,31 +135,31 @@ where
         ignore_exports: vec![],
         ignore_catalog_references: vec![],
         ignore_dependency_overrides: vec![],
-        ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+        ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
-        unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
-        duplicates: fallow_config::DuplicatesConfig::default(),
-        health: fallow_config::HealthConfig::default(),
+        unused_component_props: plow_config::UnusedComponentPropsConfig::default(),
+        duplicates: plow_config::DuplicatesConfig::default(),
+        health: plow_config::HealthConfig::default(),
         rules,
-        boundaries: fallow_config::BoundaryConfig::default(),
+        boundaries: plow_config::BoundaryConfig::default(),
         production: false.into(),
         plugins: vec![],
         rule_packs: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
-        audit: fallow_config::AuditConfig::default(),
+        audit: plow_config::AuditConfig::default(),
         codeowners: None,
         public_packages: vec![],
-        flags: fallow_config::FlagsConfig::default(),
-        security: fallow_config::SecurityConfig::default(),
-        fix: fallow_config::FixConfig::default(),
-        resolve: fallow_config::ResolveConfig::default(),
+        flags: plow_config::FlagsConfig::default(),
+        security: plow_config::SecurityConfig::default(),
+        fix: plow_config::FixConfig::default(),
+        resolve: plow_config::ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
         auto_imports: false,
-        cache: fallow_config::CacheConfig::default(),
+        cache: plow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None)
 }
@@ -167,7 +167,7 @@ where
 pub fn create_config_with_overrides(
     root: PathBuf,
     overrides: Vec<(&str, PartialRulesConfig)>,
-) -> fallow_config::ResolvedConfig {
+) -> plow_config::ResolvedConfig {
     let overrides = overrides
         .into_iter()
         .map(|(glob, rules)| ConfigOverride {
@@ -175,7 +175,7 @@ pub fn create_config_with_overrides(
             rules,
         })
         .collect();
-    FallowConfig {
+    PlowConfig {
         schema: None,
         extends: vec![],
         entry: vec![],
@@ -187,31 +187,31 @@ pub fn create_config_with_overrides(
         ignore_exports: vec![],
         ignore_catalog_references: vec![],
         ignore_dependency_overrides: vec![],
-        ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+        ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
-        unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
-        duplicates: fallow_config::DuplicatesConfig::default(),
-        health: fallow_config::HealthConfig::default(),
+        unused_component_props: plow_config::UnusedComponentPropsConfig::default(),
+        duplicates: plow_config::DuplicatesConfig::default(),
+        health: plow_config::HealthConfig::default(),
         rules: RulesConfig::default(),
-        boundaries: fallow_config::BoundaryConfig::default(),
+        boundaries: plow_config::BoundaryConfig::default(),
         production: false.into(),
         plugins: vec![],
         rule_packs: vec![],
         dynamically_loaded: vec![],
         overrides,
         regression: None,
-        audit: fallow_config::AuditConfig::default(),
+        audit: plow_config::AuditConfig::default(),
         codeowners: None,
         public_packages: vec![],
-        flags: fallow_config::FlagsConfig::default(),
-        security: fallow_config::SecurityConfig::default(),
-        fix: fallow_config::FixConfig::default(),
-        resolve: fallow_config::ResolveConfig::default(),
+        flags: plow_config::FlagsConfig::default(),
+        security: plow_config::SecurityConfig::default(),
+        fix: plow_config::FixConfig::default(),
+        resolve: plow_config::ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
         auto_imports: false,
-        cache: fallow_config::CacheConfig::default(),
+        cache: plow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None)
 }
@@ -219,8 +219,8 @@ pub fn create_config_with_overrides(
 pub fn create_config_with_ignore_decorators(
     root: PathBuf,
     ignore_decorators: Vec<String>,
-) -> fallow_config::ResolvedConfig {
-    FallowConfig {
+) -> plow_config::ResolvedConfig {
+    PlowConfig {
         schema: None,
         extends: vec![],
         entry: vec![],
@@ -232,31 +232,31 @@ pub fn create_config_with_ignore_decorators(
         ignore_exports: vec![],
         ignore_catalog_references: vec![],
         ignore_dependency_overrides: vec![],
-        ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+        ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
         ignore_decorators,
-        unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
-        duplicates: fallow_config::DuplicatesConfig::default(),
-        health: fallow_config::HealthConfig::default(),
+        unused_component_props: plow_config::UnusedComponentPropsConfig::default(),
+        duplicates: plow_config::DuplicatesConfig::default(),
+        health: plow_config::HealthConfig::default(),
         rules: RulesConfig::default(),
-        boundaries: fallow_config::BoundaryConfig::default(),
+        boundaries: plow_config::BoundaryConfig::default(),
         production: false.into(),
         plugins: vec![],
         rule_packs: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
-        audit: fallow_config::AuditConfig::default(),
+        audit: plow_config::AuditConfig::default(),
         codeowners: None,
         public_packages: vec![],
-        flags: fallow_config::FlagsConfig::default(),
-        security: fallow_config::SecurityConfig::default(),
-        fix: fallow_config::FixConfig::default(),
-        resolve: fallow_config::ResolveConfig::default(),
+        flags: plow_config::FlagsConfig::default(),
+        security: plow_config::SecurityConfig::default(),
+        fix: plow_config::FixConfig::default(),
+        resolve: plow_config::ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
         auto_imports: false,
-        cache: fallow_config::CacheConfig::default(),
+        cache: plow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None)
 }

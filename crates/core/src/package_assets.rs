@@ -1,6 +1,6 @@
 use std::path::{Component, Path};
 
-use fallow_config::PackageJson;
+use plow_config::PackageJson;
 
 pub const PACKAGE_FILES_SOURCE: &str = "package-files";
 

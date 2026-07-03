@@ -84,7 +84,7 @@ pub struct HealthScorePenalties {
 /// Project-level styling-health score: a SECOND health axis computed purely from
 /// the structural CSS analytics (`CssAnalyticsReport`), orthogonal to the JS/TS
 /// code-health [`HealthScore`]. Surfaced only alongside the `--css` analytics, so
-/// a plain `fallow health` run is byte-unchanged. The code score and grade stay
+/// a plain `plow health` run is byte-unchanged. The code score and grade stay
 /// untouched: styling health is additive, never folded into the code score.
 ///
 /// Like [`HealthScore`], the score starts at 100 and subtracts capped per-category
@@ -137,7 +137,7 @@ pub enum StylingHealthConfidence {
     /// (named in `confidence_reason`): a thin authored-CSS surface (little to
     /// measure), or predominantly flat compile-time-atomic CSS-in-JS
     /// (StyleX/Panda) whose structure is not assessable. NOT a signal that
-    /// fallow's analysis failed.
+    /// plow's analysis failed.
     Low,
 }
 
@@ -316,7 +316,7 @@ impl ReactHookProfile {
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ComplexityViolation {
-    #[serde(serialize_with = "fallow_types::serde_path::serialize")]
+    #[serde(serialize_with = "plow_types::serde_path::serialize")]
     pub path: std::path::PathBuf,
     pub name: String,
     pub line: u32,
@@ -357,7 +357,7 @@ pub struct ComplexityViolation {
     pub coverage_source: Option<CoverageSource>,
     #[serde(
         default,
-        serialize_with = "fallow_types::serde_path::serialize_option",
+        serialize_with = "plow_types::serde_path::serialize_option",
         skip_serializing_if = "Option::is_none"
     )]
     pub inherited_from: Option<std::path::PathBuf>,
@@ -368,7 +368,7 @@ pub struct ComplexityViolation {
     /// in via `health --complexity-breakdown`; empty (and omitted from JSON)
     /// otherwise so default and CI output stay lean.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub contributions: Vec<fallow_types::extract::ComplexityContribution>,
+    pub contributions: Vec<plow_types::extract::ComplexityContribution>,
     /// Resolved thresholds used for this finding when a config override changed
     /// at least one ceiling. Omitted for findings using global thresholds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -444,7 +444,7 @@ pub struct ThresholdOverrideState {
     pub override_index: usize,
     #[serde(
         default,
-        serialize_with = "fallow_types::serde_path::serialize_option",
+        serialize_with = "plow_types::serde_path::serialize_option",
         skip_serializing_if = "Option::is_none"
     )]
     pub path: Option<std::path::PathBuf>,
@@ -465,7 +465,7 @@ pub struct ComponentRollup {
     pub class_worst_function: String,
     pub class_cyclomatic: u16,
     pub class_cognitive: u16,
-    #[serde(serialize_with = "fallow_types::serde_path::serialize")]
+    #[serde(serialize_with = "plow_types::serde_path::serialize")]
     pub template_path: std::path::PathBuf,
     pub template_cyclomatic: u16,
     pub template_cognitive: u16,
@@ -617,7 +617,7 @@ pub fn compute_finding_severity(
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct LargeFunctionEntry {
-    #[serde(serialize_with = "fallow_types::serde_path::serialize")]
+    #[serde(serialize_with = "plow_types::serde_path::serialize")]
     pub path: std::path::PathBuf,
     pub name: String,
     pub line: u32,
@@ -677,7 +677,7 @@ impl Default for HealthSummary {
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct FileHealthScore {
-    #[serde(serialize_with = "fallow_types::serde_path::serialize")]
+    #[serde(serialize_with = "plow_types::serde_path::serialize")]
     pub path: std::path::PathBuf,
     pub fan_in: usize,
     pub fan_out: usize,
@@ -696,7 +696,7 @@ pub struct FileHealthScore {
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HotspotEntry {
-    #[serde(serialize_with = "fallow_types::serde_path::serialize")]
+    #[serde(serialize_with = "plow_types::serde_path::serialize")]
     pub path: std::path::PathBuf,
     pub score: f64,
     pub commits: u32,
@@ -705,7 +705,7 @@ pub struct HotspotEntry {
     pub lines_deleted: u32,
     pub complexity_density: f64,
     pub fan_in: usize,
-    pub trend: fallow_types::churn::ChurnTrend,
+    pub trend: plow_types::churn::ChurnTrend,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ownership: Option<OwnershipMetrics>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]

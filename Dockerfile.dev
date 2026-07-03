@@ -4,7 +4,7 @@ WORKDIR /src
 
 # Keep this base image tag aligned with rust-toolchain.toml.
 COPY . .
-RUN cargo build --release --bin fallow
+RUN cargo build --release --bin plow
 
 FROM node:26-bookworm-slim AS runtime
 
@@ -17,8 +17,8 @@ RUN apt-get update \
   && npm cache clean --force \
   && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /src/target/release/fallow /usr/local/bin/fallow
+COPY --from=builder /src/target/release/plow /usr/local/bin/plow
 
 WORKDIR /workspace
-ENTRYPOINT ["fallow"]
+ENTRYPOINT ["plow"]
 CMD ["--help"]

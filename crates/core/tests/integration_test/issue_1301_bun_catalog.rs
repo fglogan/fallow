@@ -6,7 +6,7 @@ use super::common::{create_config, fixture_path};
 fn detects_bun_package_json_catalog_unresolved_references() {
     let root = fixture_path("issue-1301-bun-catalog");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let actual: FxHashSet<(&str, &str)> = results
         .unresolved_catalog_references
@@ -40,7 +40,7 @@ fn detects_bun_package_json_catalog_unresolved_references() {
 fn detects_bun_package_json_unused_catalog_entries() {
     let root = fixture_path("issue-1301-bun-catalog");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let actual: FxHashSet<(&str, &str, &std::path::Path)> = results
         .unused_catalog_entries
@@ -86,7 +86,7 @@ fn detects_bun_package_json_unused_catalog_entries() {
 fn detects_bun_package_json_empty_named_catalog_groups() {
     let root = fixture_path("issue-1301-bun-catalog");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let actual: Vec<_> = results
         .empty_catalog_groups

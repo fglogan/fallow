@@ -4,7 +4,7 @@
 )]
 use oxc_ast::ast::*;
 
-use fallow_types::extract::{
+use plow_types::extract::{
     SanitizedSinkArg, SanitizerScope, SecurityControlKind, SecurityControlSite,
 };
 

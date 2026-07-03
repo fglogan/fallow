@@ -4,7 +4,7 @@ use super::common::{create_config, fixture_path};
 fn same_name_effect_schema_reports_local_only_value_export_surface() {
     let root = fixture_path("issue-1304-effect-schema-same-name");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports

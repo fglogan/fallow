@@ -50,9 +50,9 @@
           ]
         },
         {
-          "module_dir": "npm/fallow/types",
+          "module_dir": "npm/plow/types",
           "files": [
-            "npm/fallow/types/output-contract.d.ts"
+            "npm/plow/types/output-contract.d.ts"
           ]
         }
       ],
@@ -61,7 +61,7 @@
         "apps/review-electron/fixtures/sample-app/src",
         "apps/review-electron/fixtures/sample-app",
         "editors/vscode/src/generated",
-        "npm/fallow/types"
+        "npm/plow/types"
       ]
     },
     "impact_closure": {
@@ -169,7 +169,7 @@
           "reason": "isolated change, no blast beyond the diff"
         },
         {
-          "file": "npm/fallow/types/output-contract.d.ts",
+          "file": "npm/plow/types/output-contract.d.ts",
           "score": {
             "fan_io": 0,
             "security_taint": 0,
@@ -191,17 +191,17 @@
       {
         "kind": "suppression-added",
         "file": "apps/review-electron/fixtures/sample-review.json",
-        "evidence": "fallow-ignore added (0 -> 71)"
+        "evidence": "plow-ignore added (0 -> 71)"
       },
       {
         "kind": "suppression-added",
         "file": "crates/cli/src/audit_decision_surface.rs",
-        "evidence": "fallow-ignore added (0 -> 11)"
+        "evidence": "plow-ignore added (0 -> 11)"
       },
       {
         "kind": "suppression-added",
         "file": "crates/cli/src/audit_weakening.rs",
-        "evidence": "fallow-ignore added (0 -> 2)"
+        "evidence": "plow-ignore added (0 -> 2)"
       },
       {
         "kind": "suppression-added",
@@ -221,17 +221,17 @@
       {
         "kind": "suppression-added",
         "file": "crates/cli/src/main.rs",
-        "evidence": "fallow-ignore added (0 -> 1)"
+        "evidence": "plow-ignore added (0 -> 1)"
       },
       {
         "kind": "suppression-added",
         "file": "crates/mcp/src/server/mod.rs",
-        "evidence": "fallow-ignore added (1 -> 2)"
+        "evidence": "plow-ignore added (1 -> 2)"
       },
       {
         "kind": "suppression-added",
         "file": "docs/output-schema.json",
-        "evidence": "fallow-ignore added (22 -> 23)"
+        "evidence": "plow-ignore added (22 -> 23)"
       }
     ],
     "routing": {
@@ -387,7 +387,7 @@
       "apps/review-electron/fixtures/sample-app/src/components/Header.tsx",
       "apps/review-electron/fixtures/sample-app/vite.config.ts",
       "editors/vscode/src/generated/output-contract.d.ts",
-      "npm/fallow/types/output-contract.d.ts"
+      "npm/plow/types/output-contract.d.ts"
     ],
     "units": [
       {
@@ -440,7 +440,7 @@
         "expert": []
       },
       {
-        "file": "npm/fallow/types/output-contract.d.ts",
+        "file": "npm/plow/types/output-contract.d.ts",
         "concern_lens": "orientation",
         "scoring_budget": 0,
         "out_of_diff": [],
@@ -449,9 +449,9 @@
     ]
   },
   "agent_schema": {
-    "judgment_shape": "Return { \"graph_snapshot_hash\": <echoed>, \"judgments\": [ { \"signal_id\": <one fallow emitted>, \"framing\": <free text>, \"concern\": <optional> } ] }.",
+    "judgment_shape": "Return { \"graph_snapshot_hash\": <echoed>, \"judgments\": [ { \"signal_id\": <one plow emitted>, \"framing\": <free text>, \"concern\": <optional> } ] }.",
     "echo_field": "graph_snapshot_hash",
-    "anchoring_rule": "Every judgment must cite a signal_id fallow emitted; an unanchored id is rejected (anti-hallucination)."
+    "anchoring_rule": "Every judgment must cite a signal_id plow emitted; an unanchored id is rejected (anti-hallucination)."
   },
   "injection_note": "The digest is built from the deterministic module graph only; PR prose is untrusted and never enters the digest. Your free-text framing is fenced as non-deterministic and never gates or auto-posts.",
   "_meta": {

@@ -165,7 +165,7 @@ const SCHEMA = {
       filter_flag: "--unused-files",
       fixable: false,
       suppressible: true,
-      suppress_comment: "// fallow-ignore-file unused-file",
+      suppress_comment: "// plow-ignore-file unused-file",
       note: null,
       license: "free",
     },
@@ -187,7 +187,7 @@ const SCHEMA = {
       filter_flag: null,
       fixable: false,
       suppressible: true,
-      suppress_comment: "// fallow-ignore-next-line security-sink",
+      suppress_comment: "// plow-ignore-next-line security-sink",
       note: null,
       license: "free",
     },
@@ -198,7 +198,7 @@ const SCHEMA = {
       filter_flag: null,
       fixable: false,
       suppressible: true,
-      suppress_comment: "// fallow-ignore-next-line security-sink",
+      suppress_comment: "// plow-ignore-next-line security-sink",
       note: null,
       license: "free",
     },
@@ -235,7 +235,7 @@ const SCHEMA = {
   task_matrix: [
     {
       task: "delete an unused export or file",
-      command: "fallow dead-code --trace <file>:<export>",
+      command: "plow dead-code --trace <file>:<export>",
       note: null,
     },
     {
@@ -255,7 +255,7 @@ Hand-written intro stays.
 <!-- generated:commands:start -->
 | Command | Purpose | Key Flags |
 |---|---|---|
-| \`fallow\` | Curated combined purpose | \`--only\`, \`--skip\` |
+| \`plow\` | Curated combined purpose | \`--only\`, \`--skip\` |
 | \`dead-code\` | Curated dead code purpose | \`--changed-since\` |
 | \`coverage\` | Coverage helper | \`setup\` |
 | \`coverage upload-source-maps\` | Upload source maps from CI | \`--dir dist\` |
@@ -267,7 +267,7 @@ Hand-written intro stays.
 <!-- generated:issue-types:start -->
 | Type | Filter flag | Fixable | Suppress comment | Description |
 |---|---|---|---|---|
-| \`unused-file\` | \`--unused-files\` | - | \`// fallow-ignore-file unused-file\` | Curated teaching prose for unused files |
+| \`unused-file\` | \`--unused-files\` | - | \`// plow-ignore-file unused-file\` | Curated teaching prose for unused files |
 <!-- generated:issue-types:end -->
 
 ## MCP Tools
@@ -283,7 +283,7 @@ Hand-written intro stays.
 <!-- generated:task-matrix:start -->
 | When the agent is about to... | Run |
 |---|---|
-| stale row that should be regenerated | \`fallow gone\` |
+| stale row that should be regenerated | \`plow gone\` |
 <!-- generated:task-matrix:end -->
 
 Hand-written outro stays.
@@ -300,7 +300,7 @@ Hand-written intro stays.
 <!-- generated:commands:start -->
 | Command | Purpose | Key Flags |
 |---|---|---|
-| \`fallow\` | Curated combined purpose | \`--only\`, \`--skip\` |
+| \`plow\` | Curated combined purpose | \`--only\`, \`--skip\` |
 | \`dead-code\` | Curated dead code purpose | \`--changed-since\` |
 <!-- generated:commands:end -->
 
@@ -309,7 +309,7 @@ Hand-written intro stays.
 <!-- generated:issue-types:start -->
 | Type | Filter flag | Fixable | Suppress comment | Description |
 |---|---|---|---|---|
-| \`unused-file\` | \`--unused-files\` | - | \`// fallow-ignore-file unused-file\` | Curated teaching prose for unused files |
+| \`unused-file\` | \`--unused-files\` | - | \`// plow-ignore-file unused-file\` | Curated teaching prose for unused files |
 <!-- generated:issue-types:end -->
 
 ## MCP Tools
@@ -323,7 +323,7 @@ Hand-written intro stays.
 Hand-written outro stays.
 `;
 
-const DOC_CLI_REFERENCE = `# Fallow CLI Reference
+const DOC_CLI_REFERENCE = `# Plow CLI Reference
 
 ## \`dead-code\`: Dead Code Analysis
 
@@ -370,11 +370,11 @@ Arguments are hand-written here.
 
 ### Combined Mode Flags
 
-<!-- generated:flags:fallow-combined:start -->
+<!-- generated:flags:plow-combined:start -->
 | Flag | Type | Default | Description |
 |---|---|---|---|
 | \`--only\` | \`string\` | - | Curated only prose |
-<!-- generated:flags:fallow-combined:end -->
+<!-- generated:flags:plow-combined:end -->
 `;
 
 test("escapeCell escapes pipes and collapses whitespace, leaves backticks and angle brackets", () => {
@@ -385,8 +385,8 @@ test("escapeCell escapes pipes and collapses whitespace, leaves backticks and an
 test("firstSentence cuts at sentence boundary and survives dotted filenames", () => {
   assert.equal(firstSentence("First part. Second part."), "First part.");
   assert.equal(
-    firstSentence("Initialize a .fallowrc.json configuration file"),
-    "Initialize a .fallowrc.json configuration file",
+    firstSentence("Initialize a .plowrc.json configuration file"),
+    "Initialize a .plowrc.json configuration file",
   );
 });
 
@@ -464,7 +464,7 @@ test("task-matrix section regenerates from the manifest and is idempotent", () =
   assert.ok(once.includes("| When the agent is about to... | Run |"));
   assert.ok(
     once.includes(
-      "| delete an unused export or file | `fallow dead-code --trace <file>:<export>` |",
+      "| delete an unused export or file | `plow dead-code --trace <file>:<export>` |",
     ),
   );
   // The flag-fragment row appends its note after a semicolon.
@@ -544,8 +544,8 @@ test("CLI reference keeps issue filters separate from command flags", () => {
 test("CLI reference combined mode uses the explicit allow-list", () => {
   const out = regenerateCliReferenceMd(DOC_CLI_REFERENCE, SCHEMA);
   const block = out.slice(
-    out.indexOf("<!-- generated:flags:fallow-combined:start -->"),
-    out.indexOf("<!-- generated:flags:fallow-combined:end -->"),
+    out.indexOf("<!-- generated:flags:plow-combined:start -->"),
+    out.indexOf("<!-- generated:flags:plow-combined:end -->"),
   );
   assert.match(block, /\| `--dupes-mode` \|/);
   assert.match(block, /\| `--coverage` \|/);

@@ -16,9 +16,9 @@ use super::super::threshold_overrides::{
 };
 use crate::baseline::HealthBaselineData;
 use crate::source::ModuleInfo;
-use fallow_output::{ComplexityViolation, ExceededThreshold, FindingSeverity};
-use fallow_types::discover::FileId;
-use fallow_types::extract::FunctionComplexity;
+use plow_output::{ComplexityViolation, ExceededThreshold, FindingSeverity};
+use plow_types::discover::FileId;
+use plow_types::extract::FunctionComplexity;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
 
@@ -119,7 +119,7 @@ fn make_fc(name: &str, cyclomatic: u16, cognitive: u16, line_count: u32) -> Func
 }
 
 fn make_fc_with_contributions(name: &str, cyclomatic: u16, cognitive: u16) -> FunctionComplexity {
-    use fallow_types::extract::{
+    use plow_types::extract::{
         ComplexityContribution, ComplexityContributionKind, ComplexityMetric,
     };
     let mut fc = make_fc(name, cyclomatic, cognitive, 50);
@@ -190,7 +190,7 @@ fn collect_findings_includes_contributions_with_breakdown_flag() {
 }
 
 fn threshold_resolver(
-    overrides: &[fallow_config::HealthThresholdOverride],
+    overrides: &[plow_config::HealthThresholdOverride],
 ) -> ThresholdOverrideResolver {
     ThresholdOverrideResolver::new(
         overrides,
@@ -211,7 +211,7 @@ fn collect_findings_uses_threshold_override_as_local_ceiling() {
     )];
     let mut file_paths = FxHashMap::default();
     file_paths.insert(FileId(0), &path);
-    let resolver = threshold_resolver(&[fallow_config::HealthThresholdOverride {
+    let resolver = threshold_resolver(&[plow_config::HealthThresholdOverride {
         files: vec!["src/a.ts".to_string()],
         functions: vec!["complexFn".to_string()],
         max_cyclomatic: Some(30),
@@ -239,7 +239,7 @@ fn collect_findings_uses_threshold_override_as_local_ceiling() {
     assert_eq!(states.len(), 1);
     assert!(matches!(
         states[0].status,
-        fallow_output::ThresholdOverrideStatus::Active
+        plow_output::ThresholdOverrideStatus::Active
     ));
 }
 
@@ -252,7 +252,7 @@ fn collect_findings_reports_when_local_ceiling_is_exceeded() {
     )];
     let mut file_paths = FxHashMap::default();
     file_paths.insert(FileId(0), &path);
-    let resolver = threshold_resolver(&[fallow_config::HealthThresholdOverride {
+    let resolver = threshold_resolver(&[plow_config::HealthThresholdOverride {
         files: vec!["src/a.ts".to_string()],
         functions: vec!["complexFn".to_string()],
         max_cyclomatic: Some(30),
@@ -279,7 +279,7 @@ fn collect_findings_reports_when_local_ceiling_is_exceeded() {
     assert_eq!(findings[0].effective_thresholds.unwrap().max_cyclomatic, 30);
     assert!(matches!(
         findings[0].threshold_source,
-        Some(fallow_output::ThresholdSource::Override)
+        Some(plow_output::ThresholdSource::Override)
     ));
 }
 
@@ -292,7 +292,7 @@ fn collect_findings_reports_stale_override_when_under_global_thresholds() {
     )];
     let mut file_paths = FxHashMap::default();
     file_paths.insert(FileId(0), &path);
-    let resolver = threshold_resolver(&[fallow_config::HealthThresholdOverride {
+    let resolver = threshold_resolver(&[plow_config::HealthThresholdOverride {
         files: vec!["src/a.ts".to_string()],
         functions: vec!["complexFn".to_string()],
         max_cyclomatic: Some(30),
@@ -320,13 +320,13 @@ fn collect_findings_reports_stale_override_when_under_global_thresholds() {
     assert_eq!(states.len(), 1);
     assert!(matches!(
         states[0].status,
-        fallow_output::ThresholdOverrideStatus::Stale
+        plow_output::ThresholdOverrideStatus::Stale
     ));
 }
 
 #[test]
 fn threshold_override_tracker_reports_no_match_only_when_requested() {
-    let resolver = threshold_resolver(&[fallow_config::HealthThresholdOverride {
+    let resolver = threshold_resolver(&[plow_config::HealthThresholdOverride {
         files: vec!["src/missing.ts".to_string()],
         functions: vec!["missingFn".to_string()],
         max_cyclomatic: Some(30),
@@ -344,7 +344,7 @@ fn threshold_override_tracker_reports_no_match_only_when_requested() {
     assert_eq!(states.len(), 1);
     assert!(matches!(
         states[0].status,
-        fallow_output::ThresholdOverrideStatus::NoMatch
+        plow_output::ThresholdOverrideStatus::NoMatch
     ));
 }
 
@@ -649,8 +649,8 @@ fn collect_findings_filters_by_changed_files() {
     assert_eq!(files, 1);
 }
 
-fn build_diff(text: &str) -> fallow_output::DiffIndex {
-    fallow_output::DiffIndex::from_unified_diff(text)
+fn build_diff(text: &str) -> plow_output::DiffIndex {
+    plow_output::DiffIndex::from_unified_diff(text)
 }
 
 #[test]
@@ -772,7 +772,7 @@ fn filter_complexity_findings_by_diff_handles_zero_line_count() {
 
 #[test]
 fn filter_hotspots_by_diff_uses_file_level_membership() {
-    use fallow_output::HotspotEntry;
+    use plow_output::HotspotEntry;
     let mut hotspots = vec![
         HotspotEntry {
             path: PathBuf::from("/project/src/touched.ts"),
@@ -815,7 +815,7 @@ fn filter_hotspots_by_diff_uses_file_level_membership() {
 
 #[test]
 fn filter_large_functions_by_diff_uses_range_overlap() {
-    use fallow_output::LargeFunctionEntry;
+    use plow_output::LargeFunctionEntry;
     let mut entries = vec![
         LargeFunctionEntry {
             path: PathBuf::from("/project/src/a.ts"),
@@ -979,16 +979,16 @@ fn merge_crap_findings_disambiguates_same_line_functions() {
                 col: inner.col,
                 crap: 56.0,
                 coverage_pct: None,
-                coverage_tier: fallow_output::CoverageTier::None,
-                coverage_source: fallow_output::CoverageSource::Estimated,
+                coverage_tier: plow_output::CoverageTier::None,
+                coverage_source: plow_output::CoverageSource::Estimated,
             },
             scoring::PerFunctionCrap {
                 line: outer.line,
                 col: outer.col,
                 crap: 2.0,
                 coverage_pct: None,
-                coverage_tier: fallow_output::CoverageTier::None,
-                coverage_source: fallow_output::CoverageSource::Estimated,
+                coverage_tier: plow_output::CoverageTier::None,
+                coverage_source: plow_output::CoverageSource::Estimated,
             },
         ],
     );
@@ -1085,16 +1085,16 @@ fn merge_crap_findings_picks_outer_when_outer_exceeds() {
                 col: inner.col,
                 crap: 2.0,
                 coverage_pct: None,
-                coverage_tier: fallow_output::CoverageTier::None,
-                coverage_source: fallow_output::CoverageSource::Estimated,
+                coverage_tier: plow_output::CoverageTier::None,
+                coverage_source: plow_output::CoverageSource::Estimated,
             },
             scoring::PerFunctionCrap {
                 line: outer.line,
                 col: outer.col,
                 crap: 72.0,
                 coverage_pct: None,
-                coverage_tier: fallow_output::CoverageTier::None,
-                coverage_source: fallow_output::CoverageSource::Estimated,
+                coverage_tier: plow_output::CoverageTier::None,
+                coverage_source: plow_output::CoverageSource::Estimated,
             },
         ],
     );
@@ -1129,7 +1129,7 @@ fn fx_summary(
     hit: usize,
     unhit: usize,
     untracked: usize,
-) -> fallow_output::RuntimeCoverageSummary {
+) -> plow_output::RuntimeCoverageSummary {
     #[expect(
         clippy::cast_precision_loss,
         reason = "test fixture totals are tiny, f64 precision is fine"
@@ -1139,8 +1139,8 @@ fn fx_summary(
     } else {
         (hit as f64 / tracked as f64) * 100.0
     };
-    fallow_output::RuntimeCoverageSummary {
-        data_source: fallow_output::RuntimeCoverageDataSource::Local,
+    plow_output::RuntimeCoverageSummary {
+        data_source: plow_output::RuntimeCoverageDataSource::Local,
         last_received_at: None,
         functions_tracked: tracked,
         functions_hit: hit,
@@ -1158,8 +1158,8 @@ fn fx_evidence(
     static_status: &str,
     test_coverage: &str,
     v8_tracking: &str,
-) -> fallow_output::RuntimeCoverageEvidence {
-    fallow_output::RuntimeCoverageEvidence {
+) -> plow_output::RuntimeCoverageEvidence {
+    plow_output::RuntimeCoverageEvidence {
         static_status: static_status.to_owned(),
         test_coverage: test_coverage.to_owned(),
         v8_tracking: v8_tracking.to_owned(),
@@ -1180,55 +1180,55 @@ fn runtime_coverage_top_applies_after_baseline_filtering() {
         findings: vec![],
         finding_counts: std::collections::BTreeMap::new(),
         runtime_coverage_findings: vec![
-            "fallow:prod:aaaaaaaa".to_owned(),
-            "fallow:prod:bbbbbbbb".to_owned(),
+            "plow:prod:aaaaaaaa".to_owned(),
+            "plow:prod:bbbbbbbb".to_owned(),
         ],
         runtime_coverage_source_hashes: vec![],
         target_keys: vec![],
     };
-    let mut report = fallow_output::RuntimeCoverageReport {
-        schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
-        verdict: fallow_output::RuntimeCoverageReportVerdict::ColdCodeDetected,
+    let mut report = plow_output::RuntimeCoverageReport {
+        schema_version: plow_output::RuntimeCoverageSchemaVersion::V1,
+        verdict: plow_output::RuntimeCoverageReportVerdict::ColdCodeDetected,
         signals: Vec::new(),
         summary: fx_summary(3, 0, 2, 1),
         findings: vec![
-            fallow_output::RuntimeCoverageFinding {
-                id: "fallow:prod:aaaaaaaa".to_owned(),
+            plow_output::RuntimeCoverageFinding {
+                id: "plow:prod:aaaaaaaa".to_owned(),
                 stable_id: None,
                 path: PathBuf::from("/project/src/a.ts"),
                 function: "alpha".to_owned(),
                 line: 10,
-                verdict: fallow_output::RuntimeCoverageVerdict::ReviewRequired,
+                verdict: plow_output::RuntimeCoverageVerdict::ReviewRequired,
                 invocations: Some(0),
-                confidence: fallow_output::RuntimeCoverageConfidence::Medium,
+                confidence: plow_output::RuntimeCoverageConfidence::Medium,
                 evidence: fx_evidence("used", "not_covered", "tracked"),
                 actions: vec![],
                 source_hash: None,
                 discriminators: None,
             },
-            fallow_output::RuntimeCoverageFinding {
-                id: "fallow:prod:bbbbbbbb".to_owned(),
+            plow_output::RuntimeCoverageFinding {
+                id: "plow:prod:bbbbbbbb".to_owned(),
                 stable_id: None,
                 path: PathBuf::from("/project/src/b.ts"),
                 function: "beta".to_owned(),
                 line: 20,
-                verdict: fallow_output::RuntimeCoverageVerdict::CoverageUnavailable,
+                verdict: plow_output::RuntimeCoverageVerdict::CoverageUnavailable,
                 invocations: None,
-                confidence: fallow_output::RuntimeCoverageConfidence::None,
+                confidence: plow_output::RuntimeCoverageConfidence::None,
                 evidence: fx_evidence("used", "not_covered", "untracked"),
                 actions: vec![],
                 source_hash: None,
                 discriminators: None,
             },
-            fallow_output::RuntimeCoverageFinding {
-                id: "fallow:prod:cccccccc".to_owned(),
+            plow_output::RuntimeCoverageFinding {
+                id: "plow:prod:cccccccc".to_owned(),
                 stable_id: None,
                 path: PathBuf::from("/project/src/c.ts"),
                 function: "gamma".to_owned(),
                 line: 30,
-                verdict: fallow_output::RuntimeCoverageVerdict::ReviewRequired,
+                verdict: plow_output::RuntimeCoverageVerdict::ReviewRequired,
                 invocations: Some(0),
-                confidence: fallow_output::RuntimeCoverageConfidence::Medium,
+                confidence: plow_output::RuntimeCoverageConfidence::Medium,
                 evidence: fx_evidence("used", "not_covered", "tracked"),
                 actions: vec![],
                 source_hash: None,
@@ -1236,8 +1236,8 @@ fn runtime_coverage_top_applies_after_baseline_filtering() {
             },
         ],
         hot_paths: vec![
-            fallow_output::RuntimeCoverageHotPath {
-                id: "fallow:hot:11111111".to_owned(),
+            plow_output::RuntimeCoverageHotPath {
+                id: "plow:hot:11111111".to_owned(),
                 stable_id: None,
                 path: PathBuf::from("/project/src/hot-a.ts"),
                 function: "hotAlpha".to_owned(),
@@ -1247,8 +1247,8 @@ fn runtime_coverage_top_applies_after_baseline_filtering() {
                 percentile: 99,
                 actions: vec![],
             },
-            fallow_output::RuntimeCoverageHotPath {
-                id: "fallow:hot:22222222".to_owned(),
+            plow_output::RuntimeCoverageHotPath {
+                id: "plow:hot:22222222".to_owned(),
                 stable_id: None,
                 path: PathBuf::from("/project/src/hot-b.ts"),
                 function: "hotBeta".to_owned(),
@@ -1266,7 +1266,7 @@ fn runtime_coverage_top_applies_after_baseline_filtering() {
         actionable: true,
         actionability_reason: None,
         actionability_verdict: None,
-        provenance: fallow_output::RuntimeCoverageProvenance::default(),
+        provenance: plow_output::RuntimeCoverageProvenance::default(),
     };
 
     apply_runtime_coverage_filters(
@@ -1280,7 +1280,7 @@ fn runtime_coverage_top_applies_after_baseline_filtering() {
     assert_eq!(report.findings[0].function, "gamma");
     assert_eq!(
         report.verdict,
-        fallow_output::RuntimeCoverageReportVerdict::ColdCodeDetected
+        plow_output::RuntimeCoverageReportVerdict::ColdCodeDetected
     );
     assert_eq!(report.summary.functions_tracked, 3);
     assert_eq!(report.summary.functions_hit, 0);
@@ -1297,24 +1297,24 @@ fn runtime_coverage_baseline_refreshes_to_clean_when_only_baselined_findings_rem
     let baseline = HealthBaselineData {
         findings: vec![],
         finding_counts: std::collections::BTreeMap::new(),
-        runtime_coverage_findings: vec!["fallow:prod:aaaaaaaa".to_owned()],
+        runtime_coverage_findings: vec!["plow:prod:aaaaaaaa".to_owned()],
         runtime_coverage_source_hashes: vec![],
         target_keys: vec![],
     };
-    let mut report = fallow_output::RuntimeCoverageReport {
-        schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
-        verdict: fallow_output::RuntimeCoverageReportVerdict::ColdCodeDetected,
+    let mut report = plow_output::RuntimeCoverageReport {
+        schema_version: plow_output::RuntimeCoverageSchemaVersion::V1,
+        verdict: plow_output::RuntimeCoverageReportVerdict::ColdCodeDetected,
         signals: Vec::new(),
         summary: fx_summary(2, 1, 1, 0),
-        findings: vec![fallow_output::RuntimeCoverageFinding {
-            id: "fallow:prod:aaaaaaaa".to_owned(),
+        findings: vec![plow_output::RuntimeCoverageFinding {
+            id: "plow:prod:aaaaaaaa".to_owned(),
             stable_id: None,
             path: PathBuf::from("/project/src/a.ts"),
             function: "alpha".to_owned(),
             line: 10,
-            verdict: fallow_output::RuntimeCoverageVerdict::ReviewRequired,
+            verdict: plow_output::RuntimeCoverageVerdict::ReviewRequired,
             invocations: Some(0),
-            confidence: fallow_output::RuntimeCoverageConfidence::Medium,
+            confidence: plow_output::RuntimeCoverageConfidence::Medium,
             evidence: fx_evidence("used", "not_covered", "tracked"),
             actions: vec![],
             source_hash: None,
@@ -1328,7 +1328,7 @@ fn runtime_coverage_baseline_refreshes_to_clean_when_only_baselined_findings_rem
         actionable: true,
         actionability_reason: None,
         actionability_verdict: None,
-        provenance: fallow_output::RuntimeCoverageProvenance::default(),
+        provenance: plow_output::RuntimeCoverageProvenance::default(),
     };
 
     apply_runtime_coverage_filters(
@@ -1339,7 +1339,7 @@ fn runtime_coverage_baseline_refreshes_to_clean_when_only_baselined_findings_rem
     assert!(report.findings.is_empty());
     assert_eq!(
         report.verdict,
-        fallow_output::RuntimeCoverageReportVerdict::Clean
+        plow_output::RuntimeCoverageReportVerdict::Clean
     );
     assert_eq!(report.summary.functions_tracked, 2);
     assert_eq!(report.summary.functions_hit, 1);
@@ -1353,14 +1353,14 @@ fn runtime_coverage_changed_review_uses_hot_path_verdict() {
     let root = Path::new("/project");
     let mut changed_files = FxHashSet::default();
     changed_files.insert(PathBuf::from("/project/src/hot.ts"));
-    let mut report = fallow_output::RuntimeCoverageReport {
-        schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
-        verdict: fallow_output::RuntimeCoverageReportVerdict::Clean,
+    let mut report = plow_output::RuntimeCoverageReport {
+        schema_version: plow_output::RuntimeCoverageSchemaVersion::V1,
+        verdict: plow_output::RuntimeCoverageReportVerdict::Clean,
         signals: Vec::new(),
         summary: fx_summary(2, 2, 0, 0),
         findings: vec![],
-        hot_paths: vec![fallow_output::RuntimeCoverageHotPath {
-            id: "fallow:hot:33333333".to_owned(),
+        hot_paths: vec![plow_output::RuntimeCoverageHotPath {
+            id: "plow:hot:33333333".to_owned(),
             stable_id: None,
             path: PathBuf::from("/project/src/hot.ts"),
             function: "renderHotPath".to_owned(),
@@ -1377,7 +1377,7 @@ fn runtime_coverage_changed_review_uses_hot_path_verdict() {
         actionable: true,
         actionability_reason: None,
         actionability_verdict: None,
-        provenance: fallow_output::RuntimeCoverageProvenance::default(),
+        provenance: plow_output::RuntimeCoverageProvenance::default(),
     };
 
     apply_runtime_coverage_filters(
@@ -1387,7 +1387,7 @@ fn runtime_coverage_changed_review_uses_hot_path_verdict() {
 
     assert_eq!(
         report.verdict,
-        fallow_output::RuntimeCoverageReportVerdict::HotPathTouched
+        plow_output::RuntimeCoverageReportVerdict::HotPathTouched
     );
 }
 
@@ -1396,14 +1396,14 @@ fn runtime_coverage_changed_review_ignores_unmodified_hot_paths() {
     let root = Path::new("/project");
     let mut changed_files = FxHashSet::default();
     changed_files.insert(PathBuf::from("/project/src/other.ts"));
-    let mut report = fallow_output::RuntimeCoverageReport {
-        schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
-        verdict: fallow_output::RuntimeCoverageReportVerdict::Clean,
+    let mut report = plow_output::RuntimeCoverageReport {
+        schema_version: plow_output::RuntimeCoverageSchemaVersion::V1,
+        verdict: plow_output::RuntimeCoverageReportVerdict::Clean,
         signals: Vec::new(),
         summary: fx_summary(2, 2, 0, 0),
         findings: vec![],
-        hot_paths: vec![fallow_output::RuntimeCoverageHotPath {
-            id: "fallow:hot:44444444".to_owned(),
+        hot_paths: vec![plow_output::RuntimeCoverageHotPath {
+            id: "plow:hot:44444444".to_owned(),
             stable_id: None,
             path: PathBuf::from("/project/src/hot.ts"),
             function: "renderHotPath".to_owned(),
@@ -1420,7 +1420,7 @@ fn runtime_coverage_changed_review_ignores_unmodified_hot_paths() {
         actionable: true,
         actionability_reason: None,
         actionability_verdict: None,
-        provenance: fallow_output::RuntimeCoverageProvenance::default(),
+        provenance: plow_output::RuntimeCoverageProvenance::default(),
     };
 
     apply_runtime_coverage_filters(
@@ -1431,16 +1431,16 @@ fn runtime_coverage_changed_review_ignores_unmodified_hot_paths() {
     assert!(report.hot_paths.is_empty());
     assert_eq!(
         report.verdict,
-        fallow_output::RuntimeCoverageReportVerdict::Clean
+        plow_output::RuntimeCoverageReportVerdict::Clean
     );
 }
 
 fn fx_runtime_coverage_report_with_hot_paths(
-    hot_paths: Vec<fallow_output::RuntimeCoverageHotPath>,
-) -> fallow_output::RuntimeCoverageReport {
-    fallow_output::RuntimeCoverageReport {
-        schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
-        verdict: fallow_output::RuntimeCoverageReportVerdict::Clean,
+    hot_paths: Vec<plow_output::RuntimeCoverageHotPath>,
+) -> plow_output::RuntimeCoverageReport {
+    plow_output::RuntimeCoverageReport {
+        schema_version: plow_output::RuntimeCoverageSchemaVersion::V1,
+        verdict: plow_output::RuntimeCoverageReportVerdict::Clean,
         signals: Vec::new(),
         summary: fx_summary(2, 2, 0, 0),
         findings: vec![],
@@ -1452,7 +1452,7 @@ fn fx_runtime_coverage_report_with_hot_paths(
         actionable: true,
         actionability_reason: None,
         actionability_verdict: None,
-        provenance: fallow_output::RuntimeCoverageProvenance::default(),
+        provenance: plow_output::RuntimeCoverageProvenance::default(),
     }
 }
 
@@ -1461,8 +1461,8 @@ fn fx_hot_path(
     path: &str,
     line: u32,
     end_line: u32,
-) -> fallow_output::RuntimeCoverageHotPath {
-    fallow_output::RuntimeCoverageHotPath {
+) -> plow_output::RuntimeCoverageHotPath {
+    plow_output::RuntimeCoverageHotPath {
         id: id.to_owned(),
         stable_id: None,
         path: PathBuf::from(path),
@@ -1484,9 +1484,9 @@ fn runtime_coverage_diff_index_keeps_hot_paths_with_added_line_in_range() {
                     @@ -10,1 +10,2 @@\n\
                     +  // touch the body\n\
                     line 11\n";
-    let diff_index = fallow_output::DiffIndex::from_unified_diff(diff);
+    let diff_index = plow_output::DiffIndex::from_unified_diff(diff);
     let mut report = fx_runtime_coverage_report_with_hot_paths(vec![fx_hot_path(
-        "fallow:hot:01010101",
+        "plow:hot:01010101",
         "src/hot.ts",
         7,
         24,
@@ -1500,7 +1500,7 @@ fn runtime_coverage_diff_index_keeps_hot_paths_with_added_line_in_range() {
     assert_eq!(report.hot_paths.len(), 1);
     assert_eq!(
         report.verdict,
-        fallow_output::RuntimeCoverageReportVerdict::HotPathTouched
+        plow_output::RuntimeCoverageReportVerdict::HotPathTouched
     );
 }
 
@@ -1513,9 +1513,9 @@ fn runtime_coverage_diff_index_drops_hot_paths_when_added_line_outside_range() {
                     @@ -50,1 +50,2 @@\n\
                     +  // unrelated change far below the hot function\n\
                     line 51\n";
-    let diff_index = fallow_output::DiffIndex::from_unified_diff(diff);
+    let diff_index = plow_output::DiffIndex::from_unified_diff(diff);
     let mut report = fx_runtime_coverage_report_with_hot_paths(vec![fx_hot_path(
-        "fallow:hot:02020202",
+        "plow:hot:02020202",
         "src/hot.ts",
         7,
         24,
@@ -1529,7 +1529,7 @@ fn runtime_coverage_diff_index_drops_hot_paths_when_added_line_outside_range() {
     assert!(report.hot_paths.is_empty());
     assert_eq!(
         report.verdict,
-        fallow_output::RuntimeCoverageReportVerdict::Clean
+        plow_output::RuntimeCoverageReportVerdict::Clean
     );
 }
 
@@ -1542,9 +1542,9 @@ fn runtime_coverage_diff_index_falls_back_to_single_line_when_end_line_zero() {
                     @@ -7,1 +7,2 @@\n\
                     +  // exactly the function's start line\n\
                     line 8\n";
-    let diff_index = fallow_output::DiffIndex::from_unified_diff(diff);
+    let diff_index = plow_output::DiffIndex::from_unified_diff(diff);
     let mut report = fx_runtime_coverage_report_with_hot_paths(vec![fx_hot_path(
-        "fallow:hot:03030303",
+        "plow:hot:03030303",
         "src/hot.ts",
         7,
         0,
@@ -1558,7 +1558,7 @@ fn runtime_coverage_diff_index_falls_back_to_single_line_when_end_line_zero() {
     assert_eq!(report.hot_paths.len(), 1);
     assert_eq!(
         report.verdict,
-        fallow_output::RuntimeCoverageReportVerdict::HotPathTouched
+        plow_output::RuntimeCoverageReportVerdict::HotPathTouched
     );
 }
 
@@ -1571,9 +1571,9 @@ fn runtime_coverage_diff_index_resolves_absolute_hot_path_against_root() {
                     @@ -10,1 +10,2 @@\n\
                     +  // touched\n\
                     line 11\n";
-    let diff_index = fallow_output::DiffIndex::from_unified_diff(diff);
+    let diff_index = plow_output::DiffIndex::from_unified_diff(diff);
     let mut report = fx_runtime_coverage_report_with_hot_paths(vec![fx_hot_path(
-        "fallow:hot:04040404",
+        "plow:hot:04040404",
         "/project/src/hot.ts",
         7,
         24,
@@ -1596,11 +1596,11 @@ fn runtime_coverage_diff_index_authoritative_for_files_in_diff() {
                     @@ -50,1 +50,2 @@\n\
                     +  // outside the hot function\n\
                     line 51\n";
-    let diff_index = fallow_output::DiffIndex::from_unified_diff(diff);
+    let diff_index = plow_output::DiffIndex::from_unified_diff(diff);
     let mut changed_files = FxHashSet::default();
     changed_files.insert(PathBuf::from("/project/src/hot.ts"));
     let mut report = fx_runtime_coverage_report_with_hot_paths(vec![fx_hot_path(
-        "fallow:hot:05050505",
+        "plow:hot:05050505",
         "src/hot.ts",
         7,
         24,
@@ -1616,7 +1616,7 @@ fn runtime_coverage_diff_index_authoritative_for_files_in_diff() {
     assert!(report.hot_paths.is_empty());
     assert_eq!(
         report.verdict,
-        fallow_output::RuntimeCoverageReportVerdict::Clean
+        plow_output::RuntimeCoverageReportVerdict::Clean
     );
 }
 
@@ -1629,11 +1629,11 @@ fn runtime_coverage_per_file_fallback_to_changed_files_when_diff_omits_file() {
                     @@ -1,1 +1,2 @@\n\
                     +  // unrelated\n\
                     line 2\n";
-    let diff_index = fallow_output::DiffIndex::from_unified_diff(diff);
+    let diff_index = plow_output::DiffIndex::from_unified_diff(diff);
     let mut changed_files = FxHashSet::default();
     changed_files.insert(PathBuf::from("/project/src/hot.ts"));
     let mut report = fx_runtime_coverage_report_with_hot_paths(vec![fx_hot_path(
-        "fallow:hot:0a0a0a0a",
+        "plow:hot:0a0a0a0a",
         "src/hot.ts",
         7,
         24,
@@ -1649,7 +1649,7 @@ fn runtime_coverage_per_file_fallback_to_changed_files_when_diff_omits_file() {
     assert_eq!(report.hot_paths.len(), 1);
     assert_eq!(
         report.verdict,
-        fallow_output::RuntimeCoverageReportVerdict::HotPathTouched
+        plow_output::RuntimeCoverageReportVerdict::HotPathTouched
     );
 }
 
@@ -1658,26 +1658,26 @@ fn runtime_coverage_pr_context_promotes_hot_path_touched_above_cold_code() {
     let root = Path::new("/project");
     let mut changed_files = FxHashSet::default();
     changed_files.insert(PathBuf::from("/project/src/hot.ts"));
-    let mut report = fallow_output::RuntimeCoverageReport {
-        schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
-        verdict: fallow_output::RuntimeCoverageReportVerdict::ColdCodeDetected,
+    let mut report = plow_output::RuntimeCoverageReport {
+        schema_version: plow_output::RuntimeCoverageSchemaVersion::V1,
+        verdict: plow_output::RuntimeCoverageReportVerdict::ColdCodeDetected,
         signals: Vec::new(),
         summary: fx_summary(2, 1, 1, 0),
-        findings: vec![fallow_output::RuntimeCoverageFinding {
-            id: "fallow:prod:cold0001".to_owned(),
+        findings: vec![plow_output::RuntimeCoverageFinding {
+            id: "plow:prod:cold0001".to_owned(),
             stable_id: None,
             path: PathBuf::from("/project/src/cold.ts"),
             function: "coldFn".to_owned(),
             line: 4,
-            verdict: fallow_output::RuntimeCoverageVerdict::SafeToDelete,
+            verdict: plow_output::RuntimeCoverageVerdict::SafeToDelete,
             invocations: Some(0),
-            confidence: fallow_output::RuntimeCoverageConfidence::High,
+            confidence: plow_output::RuntimeCoverageConfidence::High,
             evidence: fx_evidence("unused", "not_covered", "tracked"),
             actions: vec![],
             source_hash: None,
             discriminators: None,
         }],
-        hot_paths: vec![fx_hot_path("fallow:hot:0b0b0b0b", "src/hot.ts", 7, 24)],
+        hot_paths: vec![fx_hot_path("plow:hot:0b0b0b0b", "src/hot.ts", 7, 24)],
         blast_radius: vec![],
         importance: vec![],
         watermark: None,
@@ -1685,7 +1685,7 @@ fn runtime_coverage_pr_context_promotes_hot_path_touched_above_cold_code() {
         actionable: true,
         actionability_reason: None,
         actionability_verdict: None,
-        provenance: fallow_output::RuntimeCoverageProvenance::default(),
+        provenance: plow_output::RuntimeCoverageProvenance::default(),
     };
 
     apply_runtime_coverage_filters(
@@ -1695,13 +1695,13 @@ fn runtime_coverage_pr_context_promotes_hot_path_touched_above_cold_code() {
 
     assert_eq!(
         report.verdict,
-        fallow_output::RuntimeCoverageReportVerdict::HotPathTouched
+        plow_output::RuntimeCoverageReportVerdict::HotPathTouched
     );
     assert_eq!(
         report.signals,
         vec![
-            fallow_output::RuntimeCoverageSignal::ColdCodeDetected,
-            fallow_output::RuntimeCoverageSignal::HotPathTouched,
+            plow_output::RuntimeCoverageSignal::ColdCodeDetected,
+            plow_output::RuntimeCoverageSignal::HotPathTouched,
         ]
     );
 }
@@ -1709,26 +1709,26 @@ fn runtime_coverage_pr_context_promotes_hot_path_touched_above_cold_code() {
 #[test]
 fn runtime_coverage_standalone_keeps_cold_code_primary_above_unchanged_hot_paths() {
     let root = Path::new("/project");
-    let mut report = fallow_output::RuntimeCoverageReport {
-        schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
-        verdict: fallow_output::RuntimeCoverageReportVerdict::Clean,
+    let mut report = plow_output::RuntimeCoverageReport {
+        schema_version: plow_output::RuntimeCoverageSchemaVersion::V1,
+        verdict: plow_output::RuntimeCoverageReportVerdict::Clean,
         signals: Vec::new(),
         summary: fx_summary(2, 1, 1, 0),
-        findings: vec![fallow_output::RuntimeCoverageFinding {
-            id: "fallow:prod:cold0002".to_owned(),
+        findings: vec![plow_output::RuntimeCoverageFinding {
+            id: "plow:prod:cold0002".to_owned(),
             stable_id: None,
             path: PathBuf::from("/project/src/cold.ts"),
             function: "coldFn".to_owned(),
             line: 4,
-            verdict: fallow_output::RuntimeCoverageVerdict::SafeToDelete,
+            verdict: plow_output::RuntimeCoverageVerdict::SafeToDelete,
             invocations: Some(0),
-            confidence: fallow_output::RuntimeCoverageConfidence::High,
+            confidence: plow_output::RuntimeCoverageConfidence::High,
             evidence: fx_evidence("unused", "not_covered", "tracked"),
             actions: vec![],
             source_hash: None,
             discriminators: None,
         }],
-        hot_paths: vec![fx_hot_path("fallow:hot:0c0c0c0c", "src/hot.ts", 7, 24)],
+        hot_paths: vec![fx_hot_path("plow:hot:0c0c0c0c", "src/hot.ts", 7, 24)],
         blast_radius: vec![],
         importance: vec![],
         watermark: None,
@@ -1736,18 +1736,18 @@ fn runtime_coverage_standalone_keeps_cold_code_primary_above_unchanged_hot_paths
         actionable: true,
         actionability_reason: None,
         actionability_verdict: None,
-        provenance: fallow_output::RuntimeCoverageProvenance::default(),
+        provenance: plow_output::RuntimeCoverageProvenance::default(),
     };
 
     apply_runtime_coverage_filters(&mut report, &RuntimeCoverageFilterContext::new(root));
 
     assert_eq!(
         report.verdict,
-        fallow_output::RuntimeCoverageReportVerdict::ColdCodeDetected
+        plow_output::RuntimeCoverageReportVerdict::ColdCodeDetected
     );
     assert_eq!(
         report.signals,
-        vec![fallow_output::RuntimeCoverageSignal::ColdCodeDetected]
+        vec![plow_output::RuntimeCoverageSignal::ColdCodeDetected]
     );
     assert_eq!(report.hot_paths.len(), 1);
 }
@@ -1757,21 +1757,21 @@ fn runtime_coverage_license_grace_outranks_pr_context_signals() {
     let root = Path::new("/project");
     let mut changed_files = FxHashSet::default();
     changed_files.insert(PathBuf::from("/project/src/hot.ts"));
-    let mut report = fallow_output::RuntimeCoverageReport {
-        schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
-        verdict: fallow_output::RuntimeCoverageReportVerdict::LicenseExpiredGrace,
+    let mut report = plow_output::RuntimeCoverageReport {
+        schema_version: plow_output::RuntimeCoverageSchemaVersion::V1,
+        verdict: plow_output::RuntimeCoverageReportVerdict::LicenseExpiredGrace,
         signals: Vec::new(),
         summary: fx_summary(2, 1, 1, 0),
         findings: vec![],
-        hot_paths: vec![fx_hot_path("fallow:hot:0d0d0d0d", "src/hot.ts", 7, 24)],
+        hot_paths: vec![fx_hot_path("plow:hot:0d0d0d0d", "src/hot.ts", 7, 24)],
         blast_radius: vec![],
         importance: vec![],
-        watermark: Some(fallow_output::RuntimeCoverageWatermark::LicenseExpiredGrace),
+        watermark: Some(plow_output::RuntimeCoverageWatermark::LicenseExpiredGrace),
         warnings: vec![],
         actionable: true,
         actionability_reason: None,
         actionability_verdict: None,
-        provenance: fallow_output::RuntimeCoverageProvenance::default(),
+        provenance: plow_output::RuntimeCoverageProvenance::default(),
     };
 
     apply_runtime_coverage_filters(
@@ -1781,24 +1781,24 @@ fn runtime_coverage_license_grace_outranks_pr_context_signals() {
 
     assert_eq!(
         report.verdict,
-        fallow_output::RuntimeCoverageReportVerdict::LicenseExpiredGrace
+        plow_output::RuntimeCoverageReportVerdict::LicenseExpiredGrace
     );
     assert!(
         report
             .signals
-            .contains(&fallow_output::RuntimeCoverageSignal::LicenseExpiredGrace)
+            .contains(&plow_output::RuntimeCoverageSignal::LicenseExpiredGrace)
     );
     assert!(
         report
             .signals
-            .contains(&fallow_output::RuntimeCoverageSignal::HotPathTouched)
+            .contains(&plow_output::RuntimeCoverageSignal::HotPathTouched)
     );
 }
 
 #[test]
 fn retain_hot_paths_drops_when_diff_touches_file_but_no_added_lines() {
     let root = Path::new("/project");
-    let diff = fallow_output::DiffIndex::from_unified_diff(
+    let diff = plow_output::DiffIndex::from_unified_diff(
         "diff --git a/src/hot.ts b/src/hot.ts\n\
              --- a/src/hot.ts\n\
              +++ b/src/hot.ts\n\
@@ -1811,7 +1811,7 @@ fn retain_hot_paths_drops_when_diff_touches_file_but_no_added_lines() {
     let mut changed_files = FxHashSet::default();
     changed_files.insert(PathBuf::from("/project/src/hot.ts"));
     let mut report = fx_runtime_coverage_report_with_hot_paths(vec![fx_hot_path(
-        "fallow:hot:deletiononly",
+        "plow:hot:deletiononly",
         "src/hot.ts",
         10,
         12,
@@ -1836,7 +1836,7 @@ fn runtime_coverage_changed_files_matches_relative_hot_path_against_absolute_set
     let mut changed_files = FxHashSet::default();
     changed_files.insert(PathBuf::from("/project/src/hot.ts"));
     let mut report = fx_runtime_coverage_report_with_hot_paths(vec![fx_hot_path(
-        "fallow:hot:06060606",
+        "plow:hot:06060606",
         "src/hot.ts",
         7,
         24,

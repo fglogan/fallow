@@ -1,7 +1,7 @@
 //! V8 `ScriptCoverage` JSON parser and UTF-16 source-offset mapper.
 //!
-//! This is the open-source layer of fallow's runtime-coverage pipeline. It
-//! provides the two things the `fallow` CLI consumes:
+//! This is the open-source layer of plow's runtime-coverage pipeline. It
+//! provides the two things the `plow` CLI consumes:
 //!
 //! 1. Serde input types for the V8 coverage dump format emitted by
 //!    `node --experimental-test-coverage`, `c8`, the Inspector protocol, or
@@ -29,8 +29,8 @@
 //! `decisions/010-v8-coverage-vs-oxc-coverage-boundary.md`.
 //!
 //! The closed-source cross-reference, combined scoring, hot-path heuristics and
-//! verdict generation live in `fallow-cov` (private) and consume the CLI's
-//! remapped function output via the `fallow-cov-protocol` envelope.
+//! verdict generation live in `plow-cov` (private) and consume the CLI's
+//! remapped function output via the `plow-cov-protocol` envelope.
 
 #![forbid(unsafe_code)]
 #![cfg_attr(
@@ -348,7 +348,7 @@ mod tests {
 
     /// Property tests for the UTF-16-offset-to-line/column mapper.
     ///
-    /// The `position` mapper backs every Istanbul range fallow emits for runtime
+    /// The `position` mapper backs every Istanbul range plow emits for runtime
     /// coverage, so its invariants are encoded as properties rather than relying
     /// on hand-picked examples. The line-boundary tests build their input from
     /// known line bodies and join them with a chosen ending, so the expected

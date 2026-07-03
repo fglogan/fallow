@@ -3,7 +3,7 @@
 #[allow(clippy::wildcard_imports, reason = "many DI visitor AST types used")]
 use oxc_ast::ast::*;
 
-use fallow_types::extract::{DiFramework, DiKeySite, DiRole};
+use plow_types::extract::{DiFramework, DiKeySite, DiRole};
 
 use super::{
     ModuleInfoExtractor, angular_inject_is_optional, angular_param_inject_token,

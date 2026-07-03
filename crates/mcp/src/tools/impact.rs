@@ -24,7 +24,7 @@ pub async fn run_impact_all(
 
 /// Build CLI arguments for the `impact` tool.
 ///
-/// `fallow impact` (bare, no subcommand) renders the read-only value report.
+/// `plow impact` (bare, no subcommand) renders the read-only value report.
 /// The mutating `enable` / `disable` subcommands are deliberately not exposed:
 /// enabling local tracking is a one-time human setup step, not an agent action.
 pub fn build_impact_args(params: &ImpactParams) -> Vec<String> {
@@ -42,7 +42,7 @@ pub fn build_impact_args(params: &ImpactParams) -> Vec<String> {
 
 /// Build CLI arguments for the `impact_all` cross-repo aggregate tool.
 ///
-/// `fallow impact --all` rolls every tracked project on this machine into one
+/// `plow impact --all` rolls every tracked project on this machine into one
 /// read-only view. It takes no `root`: the aggregate reads the user config dir,
 /// independent of any single repo. Invalid `sort` values are rejected by the
 /// CLI (clap value-enum) and surface as a structured exit-2 error.

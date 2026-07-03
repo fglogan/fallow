@@ -59,7 +59,7 @@ describe("buildHealthArgs", () => {
     const all = buildHealthArgs({
       ...baseArgs,
       hotspots: true,
-      configPath: "/repo/.fallowrc.json",
+      configPath: "/repo/.plowrc.json",
       changedSince: "main",
       production: true,
     });
@@ -78,7 +78,7 @@ describe("buildHealthArgs", () => {
       "--changed-since",
       "main",
       "--config",
-      "/repo/.fallowrc.json",
+      "/repo/.plowrc.json",
     ]);
   });
 
@@ -263,7 +263,7 @@ describe("parseUnknownHealthSubcommand", () => {
   });
 
   it("returns false for unrelated errors so genuine failures stay loud", () => {
-    expect(parseUnknownHealthSubcommand("fallow exited with code 101")).toBe(false);
+    expect(parseUnknownHealthSubcommand("plow exited with code 101")).toBe(false);
     expect(parseUnknownHealthSubcommand("unrecognized subcommand 'security'")).toBe(false);
     expect(parseUnknownHealthSubcommand("")).toBe(false);
   });

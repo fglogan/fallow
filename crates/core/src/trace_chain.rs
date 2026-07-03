@@ -1,4 +1,4 @@
-//! Symbol-level call chains (`fallow trace <symbol> --callers --callees`).
+//! Symbol-level call chains (`plow trace <symbol> --callers --callees`).
 //!
 //! Best-effort, syntactic (ADR-001), EXPLICITLY OFF the ranked path. This walk
 //! NEVER feeds the focus map / ranking (verified by a dedicated test in the
@@ -29,8 +29,8 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_types::extract::{ImportedName, ModuleInfo};
-pub use fallow_types::trace_chain::{
+use plow_types::extract::{ImportedName, ModuleInfo};
+pub use plow_types::trace_chain::{
     ChainHop, DEFAULT_TRACE_DEPTH, SymbolChainQuery, SymbolChainTrace, TraceDirections,
     UnresolvedCallee, UnresolvedReason,
 };
@@ -384,11 +384,11 @@ mod tests {
     fn unresolved_reason_classifies_member_vs_bare() {
         let info = ModuleInfo {
             callee_uses: vec![
-                fallow_types::extract::CalleeUse {
+                plow_types::extract::CalleeUse {
                     callee_path: "localHelper".to_string(),
                     span_start: 0,
                 },
-                fallow_types::extract::CalleeUse {
+                plow_types::extract::CalleeUse {
                     callee_path: "obj.method".to_string(),
                     span_start: 10,
                 },
@@ -406,7 +406,7 @@ mod tests {
     #[test]
     fn imported_callees_are_not_listed_as_unresolved() {
         let info = ModuleInfo {
-            imports: vec![fallow_types::extract::ImportInfo {
+            imports: vec![plow_types::extract::ImportInfo {
                 source: "./dep".to_string(),
                 imported_name: ImportedName::Named("dep".to_string()),
                 local_name: "dep".to_string(),
@@ -416,11 +416,11 @@ mod tests {
                 source_span: oxc_span::Span::default(),
             }],
             callee_uses: vec![
-                fallow_types::extract::CalleeUse {
+                plow_types::extract::CalleeUse {
                     callee_path: "dep".to_string(),
                     span_start: 0,
                 },
-                fallow_types::extract::CalleeUse {
+                plow_types::extract::CalleeUse {
                     callee_path: "ghost".to_string(),
                     span_start: 5,
                 },

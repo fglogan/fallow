@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# Duplication Accuracy Baseline — evaluate fallow dupes against ground truth
+# Duplication Accuracy Baseline — evaluate plow dupes against ground truth
 #
-# Runs fallow dupes in all 4 modes + defaults, captures JSON output.
+# Runs plow dupes in all 4 modes + defaults, captures JSON output.
 # Then run evaluate-results.py to compute precision/recall.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CORPUS_DIR="$SCRIPT_DIR"
-FALLOW_BIN="${FALLOW_BIN:-cargo run --bin fallow --}"
+PLOW_BIN="${PLOW_BIN:-cargo run --bin plow --}"
 RESULTS_DIR="$SCRIPT_DIR/results"
 
 mkdir -p "$RESULTS_DIR"
 
-echo "=== Fallow Duplication Accuracy Baseline ==="
+echo "=== Plow Duplication Accuracy Baseline ==="
 echo "Corpus: $CORPUS_DIR"
 echo ""
 
@@ -24,7 +24,7 @@ run_mode() {
 
   echo "--- Running mode: $label ---"
 
-  $FALLOW_BIN dupes \
+  $PLOW_BIN dupes \
     --mode "$mode" \
     --min-tokens "$min_tokens" \
     --min-lines "$min_lines" \

@@ -28,7 +28,7 @@
 //! server" }` in a non-`"use server"` file) are ALSO reclassified: the extract
 //! layer records the export local name of every exported function / const-arrow
 //! whose body carries an inline `"use server"` directive on
-//! [`ModuleInfo::inline_server_action_exports`](fallow_types::extract::ModuleInfo),
+//! [`ModuleInfo::inline_server_action_exports`](plow_types::extract::ModuleInfo),
 //! and an unused export whose name appears there is moved into
 //! `unused_server_actions` just like a whole-`"use server"`-file export. The same
 //! `is_type_only` / `is_re_export` skips apply, so this inherits every
@@ -38,7 +38,7 @@ use std::path::Path;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_types::extract::ModuleInfo;
+use plow_types::extract::ModuleInfo;
 
 use crate::discover::FileId;
 use crate::graph::ModuleGraph;

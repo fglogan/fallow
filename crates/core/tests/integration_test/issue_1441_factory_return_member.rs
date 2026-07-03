@@ -8,8 +8,8 @@ fn factory_return_value_credits_class_member() {
     // (same-file factory; imported/composable wrappers are deferred).
     let root = fixture_path("issue-1441-factory-return-member");
     let mut config = create_config(root);
-    config.rules.unused_class_members = fallow_config::Severity::Error;
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    config.rules.unused_class_members = plow_config::Severity::Error;
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused: Vec<String> = results
         .unused_class_members
@@ -42,8 +42,8 @@ fn cross_module_factory_return_credits_class_member() {
     //   unusedMethod -> never reached at all
     let root = fixture_path("issue-1441-cross-module-factory-member");
     let mut config = create_config(root);
-    config.rules.unused_class_members = fallow_config::Severity::Error;
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    config.rules.unused_class_members = plow_config::Severity::Error;
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused: Vec<String> = results
         .unused_class_members
@@ -79,8 +79,8 @@ fn inferred_return_factory_credits_class_member() {
     // genuinely unaccessed member (`Api.DeadMember`) stays flagged. Issue #1441.
     let root = fixture_path("issue-1441-inferred-return-member");
     let mut config = create_config(root);
-    config.rules.unused_class_members = fallow_config::Severity::Error;
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    config.rules.unused_class_members = plow_config::Severity::Error;
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused: Vec<String> = results
         .unused_class_members

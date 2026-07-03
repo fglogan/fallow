@@ -8,7 +8,7 @@
  * struct), regenerate, commit. See the banner of
  * `src/generated/output-contract.d.ts` for the full recipe.
  *
- * The `Fallow*Result` aliases below preserve the historical names used by
+ * The `Plow*Result` aliases below preserve the historical names used by
  * existing consumers. New code should prefer the schema-derived names
  * (`CheckOutput`, `DupesOutput`, `CombinedOutput`).
  */
@@ -16,7 +16,7 @@
 // Bare-name backwards-compat aliases (`UnusedExport`, `CloneGroup`, ...) and
 // per-alias rationale live in the generated `output-contract.d.ts` under the
 // `// Backwards-compat aliases` section. They are sourced from the same
-// `export type { ... }` block below so the published `fallow/types` subpath
+// `export type { ... }` block below so the published `plow/types` subpath
 // carries the v2.x stable surface. Public-consumer policy:
 // `docs/backwards-compatibility.md`.
 export type {
@@ -61,7 +61,7 @@ export type {
   EntryPoints,
   FindingSeverity,
   FixAction as SuggestionFixAction,
-  FallowOutput,
+  PlowOutput,
   HealthFinding,
   HealthOutput,
   HealthReport,
@@ -115,23 +115,23 @@ export type {
   WorkspacesOutput,
 } from "./generated/output-contract.js";
 
-import type { FallowOutput } from "./generated/output-contract.js";
+import type { PlowOutput } from "./generated/output-contract.js";
 
-export type { CheckOutput as FallowCheckResult } from "./generated/output-contract.js";
-export type FallowInspectResult = Extract<FallowOutput, { kind: "inspect_target" }>;
+export type { CheckOutput as PlowCheckResult } from "./generated/output-contract.js";
+export type PlowInspectResult = Extract<PlowOutput, { kind: "inspect_target" }>;
 // The VS Code extension reads dupes only via the combined invocation
-// (`fallow --format json`), where `combined.dupes` is the typed
+// (`plow --format json`), where `combined.dupes` is the typed
 // `DupesReportPayload` body (introduced in #409), NOT the full
 // `DupesOutput` envelope with schema_version / version / elapsed_ms.
-// Aliasing `FallowDupesResult` to `DupesReportPayload` keeps every
+// Aliasing `PlowDupesResult` to `DupesReportPayload` keeps every
 // downstream consumer's existing usage (clone_groups, clone_families,
 // stats, mirrored_directories) honest; the inner `clone_groups[]` and
 // `clone_families[]` items are now `CloneGroupFinding` /
 // `CloneFamilyFinding` (each carrying typed actions[]). If a future VS
-// Code feature calls `fallow dupes` standalone, switch its return type
+// Code feature calls `plow dupes` standalone, switch its return type
 // to the full `DupesOutput` instead.
-export type { DupesReportPayload as FallowDupesResult } from "./generated/output-contract.js";
-export type { CombinedOutput as FallowCombinedResult } from "./generated/output-contract.js";
+export type { DupesReportPayload as PlowDupesResult } from "./generated/output-contract.js";
+export type { CombinedOutput as PlowCombinedResult } from "./generated/output-contract.js";
 
 export type {
   DiagnosticSeveritySetting,
@@ -141,7 +141,7 @@ export type {
 } from "./settings.js";
 export type { IssueCategory } from "./labels.js";
 export { ISSUE_CATEGORY_LABELS } from "./labels.js";
-export type { FallowFixResult, FixAction } from "./fix-types.js";
+export type { PlowFixResult, FixAction } from "./fix-types.js";
 export type {
   LicenseActionResult,
   LicenseErrorJson,

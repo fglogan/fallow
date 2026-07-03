@@ -12,7 +12,7 @@ use super::common::{create_config, fixture_path};
 fn flags_dead_inputs_outputs_and_holds_every_abstain() {
     let root = fixture_path("angular-unused-component-io");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let inputs: Vec<(&str, &str)> = results
         .unused_component_inputs

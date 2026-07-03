@@ -1,20 +1,20 @@
-use fallow_config::{FallowConfig, OutputFormat};
+use plow_config::{OutputFormat, PlowConfig};
 
 use crate::common::fixture_path;
 
-/// Capability E: fallow ALREADY reports route-internal unused exports today.
+/// Capability E: plow ALREADY reports route-internal unused exports today.
 /// On a `next`-enabled App Router page, a stray non-allowlisted export and a
 /// typo'd route-export name surface as `unused_exports` while the valid
 /// `metadata` and `default` are credited by the nextjs plugin's precise
 /// used-exports allowlist. `--include-entry-exports` subjects the entry file's
 /// exports to unused-export detection (still honoring plugin allowlists).
 ///
-/// This proves the knip-can't-but-fallow-does gap: a typo like `meatdata`
+/// This proves the knip-can't-but-plow-does gap: a typo like `meatdata`
 /// (instead of `metadata`) and a stray `helper` are caught, while the real
 /// framework exports are not falsely reported.
 #[test]
 fn typo_and_stray_route_exports_surface_while_valid_ones_are_credited() {
-    let config = FallowConfig {
+    let config = PlowConfig {
         include_entry_exports: true,
         ..Default::default()
     }
@@ -27,7 +27,7 @@ fn typo_and_stray_route_exports_surface_while_valid_ones_are_credited() {
         None,
     );
 
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused: Vec<&str> = results
         .unused_exports

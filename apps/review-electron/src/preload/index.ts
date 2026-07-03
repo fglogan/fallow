@@ -36,15 +36,15 @@ const api = {
   },
 };
 
-export type FallowApi = typeof api;
+export type PlowApi = typeof api;
 
 // contextBridge only works with contextIsolation on; fall back defensively.
 if (process.contextIsolated) {
   try {
-    contextBridge.exposeInMainWorld("fallow", api);
+    contextBridge.exposeInMainWorld("plow", api);
   } catch (error) {
     console.error(error);
   }
 } else {
-  (globalThis as unknown as { fallow: FallowApi }).fallow = api;
+  (globalThis as unknown as { plow: PlowApi }).plow = api;
 }

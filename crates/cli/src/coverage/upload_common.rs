@@ -1,8 +1,8 @@
 use std::path::Path;
 use std::process::Command;
 
-use fallow_config::{FallowConfig, OutputFormat, ResolvedConfig};
-use fallow_engine::clear_ambient_git_env;
+use plow_config::{OutputFormat, PlowConfig, ResolvedConfig};
+use plow_engine::clear_ambient_git_env;
 
 pub(super) const GIT_SHA_MAX_LEN: usize = 64;
 
@@ -39,7 +39,7 @@ pub(super) fn resolve_project_id(
 /// Validate the project identifier used as the `{repo}` URL segment.
 ///
 /// The server accepts any non-empty string without path-traversal, whether
-/// bare (`fallow-cloud-api`) or slash-scoped (`acme/widgets`). Keep validation
+/// bare (`plow-cloud-api`) or slash-scoped (`acme/widgets`). Keep validation
 /// minimal: reject only what the server or filesystem would reject (empty,
 /// `..`).
 pub(super) fn validate_project_id(id: &str) -> Result<&str, String> {
@@ -149,7 +149,7 @@ pub(super) fn dirty_worktree(root: &Path) -> bool {
 }
 
 pub(super) fn load_resolved_config(root: &Path) -> Result<ResolvedConfig, String> {
-    let user_config = match FallowConfig::find_and_load(root) {
+    let user_config = match PlowConfig::find_and_load(root) {
         Ok(Some((config, _path))) => Some(config),
         Ok(None) => None,
         Err(e) => return Err(format!("config load failed: {e}")),

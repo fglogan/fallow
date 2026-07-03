@@ -1,12 +1,10 @@
 //! Shared audit JSON payload contracts for programmatic consumers.
 
-use fallow_config::AuditGate;
-use fallow_output::{
-    AuditCommand, CodeClimateIssue, RootEnvelopeMode, codeclimate_issues_to_value,
-};
-use fallow_types::duplicates::DuplicationReport;
-use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
-use fallow_types::output::NextStep;
+use plow_config::AuditGate;
+use plow_output::{AuditCommand, CodeClimateIssue, RootEnvelopeMode, codeclimate_issues_to_value};
+use plow_types::duplicates::DuplicationReport;
+use plow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
+use plow_types::output::NextStep;
 use serde::Serialize;
 
 /// Verdict for the audit command.
@@ -167,7 +165,7 @@ where
     Complexity: Serialize,
 {
     let header = audit_header_output(input.header);
-    let output = fallow_output::AuditOutput {
+    let output = plow_output::AuditOutput {
         schema_version: header.schema_version,
         version: header.version,
         command: header.command,
@@ -186,10 +184,10 @@ where
         complexity: input.complexity,
         next_steps: input.next_steps,
     };
-    fallow_output::serialize_audit_json_output(output, mode, analysis_run_id)
+    plow_output::serialize_audit_json_output(output, mode, analysis_run_id)
 }
 
-/// Build the combined SARIF document for `fallow audit`.
+/// Build the combined SARIF document for `plow audit`.
 #[must_use]
 pub fn build_audit_sarif(input: AuditSarifOutputInput<'_>) -> serde_json::Value {
     let mut all_runs = Vec::new();
@@ -225,15 +223,15 @@ fn build_audit_duplication_sarif_run(duplication: &DuplicationReport) -> serde_j
     serde_json::json!({
         "tool": {
             "driver": {
-                "name": "fallow",
+                "name": "plow",
                 "version": env!("CARGO_PKG_VERSION"),
-                "informationUri": "https://github.com/fallow-rs/fallow",
+                "informationUri": "https://github.com/fglogan/genesis-plow",
             }
         },
-        "automationDetails": { "id": "fallow/audit/dupes" },
+        "automationDetails": { "id": "plow/audit/dupes" },
         "results": duplication.clone_groups.iter().enumerate().map(|(i, group)| {
             serde_json::json!({
-                "ruleId": "fallow/code-duplication",
+                "ruleId": "plow/code-duplication",
                 "level": "warning",
                 "message": {
                     "text": format!(
@@ -248,7 +246,7 @@ fn build_audit_duplication_sarif_run(duplication: &DuplicationReport) -> serde_j
     })
 }
 
-/// Build combined CodeClimate issues for `fallow audit`.
+/// Build combined CodeClimate issues for `plow audit`.
 #[must_use]
 pub fn build_audit_codeclimate_issues(input: AuditCodeClimateOutputInput) -> Vec<CodeClimateIssue> {
     let mut all_issues = input.dead_code;
@@ -257,7 +255,7 @@ pub fn build_audit_codeclimate_issues(input: AuditCodeClimateOutputInput) -> Vec
     all_issues
 }
 
-/// Build the combined CodeClimate JSON array for `fallow audit`.
+/// Build the combined CodeClimate JSON array for `plow audit`.
 #[must_use]
 pub fn build_audit_codeclimate(input: AuditCodeClimateOutputInput) -> serde_json::Value {
     codeclimate_issues_to_value(&build_audit_codeclimate_issues(input))
@@ -341,9 +339,9 @@ mod tests {
     #[test]
     fn audit_sarif_combines_runs_and_duplication_run() {
         let duplication = DuplicationReport {
-            clone_groups: vec![fallow_types::duplicates::CloneGroup {
+            clone_groups: vec![plow_types::duplicates::CloneGroup {
                 instances: vec![
-                    fallow_types::duplicates::CloneInstance {
+                    plow_types::duplicates::CloneInstance {
                         file: "src/a.ts".into(),
                         start_line: 1,
                         end_line: 12,
@@ -351,7 +349,7 @@ mod tests {
                         end_col: 1,
                         fragment: "duplicated();".to_string(),
                     },
-                    fallow_types::duplicates::CloneInstance {
+                    plow_types::duplicates::CloneInstance {
                         file: "src/b.ts".into(),
                         start_line: 1,
                         end_line: 12,
@@ -378,21 +376,21 @@ mod tests {
         assert_eq!(value["runs"].as_array().expect("runs").len(), 3);
         assert_eq!(
             value["runs"][1]["automationDetails"]["id"],
-            "fallow/audit/dupes"
+            "plow/audit/dupes"
         );
     }
 
     #[test]
     fn audit_codeclimate_combines_issue_sections() {
         let issue = CodeClimateIssue {
-            kind: fallow_output::CodeClimateIssueKind::Issue,
-            check_name: "fallow/test".to_string(),
+            kind: plow_output::CodeClimateIssueKind::Issue,
+            check_name: "plow/test".to_string(),
             description: "test".to_string(),
-            severity: fallow_output::CodeClimateSeverity::Minor,
+            severity: plow_output::CodeClimateSeverity::Minor,
             fingerprint: "abc".to_string(),
-            location: fallow_output::CodeClimateLocation {
+            location: plow_output::CodeClimateLocation {
                 path: "src/a.ts".to_string(),
-                lines: fallow_output::CodeClimateLines { begin: 1 },
+                lines: plow_output::CodeClimateLines { begin: 1 },
             },
             categories: vec!["Bug Risk".to_string()],
             owner: None,

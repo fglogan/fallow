@@ -3,7 +3,7 @@
 use crate::root_envelopes::{RootEnvelopeMode, serialize_named_json_output};
 use serde::Serialize;
 
-/// Plain body emitted by `fallow list --format json` before an optional
+/// Plain body emitted by `plow list --format json` before an optional
 /// command-specific root envelope is attached.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -28,14 +28,14 @@ pub struct ListOutput<Boundaries, Diagnostic> {
     pub workspace_diagnostics: Option<Vec<Diagnostic>>,
 }
 
-/// One active plugin in `fallow list --plugins --format json`.
+/// One active plugin in `plow list --plugins --format json`.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ListPluginOutput {
     pub name: String,
 }
 
-/// One entry point in `fallow list --entry-points --format json`.
+/// One entry point in `plow list --entry-points --format json`.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ListEntryPointOutput {
@@ -43,7 +43,7 @@ pub struct ListEntryPointOutput {
     pub source: String,
 }
 
-/// Envelope emitted by `fallow list --boundaries --format json`. Surfaces
+/// Envelope emitted by `plow list --boundaries --format json`. Surfaces
 /// the architecture boundary zones, rules, and the user's pre-expansion
 /// `autoDiscover` logical groups so consumers can render grouping intent that
 /// expansion would otherwise flatten out of `zones[]`.
@@ -51,19 +51,16 @@ pub struct ListEntryPointOutput {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
     feature = "schema",
-    schemars(title = "fallow list --boundaries --format json")
+    schemars(title = "plow list --boundaries --format json")
 )]
 pub struct ListBoundariesOutput<Status, Rule> {
     pub boundaries: BoundariesListing<Status, Rule>,
 }
 
-/// `fallow workspaces --format json` envelope.
+/// `plow workspaces --format json` envelope.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(
-    feature = "schema",
-    schemars(title = "fallow workspaces --format json")
-)]
+#[cfg_attr(feature = "schema", schemars(title = "plow workspaces --format json"))]
 pub struct WorkspacesOutput<Diagnostic> {
     /// Number of workspace package entries in `workspaces`.
     pub workspace_count: usize,
@@ -76,7 +73,7 @@ pub struct WorkspacesOutput<Diagnostic> {
     pub workspace_diagnostics: Vec<Diagnostic>,
 }
 
-/// One workspace package emitted by `fallow workspaces --format json`.
+/// One workspace package emitted by `plow workspaces --format json`.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct WorkspaceInfo {
@@ -150,7 +147,7 @@ pub struct BoundariesListLogicalGroup<Status, Rule> {
     pub child_source_indices: Vec<usize>,
 }
 
-/// Serialize `fallow list --boundaries --format json`.
+/// Serialize `plow list --boundaries --format json`.
 ///
 /// # Errors
 ///
@@ -162,7 +159,7 @@ pub fn serialize_list_boundaries_json_output<T: Serialize>(
     serialize_named_json_output(output, "list-boundaries", mode)
 }
 
-/// Serialize `fallow list --workspaces --format json`.
+/// Serialize `plow list --workspaces --format json`.
 ///
 /// # Errors
 ///

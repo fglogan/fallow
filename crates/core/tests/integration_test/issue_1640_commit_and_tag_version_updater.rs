@@ -8,7 +8,7 @@ use super::common::{create_config, fixture_path};
 fn commit_and_tag_version_updater_is_credited_control_still_flagged() {
     let root = fixture_path("issue-1640-commit-and-tag-version-updater");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files: Vec<String> = results
         .unused_files

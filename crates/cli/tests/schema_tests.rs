@@ -7,14 +7,14 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use common::{parse_json, run_fallow_raw};
+use common::{parse_json, run_plow_raw};
 use std::fs;
 use std::path::{Path, PathBuf};
 use syn::spanned::Spanned;
 
 #[test]
 fn schema_outputs_valid_json() {
-    let output = run_fallow_raw(&["schema"]);
+    let output = run_plow_raw(&["schema"]);
     assert_eq!(output.code, 0, "schema should exit 0");
     let json = parse_json(&output);
     assert!(json.is_object(), "schema output should be a JSON object");
@@ -22,12 +22,12 @@ fn schema_outputs_valid_json() {
 
 #[test]
 fn schema_has_name_and_version() {
-    let output = run_fallow_raw(&["schema"]);
+    let output = run_plow_raw(&["schema"]);
     let json = parse_json(&output);
     assert_eq!(
         json["name"].as_str().unwrap(),
-        "fallow",
-        "schema name should be 'fallow'"
+        "plow",
+        "schema name should be 'plow'"
     );
     assert!(
         json.get("version").is_some(),
@@ -37,7 +37,7 @@ fn schema_has_name_and_version() {
 
 #[test]
 fn schema_has_commands_array() {
-    let output = run_fallow_raw(&["schema"]);
+    let output = run_plow_raw(&["schema"]);
     let json = parse_json(&output);
     let commands = json["commands"].as_array().unwrap();
     assert!(!commands.is_empty(), "schema should list commands");
@@ -59,25 +59,25 @@ fn schema_has_commands_array() {
 
 #[test]
 fn explain_outputs_rule_guidance_as_json() {
-    let output = run_fallow_raw(&["explain", "unused-exports", "--format", "json", "--quiet"]);
+    let output = run_plow_raw(&["explain", "unused-exports", "--format", "json", "--quiet"]);
     assert_eq!(output.code, 0, "explain should exit 0: {}", output.stderr);
     let json = parse_json(&output);
-    assert_eq!(json["id"].as_str(), Some("fallow/unused-export"));
+    assert_eq!(json["id"].as_str(), Some("plow/unused-export"));
     assert!(json["example"].as_str().is_some_and(|s| !s.is_empty()));
     assert!(json["how_to_fix"].as_str().is_some_and(|s| !s.is_empty()));
 }
 
 #[test]
 fn explain_accepts_issue_labels_with_spaces() {
-    let output = run_fallow_raw(&["explain", "unused", "files", "--format", "json", "--quiet"]);
+    let output = run_plow_raw(&["explain", "unused", "files", "--format", "json", "--quiet"]);
     assert_eq!(output.code, 0, "explain should exit 0: {}", output.stderr);
     let json = parse_json(&output);
-    assert_eq!(json["id"].as_str(), Some("fallow/unused-file"));
+    assert_eq!(json["id"].as_str(), Some("plow/unused-file"));
 }
 
 #[test]
 fn explain_compact_is_single_line() {
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "explain",
         "unused-exports",
         "--format",
@@ -87,13 +87,13 @@ fn explain_compact_is_single_line() {
     assert_eq!(output.code, 0, "explain should exit 0: {}", output.stderr);
     assert_eq!(
         output.stdout.trim(),
-        "explain:fallow/unused-export:Export is never imported:https://docs.fallow.tools/explanations/dead-code#unused-exports"
+        "explain:plow/unused-export:Export is never imported:https://docs.genesis-plow.dev/explanations/dead-code#unused-exports"
     );
 }
 
 #[test]
 fn explain_markdown_is_markdown() {
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "explain",
         "unused-exports",
         "--format",
@@ -104,15 +104,15 @@ fn explain_markdown_is_markdown() {
     assert!(output.stdout.starts_with("# Unused Exports\n\n"));
     assert!(output.stdout.contains("## Why it matters"));
     assert!(
-        output
-            .stdout
-            .contains("[Docs](https://docs.fallow.tools/explanations/dead-code#unused-exports)")
+        output.stdout.contains(
+            "[Docs](https://docs.genesis-plow.dev/explanations/dead-code#unused-exports)"
+        )
     );
 }
 
 #[test]
 fn explain_rejects_unknown_issue_type() {
-    let output = run_fallow_raw(&["explain", "not-a-real-rule", "--format", "json", "--quiet"]);
+    let output = run_plow_raw(&["explain", "not-a-real-rule", "--format", "json", "--quiet"]);
     assert_eq!(output.code, 2, "unknown explain id should exit 2");
     let json = parse_json(&output);
     assert_eq!(json["error"].as_bool(), Some(true));
@@ -120,7 +120,7 @@ fn explain_rejects_unknown_issue_type() {
 
 #[test]
 fn explain_outputs_tainted_sink_guidance_as_json() {
-    let output = run_fallow_raw(&["explain", "tainted-sink", "--format", "json", "--quiet"]);
+    let output = run_plow_raw(&["explain", "tainted-sink", "--format", "json", "--quiet"]);
     assert_eq!(output.code, 0, "explain should exit 0: {}", output.stderr);
     let json = parse_json(&output);
     assert_eq!(json["id"].as_str(), Some("security/tainted-sink"));
@@ -138,7 +138,7 @@ fn explain_outputs_tainted_sink_guidance_as_json() {
 
 #[test]
 fn explain_outputs_client_server_leak_guidance_as_json() {
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "explain",
         "client-server-leak",
         "--format",
@@ -162,7 +162,7 @@ fn explain_outputs_client_server_leak_guidance_as_json() {
 
 #[test]
 fn explain_outputs_hardcoded_secret_guidance_as_json() {
-    let output = run_fallow_raw(&["explain", "hardcoded-secret", "--format", "json", "--quiet"]);
+    let output = run_plow_raw(&["explain", "hardcoded-secret", "--format", "json", "--quiet"]);
     assert_eq!(output.code, 0, "explain should exit 0: {}", output.stderr);
     let json = parse_json(&output);
     assert_eq!(json["id"].as_str(), Some("security/hardcoded-secret"));
@@ -180,7 +180,7 @@ fn explain_outputs_hardcoded_secret_guidance_as_json() {
 
 #[test]
 fn explain_accepts_security_catalogue_ids() {
-    let output = run_fallow_raw(&["explain", "sql-injection", "--format", "json", "--quiet"]);
+    let output = run_plow_raw(&["explain", "sql-injection", "--format", "json", "--quiet"]);
     assert_eq!(output.code, 0, "explain should exit 0: {}", output.stderr);
     let json = parse_json(&output);
     assert_eq!(json["id"].as_str(), Some("security/sql-injection"));
@@ -191,7 +191,7 @@ fn explain_accepts_security_catalogue_ids() {
             .is_some_and(|s| s.contains("CWE-89"))
     );
 
-    let output = run_fallow_raw(&["explain", "security/ssrf", "--format", "json", "--quiet"]);
+    let output = run_plow_raw(&["explain", "security/ssrf", "--format", "json", "--quiet"]);
     assert_eq!(output.code, 0, "explain should exit 0: {}", output.stderr);
     let json = parse_json(&output);
     assert_eq!(json["id"].as_str(), Some("security/ssrf"));
@@ -203,7 +203,7 @@ fn explain_accepts_security_catalogue_ids() {
 
 #[test]
 fn explain_security_unknown_suggests_security_examples() {
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "explain",
         "security-not-a-real-rule",
         "--format",
@@ -229,7 +229,7 @@ fn explain_security_unknown_suggests_security_examples() {
 
 #[test]
 fn schema_has_issue_types() {
-    let output = run_fallow_raw(&["schema"]);
+    let output = run_plow_raw(&["schema"]);
     let json = parse_json(&output);
     let types = json["issue_types"].as_array().unwrap();
     assert!(!types.is_empty(), "schema should list issue types");
@@ -237,7 +237,7 @@ fn schema_has_issue_types() {
 
 #[test]
 fn schema_has_exit_codes() {
-    let output = run_fallow_raw(&["schema"]);
+    let output = run_plow_raw(&["schema"]);
     let json = parse_json(&output);
     assert!(
         json.get("exit_codes").is_some(),
@@ -476,7 +476,7 @@ struct Example {
     local: Vec<PathBuf>,
     #[serde(serialize_with = "crate::serde_path::serialize_vec")]
     crate_path: Vec<PathBuf>,
-    #[serde(serialize_with = "fallow_types::serde_path::serialize_vec")]
+    #[serde(serialize_with = "plow_types::serde_path::serialize_vec")]
     external_path: Vec<PathBuf>,
 }"#;
     let syntax = syn::parse_file(source).expect("synthetic path struct should parse");
@@ -857,7 +857,7 @@ fn serde_has_skip_serializing_if(attrs: &[syn::Attribute], expected: &str) -> bo
 
 #[test]
 fn config_schema_outputs_valid_json() {
-    let output = run_fallow_raw(&["config-schema"]);
+    let output = run_plow_raw(&["config-schema"]);
     assert_eq!(output.code, 0, "config-schema should exit 0");
     let json = parse_json(&output);
     assert!(json.is_object(), "config-schema should be a JSON object");
@@ -865,7 +865,7 @@ fn config_schema_outputs_valid_json() {
 
 #[test]
 fn config_schema_is_json_schema() {
-    let output = run_fallow_raw(&["config-schema"]);
+    let output = run_plow_raw(&["config-schema"]);
     let json = parse_json(&output);
     assert!(
         json.get("$schema").is_some() || json.get("type").is_some(),
@@ -875,7 +875,7 @@ fn config_schema_is_json_schema() {
 
 #[test]
 fn plugin_schema_outputs_valid_json() {
-    let output = run_fallow_raw(&["plugin-schema"]);
+    let output = run_plow_raw(&["plugin-schema"]);
     assert_eq!(output.code, 0, "plugin-schema should exit 0");
     let json = parse_json(&output);
     assert!(json.is_object(), "plugin-schema should be a JSON object");
@@ -883,7 +883,7 @@ fn plugin_schema_outputs_valid_json() {
 
 #[test]
 fn plugin_schema_is_json_schema() {
-    let output = run_fallow_raw(&["plugin-schema"]);
+    let output = run_plow_raw(&["plugin-schema"]);
     let json = parse_json(&output);
     assert!(
         json.get("$schema").is_some() || json.get("type").is_some(),

@@ -4,7 +4,7 @@ use ls_types::{
     Diagnostic, DiagnosticSeverity, DiagnosticTag, NumberOrString, Position, Range, Uri,
 };
 
-use fallow_api::EditorAnalysisResults as AnalysisResults;
+use plow_api::EditorAnalysisResults as AnalysisResults;
 
 use super::{FIRST_LINE_RANGE, doc_link};
 
@@ -17,14 +17,14 @@ pub fn push_export_diagnostics(
     for (exports, code, anchor, msg_prefix) in [
         (
             Box::new(exports_iter)
-                as Box<dyn Iterator<Item = &fallow_api::editor_results::UnusedExport>>,
+                as Box<dyn Iterator<Item = &plow_api::editor_results::UnusedExport>>,
             "unused-export",
             "unused-exports",
             "Export" as &str,
         ),
         (
             Box::new(types_iter)
-                as Box<dyn Iterator<Item = &fallow_api::editor_results::UnusedExport>>,
+                as Box<dyn Iterator<Item = &plow_api::editor_results::UnusedExport>>,
             "unused-type",
             "unused-types",
             "Type export",
@@ -45,7 +45,7 @@ pub fn push_export_diagnostics(
 )]
 fn push_unused_export_diagnostic(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
-    export: &fallow_api::editor_results::UnusedExport,
+    export: &plow_api::editor_results::UnusedExport,
     code: &str,
     anchor: &str,
     msg_prefix: &str,
@@ -66,7 +66,7 @@ fn push_unused_export_diagnostic(
             },
         },
         severity: Some(DiagnosticSeverity::HINT),
-        source: Some("fallow".to_string()),
+        source: Some("plow".to_string()),
         code: Some(NumberOrString::String(code.to_string())),
         code_description: doc_link(anchor),
         message: format!("{msg_prefix} '{}' is unused", export.export_name),
@@ -99,7 +99,7 @@ fn push_private_type_leak_diagnostics(
                     },
                 },
                 severity: Some(DiagnosticSeverity::WARNING),
-                source: Some("fallow".to_string()),
+                source: Some("plow".to_string()),
                 code: Some(NumberOrString::String("private-type-leak".to_string())),
                 code_description: doc_link("private-type-leaks"),
                 message: format!(
@@ -118,7 +118,7 @@ pub fn push_file_diagnostics(map: &mut FxHashMap<Uri, Vec<Diagnostic>>, results:
             map.entry(uri).or_default().push(Diagnostic {
                 range: FIRST_LINE_RANGE,
                 severity: Some(DiagnosticSeverity::WARNING),
-                source: Some("fallow".to_string()),
+                source: Some("plow".to_string()),
                 code: Some(NumberOrString::String("unused-file".to_string())),
                 code_description: doc_link("unused-files"),
                 message: "File is not reachable from any entry point".to_string(),
@@ -154,7 +154,7 @@ pub fn push_import_diagnostics(
                     },
                 },
                 severity: Some(DiagnosticSeverity::ERROR),
-                source: Some("fallow".to_string()),
+                source: Some("plow".to_string()),
                 code: Some(NumberOrString::String("unresolved-import".to_string())),
                 code_description: doc_link("unresolved-imports"),
                 message: format!("Cannot find module '{}'", import.import.specifier),
@@ -171,7 +171,7 @@ pub fn push_dep_diagnostics(
     root: &std::path::Path,
 ) {
     type DepIter<'a> =
-        Box<dyn Iterator<Item = &'a fallow_api::editor_results::UnusedDependency> + 'a>;
+        Box<dyn Iterator<Item = &'a plow_api::editor_results::UnusedDependency> + 'a>;
     let groups: [(DepIter<'_>, &str, &str, &str); 3] = [
         (
             Box::new(results.unused_dependencies.iter().map(|f| &f.dep)),
@@ -213,7 +213,7 @@ pub fn push_dep_diagnostics(
 /// Push one full-line WARNING diagnostic for an unused dependency group entry.
 fn push_unused_dependency_diagnostic(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
-    dep: &fallow_api::editor_results::UnusedDependency,
+    dep: &plow_api::editor_results::UnusedDependency,
     code: &str,
     anchor: &str,
     msg_prefix: &str,
@@ -225,7 +225,7 @@ fn push_unused_dependency_diagnostic(
     map.entry(dep_uri).or_default().push(Diagnostic {
         range: full_line_range(line),
         severity: Some(DiagnosticSeverity::WARNING),
-        source: Some("fallow".to_string()),
+        source: Some("plow".to_string()),
         code: Some(NumberOrString::String(code.to_string())),
         code_description: doc_link(anchor),
         message: format!("{msg_prefix}: {}", dep.package_name),
@@ -247,7 +247,7 @@ fn push_unlisted_dependency_diagnostics(
         map.entry(uri.clone()).or_default().push(Diagnostic {
             range: FIRST_LINE_RANGE,
             severity: Some(DiagnosticSeverity::WARNING),
-            source: Some("fallow".to_string()),
+            source: Some("plow".to_string()),
             code: Some(NumberOrString::String("unlisted-dependency".to_string())),
             code_description: doc_link("unlisted-dependencies"),
             message: format!(
@@ -269,7 +269,7 @@ fn push_type_only_dependency_diagnostics(
             map.entry(dep_uri).or_default().push(Diagnostic {
                 range: full_line_range(line),
                 severity: Some(DiagnosticSeverity::INFORMATION),
-                source: Some("fallow".to_string()),
+                source: Some("plow".to_string()),
                 code: Some(NumberOrString::String("type-only-dependency".to_string())),
                 code_description: doc_link("type-only-dependencies"),
                 message: format!(
@@ -292,7 +292,7 @@ fn push_test_only_dependency_diagnostics(
             map.entry(dep_uri).or_default().push(Diagnostic {
                 range: full_line_range(line),
                 severity: Some(DiagnosticSeverity::INFORMATION),
-                source: Some("fallow".to_string()),
+                source: Some("plow".to_string()),
                 code: Some(NumberOrString::String("test-only-dependency".to_string())),
                 code_description: doc_link("test-only-dependencies"),
                 message: format!(
@@ -317,7 +317,7 @@ fn push_unused_catalog_entry_diagnostics(
             map.entry(entry_uri).or_default().push(Diagnostic {
                 range: full_line_range(line),
                 severity: Some(DiagnosticSeverity::WARNING),
-                source: Some("fallow".to_string()),
+                source: Some("plow".to_string()),
                 code: Some(NumberOrString::String("unused-catalog-entry".to_string())),
                 code_description: doc_link("unused-catalog-entries"),
                 message: unused_catalog_entry_message(entry),
@@ -327,7 +327,7 @@ fn push_unused_catalog_entry_diagnostics(
     }
 }
 
-fn unused_catalog_entry_message(entry: &fallow_api::editor_results::UnusedCatalogEntry) -> String {
+fn unused_catalog_entry_message(entry: &plow_api::editor_results::UnusedCatalogEntry) -> String {
     if entry.catalog_name == "default" {
         format!(
             "Unused catalog entry: '{}' is not referenced by any workspace package",
@@ -371,7 +371,7 @@ fn push_empty_catalog_group_diagnostics(
                 },
             },
             severity: Some(DiagnosticSeverity::WARNING),
-            source: Some("fallow".to_string()),
+            source: Some("plow".to_string()),
             code: Some(NumberOrString::String("empty-catalog-group".to_string())),
             code_description: doc_link("empty-catalog-groups"),
             message: format!(
@@ -423,7 +423,7 @@ fn push_unresolved_catalog_reference_diagnostics(
                 },
             },
             severity: Some(DiagnosticSeverity::ERROR),
-            source: Some("fallow".to_string()),
+            source: Some("plow".to_string()),
             code: Some(NumberOrString::String(
                 "unresolved-catalog-reference".to_string(),
             )),
@@ -470,7 +470,7 @@ fn push_unused_dependency_override_diagnostics(
         map.entry(uri).or_default().push(Diagnostic {
             range: full_line_range(line),
             severity: Some(DiagnosticSeverity::WARNING),
-            source: Some("fallow".to_string()),
+            source: Some("plow".to_string()),
             code: Some(NumberOrString::String(
                 "unused-dependency-override".to_string(),
             )),
@@ -501,7 +501,7 @@ fn push_misconfigured_dependency_override_diagnostics(
         map.entry(uri).or_default().push(Diagnostic {
             range: full_line_range(line),
             severity: Some(DiagnosticSeverity::ERROR),
-            source: Some("fallow".to_string()),
+            source: Some("plow".to_string()),
             code: Some(NumberOrString::String(
                 "misconfigured-dependency-override".to_string(),
             )),
@@ -522,21 +522,21 @@ pub fn push_member_diagnostics(
     for (members, code, anchor, kind_label) in [
         (
             Box::new(enum_iter)
-                as Box<dyn Iterator<Item = &fallow_api::editor_results::UnusedMember>>,
+                as Box<dyn Iterator<Item = &plow_api::editor_results::UnusedMember>>,
             "unused-enum-member",
             "unused-enum-members",
             "Enum member" as &str,
         ),
         (
             Box::new(class_iter)
-                as Box<dyn Iterator<Item = &fallow_api::editor_results::UnusedMember>>,
+                as Box<dyn Iterator<Item = &plow_api::editor_results::UnusedMember>>,
             "unused-class-member",
             "unused-class-members",
             "Class member",
         ),
         (
             Box::new(store_iter)
-                as Box<dyn Iterator<Item = &fallow_api::editor_results::UnusedMember>>,
+                as Box<dyn Iterator<Item = &plow_api::editor_results::UnusedMember>>,
             "unused-store-member",
             "unused-store-members",
             "Store member",
@@ -560,7 +560,7 @@ pub fn push_member_diagnostics(
 /// Push one HINT diagnostic for an unused enum / class / store member.
 fn push_unused_member_diagnostic(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
-    member: &fallow_api::editor_results::UnusedMember,
+    member: &plow_api::editor_results::UnusedMember,
     code: &str,
     anchor: &str,
     kind_label: &str,
@@ -581,7 +581,7 @@ fn push_unused_member_diagnostic(
             },
         },
         severity: Some(DiagnosticSeverity::HINT),
-        source: Some("fallow".to_string()),
+        source: Some("plow".to_string()),
         code: Some(NumberOrString::String(code.to_string())),
         code_description: doc_link(anchor),
         message: format!(
@@ -617,7 +617,7 @@ fn push_unrendered_component_diagnostics(
                     },
                 },
                 severity: Some(DiagnosticSeverity::HINT),
-                source: Some("fallow".to_string()),
+                source: Some("plow".to_string()),
                 code: Some(NumberOrString::String("unrendered-component".to_string())),
                 code_description: doc_link("unrendered-components"),
                 message: format!(
@@ -651,7 +651,7 @@ fn push_unused_component_prop_diagnostics(
                     },
                 },
                 severity: Some(DiagnosticSeverity::HINT),
-                source: Some("fallow".to_string()),
+                source: Some("plow".to_string()),
                 code: Some(NumberOrString::String("unused-component-prop".to_string())),
                 code_description: doc_link("unused-component-props"),
                 message: format!(
@@ -685,7 +685,7 @@ fn push_unused_component_emit_diagnostics(
                     },
                 },
                 severity: Some(DiagnosticSeverity::HINT),
-                source: Some("fallow".to_string()),
+                source: Some("plow".to_string()),
                 code: Some(NumberOrString::String("unused-component-emit".to_string())),
                 code_description: doc_link("unused-component-emits"),
                 message: format!(
@@ -719,7 +719,7 @@ fn push_unused_component_input_diagnostics(
                     },
                 },
                 severity: Some(DiagnosticSeverity::HINT),
-                source: Some("fallow".to_string()),
+                source: Some("plow".to_string()),
                 code: Some(NumberOrString::String("unused-component-input".to_string())),
                 code_description: doc_link("unused-component-inputs"),
                 message: format!(
@@ -753,7 +753,7 @@ fn push_unused_component_output_diagnostics(
                     },
                 },
                 severity: Some(DiagnosticSeverity::HINT),
-                source: Some("fallow".to_string()),
+                source: Some("plow".to_string()),
                 code: Some(NumberOrString::String(
                     "unused-component-output".to_string(),
                 )),
@@ -789,7 +789,7 @@ fn push_unused_svelte_event_diagnostics(
                     },
                 },
                 severity: Some(DiagnosticSeverity::HINT),
-                source: Some("fallow".to_string()),
+                source: Some("plow".to_string()),
                 code: Some(NumberOrString::String("unused-svelte-event".to_string())),
                 code_description: doc_link("unused-svelte-events"),
                 message: format!(
@@ -829,7 +829,7 @@ fn push_unused_load_data_key_diagnostics(
                     },
                 },
                 severity: Some(DiagnosticSeverity::HINT),
-                source: Some("fallow".to_string()),
+                source: Some("plow".to_string()),
                 code: Some(NumberOrString::String("unused-load-data-key".to_string())),
                 code_description: doc_link("unused-load-data-keys"),
                 message: format!(
@@ -869,7 +869,7 @@ fn push_unused_server_action_diagnostics(
                     },
                 },
                 severity: Some(DiagnosticSeverity::HINT),
-                source: Some("fallow".to_string()),
+                source: Some("plow".to_string()),
                 code: Some(NumberOrString::String("unused-server-action".to_string())),
                 code_description: doc_link("unused-server-actions"),
                 message: format!(
@@ -887,9 +887,10 @@ fn push_unused_server_action_diagnostics(
 mod tests {
     use std::path::PathBuf;
 
-    use fallow_api::editor_duplicates::{DuplicationReport, DuplicationStats};
-    use fallow_api::editor_extract::MemberKind;
-    use fallow_api::editor_results::{
+    use ls_types::{DiagnosticSeverity, DiagnosticTag, NumberOrString, Uri};
+    use plow_api::editor_duplicates::{DuplicationReport, DuplicationStats};
+    use plow_api::editor_extract::MemberKind;
+    use plow_api::editor_results::{
         AnalysisResults, DependencyLocation, EmptyCatalogGroup, EmptyCatalogGroupFinding,
         ImportSite, TestOnlyDependency, TestOnlyDependencyFinding, TypeOnlyDependency,
         TypeOnlyDependencyFinding, UnlistedDependency, UnlistedDependencyFinding,
@@ -900,7 +901,6 @@ mod tests {
         UnusedFile, UnusedFileFinding, UnusedMember, UnusedOptionalDependencyFinding,
         UnusedStoreMemberFinding, UnusedTypeFinding,
     };
-    use ls_types::{DiagnosticSeverity, DiagnosticTag, NumberOrString, Uri};
 
     use crate::diagnostics::{FIRST_LINE_RANGE, build_diagnostics_for_test};
 
@@ -966,7 +966,7 @@ mod tests {
             d.code,
             Some(NumberOrString::String("unused-export".to_string()))
         );
-        assert_eq!(d.source, Some("fallow".to_string()));
+        assert_eq!(d.source, Some("plow".to_string()));
         assert_eq!(d.range.start.line, 4);
         assert_eq!(d.range.start.character, 7);
         assert_eq!(d.range.end.character, 7 + "helper".len() as u32);
@@ -1413,7 +1413,7 @@ mod tests {
             d.code,
             Some(NumberOrString::String("unused-catalog-entry".to_string()))
         );
-        assert_eq!(d.source, Some("fallow".to_string()));
+        assert_eq!(d.source, Some("plow".to_string()));
         assert!(d.message.contains("is-even"));
         assert_eq!(d.range.start.line, 5);
     }
@@ -1474,7 +1474,7 @@ mod tests {
             d.code,
             Some(NumberOrString::String("empty-catalog-group".to_string()))
         );
-        assert_eq!(d.source, Some("fallow".to_string()));
+        assert_eq!(d.source, Some("plow".to_string()));
         assert!(d.message.contains("legacy"));
         assert_eq!(d.range.start.line, 8);
         assert_eq!(d.range.start.character, 0);
@@ -1550,7 +1550,7 @@ mod tests {
 
     #[test]
     fn unused_dependency_override_produces_warning_diagnostic_with_absolute_uri() {
-        use fallow_api::editor_results::{
+        use plow_api::editor_results::{
             DependencyOverrideSource, UnusedDependencyOverride, UnusedDependencyOverrideFinding,
         };
 
@@ -1601,7 +1601,7 @@ mod tests {
 
     #[test]
     fn misconfigured_dependency_override_produces_error_diagnostic() {
-        use fallow_api::editor_results::{
+        use plow_api::editor_results::{
             DependencyOverrideMisconfigReason, DependencyOverrideSource,
             MisconfiguredDependencyOverride, MisconfiguredDependencyOverrideFinding,
         };

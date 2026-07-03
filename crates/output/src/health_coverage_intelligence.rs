@@ -1,10 +1,10 @@
 use std::fmt;
 use std::path::PathBuf;
 
-use fallow_types::serde_path;
+use plow_types::serde_path;
 
 /// Coverage-intelligence JSON contract version. Scoped to the
-/// `coverage_intelligence` block and independent of the top-level fallow
+/// `coverage_intelligence` block and independent of the top-level plow
 /// JSON `schema_version`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -182,7 +182,7 @@ pub struct CoverageIntelligenceAction {
     #[serde(rename = "type")]
     pub kind: String,
     pub description: String,
-    /// Whether fallow can apply this action automatically.
+    /// Whether plow can apply this action automatically.
     pub auto_fixable: bool,
 }
 
@@ -214,7 +214,7 @@ pub struct CoverageIntelligenceEvidence {
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CoverageIntelligenceFinding {
-    /// Stable finding ID of the form `fallow:coverage-intel:<hash>`.
+    /// Stable finding ID of the form `plow:coverage-intel:<hash>`.
     pub id: String,
     /// File path relative to the project root.
     #[serde(serialize_with = "serde_path::serialize")]

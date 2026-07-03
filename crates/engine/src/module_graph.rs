@@ -2,21 +2,21 @@
 
 #![allow(
     clippy::implicit_hasher,
-    reason = "engine graph helpers use FxHashSet changed-file sets consistently with the rest of fallow"
+    reason = "engine graph helpers use FxHashSet changed-file sets consistently with the rest of plow"
 )]
 
 use std::path::{Path, PathBuf};
 
-use fallow_types::discover::FileId;
+use plow_types::discover::FileId;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_graph::graph::{
+use plow_graph::graph::{
     CoordinationGapPaths as GraphCoordinationGapPaths,
     FocusFileFactsPaths as GraphFocusFileFactsPaths, ImpactClosurePaths as GraphImpactClosurePaths,
     ModuleGraph, PartitionOrderPaths as GraphPartitionOrderPaths,
     ReviewUnitPaths as GraphReviewUnitPaths,
 };
-use fallow_graph::graph::{
+use plow_graph::graph::{
     DirectImporterSummary as GraphDirectImporterSummary,
     ImportedSymbolSummary as GraphImportedSymbolSummary, ModuleNode,
 };
@@ -24,7 +24,7 @@ use fallow_graph::graph::{
 /// Engine-owned retained graph handle.
 ///
 /// Downstream crates can request stable graph facts through engine helpers
-/// without depending on `fallow-graph` node internals.
+/// without depending on `plow-graph` node internals.
 #[derive(Debug)]
 pub struct RetainedModuleGraph {
     inner: ModuleGraph,
@@ -333,13 +333,13 @@ pub fn export_lines_for_changed_paths(
         let Ok(content) = std::fs::read_to_string(&module.path) else {
             continue;
         };
-        let offsets = fallow_types::extract::compute_line_offsets(&content);
+        let offsets = plow_types::extract::compute_line_offsets(&content);
         let exports: Vec<(String, u32)> = module
             .exports
             .iter()
             .map(|export| {
                 let (line, _) =
-                    fallow_types::extract::byte_offset_to_line_col(&offsets, export.span.start);
+                    plow_types::extract::byte_offset_to_line_col(&offsets, export.span.start);
                 (export.name.to_string(), line)
             })
             .collect();

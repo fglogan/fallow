@@ -5,7 +5,7 @@
 //! configured scale token. They are not wrong, but a high count is a design-
 //! token-bypass signal that no per-rule linter aggregates across a codebase, and
 //! AI-assisted edits over-produce them. This scanner finds them in markup so
-//! `fallow health --css` can surface them as candidates. The caller MUST gate on
+//! `plow health --css` can surface them as candidates. The caller MUST gate on
 //! the project actually using Tailwind: the `prefix-[value]` shape is Tailwind-
 //! specific in practice but not formally exclusive.
 

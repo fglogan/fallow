@@ -1,7 +1,7 @@
 use std::time::Instant;
 
-use fallow_config::ResolvedConfig;
-use fallow_output::{FileHealthScore, HotspotEntry, HotspotSummary, RefactoringTarget};
+use plow_config::ResolvedConfig;
+use plow_output::{FileHealthScore, HotspotEntry, HotspotSummary, RefactoringTarget};
 
 use crate::baseline::{HealthBaselineData, filter_new_health_targets};
 
@@ -16,13 +16,13 @@ use super::targets::{self, TargetAuxData, compute_refactoring_targets};
 
 pub struct HealthDerivedSectionInput<'a> {
     pub(crate) config: &'a ResolvedConfig,
-    pub(crate) files: &'a [fallow_types::discover::DiscoveredFile],
+    pub(crate) files: &'a [plow_types::discover::DiscoveredFile],
     pub(crate) ignore_set: &'a globset::GlobSet,
     pub(crate) changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
     pub(crate) ws_roots: Option<&'a [std::path::PathBuf]>,
     pub(crate) file_scores: &'a [FileHealthScore],
     pub(crate) churn_fetch: Option<hotspots::ChurnFetchResult>,
-    pub(crate) diff_index: Option<&'a fallow_output::DiffIndex>,
+    pub(crate) diff_index: Option<&'a plow_output::DiffIndex>,
     pub(crate) score_output: Option<&'a scoring::FileScoreOutput>,
     pub(crate) loaded_baseline: Option<&'a HealthBaselineData>,
 }
@@ -35,7 +35,7 @@ pub struct HealthDerivedSections {
     pub(crate) hotspot_summary: Option<HotspotSummary>,
     pub(crate) hotspots_ms: f64,
     pub(crate) targets: Vec<RefactoringTarget>,
-    pub(crate) target_thresholds: Option<fallow_output::TargetThresholds>,
+    pub(crate) target_thresholds: Option<plow_output::TargetThresholds>,
     pub(crate) targets_ms: f64,
 }
 
@@ -106,7 +106,7 @@ struct HealthHotspotSectionInput<'a> {
     ignore_set: &'a globset::GlobSet,
     ws_roots: Option<&'a [std::path::PathBuf]>,
     churn_fetch: Option<hotspots::ChurnFetchResult>,
-    diff_index: Option<&'a fallow_output::DiffIndex>,
+    diff_index: Option<&'a plow_output::DiffIndex>,
 }
 
 fn prepare_health_section_hotspots(
@@ -130,7 +130,7 @@ struct HealthTargetSectionInput<'a> {
     hotspots: &'a [HotspotEntry],
     loaded_baseline: Option<&'a HealthBaselineData>,
     config: &'a ResolvedConfig,
-    diff_index: Option<&'a fallow_output::DiffIndex>,
+    diff_index: Option<&'a plow_output::DiffIndex>,
     dupes_report: Option<&'a crate::duplicates::DuplicationReport>,
 }
 
@@ -139,7 +139,7 @@ fn prepare_health_section_targets(
     input: &HealthTargetSectionInput<'_>,
 ) -> (
     Vec<RefactoringTarget>,
-    Option<fallow_output::TargetThresholds>,
+    Option<plow_output::TargetThresholds>,
     f64,
 ) {
     compute_filtered_targets(FilteredTargetInput {
@@ -161,7 +161,7 @@ struct FilteredHotspotInput<'a> {
     ignore_set: &'a globset::GlobSet,
     ws_roots: Option<&'a [std::path::PathBuf]>,
     churn_fetch: Option<hotspots::ChurnFetchResult>,
-    diff_index: Option<&'a fallow_output::DiffIndex>,
+    diff_index: Option<&'a plow_output::DiffIndex>,
 }
 
 fn compute_filtered_hotspots(
@@ -198,7 +198,7 @@ struct FilteredTargetInput<'a> {
     hotspots: &'a [HotspotEntry],
     loaded_baseline: Option<&'a HealthBaselineData>,
     config: &'a ResolvedConfig,
-    diff_index: Option<&'a fallow_output::DiffIndex>,
+    diff_index: Option<&'a plow_output::DiffIndex>,
     dupes_report: Option<&'a crate::duplicates::DuplicationReport>,
 }
 
@@ -206,7 +206,7 @@ fn compute_filtered_targets(
     input: FilteredTargetInput<'_>,
 ) -> (
     Vec<RefactoringTarget>,
-    Option<fallow_output::TargetThresholds>,
+    Option<plow_output::TargetThresholds>,
     f64,
 ) {
     let t = Instant::now();
@@ -224,7 +224,7 @@ fn compute_filtered_targets(
 fn prepare_health_duplication_data(
     opts: &HealthExecutionOptions<'_>,
     config: &ResolvedConfig,
-    files: &[fallow_types::discover::DiscoveredFile],
+    files: &[plow_types::discover::DiscoveredFile],
     changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
     ws_roots: Option<&[std::path::PathBuf]>,
     ignore_set: &globset::GlobSet,
@@ -243,7 +243,7 @@ fn prepare_health_duplication_data(
 fn compute_health_duplication_report(
     opts: &HealthExecutionOptions<'_>,
     config: &ResolvedConfig,
-    files: &[fallow_types::discover::DiscoveredFile],
+    files: &[plow_types::discover::DiscoveredFile],
     candidate_paths: &rustc_hash::FxHashSet<std::path::PathBuf>,
 ) -> (Option<crate::duplicates::DuplicationReport>, f64) {
     let t = Instant::now();
@@ -270,7 +270,7 @@ fn compute_targets(
     input: &FilteredTargetInput<'_>,
 ) -> (
     Vec<RefactoringTarget>,
-    Option<fallow_output::TargetThresholds>,
+    Option<plow_output::TargetThresholds>,
 ) {
     if !input.opts.targets {
         return (Vec::new(), None);

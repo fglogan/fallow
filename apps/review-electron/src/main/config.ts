@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 export type AppConfig = {
-  fallowBin: string | null;
+  plowBin: string | null;
   defaultUrl: string;
   inspectPort: number;
   agentBackend: string;
@@ -11,7 +11,7 @@ export type AppConfig = {
 };
 
 export const DEFAULT_CONFIG: AppConfig = {
-  fallowBin: null,
+  plowBin: null,
   defaultUrl: "http://localhost:5273",
   inspectPort: 7787,
   agentBackend: "claude-code",
@@ -45,7 +45,7 @@ export const parseConfig = (text: string): AppConfig => {
   if (typeof raw !== "object" || raw === null) return { ...DEFAULT_CONFIG };
   const r = raw as Record<string, unknown>;
   return {
-    fallowBin: strOrNull(r["fallowBin"], DEFAULT_CONFIG.fallowBin),
+    plowBin: strOrNull(r["plowBin"], DEFAULT_CONFIG.plowBin),
     defaultUrl: str(r["defaultUrl"], DEFAULT_CONFIG.defaultUrl),
     inspectPort: num(r["inspectPort"], DEFAULT_CONFIG.inspectPort),
     agentBackend: str(r["agentBackend"], DEFAULT_CONFIG.agentBackend),
@@ -54,7 +54,7 @@ export const parseConfig = (text: string): AppConfig => {
 };
 
 export const configPath = (home: string = homedir()): string =>
-  join(home, ".fallow-review", "config.jsonc");
+  join(home, ".plow-review", "config.jsonc");
 
 /** Load the user config (or defaults if missing/unreadable). */
 export const loadConfig = (home: string = homedir()): AppConfig => {

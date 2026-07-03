@@ -1,10 +1,10 @@
 //! Persisted graph-cache store: coarse all-or-nothing load / save of a
 //! previously-built [`ModuleGraph`].
 //!
-//! Mirrors the extraction cache store (`fallow_extract::cache::store`): the
+//! Mirrors the extraction cache store (`plow_extract::cache::store`): the
 //! payload is postcard-encoded, written atomically via a sibling `.tmp` file
 //! plus best-effort fsync and rename, and a `.gitignore` is written alongside
-//! so `.fallow/` is never committed. Every IO error is swallowed (the graph
+//! so `.plow/` is never committed. Every IO error is swallowed (the graph
 //! cache is best-effort and must never fail analysis); a corrupt or
 //! version-mismatched file simply misses and the graph is rebuilt fresh.
 
@@ -94,7 +94,7 @@ impl GraphCacheStore {
     }
 }
 
-/// Write `.fallow/.gitignore` (`*\n`) so the cache directory is never committed.
+/// Write `.plow/.gitignore` (`*\n`) so the cache directory is never committed.
 fn write_cache_gitignore(cache_dir: &Path) -> std::io::Result<()> {
     std::fs::write(cache_dir.join(".gitignore"), "*\n")
 }

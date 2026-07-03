@@ -1,11 +1,11 @@
-# @fallow-cli/fallow-node
+# @plow-cli/plow-node
 
-Native Node.js bindings for fallow’s main analyses.
+Native Node.js bindings for plow’s main analyses.
 
 ## Install
 
 ```bash
-npm install @fallow-cli/fallow-node   # or: pnpm/yarn/bun add @fallow-cli/fallow-node
+npm install @plow-cli/plow-node   # or: pnpm/yarn/bun add @plow-cli/plow-node
 ```
 
 ## API
@@ -24,7 +24,7 @@ Enum-like option values use lowercase CLI-style strings such as `"mild"`, `"cycl
 
 Shared options mirror analysis-affecting CLI globals, including `root`, `configPath`, `noCache`, `threads`, `diffFile`, `production`, `changedSince`, `workspace`, `changedWorkspaces`, and `explain`. Object-shaped JSON roots always carry the top-level `kind` discriminator; consumers should branch on `kind`. `diffFile` accepts a path to a unified diff file; stdin diff sources are CLI-only.
 
-Rejected promises throw a `FallowNodeError` with:
+Rejected promises throw a `PlowNodeError` with:
 
 - `message`
 - `exitCode`

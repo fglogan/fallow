@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 /// # Examples
 ///
 /// ```
-/// use fallow_types::discover::{DiscoveredFile, FileId};
+/// use plow_types::discover::{DiscoveredFile, FileId};
 /// use std::path::PathBuf;
 ///
 /// let file = DiscoveredFile {
@@ -36,7 +36,7 @@ pub struct DiscoveredFile {
 /// # Examples
 ///
 /// ```
-/// use fallow_types::discover::FileId;
+/// use plow_types::discover::FileId;
 ///
 /// let id = FileId(42);
 /// assert_eq!(id.0, 42);
@@ -137,7 +137,7 @@ pub enum EntryPointSource {
     TestFile,
     /// A default index file (e.g., `src/index.ts`).
     DefaultIndex,
-    /// Manually configured in fallow config.
+    /// Manually configured in plow config.
     ManualEntry,
     /// Discovered from infrastructure config files (Dockerfile, Procfile, fly.toml).
     InfrastructureConfig,

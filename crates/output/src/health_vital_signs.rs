@@ -149,7 +149,7 @@ pub struct RenderFanInTopComponent {
     pub component: String,
     /// Project-relative path of the file declaring the component. Serialized with
     /// forward slashes (same serializer the other relativized health paths use).
-    #[serde(serialize_with = "fallow_types::serde_path::serialize")]
+    #[serde(serialize_with = "plow_types::serde_path::serialize")]
     pub path: std::path::PathBuf,
     /// Total JSX render SITES that resolve to this component across the project.
     /// SECONDARY "incl. repeats" context, not the headline (see `distinct_parents`).
@@ -210,7 +210,7 @@ pub struct VitalSignsCounts {
 pub struct VitalSignsSnapshot {
     /// Schema version for snapshot format (independent of report schema_version).
     pub snapshot_schema_version: u32,
-    /// Fallow version that produced this snapshot.
+    /// Plow version that produced this snapshot.
     pub version: String,
     /// ISO 8601 timestamp.
     pub timestamp: String,

@@ -1,4 +1,4 @@
-use fallow_config::OutputFormat;
+use plow_config::OutputFormat;
 
 use super::Cli;
 
@@ -50,9 +50,9 @@ pub struct FormatConfig {
     pub cli_format_was_explicit: bool,
 }
 
-/// Read `FALLOW_FORMAT` env var and parse it into a Format value.
+/// Read `PLOW_FORMAT` env var and parse it into a Format value.
 pub fn format_from_env() -> Option<Format> {
-    let val = std::env::var("FALLOW_FORMAT").ok()?;
+    let val = std::env::var("PLOW_FORMAT").ok()?;
     parse_format_arg(&val)
 }
 
@@ -73,9 +73,9 @@ pub fn parse_format_arg(value: &str) -> Option<Format> {
     }
 }
 
-/// Read `FALLOW_QUIET` env var: "1" or "true" means quiet.
+/// Read `PLOW_QUIET` env var: "1" or "true" means quiet.
 fn quiet_from_env() -> bool {
-    std::env::var("FALLOW_QUIET").is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+    std::env::var("PLOW_QUIET").is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
 }
 
 pub fn bool_from_env(name: &str) -> Option<bool> {

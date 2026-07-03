@@ -5,8 +5,8 @@ use std::sync::Mutex;
 static TELEMETRY_ANALYSIS_RUN_ID: Mutex<Option<String>> = Mutex::new(None);
 
 #[must_use]
-pub fn current_root_envelope_mode() -> fallow_output::RootEnvelopeMode {
-    fallow_output::RootEnvelopeMode::Tagged
+pub fn current_root_envelope_mode() -> plow_output::RootEnvelopeMode {
+    plow_output::RootEnvelopeMode::Tagged
 }
 
 #[allow(

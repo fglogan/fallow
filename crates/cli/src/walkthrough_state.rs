@@ -1,7 +1,7 @@
-//! Local, account-free viewed-state for `fallow review --walkthrough`.
+//! Local, account-free viewed-state for `plow review --walkthrough`.
 //!
 //! Per-file "I've looked at this" marks live in a small JSON ledger inside the
-//! resolved cache dir (`.fallow/walkthrough-state.json`, already gitignored).
+//! resolved cache dir (`.plow/walkthrough-state.json`, already gitignored).
 //! The ledger is purely local: no account, no network, human/git-readable.
 //!
 //! Staleness is keyed on the guide's `graph_snapshot_hash`. A mark is honored
@@ -85,7 +85,7 @@ impl ViewedState {
 /// older render).
 #[must_use]
 pub fn load_viewed_state(cache_dir: &Path) -> ViewedState {
-    let path = fallow_config::walkthrough_state_path(cache_dir);
+    let path = plow_config::walkthrough_state_path(cache_dir);
     let Ok(contents) = std::fs::read_to_string(&path) else {
         return ViewedState::default();
     };
@@ -127,7 +127,7 @@ pub fn mark_viewed(cache_dir: &Path, files: &[String], current_hash: &str) -> st
 
 /// Serialize `state` and write it to the ledger path via temp + rename.
 fn write_atomic(cache_dir: &Path, state: &ViewedState) -> std::io::Result<()> {
-    let path = fallow_config::walkthrough_state_path(cache_dir);
+    let path = plow_config::walkthrough_state_path(cache_dir);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -157,7 +157,7 @@ mod tests {
     #[test]
     fn garbled_json_loads_empty_default() {
         let dir = temp_cache();
-        let path = fallow_config::walkthrough_state_path(dir.path());
+        let path = plow_config::walkthrough_state_path(dir.path());
         std::fs::write(&path, b"{ not json").expect("write");
         let state = load_viewed_state(dir.path());
         assert!(state.entries.is_empty());
@@ -166,7 +166,7 @@ mod tests {
     #[test]
     fn unknown_version_loads_empty_default() {
         let dir = temp_cache();
-        let path = fallow_config::walkthrough_state_path(dir.path());
+        let path = plow_config::walkthrough_state_path(dir.path());
         std::fs::write(
             &path,
             br#"{"version":999,"schema":"walkthrough-viewed-marks","graph_snapshot_hash":"h","entries":{"a.ts":{"viewed_at":"t"}}}"#,

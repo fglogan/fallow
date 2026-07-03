@@ -122,7 +122,7 @@ fn tokenize_astro(
     source: &str,
     strip_types: bool,
     skip_imports: bool,
-    extract_fn: fn(&str) -> Option<fallow_extract::sfc::SfcScript>,
+    extract_fn: fn(&str) -> Option<plow_extract::sfc::SfcScript>,
 ) -> FileTokens {
     if let Some(script) = extract_fn(source) {
         let mut sections = vec![tokenize_js_section(

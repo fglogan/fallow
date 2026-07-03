@@ -7,8 +7,8 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::resolve::ResolvedModule;
-use fallow_types::discover::FileId;
-use fallow_types::extract::{ImportedName, VisibilityTag};
+use plow_types::discover::FileId;
+use plow_types::extract::{ImportedName, VisibilityTag};
 
 use super::types::{ExportSymbol, ReExportEdge, ReferenceKind, SymbolReference};
 use super::{ImportedSymbol, ModuleNode};
@@ -87,8 +87,8 @@ pub(super) fn mark_member_exports_referenced(
     let mut found_members: FxHashSet<String> = FxHashSet::default();
     for export in exports {
         let name_str = match &export.name {
-            fallow_types::extract::ExportName::Named(n) => n.as_str(),
-            fallow_types::extract::ExportName::Default => "default",
+            plow_types::extract::ExportName::Named(n) => n.as_str(),
+            plow_types::extract::ExportName::Default => "default",
         };
         if member_set.contains(name_str) {
             found_members.insert(name_str.to_owned());
@@ -118,9 +118,9 @@ pub(super) fn create_synthetic_exports_for_star_re_exports(
             continue;
         }
         let export_name = if member == "default" {
-            fallow_types::extract::ExportName::Default
+            plow_types::extract::ExportName::Default
         } else {
-            fallow_types::extract::ExportName::Named(member.clone())
+            plow_types::extract::ExportName::Named(member.clone())
         };
         exports.push(ExportSymbol {
             name: export_name,
@@ -439,8 +439,8 @@ pub(super) fn attach_symbol_reference(
 mod tests {
     use super::*;
     use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
-    use fallow_types::discover::{DiscoveredFile, FileId};
-    use fallow_types::extract::{ExportName, VisibilityTag};
+    use plow_types::discover::{DiscoveredFile, FileId};
+    use plow_types::extract::{ExportName, VisibilityTag};
 
     use super::super::ModuleGraph;
 
@@ -519,15 +519,15 @@ mod tests {
         let resolved = ResolvedModule {
             path: std::path::PathBuf::from("/project/entry.ts"),
             member_accesses: vec![
-                fallow_types::extract::MemberAccess {
+                plow_types::extract::MemberAccess {
                     object: "ns".to_string(),
                     member: "foo".to_string(),
                 },
-                fallow_types::extract::MemberAccess {
+                plow_types::extract::MemberAccess {
                     object: "ns".to_string(),
                     member: "bar".to_string(),
                 },
-                fallow_types::extract::MemberAccess {
+                plow_types::extract::MemberAccess {
                     object: "other".to_string(),
                     member: "baz".to_string(),
                 },
@@ -782,16 +782,16 @@ mod tests {
                 size_bytes: 50,
             },
         ];
-        let entry_points = vec![fallow_types::discover::EntryPoint {
+        let entry_points = vec![plow_types::discover::EntryPoint {
             path: std::path::PathBuf::from("/project/entry.ts"),
-            source: fallow_types::discover::EntryPointSource::PackageJsonMain,
+            source: plow_types::discover::EntryPointSource::PackageJsonMain,
         }];
         let resolved_modules = vec![
             ResolvedModule {
                 file_id: FileId(0),
                 path: std::path::PathBuf::from("/project/entry.ts"),
                 resolved_imports: vec![ResolvedImport {
-                    info: fallow_types::extract::ImportInfo {
+                    info: plow_types::extract::ImportInfo {
                         source: "./utils".to_string(),
                         imported_name: ImportedName::Named("foo".to_string()),
                         local_name: "foo".to_string(),
@@ -810,7 +810,7 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(1),
                 path: std::path::PathBuf::from("/project/utils.ts"),
-                exports: vec![fallow_types::extract::ExportInfo {
+                exports: vec![plow_types::extract::ExportInfo {
                     name: ExportName::Named("foo".to_string()),
                     local_name: Some("foo".to_string()),
                     is_type_only: false,
@@ -850,16 +850,16 @@ mod tests {
                 size_bytes: 50,
             },
         ];
-        let entry_points = vec![fallow_types::discover::EntryPoint {
+        let entry_points = vec![plow_types::discover::EntryPoint {
             path: std::path::PathBuf::from("/project/entry.ts"),
-            source: fallow_types::discover::EntryPointSource::PackageJsonMain,
+            source: plow_types::discover::EntryPointSource::PackageJsonMain,
         }];
         let resolved_modules = vec![
             ResolvedModule {
                 file_id: FileId(0),
                 path: std::path::PathBuf::from("/project/entry.ts"),
                 resolved_imports: vec![ResolvedImport {
-                    info: fallow_types::extract::ImportInfo {
+                    info: plow_types::extract::ImportInfo {
                         source: "./utils".to_string(),
                         imported_name: ImportedName::Namespace,
                         local_name: "utils".to_string(),
@@ -870,7 +870,7 @@ mod tests {
                     },
                     target: ResolveResult::InternalModule(FileId(1)),
                 }],
-                member_accesses: vec![fallow_types::extract::MemberAccess {
+                member_accesses: vec![plow_types::extract::MemberAccess {
                     object: "utils".to_string(),
                     member: "foo".to_string(),
                 }],
@@ -880,7 +880,7 @@ mod tests {
                 file_id: FileId(1),
                 path: std::path::PathBuf::from("/project/utils.ts"),
                 exports: vec![
-                    fallow_types::extract::ExportInfo {
+                    plow_types::extract::ExportInfo {
                         name: ExportName::Named("foo".to_string()),
                         local_name: Some("foo".to_string()),
                         is_type_only: false,
@@ -891,7 +891,7 @@ mod tests {
                         is_side_effect_used: false,
                         super_class: None,
                     },
-                    fallow_types::extract::ExportInfo {
+                    plow_types::extract::ExportInfo {
                         name: ExportName::Named("bar".to_string()),
                         local_name: Some("bar".to_string()),
                         is_type_only: false,
@@ -943,16 +943,16 @@ mod tests {
                 size_bytes: 50,
             },
         ];
-        let entry_points = vec![fallow_types::discover::EntryPoint {
+        let entry_points = vec![plow_types::discover::EntryPoint {
             path: std::path::PathBuf::from("/project/entry.ts"),
-            source: fallow_types::discover::EntryPointSource::PackageJsonMain,
+            source: plow_types::discover::EntryPointSource::PackageJsonMain,
         }];
         let resolved_modules = vec![
             ResolvedModule {
                 file_id: FileId(0),
                 path: std::path::PathBuf::from("/project/entry.ts"),
                 resolved_imports: vec![ResolvedImport {
-                    info: fallow_types::extract::ImportInfo {
+                    info: plow_types::extract::ImportInfo {
                         source: "./utils".to_string(),
                         imported_name: ImportedName::Namespace,
                         local_name: "utils".to_string(),
@@ -970,7 +970,7 @@ mod tests {
                 file_id: FileId(1),
                 path: std::path::PathBuf::from("/project/utils.ts"),
                 exports: vec![
-                    fallow_types::extract::ExportInfo {
+                    plow_types::extract::ExportInfo {
                         name: ExportName::Named("foo".to_string()),
                         local_name: Some("foo".to_string()),
                         is_type_only: false,
@@ -981,7 +981,7 @@ mod tests {
                         is_side_effect_used: false,
                         super_class: None,
                     },
-                    fallow_types::extract::ExportInfo {
+                    plow_types::extract::ExportInfo {
                         name: ExportName::Named("bar".to_string()),
                         local_name: Some("bar".to_string()),
                         is_type_only: false,
@@ -1021,16 +1021,16 @@ mod tests {
                 size_bytes: 50,
             },
         ];
-        let entry_points = vec![fallow_types::discover::EntryPoint {
+        let entry_points = vec![plow_types::discover::EntryPoint {
             path: std::path::PathBuf::from("/project/entry.ts"),
-            source: fallow_types::discover::EntryPointSource::PackageJsonMain,
+            source: plow_types::discover::EntryPointSource::PackageJsonMain,
         }];
         let resolved_modules = vec![
             ResolvedModule {
                 file_id: FileId(0),
                 path: std::path::PathBuf::from("/project/entry.ts"),
                 resolved_imports: vec![ResolvedImport {
-                    info: fallow_types::extract::ImportInfo {
+                    info: plow_types::extract::ImportInfo {
                         source: "./Button.module.css".to_string(),
                         imported_name: ImportedName::Default,
                         local_name: "styles".to_string(),
@@ -1041,7 +1041,7 @@ mod tests {
                     },
                     target: ResolveResult::InternalModule(FileId(1)),
                 }],
-                member_accesses: vec![fallow_types::extract::MemberAccess {
+                member_accesses: vec![plow_types::extract::MemberAccess {
                     object: "styles".to_string(),
                     member: "primary".to_string(),
                 }],
@@ -1051,7 +1051,7 @@ mod tests {
                 file_id: FileId(1),
                 path: std::path::PathBuf::from("/project/Button.module.css"),
                 exports: vec![
-                    fallow_types::extract::ExportInfo {
+                    plow_types::extract::ExportInfo {
                         name: ExportName::Named("primary".to_string()),
                         local_name: Some("primary".to_string()),
                         is_type_only: false,
@@ -1062,7 +1062,7 @@ mod tests {
                         is_side_effect_used: false,
                         super_class: None,
                     },
-                    fallow_types::extract::ExportInfo {
+                    plow_types::extract::ExportInfo {
                         name: ExportName::Named("secondary".to_string()),
                         local_name: Some("secondary".to_string()),
                         is_type_only: false,
@@ -1114,16 +1114,16 @@ mod tests {
                 size_bytes: 50,
             },
         ];
-        let entry_points = vec![fallow_types::discover::EntryPoint {
+        let entry_points = vec![plow_types::discover::EntryPoint {
             path: std::path::PathBuf::from("/project/entry.ts"),
-            source: fallow_types::discover::EntryPointSource::PackageJsonMain,
+            source: plow_types::discover::EntryPointSource::PackageJsonMain,
         }];
         let resolved_modules = vec![
             ResolvedModule {
                 file_id: FileId(0),
                 path: std::path::PathBuf::from("/project/entry.ts"),
                 resolved_imports: vec![ResolvedImport {
-                    info: fallow_types::extract::ImportInfo {
+                    info: plow_types::extract::ImportInfo {
                         source: "./component".to_string(),
                         imported_name: ImportedName::Default,
                         local_name: "Component".to_string(),
@@ -1139,7 +1139,7 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(1),
                 path: std::path::PathBuf::from("/project/component.ts"),
-                exports: vec![fallow_types::extract::ExportInfo {
+                exports: vec![plow_types::extract::ExportInfo {
                     name: ExportName::Default,
                     local_name: Some("Component".to_string()),
                     is_type_only: false,
@@ -1174,15 +1174,15 @@ mod tests {
             path: std::path::PathBuf::from("/project/entry.ts"),
             size_bytes: 100,
         }];
-        let entry_points = vec![fallow_types::discover::EntryPoint {
+        let entry_points = vec![plow_types::discover::EntryPoint {
             path: std::path::PathBuf::from("/project/entry.ts"),
-            source: fallow_types::discover::EntryPointSource::PackageJsonMain,
+            source: plow_types::discover::EntryPointSource::PackageJsonMain,
         }];
         let resolved_modules = vec![ResolvedModule {
             file_id: FileId(0),
             path: std::path::PathBuf::from("/project/entry.ts"),
             resolved_imports: vec![ResolvedImport {
-                info: fallow_types::extract::ImportInfo {
+                info: plow_types::extract::ImportInfo {
                     source: "react".to_string(),
                     imported_name: ImportedName::Named("FC".to_string()),
                     local_name: "FC".to_string(),

@@ -88,7 +88,7 @@ vi.mock("node:child_process", () => ({
       err: Error | null,
       result?: { stdout: string; stderr: string },
     ) => void;
-    cb(null, { stdout: "fallow 2.26.0\n", stderr: "" });
+    cb(null, { stdout: "plow 2.26.0\n", stderr: "" });
   },
 }));
 
@@ -145,11 +145,11 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 
 const binDir = path.join("/storage", "bin");
 const lockPath = path.join(binDir, ".install.lock");
-const lspPath = path.join(binDir, "fallow-lsp");
+const lspPath = path.join(binDir, "plow-lsp");
 const lspSigPath = `${lspPath}.sig`;
-const cliPath = path.join(binDir, "fallow");
+const cliPath = path.join(binDir, "plow");
 const cliSigPath = `${cliPath}.sig`;
-const versionPath = path.join(binDir, ".fallow-version");
+const versionPath = path.join(binDir, ".plow-version");
 
 const fakeContext = { globalStorageUri: { fsPath: "/storage" } } as never;
 
@@ -243,7 +243,7 @@ describe("renameIntoPlace", () => {
   beforeEach(reset);
 
   it("renames the temp binary onto an absent destination", () => {
-    const temp = path.join(binDir, ".fallow.tmp");
+    const temp = path.join(binDir, ".plow.tmp");
     files[temp] = Buffer.from("new-binary");
 
     renameIntoPlace(temp, cliPath);
@@ -253,7 +253,7 @@ describe("renameIntoPlace", () => {
   });
 
   it("treats a locked but byte-identical destination as success", () => {
-    const temp = path.join(binDir, ".fallow.tmp");
+    const temp = path.join(binDir, ".plow.tmp");
     files[temp] = Buffer.from("same-binary");
     files[cliPath] = Buffer.from("same-binary"); // makes renameSync throw EPERM
 
@@ -263,7 +263,7 @@ describe("renameIntoPlace", () => {
   });
 
   it("rethrows when the locked destination differs from the temp binary", () => {
-    const temp = path.join(binDir, ".fallow.tmp");
+    const temp = path.join(binDir, ".plow.tmp");
     files[temp] = Buffer.from("new-binary");
     files[cliPath] = Buffer.from("old-binary"); // locked AND different
 

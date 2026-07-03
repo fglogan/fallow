@@ -1,6 +1,6 @@
-//! Shared types for fallow codebase intelligence.
+//! Shared types for plow codebase intelligence.
 //!
-//! This crate contains type definitions used across multiple fallow crates
+//! This crate contains type definitions used across multiple plow crates
 //! (core, CLI, LSP). It has no analysis logic, only data structures.
 
 #![warn(missing_docs)]
@@ -33,8 +33,8 @@ pub mod extract;
 /// Shared issue-type contract metadata used by CLI, LSP, MCP, and suppression
 /// helpers.
 pub mod issue_meta;
-/// Machine-readable manifest of the fallow MCP server's tools, shared by
-/// `fallow schema` and the telemetry tool-name allowlist; kept in sync with
+/// Machine-readable manifest of the plow MCP server's tools, shared by
+/// `plow schema` and the telemetry tool-name allowlist; kept in sync with
 /// the live tool router by a drift test in `crates/mcp`.
 pub mod mcp_manifest;
 /// JSON-output augmentation types: `IssueAction` enum + variants.
@@ -80,7 +80,7 @@ pub mod trace;
 pub mod trace_chain;
 /// Workspace and source-discovery diagnostic data types
 /// (`WorkspaceDiagnostic`, `WorkspaceDiagnosticKind`). Re-exported by
-/// `fallow-config` for back-compat; embedded directly by `fallow-output` so
+/// `plow-config` for back-compat; embedded directly by `plow-output` so
 /// `workspace_diagnostics[]` keeps its typed JSON schema. The
 /// `schemars::JsonSchema` derive is gated on the `schema` feature.
 pub mod workspace;

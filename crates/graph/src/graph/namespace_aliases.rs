@@ -20,8 +20,8 @@
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_types::discover::FileId;
-use fallow_types::extract::{ImportedName, NamespaceObjectAlias};
+use plow_types::discover::FileId;
+use plow_types::extract::{ImportedName, NamespaceObjectAlias};
 
 use crate::resolve::ResolvedModule;
 

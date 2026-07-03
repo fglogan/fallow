@@ -17,8 +17,8 @@ pub struct CombinedFinding {
     pub group_index: usize,
 }
 
-impl From<fallow_core::cross_reference::CombinedFinding> for CombinedFinding {
-    fn from(finding: fallow_core::cross_reference::CombinedFinding) -> Self {
+impl From<plow_core::cross_reference::CombinedFinding> for CombinedFinding {
+    fn from(finding: plow_core::cross_reference::CombinedFinding) -> Self {
         Self {
             clone_instance: finding.clone_instance,
             dead_code_kind: finding.dead_code_kind.into(),
@@ -38,14 +38,14 @@ pub enum DeadCodeKind {
     UnusedType { type_name: String },
 }
 
-impl From<fallow_core::cross_reference::DeadCodeKind> for DeadCodeKind {
-    fn from(kind: fallow_core::cross_reference::DeadCodeKind) -> Self {
+impl From<plow_core::cross_reference::DeadCodeKind> for DeadCodeKind {
+    fn from(kind: plow_core::cross_reference::DeadCodeKind) -> Self {
         match kind {
-            fallow_core::cross_reference::DeadCodeKind::UnusedFile => Self::UnusedFile,
-            fallow_core::cross_reference::DeadCodeKind::UnusedExport { export_name } => {
+            plow_core::cross_reference::DeadCodeKind::UnusedFile => Self::UnusedFile,
+            plow_core::cross_reference::DeadCodeKind::UnusedExport { export_name } => {
                 Self::UnusedExport { export_name }
             }
-            fallow_core::cross_reference::DeadCodeKind::UnusedType { type_name } => {
+            plow_core::cross_reference::DeadCodeKind::UnusedType { type_name } => {
                 Self::UnusedType { type_name }
             }
         }
@@ -86,8 +86,8 @@ impl CrossReferenceResult {
     }
 }
 
-impl From<fallow_core::cross_reference::CrossReferenceResult> for CrossReferenceResult {
-    fn from(result: fallow_core::cross_reference::CrossReferenceResult) -> Self {
+impl From<plow_core::cross_reference::CrossReferenceResult> for CrossReferenceResult {
+    fn from(result: plow_core::cross_reference::CrossReferenceResult) -> Self {
         Self {
             combined_findings: result
                 .combined_findings
@@ -106,7 +106,7 @@ pub fn cross_reference(
     duplication: &DuplicationReport,
     dead_code: &AnalysisResults,
 ) -> CrossReferenceResult {
-    fallow_core::cross_reference::cross_reference(duplication, dead_code).into()
+    plow_core::cross_reference::cross_reference(duplication, dead_code).into()
 }
 
 #[cfg(test)]
@@ -155,18 +155,17 @@ mod tests {
 
     #[test]
     fn cross_reference_result_converts_from_core_without_leaking_type() {
-        let result =
-            CrossReferenceResult::from(fallow_core::cross_reference::CrossReferenceResult {
-                combined_findings: vec![fallow_core::cross_reference::CombinedFinding {
-                    clone_instance: clone_instance("src/a.ts", 1, 3),
-                    dead_code_kind: fallow_core::cross_reference::DeadCodeKind::UnusedType {
-                        type_name: "UnusedType".to_string(),
-                    },
-                    group_index: 7,
-                }],
-                clones_in_unused_files: 0,
-                clones_with_unused_exports: 1,
-            });
+        let result = CrossReferenceResult::from(plow_core::cross_reference::CrossReferenceResult {
+            combined_findings: vec![plow_core::cross_reference::CombinedFinding {
+                clone_instance: clone_instance("src/a.ts", 1, 3),
+                dead_code_kind: plow_core::cross_reference::DeadCodeKind::UnusedType {
+                    type_name: "UnusedType".to_string(),
+                },
+                group_index: 7,
+            }],
+            clones_in_unused_files: 0,
+            clones_with_unused_exports: 1,
+        });
 
         assert_eq!(result.total(), 1);
         assert_eq!(result.clones_with_unused_exports, 1);

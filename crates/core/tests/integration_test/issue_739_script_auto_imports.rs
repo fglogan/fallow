@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use super::common::{create_config, fixture_path};
-use fallow_types::results::AnalysisResults;
+use plow_types::results::AnalysisResults;
 
 fn normalize_path(root: &Path, path: &Path) -> String {
     path.strip_prefix(root)
@@ -39,7 +39,7 @@ fn flag_off_keeps_script_convention_files_alive() {
     let config = create_config(root.clone());
     assert!(!config.auto_imports, "default is additive");
 
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused = unused_file_paths(&results, &root);
 
     assert!(
@@ -54,7 +54,7 @@ fn flag_on_keeps_script_auto_import_providers_reachable() {
     let mut config = create_config(root.clone());
     config.auto_imports = true;
 
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused = unused_file_paths(&results, &root);
 
     for reachable in [
@@ -93,7 +93,7 @@ fn include_entry_exports_credits_script_auto_import_exports() {
     config.auto_imports = true;
     config.include_entry_exports = true;
 
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused = unused_exports(&results, &root);
 
     assert!(
@@ -129,7 +129,7 @@ fn custom_imports_config_keeps_script_fallback_patterns() {
     let mut config = create_config(root.clone());
     config.auto_imports = true;
 
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused = unused_file_paths(&results, &root);
 
     assert!(

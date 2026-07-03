@@ -2,10 +2,10 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_config::WorkspaceInfo;
-use fallow_output::{DiffIndex, MAX_DIFF_BYTES};
-use fallow_types::path_util::is_absolute_path_any_platform;
 use globset::Glob;
+use plow_config::WorkspaceInfo;
+use plow_output::{DiffIndex, MAX_DIFF_BYTES};
+use plow_types::path_util::is_absolute_path_any_platform;
 use rustc_hash::FxHashSet;
 
 use crate::{AnalysisOptions, ProgrammaticError};
@@ -50,7 +50,7 @@ pub fn resolve_programmatic_analysis_context(
         .build()
         .map_err(|err| {
             ProgrammaticError::new(format!("failed to build analysis thread pool: {err}"), 2)
-                .with_code("FALLOW_THREAD_POOL_INIT_FAILED")
+                .with_code("PLOW_THREAD_POOL_INIT_FAILED")
                 .with_context("analysis.threads")
         })?;
     let diff = options
@@ -85,7 +85,7 @@ fn validate_analysis_option_shape(options: &AnalysisOptions) -> ProgrammaticResu
     if options.threads == Some(0) {
         return Err(
             ProgrammaticError::new("`threads` must be greater than 0", 2)
-                .with_code("FALLOW_INVALID_THREADS")
+                .with_code("PLOW_INVALID_THREADS")
                 .with_context("analysis.threads"),
         );
     }
@@ -94,7 +94,7 @@ fn validate_analysis_option_shape(options: &AnalysisOptions) -> ProgrammaticResu
             "`workspace` and `changed_workspaces` are mutually exclusive",
             2,
         )
-        .with_code("FALLOW_MUTUALLY_EXCLUSIVE_SCOPE")
+        .with_code("PLOW_MUTUALLY_EXCLUSIVE_SCOPE")
         .with_context("analysis.workspace"));
     }
     Ok(())
@@ -108,13 +108,13 @@ fn resolve_analysis_root(root: Option<&Path>) -> ProgrammaticResult<PathBuf> {
                 format!("failed to resolve current working directory: {err}"),
                 2,
             )
-            .with_code("FALLOW_CWD_UNAVAILABLE")
+            .with_code("PLOW_CWD_UNAVAILABLE")
             .with_context("analysis.root")
         })?,
     };
-    fallow_engine::validate::validate_root(&root).map_err(|err| {
+    plow_engine::validate::validate_root(&root).map_err(|err| {
         ProgrammaticError::new(err, 2)
-            .with_code("FALLOW_INVALID_ROOT")
+            .with_code("PLOW_INVALID_ROOT")
             .with_context("analysis.root")
     })
 }
@@ -127,7 +127,7 @@ fn validate_analysis_config_path(config_path: Option<&Path>) -> ProgrammaticResu
             format!("config file does not exist: {}", config_path.display()),
             2,
         )
-        .with_code("FALLOW_INVALID_CONFIG_PATH")
+        .with_code("PLOW_INVALID_CONFIG_PATH")
         .with_context("analysis.configPath"));
     }
     Ok(())
@@ -210,7 +210,7 @@ fn load_explicit_diff_file(path: &Path, root: &Path) -> ProgrammaticResult<DiffI
             "`diff_file` does not support stdin; pass a file path",
             2,
         )
-        .with_code("FALLOW_INVALID_DIFF_FILE")
+        .with_code("PLOW_INVALID_DIFF_FILE")
         .with_context("analysis.diffFile"));
     }
     let abs = if is_absolute_path_any_platform(path) {
@@ -226,7 +226,7 @@ fn load_explicit_diff_file(path: &Path, root: &Path) -> ProgrammaticResult<DiffI
             ),
             2,
         )
-        .with_code("FALLOW_INVALID_DIFF_FILE")
+        .with_code("PLOW_INVALID_DIFF_FILE")
         .with_context("analysis.diffFile")
     })?;
     if !meta.is_file() {
@@ -234,7 +234,7 @@ fn load_explicit_diff_file(path: &Path, root: &Path) -> ProgrammaticResult<DiffI
             format!("diff path is not a file: {}", abs.display()),
             2,
         )
-        .with_code("FALLOW_INVALID_DIFF_FILE")
+        .with_code("PLOW_INVALID_DIFF_FILE")
         .with_context("analysis.diffFile"));
     }
     if meta.len() > MAX_DIFF_BYTES {
@@ -246,7 +246,7 @@ fn load_explicit_diff_file(path: &Path, root: &Path) -> ProgrammaticResult<DiffI
             ),
             2,
         )
-        .with_code("FALLOW_INVALID_DIFF_FILE")
+        .with_code("PLOW_INVALID_DIFF_FILE")
         .with_context("analysis.diffFile"));
     }
     let text = std::fs::read_to_string(&abs).map_err(|err| {
@@ -254,7 +254,7 @@ fn load_explicit_diff_file(path: &Path, root: &Path) -> ProgrammaticResult<DiffI
             format!("failed to read diff file {}: {err}", abs.display()),
             2,
         )
-        .with_code("FALLOW_INVALID_DIFF_FILE")
+        .with_code("PLOW_INVALID_DIFF_FILE")
         .with_context("analysis.diffFile")
     })?;
     Ok(DiffIndex::from_unified_diff(&text))
@@ -266,7 +266,7 @@ pub fn changed_files_for_run(
     let Some(git_ref) = resolved.changed_since.as_deref() else {
         return Ok(None);
     };
-    fallow_engine::changed_files(&resolved.root, git_ref)
+    plow_engine::changed_files(&resolved.root, git_ref)
         .map(Some)
         .map_err(|err| {
             ProgrammaticError::new(
@@ -276,7 +276,7 @@ pub fn changed_files_for_run(
                 ),
                 2,
             )
-            .with_code("FALLOW_CHANGED_FILES_FAILED")
+            .with_code("PLOW_CHANGED_FILES_FAILED")
             .with_context("analysis.changedSince")
         })
 }
@@ -294,7 +294,7 @@ fn resolve_workspace_scope(
             "`workspace` and `changed_workspaces` are mutually exclusive",
             2,
         )
-        .with_code("FALLOW_MUTUALLY_EXCLUSIVE_SCOPE")
+        .with_code("PLOW_MUTUALLY_EXCLUSIVE_SCOPE")
         .with_context("analysis.workspace")),
     }
 }
@@ -303,7 +303,7 @@ pub fn resolve_workspace_filters(
     root: &Path,
     patterns: &[String],
 ) -> ProgrammaticResult<Vec<PathBuf>> {
-    let workspaces = fallow_config::discover_workspaces(root);
+    let workspaces = plow_config::discover_workspaces(root);
     if workspaces.is_empty() {
         let joined = patterns
             .iter()
@@ -316,7 +316,7 @@ pub fn resolve_workspace_filters(
             ),
             2,
         )
-        .with_code("FALLOW_WORKSPACES_NOT_FOUND")
+        .with_code("PLOW_WORKSPACES_NOT_FOUND")
         .with_context("analysis.workspace"));
     }
 
@@ -336,7 +336,7 @@ pub fn resolve_workspace_filters(
     if matched.is_empty() {
         return Err(
             ProgrammaticError::new("`workspace` excluded every discovered workspace", 2)
-                .with_code("FALLOW_WORKSPACE_SCOPE_EMPTY")
+                .with_code("PLOW_WORKSPACE_SCOPE_EMPTY")
                 .with_context("analysis.workspace"),
         );
     }
@@ -350,7 +350,7 @@ pub fn resolve_workspace_filters(
 }
 
 fn resolve_changed_workspaces(root: &Path, git_ref: &str) -> ProgrammaticResult<Vec<PathBuf>> {
-    let workspaces = fallow_config::discover_workspaces(root);
+    let workspaces = plow_config::discover_workspaces(root);
     if workspaces.is_empty() {
         return Err(ProgrammaticError::new(
             format!(
@@ -358,10 +358,10 @@ fn resolve_changed_workspaces(root: &Path, git_ref: &str) -> ProgrammaticResult<
             ),
             2,
         )
-        .with_code("FALLOW_WORKSPACES_NOT_FOUND")
+        .with_code("PLOW_WORKSPACES_NOT_FOUND")
         .with_context("analysis.changedWorkspaces"));
     }
-    let changed_files = fallow_engine::changed_files(root, git_ref).map_err(|err| {
+    let changed_files = plow_engine::changed_files(root, git_ref).map_err(|err| {
         ProgrammaticError::new(
             format!(
                 "failed to resolve changed workspaces for ref `{git_ref}`: {}",
@@ -369,7 +369,7 @@ fn resolve_changed_workspaces(root: &Path, git_ref: &str) -> ProgrammaticResult<
             ),
             2,
         )
-        .with_code("FALLOW_CHANGED_WORKSPACES_FAILED")
+        .with_code("PLOW_CHANGED_WORKSPACES_FAILED")
         .with_context("analysis.changedWorkspaces")
     })?;
     let mut roots = workspaces
@@ -419,7 +419,7 @@ fn match_positive_workspace_patterns(
             ),
             2,
         )
-        .with_code("FALLOW_WORKSPACE_PATTERN_UNMATCHED")
+        .with_code("PLOW_WORKSPACE_PATTERN_UNMATCHED")
         .with_context("analysis.workspace"));
     }
 
@@ -443,7 +443,7 @@ fn find_workspace_matches(
 
     let glob = Glob::new(pattern).map_err(|err| {
         ProgrammaticError::new(format!("invalid `workspace` pattern '{pattern}': {err}"), 2)
-            .with_code("FALLOW_INVALID_WORKSPACE_PATTERN")
+            .with_code("PLOW_INVALID_WORKSPACE_PATTERN")
             .with_context("analysis.workspace")
     })?;
     let matcher = glob.compile_matcher();

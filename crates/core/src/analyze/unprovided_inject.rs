@@ -12,12 +12,12 @@
 //! - **Dep-gated** on `vue` / `@vue/runtime-core` / `svelte`.
 //! - **External-abstain**: a key imported from an npm PACKAGE is skipped, because
 //!   the `provide` may live inside that package's own code (in `node_modules`,
-//!   which fallow does not parse).
+//!   which plow does not parse).
 //! - **Public-API abstain**: a key that is part of this package's public API
 //!   (re-exported from, or defined in, a non-private package entry point) is
 //!   skipped, because a "bring-your-own-provider" library exports the key and an
 //!   inject-composable for a downstream consumer to provide.
-//! - **Dynamic-provide abstain**: if ANY reachable module provides a key fallow
+//! - **Dynamic-provide abstain**: if ANY reachable module provides a key plow
 //!   cannot pin to a stable symbol (a spread, a computed key, or a transient
 //!   loop/parameter local), the whole project abstains, because a surviving
 //!   inject finding could be falsely flagged. Mirrors the Pinia spread-return
@@ -29,7 +29,7 @@
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_types::extract::{DiFramework, DiRole, ExportName, ModuleInfo};
+use plow_types::extract::{DiFramework, DiRole, ExportName, ModuleInfo};
 
 use crate::discover::FileId;
 use crate::graph::ModuleGraph;
@@ -201,7 +201,7 @@ fn evaluate_inject_site(
     scan: &InjectScanContext<'_>,
     resolved: &ResolvedModule,
     local_to_export_keys: &FxHashMap<&str, Vec<ExportKey>>,
-    site: &fallow_types::extract::DiKeySite,
+    site: &plow_types::extract::DiKeySite,
 ) -> Option<UnprovidedInject> {
     if !inject_site_has_unprovided_key(scan, resolved, local_to_export_keys, site) {
         return None;
@@ -223,7 +223,7 @@ fn inject_site_has_unprovided_key(
     scan: &InjectScanContext<'_>,
     resolved: &ResolvedModule,
     local_to_export_keys: &FxHashMap<&str, Vec<ExportKey>>,
-    site: &fallow_types::extract::DiKeySite,
+    site: &plow_types::extract::DiKeySite,
 ) -> bool {
     let canonical = match resolve_key(
         resolved,
@@ -281,7 +281,7 @@ fn inject_site_suppressed(scan: &InjectScanContext<'_>, file_id: FileId, line: u
 
 fn build_unprovided_inject(
     path: &std::path::Path,
-    site: &fallow_types::extract::DiKeySite,
+    site: &plow_types::extract::DiKeySite,
     line: u32,
     col: u32,
 ) -> UnprovidedInject {

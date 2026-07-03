@@ -18,7 +18,7 @@
 //! 2. **security taint touch**: a source -> sink taint trace touches the unit
 //!    (reuse `SecurityFinding.trace`). Built as a pure function of a security-
 //!    finding slice; the brief path carries an EMPTY slice today (security is the
-//!    opt-in `fallow security` command, not the bare dead-code analysis), so this
+//!    opt-in `plow security` command, not the bare dead-code analysis), so this
 //!    contributes 0 until a future epic threads a security pass. The seam is wired
 //!    and tested; no taint engine runs here.
 //! 3. **risk zone**: boundary / public-API / security-sensitive.
@@ -36,8 +36,8 @@
 //! can reach the `Skip` arm, and the output is byte-identical to the no-runtime baseline. The free
 //! tier ranks but never skips; safe-skip is runtime-backed only.
 
-use fallow_engine::FocusFileFactsPaths;
-pub use fallow_output::{ConfidenceFlag, FocusLabel, FocusMap, FocusScore, FocusUnit};
+use plow_engine::FocusFileFactsPaths;
+pub use plow_output::{ConfidenceFlag, FocusLabel, FocusMap, FocusScore, FocusUnit};
 
 /// A unit's score at or above this threshold is labeled [`FocusLabel::ReviewHere`];
 /// below it, [`FocusLabel::NotPrioritized`]. Tuned so a unit with any non-trivial
@@ -140,7 +140,7 @@ pub struct FocusInputs<'a> {
     pub coordination_changed_files: &'a [String],
     /// Root-relative file paths a security source -> sink taint trace touches
     /// (reuse `SecurityFinding.trace`). EMPTY on the brief path today (the taint
-    /// engine is the opt-in `fallow security` command); the seam lights up the
+    /// engine is the opt-in `plow security` command); the seam lights up the
     /// moment a security pass is threaded, with no focus-map code change.
     pub taint_touched_files: &'a [String],
     /// Per-file runtime evidence (paid). `None` in free mode, where the focus
@@ -664,7 +664,7 @@ mod tests {
         assert_eq!(map.review_here[0].file, "src/high.ts");
     }
 
-    // done-condition (c): the symbol-level call chain (`fallow trace`) is
+    // done-condition (c): the symbol-level call chain (`plow trace`) is
     // EXPLICITLY OFF the ranked path. The focus-map ranking inputs
     // (`FocusInputs`) carry NO trace / symbol-chain field, and the composite
     // `FocusScore.total` is the sum of EXACTLY the four documented components

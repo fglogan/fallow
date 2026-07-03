@@ -1,6 +1,6 @@
 use crate::{discover::FileId, source::ModuleInfo, suppress};
-use fallow_graph::graph::{ModuleGraph, ModuleNode};
-use fallow_output::{CoverageGapSummary, CoverageGaps, UntestedExport, UntestedFile};
+use plow_graph::graph::{ModuleGraph, ModuleNode};
+use plow_output::{CoverageGapSummary, CoverageGaps, UntestedExport, UntestedFile};
 
 pub struct CoverageGapData {
     pub report: CoverageGaps,
@@ -40,7 +40,7 @@ fn module_is_coverage_suppressed(module: Option<&ModuleInfo>) -> bool {
     module.is_some_and(|m| {
         suppress::is_file_suppressed(
             &m.suppressions,
-            fallow_types::suppress::IssueKind::CoverageGaps,
+            plow_types::suppress::IssueKind::CoverageGaps,
         )
     })
 }
@@ -74,7 +74,7 @@ fn collect_untested_exports(
         }
 
         let (line, col) =
-            fallow_types::extract::byte_offset_to_line_col(&module.line_offsets, export.span.start);
+            plow_types::extract::byte_offset_to_line_col(&module.line_offsets, export.span.start);
         exports.push(UntestedExport {
             path: path.to_path_buf(),
             export_name: export.name.to_string(),
@@ -168,13 +168,13 @@ fn build_coverage_gap_data(scan: CoverageGapScan, root: &std::path::Path) -> Cov
 
     let untested_file_count = files.len();
     let untested_export_count = exports.len();
-    let wrapped_files: Vec<fallow_output::UntestedFileFinding> = files
+    let wrapped_files: Vec<plow_output::UntestedFileFinding> = files
         .into_iter()
-        .map(|file| fallow_output::UntestedFileFinding::with_actions(file, root))
+        .map(|file| plow_output::UntestedFileFinding::with_actions(file, root))
         .collect();
-    let wrapped_exports: Vec<fallow_output::UntestedExportFinding> = exports
+    let wrapped_exports: Vec<plow_output::UntestedExportFinding> = exports
         .into_iter()
-        .map(|export| fallow_output::UntestedExportFinding::with_actions(export, root))
+        .map(|export| plow_output::UntestedExportFinding::with_actions(export, root))
         .collect();
 
     CoverageGapData {

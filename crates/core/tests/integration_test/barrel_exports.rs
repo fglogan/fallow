@@ -4,7 +4,7 @@ use super::common::{create_config, fixture_path};
 fn barrel_exports_resolves_through_barrel() {
     let root = fixture_path("barrel-exports");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -22,7 +22,7 @@ fn barrel_exports_resolves_through_barrel() {
 fn barrel_unused_re_exports_detected() {
     let root = fixture_path("barrel-unused-reexports");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -45,7 +45,7 @@ fn barrel_unused_re_exports_detected() {
 fn barrel_unused_type_re_exports_detected() {
     let root = fixture_path("barrel-unused-reexports");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_type_names: Vec<&str> = results
         .unused_types
@@ -68,7 +68,7 @@ fn barrel_unused_type_re_exports_detected() {
 fn barrel_re_export_propagates_to_source_module() {
     let root = fixture_path("barrel-unused-reexports");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         !results
@@ -83,7 +83,7 @@ fn barrel_re_export_propagates_to_source_module() {
 fn source_order_independent_import_forwarding_is_re_export() {
     let root = fixture_path("source-order-re-export");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.duplicate_exports.is_empty(),
@@ -115,7 +115,7 @@ fn source_order_independent_import_forwarding_is_re_export() {
 fn barrel_exports_detects_unused_re_export_bar() {
     let root = fixture_path("barrel-exports");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -138,7 +138,7 @@ fn barrel_exports_detects_unused_re_export_bar() {
 fn multi_hop_barrel_used_propagates() {
     let root = fixture_path("multi-hop-barrel");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         !results
@@ -153,7 +153,7 @@ fn multi_hop_barrel_used_propagates() {
 fn multi_hop_barrel_unused_detected() {
     let root = fixture_path("multi-hop-barrel");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -171,7 +171,7 @@ fn multi_hop_barrel_unused_detected() {
 fn star_re_export_chain_used_propagates() {
     let root = fixture_path("star-re-export-chain");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -189,7 +189,7 @@ fn star_re_export_chain_used_propagates() {
 fn star_re_export_chain_unused_detected() {
     let root = fixture_path("star-re-export-chain");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -207,7 +207,7 @@ fn star_re_export_chain_unused_detected() {
 fn multi_level_chain_used_exports_propagate() {
     let root = fixture_path("multi-level-barrel-chain");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -229,7 +229,7 @@ fn multi_level_chain_used_exports_propagate() {
 fn multi_level_chain_partially_re_exported_detected() {
     let root = fixture_path("multi-level-barrel-chain");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -257,7 +257,7 @@ fn multi_level_chain_partially_re_exported_detected() {
 fn star_selective_usage_used_propagates() {
     let root = fixture_path("star-selective-usage");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -279,7 +279,7 @@ fn star_selective_usage_used_propagates() {
 fn star_selective_usage_unused_detected() {
     let root = fixture_path("star-selective-usage");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -301,7 +301,7 @@ fn star_selective_usage_unused_detected() {
 fn mixed_named_star_used_propagates() {
     let root = fixture_path("mixed-named-star-reexports");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -323,7 +323,7 @@ fn mixed_named_star_used_propagates() {
 fn mixed_named_star_unused_detected() {
     let root = fixture_path("mixed-named-star-reexports");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -346,7 +346,7 @@ fn mixed_named_star_unused_detected() {
 fn alias_chain_used_exports_propagate() {
     let root = fixture_path("re-export-alias-chain");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -369,7 +369,7 @@ fn alias_chain_used_exports_propagate() {
 fn alias_chain_unused_detected() {
     let root = fixture_path("re-export-alias-chain");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -393,7 +393,7 @@ fn circular_re_export_completes_without_infinite_loop() {
     let root = fixture_path("circular-re-export");
     let config = create_config(root);
     let results =
-        fallow_core::analyze(&config).expect("analysis should succeed with circular re-exports");
+        plow_core::analyze(&config).expect("analysis should succeed with circular re-exports");
 
     assert!(
         !results
@@ -430,7 +430,7 @@ fn circular_re_export_completes_without_infinite_loop() {
 fn circular_re_export_no_unused_files() {
     let root = fixture_path("circular-re-export");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.unused_files.is_empty(),
@@ -447,7 +447,7 @@ fn circular_re_export_no_unused_files() {
 fn barrel_default_reexport_unused_detected() {
     let root = fixture_path("barrel-default-reexport");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -470,7 +470,7 @@ fn barrel_default_reexport_unused_detected() {
 fn barrel_default_reexport_no_unused_files() {
     let root = fixture_path("barrel-default-reexport");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_paths: Vec<String> = results
         .unused_files

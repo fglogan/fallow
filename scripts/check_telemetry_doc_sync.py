@@ -3,14 +3,14 @@
 
 The telemetry contract is documented in three repos:
 
-  - fallow      docs/telemetry.md                              (canonical; ships in npm)
-  - fallow-docs cli/telemetry.mdx, explanations/telemetry.mdx,
+  - plow      docs/telemetry.md                              (canonical; ships in npm)
+  - plow-docs cli/telemetry.mdx, explanations/telemetry.mdx,
                 configuration/environment.mdx                  (hosted)
-  - fallow-skills references/cli-reference.md                  (agent guidance)
+  - plow-skills references/cli-reference.md                  (agent guidance)
 
-Within the fallow repo, a Rust test (crates/cli/src/telemetry.rs
+Within the plow repo, a Rust test (crates/cli/src/telemetry.rs
 `docs_agent_source_allowlist_matches_code`) already pins docs/telemetry.md to the
-AgentSource enum, and the fallow-cloud server has its own agreement test against
+AgentSource enum, and the plow-cloud server has its own agreement test against
 the same enum. This script closes the remaining gap: it asserts every companion
 doc lists the full canonical allowlist, so a value added to the canonical doc
 (for example a new agent) cannot silently go missing from a hosted or skills copy
@@ -18,12 +18,12 @@ the way `windsurf`/`gemini` aliases once drifted out of the explanation page.
 
 It is a release-time / local check, not a hard CI gate: the three docs live in
 three repos, so a single repo's CI cannot see the others without fetching them.
-Run it before `/fallow-release`, or wire it into a job that checks the sibling
+Run it before `/plow-release`, or wire it into a job that checks the sibling
 repos out first.
 
-Companion repos are located as siblings of the fallow repo root by default
-(`../fallow-docs`, `../fallow-skills`); override with FALLOW_DOCS_DIR /
-FALLOW_SKILLS_DIR. A companion repo that is absent is skipped with a warning
+Companion repos are located as siblings of the plow repo root by default
+(`../plow-docs`, `../plow-skills`); override with PLOW_DOCS_DIR /
+PLOW_SKILLS_DIR. A companion repo that is absent is skipped with a warning
 (exit stays 0 for that repo) so the script is usable in environments that only
 checked out one repo.
 
@@ -57,8 +57,8 @@ def parse_canonical_allowlist(text: str) -> list[str]:
 
 
 def companion_files() -> list[Path]:
-    docs = Path(os.environ.get("FALLOW_DOCS_DIR", REPO_ROOT.parent / "fallow-docs"))
-    skills = Path(os.environ.get("FALLOW_SKILLS_DIR", REPO_ROOT.parent / "fallow-skills"))
+    docs = Path(os.environ.get("PLOW_DOCS_DIR", REPO_ROOT.parent / "plow-docs"))
+    skills = Path(os.environ.get("PLOW_SKILLS_DIR", REPO_ROOT.parent / "plow-skills"))
     files: list[Path] = []
     if docs.is_dir():
         files += [
@@ -67,12 +67,12 @@ def companion_files() -> list[Path]:
             docs / "configuration" / "environment.mdx",
         ]
     else:
-        print(f"warning: fallow-docs not found at {docs}, skipping", file=sys.stderr)
-    skills_ref = skills / "fallow" / "skills" / "fallow" / "references" / "cli-reference.md"
+        print(f"warning: plow-docs not found at {docs}, skipping", file=sys.stderr)
+    skills_ref = skills / "plow" / "skills" / "plow" / "references" / "cli-reference.md"
     if skills.is_dir():
         files.append(skills_ref)
     else:
-        print(f"warning: fallow-skills not found at {skills}, skipping", file=sys.stderr)
+        print(f"warning: plow-skills not found at {skills}, skipping", file=sys.stderr)
     return files
 
 

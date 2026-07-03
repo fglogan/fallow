@@ -47,7 +47,7 @@ const MODES: { id: RightMode; label: string; icon: typeof FileDiff }[] = [
 const SIDEBAR_MIN = 320;
 const SIDEBAR_MAX = 760;
 const SIDEBAR_DEFAULT = 420;
-const SIDEBAR_KEY = "fallow-review:sidebar-width";
+const SIDEBAR_KEY = "plow-review:sidebar-width";
 
 /** Restore the persisted sidebar width, clamped to the allowed range. */
 const readSidebarWidth = (): number => {
@@ -100,7 +100,7 @@ export const App = () => {
   // run (the persisted file is absent); an envelope with `abstained: true` is the
   // distinct "looked, found nothing" state.
   const [tradeoffs, setTradeoffs] = useState<TradeOffEnvelope | null>(null);
-  // Per-trade-off fallow validation (anchored / unanchored / stale), from the
+  // Per-trade-off plow validation (anchored / unanchored / stale), from the
   // walkthrough-file round-trip. null = not run / no trade-offs.
   const [tradeoffValidation, setTradeoffValidation] = useState<TradeOffValidation | null>(null);
   // Author-agent review brief (the CAPTURE artifact): what the agent that did the
@@ -109,12 +109,12 @@ export const App = () => {
   const [reviewContext, setReviewContext] = useState<ReviewContextData | null>(null);
 
   useEffect(() => {
-    window.fallow.onInspectSelection(setCard);
+    window.plow.onInspectSelection(setCard);
   }, []);
 
   // Fetch author-captured framing once on load; honest empty when absent.
   useEffect(() => {
-    void window.fallow
+    void window.plow
       .getCapturedFraming()
       .then(setCapturedFraming)
       .catch(() => setCapturedFraming([]));
@@ -123,17 +123,17 @@ export const App = () => {
   // Fetch model-inferred trade-offs once on load from their OWN channel; null
   // stays null (the "not run" state) when the persisted file is absent or errors.
   useEffect(() => {
-    void window.fallow
+    void window.plow
       .getTradeoffs()
       .then(setTradeoffs)
       .catch(() => setTradeoffs(null));
   }, []);
 
   // Close the loop: validate the trade-off anchors against the LIVE graph through
-  // fallow's walkthrough-file machinery (anchored / unanchored / stale), so the
-  // broader surface is fallow-grade, not just agent-self-checked. null = not run.
+  // plow's walkthrough-file machinery (anchored / unanchored / stale), so the
+  // broader surface is plow-grade, not just agent-self-checked. null = not run.
   useEffect(() => {
-    void window.fallow
+    void window.plow
       .validateTradeoffs()
       .then(setTradeoffValidation)
       .catch(() => setTradeoffValidation(null));
@@ -142,7 +142,7 @@ export const App = () => {
   // Fetch the author-agent review brief once on load; null stays null (render
   // nothing) when the author recorded no brief or the read errors.
   useEffect(() => {
-    void window.fallow
+    void window.plow
       .getReviewContext()
       .then(setReviewContext)
       .catch(() => setReviewContext(null));
@@ -182,7 +182,7 @@ export const App = () => {
     setError(null);
     setLoading(true);
     try {
-      setDoc(await window.fallow.getReview());
+      setDoc(await window.plow.getReview());
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -208,7 +208,7 @@ export const App = () => {
   // file, a signal/decision, a trade-off anchor, or a `file:line`/`file:start-end`
   // diff range) back to the agent through the same feed channel.
   const onComment = useCallback((target: FeedTarget, note: string) => {
-    void window.fallow.appendFeed({ target, note, at: new Date().toISOString() });
+    void window.plow.appendFeed({ target, note, at: new Date().toISOString() });
     setNoteCount((n) => n + 1);
   }, []);
   // File-level note kept as-is so StageList/FileRow stay untouched; delegates to
@@ -240,7 +240,7 @@ export const App = () => {
         <header className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border px-4">
           <div className="flex items-center gap-2">
             <Telescope className="size-4 text-primary" />
-            <h1 className="text-sm font-semibold lowercase">fallow review</h1>
+            <h1 className="text-sm font-semibold lowercase">plow review</h1>
           </div>
           <Button size="sm" variant="secondary" disabled={loading} onClick={() => void load()}>
             {loading ? (
@@ -283,7 +283,7 @@ export const App = () => {
           ) : loading ? (
             <div className="flex flex-col items-center gap-2 py-16 text-center text-muted-foreground">
               <Loader2 className="size-6 animate-spin opacity-70" />
-              <p className="text-sm">running fallow review…</p>
+              <p className="text-sm">running plow review…</p>
               <p className="text-[11px]">scoring blast radius and partitioning the diff</p>
             </div>
           ) : error ? (
@@ -291,8 +291,8 @@ export const App = () => {
               data-testid="review-error"
               className="flex flex-col items-center gap-3 py-16 text-center"
             >
-              <div className="flex size-11 items-center justify-center rounded-full border border-fallow-red/30 bg-fallow-red/10">
-                <TriangleAlert className="size-5 text-fallow-red" />
+              <div className="flex size-11 items-center justify-center rounded-full border border-plow-red/30 bg-plow-red/10">
+                <TriangleAlert className="size-5 text-plow-red" />
               </div>
               <div className="space-y-1">
                 <p className="text-sm font-medium text-foreground">review failed</p>

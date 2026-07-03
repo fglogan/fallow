@@ -1,10 +1,10 @@
-//! Reusable output contract types for fallow.
+//! Reusable output contract types for plow.
 //!
 //! This crate owns stable report DTOs that are not tied to CLI rendering.
-//! Higher-level output assemblers live above this crate in `fallow-api` or the
+//! Higher-level output assemblers live above this crate in `plow-api` or the
 //! CLI, while this crate remains the shared typed boundary those builders and
 //! non-CLI consumers can use. Shared selectors such as `OutputFormat` stay in
-//! `fallow-types`; this crate re-exports only the selectors needed to keep
+//! `plow-types`; this crate re-exports only the selectors needed to keep
 //! output builders on one contract surface.
 #![cfg_attr(
     test,
@@ -117,11 +117,6 @@ pub use dupes::{
     DUPES_SUPPRESS_COMMENT, DUPES_SUPPRESS_DESCRIPTION, DupesOutput, DupesOutputInput,
     build_dupes_output, clone_family_actions, clone_group_actions, serialize_dupes_json_output,
 };
-pub use fallow_types::envelope;
-pub use fallow_types::output;
-pub use fallow_types::output_dead_code;
-pub use fallow_types::output_format::OutputFormat;
-pub use fallow_types::output_health;
 pub use feature_flags::{
     FeatureFlagAction, FeatureFlagActionType, FeatureFlagConfidence, FeatureFlagDeadCodeOverlap,
     FeatureFlagFinding, FeatureFlagKind, FeatureFlagsConfidenceMeta, FeatureFlagsKindMeta,
@@ -229,6 +224,11 @@ pub use next_steps::{
     build_dupes_next_steps, build_health_next_steps, build_health_next_steps_input,
     impact_digest_summary, trace_unused_export_input,
 };
+pub use plow_types::envelope;
+pub use plow_types::output;
+pub use plow_types::output_dead_code;
+pub use plow_types::output_format::OutputFormat;
+pub use plow_types::output_health;
 pub use report_contract::{
     COVERAGE_ANALYZE_DOCS, COVERAGE_SETUP_DOCS, DUPES_DOCS, HEALTH_DOCS, SECURITY_DOCS,
     SecurityRuleMeta, coverage_analyze_meta, coverage_setup_meta, dupes_meta, health_meta,
@@ -243,7 +243,7 @@ pub use review_envelopes::{
     serialize_review_envelope_json_output, serialize_review_reconcile_json_output,
 };
 pub use root_envelopes::{
-    AuditCommand, AuditOutput, CombinedMeta, CombinedOutput, FallowOutput, RootEnvelopeMode,
+    AuditCommand, AuditOutput, CombinedMeta, CombinedOutput, PlowOutput, RootEnvelopeMode,
     apply_root_kind, attach_telemetry_meta, serialize_audit_json_output,
     serialize_combined_json_output, serialize_json_root_output, serialize_named_json_output,
 };

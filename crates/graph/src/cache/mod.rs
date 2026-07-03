@@ -7,8 +7,8 @@
 
 use std::path::Path;
 
-use fallow_types::discover::{DiscoveredFile, StableFileKey};
-use fallow_types::source_fingerprint::SourceFingerprint;
+use plow_types::discover::{DiscoveredFile, StableFileKey};
+use plow_types::source_fingerprint::SourceFingerprint;
 
 mod store;
 
@@ -49,15 +49,15 @@ pub(crate) mod span_serde {
 
 /// Lossless cache (de)serialization for `Vec<MemberInfo>`.
 ///
-/// `fallow_types::extract::MemberInfo` derives only `serde::Serialize`, and its
+/// `plow_types::extract::MemberInfo` derives only `serde::Serialize`, and its
 /// `span` field uses `serialize_with` with no matching deserializer, so it
 /// cannot be deserialized through a plain derive. Rather than change the shared
 /// type's serde shape (which would ripple into JSON output), the cache mirrors
 /// it field-for-field into a dedicated `CachedMemberInfo` and converts both
 /// ways. Every `MemberInfo` field is carried, so the round-trip is lossless.
 pub(crate) mod member_serde {
-    use fallow_types::extract::{MemberInfo, MemberKind};
     use oxc_span::Span;
+    use plow_types::extract::{MemberInfo, MemberKind};
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
     #[derive(Serialize, Deserialize)]
@@ -227,7 +227,7 @@ fn sort_files(files: &mut [GraphCacheFile]) {
 mod tests {
     use std::path::{Path, PathBuf};
 
-    use fallow_types::discover::FileId;
+    use plow_types::discover::FileId;
     use rustc_hash::FxHashMap;
 
     use super::*;

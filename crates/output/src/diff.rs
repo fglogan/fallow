@@ -145,7 +145,7 @@ pub fn relative_to_diff_path(path: &Path, root: &Path) -> Option<String> {
     if let Ok(stripped) = path.strip_prefix(root) {
         return Some(stripped.to_string_lossy().replace('\\', "/"));
     }
-    if fallow_types::path_util::is_absolute_path_any_platform(path) {
+    if plow_types::path_util::is_absolute_path_any_platform(path) {
         return None;
     }
     Some(path.to_string_lossy().replace('\\', "/"))

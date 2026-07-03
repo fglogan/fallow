@@ -2,8 +2,8 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_output::{DiffIndex, relative_to_diff_path};
-use fallow_types::duplicates::{CloneInstance, DuplicationReport};
+use plow_output::{DiffIndex, relative_to_diff_path};
+use plow_types::duplicates::{CloneInstance, DuplicationReport};
 
 pub fn filter_by_diff(report: &mut DuplicationReport, diff_index: &DiffIndex, root: &Path) {
     let instance_overlaps = |instance: &CloneInstance| -> bool {
@@ -57,6 +57,6 @@ pub fn apply_top(report: &mut DuplicationReport, n: usize, root: &Path) {
 }
 
 fn rebuild_duplication_derived_fields(report: &mut DuplicationReport, root: &Path) {
-    fallow_engine::refresh_clone_families(report, root);
-    report.stats = fallow_engine::recompute_stats(report);
+    plow_engine::refresh_clone_families(report, root);
+    report.stats = plow_engine::recompute_stats(report);
 }

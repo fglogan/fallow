@@ -13,7 +13,7 @@ import type {
 export const formatConfidence = (confidence: RuntimeCoverageConfidence): string =>
   confidence.replace(/_/g, " ");
 
-/** First CLI version that ships `fallow coverage analyze --runtime-coverage ... --format json` (CHANGELOG 2.57.0). */
+/** First CLI version that ships `plow coverage analyze --runtime-coverage ... --format json` (CHANGELOG 2.57.0). */
 export const COVERAGE_ANALYZE_MIN_VERSION = "2.57.0";
 
 /** Options for building the `coverage analyze` argument vector. */
@@ -21,7 +21,7 @@ export interface CoverageArgsOptions {
   /** Absolute path to a local runtime-coverage capture (file or directory). */
   readonly capturePath: string;
   /**
-   * Mirror `fallow.production`; appends `--production` when `true`. `false` /
+   * Mirror `plow.production`; appends `--production` when `true`. `false` /
    * `undefined` defer to the project config (force-off via `--no-production` is
    * editor-diagnostics-only, see #1055).
    */
@@ -33,7 +33,7 @@ export interface CoverageArgsOptions {
 }
 
 /**
- * Build the argv for a local `fallow coverage analyze` run. Kept pure (no VS
+ * Build the argv for a local `plow coverage analyze` run. Kept pure (no VS
  * Code or config access) so flag-forwarding rules can be unit-tested, mirroring
  * `buildAnalysisArgs`. Local mode is selected purely by `--runtime-coverage`;
  * `--cloud` is deliberately never emitted, so this stays a free, offline,
@@ -153,10 +153,10 @@ export const buildCoverageGateMessage = (
   const detail = structured ?? fallbackMessage;
 
   if (exitCode === COVERAGE_EXIT_LICENSE) {
-    return `${detail} Activate a runtime-coverage license or trial: run \`fallow license activate --trial --email you@company.com\`.`;
+    return `${detail} Activate a runtime-coverage license or trial: run \`plow license activate --trial --email you@company.com\`.`;
   }
   if (exitCode === COVERAGE_EXIT_SIDECAR_MISSING || exitCode === COVERAGE_EXIT_SIDECAR_INVALID) {
-    return `${detail} Install the fallow-cov sidecar: run \`fallow coverage setup\`.`;
+    return `${detail} Install the plow-cov sidecar: run \`plow coverage setup\`.`;
   }
   return detail;
 };
@@ -176,7 +176,7 @@ export const coverageWatermarkMessage = (report: RuntimeCoverageReport | null): 
     return "Runtime coverage was produced under an expired trial; treat these candidates as stale and re-run after activating a license.";
   }
   if (watermark === "license-expired-grace") {
-    return "Runtime coverage was produced under license grace (the license has expired); refresh with `fallow license refresh` before acting on these candidates.";
+    return "Runtime coverage was produced under license grace (the license has expired); refresh with `plow license refresh` before acting on these candidates.";
   }
   return "Runtime coverage carries a license watermark; verify your license before acting on these candidates.";
 };

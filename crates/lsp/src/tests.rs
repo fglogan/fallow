@@ -1,7 +1,7 @@
 use super::*;
 
-use fallow_api::editor_duplicates::{CloneGroup, CloneInstance, DuplicationStats};
-use fallow_api::editor_results::{
+use plow_api::editor_duplicates::{CloneGroup, CloneInstance, DuplicationStats};
+use plow_api::editor_results::{
     BoundaryViolation, BoundaryViolationFinding, CircularDependency, CircularDependencyFinding,
     ExportUsage, SecuritySeverity, TestOnlyDependency, TestOnlyDependencyFinding,
     TypeOnlyDependency, UnlistedDependency, UnlistedDependencyFinding, UnusedClassMemberFinding,
@@ -54,10 +54,10 @@ fn server_capabilities_advertise_pull_diagnostics() {
     );
     match provider {
         DiagnosticServerCapabilities::Options(opts) => {
-            assert_eq!(opts.identifier.as_deref(), Some("fallow"));
+            assert_eq!(opts.identifier.as_deref(), Some("plow"));
             assert!(
                 opts.inter_file_dependencies,
-                "fallow diagnostics span files; clients must re-pull related files on changes"
+                "plow diagnostics span files; clients must re-pull related files on changes"
             );
             assert!(
                 !opts.workspace_diagnostics,
@@ -93,8 +93,8 @@ fn analysis_complete_params_collapses_boundary_subresults() {
             col: 0,
         })],
         boundary_coverage_violations: vec![
-            fallow_api::editor_results::BoundaryCoverageViolationFinding::with_actions(
-                fallow_api::editor_results::BoundaryCoverageViolation {
+            plow_api::editor_results::BoundaryCoverageViolationFinding::with_actions(
+                plow_api::editor_results::BoundaryCoverageViolation {
                     path: "/unzoned.ts".into(),
                     line: 2,
                     col: 0,
@@ -102,8 +102,8 @@ fn analysis_complete_params_collapses_boundary_subresults() {
             ),
         ],
         boundary_call_violations: vec![
-            fallow_api::editor_results::BoundaryCallViolationFinding::with_actions(
-                fallow_api::editor_results::BoundaryCallViolation {
+            plow_api::editor_results::BoundaryCallViolationFinding::with_actions(
+                plow_api::editor_results::BoundaryCallViolation {
                     path: "/domain.ts".into(),
                     line: 3,
                     col: 0,
@@ -158,7 +158,7 @@ fn client_capabilities_support_workspace_diagnostic_refresh() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn shutdown_sets_cancellation_flag() {
-    let (service, _) = LspService::build(FallowLspServer::new).finish();
+    let (service, _) = LspService::build(PlowLspServer::new).finish();
     let backend = service.inner();
     assert!(
         !backend.cancellation.load(Ordering::SeqCst),
@@ -173,7 +173,7 @@ async fn shutdown_sets_cancellation_flag() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn run_analysis_short_circuits_after_shutdown() {
-    let (service, _) = LspService::build(FallowLspServer::new).finish();
+    let (service, _) = LspService::build(PlowLspServer::new).finish();
     let backend = service.inner();
     *backend.root.write().await = Some(std::env::temp_dir());
     backend.shutdown().await.expect("shutdown returns Ok");
@@ -202,7 +202,7 @@ async fn initialized_does_not_run_startup_analysis_before_file_open() {
     let root = dir.path().canonicalize().expect("canonical root");
     write_startup_analysis_fixture(&root);
 
-    let (service, _) = LspService::build(FallowLspServer::new).finish();
+    let (service, _) = LspService::build(PlowLspServer::new).finish();
     let backend = service.inner();
     *backend.root.write().await = Some(root);
 
@@ -225,7 +225,7 @@ async fn first_did_open_runs_startup_analysis_once() {
     let source = write_startup_analysis_fixture(&root);
     let uri = Uri::from_file_path(&source).expect("source file URI");
 
-    let (service, _) = LspService::build(FallowLspServer::new).finish();
+    let (service, _) = LspService::build(PlowLspServer::new).finish();
     let backend = service.inner();
     *backend.root.write().await = Some(root);
 
@@ -265,7 +265,7 @@ async fn did_save_waits_for_in_flight_startup_analysis() {
     let source = write_startup_analysis_fixture(&root);
     let uri = Uri::from_file_path(&source).expect("source file URI");
 
-    let (service, _) = LspService::build(FallowLspServer::new).finish();
+    let (service, _) = LspService::build(PlowLspServer::new).finish();
     let backend = service.inner();
     *backend.root.write().await = Some(root);
 
@@ -326,7 +326,7 @@ fn diagnostic_issue_types_include_all_lsp_codes_in_user_order() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn text_document_diagnostic_request_is_served() {
-    let (mut service, _) = LspService::build(FallowLspServer::new).finish();
+    let (mut service, _) = LspService::build(PlowLspServer::new).finish();
 
     let initialize = Request::build("initialize")
         .params(json!({"capabilities": {}}))
@@ -349,7 +349,7 @@ async fn text_document_diagnostic_request_is_served() {
             "textDocument": {
                 "uri": "file:///workspace/src/example.ts"
             },
-            "identifier": "fallow"
+            "identifier": "plow"
         }))
         .id(2)
         .finish();
@@ -373,7 +373,7 @@ async fn text_document_diagnostic_request_is_served() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn initialize_advertises_pull_diagnostics_for_refreshable_clients() {
-    let (mut service, _) = LspService::build(FallowLspServer::new).finish();
+    let (mut service, _) = LspService::build(PlowLspServer::new).finish();
 
     let initialize = Request::build("initialize")
         .params(json!({
@@ -399,14 +399,14 @@ async fn initialize_advertises_pull_diagnostics_for_refreshable_clients() {
     let result = response.result().expect("initialize response should be ok");
     assert_eq!(
         result["capabilities"]["diagnosticProvider"]["identifier"],
-        json!("fallow")
+        json!("plow")
     );
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn fallow_issue_types_request_is_served() {
-    let (mut service, _) = LspService::build(FallowLspServer::new)
-        .custom_method("fallow/issueTypes", FallowLspServer::issue_types)
+async fn plow_issue_types_request_is_served() {
+    let (mut service, _) = LspService::build(PlowLspServer::new)
+        .custom_method("plow/issueTypes", PlowLspServer::issue_types)
         .finish();
 
     let initialize = Request::build("initialize")
@@ -423,7 +423,7 @@ async fn fallow_issue_types_request_is_served() {
         .expect("initialize request should return a response");
     assert!(response.is_ok());
 
-    let issue_types = Request::build("fallow/issueTypes").id(2).finish();
+    let issue_types = Request::build("plow/issueTypes").id(2).finish();
     let response = service
         .ready()
         .await
@@ -435,7 +435,7 @@ async fn fallow_issue_types_request_is_served() {
 
     assert!(
         response.is_ok(),
-        "fallow/issueTypes must not return method_not_found"
+        "plow/issueTypes must not return method_not_found"
     );
     let result = response
         .result()
@@ -451,16 +451,16 @@ async fn fallow_issue_types_request_is_served() {
             .iter()
             .any(|v| v["code"] == json!("test-only-dependency")
                 && v["label"] == json!("Test-Only Dependencies")),
-        "response should include every diagnostic code emitted by fallow-lsp"
+        "response should include every diagnostic code emitted by plow-lsp"
     );
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn fallow_refresh_diagnostics_request_is_served() {
-    let (mut service, _) = LspService::build(FallowLspServer::new)
+async fn plow_refresh_diagnostics_request_is_served() {
+    let (mut service, _) = LspService::build(PlowLspServer::new)
         .custom_method(
-            "fallow/refreshDiagnostics",
-            FallowLspServer::refresh_diagnostics,
+            "plow/refreshDiagnostics",
+            PlowLspServer::refresh_diagnostics,
         )
         .finish();
 
@@ -478,7 +478,7 @@ async fn fallow_refresh_diagnostics_request_is_served() {
         .expect("initialize request should return a response");
     assert!(response.is_ok());
 
-    let refresh = Request::build("fallow/refreshDiagnostics").id(2).finish();
+    let refresh = Request::build("plow/refreshDiagnostics").id(2).finish();
     let response = service
         .ready()
         .await
@@ -490,18 +490,18 @@ async fn fallow_refresh_diagnostics_request_is_served() {
 
     assert!(
         response.is_ok(),
-        "fallow/refreshDiagnostics must not return method_not_found"
+        "plow/refreshDiagnostics must not return method_not_found"
     );
 }
 
 #[test]
 fn initialization_config_path_resolves_workspace_relative_path() {
-    let opts = json!({"configPath": "config/fallow.json"});
+    let opts = json!({"configPath": "config/plow.json"});
     let root = Path::new("/workspace");
 
     assert_eq!(
         initialization_config_path(&opts, Some(root)),
-        Some(PathBuf::from("/workspace/config/fallow.json"))
+        Some(PathBuf::from("/workspace/config/plow.json"))
     );
 }
 
@@ -515,9 +515,9 @@ fn initialization_config_path_ignores_blank_path() {
 #[test]
 fn initialization_config_path_passes_through_absolute_path() {
     #[cfg(windows)]
-    let absolute = "C:/configs/fallow.json";
+    let absolute = "C:/configs/plow.json";
     #[cfg(not(windows))]
-    let absolute = "/etc/fallow.json";
+    let absolute = "/etc/plow.json";
 
     let opts = json!({ "configPath": absolute });
     assert_eq!(
@@ -528,11 +528,11 @@ fn initialization_config_path_passes_through_absolute_path() {
 
 #[test]
 fn initialization_config_path_keeps_relative_path_without_root() {
-    let opts = json!({"configPath": "config/fallow.json"});
+    let opts = json!({"configPath": "config/plow.json"});
 
     assert_eq!(
         initialization_config_path(&opts, None),
-        Some(PathBuf::from("config/fallow.json"))
+        Some(PathBuf::from("config/plow.json"))
     );
 }
 
@@ -663,7 +663,7 @@ fn analyze_project_root_production_override_excludes_test_files() {
     // The project config does NOT set production. Production mode excludes
     // test files from discovery, so an unreferenced `*.test.ts` file is only
     // reported as an unused file when production is OFF. This pins the editor
-    // `fallow.production` -> LSP parity contract: `"on"` (Some(true)) must
+    // `plow.production` -> LSP parity contract: `"on"` (Some(true)) must
     // drop the test file the sidebar's `--production` run also drops; `"off"`
     // (Some(false)) and `"auto"` (None, project config defers to off) keep it
     // (issue #1055).
@@ -728,7 +728,7 @@ fn analyze_project_root_implicit_config_error_falls_back_to_default_session() {
         r#"{"name":"lsp-config-fallback","private":true,"main":"src/index.ts"}"#,
     )
     .expect("write package");
-    std::fs::write(root.join(".fallowrc.jsonc"), "{ invalid json").expect("write config");
+    std::fs::write(root.join(".plowrc.jsonc"), "{ invalid json").expect("write config");
     std::fs::write(root.join("src/index.ts"), "export const used = 1;\n").expect("write index");
     std::fs::write(root.join("src/orphan.ts"), "export const orphan = 2;\n").expect("write orphan");
 
@@ -775,7 +775,7 @@ fn analyze_project_root_applies_lsp_duplication_options() {
     )
     .expect("write package");
     std::fs::write(
-        root.join(".fallowrc.jsonc"),
+        root.join(".plowrc.jsonc"),
         r#"{"duplicates":{"minTokens":5,"minLines":1,"minOccurrences":2}}"#,
     )
     .expect("write config");
@@ -841,7 +841,7 @@ fn write_inline_complexity_fixture(root: &Path) {
     )
     .expect("write package");
     std::fs::write(
-        root.join(".fallowrc.jsonc"),
+        root.join(".plowrc.jsonc"),
         r#"{"health":{"maxCyclomatic":2,"maxCognitive":2}}"#,
     )
     .expect("write config");
@@ -957,7 +957,7 @@ fn find_project_roots_returns_only_workspace_root() {
     // so a single returned root proves the per-package loop is gone (not
     // that discovery found nothing).
     assert_eq!(
-        fallow_config::discover_workspaces(root).len(),
+        plow_config::discover_workspaces(root).len(),
         2,
         "fixture should expose two workspace packages"
     );
@@ -1006,8 +1006,8 @@ fn merge_results_accumulates_from_multiple_sources() {
             path: "/a.ts".into(),
         }));
     source_a.unresolved_imports.push(
-        fallow_api::editor_results::UnresolvedImportFinding::with_actions(
-            fallow_api::editor_results::UnresolvedImport {
+        plow_api::editor_results::UnresolvedImportFinding::with_actions(
+            plow_api::editor_results::UnresolvedImport {
                 path: "/a.ts".into(),
                 specifier: "./missing".to_string(),
                 line: 1,
@@ -1062,7 +1062,7 @@ fn merge_test_unused_export(
 
 fn merge_test_unused_dependency(
     package_name: &str,
-    location: fallow_api::editor_results::DependencyLocation,
+    location: plow_api::editor_results::DependencyLocation,
     line: u32,
 ) -> UnusedDependency {
     UnusedDependency {
@@ -1077,7 +1077,7 @@ fn merge_test_unused_dependency(
 fn merge_test_unused_member(
     parent_name: &str,
     member_name: &str,
-    kind: fallow_api::editor_extract::MemberKind,
+    kind: plow_api::editor_extract::MemberKind,
     line: u32,
 ) -> UnusedMember {
     UnusedMember {
@@ -1108,21 +1108,21 @@ fn merge_test_source_with_all_fields() -> AnalysisResults {
         unused_dependencies: vec![UnusedDependencyFinding::with_actions(
             merge_test_unused_dependency(
                 "dep",
-                fallow_api::editor_results::DependencyLocation::Dependencies,
+                plow_api::editor_results::DependencyLocation::Dependencies,
                 3,
             ),
         )],
         unused_dev_dependencies: vec![UnusedDevDependencyFinding::with_actions(
             merge_test_unused_dependency(
                 "dev-dep",
-                fallow_api::editor_results::DependencyLocation::DevDependencies,
+                plow_api::editor_results::DependencyLocation::DevDependencies,
                 4,
             ),
         )],
         unused_optional_dependencies: vec![UnusedOptionalDependencyFinding::with_actions(
             merge_test_unused_dependency(
                 "opt-dep",
-                fallow_api::editor_results::DependencyLocation::OptionalDependencies,
+                plow_api::editor_results::DependencyLocation::OptionalDependencies,
                 5,
             ),
         )],
@@ -1130,7 +1130,7 @@ fn merge_test_source_with_all_fields() -> AnalysisResults {
             merge_test_unused_member(
                 "E",
                 "A",
-                fallow_api::editor_extract::MemberKind::EnumMember,
+                plow_api::editor_extract::MemberKind::EnumMember,
                 6,
             ),
         )],
@@ -1138,7 +1138,7 @@ fn merge_test_source_with_all_fields() -> AnalysisResults {
             merge_test_unused_member(
                 "C",
                 "m",
-                fallow_api::editor_extract::MemberKind::ClassMethod,
+                plow_api::editor_extract::MemberKind::ClassMethod,
                 7,
             ),
         )],
@@ -1146,13 +1146,13 @@ fn merge_test_source_with_all_fields() -> AnalysisResults {
             merge_test_unused_member(
                 "S",
                 "a",
-                fallow_api::editor_extract::MemberKind::StoreMember,
+                plow_api::editor_extract::MemberKind::StoreMember,
                 7,
             ),
         )],
         unresolved_imports: vec![
-            fallow_api::editor_results::UnresolvedImportFinding::with_actions(
-                fallow_api::editor_results::UnresolvedImport {
+            plow_api::editor_results::UnresolvedImportFinding::with_actions(
+                plow_api::editor_results::UnresolvedImport {
                     path: "/f.ts".into(),
                     specifier: "./gone".to_string(),
                     line: 8,
@@ -1168,21 +1168,19 @@ fn merge_test_source_with_all_fields() -> AnalysisResults {
             },
         )],
         duplicate_exports: vec![
-            fallow_api::editor_results::DuplicateExportFinding::with_actions(
-                fallow_api::editor_results::DuplicateExport {
+            plow_api::editor_results::DuplicateExportFinding::with_actions(
+                plow_api::editor_results::DuplicateExport {
                     export_name: "dup".to_string(),
                     locations: vec![],
                 },
             ),
         ],
         type_only_dependencies: vec![
-            fallow_api::editor_results::TypeOnlyDependencyFinding::with_actions(
-                TypeOnlyDependency {
-                    package_name: "type-only".to_string(),
-                    path: "/pkg.json".into(),
-                    line: 9,
-                },
-            ),
+            plow_api::editor_results::TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
+                package_name: "type-only".to_string(),
+                path: "/pkg.json".into(),
+                line: 9,
+            }),
         ],
         circular_dependencies: vec![CircularDependencyFinding::with_actions(
             CircularDependency {
@@ -1211,8 +1209,8 @@ fn merge_test_source_with_all_fields() -> AnalysisResults {
             col: 0,
         })],
         boundary_coverage_violations: vec![
-            fallow_api::editor_results::BoundaryCoverageViolationFinding::with_actions(
-                fallow_api::editor_results::BoundaryCoverageViolation {
+            plow_api::editor_results::BoundaryCoverageViolationFinding::with_actions(
+                plow_api::editor_results::BoundaryCoverageViolation {
                     path: "/unzoned.ts".into(),
                     line: 13,
                     col: 0,
@@ -1220,8 +1218,8 @@ fn merge_test_source_with_all_fields() -> AnalysisResults {
             ),
         ],
         boundary_call_violations: vec![
-            fallow_api::editor_results::BoundaryCallViolationFinding::with_actions(
-                fallow_api::editor_results::BoundaryCallViolation {
+            plow_api::editor_results::BoundaryCallViolationFinding::with_actions(
+                plow_api::editor_results::BoundaryCallViolation {
                     path: "/zoned.ts".into(),
                     line: 14,
                     col: 0,
@@ -1232,16 +1230,16 @@ fn merge_test_source_with_all_fields() -> AnalysisResults {
             ),
         ],
         policy_violations: vec![
-            fallow_api::editor_results::PolicyViolationFinding::with_actions(
-                fallow_api::editor_results::PolicyViolation {
+            plow_api::editor_results::PolicyViolationFinding::with_actions(
+                plow_api::editor_results::PolicyViolation {
                     path: "/zoned.ts".into(),
                     line: 15,
                     col: 0,
                     pack: "team-policy".to_string(),
                     rule_id: "no-console".to_string(),
-                    kind: fallow_api::editor_results::PolicyRuleKind::BannedCall,
+                    kind: plow_api::editor_results::PolicyRuleKind::BannedCall,
                     matched: "console.log".to_string(),
-                    severity: fallow_api::editor_results::PolicyViolationSeverity::Warn,
+                    severity: plow_api::editor_results::PolicyViolationSeverity::Warn,
                     message: None,
                 },
             ),
@@ -1255,8 +1253,8 @@ fn merge_test_source_with_all_fields() -> AnalysisResults {
             reference_locations: vec![],
         }],
         private_type_leaks: vec![
-            fallow_api::editor_results::PrivateTypeLeakFinding::with_actions(
-                fallow_api::editor_results::PrivateTypeLeak {
+            plow_api::editor_results::PrivateTypeLeakFinding::with_actions(
+                plow_api::editor_results::PrivateTypeLeak {
                     path: "/f.ts".into(),
                     export_name: "pub_fn".to_string(),
                     type_name: "Secret".to_string(),
@@ -1267,29 +1265,29 @@ fn merge_test_source_with_all_fields() -> AnalysisResults {
             ),
         ],
         re_export_cycles: vec![
-            fallow_api::editor_results::ReExportCycleFinding::with_actions(
-                fallow_api::editor_results::ReExportCycle {
+            plow_api::editor_results::ReExportCycleFinding::with_actions(
+                plow_api::editor_results::ReExportCycle {
                     files: vec!["/barrel.ts".into()],
-                    kind: fallow_api::editor_results::ReExportCycleKind::SelfLoop,
+                    kind: plow_api::editor_results::ReExportCycleKind::SelfLoop,
                 },
             ),
         ],
-        stale_suppressions: vec![fallow_api::editor_results::StaleSuppression {
+        stale_suppressions: vec![plow_api::editor_results::StaleSuppression {
             path: "/f.ts".into(),
             line: 15,
             col: 0,
-            origin: fallow_api::editor_results::SuppressionOrigin::Comment {
+            origin: plow_api::editor_results::SuppressionOrigin::Comment {
                 issue_kind: None,
                 reason: None,
                 is_file_level: false,
                 kind_known: true,
             },
             missing_reason: false,
-            actions: fallow_api::editor_results::StaleSuppression::actions_for(false),
+            actions: plow_api::editor_results::StaleSuppression::actions_for(false),
         }],
         unused_catalog_entries: vec![
-            fallow_api::editor_results::UnusedCatalogEntryFinding::with_actions(
-                fallow_api::editor_results::UnusedCatalogEntry {
+            plow_api::editor_results::UnusedCatalogEntryFinding::with_actions(
+                plow_api::editor_results::UnusedCatalogEntry {
                     entry_name: "react".to_string(),
                     catalog_name: "default".to_string(),
                     path: "/pnpm-workspace.yaml".into(),
@@ -1299,8 +1297,8 @@ fn merge_test_source_with_all_fields() -> AnalysisResults {
             ),
         ],
         empty_catalog_groups: vec![
-            fallow_api::editor_results::EmptyCatalogGroupFinding::with_actions(
-                fallow_api::editor_results::EmptyCatalogGroup {
+            plow_api::editor_results::EmptyCatalogGroupFinding::with_actions(
+                plow_api::editor_results::EmptyCatalogGroup {
                     catalog_name: "ui".to_string(),
                     path: "/pnpm-workspace.yaml".into(),
                     line: 17,
@@ -1308,8 +1306,8 @@ fn merge_test_source_with_all_fields() -> AnalysisResults {
             ),
         ],
         unresolved_catalog_references: vec![
-            fallow_api::editor_results::UnresolvedCatalogReferenceFinding::with_actions(
-                fallow_api::editor_results::UnresolvedCatalogReference {
+            plow_api::editor_results::UnresolvedCatalogReferenceFinding::with_actions(
+                plow_api::editor_results::UnresolvedCatalogReference {
                     entry_name: "vue".to_string(),
                     catalog_name: "default".to_string(),
                     path: "/pkg.json".into(),
@@ -1319,14 +1317,14 @@ fn merge_test_source_with_all_fields() -> AnalysisResults {
             ),
         ],
         unused_dependency_overrides: vec![
-            fallow_api::editor_results::UnusedDependencyOverrideFinding::with_actions(
-                fallow_api::editor_results::UnusedDependencyOverride {
+            plow_api::editor_results::UnusedDependencyOverrideFinding::with_actions(
+                plow_api::editor_results::UnusedDependencyOverride {
                     raw_key: "react".to_string(),
                     target_package: "react".to_string(),
                     parent_package: None,
                     version_constraint: None,
                     version_range: "18".to_string(),
-                    source: fallow_api::editor_results::DependencyOverrideSource::PnpmWorkspaceYaml,
+                    source: plow_api::editor_results::DependencyOverrideSource::PnpmWorkspaceYaml,
                     path: "/pnpm-workspace.yaml".into(),
                     line: 19,
                     hint: None,
@@ -1334,22 +1332,21 @@ fn merge_test_source_with_all_fields() -> AnalysisResults {
             ),
         ],
         misconfigured_dependency_overrides: vec![
-            fallow_api::editor_results::MisconfiguredDependencyOverrideFinding::with_actions(
-                fallow_api::editor_results::MisconfiguredDependencyOverride {
+            plow_api::editor_results::MisconfiguredDependencyOverrideFinding::with_actions(
+                plow_api::editor_results::MisconfiguredDependencyOverride {
                     raw_key: "bad>".to_string(),
                     target_package: None,
                     raw_value: String::new(),
-                    reason:
-                        fallow_api::editor_results::DependencyOverrideMisconfigReason::EmptyValue,
-                    source: fallow_api::editor_results::DependencyOverrideSource::PnpmPackageJson,
+                    reason: plow_api::editor_results::DependencyOverrideMisconfigReason::EmptyValue,
+                    source: plow_api::editor_results::DependencyOverrideSource::PnpmPackageJson,
                     path: "/pkg.json".into(),
                     line: 20,
                 },
             ),
         ],
         invalid_client_exports: vec![
-            fallow_api::editor_results::InvalidClientExportFinding::with_actions(
-                fallow_api::editor_results::InvalidClientExport {
+            plow_api::editor_results::InvalidClientExportFinding::with_actions(
+                plow_api::editor_results::InvalidClientExport {
                     path: "/app/page.tsx".into(),
                     export_name: "metadata".to_string(),
                     directive: "use client".to_string(),
@@ -1359,8 +1356,8 @@ fn merge_test_source_with_all_fields() -> AnalysisResults {
             ),
         ],
         mixed_client_server_barrels: vec![
-            fallow_api::editor_results::MixedClientServerBarrelFinding::with_actions(
-                fallow_api::editor_results::MixedClientServerBarrel {
+            plow_api::editor_results::MixedClientServerBarrelFinding::with_actions(
+                plow_api::editor_results::MixedClientServerBarrel {
                     path: "/app/components/index.ts".into(),
                     client_origin: "./Button".to_string(),
                     server_origin: "./fetchUser".to_string(),
@@ -1370,8 +1367,8 @@ fn merge_test_source_with_all_fields() -> AnalysisResults {
             ),
         ],
         misplaced_directives: vec![
-            fallow_api::editor_results::MisplacedDirectiveFinding::with_actions(
-                fallow_api::editor_results::MisplacedDirective {
+            plow_api::editor_results::MisplacedDirectiveFinding::with_actions(
+                plow_api::editor_results::MisplacedDirective {
                     path: "/app/widget.tsx".into(),
                     directive: "use client".to_string(),
                     line: 24,
@@ -1393,8 +1390,8 @@ fn merge_test_source_with_all_fields() -> AnalysisResults {
         thin_wrappers: vec![],
         duplicate_prop_shapes: vec![],
         route_collisions: vec![
-            fallow_api::editor_results::RouteCollisionFinding::with_actions(
-                fallow_api::editor_results::RouteCollision {
+            plow_api::editor_results::RouteCollisionFinding::with_actions(
+                plow_api::editor_results::RouteCollision {
                     path: "/app/(a)/about/page.tsx".into(),
                     url: "/about".to_string(),
                     conflicting_paths: vec!["/app/(b)/about/page.tsx".into()],
@@ -1404,8 +1401,8 @@ fn merge_test_source_with_all_fields() -> AnalysisResults {
             ),
         ],
         dynamic_segment_name_conflicts: vec![
-            fallow_api::editor_results::DynamicSegmentNameConflictFinding::with_actions(
-                fallow_api::editor_results::DynamicSegmentNameConflict {
+            plow_api::editor_results::DynamicSegmentNameConflictFinding::with_actions(
+                plow_api::editor_results::DynamicSegmentNameConflict {
                     path: "/app/shop/[id]/page.tsx".into(),
                     position: "/shop".to_string(),
                     conflicting_segments: vec!["[id]".to_string(), "[slug]".to_string()],
@@ -1418,11 +1415,11 @@ fn merge_test_source_with_all_fields() -> AnalysisResults {
         suppression_count: 1,
         unused_component_props_exempted: 1,
         active_suppressions: Vec::new(),
-        feature_flags: vec![fallow_api::editor_results::FeatureFlag {
+        feature_flags: vec![plow_api::editor_results::FeatureFlag {
             path: "/f.ts".into(),
             flag_name: "ENABLE_X".to_string(),
-            kind: fallow_api::editor_results::FlagKind::EnvironmentVariable,
-            confidence: fallow_api::editor_results::FlagConfidence::High,
+            kind: plow_api::editor_results::FlagKind::EnvironmentVariable,
+            confidence: plow_api::editor_results::FlagConfidence::High,
             line: 21,
             col: 0,
             guard_span_start: None,
@@ -1432,16 +1429,16 @@ fn merge_test_source_with_all_fields() -> AnalysisResults {
             guard_line_end: None,
             guarded_dead_exports: vec![],
         }],
-        entry_point_summary: Some(fallow_api::editor_results::EntryPointSummary {
+        entry_point_summary: Some(plow_api::editor_results::EntryPointSummary {
             total: 0,
             by_source: vec![],
         }),
-        security_findings: vec![fallow_api::editor_results::SecurityFinding {
+        security_findings: vec![plow_api::editor_results::SecurityFinding {
             finding_id: String::new(),
-            candidate: fallow_api::editor_results::SecurityCandidate::default(),
+            candidate: plow_api::editor_results::SecurityCandidate::default(),
             taint_flow: None,
             attack_surface: None,
-            kind: fallow_api::editor_results::SecurityFindingKind::ClientServerLeak,
+            kind: plow_api::editor_results::SecurityFindingKind::ClientServerLeak,
             category: None,
             cwe: None,
             path: "/client.tsx".into(),
@@ -1460,17 +1457,17 @@ fn merge_test_source_with_all_fields() -> AnalysisResults {
         security_unresolved_edge_files: 2,
         security_unresolved_callee_sites: 0,
         security_unresolved_callee_diagnostics: vec![
-            fallow_api::editor_results::SecurityUnresolvedCalleeDiagnostic {
+            plow_api::editor_results::SecurityUnresolvedCalleeDiagnostic {
                 path: "/client.tsx".into(),
                 line: 2,
                 col: 0,
-                reason: fallow_api::editor_extract::SkippedSecurityCalleeReason::DynamicDispatch,
+                reason: plow_api::editor_extract::SkippedSecurityCalleeReason::DynamicDispatch,
                 expression_kind:
-                    fallow_api::editor_extract::SkippedSecurityCalleeExpressionKind::Other,
+                    plow_api::editor_extract::SkippedSecurityCalleeExpressionKind::Other,
             },
         ],
-        render_fan_in: Some(fallow_api::editor_results::RenderFanInMetric {
-            per_component: vec![fallow_api::editor_results::RenderFanInComponent {
+        render_fan_in: Some(plow_api::editor_results::RenderFanInMetric {
+            per_component: vec![plow_api::editor_results::RenderFanInComponent {
                 file: "/Button.tsx".into(),
                 component: "Button".to_string(),
                 render_sites: 6,
@@ -1480,7 +1477,7 @@ fn merge_test_source_with_all_fields() -> AnalysisResults {
             high_pct: Some(0.0),
             max_distinct_parents: Some(3),
         }),
-        react_component_intel: vec![fallow_api::editor_results::ReactComponentIntel {
+        react_component_intel: vec![plow_api::editor_results::ReactComponentIntel {
             path: "/Button.tsx".into(),
             component_name: "Button".to_string(),
             anchor_line: 1,
@@ -1488,7 +1485,7 @@ fn merge_test_source_with_all_fields() -> AnalysisResults {
             render_sites: 6,
             distinct_parents: 3,
             prop_count: 1,
-            hooks: fallow_api::editor_results::ReactHookSummary::default(),
+            hooks: plow_api::editor_results::ReactHookSummary::default(),
             props: Vec::new(),
         }],
     }
@@ -1576,7 +1573,7 @@ fn make_diagnostic() -> Diagnostic {
         },
         severity: Some(DiagnosticSeverity::HINT),
         code: Some(NumberOrString::String("unused-export".to_string())),
-        source: Some("fallow".to_string()),
+        source: Some("plow".to_string()),
         message: "Export 'helper' is unused".to_string(),
         ..Default::default()
     }
@@ -1596,13 +1593,13 @@ fn attach_changed_since_data_sets_payload_when_active() {
     let uri = "file:///a.ts".parse::<Uri>().unwrap();
     map.insert(uri.clone(), vec![make_diagnostic(), make_diagnostic()]);
 
-    attach_changed_since_data(&mut map, Some("fallow-baseline"));
+    attach_changed_since_data(&mut map, Some("plow-baseline"));
 
     let diags = &map[&uri];
     for d in diags {
         assert_eq!(
             d.data,
-            Some(serde_json::json!({ "changedSince": "fallow-baseline" })),
+            Some(serde_json::json!({ "changedSince": "plow-baseline" })),
             "every diagnostic must carry data.changedSince when filter is active"
         );
     }
@@ -1637,11 +1634,11 @@ fn attach_changed_since_data_merges_into_existing_object_data() {
     d.data = Some(serde_json::json!({ "resolveToken": "abc-123" }));
     map.insert(uri.clone(), vec![d]);
 
-    attach_changed_since_data(&mut map, Some("fallow-baseline"));
+    attach_changed_since_data(&mut map, Some("plow-baseline"));
 
     let merged = map[&uri][0].data.as_ref().unwrap();
     assert_eq!(merged["resolveToken"], "abc-123");
-    assert_eq!(merged["changedSince"], "fallow-baseline");
+    assert_eq!(merged["changedSince"], "plow-baseline");
 }
 
 #[test]
@@ -1652,7 +1649,7 @@ fn attach_changed_since_data_leaves_non_object_data_intact() {
     d.data = Some(serde_json::Value::String("custom-token".to_string()));
     map.insert(uri.clone(), vec![d]);
 
-    attach_changed_since_data(&mut map, Some("fallow-baseline"));
+    attach_changed_since_data(&mut map, Some("plow-baseline"));
 
     assert_eq!(
         map[&uri][0].data,
@@ -1837,7 +1834,7 @@ fn issue_type_mapping_codes_are_singular() {
     }
 }
 
-async fn install_document(backend: &FallowLspServer, uri: &Uri, version: i32, text: &str) {
+async fn install_document(backend: &PlowLspServer, uri: &Uri, version: i32, text: &str) {
     backend.documents.write().await.insert(
         uri.clone(),
         DocumentState {
@@ -1871,7 +1868,7 @@ fn dirty_snapshot_for(uri: &Uri, version: i32) -> VersionSnapshot {
 
 #[tokio::test(flavor = "current_thread")]
 async fn publish_skips_uri_when_live_version_advanced_past_snapshot() {
-    let (service, _) = LspService::build(FallowLspServer::new).finish();
+    let (service, _) = LspService::build(PlowLspServer::new).finish();
     let backend = service.inner();
 
     let uri = "file:///stale.ts".parse::<Uri>().unwrap();
@@ -1894,7 +1891,7 @@ async fn publish_skips_uri_when_live_version_advanced_past_snapshot() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn publish_emits_when_live_version_equals_snapshot() {
-    let (service, _) = LspService::build(FallowLspServer::new).finish();
+    let (service, _) = LspService::build(PlowLspServer::new).finish();
     let backend = service.inner();
 
     let uri = "file:///fresh.ts".parse::<Uri>().unwrap();
@@ -1926,7 +1923,7 @@ async fn publish_skips_uri_when_snapshot_buffer_differs_from_disk() {
     let file_path = temp.path().join("dirty-at-start.ts");
     std::fs::write(&file_path, "export const disk = 1;\n").expect("fixture file should be written");
 
-    let (service, _) = LspService::build(FallowLspServer::new).finish();
+    let (service, _) = LspService::build(PlowLspServer::new).finish();
     let backend = service.inner();
     let uri = Uri::from_file_path(&file_path).expect("temp path should convert to file URI");
 
@@ -1947,7 +1944,7 @@ async fn publish_skips_uri_when_snapshot_buffer_differs_from_disk() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn publish_emits_when_uri_absent_from_snapshot_and_live() {
-    let (service, _) = LspService::build(FallowLspServer::new).finish();
+    let (service, _) = LspService::build(PlowLspServer::new).finish();
     let backend = service.inner();
 
     let uri = "file:///never-opened/package.json".parse::<Uri>().unwrap();
@@ -1967,7 +1964,7 @@ async fn publish_emits_when_uri_absent_from_snapshot_and_live() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn publish_skips_uri_when_opened_mid_run() {
-    let (service, _) = LspService::build(FallowLspServer::new).finish();
+    let (service, _) = LspService::build(PlowLspServer::new).finish();
     let backend = service.inner();
 
     let uri = "file:///opened-mid-run.ts".parse::<Uri>().unwrap();
@@ -2000,7 +1997,7 @@ async fn publish_caches_diagnostics_for_uri_opened_mid_run_when_buffer_matches_d
     std::fs::write(&file_path, "export const value = 1;\n")
         .expect("fixture file should be written");
 
-    let (service, _) = LspService::build(FallowLspServer::new).finish();
+    let (service, _) = LspService::build(PlowLspServer::new).finish();
     let backend = service.inner();
     let uri = Uri::from_file_path(&file_path).expect("temp path should convert to file URI");
     let snapshot: VersionSnapshot = FxHashMap::default();
@@ -2021,7 +2018,7 @@ async fn publish_caches_diagnostics_for_uri_opened_mid_run_when_buffer_matches_d
 
 #[tokio::test(flavor = "current_thread")]
 async fn publish_skips_uri_when_closed_mid_run() {
-    let (service, _) = LspService::build(FallowLspServer::new).finish();
+    let (service, _) = LspService::build(PlowLspServer::new).finish();
     let backend = service.inner();
 
     let uri = "file:///closed.ts".parse::<Uri>().unwrap();
@@ -2046,7 +2043,7 @@ async fn publish_skips_uri_when_closed_mid_run() {
 async fn publish_threads_snapshot_version_to_client() {
     use futures::StreamExt;
 
-    let (mut service, socket) = LspService::build(FallowLspServer::new).finish();
+    let (mut service, socket) = LspService::build(PlowLspServer::new).finish();
 
     let initialize = Request::build("initialize")
         .params(json!({"capabilities": {}}))
@@ -2099,7 +2096,7 @@ async fn publish_requests_workspace_diagnostic_refresh_when_client_pulls() {
     use futures::{SinkExt, StreamExt};
     use tower_lsp_server::jsonrpc::Response;
 
-    let (mut service, socket) = LspService::build(FallowLspServer::new).finish();
+    let (mut service, socket) = LspService::build(PlowLspServer::new).finish();
 
     let initialize = Request::build("initialize")
         .params(json!({
@@ -2168,7 +2165,7 @@ async fn publish_pushes_unopened_file_diagnostics_when_client_pulls() {
     use futures::{SinkExt, StreamExt};
     use tower_lsp_server::jsonrpc::Response;
 
-    let (mut service, socket) = LspService::build(FallowLspServer::new).finish();
+    let (mut service, socket) = LspService::build(PlowLspServer::new).finish();
 
     let initialize = Request::build("initialize")
         .params(json!({
@@ -2240,7 +2237,7 @@ async fn publish_pushes_unopened_file_diagnostics_when_client_pulls() {
 async fn open_files_keep_push_when_client_never_pulls() {
     use futures::StreamExt;
 
-    let (mut service, socket) = LspService::build(FallowLspServer::new).finish();
+    let (mut service, socket) = LspService::build(PlowLspServer::new).finish();
 
     // A refresh-capable client can advertise `workspace.diagnostics.refreshSupport`
     // without issuing `textDocument/diagnostic`. Suppressing open-file pushes
@@ -2318,11 +2315,11 @@ async fn security_diagnostics_push_when_client_never_pulls() {
 
     // The opt-in author-time security surface must reach a client that
     // advertises pull-diagnostics `refreshSupport` but never issues a
-    // `textDocument/diagnostic` (fallow's own VS Code extension does
+    // `textDocument/diagnostic` (plow's own VS Code extension does
     // exactly this). Delivery keys on the OBSERVED pull, so the new
     // `security-sink` code rides the push path like any other. This locks
     // the exact path that silently blanked once (issue #891 / rec 4).
-    let (mut service, socket) = LspService::build(FallowLspServer::new).finish();
+    let (mut service, socket) = LspService::build(PlowLspServer::new).finish();
     let initialize = Request::build("initialize")
         .params(json!({
             "capabilities": {
@@ -2346,12 +2343,12 @@ async fn security_diagnostics_push_when_client_never_pulls() {
     install_document(backend, &uri, 1, "doRender();").await;
     let snapshot = snapshot_for(&uri, 1);
 
-    let finding = fallow_api::editor_results::SecurityFinding {
+    let finding = plow_api::editor_results::SecurityFinding {
         finding_id: String::new(),
-        candidate: fallow_api::editor_results::SecurityCandidate::default(),
+        candidate: plow_api::editor_results::SecurityCandidate::default(),
         taint_flow: None,
         attack_surface: None,
-        kind: fallow_api::editor_results::SecurityFindingKind::TaintedSink,
+        kind: plow_api::editor_results::SecurityFindingKind::TaintedSink,
         category: Some("dangerous-html".to_string()),
         cwe: Some(79),
         path: std::path::PathBuf::from("/render.ts"),
@@ -2406,7 +2403,7 @@ async fn did_open_clears_push_diagnostics_when_client_pulls() {
     use futures::{SinkExt, StreamExt};
     use tower_lsp_server::jsonrpc::Response;
 
-    let (mut service, mut socket) = LspService::build(FallowLspServer::new).finish();
+    let (mut service, mut socket) = LspService::build(PlowLspServer::new).finish();
 
     let initialize = Request::build("initialize")
         .params(json!({
@@ -2476,7 +2473,7 @@ async fn did_open_clears_push_diagnostics_when_client_pulls() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn text_document_diagnostic_returns_cached_diagnostics_after_open_refresh() {
-    let (mut service, _) = LspService::build(FallowLspServer::new).finish();
+    let (mut service, _) = LspService::build(PlowLspServer::new).finish();
 
     let initialize = Request::build("initialize")
         .params(json!({
@@ -2519,7 +2516,7 @@ async fn text_document_diagnostic_returns_cached_diagnostics_after_open_refresh(
             "textDocument": {
                 "uri": uri.to_string()
             },
-            "identifier": "fallow"
+            "identifier": "plow"
         }))
         .id(2)
         .finish();
@@ -2650,7 +2647,7 @@ async fn serve_emits_workspace_diagnostic_refresh_over_stdio_after_pull() {
     let (server_tx, client_rx) = tokio::io::duplex(64 * 1024);
     let mut reader = BufReader::new(client_rx);
 
-    let (service, socket) = LspService::build(FallowLspServer::new).finish();
+    let (service, socket) = LspService::build(PlowLspServer::new).finish();
     let server = tokio::spawn(async move {
         Server::new(server_rx, server_tx, socket)
             .serve(service)
@@ -2691,7 +2688,7 @@ async fn serve_emits_workspace_diagnostic_refresh_over_stdio_after_pull() {
                 "method": "textDocument/diagnostic",
                 "params": {
                     "textDocument": { "uri": file_uri.clone() },
-                    "identifier": "fallow"
+                    "identifier": "plow"
                 }
             }),
         )
@@ -2740,7 +2737,7 @@ async fn serve_emits_workspace_diagnostic_refresh_over_stdio_after_pull() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn stale_clearing_skips_uri_when_live_version_advanced() {
-    let (service, _) = LspService::build(FallowLspServer::new).finish();
+    let (service, _) = LspService::build(PlowLspServer::new).finish();
     let backend = service.inner();
 
     let uri = "file:///clearing.ts".parse::<Uri>().unwrap();
@@ -2777,7 +2774,7 @@ async fn stale_clearing_skips_uri_when_live_version_advanced() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn publish_inserts_skipped_uri_into_new_uris() {
-    let (service, _) = LspService::build(FallowLspServer::new).finish();
+    let (service, _) = LspService::build(PlowLspServer::new).finish();
     let backend = service.inner();
 
     let uri = "file:///tracked.ts".parse::<Uri>().unwrap();
@@ -2804,14 +2801,14 @@ async fn publish_inserts_skipped_uri_into_new_uris() {
 #[test]
 fn config_load_error_detail_with_explicit_config_path() {
     let root = Path::new("/workspace/my-project");
-    let config = Path::new("/workspace/my-project/fallow.json");
+    let config = Path::new("/workspace/my-project/plow.json");
     let msg = config_load_error_detail(root, Some(config), "file not found");
     assert!(
-        msg.contains("fallow.configPath"),
-        "explicit config errors must mention fallow.configPath"
+        msg.contains("plow.configPath"),
+        "explicit config errors must mention plow.configPath"
     );
     assert!(
-        msg.contains("fallow.json"),
+        msg.contains("plow.json"),
         "message must include the config path"
     );
     assert!(
@@ -2829,8 +2826,8 @@ fn config_load_error_detail_without_explicit_config_path() {
     let root = Path::new("/workspace/my-project");
     let msg = config_load_error_detail(root, None, "parse error");
     assert!(
-        !msg.contains("fallow.configPath"),
-        "implicit config errors must not mention fallow.configPath"
+        !msg.contains("plow.configPath"),
+        "implicit config errors must not mention plow.configPath"
     );
     assert!(
         msg.contains("config error for"),
@@ -2859,7 +2856,7 @@ fn make_diagnostic_with_code(code: &str) -> Diagnostic {
             },
         },
         code: Some(NumberOrString::String(code.to_string())),
-        source: Some("fallow".to_string()),
+        source: Some("plow".to_string()),
         message: format!("Issue: {code}"),
         ..Default::default()
     }
@@ -2878,7 +2875,7 @@ fn make_diagnostic_with_numeric_code(code: i32) -> Diagnostic {
             },
         },
         code: Some(NumberOrString::Number(code)),
-        source: Some("fallow".to_string()),
+        source: Some("plow".to_string()),
         message: "numeric code diagnostic".to_string(),
         ..Default::default()
     }
@@ -2897,7 +2894,7 @@ fn make_diagnostic_no_code() -> Diagnostic {
             },
         },
         code: None,
-        source: Some("fallow".to_string()),
+        source: Some("plow".to_string()),
         message: "no code diagnostic".to_string(),
         ..Default::default()
     }

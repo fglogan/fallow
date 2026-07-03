@@ -1,7 +1,7 @@
 //! Impact report output contracts.
 
 use crate::root_envelopes::{RootEnvelopeMode, attach_telemetry_meta, serialize_named_json_output};
-use fallow_types::envelope::Meta;
+use plow_types::envelope::Meta;
 use serde::{Deserialize, Serialize};
 
 /// Per-category issue counts captured at a recorded run.
@@ -26,7 +26,7 @@ impl ImpactCounts {
     }
 }
 
-/// A commit-gate containment event recorded by `fallow impact`.
+/// A commit-gate containment event recorded by `plow impact`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ContainmentEvent {
@@ -95,7 +95,7 @@ pub struct TrendSummary {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum ImpactReportSchemaVersion {
-    /// First release of the `fallow impact --format json` shape.
+    /// First release of the `plow impact --format json` shape.
     #[serde(rename = "1")]
     V1,
 }
@@ -103,7 +103,7 @@ pub enum ImpactReportSchemaVersion {
 /// The rendered impact report, derived purely from the store.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(feature = "schema", schemars(title = "fallow impact --format json"))]
+#[cfg_attr(feature = "schema", schemars(title = "plow impact --format json"))]
 pub struct ImpactReport {
     /// Output-shape version for this report, so JSON consumers have a
     /// forward-compat signal independent of the on-disk store version. Always
@@ -131,7 +131,7 @@ pub struct ImpactReport {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub latest_git_sha: Option<String>,
     /// Counts from the most recent recorded run. These are CHANGED-FILE scoped
-    /// (each record comes from a `fallow audit` run, whose default `new-only`
+    /// (each record comes from a `plow audit` run, whose default `new-only`
     /// gate counts only findings in the changed files of that run), NOT a
     /// whole-project total.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -139,24 +139,24 @@ pub struct ImpactReport {
     /// Trend between the two most recent records. None until two records exist.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trend: Option<TrendSummary>,
-    /// Counts from the most recent whole-project `fallow` run. WHOLE-PROJECT
+    /// Counts from the most recent whole-project `plow` run. WHOLE-PROJECT
     /// scope (not changed-file), so this is the current issue total across the
     /// whole repo, context next to the actionable changed-file `surfacing`
-    /// count. None until a full `fallow` run has been recorded. v1.6.
+    /// count. None until a full `plow` run has been recorded. v1.6.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_surfacing: Option<ImpactCounts>,
     /// Trend between the two most recent whole-project records. Comparable over
     /// time (same whole-project denominator every run), unlike the changed-file
-    /// `trend`. None until two full `fallow` runs exist. v1.6.
+    /// `trend`. None until two full `plow` runs exist. v1.6.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_trend: Option<TrendSummary>,
     pub containment_count: usize,
     /// Most recent containment events (newest last), capped for display.
     pub recent_containment: Vec<ContainmentEvent>,
-    /// Lifetime count of findings fallow credits as genuinely resolved (code
-    /// removed or refactored, never a `fallow-ignore`). v1.5.
+    /// Lifetime count of findings plow credits as genuinely resolved (code
+    /// removed or refactored, never a `plow-ignore`). v1.5.
     pub resolved_total: usize,
-    /// Lifetime count of findings silenced by a newly-added `fallow-ignore`.
+    /// Lifetime count of findings silenced by a newly-added `plow-ignore`.
     /// Reported as honest context, never as a win. v1.5.
     pub suppressed_total: usize,
     /// Most recent resolution events (newest last), capped for display. v1.5.
@@ -182,7 +182,7 @@ pub struct ImpactReport {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum CrossRepoImpactSchemaVersion {
-    /// First release of the `fallow impact --all --format json` shape.
+    /// First release of the `plow impact --all --format json` shape.
     #[serde(rename = "1")]
     V1,
 }
@@ -196,7 +196,7 @@ pub struct CrossRepoTotals {
     pub suppressed_total: usize,
     pub containment_count: usize,
     /// Sum of whole-project issue totals across projects that have a full-run
-    /// baseline, as of EACH project's last full `fallow` run (not a simultaneous
+    /// baseline, as of EACH project's last full `plow` run (not a simultaneous
     /// snapshot).
     pub project_wide_issues: usize,
     pub projects_with_baseline: usize,
@@ -217,17 +217,17 @@ pub struct CrossRepoProjectEntry {
     /// whole-project), for the LAST RUN column and the default `recent` sort.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_recorded: Option<String>,
-    /// The full per-project report (identical shape to `fallow impact --format
+    /// The full per-project report (identical shape to `plow impact --format
     /// json`), reused verbatim so the per-project wire contract is the sub-shape.
     pub report: ImpactReport,
 }
 
-/// The cross-repo aggregate report, `fallow impact --all --format json`.
+/// The cross-repo aggregate report, `plow impact --all --format json`.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
     feature = "schema",
-    schemars(title = "fallow impact --all --format json")
+    schemars(title = "plow impact --all --format json")
 )]
 pub struct CrossRepoImpactReport {
     pub schema_version: CrossRepoImpactSchemaVersion,
@@ -243,7 +243,7 @@ pub struct CrossRepoImpactReport {
     pub projects: Vec<CrossRepoProjectEntry>,
 }
 
-/// Serialize the `fallow impact --format json` envelope.
+/// Serialize the `plow impact --format json` envelope.
 ///
 /// # Errors
 ///
@@ -258,7 +258,7 @@ pub fn serialize_impact_json_output(
     Ok(value)
 }
 
-/// Serialize the `fallow impact --all --format json` envelope.
+/// Serialize the `plow impact --all --format json` envelope.
 ///
 /// # Errors
 ///

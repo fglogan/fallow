@@ -10,12 +10,12 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
-use fallow_api::{
+use plow_api::{
     AnalysisOptions, AuditOptions, ComplexityOptions, DeadCodeOptions, DuplicationMode,
     DuplicationOptions, EditorAnalysisSession, EngineHealthRunner, run_audit,
     run_circular_dependencies, run_dead_code, run_duplication, run_health_with_runner,
 };
-use fallow_core::{
+use plow_core::{
     cache::{CacheStore, module_to_cached},
     discover::{DiscoveredFile, FileId},
     extract::{parse_all_files, parse_single_file},
@@ -771,7 +771,7 @@ fn create_warm_hash_workspace_project() -> ExtractCacheInput {
         let module = parse_single_file(file).expect("benchmark fixture parses");
         let cached = module_to_cached(
             &module,
-            fallow_types::source_fingerprint::SourceFingerprint::new(1, 1),
+            plow_types::source_fingerprint::SourceFingerprint::new(1, 1),
         );
         cache.insert(&file.path, cached);
     }
@@ -806,7 +806,7 @@ fn create_audit_project(changed: bool) -> CommandInput {
         &input.root,
         &[
             "-c",
-            "user.name=Fallow Bench",
+            "user.name=Plow Bench",
             "-c",
             "user.email=bench@example.com",
             "-c",

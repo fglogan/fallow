@@ -34,7 +34,7 @@ pub enum ToggleState {
     Off,
 }
 
-/// Row ordering for `fallow impact --all`.
+/// Row ordering for `plow impact --all`.
 #[derive(Clone, Copy, clap::ValueEnum)]
 pub enum ImpactSortCli {
     /// Most recently recorded project first (default).
@@ -58,7 +58,7 @@ impl ImpactSortCli {
     }
 }
 
-/// The `fallow impact --all` cross-repo view options, bundled so
+/// The `plow impact --all` cross-repo view options, bundled so
 /// `dispatch_impact` takes one parameter instead of three.
 #[derive(Clone, Copy)]
 pub struct ImpactCrossRepoOpts {
@@ -70,7 +70,7 @@ pub struct ImpactCrossRepoOpts {
 pub fn dispatch_impact(
     root: &Path,
     quiet: bool,
-    output: fallow_config::OutputFormat,
+    output: plow_config::OutputFormat,
     subcommand: Option<ImpactCli>,
     cross_repo: ImpactCrossRepoOpts,
 ) -> ExitCode {
@@ -78,7 +78,7 @@ pub fn dispatch_impact(
     if all {
         if subcommand.is_some() {
             return crate::emit_known_failure(
-                "`fallow impact --all` is a read-only cross-repo view and cannot be combined \
+                "`plow impact --all` is a read-only cross-repo view and cannot be combined \
                  with a subcommand (enable/disable/default/reset)",
                 2,
                 output,
@@ -96,38 +96,38 @@ pub fn dispatch_impact(
     }
 }
 
-/// Enable Fallow Impact for this project; print the first-enable guidance.
+/// Enable Plow Impact for this project; print the first-enable guidance.
 fn impact_enable(root: &Path, quiet: bool) -> ExitCode {
     let newly = impact::enable(root);
     if !quiet {
         if newly {
             println!(
-                "Fallow Impact enabled for this project. Each `fallow audit` / pre-commit \
+                "Plow Impact enabled for this project. Each `plow audit` / pre-commit \
                  gate run is recorded in your user config dir (never written into the \
                  repo, never uploaded)."
             );
             println!(
-                "Tip: run `fallow init --hooks` (or add `--gate-marker pre-commit` to \
-                 your existing hook's `fallow audit` line) so blocked-then-fixed \
+                "Tip: run `plow init --hooks` (or add `--gate-marker pre-commit` to \
+                 your existing hook's `plow audit` line) so blocked-then-fixed \
                  commits are recorded as contained."
             );
         } else {
-            println!("Fallow Impact is already enabled.");
+            println!("Plow Impact is already enabled.");
         }
     }
     ExitCode::SUCCESS
 }
 
-/// Disable Fallow Impact for this project; history is retained.
+/// Disable Plow Impact for this project; history is retained.
 fn impact_disable(root: &Path, quiet: bool) -> ExitCode {
     let was_enabled = impact::disable(root);
     if !quiet {
         println!(
             "{}",
             if was_enabled {
-                "Fallow Impact disabled. Existing history is retained."
+                "Plow Impact disabled. Existing history is retained."
             } else {
-                "Fallow Impact was already disabled."
+                "Plow Impact was already disabled."
             }
         );
     }
@@ -141,16 +141,16 @@ fn impact_set_default(state: ToggleState, quiet: bool) -> ExitCode {
     if !quiet {
         let verb = if on { "on" } else { "off" };
         let body = if on {
-            "New projects now record Impact by default. A per-project `fallow impact \
+            "New projects now record Impact by default. A per-project `plow impact \
              disable` still opts that repo out."
         } else {
-            "New projects no longer record by default; run `fallow impact enable` per \
+            "New projects no longer record by default; run `plow impact enable` per \
              project to opt in."
         };
         if changed {
-            println!("Fallow Impact default set to {verb}. {body}");
+            println!("Plow Impact default set to {verb}. {body}");
         } else {
-            println!("Fallow Impact default was already {verb}.");
+            println!("Plow Impact default was already {verb}.");
         }
     }
     ExitCode::SUCCESS
@@ -164,9 +164,9 @@ fn impact_reset(root: &Path, all: bool, quiet: bool) -> ExitCode {
             println!(
                 "{}",
                 if removed {
-                    "Removed all Fallow Impact history."
+                    "Removed all Plow Impact history."
                 } else {
-                    "No Fallow Impact history to remove."
+                    "No Plow Impact history to remove."
                 }
             );
         }
@@ -176,9 +176,9 @@ fn impact_reset(root: &Path, all: bool, quiet: bool) -> ExitCode {
             println!(
                 "{}",
                 if removed {
-                    "Removed this project's Fallow Impact history."
+                    "Removed this project's Plow Impact history."
                 } else {
-                    "No Fallow Impact history for this project."
+                    "No Plow Impact history for this project."
                 }
             );
         }
@@ -186,22 +186,22 @@ fn impact_reset(root: &Path, all: bool, quiet: bool) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn render_impact_status(root: &Path, quiet: bool, output: fallow_config::OutputFormat) -> ExitCode {
+fn render_impact_status(root: &Path, quiet: bool, output: plow_config::OutputFormat) -> ExitCode {
     let store = impact::load(root);
     let report = impact::build_report(&store);
-    let is_human = matches!(output, fallow_config::OutputFormat::Human);
+    let is_human = matches!(output, plow_config::OutputFormat::Human);
     let rendered = match output {
-        fallow_config::OutputFormat::Json => impact::render_json(&report),
-        fallow_config::OutputFormat::Markdown => impact::render_markdown(&report),
-        fallow_config::OutputFormat::Human => impact::render_human(&report),
-        fallow_config::OutputFormat::Sarif
-        | fallow_config::OutputFormat::Compact
-        | fallow_config::OutputFormat::CodeClimate
-        | fallow_config::OutputFormat::PrCommentGithub
-        | fallow_config::OutputFormat::PrCommentGitlab
-        | fallow_config::OutputFormat::ReviewGithub
-        | fallow_config::OutputFormat::ReviewGitlab
-        | fallow_config::OutputFormat::Badge => {
+        plow_config::OutputFormat::Json => impact::render_json(&report),
+        plow_config::OutputFormat::Markdown => impact::render_markdown(&report),
+        plow_config::OutputFormat::Human => impact::render_human(&report),
+        plow_config::OutputFormat::Sarif
+        | plow_config::OutputFormat::Compact
+        | plow_config::OutputFormat::CodeClimate
+        | plow_config::OutputFormat::PrCommentGithub
+        | plow_config::OutputFormat::PrCommentGitlab
+        | plow_config::OutputFormat::ReviewGithub
+        | plow_config::OutputFormat::ReviewGitlab
+        | plow_config::OutputFormat::Badge => {
             return crate::emit_known_failure(
                 "impact supports human, json, and markdown output",
                 2,
@@ -221,29 +221,29 @@ fn render_impact_status(root: &Path, quiet: bool, output: fallow_config::OutputF
     ExitCode::SUCCESS
 }
 
-/// Render the cross-repo `fallow impact --all` roll-up. Reads the user config
+/// Render the cross-repo `plow impact --all` roll-up. Reads the user config
 /// dir; never reads `--root`. Human output adds one store-dir discoverability
 /// line gated on `is_human && !quiet`; JSON/markdown stay path-free.
 fn render_impact_all(
     quiet: bool,
-    output: fallow_config::OutputFormat,
+    output: plow_config::OutputFormat,
     sort: ImpactSortCli,
     limit: Option<usize>,
 ) -> ExitCode {
     let report = impact::aggregate(sort.to_impact());
-    let is_human = matches!(output, fallow_config::OutputFormat::Human);
+    let is_human = matches!(output, plow_config::OutputFormat::Human);
     let rendered = match output {
-        fallow_config::OutputFormat::Json => impact::render_cross_repo_json(&report),
-        fallow_config::OutputFormat::Markdown => impact::render_cross_repo_markdown(&report),
-        fallow_config::OutputFormat::Human => impact::render_cross_repo_human(&report, limit),
-        fallow_config::OutputFormat::Sarif
-        | fallow_config::OutputFormat::Compact
-        | fallow_config::OutputFormat::CodeClimate
-        | fallow_config::OutputFormat::PrCommentGithub
-        | fallow_config::OutputFormat::PrCommentGitlab
-        | fallow_config::OutputFormat::ReviewGithub
-        | fallow_config::OutputFormat::ReviewGitlab
-        | fallow_config::OutputFormat::Badge => {
+        plow_config::OutputFormat::Json => impact::render_cross_repo_json(&report),
+        plow_config::OutputFormat::Markdown => impact::render_cross_repo_markdown(&report),
+        plow_config::OutputFormat::Human => impact::render_cross_repo_human(&report, limit),
+        plow_config::OutputFormat::Sarif
+        | plow_config::OutputFormat::Compact
+        | plow_config::OutputFormat::CodeClimate
+        | plow_config::OutputFormat::PrCommentGithub
+        | plow_config::OutputFormat::PrCommentGitlab
+        | plow_config::OutputFormat::ReviewGithub
+        | plow_config::OutputFormat::ReviewGitlab
+        | plow_config::OutputFormat::Badge => {
             return crate::emit_known_failure(
                 "impact --all supports human, json, and markdown output",
                 2,

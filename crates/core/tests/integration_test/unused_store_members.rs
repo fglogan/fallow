@@ -8,7 +8,7 @@
 use std::path::Path;
 
 use super::common::{create_config, fixture_path};
-use fallow_types::results::AnalysisResults;
+use plow_types::results::AnalysisResults;
 
 fn store_members(results: &AnalysisResults, root: &Path) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = results
@@ -33,7 +33,7 @@ fn store_members(results: &AnalysisResults, root: &Path) -> Vec<(String, String)
 fn flags_unused_option_and_setup_store_members() {
     let root = fixture_path("pinia-store-members");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let members = store_members(&results, &root);
     let names: Vec<&str> = members.iter().map(|(_, m)| m.as_str()).collect();
 
@@ -69,7 +69,7 @@ fn flags_unused_option_and_setup_store_members() {
 fn credits_consumed_store_members() {
     let root = fixture_path("pinia-store-members");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let names: Vec<String> = store_members(&results, &root)
         .into_iter()
         .map(|(_, m)| m)
@@ -102,7 +102,7 @@ fn credits_inline_store_call_members_and_flags_dead_ones() {
     // genuinely unaccessed member on the same store still flags.
     let root = fixture_path("pinia-inline-store-member");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let names: Vec<String> = store_members(&results, &root)
         .into_iter()
         .map(|(_, m)| m)
@@ -126,7 +126,7 @@ fn credits_inline_store_call_members_and_flags_dead_ones() {
 fn abstains_on_whole_object_dynamic_and_map_helpers() {
     let root = fixture_path("pinia-store-members-abstain");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let members = store_members(&results, &root);
 
     // Spread (`{...store}`), `Object.keys(store)`, dynamic `store[key]()`, and
@@ -145,7 +145,7 @@ fn flags_dead_members_in_a_workspace_store_package() {
     // is dead, while cross-package consumers credit the used members.
     let root = fixture_path("pinia-store-members-monorepo");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let names: Vec<String> = store_members(&results, &root)
         .into_iter()
         .map(|(_, m)| m)
@@ -171,7 +171,7 @@ fn flags_dead_members_in_a_workspace_store_package() {
 fn dep_gate_suppresses_without_pinia() {
     let root = fixture_path("pinia-store-members-no-dep");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let members = store_members(&results, &root);
 
     // A local `defineStore`-named helper in a project that does NOT declare
@@ -190,7 +190,7 @@ fn credits_typed_param_store_members_and_flags_dead_ones() {
     // unused member on the same store still flags (non-vacuous control).
     let root = fixture_path("pinia-typed-param-store-member");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let names: Vec<String> = store_members(&results, &root)
         .into_iter()
         .map(|(_, m)| m)

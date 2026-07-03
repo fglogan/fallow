@@ -8,18 +8,18 @@ use crate::core_backend;
 use crate::duplicates::DuplicationReport;
 use crate::module_graph::RetainedModuleGraph;
 
-pub type CloneTrace = fallow_types::trace::CloneTrace;
-pub type DependencyTrace = fallow_types::trace::DependencyTrace;
-pub type ExportReference = fallow_types::trace::ExportReference;
-pub type ExportTrace = fallow_types::trace::ExportTrace;
-pub type FileTrace = fallow_types::trace::FileTrace;
-pub type ImpactClosureGap = fallow_types::trace::ImpactClosureGap;
-pub type ImpactClosureTrace = fallow_types::trace::ImpactClosureTrace;
-pub type PipelineTimings = fallow_types::trace::PipelineTimings;
-pub type ReExportChain = fallow_types::trace::ReExportChain;
-pub type TracedCloneGroup = fallow_types::trace::TracedCloneGroup;
-pub type TracedExport = fallow_types::trace::TracedExport;
-pub type TracedReExport = fallow_types::trace::TracedReExport;
+pub type CloneTrace = plow_types::trace::CloneTrace;
+pub type DependencyTrace = plow_types::trace::DependencyTrace;
+pub type ExportReference = plow_types::trace::ExportReference;
+pub type ExportTrace = plow_types::trace::ExportTrace;
+pub type FileTrace = plow_types::trace::FileTrace;
+pub type ImpactClosureGap = plow_types::trace::ImpactClosureGap;
+pub type ImpactClosureTrace = plow_types::trace::ImpactClosureTrace;
+pub type PipelineTimings = plow_types::trace::PipelineTimings;
+pub type ReExportChain = plow_types::trace::ReExportChain;
+pub type TracedCloneGroup = plow_types::trace::TracedCloneGroup;
+pub type TracedExport = plow_types::trace::TracedExport;
+pub type TracedReExport = plow_types::trace::TracedReExport;
 
 /// Trace why an export is considered used or unused.
 #[must_use]
@@ -42,7 +42,7 @@ pub fn trace_file(graph: &RetainedModuleGraph, root: &Path, file_path: &str) -> 
 #[must_use]
 #[expect(
     clippy::implicit_hasher,
-    reason = "fallow standardizes on FxHashSet across the workspace"
+    reason = "plow standardizes on FxHashSet across the workspace"
 )]
 pub fn trace_dependency(
     graph: &RetainedModuleGraph,

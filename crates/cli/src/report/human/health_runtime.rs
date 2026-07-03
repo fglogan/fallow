@@ -6,7 +6,7 @@ use super::{MAX_FLAT_ITEMS, format_path, health::format_window, relative_path, t
 
 pub(super) fn render_runtime_coverage(
     lines: &mut Vec<String>,
-    report: &fallow_output::HealthReport,
+    report: &plow_output::HealthReport,
     root: &Path,
 ) {
     let Some(ref production) = report.runtime_coverage else {
@@ -24,14 +24,14 @@ pub(super) fn render_runtime_coverage(
 
 fn render_runtime_summary(
     lines: &mut Vec<String>,
-    production: &fallow_output::RuntimeCoverageReport,
+    production: &plow_output::RuntimeCoverageReport,
 ) {
     let verdict = match production.verdict {
-        fallow_output::RuntimeCoverageReportVerdict::Clean => "clean",
-        fallow_output::RuntimeCoverageReportVerdict::HotPathTouched => "hot path touched",
-        fallow_output::RuntimeCoverageReportVerdict::ColdCodeDetected => "cold code detected",
-        fallow_output::RuntimeCoverageReportVerdict::LicenseExpiredGrace => "license expired grace",
-        fallow_output::RuntimeCoverageReportVerdict::Unknown => "unknown",
+        plow_output::RuntimeCoverageReportVerdict::Clean => "clean",
+        plow_output::RuntimeCoverageReportVerdict::HotPathTouched => "hot path touched",
+        plow_output::RuntimeCoverageReportVerdict::ColdCodeDetected => "cold code detected",
+        plow_output::RuntimeCoverageReportVerdict::LicenseExpiredGrace => "license expired grace",
+        plow_output::RuntimeCoverageReportVerdict::Unknown => "unknown",
     };
     lines.push(format!(
         "{} {} {}",
@@ -67,17 +67,16 @@ fn render_runtime_summary(
     }
     if matches!(
         production.watermark,
-        Some(fallow_output::RuntimeCoverageWatermark::LicenseExpiredGrace)
+        Some(plow_output::RuntimeCoverageWatermark::LicenseExpiredGrace)
     ) {
-        lines.push(
-            "  license expired grace active; refresh with `fallow license refresh`".to_owned(),
-        );
+        lines
+            .push("  license expired grace active; refresh with `plow license refresh`".to_owned());
     }
 }
 
 fn render_runtime_findings(
     lines: &mut Vec<String>,
-    production: &fallow_output::RuntimeCoverageReport,
+    production: &plow_output::RuntimeCoverageReport,
     root: &Path,
 ) {
     let shown_findings = production.findings.len().min(MAX_FLAT_ITEMS);
@@ -105,7 +104,7 @@ fn render_runtime_findings(
 
 fn render_runtime_hot_paths(
     lines: &mut Vec<String>,
-    production: &fallow_output::RuntimeCoverageReport,
+    production: &plow_output::RuntimeCoverageReport,
     root: &Path,
 ) {
     if !production.hot_paths.is_empty() {
@@ -125,7 +124,7 @@ fn render_runtime_hot_paths(
 
 fn render_runtime_warnings(
     lines: &mut Vec<String>,
-    production: &fallow_output::RuntimeCoverageReport,
+    production: &plow_output::RuntimeCoverageReport,
 ) {
     for warning in &production.warnings {
         lines.push(format!("  warning [{}]: {}", warning.code, warning.message));
@@ -134,7 +133,7 @@ fn render_runtime_warnings(
 
 fn render_capture_quality_warning(
     lines: &mut Vec<String>,
-    production: &fallow_output::RuntimeCoverageReport,
+    production: &plow_output::RuntimeCoverageReport,
 ) {
     let Some(ref quality) = production.summary.capture_quality else {
         return;
@@ -163,10 +162,7 @@ fn render_capture_quality_warning(
     );
 }
 
-fn render_upgrade_prompt(
-    lines: &mut Vec<String>,
-    production: &fallow_output::RuntimeCoverageReport,
-) {
+fn render_upgrade_prompt(lines: &mut Vec<String>, production: &plow_output::RuntimeCoverageReport) {
     let Some(ref quality) = production.summary.capture_quality else {
         return;
     };
@@ -188,6 +184,6 @@ fn render_upgrade_prompt(
             .to_owned(),
     );
     lines.push(
-        "  start a trial: `fallow license activate --trial --email you@company.com`".to_owned(),
+        "  start a trial: `plow license activate --trial --email you@company.com`".to_owned(),
     );
 }

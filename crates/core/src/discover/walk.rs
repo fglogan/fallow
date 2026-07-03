@@ -2,15 +2,15 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
-use fallow_config::{ResolvedConfig, WorkspaceDiagnostic, WorkspaceDiagnosticKind};
-use fallow_types::discover::{DiscoveredFile, FileId};
 use ignore::WalkBuilder;
+use plow_config::{ResolvedConfig, WorkspaceDiagnostic, WorkspaceDiagnosticKind};
+use plow_types::discover::{DiscoveredFile, FileId};
 use rustc_hash::FxHashSet;
 
 use super::ALLOWED_HIDDEN_DIRS;
 
 /// Process-wide dedupe of the size-skip / largest-files stderr notes, keyed by a
-/// content-derived string, so combined-mode (`fallow` runs check + dupes +
+/// content-derived string, so combined-mode (`plow` runs check + dupes +
 /// health, each of which can trigger a source walk) emits each note at most once
 /// per distinct content. Mirrors the workspace-diagnostics `should_emit`
 /// pattern (issue #1086).
@@ -173,7 +173,7 @@ fn partition_minified_generated_js(
 
 /// Record the skipped files in the workspace-diagnostics registry (so they
 /// surface in `workspace_diagnostics[]` JSON) and emit one aggregated
-/// `tracing::warn!` so a human running `fallow` sees what was dropped. Mirrors
+/// `tracing::warn!` so a human running `plow` sees what was dropped. Mirrors
 /// the JSON-plus-gated-warn pattern used for undeclared workspaces.
 fn report_skipped_large_files(config: &ResolvedConfig, skipped: &[SizedFile]) {
     if skipped.is_empty() {
@@ -191,7 +191,7 @@ fn report_skipped_large_files(config: &ResolvedConfig, skipped: &[SizedFile]) {
             )
         })
         .collect();
-    fallow_config::append_workspace_diagnostics(&config.root, diagnostics);
+    plow_config::append_workspace_diagnostics(&config.root, diagnostics);
 
     let mut sorted: Vec<SizedFile> = skipped.to_vec();
     sorted.sort_unstable_by_key(|f| std::cmp::Reverse(f.1));
@@ -206,8 +206,8 @@ fn report_skipped_large_files(config: &ResolvedConfig, skipped: &[SizedFile]) {
         let examples = summarize_examples(&config.root, &sorted);
         let noun = if count == 1 { "file" } else { "files" };
         tracing::warn!(
-            "fallow: skipped {count} {noun} over the max file size limit ({examples}). \
-             Raise the limit with --max-file-size <MB> (or FALLOW_MAX_FILE_SIZE), or add them to ignorePatterns."
+            "plow: skipped {count} {noun} over the max file size limit ({examples}). \
+             Raise the limit with --max-file-size <MB> (or PLOW_MAX_FILE_SIZE), or add them to ignorePatterns."
         );
     }
 }
@@ -229,7 +229,7 @@ fn report_skipped_minified_files(config: &ResolvedConfig, skipped: &[SizedFile])
             )
         })
         .collect();
-    fallow_config::append_workspace_diagnostics(&config.root, diagnostics);
+    plow_config::append_workspace_diagnostics(&config.root, diagnostics);
 
     let mut sorted: Vec<SizedFile> = skipped.to_vec();
     sorted.sort_unstable_by_key(|f| std::cmp::Reverse(f.1));
@@ -245,7 +245,7 @@ fn report_skipped_minified_files(config: &ResolvedConfig, skipped: &[SizedFile])
         let noun = if count == 1 { "file" } else { "files" };
         let pronoun = if count == 1 { "it" } else { "them" };
         tracing::warn!(
-            "fallow: skipped {count} minified generated JS {noun} ({examples}). \
+            "plow: skipped {count} minified generated JS {noun} ({examples}). \
              Add {pronoun} to ignorePatterns, rename {pronoun} with a .min.js suffix, or use --max-file-size 0 to analyze {pronoun}."
         );
     }
@@ -275,13 +275,13 @@ fn build_largest_files_note(root: &Path, files: &[DiscoveredFile]) -> Option<Str
         // Large file SET with no individually large file: report the count only,
         // omitting a "largest:" list that would otherwise be all sub-floor noise.
         return Some(format!(
-            "fallow: discovered {count} {noun}. If analysis stalls or runs out of memory, \
+            "plow: discovered {count} {noun}. If analysis stalls or runs out of memory, \
              exclude large generated files via ignorePatterns or --max-file-size."
         ));
     }
     let examples = summarize_examples(root, &by_size);
     Some(format!(
-        "fallow: discovered {count} {noun}; largest: {examples}. If analysis stalls or runs out of memory, \
+        "plow: discovered {count} {noun}; largest: {examples}. If analysis stalls or runs out of memory, \
          exclude large generated files via ignorePatterns or --max-file-size."
     ))
 }
@@ -682,7 +682,7 @@ pub fn discover_files_and_config_candidates(
     // Drop any source-discovery diagnostics from a previous pass (watch-mode
     // rerun, combined-mode re-walk) BEFORE re-recording this walk's skips, so a
     // file that is no longer skipped does not leave a stale entry (issue #1086).
-    fallow_config::clear_source_discovery_diagnostics(&config.root);
+    plow_config::clear_source_discovery_diagnostics(&config.root);
     let (kept, skipped) = partition_by_size(raw, config.max_file_size_bytes);
     report_skipped_large_files(config, &skipped);
     let (kept, skipped_minified) =
@@ -782,7 +782,7 @@ mod tests {
         assert!(!is_allowed_hidden_dir(OsStr::new(".git")));
         assert!(!is_allowed_hidden_dir(OsStr::new(".cache")));
         assert!(!is_allowed_hidden_dir(OsStr::new(".vscode")));
-        assert!(!is_allowed_hidden_dir(OsStr::new(".fallow")));
+        assert!(!is_allowed_hidden_dir(OsStr::new(".plow")));
         assert!(!is_allowed_hidden_dir(OsStr::new(".next")));
     }
 
@@ -1026,8 +1026,8 @@ mod tests {
     mod discover_files_integration {
         use std::path::PathBuf;
 
-        use fallow_config::{
-            DuplicatesConfig, FallowConfig, FlagsConfig, HealthConfig, OutputFormat, ResolveConfig,
+        use plow_config::{
+            DuplicatesConfig, FlagsConfig, HealthConfig, OutputFormat, PlowConfig, ResolveConfig,
             RulesConfig,
         };
 
@@ -1035,7 +1035,7 @@ mod tests {
 
         /// Create a minimal ResolvedConfig pointing at the given root directory.
         fn make_config(root: PathBuf, production: bool) -> ResolvedConfig {
-            FallowConfig {
+            PlowConfig {
                 production: production.into(),
                 ..Default::default()
             }
@@ -1390,7 +1390,7 @@ mod tests {
 
         /// Create a config with custom ignore patterns.
         fn make_config_with_ignores(root: PathBuf, ignores: Vec<String>) -> ResolvedConfig {
-            FallowConfig {
+            PlowConfig {
                 schema: None,
                 extends: vec![],
                 entry: vec![],
@@ -1402,32 +1402,31 @@ mod tests {
                 ignore_exports: vec![],
                 ignore_catalog_references: vec![],
                 ignore_dependency_overrides: vec![],
-                ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(
-                ),
+                ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
                 used_class_members: vec![],
                 ignore_decorators: vec![],
-                unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
+                unused_component_props: plow_config::UnusedComponentPropsConfig::default(),
                 duplicates: DuplicatesConfig::default(),
                 health: HealthConfig::default(),
                 rules: RulesConfig::default(),
-                boundaries: fallow_config::BoundaryConfig::default(),
+                boundaries: plow_config::BoundaryConfig::default(),
                 production: false.into(),
                 plugins: vec![],
                 rule_packs: vec![],
                 dynamically_loaded: vec![],
                 overrides: vec![],
                 regression: None,
-                audit: fallow_config::AuditConfig::default(),
+                audit: plow_config::AuditConfig::default(),
                 codeowners: None,
                 public_packages: vec![],
                 flags: FlagsConfig::default(),
-                security: fallow_config::SecurityConfig::default(),
-                fix: fallow_config::FixConfig::default(),
+                security: plow_config::SecurityConfig::default(),
+                fix: plow_config::FixConfig::default(),
                 resolve: ResolveConfig::default(),
                 sealed: false,
                 include_entry_exports: false,
                 auto_imports: false,
-                cache: fallow_config::CacheConfig::default(),
+                cache: plow_config::CacheConfig::default(),
             }
             .resolve(root, OutputFormat::Human, 1, true, true, None)
         }
@@ -1609,13 +1608,13 @@ mod tests {
             let config = make_config_with_max_file_size(dir.path().to_path_buf(), Some(1_000));
             let _ = discover_files(&config);
 
-            let diagnostics = fallow_config::workspace_diagnostics_for(dir.path());
+            let diagnostics = plow_config::workspace_diagnostics_for(dir.path());
             let skipped: Vec<_> = diagnostics
                 .iter()
                 .filter(|d| {
                     matches!(
                         d.kind,
-                        fallow_config::WorkspaceDiagnosticKind::SkippedLargeFile { .. }
+                        plow_config::WorkspaceDiagnosticKind::SkippedLargeFile { .. }
                     )
                 })
                 .collect();
@@ -1628,7 +1627,7 @@ mod tests {
             assert!(
                 matches!(
                     skipped[0].kind,
-                    fallow_config::WorkspaceDiagnosticKind::SkippedLargeFile { size_bytes }
+                    plow_config::WorkspaceDiagnosticKind::SkippedLargeFile { size_bytes }
                         if size_bytes == 5_000
                 ),
                 "the recorded diagnostic carries the on-disk byte size"
@@ -1652,13 +1651,13 @@ mod tests {
                 "large one-line JS assets should be skipped before parsing"
             );
 
-            let diagnostics = fallow_config::workspace_diagnostics_for(dir.path());
+            let diagnostics = plow_config::workspace_diagnostics_for(dir.path());
             assert!(
                 diagnostics.iter().any(|diag| {
                     diag.path.ends_with("src/index-abc123.js")
                         && matches!(
                             diag.kind,
-                            fallow_config::WorkspaceDiagnosticKind::SkippedMinifiedFile { .. }
+                            plow_config::WorkspaceDiagnosticKind::SkippedMinifiedFile { .. }
                         )
                 }),
                 "the skipped minified asset is recorded for JSON output: {diagnostics:?}"

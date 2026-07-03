@@ -41,7 +41,7 @@ describe("resolveFilePath", () => {
   });
 
   it("keeps literal percent-encoded bracket filenames when they exist", () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "fallow-vscode-path-"));
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "plow-vscode-path-"));
     try {
       fs.mkdirSync(path.join(root, "src/app"), { recursive: true });
       fs.writeFileSync(path.join(root, "src/app/%5BproductId%5D.ts"), "");

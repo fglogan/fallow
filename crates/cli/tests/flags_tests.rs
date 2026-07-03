@@ -6,11 +6,11 @@
 
 mod common;
 
-use common::run_fallow;
+use common::run_plow;
 
 #[test]
 fn feature_flag_suppression_next_line() {
-    let out = run_fallow(
+    let out = run_plow(
         "flags",
         "feature-flag-suppression",
         &["--no-cache", "--format", "json"],
@@ -29,7 +29,7 @@ fn feature_flag_suppression_next_line() {
 
     assert!(
         !flag_names.contains(&"FEATURE_DARK_MODE"),
-        "FEATURE_DARK_MODE should be suppressed via // fallow-ignore-next-line feature-flag, found: {flag_names:?}"
+        "FEATURE_DARK_MODE should be suppressed via // plow-ignore-next-line feature-flag, found: {flag_names:?}"
     );
     assert!(
         flag_names.contains(&"FEATURE_NEW_CHECKOUT"),
@@ -39,7 +39,7 @@ fn feature_flag_suppression_next_line() {
 
 #[test]
 fn feature_flag_suppression_file_wide() {
-    let out = run_fallow(
+    let out = run_plow(
         "flags",
         "feature-flag-suppression",
         &["--no-cache", "--format", "json"],
@@ -59,7 +59,7 @@ fn feature_flag_suppression_file_wide() {
 
 #[test]
 fn empty_result_default_config_surfaces_detectors() {
-    let out = run_fallow("flags", "flags-none-default", &["--no-cache"]);
+    let out = run_plow("flags", "flags-none-default", &["--no-cache"]);
 
     assert_eq!(out.code, 0, "flags exits 0 on no findings");
     assert!(
@@ -94,7 +94,7 @@ fn empty_result_default_config_surfaces_detectors() {
     );
     assert!(
         out.stderr
-            .contains("docs.fallow.tools/cli/flags#configuration"),
+            .contains("docs.genesis-plow.dev/cli/flags#configuration"),
         "should link the configuration docs: {}",
         out.stderr
     );
@@ -102,7 +102,7 @@ fn empty_result_default_config_surfaces_detectors() {
 
 #[test]
 fn empty_result_quiet_suppresses_hint() {
-    let out = run_fallow("flags", "flags-none-default", &["--no-cache", "--quiet"]);
+    let out = run_plow("flags", "flags-none-default", &["--no-cache", "--quiet"]);
 
     assert_eq!(out.code, 0, "flags exits 0 on no findings");
     assert!(
@@ -119,7 +119,7 @@ fn empty_result_quiet_suppresses_hint() {
 
 #[test]
 fn empty_result_custom_config_is_terse() {
-    let out = run_fallow("flags", "flags-none-custom", &["--no-cache"]);
+    let out = run_plow("flags", "flags-none-custom", &["--no-cache"]);
 
     assert_eq!(out.code, 0, "flags exits 0 on no findings");
     assert!(

@@ -213,7 +213,7 @@ def scan_agent() -> int:
                     keyword_warnings.append(f"{rel(path)}:{lineno}: {label}")
 
     if codepoint_errors or keyword_warnings:
-        print("\nfallow agent-file guard: review the items below.", file=sys.stderr)
+        print("\nplow agent-file guard: review the items below.", file=sys.stderr)
         if codepoint_errors:
             print(f"  {codepoint_errors} hidden code point(s) in agent-instruction files (above).", file=sys.stderr)
         for w in keyword_warnings:

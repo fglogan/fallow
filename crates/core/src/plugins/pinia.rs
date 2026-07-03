@@ -2,9 +2,9 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_config::{AutoImportKind, AutoImportRule};
-use fallow_types::discover::FileId;
-use fallow_types::extract::ExportName;
+use plow_config::{AutoImportKind, AutoImportRule};
+use plow_types::discover::FileId;
+use plow_types::extract::ExportName;
 
 use super::Plugin;
 
@@ -50,7 +50,7 @@ fn collect_store_auto_imports(dir: &Path, rules: &mut Vec<AutoImportRule>) {
         let Ok(source) = std::fs::read_to_string(&path) else {
             continue;
         };
-        let module = fallow_extract::parse_source_to_module(FileId(0), &path, &source, 0, false);
+        let module = plow_extract::parse_source_to_module(FileId(0), &path, &source, 0, false);
         for export in module.exports {
             if export.is_type_only {
                 continue;

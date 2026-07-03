@@ -1,8 +1,8 @@
-# Fallow Roadmap
+# Plow Roadmap
 
-> This roadmap covers planned work and is reviewed periodically. For shipped capabilities, see the [releases](https://github.com/fallow-rs/fallow/releases) and [documentation](https://docs.fallow.tools).
+> This roadmap covers planned work and is reviewed periodically. For shipped capabilities, see the [releases](https://github.com/fglogan/genesis-plow/releases) and [documentation](https://docs.genesis-plow.dev).
 
-This roadmap tracks planned work on Fallow: what is queued, what is being scoped, and where the project is headed.
+This roadmap tracks planned work on Plow: what is queued, what is being scoped, and where the project is headed.
 
 ---
 
@@ -12,7 +12,7 @@ Concrete work scoped to the next one or two minor releases.
 
 ### Richer MCP responses
 
-In progress: agents already query fallow via MCP, but the responses lack context agents need to make confident removal decisions: re-export chains, who imports this symbol, recent churn, duplicate siblings. The work expands existing tool responses before adding new tools, and is partially landed.
+In progress: agents already query plow via MCP, but the responses lack context agents need to make confident removal decisions: re-export chains, who imports this symbol, recent churn, duplicate siblings. The work expands existing tool responses before adding new tools, and is partially landed.
 
 ### Coverage sidecar ergonomics
 
@@ -20,19 +20,19 @@ The coverage setup state machine works end to end, but the install handoff still
 
 ### Post-fix formatter integration
 
-`fallow fix` leaves Prettier, dprint, or Biome to clean up whitespace after removals. Invoke the project's configured formatter automatically when running in-place.
+`plow fix` leaves Prettier, dprint, or Biome to clean up whitespace after removals. Invoke the project's configured formatter automatically when running in-place.
 
 ### Baseline-adoption ergonomics
 
-Follow-ups to the `fallow.changedSince` setting shipped for issue #185. The setting works (Problems panel and sidebar scope to files changed since the configured ref) but a few UX polish items would close the loop for users adopting fallow on legacy codebases:
+Follow-ups to the `plow.changedSince` setting shipped for issue #185. The setting works (Problems panel and sidebar scope to files changed since the configured ref) but a few UX polish items would close the loop for users adopting plow on legacy codebases:
 
-- **"Fallow: Set Baseline at HEAD" command** -- a palette command that runs `git tag fallow-baseline` and writes `fallow.changedSince` into `.vscode/settings.json` in one step, so users do not need to leave the editor or know the git tag command.
-- **Filter-dropped status surfacing** -- when the LSP cannot resolve the configured ref (typo, shallow clone, missing tag), it currently falls back to full scope and logs a `WARNING` to the Fallow output channel. Surface that state in the status bar (e.g. `Fallow: 118 issues (since fallow-baseline: scope dropped)`) so users notice immediately rather than after the next "wait, why am I seeing all these issues again?" question.
+- **"Plow: Set Baseline at HEAD" command** -- a palette command that runs `git tag plow-baseline` and writes `plow.changedSince` into `.vscode/settings.json` in one step, so users do not need to leave the editor or know the git tag command.
+- **Filter-dropped status surfacing** -- when the LSP cannot resolve the configured ref (typo, shallow clone, missing tag), it currently falls back to full scope and logs a `WARNING` to the Plow output channel. Surface that state in the status bar (e.g. `Plow: 118 issues (since plow-baseline: scope dropped)`) so users notice immediately rather than after the next "wait, why am I seeing all these issues again?" question.
 - **Shallow-clone hint in CI templates** -- the runtime hint already explains the `fetch-depth: 0` fix; the GitHub Action template should default to a checkout depth that works with long-lived baseline tags, or document the requirement in the inline comments. The GitLab template ships `GIT_DEPTH: "0"` as a default since v2.54.0.
 
 ### Per-package `changedSince` overrides
 
-Monorepos with packages on different release cadences want different baseline refs per package (e.g. `packages/web` tracks `main`, `packages/legacy` tracks `release/2024.10`). Today `fallow.changedSince` is workspace-wide. Extending this to per-package overrides requires config-schema work (a new `[overrides]` block keyed on workspace root, or `package.json` field), resolution semantics (which baseline wins for a file in package A imported from package B), and matching status-bar logic.
+Monorepos with packages on different release cadences want different baseline refs per package (e.g. `packages/web` tracks `main`, `packages/legacy` tracks `release/2024.10`). Today `plow.changedSince` is workspace-wide. Extending this to per-package overrides requires config-schema work (a new `[overrides]` block keyed on workspace root, or `package.json` field), resolution semantics (which baseline wins for a file in package A imported from package B), and matching status-bar logic.
 
 ---
 
@@ -42,7 +42,7 @@ Broader bets, still being scoped.
 
 ### Agent-driven cleanup loop
 
-Safe removals (unused exports, enum members, dependencies) are already auto-fixable. The open question is the judgment calls: deleting files, consolidating duplicates, restructuring modules. The bet: structured MCP output plus the right review workflow lets an agent propose those changes, a human approves the PR, and fallow verifies nothing regressed.
+Safe removals (unused exports, enum members, dependencies) are already auto-fixable. The open question is the judgment calls: deleting files, consolidating duplicates, restructuring modules. The bet: structured MCP output plus the right review workflow lets an agent propose those changes, a human approves the PR, and plow verifies nothing regressed.
 
 ### Codebase health grade
 
@@ -50,7 +50,7 @@ One letter (A-F) per project, derived from dead code ratio, duplication, complex
 
 ### Visualization
 
-`fallow viz`: a self-contained interactive HTML report. Treemap with dead code highlighted, dependency graph, cycle visualization, duplication heatmaps. No server, opens in any browser. Scoping depends on which view actually unblocks a user workflow rather than just looking good in screenshots.
+`plow viz`: a self-contained interactive HTML report. Treemap with dead code highlighted, dependency graph, cycle visualization, duplication heatmaps. No server, opens in any browser. Scoping depends on which view actually unblocks a user workflow rather than just looking good in screenshots.
 
 ---
 
@@ -76,4 +76,4 @@ Acknowledged gaps. Fixes land opportunistically.
 
 ---
 
-[Open an issue](https://github.com/fallow-rs/fallow/issues) to request a feature or report a bug. PRs welcome: check the [contributing guide](CONTRIBUTING.md) and [issues labeled "good first issue"](https://github.com/fallow-rs/fallow/issues?q=label%3A%22good+first+issue%22).
+[Open an issue](https://github.com/fglogan/genesis-plow/issues) to request a feature or report a bug. PRs welcome: check the [contributing guide](CONTRIBUTING.md) and [issues labeled "good first issue"](https://github.com/fglogan/genesis-plow/issues?q=label%3A%22good+first+issue%22).

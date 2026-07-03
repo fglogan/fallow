@@ -1,10 +1,10 @@
 # Benchmark Methodology
 
-This document describes how fallow's performance benchmarks are structured, how to reproduce them, and how to interpret results.
+This document describes how plow's performance benchmarks are structured, how to reproduce them, and how to interpret results.
 
 ## Overview
 
-Fallow uses two benchmark layers:
+Plow uses two benchmark layers:
 
 1. **Criterion (Rust)**: Microbenchmarks for regression detection in CI. Measures individual pipeline stages and full end-to-end analysis at various project sizes (10, 100, 1000, 5000 files).
 2. **Comparative (Node.js)**: Wall-clock comparisons against knip (unused code), jscpd (duplication), and madge/dpdm (circular dependencies) on synthetic and real-world projects.
@@ -93,11 +93,11 @@ npm run generate:circular  # circular dep fixtures (tiny → xlarge)
 npm run download-fixtures  # preact, fastify, zod, vue-core, svelte, query, vite, next.js
 
 # Run benchmarks (includes knip v6 if installed in benchmarks/knip6/)
-npm run bench              # fallow vs knip v5 + v6 (all fixtures)
+npm run bench              # plow vs knip v5 + v6 (all fixtures)
 npm run bench:synthetic    # synthetic only
 npm run bench:real-world   # real-world only
-npm run bench:dupes        # fallow dupes vs jscpd (all fixtures)
-npm run bench:circular     # fallow vs madge + dpdm (all fixtures)
+npm run bench:dupes        # plow dupes vs jscpd (all fixtures)
+npm run bench:circular     # plow vs madge + dpdm (all fixtures)
 
 # Customize runs
 npm run bench -- --runs=10 --warmup=3
@@ -117,13 +117,13 @@ Benchmark scripts print:
 - **Max** indicates worst-case (GC pauses for JS tools, cold OS caches).
 - **Cache speedup** shows the ratio of cold-to-warm median times. Values > 1.5x indicate significant parsing savings from caching.
 - **Peak RSS** measures maximum memory usage. Lower is better for CI environments with constrained memory.
-- **Speedup** is `competitor_median / fallow_median`. Values > 1.0x mean fallow is faster.
+- **Speedup** is `competitor_median / plow_median`. Values > 1.0x mean plow is faster.
 
 ## Hardware Considerations
 
 Benchmark results vary with hardware. Key factors:
 
-- **CPU core count**: fallow uses rayon for parallel parsing. More cores = faster cold cache analysis. Single-threaded tools (knip) don't benefit.
+- **CPU core count**: plow uses rayon for parallel parsing. More cores = faster cold cache analysis. Single-threaded tools (knip) don't benefit.
 - **Disk speed**: SSD vs HDD significantly affects file discovery and first-read performance.
 - **Available RAM**: Large projects (5000+ files) with duplication detection can use several hundred MB.
 
@@ -131,30 +131,30 @@ When publishing results, always include the environment info printed by the benc
 
 ## Reference Results (2026-06-19)
 
-Environment: Apple M5 (10 cores), 32 GB RAM, macOS 26.4, Node v22.22.1, rustc 1.95.0. fallow 2.100.0, knip 5.87.0, knip 6.6.1, jscpd 5.0.10, madge 8.0.0, dpdm 4.0.1. Real-world fixtures, cold runs, median of 5, 2 warmup.
+Environment: Apple M5 (10 cores), 32 GB RAM, macOS 26.4, Node v22.22.1, rustc 1.95.0. plow 2.100.0, knip 5.87.0, knip 6.6.1, jscpd 5.0.10, madge 8.0.0, dpdm 4.0.1. Real-world fixtures, cold runs, median of 5, 2 warmup.
 
-### Dead code: fallow dead-code vs knip
+### Dead code: plow dead-code vs knip
 
-| Project | Files | fallow | knip v5 | knip v6 | vs v5 | vs v6 | fallow RSS | knip v6 RSS |
+| Project | Files | plow | knip v5 | knip v6 | vs v5 | vs v6 | plow RSS | knip v6 RSS |
 |---------|------:|-------:|--------:|--------:|------:|------:|-----------:|------------:|
 | astro | 2,859 | 3.76s | 3.91s | 1.21s | knip 1.0x | knip 3.1x | 873.1 MB | 371.4 MB |
-| fastify | 286 | 64ms | 903ms | 205ms | fallow 13.7x | fallow 3.2x | 53.5 MB | 105.3 MB |
+| fastify | 286 | 64ms | 903ms | 205ms | plow 13.7x | plow 3.2x | 53.5 MB | 105.3 MB |
 | next.js | 20,558 | 2.95s | errors* | errors* | n/a | n/a | 513.1 MB | n/a |
-| preact | 244 | 74ms | 822ms | 2.01s | fallow 10.3x | fallow 27.1x | 40.5 MB | 107.3 MB |
-| TanStack/query | 901 | 560ms | 2.86s | 1.04s | fallow 4.9x | fallow 1.9x | 228.4 MB | 363.6 MB |
-| svelte | 3,337 | 611ms | 2.00s | 632ms | fallow 2.6x | fallow 1.0x | 128.4 MB | 233.3 MB |
-| TypeScript | 38,146 | 2.22s | 2.84s | 736ms | fallow 1.2x | knip 3.0x | 494.2 MB | 339.2 MB |
+| preact | 244 | 74ms | 822ms | 2.01s | plow 10.3x | plow 27.1x | 40.5 MB | 107.3 MB |
+| TanStack/query | 901 | 560ms | 2.86s | 1.04s | plow 4.9x | plow 1.9x | 228.4 MB | 363.6 MB |
+| svelte | 3,337 | 611ms | 2.00s | 632ms | plow 2.6x | plow 1.0x | 128.4 MB | 233.3 MB |
+| TypeScript | 38,146 | 2.22s | 2.84s | 736ms | plow 1.2x | knip 3.0x | 494.2 MB | 339.2 MB |
 | vite | 1,420 | 595ms | errors* | errors* | n/a | n/a | 102.8 MB | n/a |
 | vue/core | 522 | 138ms | errors* | errors* | n/a | n/a | 71.7 MB | n/a |
-| zod | 174 | 47ms | 614ms | 279ms | fallow 13.0x | fallow 5.9x | 39.1 MB | 160.2 MB |
+| zod | 174 | 47ms | 614ms | 279ms | plow 13.0x | plow 5.9x | 39.1 MB | 160.2 MB |
 
-\* knip (both v5 and v6) exits without valid output on next.js, vite, and vue/core: it fails loading those projects' own config files (jest.config.js, a BOM-prefixed config, and a nested vite.config.ts). fallow analyzes all three. fallow numbers are cold; warm (cached) runs are faster again.
+\* knip (both v5 and v6) exits without valid output on next.js, vite, and vue/core: it fails loading those projects' own config files (jest.config.js, a BOM-prefixed config, and a nested vite.config.ts). plow analyzes all three. plow numbers are cold; warm (cached) runs are faster again.
 
-### Duplication: fallow dupes vs jscpd
+### Duplication: plow dupes vs jscpd
 
-jscpd's Rust rewrite (5.x) is faster than fallow for raw duplication scanning on every project here. fallow's duplication checker runs inside the broader audit flow (dead code, dependencies, complexity, CSS, framework, security) rather than as a standalone scanner.
+jscpd's Rust rewrite (5.x) is faster than plow for raw duplication scanning on every project here. plow's duplication checker runs inside the broader audit flow (dead code, dependencies, complexity, CSS, framework, security) rather than as a standalone scanner.
 
-| Project | Files | fallow | jscpd | Speedup | fallow RSS | jscpd RSS |
+| Project | Files | plow | jscpd | Speedup | plow RSS | jscpd RSS |
 |---------|------:|-------:|------:|--------:|-----------:|----------:|
 | astro | 2,859 | 549ms | 189ms | jscpd 2.9x | 199.5 MB | 245.6 MB |
 | fastify | 286 | 90ms | 64ms | jscpd 1.4x | 105.3 MB | 95.3 MB |
@@ -167,9 +167,9 @@ jscpd's Rust rewrite (5.x) is faster than fallow for raw duplication scanning on
 | vue/core | 522 | 109ms | 78ms | jscpd 1.4x | 149.1 MB | 143.1 MB |
 | zod | 174 | 54ms | 53ms | jscpd 1.0x | 62.5 MB | 69.5 MB |
 
-### Circular dependencies: fallow dead-code --circular-deps vs madge/dpdm
+### Circular dependencies: plow dead-code --circular-deps vs madge/dpdm
 
-| Project | Files | fallow | cycles | madge | vs madge | dpdm | vs dpdm | fallow RSS |
+| Project | Files | plow | cycles | madge | vs madge | dpdm | vs dpdm | plow RSS |
 |---------|------:|-------:|-------:|------:|---------:|-----:|--------:|-----------:|
 | astro | 2,859 | 3.81s | 42 | 170ms | 0.0x | 138ms | 0.0x | 842.8 MB |
 | fastify | 286 | 97ms | 20 | 224ms | 2.3x | 165ms | 1.7x | 50.7 MB |
@@ -182,15 +182,15 @@ jscpd's Rust rewrite (5.x) is faster than fallow for raw duplication scanning on
 | vue/core | 522 | 137ms | 58 | 173ms | 1.3x | 145ms | 1.1x | 72.6 MB |
 | zod | 174 | 43ms | 0 | 532ms | 12.4x | 192ms | 4.5x | 38.4 MB |
 
-Note: fallow runs a full analysis pipeline (discovery, parsing, graph building, SCC detection) while madge/dpdm only build an import dependency graph, so this is not a like-for-like comparison. On large monorepos fallow's pipeline overhead dominates; on small-to-medium projects and on TypeScript (vs madge) fallow wins. dpdm reports `?` for cycle counts on these projects, indicating incomplete detection, so its timings are not directly comparable.
+Note: plow runs a full analysis pipeline (discovery, parsing, graph building, SCC detection) while madge/dpdm only build an import dependency graph, so this is not a like-for-like comparison. On large monorepos plow's pipeline overhead dominates; on small-to-medium projects and on TypeScript (vs madge) plow wins. dpdm reports `?` for cycle counts on these projects, indicating incomplete detection, so its timings are not directly comparable.
 
 ### Summary ranges
 
 | Comparison | Speed | Memory |
 |:-----------|:------|:-------|
-| fallow vs knip v6 | Mixed: fallow up to 27x faster (small/mid projects); knip faster on astro and TypeScript (around 3x); knip cannot analyze next.js, vite, or vue/core here | Generally less, except astro |
-| fallow vs jscpd 5.x | jscpd 1.0-14.7x faster (its Rust rewrite); fallow does more per pass | Comparable, except TypeScript (fallow much less) |
-| fallow vs madge | fallow faster on small/mid and on TypeScript; madge faster on large monorepos (it does far less) | Mixed |
+| plow vs knip v6 | Mixed: plow up to 27x faster (small/mid projects); knip faster on astro and TypeScript (around 3x); knip cannot analyze next.js, vite, or vue/core here | Generally less, except astro |
+| plow vs jscpd 5.x | jscpd 1.0-14.7x faster (its Rust rewrite); plow does more per pass | Comparable, except TypeScript (plow much less) |
+| plow vs madge | plow faster on small/mid and on TypeScript; madge faster on large monorepos (it does far less) | Mixed |
 
 ## CI Integration
 

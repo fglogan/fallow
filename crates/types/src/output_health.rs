@@ -101,7 +101,7 @@ pub struct CloneSiblingEvidence {
 /// `comment` plus `placement`, and the coverage-leaning actions
 /// (`add-tests`, `increase-coverage`) carry only `note`.
 ///
-/// [`ComplexityViolation`]: ../../fallow-output/src/health_scores.rs
+/// [`ComplexityViolation`]: ../../plow-output/src/health_scores.rs
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HealthFindingAction {
@@ -130,11 +130,11 @@ pub struct HealthFindingAction {
     /// `suppress-line` for
     /// synthetic Angular `<template>` findings on `.html` files, because
     /// line-suppression comments cannot be expressed in HTML; the `comment`
-    /// field carries `<!-- fallow-ignore-file complexity -->` and
+    /// field carries `<!-- plow-ignore-file complexity -->` and
     /// `placement` is `top-of-template`.
     #[serde(rename = "type")]
     pub kind: HealthFindingActionType,
-    /// Whether `fallow fix` can auto-apply this action. Today every health
+    /// Whether `plow fix` can auto-apply this action. Today every health
     /// finding action is manual, but the field is non-singleton so a future
     /// auto-applier (e.g., an LLM-driven `refactor-function` worker) does
     /// not need a schema change.
@@ -147,8 +147,8 @@ pub struct HealthFindingAction {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
     /// The inline comment to insert (e.g.,
-    /// `// fallow-ignore-next-line complexity` or
-    /// `<!-- fallow-ignore-file complexity -->`). Present on
+    /// `// plow-ignore-next-line complexity` or
+    /// `<!-- plow-ignore-file complexity -->`). Present on
     /// `suppress-line` and `suppress-file` action variants.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub comment: Option<String>,
@@ -198,7 +198,7 @@ pub enum HealthFindingActionType {
     /// synthetic Angular `<template>` findings on `.html` files where a
     /// line suppression cannot be expressed.
     SuppressFile,
-    /// Suppress with an inline `// fallow-ignore-next-line complexity`
+    /// Suppress with an inline `// plow-ignore-next-line complexity`
     /// comment above the function or Angular decorator.
     SuppressLine,
 }
@@ -210,14 +210,14 @@ pub enum HealthFindingActionType {
 /// `ownership-drift`) are appended only when `--ownership` is active AND
 /// the corresponding signal fires for the hotspot.
 ///
-/// [`HotspotEntry`]: ../../fallow-output/src/health_scores.rs
+/// [`HotspotEntry`]: ../../plow-output/src/health_scores.rs
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HotspotAction {
     /// Action type identifier.
     #[serde(rename = "type")]
     pub kind: HotspotActionType,
-    /// Whether `fallow fix` can auto-apply this action. Today every
+    /// Whether `plow fix` can auto-apply this action. Today every
     /// hotspot action is manual.
     pub auto_fixable: bool,
     /// Human-readable description of the action.
@@ -286,14 +286,14 @@ pub enum HotspotActionHeuristic {
 /// the target's `evidence.complex_functions` back to the matching
 /// `ComplexityViolation` and read placement from THAT action instead.
 ///
-/// [`RefactoringTarget`]: ../../fallow-output/src/health_targets.rs
+/// [`RefactoringTarget`]: ../../plow-output/src/health_targets.rs
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RefactoringTargetAction {
     /// Action type identifier.
     #[serde(rename = "type")]
     pub kind: RefactoringTargetActionType,
-    /// Whether `fallow fix` can auto-apply this action. Today both
+    /// Whether `plow fix` can auto-apply this action. Today both
     /// variants are manual.
     pub auto_fixable: bool,
     /// Human-readable description of the action. For `apply-refactoring`
@@ -302,7 +302,7 @@ pub struct RefactoringTargetAction {
     pub description: String,
     /// Recommendation category for `apply-refactoring` actions. Mirrors
     /// the parent target's
-    /// [`category`](../../fallow-output/src/health_targets.rs.html)
+    /// [`category`](../../plow-output/src/health_targets.rs.html)
     /// field so consumers can route on the action alone.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
@@ -328,18 +328,18 @@ pub enum RefactoringTargetActionType {
 /// `build_untested_file_actions` emits a two-entry array on every
 /// untested-file item: an `add-tests` primary action (scaffold tests for
 /// the runtime file) and a `suppress-file` action
-/// (`// fallow-ignore-file coverage-gaps`). Both variants share the same
+/// (`// plow-ignore-file coverage-gaps`). Both variants share the same
 /// struct shape; the field that is populated (`note` for `add-tests`,
 /// `comment` for `suppress-file`) depends on the `kind`.
 ///
-/// [`UntestedFile`]: ../../fallow-output/src/health_coverage_gaps.rs
+/// [`UntestedFile`]: ../../plow-output/src/health_coverage_gaps.rs
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UntestedFileAction {
     /// Action type identifier.
     #[serde(rename = "type")]
     pub kind: UntestedFileActionType,
-    /// Whether `fallow fix` can auto-apply this action. Today both
+    /// Whether `plow fix` can auto-apply this action. Today both
     /// variants are manual.
     pub auto_fixable: bool,
     /// Human-readable description of the action.
@@ -349,7 +349,7 @@ pub struct UntestedFileAction {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
     /// The file-level comment to insert. Present on `suppress-file`
-    /// (`// fallow-ignore-file coverage-gaps`). Absent on `add-tests`.
+    /// (`// plow-ignore-file coverage-gaps`). Absent on `add-tests`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub comment: Option<String>,
 }
@@ -373,18 +373,18 @@ pub enum UntestedFileActionType {
 /// `build_untested_export_actions` emits a two-entry array on every
 /// untested-export item: an `add-test-import` primary action (import the
 /// export from a test-reachable module) and a `suppress-file` action
-/// (`// fallow-ignore-file coverage-gaps`). The export-specific variant
+/// (`// plow-ignore-file coverage-gaps`). The export-specific variant
 /// `add-test-import` reflects that a test-reachable reference chain, not
 /// just any test coverage, is what closes the gap.
 ///
-/// [`UntestedExport`]: ../../fallow-output/src/health_coverage_gaps.rs
+/// [`UntestedExport`]: ../../plow-output/src/health_coverage_gaps.rs
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UntestedExportAction {
     /// Action type identifier.
     #[serde(rename = "type")]
     pub kind: UntestedExportActionType,
-    /// Whether `fallow fix` can auto-apply this action. Today both
+    /// Whether `plow fix` can auto-apply this action. Today both
     /// variants are manual.
     pub auto_fixable: bool,
     /// Human-readable description of the action.
@@ -395,7 +395,7 @@ pub struct UntestedExportAction {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
     /// The file-level comment to insert. Present on `suppress-file`
-    /// (`// fallow-ignore-file coverage-gaps`). Absent on
+    /// (`// plow-ignore-file coverage-gaps`). Absent on
     /// `add-test-import`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub comment: Option<String>,

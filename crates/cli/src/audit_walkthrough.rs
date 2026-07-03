@@ -1,10 +1,10 @@
 //! Agent-contract loop (the codiff pattern, graph-extended).
 //!
 //! Closes the steer-the-agent loop. The tool owns the digest + prompt + schema;
-//! the agent owns judgment; fallow post-validates the agent's judgment against
+//! the agent owns judgment; plow post-validates the agent's judgment against
 //! the LIVE graph + diff. The reentry is the `--walkthrough-file` path, exactly
 //! as codiff re-resolves hunk ids against the live diff at validation time, but
-//! fallow's verifier is the deterministic module graph, not a second model.
+//! plow's verifier is the deterministic module graph, not a second model.
 //!
 //! ## LEAD PRINCIPLE: the verifier is the graph, not a second model
 //!
@@ -12,7 +12,7 @@
 //! that cannot hallucinate. Two mechanisms enforce it:
 //!
 //! 1. **Anti-hallucination** (anchoring): every agent judgment MUST cite a
-//!    `signal_id` fallow emitted.
+//!    `signal_id` plow emitted.
 //!    [`DecisionSurface::accept_signal_id`](crate::audit_decision_surface::DecisionSurface::accept_signal_id)
 //!    is the allowlist; a judgment whose id was never emitted is REJECTED. The
 //!    agent proposes; the graph disposes.
@@ -32,11 +32,11 @@
 //! agent as untrusted: this loop is injection-resistant because the trusted
 //! surface is the graph, and the untrusted surface is fenced.
 
-pub use fallow_output::{
+pub use plow_output::{
     AcceptedJudgment, AgentWalkthrough, ChangeAnchor, DirectionUnit, INJECTION_NOTE,
     RejectedJudgment, ReviewDirection, WalkthroughValidation, agent_schema,
 };
-use fallow_output::{FocusMap, RoutingFacts};
+use plow_output::{FocusMap, RoutingFacts};
 use rustc_hash::{FxHashMap, FxHashSet};
 use xxhash_rust::xxh3::xxh3_64;
 
@@ -45,18 +45,18 @@ use crate::audit_decision_surface::DecisionSurface;
 use crate::report::ci::diff_filter::parse_new_hunk_start;
 
 #[cfg(test)]
-use fallow_output::AgentJudgment;
+use plow_output::AgentJudgment;
 
-/// The standing reason a judgment is rejected for citing a `signal_id` fallow
+/// The standing reason a judgment is rejected for citing a `signal_id` plow
 /// never emitted (the anti-hallucination gate).
 const UNANCHORED_REASON: &str = "unanchored-signal-id";
 
 /// The reason a judgment is rejected for citing a `change_anchor` (a `chg:` id)
-/// that fallow did not emit for this changed set (the anti-hallucination gate
+/// that plow did not emit for this changed set (the anti-hallucination gate
 /// for the weaker, region-level anchor).
 const UNKNOWN_CHANGE_ANCHOR_REASON: &str = "unknown-change-anchor";
 
-pub type WalkthroughGuide = fallow_output::StandardWalkthroughGuide;
+pub type WalkthroughGuide = plow_output::StandardWalkthroughGuide;
 
 /// Strip per-line leading/trailing whitespace and join added lines with `\n`, so
 /// a reflow or a whitespace-only edit does not move the content-addressed id.
@@ -276,7 +276,7 @@ fn extract_count(text: &str, marker: &str) -> u32 {
 /// sort first (load-bearing definitions before mechanical churn), then by budget.
 #[allow(
     clippy::implicit_hasher,
-    reason = "fallow standardizes on FxHashMap; fires on the lib target only, so #[expect] is unfulfilled on the bin"
+    reason = "plow standardizes on FxHashMap; fires on the lib target only, so #[expect] is unfulfilled on the bin"
 )]
 #[must_use]
 pub fn build_direction(
@@ -391,7 +391,7 @@ pub fn build_walkthrough_guide(
 #[must_use]
 #[allow(
     clippy::implicit_hasher,
-    reason = "fallow standardizes on FxHashSet; the change-anchor allowlist is always built with the fallow hasher"
+    reason = "plow standardizes on FxHashSet; the change-anchor allowlist is always built with the plow hasher"
 )]
 pub fn validate_walkthrough(
     agent: &AgentWalkthrough,
@@ -614,7 +614,7 @@ mod tests {
                     concern: None,
                 },
                 AgentJudgment {
-                    // A fabricated id fallow never emitted.
+                    // A fabricated id plow never emitted.
                     signal_id: "sig:deadbeefdeadbeef".to_string(),
                     change_anchor: String::new(),
                     framing: "hallucinated decision with no graph anchor".to_string(),

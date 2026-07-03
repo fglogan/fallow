@@ -14,7 +14,7 @@ describe("decodePngDataUrl", () => {
 });
 
 describe("shotPath", () => {
-  it("places shots under .fallow-review/shots", () => {
-    expect(shotPath("/repo", 42)).toBe("/repo/.fallow-review/shots/shot-42.png");
+  it("places shots under .plow-review/shots", () => {
+    expect(shotPath("/repo", 42)).toBe("/repo/.plow-review/shots/shot-42.png");
   });
 });

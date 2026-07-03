@@ -2,18 +2,18 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_output::{
+use plow_output::{
     CheckOutput, DupesOutput, FeatureFlagFinding, FeatureFlagsOutput as FeatureFlagsOutputContract,
     GroupByMode, HealthGroup, HealthGrouping, HealthJsonOutputInput, HealthOutputInput,
     HealthReport, RootEnvelopeMode, health_meta,
 };
-use fallow_types::output::NextStep;
-use fallow_types::output_dead_code::{
+use plow_types::output::NextStep;
+use plow_types::output_dead_code::{
     BoundaryCallViolationFinding, BoundaryCoverageViolationFinding, BoundaryViolationFinding,
     CircularDependencyFinding,
 };
-use fallow_types::results::AnalysisResults;
-use fallow_types::workspace::WorkspaceDiagnostic;
+use plow_types::results::AnalysisResults;
+use plow_types::workspace::WorkspaceDiagnostic;
 use rustc_hash::FxHashSet;
 
 use crate::{AuditAttribution, AuditSummary, AuditVerdict};
@@ -37,16 +37,16 @@ pub type DuplicationOutput = DupesOutput<DupesReportPayload, DuplicationGroup>;
 pub type FeatureFlagsOutput = FeatureFlagsOutputContract;
 
 /// Concrete export trace output returned by typed programmatic runs.
-pub type TraceExportOutput = fallow_types::trace::ExportTrace;
+pub type TraceExportOutput = plow_types::trace::ExportTrace;
 
 /// Concrete file trace output returned by typed programmatic runs.
-pub type TraceFileOutput = fallow_types::trace::FileTrace;
+pub type TraceFileOutput = plow_types::trace::FileTrace;
 
 /// Concrete dependency trace output returned by typed programmatic runs.
-pub type TraceDependencyOutput = fallow_types::trace::DependencyTrace;
+pub type TraceDependencyOutput = plow_types::trace::DependencyTrace;
 
 /// Concrete duplicate-code trace output returned by typed programmatic runs.
-pub type TraceCloneOutput = fallow_types::trace::CloneTrace;
+pub type TraceCloneOutput = plow_types::trace::CloneTrace;
 
 /// Inputs for serializing health JSON output through the API boundary.
 pub struct HealthJsonReportInput<'a> {
@@ -336,7 +336,7 @@ pub struct AuditProgrammaticKeySnapshot {
 /// Typed programmatic decision-surface output before JSON serialization.
 #[derive(Debug, Clone)]
 pub struct DecisionSurfaceProgrammaticOutput {
-    pub surface: fallow_output::DecisionSurface,
+    pub surface: plow_output::DecisionSurface,
     pub elapsed: std::time::Duration,
     pub envelope_mode: RootEnvelopeMode,
     pub telemetry_analysis_run_id: Option<String>,
@@ -351,7 +351,7 @@ pub fn serialize_health_report_json(
     input: HealthJsonReportInput<'_>,
 ) -> Result<serde_json::Value, serde_json::Error> {
     let root_prefix = format!("{}/", input.root.display());
-    fallow_output::serialize_health_json_output(HealthJsonOutputInput {
+    plow_output::serialize_health_json_output(HealthJsonOutputInput {
         output: HealthOutputInput {
             schema_version: HEALTH_SCHEMA_VERSION,
             version: env!("CARGO_PKG_VERSION").to_string(),

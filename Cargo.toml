@@ -6,22 +6,22 @@ members = ["crates/*"]
 version = "2.104.0"
 edition = "2024"
 rust-version = "1.92"
-license = "MIT"
-repository = "https://github.com/fallow-rs/fallow"
-homepage = "https://docs.fallow.tools"
-documentation = "https://docs.fallow.tools"
+license = "LicenseRef-Tempext-Commercial"
+repository = "https://github.com/fglogan/genesis-plow"
+homepage = "https://docs.genesis-plow.dev"
+documentation = "https://docs.genesis-plow.dev"
 keywords = ["typescript", "javascript", "lint", "static-analysis", "code-quality"]
 categories = ["command-line-utilities", "development-tools"]
 
 [workspace.dependencies]
-fallow-api = { version = "2.104.0", path = "crates/api" }
-fallow-core = { version = "2.104.0", path = "crates/core" }
-fallow-config = { version = "2.104.0", path = "crates/config" }
-fallow-extract = { version = "2.104.0", path = "crates/extract" }
-fallow-engine = { version = "2.104.0", path = "crates/engine" }
-fallow-graph = { version = "2.104.0", path = "crates/graph" }
-fallow-output = { version = "2.104.0", path = "crates/output" }
-fallow-types = { version = "2.104.0", path = "crates/types" }
+plow-api = { version = "2.104.0", path = "crates/api" }
+plow-core = { version = "2.104.0", path = "crates/core" }
+plow-config = { version = "2.104.0", path = "crates/config" }
+plow-extract = { version = "2.104.0", path = "crates/extract" }
+plow-engine = { version = "2.104.0", path = "crates/engine" }
+plow-graph = { version = "2.104.0", path = "crates/graph" }
+plow-output = { version = "2.104.0", path = "crates/output" }
+plow-types = { version = "2.104.0", path = "crates/types" }
 
 # Parsing & analysis
 oxc_allocator = "0.126"
@@ -36,7 +36,7 @@ oxc_syntax = "0.126"
 oxc_coverage_instrument = "0.9.0"
 # CSS AST parser (browser-grade, built on Mozilla cssparser/selectors). Pinned
 # exact because it has no stable release line and pre-release semver matching is
-# brittle. Used by fallow-extract for CSS class/import extraction and analytics.
+# brittle. Used by plow-extract for CSS class/import extraction and analytics.
 lightningcss = { version = "=1.0.0-alpha.71", default-features = false, features = [
     "visitor",
 ] }
@@ -158,9 +158,9 @@ unused_peekable = "warn"               # Catch Peekable iterators that never pee
 
 # Process-spawn ban (method list lives in .clippy.toml). Allowed workspace-wide
 # so the CLI / MCP crates can spawn git worktrees, the coverage sidecar, and
-# subprocesses off the analysis path; fallow-core/extract/graph re-deny it at
+# subprocesses off the analysis path; plow-core/extract/graph re-deny it at
 # their crate root to enforce that the analysis path spawns only `git` via
-# fallow_core::spawn.
+# plow_core::spawn.
 disallowed_methods = "allow"
 
 # Allow common pedantic false positives

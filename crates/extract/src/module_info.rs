@@ -1,5 +1,5 @@
 use crate::{ExportInfo, ImportInfo, ModuleInfo};
-use fallow_types::discover::FileId;
+use plow_types::discover::FileId;
 
 /// Build the shared empty-module baseline used by non-JS extractors.
 ///
@@ -34,7 +34,7 @@ pub fn non_js_module_info(
         unused_import_bindings: Vec::new(),
         type_referenced_import_bindings: Vec::new(),
         value_referenced_import_bindings: Vec::new(),
-        line_offsets: fallow_types::extract::compute_line_offsets(source),
+        line_offsets: plow_types::extract::compute_line_offsets(source),
         complexity: Vec::new(),
         flag_uses: Vec::new(),
         class_heritage: Vec::new(),

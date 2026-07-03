@@ -5,7 +5,7 @@ out/
 release/
 test-results/
 playwright-report/
-.fallow-review/
+.plow-review/
 *.log
 fixtures/sample-app/node_modules/
 fixtures/sample-app/dist/

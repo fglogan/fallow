@@ -1,11 +1,11 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "Fallow Review config",
+  "title": "Plow Review config",
   "type": "object",
   "additionalProperties": false,
   "properties": {
     "$schema": { "type": "string" },
-    "fallowBin": { "type": ["string", "null"], "description": "Path to the fallow binary." },
+    "plowBin": { "type": ["string", "null"], "description": "Path to the plow binary." },
     "defaultUrl": { "type": "string", "description": "Default URL for live-app / screenshot." },
     "inspectPort": { "type": "number", "description": "Localhost port for the inspector bridge." },
     "agentBackend": {

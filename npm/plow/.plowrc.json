@@ -1,0 +1,15 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fglogan/genesis-plow/main/schema.json",
+  "entry": [
+    "bin/plow",
+    "bin/plow-lsp",
+    "bin/plow-mcp",
+    "scripts/platform-package.js",
+    "scripts/run-binary.js",
+    "scripts/verify-binary.js"
+  ],
+  "ignorePatterns": [
+    "skills/**",
+    "types/**"
+  ]
+}

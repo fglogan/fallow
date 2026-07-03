@@ -5,13 +5,13 @@ expression: json_str
 [
   {
     "type": "issue",
-    "check_name": "fallow/high-complexity",
+    "check_name": "plow/high-complexity",
     "description": "'processData' has cyclomatic complexity 25 (threshold: 20) and cognitive complexity 30 (threshold: 15)",
     "categories": [
       "Complexity"
     ],
     "severity": "major",
-    "fingerprint": "d4ee093a5fdb5d49",
+    "fingerprint": "5e1e11ec6d9fd112",
     "location": {
       "path": "src/complex.ts",
       "lines": {
@@ -21,13 +21,13 @@ expression: json_str
   },
   {
     "type": "issue",
-    "check_name": "fallow/runtime-review-required",
+    "check_name": "plow/runtime-review-required",
     "description": "'coldPath' runtime coverage verdict: review required (0 invocations)",
     "categories": [
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "8ad72b7a0b4f6fb2",
+    "fingerprint": "11693d66618a1875",
     "location": {
       "path": "src/cold.ts",
       "lines": {
@@ -37,13 +37,13 @@ expression: json_str
   },
   {
     "type": "issue",
-    "check_name": "fallow/runtime-coverage-unavailable",
+    "check_name": "plow/runtime-coverage-unavailable",
     "description": "'lateBound' runtime coverage verdict: coverage unavailable (untracked)",
     "categories": [
       "Bug Risk"
     ],
     "severity": "minor",
-    "fingerprint": "a4bc61bb1ba59529",
+    "fingerprint": "43cd8b63515108da",
     "location": {
       "path": "src/unknown.ts",
       "lines": {

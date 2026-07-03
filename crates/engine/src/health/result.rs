@@ -2,10 +2,10 @@
 
 use std::time::Duration;
 
-use fallow_config::ResolvedConfig;
-use fallow_output::{HealthGrouping, HealthReport, HealthTimings};
-use fallow_types::discover::DiscoveredFile;
-use fallow_types::workspace::WorkspaceDiagnostic;
+use plow_config::ResolvedConfig;
+use plow_output::{HealthGrouping, HealthReport, HealthTimings};
+use plow_types::discover::DiscoveredFile;
+use plow_types::workspace::WorkspaceDiagnostic;
 
 use crate::results::HealthAnalysisResult;
 
@@ -27,7 +27,7 @@ struct HealthReportSideEffectsInput<'a> {
     /// The per-file extraction output (always present, graph-independent). Used by
     /// the `--css` path to derive the CSS-in-JS design-token blast-radius from
     /// imports + member accesses without a resolved graph (Phase 3d).
-    modules: &'a [fallow_types::extract::ModuleInfo],
+    modules: &'a [plow_types::extract::ModuleInfo],
     config: &'a ResolvedConfig,
     ignore_set: &'a globset::GlobSet,
     changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
@@ -38,7 +38,7 @@ pub(super) struct HealthFinalizeInput<'a, R> {
     pub(super) opts: &'a HealthExecutionOptions<'a>,
     pub(super) config: ResolvedConfig,
     pub(super) files: &'a [DiscoveredFile],
-    pub(super) modules: &'a [fallow_types::extract::ModuleInfo],
+    pub(super) modules: &'a [plow_types::extract::ModuleInfo],
     pub(super) scope: HealthScope<'a, R>,
     pub(super) output: HealthOutputParts,
     pub(super) elapsed: Duration,

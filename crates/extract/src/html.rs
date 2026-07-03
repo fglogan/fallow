@@ -18,7 +18,7 @@ use crate::{
     AngularTemplateMemberAccessFact, ImportInfo, ImportedName, MemberAccess, ModuleInfo,
     SemanticFact,
 };
-use fallow_types::discover::FileId;
+use plow_types::discover::FileId;
 
 /// Regex to match HTML comments (`<!-- ... -->`) for stripping before extraction.
 static HTML_COMMENT_RE: LazyLock<regex::Regex> =
@@ -157,10 +157,10 @@ struct HtmlModuleParts {
     imports: Vec<ImportInfo>,
     member_accesses: Vec<MemberAccess>,
     semantic_facts: Vec<SemanticFact>,
-    security_sinks: Vec<fallow_types::extract::SinkSite>,
+    security_sinks: Vec<plow_types::extract::SinkSite>,
     angular_used_selectors: Vec<String>,
     has_dynamic_component_render: bool,
-    complexity: Vec<fallow_types::extract::FunctionComplexity>,
+    complexity: Vec<plow_types::extract::FunctionComplexity>,
 }
 
 /// Collect the asset-reference imports, Angular template member accesses /
@@ -276,7 +276,7 @@ fn html_module_info(
         unused_import_bindings: Vec::new(),
         type_referenced_import_bindings: Vec::new(),
         value_referenced_import_bindings: Vec::new(),
-        line_offsets: fallow_types::extract::compute_line_offsets(source),
+        line_offsets: plow_types::extract::compute_line_offsets(source),
         complexity,
         flag_uses: Vec::new(),
         class_heritage: vec![],
@@ -756,7 +756,7 @@ mod tests {
     fn suppression_comments_extracted() {
         let info = parse_html_to_module(
             FileId(0),
-            "<!-- fallow-ignore-file -->\n<script src=\"./entry.js\"></script>",
+            "<!-- plow-ignore-file -->\n<script src=\"./entry.js\"></script>",
             0,
         );
         assert_eq!(info.imports.len(), 1);

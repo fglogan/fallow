@@ -1,6 +1,6 @@
 {"version":3,"term":{"cols":176,"rows":44,"type":"xterm-ghostty","version":"ghostty 1.3.1","theme":{"fg":"#c6d0f5","bg":"#303446","palette":"#51576d:#e78284:#a6d189:#e5c890:#8caaee:#f4b8e4:#81c8be:#a5adce:#626880:#e67172:#8ec772:#d9ba73:#7b9ef0:#f2a4db:#5abfb5:#b5bfe2"}},"timestamp":1774254652,"env":{"SHELL":"/bin/zsh"}}
 [0.223, "o", "\u001b[1m\u001b[7m%\u001b[27m\u001b[1m\u001b[0m                                                                                                                                                                               \r \r"]
-[0.023, "o", "\r\u001b[0m\u001b[27m\u001b[24m\u001b[J\r\n\u001b[1;36mfallow/assets/demo-project\u001b[0m on \u001b[1;35m🌱 main\u001b[0m \u001b[1;31m[$✘!?]\u001b[0m via \u001b[1;32m⬢ v22.21.1 \u001b[0mon \u001b[1;34m☁️  bartwaardenburg@gmail.com\u001b[0m \r\n➜ \u001b[K\u001b[?2004h"]
+[0.023, "o", "\r\u001b[0m\u001b[27m\u001b[24m\u001b[J\r\n\u001b[1;36mplow/assets/demo-project\u001b[0m on \u001b[1;35m🌱 main\u001b[0m \u001b[1;31m[$✘!?]\u001b[0m via \u001b[1;32m⬢ v22.21.1 \u001b[0mon \u001b[1;34m☁️  bartwaardenburg@gmail.com\u001b[0m \r\n➜ \u001b[K\u001b[?2004h"]
 [4.881, "o", "f"]
 [0.007, "o", "\b\u001b[1m\u001b[31mf\u001b[0m\u001b[39m"]
 [0.001, "o", "\b\u001b[1m\u001b[31mf\u001b[0m\u001b[39m\u001b[90mallow check --quiet\u001b[39m\u001b[19D"]
@@ -20,6 +20,6 @@
 [0.000, "o", "    \u001b[2m:5\u001b[0m \u001b[1mStatus.Archived\u001b[0m\r\n    \u001b[2m:6\u001b[0m \u001b[1mStatus.Suspended\u001b[0m\r\n\r\n\u001b[31m●\u001b[0m \u001b[1;31mCircular dependencies (1)\u001b[0m\r\n  src/services/auth.ts → src/services/user.ts → src/services/auth.ts\r\n"]
 [0.000, "o", "\r\n"]
 [0.001, "o", "\u001b[1m\u001b[7m%\u001b[27m\u001b[1m\u001b[0m                                                                                                                                                                               \r \r"]
-[0.038, "o", "\r\u001b[0m\u001b[27m\u001b[24m\u001b[J\r\n\u001b[1;36mfallow/assets/demo-project\u001b[0m on \u001b[1;35m🌱 main\u001b[0m \u001b[1;31m[$✘!?]\u001b[0m via \u001b[1;32m⬢ v22.21.1 \u001b[0mon \u001b[1;34m☁️  bartwaardenburg@gmail.com\u001b[0m \r\n✗ \u001b[K\u001b[?2004h"]
+[0.038, "o", "\r\u001b[0m\u001b[27m\u001b[24m\u001b[J\r\n\u001b[1;36mplow/assets/demo-project\u001b[0m on \u001b[1;35m🌱 main\u001b[0m \u001b[1;31m[$✘!?]\u001b[0m via \u001b[1;32m⬢ v22.21.1 \u001b[0mon \u001b[1;34m☁️  bartwaardenburg@gmail.com\u001b[0m \r\n✗ \u001b[K\u001b[?2004h"]
 [7.985, "o", "\u001b[?2004l\r\r\n"]
 [0.013, "x", "1"]

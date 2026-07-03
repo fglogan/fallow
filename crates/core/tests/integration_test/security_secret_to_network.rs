@@ -11,8 +11,8 @@
 //! Findings are CANDIDATES for downstream agent verification, NOT verified
 //! vulnerabilities.
 
-use fallow_config::{SecurityCategories, SecurityConfig, Severity};
-use fallow_core::results::{AnalysisResults, SecurityFinding};
+use plow_config::{SecurityCategories, SecurityConfig, Severity};
+use plow_core::results::{AnalysisResults, SecurityFinding};
 
 use super::common::{create_config_with_rules, fixture_path};
 
@@ -32,7 +32,7 @@ fn analyze_included() -> AnalysisResults {
         }),
         request_receivers: Vec::new(),
     };
-    fallow_core::analyze(&config).expect("analysis should succeed")
+    plow_core::analyze(&config).expect("analysis should succeed")
 }
 
 /// Analyze the fixture with the rule on but WITHOUT the include (so the
@@ -42,7 +42,7 @@ fn analyze_without_include() -> AnalysisResults {
     let config = create_config_with_rules(root, |rules| {
         rules.security_sink = Severity::Warn;
     });
-    fallow_core::analyze(&config).expect("analysis should succeed")
+    plow_core::analyze(&config).expect("analysis should succeed")
 }
 
 fn secret_to_network_on<'a>(results: &'a AnalysisResults, suffix: &str) -> &'a SecurityFinding {

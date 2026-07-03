@@ -3,8 +3,8 @@
 use std::ops::Range;
 use std::path::PathBuf;
 
-use fallow_types::discover::FileId;
-use fallow_types::extract::{ExportName, VisibilityTag};
+use plow_types::discover::FileId;
+use plow_types::extract::{ExportName, VisibilityTag};
 
 /// A single module in the graph.
 ///
@@ -177,12 +177,12 @@ pub struct ExportSymbol {
     pub references: Vec<SymbolReference>,
     /// Members of this export (enum members, class members).
     ///
-    /// `MemberInfo` is a shared `fallow-types` struct whose serde shape is
+    /// `MemberInfo` is a shared `plow-types` struct whose serde shape is
     /// serialize-only (its `span` uses `serialize_with` with no matching
     /// deserializer), so it cannot round-trip through a plain derive. The cache
     /// routes it through a dedicated lossless mirror in `crate::cache`.
     #[serde(with = "crate::cache::member_serde")]
-    pub members: Vec<fallow_types::extract::MemberInfo>,
+    pub members: Vec<plow_types::extract::MemberInfo>,
 }
 
 /// A reference to an export from another file.

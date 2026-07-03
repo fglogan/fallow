@@ -1,6 +1,6 @@
-//! Typed analysis engine boundary for fallow consumers.
+//! Typed analysis engine boundary for plow consumers.
 //!
-//! `fallow-core` remains the internal orchestration backend. This crate owns
+//! `plow-core` remains the internal orchestration backend. This crate owns
 //! the typed boundary that editor, API, and embedding surfaces can depend on
 //! without calling deprecated core entry points directly. Public modules should
 //! expose owned engine runners, typed result structs, or narrowly scoped aliases
@@ -84,8 +84,6 @@ pub use duplicates::{
     source_token_kinds_equivalent,
 };
 pub use error::emit_error;
-use fallow_types::extract::ModuleInfo;
-use fallow_types::results::AnalysisResults;
 pub use flags::{
     FeatureFlagsAnalysis, analyze_feature_flags, builtin_env_prefixes, builtin_sdk_providers,
 };
@@ -108,6 +106,8 @@ pub use module_graph::{
     impact_closure_for_changed_paths, internal_consumers_for_changed_paths, module_value_exports,
     partition_order_for_changed_paths,
 };
+use plow_types::extract::ModuleInfo;
+use plow_types::results::AnalysisResults;
 pub use plugins::registry::{
     PluginRegexValidationError, builtin_plugin_names, format_plugin_regex_errors,
 };
@@ -203,8 +203,8 @@ pub fn health_shared_parse_data_from_artifacts(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_config::ProductionAnalysis;
-    use fallow_types::output_format::OutputFormat;
+    use plow_config::ProductionAnalysis;
+    use plow_types::output_format::OutputFormat;
 
     #[test]
     fn engine_error_displays_message() {
@@ -479,11 +479,11 @@ mod tests {
         .expect("project config loads");
         let trace = crate::trace_symbol_chain(
             &project_config.config,
-            fallow_types::trace_chain::SymbolChainQuery {
+            plow_types::trace_chain::SymbolChainQuery {
                 file: "src/util.ts",
                 symbol: "helper",
                 depth: 1,
-                directions: fallow_types::trace_chain::TraceDirections {
+                directions: plow_types::trace_chain::TraceDirections {
                     callers: true,
                     callees: false,
                 },

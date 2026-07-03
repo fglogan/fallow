@@ -1,7 +1,7 @@
 use std::process::ExitCode;
 use std::time::Instant;
 
-use fallow_config::{DuplicatesConfig, OutputFormat};
+use plow_config::{DuplicatesConfig, OutputFormat};
 
 use crate::check::{CheckOptions, CheckResult, IssueFilters, TraceOptions};
 use crate::dupes::{DupesMode, DupesOptions, DupesResult};
@@ -29,7 +29,7 @@ pub struct CombinedOptions<'a> {
     pub fail_on_issues: bool,
     pub sarif_file: Option<&'a std::path::Path>,
     pub changed_since: Option<&'a str>,
-    /// Import churn from a `fallow-churn/v1` file (`--churn-file`) for the
+    /// Import churn from a `plow-churn/v1` file (`--churn-file`) for the
     /// health hotspots / ownership pass instead of `git log`. Resolved relative
     /// to `root` inside the health pipeline.
     pub churn_file: Option<&'a std::path::Path>,
@@ -300,7 +300,7 @@ fn load_combined_dupes_config(opts: &CombinedOptions<'_>) -> Result<DuplicatesCo
                 .or_else(|| opts.production.then_some(true)),
             quiet: opts.quiet,
         },
-        fallow_config::ProductionAnalysis::Dupes,
+        plow_config::ProductionAnalysis::Dupes,
     )?
     .duplicates)
 }
@@ -355,7 +355,7 @@ fn build_combined_dupes_options<'a>(
 fn shared_dupes_files(
     opts: &CombinedOptions<'_>,
     check_result: Option<&CheckResult>,
-) -> Option<Vec<fallow_engine::DiscoveredFile>> {
+) -> Option<Vec<plow_engine::DiscoveredFile>> {
     let check_production = opts.production_dead_code.unwrap_or(opts.production);
     let health_production = opts.production_health.unwrap_or(opts.production);
     let dupes_production = opts.production_dupes.unwrap_or(opts.production);
@@ -377,9 +377,9 @@ fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
         no_cache: opts.no_cache,
         threads: opts.threads,
         quiet: opts.quiet,
-        thresholds: fallow_engine::HealthThresholdOverrides::default(),
+        thresholds: plow_engine::HealthThresholdOverrides::default(),
         top: None,
-        sort: fallow_engine::HealthSort::Cyclomatic,
+        sort: plow_engine::HealthSort::Cyclomatic,
         production: opts.production_health.unwrap_or(opts.production),
         production_override: opts.production_health,
         changed_since: opts.changed_since,
@@ -403,7 +403,7 @@ fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
         enforce_coverage_gap_gate: false,
         effort: None,
         score: opts.score || opts.trend,
-        gates: fallow_engine::HealthGateOptions::default(),
+        gates: plow_engine::HealthGateOptions::default(),
         since: None,
         min_commits: None,
         explain: opts.explain,
@@ -412,7 +412,7 @@ fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
             .save_snapshot
             .map(|opt| std::path::PathBuf::from(opt.as_deref().unwrap_or_default())),
         trend: opts.trend,
-        coverage_inputs: fallow_engine::HealthCoverageInputs {
+        coverage_inputs: plow_engine::HealthCoverageInputs {
             coverage: opts.coverage,
             coverage_root: opts.coverage_root,
         },

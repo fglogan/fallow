@@ -171,8 +171,8 @@ describe("buildWorkspaceQuickPickItems", () => {
 });
 
 describe("renderWorkspaceStatusBarText", () => {
-  it("shows Fallow: All when unscoped", () => {
-    expect(renderWorkspaceStatusBarText(CLEAR_WORKSPACE_SCOPE)).toBe("$(layers) Fallow: All");
+  it("shows Plow: All when unscoped", () => {
+    expect(renderWorkspaceStatusBarText(CLEAR_WORKSPACE_SCOPE)).toBe("$(layers) Plow: All");
   });
 
   it("shows the package name when scoped", () => {
@@ -208,16 +208,16 @@ describe("clearedScopeToast", () => {
   it("claims whole-project only when the residual scope is truly empty (#906 C4)", () => {
     expect(clearedScopeToast(CLEAR_WORKSPACE_SCOPE)).toContain("Analyzing the whole project");
     expect(clearedScopeToast(CLEAR_WORKSPACE_SCOPE).toLowerCase()).not.toContain(
-      "fallow.workspace setting",
+      "plow.workspace setting",
     );
   });
 
   it("reports the residual setting scope when a pinned workspace setting remains", () => {
-    // Regression for #906 C4: clearing the picker override while `fallow.workspace`
+    // Regression for #906 C4: clearing the picker override while `plow.workspace`
     // is pinned must NOT falsely claim whole-project.
     const toast = clearedScopeToast("pinned-pkg");
     expect(toast).toContain("pinned-pkg");
-    expect(toast).toContain("fallow.workspace setting");
+    expect(toast).toContain("plow.workspace setting");
     expect(toast.toLowerCase()).not.toContain("whole project");
   });
 });

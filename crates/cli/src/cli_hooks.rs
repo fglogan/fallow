@@ -18,7 +18,7 @@ pub enum HooksCli {
     /// Show installed hook state for Git, Claude, and Codex surfaces.
     Status,
 
-    /// Install a fallow-managed hook.
+    /// Install a plow-managed hook.
     Install {
         /// Hook surface to install.
         #[arg(long, value_enum)]
@@ -49,7 +49,7 @@ pub enum HooksCli {
         gitignore_claude: bool,
     },
 
-    /// Remove a fallow-managed hook.
+    /// Remove a plow-managed hook.
     Uninstall {
         /// Hook surface to remove.
         #[arg(long, value_enum)]
@@ -76,7 +76,7 @@ pub enum HooksCli {
 pub fn run_hooks_command(
     root: &Path,
     subcommand: HooksCli,
-    output: fallow_config::OutputFormat,
+    output: plow_config::OutputFormat,
 ) -> ExitCode {
     match subcommand {
         HooksCli::Status => setup_hooks::run_hooks_status(root, output),
@@ -85,11 +85,11 @@ pub fn run_hooks_command(
     }
 }
 
-/// Handle `fallow hooks install` for both the git and agent targets.
+/// Handle `plow hooks install` for both the git and agent targets.
 fn run_hooks_install(
     root: &Path,
     install: HooksCli,
-    output: fallow_config::OutputFormat,
+    output: plow_config::OutputFormat,
 ) -> ExitCode {
     let HooksCli::Install {
         target,
@@ -108,7 +108,7 @@ fn run_hooks_install(
         HooksTargetArg::Git => {
             if agent.is_some() || user || gitignore_claude {
                 return emit_error(
-                    "--agent, --user, and --gitignore-claude are only valid with `fallow hooks install --target agent`",
+                    "--agent, --user, and --gitignore-claude are only valid with `plow hooks install --target agent`",
                     2,
                     output,
                 );
@@ -123,7 +123,7 @@ fn run_hooks_install(
         HooksTargetArg::Agent => {
             if branch.is_some() {
                 return emit_error(
-                    "--branch is only valid with `fallow hooks install --target git`",
+                    "--branch is only valid with `plow hooks install --target git`",
                     2,
                     output,
                 );
@@ -138,17 +138,17 @@ fn run_hooks_install(
                     gitignore_claude,
                     uninstall: false,
                 },
-                "fallow hooks install --target agent",
+                "plow hooks install --target agent",
             )
         }
     }
 }
 
-/// Handle `fallow hooks uninstall` for both the git and agent targets.
+/// Handle `plow hooks uninstall` for both the git and agent targets.
 fn run_hooks_uninstall(
     root: &Path,
     uninstall: &HooksCli,
-    output: fallow_config::OutputFormat,
+    output: plow_config::OutputFormat,
 ) -> ExitCode {
     let HooksCli::Uninstall {
         target,
@@ -165,7 +165,7 @@ fn run_hooks_uninstall(
         HooksTargetArg::Git => {
             if agent.is_some() || user {
                 return emit_error(
-                    "--agent and --user are only valid with `fallow hooks uninstall --target agent`",
+                    "--agent and --user are only valid with `plow hooks uninstall --target agent`",
                     2,
                     output,
                 );
@@ -186,7 +186,7 @@ fn run_hooks_uninstall(
                 gitignore_claude: false,
                 uninstall: true,
             },
-            "fallow hooks uninstall --target agent",
+            "plow hooks uninstall --target agent",
         ),
     }
 }

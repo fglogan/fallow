@@ -2,14 +2,14 @@
 
 use crate::RuntimeCoverageReport;
 use crate::root_envelopes::{RootEnvelopeMode, attach_telemetry_meta, serialize_named_json_output};
-use fallow_types::envelope::{ElapsedMs, Meta, ToolVersion};
+use plow_types::envelope::{ElapsedMs, Meta, ToolVersion};
 use serde::Serialize;
 use std::time::Duration;
 
-/// `fallow coverage setup --json` envelope.
+/// `plow coverage setup --json` envelope.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(feature = "schema", schemars(title = "fallow coverage setup --json"))]
+#[cfg_attr(feature = "schema", schemars(title = "plow coverage setup --json"))]
 pub struct CoverageSetupOutput {
     pub schema_version: CoverageSetupSchemaVersion,
     pub framework_detected: CoverageSetupFramework,
@@ -110,7 +110,7 @@ pub enum CoverageAnalyzeSchemaVersion {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
     feature = "schema",
-    schemars(title = "fallow coverage analyze --format json")
+    schemars(title = "plow coverage analyze --format json")
 )]
 pub struct CoverageAnalyzeOutput {
     pub schema_version: CoverageAnalyzeSchemaVersion,
@@ -121,7 +121,7 @@ pub struct CoverageAnalyzeOutput {
     pub meta: Option<Meta>,
 }
 
-/// Serialize the `fallow coverage setup --json` envelope.
+/// Serialize the `plow coverage setup --json` envelope.
 ///
 /// # Errors
 ///
@@ -136,7 +136,7 @@ pub fn serialize_coverage_setup_json_output(
     Ok(value)
 }
 
-/// Build the `fallow coverage analyze --format json` envelope.
+/// Build the `plow coverage analyze --format json` envelope.
 #[must_use]
 pub fn build_coverage_analyze_output(
     report: &RuntimeCoverageReport,
@@ -152,7 +152,7 @@ pub fn build_coverage_analyze_output(
     }
 }
 
-/// Serialize the `fallow coverage analyze --format json` envelope.
+/// Serialize the `plow coverage analyze --format json` envelope.
 ///
 /// `explain_meta` is inserted after typed-envelope serialization because the
 /// existing command metadata is a JSON object shared with docs/schema helpers.

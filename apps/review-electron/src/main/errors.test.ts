@@ -2,12 +2,12 @@ import { describe, it, expect } from "vitest";
 import { describeExecError, describeLoadError, firstLine } from "./errors";
 
 describe("describeExecError", () => {
-  it("gives actionable copy when the fallow binary is missing", () => {
-    const e = Object.assign(new Error("spawn fallow ENOENT"), { code: "ENOENT" });
-    const msg = describeExecError(e, "fallow").message;
+  it("gives actionable copy when the plow binary is missing", () => {
+    const e = Object.assign(new Error("spawn plow ENOENT"), { code: "ENOENT" });
+    const msg = describeExecError(e, "plow").message;
     expect(msg).toContain("Couldn't find");
-    expect(msg).toContain("fallow");
-    expect(msg).toContain("FALLOW_BIN");
+    expect(msg).toContain("plow");
+    expect(msg).toContain("PLOW_BIN");
     expect(msg).not.toContain("ENOENT");
     expect(msg).not.toContain("spawn");
   });
@@ -23,14 +23,14 @@ describe("describeExecError", () => {
       code: 1,
       stderr: "error: bad flag\n  more detail\n",
     });
-    const msg = describeExecError(e, "fallow").message;
+    const msg = describeExecError(e, "plow").message;
     expect(msg).toContain("error: bad flag");
     expect(msg).not.toContain("more detail");
   });
 
   it("reports permission denied", () => {
     const e = Object.assign(new Error("spawn EACCES"), { code: "EACCES" });
-    expect(describeExecError(e, "fallow").message).toContain("permission denied");
+    expect(describeExecError(e, "plow").message).toContain("permission denied");
   });
 });
 

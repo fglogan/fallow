@@ -4,8 +4,8 @@ use super::common::{create_config, fixture_path};
 fn inheritance_propagates_this_accesses_to_children() {
     let root = fixture_path("inheritance-project");
     let mut config = create_config(root);
-    config.rules.unused_class_members = fallow_config::Severity::Error;
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    config.rules.unused_class_members = plow_config::Severity::Error;
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_members: Vec<String> = results
         .unused_class_members
@@ -57,8 +57,8 @@ fn inheritance_propagates_this_accesses_to_children() {
 fn inheritance_and_interface_members_follow_barrel_origins() {
     let root = fixture_path("inheritance-barrel-project");
     let mut config = create_config(root);
-    config.rules.unused_class_members = fallow_config::Severity::Error;
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    config.rules.unused_class_members = plow_config::Severity::Error;
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_members: Vec<String> = results
         .unused_class_members

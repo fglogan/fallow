@@ -64,7 +64,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "type": "suppress-file",
           "auto_fixable": false,
           "description": "Suppress with a file-level comment at the top of the file",
-          "comment": "// fallow-ignore-file unused-file"
+          "comment": "// plow-ignore-file unused-file"
         }
       ]
     }
@@ -88,7 +88,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "type": "suppress-line",
           "auto_fixable": false,
           "description": "Suppress with an inline comment above the line",
-          "comment": "// fallow-ignore-next-line unused-export"
+          "comment": "// plow-ignore-next-line unused-export"
         }
       ]
     }
@@ -112,7 +112,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "type": "suppress-line",
           "auto_fixable": false,
           "description": "Suppress with an inline comment above the line",
-          "comment": "// fallow-ignore-next-line unused-type"
+          "comment": "// plow-ignore-next-line unused-type"
         }
       ]
     }
@@ -133,10 +133,10 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
         {
           "type": "add-to-config",
           "auto_fixable": false,
-          "description": "Add \"lodash\" to ignoreDependencies in fallow config",
+          "description": "Add \"lodash\" to ignoreDependencies in plow config",
           "config_key": "ignoreDependencies",
           "value": "lodash",
-          "value_schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencies/items"
+          "value_schema": "https://raw.githubusercontent.com/fglogan/genesis-plow/main/schema.json#/properties/ignoreDependencies/items"
         }
       ]
     }
@@ -156,10 +156,10 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
         {
           "type": "add-to-config",
           "auto_fixable": false,
-          "description": "Add \"jest\" to ignoreDependencies in fallow config",
+          "description": "Add \"jest\" to ignoreDependencies in plow config",
           "config_key": "ignoreDependencies",
           "value": "jest",
-          "value_schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencies/items"
+          "value_schema": "https://raw.githubusercontent.com/fglogan/genesis-plow/main/schema.json#/properties/ignoreDependencies/items"
         }
       ]
     }
@@ -179,10 +179,10 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
         {
           "type": "add-to-config",
           "auto_fixable": false,
-          "description": "Add \"fsevents\" to ignoreDependencies in fallow config",
+          "description": "Add \"fsevents\" to ignoreDependencies in plow config",
           "config_key": "ignoreDependencies",
           "value": "fsevents",
-          "value_schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencies/items"
+          "value_schema": "https://raw.githubusercontent.com/fglogan/genesis-plow/main/schema.json#/properties/ignoreDependencies/items"
         }
       ]
     }
@@ -205,7 +205,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "type": "suppress-line",
           "auto_fixable": false,
           "description": "Suppress with an inline comment above the line",
-          "comment": "// fallow-ignore-next-line unused-enum-member"
+          "comment": "// plow-ignore-next-line unused-enum-member"
         }
       ]
     }
@@ -229,7 +229,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "type": "suppress-line",
           "auto_fixable": false,
           "description": "Suppress with an inline comment above the line",
-          "comment": "// fallow-ignore-next-line unused-class-member"
+          "comment": "// plow-ignore-next-line unused-class-member"
         }
       ]
     }
@@ -247,7 +247,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "type": "suppress-line",
           "auto_fixable": false,
           "description": "Suppress with an inline comment above the line",
-          "comment": "// fallow-ignore-next-line unused-store-member"
+          "comment": "// plow-ignore-next-line unused-store-member"
         }
       ]
     }
@@ -269,16 +269,16 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
         {
           "type": "add-to-config",
           "auto_fixable": false,
-          "description": "Add \"./missing-module\" to ignoreUnresolvedImports in fallow config",
+          "description": "Add \"./missing-module\" to ignoreUnresolvedImports in plow config",
           "config_key": "ignoreUnresolvedImports",
           "value": "./missing-module",
-          "value_schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreUnresolvedImports/items"
+          "value_schema": "https://raw.githubusercontent.com/fglogan/genesis-plow/main/schema.json#/properties/ignoreUnresolvedImports/items"
         },
         {
           "type": "suppress-line",
           "auto_fixable": false,
           "description": "Suppress with an inline comment above the line",
-          "comment": "// fallow-ignore-next-line unresolved-import"
+          "comment": "// plow-ignore-next-line unresolved-import"
         }
       ]
     }
@@ -303,10 +303,10 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
         {
           "type": "add-to-config",
           "auto_fixable": false,
-          "description": "Add \"chalk\" to ignoreDependencies in fallow config",
+          "description": "Add \"chalk\" to ignoreDependencies in plow config",
           "config_key": "ignoreDependencies",
           "value": "chalk",
-          "value_schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencies/items"
+          "value_schema": "https://raw.githubusercontent.com/fglogan/genesis-plow/main/schema.json#/properties/ignoreDependencies/items"
         }
       ]
     }
@@ -346,7 +346,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
               ]
             }
           ],
-          "value_schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreExports"
+          "value_schema": "https://raw.githubusercontent.com/fglogan/genesis-plow/main/schema.json#/properties/ignoreExports"
         },
         {
           "type": "remove-duplicate",
@@ -358,7 +358,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "type": "suppress-line",
           "auto_fixable": false,
           "description": "Suppress with an inline comment above the line",
-          "comment": "// fallow-ignore-next-line duplicate-export",
+          "comment": "// plow-ignore-next-line duplicate-export",
           "scope": "per-location"
         }
       ]
@@ -379,10 +379,10 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
         {
           "type": "add-to-config",
           "auto_fixable": false,
-          "description": "Add \"zod\" to ignoreDependencies in fallow config",
+          "description": "Add \"zod\" to ignoreDependencies in plow config",
           "config_key": "ignoreDependencies",
           "value": "zod",
-          "value_schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencies/items"
+          "value_schema": "https://raw.githubusercontent.com/fglogan/genesis-plow/main/schema.json#/properties/ignoreDependencies/items"
         }
       ]
     }
@@ -402,10 +402,10 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
         {
           "type": "add-to-config",
           "auto_fixable": false,
-          "description": "Add \"msw\" to ignoreDependencies in fallow config",
+          "description": "Add \"msw\" to ignoreDependencies in plow config",
           "config_key": "ignoreDependencies",
           "value": "msw",
-          "value_schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencies/items"
+          "value_schema": "https://raw.githubusercontent.com/fglogan/genesis-plow/main/schema.json#/properties/ignoreDependencies/items"
         }
       ]
     }
@@ -431,7 +431,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "type": "suppress-line",
           "auto_fixable": false,
           "description": "Suppress with an inline comment above the line",
-          "comment": "// fallow-ignore-next-line circular-dependency"
+          "comment": "// plow-ignore-next-line circular-dependency"
         }
       ]
     }
@@ -454,7 +454,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "type": "suppress-file",
           "auto_fixable": false,
           "description": "Suppress with a file-level comment at the top of this file. One suppression on any member breaks the cycle for every member (see the sibling `files` array).",
-          "comment": "// fallow-ignore-file re-export-cycle"
+          "comment": "// plow-ignore-file re-export-cycle"
         }
       ]
     }
@@ -481,7 +481,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "type": "suppress-line",
           "auto_fixable": false,
           "description": "Suppress with a YAML comment above the line",
-          "comment": "# fallow-ignore-next-line unused-catalog-entry"
+          "comment": "# plow-ignore-next-line unused-catalog-entry"
         }
       ]
     },
@@ -504,7 +504,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "type": "suppress-line",
           "auto_fixable": false,
           "description": "Suppress with a YAML comment above the line",
-          "comment": "# fallow-ignore-next-line unused-catalog-entry"
+          "comment": "# plow-ignore-next-line unused-catalog-entry"
         }
       ]
     }
@@ -525,7 +525,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "type": "suppress-line",
           "auto_fixable": false,
           "description": "Suppress with a YAML comment above the line",
-          "comment": "# fallow-ignore-next-line empty-catalog-group"
+          "comment": "# plow-ignore-next-line empty-catalog-group"
         }
       ]
     }
@@ -558,14 +558,14 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
         {
           "type": "add-to-config",
           "auto_fixable": false,
-          "description": "Suppress this reference via ignoreCatalogReferences in fallow config (use when the catalog edit is intentionally landing in a separate PR or the package is a placeholder).",
+          "description": "Suppress this reference via ignoreCatalogReferences in plow config (use when the catalog edit is intentionally landing in a separate PR or the package is a placeholder).",
           "config_key": "ignoreCatalogReferences",
           "value": {
             "package": "old-react",
             "catalog": "react17",
             "consumer": "packages/app/package.json"
           },
-          "value_schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreCatalogReferences/items"
+          "value_schema": "https://raw.githubusercontent.com/fglogan/genesis-plow/main/schema.json#/properties/ignoreCatalogReferences/items"
         }
       ]
     }
@@ -589,13 +589,13 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
         {
           "type": "add-to-config",
           "auto_fixable": false,
-          "description": "Suppress this override finding via ignoreDependencyOverrides in fallow config (use for CVE-fix overrides that target a purely-transitive package).",
+          "description": "Suppress this override finding via ignoreDependencyOverrides in plow config (use for CVE-fix overrides that target a purely-transitive package).",
           "config_key": "ignoreDependencyOverrides",
           "value": {
             "package": "axios",
             "source": "pnpm-workspace.yaml"
           },
-          "value_schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencyOverrides/items"
+          "value_schema": "https://raw.githubusercontent.com/fglogan/genesis-plow/main/schema.json#/properties/ignoreDependencyOverrides/items"
         }
       ]
     }
@@ -618,13 +618,13 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
         {
           "type": "add-to-config",
           "auto_fixable": false,
-          "description": "Suppress this override finding via ignoreDependencyOverrides in fallow config (use for CVE-fix overrides that target a purely-transitive package).",
+          "description": "Suppress this override finding via ignoreDependencyOverrides in plow config (use for CVE-fix overrides that target a purely-transitive package).",
           "config_key": "ignoreDependencyOverrides",
           "value": {
             "package": "@types/react@<<18",
             "source": "package.json"
           },
-          "value_schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencyOverrides/items"
+          "value_schema": "https://raw.githubusercontent.com/fglogan/genesis-plow/main/schema.json#/properties/ignoreDependencyOverrides/items"
         }
       ]
     }
@@ -647,7 +647,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "type": "suppress-line",
           "auto_fixable": false,
           "description": "Suppress with an inline comment above the line",
-          "comment": "// fallow-ignore-next-line invalid-client-export"
+          "comment": "// plow-ignore-next-line invalid-client-export"
         }
       ]
     }
@@ -670,7 +670,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "type": "suppress-line",
           "auto_fixable": false,
           "description": "Suppress with an inline comment above the line",
-          "comment": "// fallow-ignore-next-line mixed-client-server-barrel"
+          "comment": "// plow-ignore-next-line mixed-client-server-barrel"
         }
       ]
     }
@@ -694,7 +694,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "type": "suppress-line",
           "auto_fixable": false,
           "description": "Suppress with an inline comment above the line",
-          "comment": "// fallow-ignore-next-line unprovided-inject"
+          "comment": "// plow-ignore-next-line unprovided-inject"
         }
       ]
     }
@@ -713,7 +713,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "type": "suppress-line",
           "auto_fixable": false,
           "description": "Suppress with an inline comment above the line",
-          "comment": "// fallow-ignore-next-line unused-component-input"
+          "comment": "// plow-ignore-next-line unused-component-input"
         }
       ]
     }
@@ -730,7 +730,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "type": "suppress-line",
           "auto_fixable": false,
           "description": "Suppress with an inline comment above the line",
-          "comment": "// fallow-ignore-next-line unused-component-output"
+          "comment": "// plow-ignore-next-line unused-component-output"
         }
       ]
     }
@@ -753,7 +753,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "type": "suppress-line",
           "auto_fixable": false,
           "description": "Suppress with an inline comment above the line",
-          "comment": "// fallow-ignore-next-line unused-svelte-event"
+          "comment": "// plow-ignore-next-line unused-svelte-event"
         }
       ]
     }
@@ -761,7 +761,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
   "next_steps": [
     {
       "id": "trace-unused-export",
-      "command": "fallow dead-code --trace src/utils.ts:helperFn",
+      "command": "plow dead-code --trace src/utils.ts:helperFn",
       "reason": "verify an export is truly unused before deleting"
     }
   ]

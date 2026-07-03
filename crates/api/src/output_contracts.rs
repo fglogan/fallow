@@ -1,86 +1,81 @@
 //! Concrete output-contract aliases shared by schema and adapter crates.
 
-pub type AuditOutput = fallow_output::AuditOutput<
+pub type AuditOutput = plow_output::AuditOutput<
     crate::AuditVerdict,
     crate::AuditSummary,
     crate::AuditAttribution,
-    fallow_output::CheckOutput,
+    plow_output::CheckOutput,
     crate::DupesReportPayload,
-    fallow_output::HealthReport,
+    plow_output::HealthReport,
 >;
 
-pub type CombinedOutput = fallow_output::CombinedOutput<
-    fallow_output::CheckOutput,
+pub type CombinedOutput = plow_output::CombinedOutput<
+    plow_output::CheckOutput,
     crate::DupesReportPayload,
-    fallow_output::HealthReport,
+    plow_output::HealthReport,
 >;
 
-pub type ListBoundariesOutput = fallow_output::ListBoundariesOutput<
-    fallow_config::LogicalGroupStatus,
-    fallow_config::AuthoredRule,
+pub type ListBoundariesOutput =
+    plow_output::ListBoundariesOutput<plow_config::LogicalGroupStatus, plow_config::AuthoredRule>;
+
+pub type WorkspacesOutput = plow_output::WorkspacesOutput<plow_config::WorkspaceDiagnostic>;
+
+pub type BoundariesListing =
+    plow_output::BoundariesListing<plow_config::LogicalGroupStatus, plow_config::AuthoredRule>;
+
+pub type BoundariesListZone = plow_output::BoundariesListZone;
+
+pub type BoundariesListRule = plow_output::BoundariesListRule;
+
+pub type BoundariesListLogicalGroup = plow_output::BoundariesListLogicalGroup<
+    plow_config::LogicalGroupStatus,
+    plow_config::AuthoredRule,
 >;
 
-pub type WorkspacesOutput = fallow_output::WorkspacesOutput<fallow_config::WorkspaceDiagnostic>;
+pub type ListOutput = plow_output::ListOutput<BoundariesListing, plow_config::WorkspaceDiagnostic>;
 
-pub type BoundariesListing = fallow_output::BoundariesListing<
-    fallow_config::LogicalGroupStatus,
-    fallow_config::AuthoredRule,
->;
+pub type ListEntryPointOutput = plow_output::ListEntryPointOutput;
 
-pub type BoundariesListZone = fallow_output::BoundariesListZone;
+pub type ListPluginOutput = plow_output::ListPluginOutput;
 
-pub type BoundariesListRule = fallow_output::BoundariesListRule;
+pub type SecurityGate = plow_output::SecurityGate<crate::SecurityGateMode>;
 
-pub type BoundariesListLogicalGroup = fallow_output::BoundariesListLogicalGroup<
-    fallow_config::LogicalGroupStatus,
-    fallow_config::AuthoredRule,
->;
-
-pub type ListOutput =
-    fallow_output::ListOutput<BoundariesListing, fallow_config::WorkspaceDiagnostic>;
-
-pub type ListEntryPointOutput = fallow_output::ListEntryPointOutput;
-
-pub type ListPluginOutput = fallow_output::ListPluginOutput;
-
-pub type SecurityGate = fallow_output::SecurityGate<crate::SecurityGateMode>;
-
-pub type SecurityOutputConfig = fallow_output::SecurityOutputConfig<fallow_config::Severity>;
+pub type SecurityOutputConfig = plow_output::SecurityOutputConfig<plow_config::Severity>;
 
 pub type SecuritySummaryOutput =
-    fallow_output::SecuritySummaryOutput<SecurityOutputConfig, SecurityGate>;
+    plow_output::SecuritySummaryOutput<SecurityOutputConfig, SecurityGate>;
 
-pub type SecurityOutput = fallow_output::SecurityOutput<SecurityOutputConfig, SecurityGate>;
+pub type SecurityOutput = plow_output::SecurityOutput<SecurityOutputConfig, SecurityGate>;
 
 #[allow(
     clippy::type_complexity,
     reason = "concrete root union intentionally fills every output payload slot"
 )]
-pub type FallowOutput = fallow_output::FallowOutput<
+pub type PlowOutput = plow_output::PlowOutput<
     AuditOutput,
-    fallow_output::ExplainOutput,
-    fallow_output::InspectOutput,
-    fallow_types::trace_chain::SymbolChainTrace,
-    fallow_output::ReviewEnvelopeOutput,
-    fallow_output::ReviewReconcileOutput,
-    fallow_output::CoverageSetupOutput,
-    fallow_output::CoverageAnalyzeOutput,
+    plow_output::ExplainOutput,
+    plow_output::InspectOutput,
+    plow_types::trace_chain::SymbolChainTrace,
+    plow_output::ReviewEnvelopeOutput,
+    plow_output::ReviewReconcileOutput,
+    plow_output::CoverageSetupOutput,
+    plow_output::CoverageAnalyzeOutput,
     ListBoundariesOutput,
     WorkspacesOutput,
-    fallow_output::HealthOutput<fallow_output::HealthReport, fallow_output::HealthGroup>,
-    fallow_output::DupesOutput<crate::DupesReportPayload, crate::DuplicationGroup>,
-    fallow_output::CheckGroupedOutput,
-    fallow_output::ImpactReport,
-    fallow_output::CrossRepoImpactReport,
+    plow_output::HealthOutput<plow_output::HealthReport, plow_output::HealthGroup>,
+    plow_output::DupesOutput<crate::DupesReportPayload, crate::DuplicationGroup>,
+    plow_output::CheckGroupedOutput,
+    plow_output::ImpactReport,
+    plow_output::CrossRepoImpactReport,
     SecuritySummaryOutput,
     SecurityOutput,
-    fallow_output::SecuritySurvivorsOutput,
-    fallow_output::SecurityBlindSpotsOutput,
-    fallow_output::CheckOutput,
+    plow_output::SecuritySurvivorsOutput,
+    plow_output::SecurityBlindSpotsOutput,
+    plow_output::CheckOutput,
     CombinedOutput,
-    fallow_output::FeatureFlagsOutput,
-    fallow_output::StandardReviewBriefOutput,
-    fallow_output::DecisionSurfaceOutput,
-    fallow_output::StandardWalkthroughGuide,
-    fallow_output::WalkthroughValidation,
+    plow_output::FeatureFlagsOutput,
+    plow_output::StandardReviewBriefOutput,
+    plow_output::DecisionSurfaceOutput,
+    plow_output::StandardWalkthroughGuide,
+    plow_output::WalkthroughValidation,
 >;

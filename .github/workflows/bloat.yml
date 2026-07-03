@@ -54,7 +54,7 @@ jobs:
           {
             echo "## Top 20 functions by size"
             echo '```'
-            cargo bloat --release -p fallow-cli -n 20
+            cargo bloat --release -p plow-cli -n 20
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -63,23 +63,23 @@ jobs:
           {
             echo "## Top 20 crates by size"
             echo '```'
-            cargo bloat --release -p fallow-cli --crates -n 20
+            cargo bloat --release -p plow-cli --crates -n 20
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Track total binary size
         run: |
-          SIZE=$(stat -c%s target/release/fallow)
+          SIZE=$(stat -c%s target/release/plow)
           SIZE="$SIZE" python3 -c "
           import json, os
-          data = [{'name': 'Binary Size (fallow)', 'unit': 'bytes', 'value': int(os.environ['SIZE'])}]
+          data = [{'name': 'Binary Size (plow)', 'unit': 'bytes', 'value': int(os.environ['SIZE'])}]
           print(json.dumps(data, indent=2))
           " > bloat-bench.json
 
       - name: Store binary size metric
         uses: ./.github/actions/store-benchmark
         with:
-          name: Fallow Binary Size
+          name: Plow Binary Size
           tool: customSmallerIsBetter
           output-file-path: bloat-bench.json
           data-dir: bloat

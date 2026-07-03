@@ -3,13 +3,13 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use fallow_config::EmailMode;
-use fallow_output::{
+use plow_config::EmailMode;
+use plow_output::{
     DiffIndex, EffortEstimate, FindingSeverity, GroupByMode, RuntimeCoverageReport,
     RuntimeCoverageWatermark,
 };
-use fallow_types::output_format::OutputFormat;
-use fallow_types::path_util::is_absolute_path_any_platform;
+use plow_types::output_format::OutputFormat;
+use plow_types::path_util::is_absolute_path_any_platform;
 
 mod actions;
 mod analysis_data;
@@ -110,7 +110,7 @@ impl HealthGroupResolver for NoGroupResolver {
 
 /// Runtime coverage analysis seam.
 ///
-/// Runtime coverage execution drives the closed-source `fallow-cov` sidecar
+/// Runtime coverage execution drives the closed-source `plow-cov` sidecar
 /// (license verification, subprocess spawning), which stays in the CLI. The
 /// engine calls this callback only when [`HealthExecutionOptions::runtime_coverage`]
 /// is set, so the default and programmatic paths never touch it.
@@ -123,10 +123,10 @@ pub type RuntimeCoverageAnalyzer<'a> = dyn Fn(
 /// Inputs the runtime coverage seam needs from the analysis core.
 pub struct RuntimeCoverageSeamInput<'a> {
     pub root: &'a Path,
-    pub modules: &'a [fallow_types::extract::ModuleInfo],
+    pub modules: &'a [plow_types::extract::ModuleInfo],
     pub analysis_output: &'a crate::DeadCodeAnalysisArtifacts,
     pub istanbul_coverage: Option<&'a scoring::IstanbulCoverage>,
-    pub file_paths: &'a rustc_hash::FxHashMap<fallow_types::discover::FileId, &'a PathBuf>,
+    pub file_paths: &'a rustc_hash::FxHashMap<plow_types::discover::FileId, &'a PathBuf>,
     pub ignore_set: &'a globset::GlobSet,
     pub changed_files: Option<&'a rustc_hash::FxHashSet<PathBuf>>,
     pub ws_roots: Option<&'a [PathBuf]>,
@@ -179,7 +179,7 @@ pub struct HealthCoverageInputs<'a> {
 /// Validate that a coverage-data root is absolute under Unix or Windows path
 /// conventions.
 ///
-/// Istanbul coverage paths often come from a Linux CI runner even when fallow
+/// Istanbul coverage paths often come from a Linux CI runner even when plow
 /// is invoked on another host, so POSIX-rooted paths and Windows drive paths
 /// are both accepted on every platform.
 pub fn validate_coverage_root_absolute(coverage_root: Option<&Path>) -> Result<(), String> {
@@ -520,8 +520,8 @@ pub struct RuntimeCoverageOptions {
 
 /// Pre-parsed health input reused from another analysis in the same process.
 pub struct HealthSharedParseData {
-    pub files: Vec<fallow_types::discover::DiscoveredFile>,
-    pub modules: Vec<fallow_types::extract::ModuleInfo>,
+    pub files: Vec<plow_types::discover::DiscoveredFile>,
+    pub modules: Vec<plow_types::extract::ModuleInfo>,
     /// Full analysis output (graph + results) for file scoring.
     pub analysis_output: Option<crate::DeadCodeAnalysisArtifacts>,
 }
@@ -595,7 +595,7 @@ mod tests {
             use_shared_diff_index: false,
             workspace: Some(&workspace),
             changed_workspaces: None,
-            baseline: Some(Path::new(".fallow/health-baseline.json")),
+            baseline: Some(Path::new(".plow/health-baseline.json")),
             save_baseline: None,
             complexity: true,
             file_scores: true,
@@ -620,7 +620,7 @@ mod tests {
             min_commits: Some(2),
             explain: true,
             summary: false,
-            save_snapshot: Some(PathBuf::from(".fallow/snapshots/health.json")),
+            save_snapshot: Some(PathBuf::from(".plow/snapshots/health.json")),
             trend: true,
             coverage_inputs: HealthCoverageInputs::default(),
             performance: true,
@@ -640,7 +640,7 @@ mod tests {
         assert_eq!(options.group_by, Some(GroupByMode::Directory));
         assert_eq!(
             options.save_snapshot.as_deref(),
-            Some(Path::new(".fallow/snapshots/health.json"))
+            Some(Path::new(".plow/snapshots/health.json"))
         );
     }
 

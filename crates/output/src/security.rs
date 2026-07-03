@@ -3,19 +3,19 @@
 use std::collections::BTreeMap;
 
 use crate::root_envelopes::{RootEnvelopeMode, attach_telemetry_meta, serialize_named_json_output};
-use fallow_types::envelope::{ElapsedMs, Meta, ToolVersion};
-use fallow_types::results::{
+use plow_types::envelope::{ElapsedMs, Meta, ToolVersion};
+use plow_types::results::{
     SecurityAttackSurfaceEntry, SecurityFinding, SecurityFindingKind, SecurityRuntimeState,
     SecuritySeverity, TaintConfidence,
 };
 use serde::{Deserialize, Serialize};
 
-/// The `fallow security --format json` schema version. Independently versioned
+/// The `plow security --format json` schema version. Independently versioned
 /// from the main contract, mirroring `ImpactReportSchemaVersion`.
 #[derive(Debug, Clone, Copy, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum SecuritySchemaVersion {
-    /// First release of the `fallow security --format json` shape.
+    /// First release of the `plow security --format json` shape.
     #[serde(rename = "1")]
     V1,
     /// Adds per-finding `severity` for verification-priority tiering.
@@ -62,7 +62,7 @@ pub struct SecurityGate<Mode> {
     pub new_count: usize,
 }
 
-/// Allowlisted config context for `fallow security --format json`.
+/// Allowlisted config context for `plow security --format json`.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
@@ -98,7 +98,7 @@ pub struct SecurityRuleSeverityConfig<Severity> {
     pub effective: Severity,
 }
 
-/// The `fallow security --format json` envelope. `FallowOutput` discriminates it
+/// The `plow security --format json` envelope. `PlowOutput` discriminates it
 /// by the `kind: "security"` tag; the optional `gate` block is additive and is
 /// not part of that discrimination.
 #[derive(Debug, Clone, Serialize)]
@@ -106,7 +106,7 @@ pub struct SecurityRuleSeverityConfig<Severity> {
 pub struct SecurityOutput<Config, Gate> {
     /// Schema version of this envelope.
     pub schema_version: SecuritySchemaVersion,
-    /// Fallow CLI version that produced this output.
+    /// Plow CLI version that produced this output.
     pub version: ToolVersion,
     /// Wall-clock milliseconds spent producing the report.
     pub elapsed_ms: ElapsedMs,
@@ -141,7 +141,7 @@ pub struct SecurityOutput<Config, Gate> {
     pub unresolved_callee_diagnostics: Option<SecurityUnresolvedCalleeDiagnostics>,
 }
 
-/// Bounded unresolved-callee diagnostics for `fallow security --format json`.
+/// Bounded unresolved-callee diagnostics for `plow security --format json`.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityUnresolvedCalleeDiagnostics {
@@ -164,9 +164,9 @@ pub struct SecurityUnresolvedCalleeSample {
     pub path: String,
     pub line: u32,
     pub col: u32,
-    pub reason: fallow_types::extract::SkippedSecurityCalleeReason,
+    pub reason: plow_types::extract::SkippedSecurityCalleeReason,
     /// Compact syntax shape of the skipped callee.
-    pub expression_kind: fallow_types::extract::SkippedSecurityCalleeExpressionKind,
+    pub expression_kind: plow_types::extract::SkippedSecurityCalleeExpressionKind,
 }
 
 /// Count of unresolved callees in one file.
@@ -182,12 +182,12 @@ pub struct SecurityUnresolvedCalleeTopFile {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityUnresolvedCalleeReasonCount {
-    pub reason: fallow_types::extract::SkippedSecurityCalleeReason,
+    pub reason: plow_types::extract::SkippedSecurityCalleeReason,
     /// Number of unresolved callees with this reason.
     pub count: usize,
 }
 
-/// Compact `fallow security --summary --format json` payload. Uses the same
+/// Compact `plow security --summary --format json` payload. Uses the same
 /// `kind: "security"` discriminator as the full payload, but omits candidate
 /// arrays and exposes only aggregate counts.
 #[derive(Debug, Clone, Serialize)]
@@ -195,7 +195,7 @@ pub struct SecurityUnresolvedCalleeReasonCount {
 pub struct SecuritySummaryOutput<Config, Gate> {
     /// Schema version of this envelope.
     pub schema_version: SecuritySchemaVersion,
-    /// Fallow CLI version that produced this output.
+    /// Plow CLI version that produced this output.
     pub version: ToolVersion,
     /// Wall-clock milliseconds spent producing the report.
     pub elapsed_ms: ElapsedMs,
@@ -211,7 +211,7 @@ pub struct SecuritySummaryOutput<Config, Gate> {
     pub summary: SecuritySummary,
 }
 
-/// Build the compact aggregate payload for `fallow security --summary --format json`.
+/// Build the compact aggregate payload for `plow security --summary --format json`.
 #[must_use]
 pub fn build_security_summary<Config, Gate>(
     output: &SecurityOutput<Config, Gate>,
@@ -318,7 +318,7 @@ fn record_security_runtime_state(
     }
 }
 
-/// Serialize the full `fallow security --format json` envelope.
+/// Serialize the full `plow security --format json` envelope.
 ///
 /// # Errors
 ///
@@ -337,7 +337,7 @@ where
     Ok(value)
 }
 
-/// Serialize the compact `fallow security --summary --format json` envelope.
+/// Serialize the compact `plow security --summary --format json` envelope.
 ///
 /// # Errors
 ///
@@ -365,7 +365,7 @@ where
     Ok(value)
 }
 
-/// Serialize the `fallow security survivors --format json` envelope.
+/// Serialize the `plow security survivors --format json` envelope.
 ///
 /// # Errors
 ///
@@ -377,7 +377,7 @@ pub fn serialize_security_survivors_json_output(
     serialize_named_json_output(output, "security-survivors", mode)
 }
 
-/// Serialize the `fallow security blind-spots --format json` envelope.
+/// Serialize the `plow security blind-spots --format json` envelope.
 ///
 /// # Errors
 ///
@@ -389,7 +389,7 @@ pub fn serialize_security_blind_spots_json_output(
     serialize_named_json_output(output, "security-blind-spots", mode)
 }
 
-/// Aggregate counts for `fallow security --summary --format json`.
+/// Aggregate counts for `plow security --summary --format json`.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecuritySummary {
@@ -446,7 +446,7 @@ pub struct SecurityRuntimeStateCounts {
     pub not_collected: usize,
 }
 
-/// The `fallow security survivors --format json` schema version.
+/// The `plow security survivors --format json` schema version.
 #[derive(Debug, Clone, Copy, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum SecuritySurvivorsSchemaVersion {
@@ -455,7 +455,7 @@ pub enum SecuritySurvivorsSchemaVersion {
     V2,
 }
 
-/// Verifier verdict status accepted by `fallow security survivors`.
+/// Verifier verdict status accepted by `plow security survivors`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
@@ -472,7 +472,7 @@ pub enum SecurityVerifierVerdictStatus {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityVerifierVerdict {
-    /// Must be `fallow-security-verdict/v1`.
+    /// Must be `plow-security-verdict/v1`.
     pub schema_version: String,
     /// Stable candidate id from `security_findings[].finding_id`.
     pub finding_id: String,
@@ -492,13 +492,13 @@ pub struct SecurityVerifierVerdict {
     pub fix_direction: Option<String>,
 }
 
-/// The `fallow security survivors --format json` envelope.
+/// The `plow security survivors --format json` envelope.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecuritySurvivorsOutput {
     /// Schema version of this envelope.
     pub schema_version: SecuritySurvivorsSchemaVersion,
-    /// Fallow CLI version that produced this output.
+    /// Plow CLI version that produced this output.
     pub version: ToolVersion,
     /// Wall-clock milliseconds spent producing the report.
     pub elapsed_ms: ElapsedMs,
@@ -542,11 +542,11 @@ pub struct SecuritySurvivor {
     /// Optional verifier-owned remediation direction.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fix_direction: Option<String>,
-    /// Original typed fallow security candidate.
+    /// Original typed plow security candidate.
     pub candidate: SecurityFinding,
 }
 
-/// The `fallow security blind-spots --format json` schema version.
+/// The `plow security blind-spots --format json` schema version.
 #[derive(Debug, Clone, Copy, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum SecurityBlindSpotsSchemaVersion {
@@ -555,13 +555,13 @@ pub enum SecurityBlindSpotsSchemaVersion {
     V1,
 }
 
-/// The `fallow security blind-spots --format json` envelope.
+/// The `plow security blind-spots --format json` envelope.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityBlindSpotsOutput {
     /// Schema version of this envelope.
     pub schema_version: SecurityBlindSpotsSchemaVersion,
-    /// Fallow CLI version that produced this output.
+    /// Plow CLI version that produced this output.
     pub version: ToolVersion,
     /// Wall-clock milliseconds spent producing the report.
     pub elapsed_ms: ElapsedMs,
@@ -584,9 +584,9 @@ pub struct SecurityBlindSpotsSummary {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityBlindSpotGroup {
-    pub reason: fallow_types::extract::SkippedSecurityCalleeReason,
+    pub reason: plow_types::extract::SkippedSecurityCalleeReason,
     /// Compact syntax shape of the skipped callee.
-    pub expression_kind: fallow_types::extract::SkippedSecurityCalleeExpressionKind,
+    pub expression_kind: plow_types::extract::SkippedSecurityCalleeExpressionKind,
     /// Count in the bounded diagnostic sample.
     pub sampled_count: usize,
     /// Top files in this bounded diagnostic sample.

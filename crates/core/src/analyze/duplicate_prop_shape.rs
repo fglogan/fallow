@@ -8,7 +8,7 @@
 //!
 //! Pure static analysis (ADR-001): no type resolution. "Identical" means the
 //! sorted `Vec<String>` of declared prop NAMES (the `ComponentProp.name`), never
-//! types: fallow cannot resolve types, so two `{ id, label, value, onChange }`
+//! types: plow cannot resolve types, so two `{ id, label, value, onChange }`
 //! shapes group regardless of whether their declared types diverge. This is the
 //! conservative, actionable unit: the user can extract ONE shared `Props` type
 //! that exactly fits every member.
@@ -52,7 +52,7 @@
 //! Multi-file group anchor / suppress model copied from
 //! [`super::route_collision`]: one finding per member, the sibling members in
 //! `sharing_components`, a FILE-level suppress
-//! (`// fallow-ignore-file duplicate-prop-shape`) that drops a suppressed member
+//! (`// plow-ignore-file duplicate-prop-shape`) that drops a suppressed member
 //! from its OWN finding but keeps it in siblings' `sharing_components` (the group
 //! is real regardless of suppression), plus a line-level suppress at the
 //! component definition.
@@ -66,7 +66,7 @@ use std::path::{Path, PathBuf};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_types::extract::ModuleInfo;
+use plow_types::extract::ModuleInfo;
 
 use crate::discover::FileId;
 use crate::graph::ModuleGraph;

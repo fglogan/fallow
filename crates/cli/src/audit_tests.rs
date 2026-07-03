@@ -25,14 +25,14 @@ fn git(dir: &std::path::Path, args: &[&str]) {
 }
 
 #[test]
-fn audit_worktree_helpers_filter_to_fallow_temp_prefix() {
+fn audit_worktree_helpers_filter_to_plow_temp_prefix() {
     let temp = std::env::temp_dir();
-    let audit_path = temp.join("fallow-audit-base-123-456");
-    let reusable_path = temp.join("fallow-audit-base-cache-abcd-1234");
+    let audit_path = temp.join("plow-audit-base-123-456");
+    let reusable_path = temp.join("plow-audit-base-cache-abcd-1234");
     let canonical_audit_path = temp
         .canonicalize()
         .unwrap_or_else(|_| temp.clone())
-        .join("fallow-audit-base-456-789");
+        .join("plow-audit-base-456-789");
     let unrelated_temp = temp.join("other-worktree");
     let output = format!(
         "worktree /repo\nHEAD abc\n\nworktree {}\nHEAD def\n\nworktree {}\nHEAD ghi\n\nworktree {}\nHEAD jkl\n",
@@ -45,14 +45,11 @@ fn audit_worktree_helpers_filter_to_fallow_temp_prefix() {
         parse_worktree_list(&output),
         vec![audit_path, reusable_path.clone()]
     );
-    assert!(is_fallow_audit_worktree_path(&canonical_audit_path));
+    assert!(is_plow_audit_worktree_path(&canonical_audit_path));
     assert!(is_reusable_audit_worktree_path(&reusable_path));
-    assert_eq!(audit_worktree_pid("fallow-audit-base-123-456"), Some(123));
-    assert_eq!(
-        audit_worktree_pid("fallow-audit-base-cache-abcd-1234"),
-        None
-    );
-    assert_eq!(audit_worktree_pid("not-fallow-audit-base-123"), None);
+    assert_eq!(audit_worktree_pid("plow-audit-base-123-456"), Some(123));
+    assert_eq!(audit_worktree_pid("plow-audit-base-cache-abcd-1234"), None);
+    assert_eq!(audit_worktree_pid("not-plow-audit-base-123"), None);
 }
 
 /// Initialize a throwaway git repo with a single commit and return its root.
@@ -302,7 +299,7 @@ fn worktree_admin_entry_present(repo_root: &std::path::Path, worktree_path: &Pat
 fn worktree_cleanup_guard_runs_on_drop() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
     let repo = init_throwaway_repo(tmp.path(), "repo");
-    let worktree_path = tmp.path().join("fallow-audit-base-1234-5678");
+    let worktree_path = tmp.path().join("plow-audit-base-1234-5678");
 
     git(
         &repo,
@@ -336,7 +333,7 @@ fn worktree_cleanup_guard_runs_on_drop() {
 fn worktree_cleanup_guard_defused_skips_drop() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
     let repo = init_throwaway_repo(tmp.path(), "repo");
-    let worktree_path = tmp.path().join("fallow-audit-base-1234-5679");
+    let worktree_path = tmp.path().join("plow-audit-base-1234-5679");
 
     git(
         &repo,
@@ -379,7 +376,7 @@ fn audit_orphan_sweep_removes_dead_pid_worktree() {
     let repo = init_throwaway_repo(tmp.path(), "repo");
 
     let worktree_path = std::env::temp_dir().join(format!(
-        "fallow-audit-base-{}-{}",
+        "plow-audit-base-{}-{}",
         DEAD_PID,
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -421,7 +418,7 @@ fn audit_orphan_sweep_keeps_live_pid_worktree() {
     let repo = init_throwaway_repo(tmp.path(), "repo");
 
     let worktree_path = std::env::temp_dir().join(format!(
-        "fallow-audit-base-{}-{}",
+        "plow-audit-base-{}-{}",
         live_pid,
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -463,7 +460,7 @@ fn make_reusable_path(label: &str) -> PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .expect("clock should be after epoch")
         .as_nanos();
-    std::env::temp_dir().join(format!("fallow-audit-base-cache-{label}-{nanos:032x}"))
+    std::env::temp_dir().join(format!("plow-audit-base-cache-{label}-{nanos:032x}"))
 }
 
 /// Register a worktree with the parent repo at `path` checked out at HEAD.
@@ -752,19 +749,19 @@ fn days_to_duration_zero_disables() {
 
 #[test]
 fn reusable_worktree_last_used_path_lives_next_to_cache_dir() {
-    let cache_dir = std::env::temp_dir().join("fallow-audit-base-cache-abcd-1234");
+    let cache_dir = std::env::temp_dir().join("plow-audit-base-cache-abcd-1234");
     let sidecar = reusable_worktree_last_used_path(&cache_dir);
     assert_eq!(sidecar.parent(), cache_dir.parent());
     assert_eq!(
         sidecar.file_name().and_then(|s| s.to_str()),
-        Some("fallow-audit-base-cache-abcd-1234.last-used"),
+        Some("plow-audit-base-cache-abcd-1234.last-used"),
     );
 }
 
 #[test]
 fn touch_last_used_creates_sidecar_if_missing() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
-    let cache_dir = tmp.path().join("fallow-audit-base-cache-touchtest-0000");
+    let cache_dir = tmp.path().join("plow-audit-base-cache-touchtest-0000");
     fs::create_dir(&cache_dir).expect("cache dir should be created");
     let sidecar = reusable_worktree_last_used_path(&cache_dir);
     assert!(!sidecar.exists(), "sidecar should not exist before touch");
@@ -787,7 +784,7 @@ fn touch_last_used_creates_sidecar_if_missing() {
 #[test]
 fn reusable_worktree_lock_excludes_concurrent_acquires() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
-    let reusable = tmp.path().join("fallow-audit-base-cache-deadbeef-0000");
+    let reusable = tmp.path().join("plow-audit-base-cache-deadbeef-0000");
     let lock_path = reusable_worktree_lock_path(&reusable);
 
     let first = ReusableWorktreeLock::try_acquire(&reusable)
@@ -824,7 +821,7 @@ fn audit_base_worktree_reuses_current_node_modules_context() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
     let root = tmp.path();
     fs::create_dir_all(root.join("src")).expect("src dir should be created");
-    fs::write(root.join(".gitignore"), "node_modules\n.fallow\n")
+    fs::write(root.join(".gitignore"), "node_modules\n.plow\n")
         .expect("gitignore should be written");
     fs::write(
             root.join("package.json"),
@@ -1042,7 +1039,7 @@ fn materialize_base_dependency_context_preserves_real_worktree_dir() {
 fn audit_reusable_base_worktree_refreshes_current_node_modules_context() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
     let root = tmp.path();
-    fs::write(root.join(".gitignore"), "node_modules\n.fallow\n")
+    fs::write(root.join(".gitignore"), "node_modules\n.plow\n")
         .expect("gitignore should be written");
     fs::write(root.join("package.json"), r#"{"name":"audit-reusable"}"#)
         .expect("package.json should be written");
@@ -1137,7 +1134,7 @@ fn audit_base_snapshot_cache_payload_roundtrips_sets() {
 #[test]
 fn audit_base_snapshot_cache_dir_writes_gitignore() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
-    let cache_root = tmp.path().join(".custom-fallow-cache");
+    let cache_root = tmp.path().join(".custom-plow-cache");
     let cache_dir = audit_base_snapshot_cache_dir(&cache_root);
 
     ensure_audit_base_snapshot_cache_dir(&cache_dir).expect("cache dir should be created");
@@ -1152,7 +1149,7 @@ fn audit_base_snapshot_cache_dir_writes_gitignore() {
 fn audit_base_snapshot_cache_roundtrips_from_disk() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
     let config_path = None;
-    let cache_root = tmp.path().join(".custom-fallow-cache");
+    let cache_root = tmp.path().join(".custom-plow-cache");
     let opts = AuditOptions {
         root: tmp.path(),
         cache_dir: &cache_root,
@@ -1220,7 +1217,7 @@ fn audit_base_snapshot_cache_roundtrips_from_disk() {
 fn audit_base_snapshot_cache_rejects_mismatched_key() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
     let config_path = None;
-    let cache_root = tmp.path().join(".custom-fallow-cache");
+    let cache_root = tmp.path().join(".custom-plow-cache");
     let opts = AuditOptions {
         root: tmp.path(),
         cache_dir: &cache_root,
@@ -1291,7 +1288,7 @@ fn audit_base_snapshot_cache_key_includes_extended_config() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
     let root = tmp.path();
     fs::write(
-        root.join(".fallowrc.json"),
+        root.join(".plowrc.json"),
         r#"{"extends":"base.json","entry":["src/index.ts"]}"#,
     )
     .expect("config should be written");
@@ -1302,7 +1299,7 @@ fn audit_base_snapshot_cache_key_includes_extended_config() {
     .expect("base config should be written");
 
     let config_path = None;
-    let cache_root = root.join(".fallow");
+    let cache_root = root.join(".plow");
     let opts = AuditOptions {
         root,
         cache_dir: &cache_root,
@@ -1382,7 +1379,7 @@ fn audit_gate_all_skips_base_snapshot() {
     .expect("changed module should be written");
 
     let config_path = None;
-    let cache_root = root.join(".fallow");
+    let cache_root = root.join(".plow");
     let opts = AuditOptions {
         root,
         cache_dir: &cache_root,
@@ -1440,7 +1437,7 @@ fn audit_gate_new_only_skips_base_snapshot_for_docs_only_diff() {
     )
     .expect("package.json should be written");
     fs::write(
-        root.join(".fallowrc.json"),
+        root.join(".plowrc.json"),
         r#"{"duplicates":{"minTokens":5,"minLines":2,"mode":"strict"}}"#,
     )
     .expect("config should be written");
@@ -1456,18 +1453,15 @@ fn audit_gate_new_only_skips_base_snapshot_for_docs_only_diff() {
         &["-c", "commit.gpgsign=false", "commit", "-m", "initial"],
     );
     fs::write(root.join("README.md"), "after\n").expect("readme should be modified");
-    fs::create_dir_all(root.join(".fallow/cache/dupes-tokens-v2"))
+    fs::create_dir_all(root.join(".plow/cache/dupes-tokens-v2"))
         .expect("cache dir should be created");
-    fs::write(
-        root.join(".fallow/cache/dupes-tokens-v2/cache.bin"),
-        b"cache",
-    )
-    .expect("cache artifact should be written");
+    fs::write(root.join(".plow/cache/dupes-tokens-v2/cache.bin"), b"cache")
+        .expect("cache artifact should be written");
 
     let before_worktrees = audit_worktree_names(root);
 
     let config_path = None;
-    let cache_root = root.join(".fallow");
+    let cache_root = root.join(".plow");
     let opts = AuditOptions {
         root,
         cache_dir: &cache_root,
@@ -1568,7 +1562,7 @@ fn audit_reuses_dead_code_parse_for_health_when_production_matches() {
     .expect("changed module should be written");
 
     let config_path = None;
-    let cache_root = root.join(".fallow");
+    let cache_root = root.join(".plow");
     let opts = AuditOptions {
         root,
         cache_dir: &cache_root,
@@ -1653,7 +1647,7 @@ fn audit_dupes_falls_back_to_own_discovery_when_health_off() {
     .expect("changed module should be written");
 
     let config_path = None;
-    let cache_root = root.join(".fallow");
+    let cache_root = root.join(".plow");
     let opts = AuditOptions {
         root,
         cache_dir: &cache_root,
@@ -1755,20 +1749,20 @@ fn remap_focus_files_returns_none_when_no_paths_map() {
 fn remap_cache_dir_moves_project_local_cache_to_base_worktree() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
     let current_root = tmp.path().join("repo");
-    let base_root = tmp.path().join("fallow-base");
-    let cache_dir = current_root.join(".cache").join("fallow");
+    let base_root = tmp.path().join("plow-base");
+    let cache_dir = current_root.join(".cache").join("plow");
 
     let remapped = remap_cache_dir_for_base_worktree(&current_root, &base_root, &cache_dir);
 
-    assert_eq!(remapped, base_root.join(".cache").join("fallow"));
+    assert_eq!(remapped, base_root.join(".cache").join("plow"));
 }
 
 #[test]
 fn remap_cache_dir_keeps_external_absolute_cache_shared() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
     let current_root = tmp.path().join("repo");
-    let base_root = tmp.path().join("fallow-base");
-    let cache_dir = tmp.path().join("shared").join("fallow-cache");
+    let base_root = tmp.path().join("plow-base");
+    let cache_dir = tmp.path().join("shared").join("plow-cache");
 
     let remapped = remap_cache_dir_for_base_worktree(&current_root, &base_root, &cache_dir);
 
@@ -1790,7 +1784,7 @@ fn audit_gate_new_only_inherits_pre_existing_duplicates_in_focused_files() {
     )
     .expect("package.json should be written");
     fs::write(
-        root.join(".fallowrc.json"),
+        root.join(".plowrc.json"),
         r#"{"duplicates":{"minTokens":10,"minLines":3,"mode":"strict"}}"#,
     )
     .expect("config should be written");
@@ -1817,7 +1811,7 @@ fn audit_gate_new_only_inherits_pre_existing_duplicates_in_focused_files() {
     );
 
     let config_path = None;
-    let cache_root = root.join(".fallow");
+    let cache_root = root.join(".plow");
     let opts = AuditOptions {
         root,
         cache_dir: &cache_root,
@@ -1959,7 +1953,7 @@ export function App() {
     .expect("app should be modified");
 
     let config_path = None;
-    let cache_root = root.join(".fallow");
+    let cache_root = root.join(".plow");
     let opts = AuditOptions {
         root,
         cache_dir: &cache_root,
@@ -2108,7 +2102,7 @@ export function App() {
     .expect("app should be modified");
 
     let config_path = None;
-    let cache_root = root.join(".fallow");
+    let cache_root = root.join(".plow");
     let opts = AuditOptions {
         root: &root,
         cache_dir: &cache_root,
@@ -2191,14 +2185,14 @@ fn audit_base_uses_new_explicit_config_without_hard_failure() {
         &["-c", "commit.gpgsign=false", "commit", "-m", "initial"],
     );
 
-    let explicit_config = root.join(".fallowrc.json");
+    let explicit_config = root.join(".plowrc.json");
     fs::write(&explicit_config, r#"{"rules":{"unused-files":"error"}}"#)
         .expect("new config should be written");
     fs::write(root.join("src/index.ts"), "export const used = 2;\n")
         .expect("index should be modified");
 
     let config_path = Some(explicit_config);
-    let cache_root = root.join(".fallow");
+    let cache_root = root.join(".plow");
     let opts = AuditOptions {
         root,
         cache_dir: &cache_root,
@@ -2256,7 +2250,7 @@ fn audit_base_uses_current_discovered_config_for_attribution() {
         )
         .expect("package.json should be written");
     fs::write(
-        root.join(".fallowrc.json"),
+        root.join(".plowrc.json"),
         r#"{"rules":{"unused-dependencies":"off"}}"#,
     )
     .expect("base config should be written");
@@ -2271,7 +2265,7 @@ fn audit_base_uses_current_discovered_config_for_attribution() {
     );
 
     fs::write(
-        root.join(".fallowrc.json"),
+        root.join(".plowrc.json"),
         r#"{"rules":{"unused-dependencies":"error"}}"#,
     )
     .expect("current config should be written");
@@ -2282,7 +2276,7 @@ fn audit_base_uses_current_discovered_config_for_attribution() {
         .expect("package.json should be touched");
 
     let config_path = None;
-    let cache_root = root.join(".fallow");
+    let cache_root = root.join(".plow");
     let opts = AuditOptions {
         root,
         cache_dir: &cache_root,
@@ -2346,7 +2340,7 @@ fn audit_base_current_config_attribution_survives_cache_hit() {
         )
         .expect("package.json should be written");
     fs::write(
-        root.join(".fallowrc.json"),
+        root.join(".plowrc.json"),
         r#"{"rules":{"unused-dependencies":"off"}}"#,
     )
     .expect("base config should be written");
@@ -2361,7 +2355,7 @@ fn audit_base_current_config_attribution_survives_cache_hit() {
     );
 
     fs::write(
-        root.join(".fallowrc.json"),
+        root.join(".plowrc.json"),
         r#"{"rules":{"unused-dependencies":"error"}}"#,
     )
     .expect("current config should be written");
@@ -2372,7 +2366,7 @@ fn audit_base_current_config_attribution_survives_cache_hit() {
         .expect("package.json should be touched");
 
     let config_path = None;
-    let cache_root = root.join(".fallow");
+    let cache_root = root.join(".plow");
     let opts = AuditOptions {
         root,
         cache_dir: &cache_root,
@@ -2457,7 +2451,7 @@ fn audit_dupes_only_materializes_groups_touching_changed_files() {
     )
     .expect("package.json should be written");
     fs::write(
-        root.join(".fallowrc.json"),
+        root.join(".plowrc.json"),
         r#"{"duplicates":{"minTokens":5,"minLines":2,"mode":"strict"}}"#,
     )
     .expect("config should be written");
@@ -2485,7 +2479,7 @@ fn audit_dupes_only_materializes_groups_touching_changed_files() {
     .expect("changed file should be modified");
 
     let config_path = None;
-    let cache_root = root.join(".fallow");
+    let cache_root = root.join(".plow");
     let opts = AuditOptions {
         root,
         cache_dir: &cache_root,
@@ -2589,13 +2583,13 @@ fn tokens_equivalent_string_literal_change_is_not_equivalent() {
 }
 
 #[test]
-fn tokens_equivalent_fallow_ignore_marker_forces_false() {
+fn tokens_equivalent_plow_ignore_marker_forces_false() {
     // The guard fires before tokenization; even identical content containing the
     // marker must return false so suppression changes are never skipped.
-    let code = "// fallow-ignore-next-line unused-exports\nexport const x = 1;\n";
+    let code = "// plow-ignore-next-line unused-exports\nexport const x = 1;\n";
     assert!(
         !js_ts_tokens_equivalent(Path::new("a.ts"), code, code),
-        "fallow-ignore marker in either side must force false"
+        "plow-ignore marker in either side must force false"
     );
 }
 

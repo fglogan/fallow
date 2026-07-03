@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use rustc_hash::FxHashMap;
 use serde_json::Value;
 
-use fallow_types::discover::FileId;
+use plow_types::discover::FileId;
 
 use super::path_info::{extract_package_name, is_bare_specifier, is_valid_package_name};
 use super::types::{OUTPUT_DIRS, PackageManifestInfo, ResolveContext, ResolveResult, SOURCE_EXTS};
@@ -321,7 +321,7 @@ fn lookup_scss_path(candidate: &Path, ctx: &ResolveContext<'_>) -> Option<FileId
 /// convention; `@import 'animate.css/animate.min'` resolves to
 /// `node_modules/animate.css/animate.min.css` via the CSS-extension fallback.
 ///
-/// Files inside `node_modules/` are not in fallow's file index (the default
+/// Files inside `node_modules/` are not in plow's file index (the default
 /// ignore patterns exclude them), so this function returns
 /// `ResolveResult::NpmPackage` when a candidate exists on disk. That ensures
 /// (1) the `@import` is not reported as unresolved and (2) the npm package is
@@ -421,7 +421,7 @@ fn find_scss_in_node_modules(nm_dir: &Path, bare: &str) -> Option<PathBuf> {
 /// the corresponding source file (e.g., `packages/ui/src/utils.ts`).
 ///
 /// This handles cross-workspace imports that go through `exports` maps pointing to
-/// built output directories. Since fallow ignores `dist/`, `build/`, etc. by default,
+/// built output directories. Since plow ignores `dist/`, `build/`, etc. by default,
 /// the resolved path won't be in the file set, but the source file will be.
 ///
 /// Nested output subdirectories (e.g., `dist/esm/utils.mjs`, `build/cjs/index.cjs`)
@@ -1056,7 +1056,7 @@ fn resolve_workspace_self_reference(
     subpath: &str,
     package_name: String,
 ) -> Option<ResolveResult> {
-    let root_file = ws_root.join("__fallow_ws_self_resolve__");
+    let root_file = ws_root.join("__plow_ws_self_resolve__");
     let rel_spec = if subpath.is_empty() {
         "./".to_string()
     } else {
@@ -1099,7 +1099,7 @@ fn resolve_workspace_self_reference(
 
 /// Convert a `DynamicImportPattern` to a glob string for file matching.
 pub(super) fn make_glob_from_pattern(
-    pattern: &fallow_types::extract::DynamicImportPattern,
+    pattern: &plow_types::extract::DynamicImportPattern,
 ) -> String {
     if pattern.prefix.contains('*') || pattern.prefix.contains('{') {
         return pattern.prefix.clone();
@@ -1119,7 +1119,7 @@ mod tests {
     fn with_package_map_ctx(
         root: PathBuf,
         name: Option<&str>,
-        package_json: fallow_config::PackageJson,
+        package_json: plow_config::PackageJson,
         raw_files: &[(PathBuf, FileId)],
         f: impl FnOnce(&ResolveContext<'_>, &PackageManifestInfo, &Path),
     ) {
@@ -1545,7 +1545,7 @@ mod tests {
         with_package_map_ctx(
             PathBuf::from("/project"),
             Some("pkg"),
-            fallow_config::PackageJson::default(),
+            plow_config::PackageJson::default(),
             &[],
             |ctx, manifest, _| {
                 assert!(resolve_package_map_target(ctx, manifest, "lodash", None).is_none());
@@ -1568,7 +1568,7 @@ mod tests {
         with_package_map_ctx(
             root,
             Some("pkg"),
-            fallow_config::PackageJson::default(),
+            plow_config::PackageJson::default(),
             &[(src_path, FileId(9))],
             |ctx, manifest, _| {
                 assert_eq!(
@@ -1585,7 +1585,7 @@ mod tests {
         with_package_map_ctx(
             root,
             Some("pkg"),
-            fallow_config::PackageJson {
+            plow_config::PackageJson {
                 imports: Some(serde_json::json!({
                     "#pad": "left-pad",
                     "#scoped": "@scope/pkg/subpath"
@@ -1613,7 +1613,7 @@ mod tests {
         with_package_map_ctx(
             root,
             None,
-            fallow_config::PackageJson {
+            plow_config::PackageJson {
                 imports: Some(serde_json::json!({
                     "#runtime/*": "./dist/runtime/*.mjs"
                 })),
@@ -1639,7 +1639,7 @@ mod tests {
         with_package_map_ctx(
             root,
             Some("pkg"),
-            fallow_config::PackageJson {
+            plow_config::PackageJson {
                 source: Some("custom/entry.js".to_string()),
                 ..Default::default()
             },
@@ -1856,7 +1856,7 @@ mod tests {
 
     #[test]
     fn make_glob_prefix_only_no_suffix() {
-        let pattern = fallow_types::extract::DynamicImportPattern {
+        let pattern = plow_types::extract::DynamicImportPattern {
             prefix: "./locales/".to_string(),
             suffix: None,
             span: oxc_span::Span::default(),
@@ -1866,7 +1866,7 @@ mod tests {
 
     #[test]
     fn make_glob_prefix_with_suffix() {
-        let pattern = fallow_types::extract::DynamicImportPattern {
+        let pattern = plow_types::extract::DynamicImportPattern {
             prefix: "./locales/".to_string(),
             suffix: Some(".json".to_string()),
             span: oxc_span::Span::default(),
@@ -1876,7 +1876,7 @@ mod tests {
 
     #[test]
     fn make_glob_passthrough_star() {
-        let pattern = fallow_types::extract::DynamicImportPattern {
+        let pattern = plow_types::extract::DynamicImportPattern {
             prefix: "./pages/**/*.tsx".to_string(),
             suffix: None,
             span: oxc_span::Span::default(),
@@ -1886,7 +1886,7 @@ mod tests {
 
     #[test]
     fn make_glob_passthrough_brace() {
-        let pattern = fallow_types::extract::DynamicImportPattern {
+        let pattern = plow_types::extract::DynamicImportPattern {
             prefix: "./i18n/{en,de,fr}.json".to_string(),
             suffix: None,
             span: oxc_span::Span::default(),
@@ -1896,7 +1896,7 @@ mod tests {
 
     #[test]
     fn make_glob_empty_prefix_no_suffix() {
-        let pattern = fallow_types::extract::DynamicImportPattern {
+        let pattern = plow_types::extract::DynamicImportPattern {
             prefix: String::new(),
             suffix: None,
             span: oxc_span::Span::default(),
@@ -1906,7 +1906,7 @@ mod tests {
 
     #[test]
     fn make_glob_empty_prefix_with_suffix() {
-        let pattern = fallow_types::extract::DynamicImportPattern {
+        let pattern = plow_types::extract::DynamicImportPattern {
             prefix: String::new(),
             suffix: Some(".ts".to_string()),
             span: oxc_span::Span::default(),
@@ -1916,7 +1916,7 @@ mod tests {
 
     #[test]
     fn make_glob_template_literal_prefix_only() {
-        let pattern = fallow_types::extract::DynamicImportPattern {
+        let pattern = plow_types::extract::DynamicImportPattern {
             prefix: "./pages/".to_string(),
             suffix: None,
             span: oxc_span::Span::default(),
@@ -1926,7 +1926,7 @@ mod tests {
 
     #[test]
     fn make_glob_template_literal_with_extension_suffix() {
-        let pattern = fallow_types::extract::DynamicImportPattern {
+        let pattern = plow_types::extract::DynamicImportPattern {
             prefix: "./locales/".to_string(),
             suffix: Some(".json".to_string()),
             span: oxc_span::Span::default(),
@@ -1936,7 +1936,7 @@ mod tests {
 
     #[test]
     fn make_glob_template_literal_deep_prefix() {
-        let pattern = fallow_types::extract::DynamicImportPattern {
+        let pattern = plow_types::extract::DynamicImportPattern {
             prefix: "./modules/".to_string(),
             suffix: None,
             span: oxc_span::Span::default(),
@@ -1946,7 +1946,7 @@ mod tests {
 
     #[test]
     fn make_glob_string_concat_prefix() {
-        let pattern = fallow_types::extract::DynamicImportPattern {
+        let pattern = plow_types::extract::DynamicImportPattern {
             prefix: "./pages/".to_string(),
             suffix: None,
             span: oxc_span::Span::default(),
@@ -1956,7 +1956,7 @@ mod tests {
 
     #[test]
     fn make_glob_string_concat_with_extension() {
-        let pattern = fallow_types::extract::DynamicImportPattern {
+        let pattern = plow_types::extract::DynamicImportPattern {
             prefix: "./views/".to_string(),
             suffix: Some(".vue".to_string()),
             span: oxc_span::Span::default(),
@@ -1966,7 +1966,7 @@ mod tests {
 
     #[test]
     fn make_glob_import_meta_glob_recursive() {
-        let pattern = fallow_types::extract::DynamicImportPattern {
+        let pattern = plow_types::extract::DynamicImportPattern {
             prefix: "./components/**/*.vue".to_string(),
             suffix: None,
             span: oxc_span::Span::default(),
@@ -1980,7 +1980,7 @@ mod tests {
 
     #[test]
     fn make_glob_import_meta_glob_brace_expansion() {
-        let pattern = fallow_types::extract::DynamicImportPattern {
+        let pattern = plow_types::extract::DynamicImportPattern {
             prefix: "./plugins/{auth,analytics}.ts".to_string(),
             suffix: None,
             span: oxc_span::Span::default(),
@@ -1994,7 +1994,7 @@ mod tests {
 
     #[test]
     fn make_glob_import_meta_glob_star_with_brace() {
-        let pattern = fallow_types::extract::DynamicImportPattern {
+        let pattern = plow_types::extract::DynamicImportPattern {
             prefix: "./routes/**/*.{ts,tsx}".to_string(),
             suffix: None,
             span: oxc_span::Span::default(),
@@ -2008,7 +2008,7 @@ mod tests {
 
     #[test]
     fn make_glob_import_meta_glob_ignores_suffix_when_star_present() {
-        let pattern = fallow_types::extract::DynamicImportPattern {
+        let pattern = plow_types::extract::DynamicImportPattern {
             prefix: "./*.ts".to_string(),
             suffix: Some(".extra".to_string()),
             span: oxc_span::Span::default(),
@@ -2022,7 +2022,7 @@ mod tests {
 
     #[test]
     fn make_glob_single_dot_prefix() {
-        let pattern = fallow_types::extract::DynamicImportPattern {
+        let pattern = plow_types::extract::DynamicImportPattern {
             prefix: "./".to_string(),
             suffix: None,
             span: oxc_span::Span::default(),
@@ -2032,7 +2032,7 @@ mod tests {
 
     #[test]
     fn make_glob_prefix_without_trailing_slash() {
-        let pattern = fallow_types::extract::DynamicImportPattern {
+        let pattern = plow_types::extract::DynamicImportPattern {
             prefix: "./config".to_string(),
             suffix: None,
             span: oxc_span::Span::default(),
@@ -2042,7 +2042,7 @@ mod tests {
 
     #[test]
     fn make_glob_prefix_with_dotdot() {
-        let pattern = fallow_types::extract::DynamicImportPattern {
+        let pattern = plow_types::extract::DynamicImportPattern {
             prefix: "../shared/".to_string(),
             suffix: Some(".ts".to_string()),
             span: oxc_span::Span::default(),
@@ -2445,7 +2445,7 @@ mod tests {
     fn resolve_package_map_target_no_dot_slash_prefix_returns_none() {
         // A target that does not start with "./" is rejected by strip_prefix.
         let root = PathBuf::from("/project/packages/ui");
-        let pj = fallow_config::PackageJson::default();
+        let pj = plow_config::PackageJson::default();
         with_package_map_ctx(root, Some("@myorg/ui"), pj, &[], |ctx, manifest, _root| {
             let result = resolve_package_map_target(ctx, manifest, "src/index.ts", None);
             assert_eq!(result, None, "target without './' should return None");
@@ -2456,7 +2456,7 @@ mod tests {
     fn resolve_package_map_target_parent_dir_returns_none() {
         // A target starting with "../" is rejected as a path escape.
         let root = PathBuf::from("/project/packages/ui");
-        let pj = fallow_config::PackageJson::default();
+        let pj = plow_config::PackageJson::default();
         with_package_map_ctx(root, Some("@myorg/ui"), pj, &[], |ctx, manifest, _root| {
             let result = resolve_package_map_target(ctx, manifest, "./../outside/file.ts", None);
             assert_eq!(result, None, "parent-dir target should return None");
@@ -2467,7 +2467,7 @@ mod tests {
     fn resolve_package_map_target_absolute_path_returns_none() {
         // A target starting with "/" after stripping "./" prefix is rejected.
         let root = PathBuf::from("/project/packages/ui");
-        let pj = fallow_config::PackageJson::default();
+        let pj = plow_config::PackageJson::default();
         with_package_map_ctx(root, Some("@myorg/ui"), pj, &[], |ctx, manifest, _root| {
             // "./" + "/" -> "/" after strip_prefix("./") which is no-op, but
             // an absolute path disguised as ".//abs" yields "/" start after strip.
@@ -2481,7 +2481,7 @@ mod tests {
         // A valid "./" target resolves when the path is in raw_path_to_id.
         let root = PathBuf::from("/project/packages/ui");
         let src = root.join("src/index.ts");
-        let pj = fallow_config::PackageJson::default();
+        let pj = plow_config::PackageJson::default();
         with_package_map_ctx(
             root,
             Some("@myorg/ui"),
@@ -2506,7 +2506,7 @@ mod tests {
             root: PathBuf::from("/project"),
             canonical_root: PathBuf::from("/project"),
             name: Some("my-pkg".to_string()),
-            package_json: fallow_config::PackageJson::default(),
+            package_json: plow_config::PackageJson::default(),
         };
         let result = package_import_source_subpath(&manifest, "#my-pkg/utils");
         assert_eq!(
@@ -2524,7 +2524,7 @@ mod tests {
             root: PathBuf::from("/project"),
             canonical_root: PathBuf::from("/project"),
             name: Some("my-pkg".to_string()),
-            package_json: fallow_config::PackageJson::default(),
+            package_json: plow_config::PackageJson::default(),
         };
         let result = package_import_source_subpath(&manifest, "#utils");
         assert_eq!(
@@ -2542,7 +2542,7 @@ mod tests {
             root: PathBuf::from("/project"),
             canonical_root: PathBuf::from("/project"),
             name: Some("my-pkg".to_string()),
-            package_json: fallow_config::PackageJson::default(),
+            package_json: plow_config::PackageJson::default(),
         };
         // "#" strips to "", which is_empty is true, so returns None.
         let result = package_import_source_subpath(&manifest, "#");
@@ -2559,7 +2559,7 @@ mod tests {
             root: PathBuf::from("/project"),
             canonical_root: PathBuf::from("/project"),
             name: Some("my-pkg".to_string()),
-            package_json: fallow_config::PackageJson::default(),
+            package_json: plow_config::PackageJson::default(),
         };
         let result = package_import_source_subpath(&manifest, "no-hash");
         assert_eq!(result, None, "specifier without '#' should return None");
@@ -2572,7 +2572,7 @@ mod tests {
             root: PathBuf::from("/project"),
             canonical_root: PathBuf::from("/project"),
             name: None,
-            package_json: fallow_config::PackageJson::default(),
+            package_json: plow_config::PackageJson::default(),
         };
         let result = package_import_source_subpath(&manifest, "#internal/helper");
         assert_eq!(
@@ -2592,13 +2592,13 @@ mod tests {
             root: root1.clone(),
             canonical_root: root1,
             name: Some("root".to_string()),
-            package_json: fallow_config::PackageJson::default(),
+            package_json: plow_config::PackageJson::default(),
         };
         let m2 = PackageManifestInfo {
             root: root2.clone(),
             canonical_root: root2,
             name: Some("@myorg/ui".to_string()),
-            package_json: fallow_config::PackageJson::default(),
+            package_json: plow_config::PackageJson::default(),
         };
         let manifests = [m1, m2];
         let from_file = Path::new("/project/packages/ui/src/index.ts");
@@ -2617,7 +2617,7 @@ mod tests {
             root: root.clone(),
             canonical_root: root,
             name: Some("@myorg/ui".to_string()),
-            package_json: fallow_config::PackageJson::default(),
+            package_json: plow_config::PackageJson::default(),
         };
         let manifests = [m];
         // File is outside the manifest root.
@@ -2679,7 +2679,7 @@ mod tests {
         // A specifier containing ':' (e.g. a Sass built-in like "sass:math")
         // must return None immediately.
         let root = PathBuf::from("/project");
-        let pj = fallow_config::PackageJson::default();
+        let pj = plow_config::PackageJson::default();
         with_package_map_ctx(root.clone(), None, pj, &[], |ctx, _manifest, _r| {
             let from_file = root.join("src/main.scss");
             let result = try_scss_partial_fallback(ctx, &from_file, "sass:math");
@@ -2695,7 +2695,7 @@ mod tests {
         // A specifier whose filename already starts with '_' (i.e. it's already a
         // partial path) must return None immediately.
         let root = PathBuf::from("/project");
-        let pj = fallow_config::PackageJson::default();
+        let pj = plow_config::PackageJson::default();
         with_package_map_ctx(root.clone(), None, pj, &[], |ctx, _manifest, _r| {
             let from_file = root.join("src/main.scss");
             let result = try_scss_partial_fallback(ctx, &from_file, "./_variables");
@@ -2713,7 +2713,7 @@ mod tests {
         // Relative specifiers (starting with "./" or "../") are not bare specifiers
         // and must return None without touching any manifest.
         let root = PathBuf::from("/project");
-        let pj = fallow_config::PackageJson::default();
+        let pj = plow_config::PackageJson::default();
         with_package_map_ctx(root, None, pj, &[], |ctx, _manifest, _r| {
             let result = try_workspace_package_fallback(ctx, "./local/module");
             assert!(
@@ -2727,7 +2727,7 @@ mod tests {
     fn try_workspace_package_fallback_rejects_absolute_path() {
         // Absolute paths are not bare specifiers either.
         let root = PathBuf::from("/project");
-        let pj = fallow_config::PackageJson::default();
+        let pj = plow_config::PackageJson::default();
         with_package_map_ctx(root, None, pj, &[], |ctx, _manifest, _r| {
             let result = try_workspace_package_fallback(ctx, "/absolute/path");
             assert!(

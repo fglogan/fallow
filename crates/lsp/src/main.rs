@@ -40,25 +40,25 @@ use diagnostic_filter::{attach_changed_since_data, filter_disabled_diagnostics};
 use document_state::{
     DocumentSnapshot, DocumentState, VersionSnapshot, document_matches_disk, uri_is_stale,
 };
-#[cfg(test)]
-use fallow_api::EditorAnalysisOutput;
-#[cfg(test)]
-use fallow_api::EditorAnalysisResults as AnalysisResults;
-#[cfg(test)]
-use fallow_api::EditorDuplicationReport as DuplicationReport;
-#[cfg(test)]
-use fallow_api::EditorInlineComplexityExceeded as InlineComplexityExceeded;
-#[cfg(test)]
-use fallow_api::EditorInlineComplexityFinding as InlineComplexityFinding;
-use fallow_api::resolve_git_toplevel;
-#[cfg(test)]
-use fallow_config::DetectionMode;
-#[cfg(test)]
-use fallow_config::DuplicatesConfig;
 use initialization::{
     LspDuplicationOptions, initialization_config_path, initialization_duplication_options,
     initialization_inline_complexity_enabled, initialization_production_override,
 };
+#[cfg(test)]
+use plow_api::EditorAnalysisOutput;
+#[cfg(test)]
+use plow_api::EditorAnalysisResults as AnalysisResults;
+#[cfg(test)]
+use plow_api::EditorDuplicationReport as DuplicationReport;
+#[cfg(test)]
+use plow_api::EditorInlineComplexityExceeded as InlineComplexityExceeded;
+#[cfg(test)]
+use plow_api::EditorInlineComplexityFinding as InlineComplexityFinding;
+use plow_api::resolve_git_toplevel;
+#[cfg(test)]
+use plow_config::DetectionMode;
+#[cfg(test)]
+use plow_config::DuplicatesConfig;
 #[cfg(test)]
 use protocol::analysis_complete_params_for_test;
 #[cfg(test)]
@@ -72,7 +72,7 @@ use server_capabilities::{
 };
 
 #[derive(Clone)]
-struct FallowLspServer {
+struct PlowLspServer {
     client: Client,
     root: Arc<RwLock<Option<PathBuf>>>,
     analysis: Arc<RwLock<Option<LspAnalysisSnapshot>>>,
@@ -107,7 +107,7 @@ struct FallowLspServer {
     /// diagnostics match the CLI-driven sidebar (which receives
     /// `--production`/`--no-production`); `None` defers to the project config,
     /// mirroring the CLI default. Without this the sidebar and editor squiggles
-    /// disagree whenever `fallow.production` is set (issue #1055).
+    /// disagree whenever `plow.production` is set (issue #1055).
     production_override: Arc<RwLock<Option<bool>>>,
     /// Whether the client opted in to heuristic complexity code lenses.
     inline_complexity_enabled: Arc<RwLock<bool>>,
@@ -148,7 +148,7 @@ struct FallowLspServer {
     cancellation: Arc<AtomicBool>,
 }
 
-impl LanguageServer for FallowLspServer {
+impl LanguageServer for PlowLspServer {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
         let root = params
             .workspace_folders
@@ -215,7 +215,7 @@ impl LanguageServer for FallowLspServer {
 
     async fn initialized(&self, _: InitializedParams) {
         self.client
-            .log_message(MessageType::INFO, "fallow LSP server initialized")
+            .log_message(MessageType::INFO, "plow LSP server initialized")
             .await;
     }
 
@@ -414,7 +414,7 @@ impl LanguageServer for FallowLspServer {
     }
 }
 
-impl FallowLspServer {
+impl PlowLspServer {
     fn new(client: Client) -> Self {
         Self {
             client,
@@ -516,7 +516,7 @@ impl FallowLspServer {
                         .log_message(
                             MessageType::WARNING,
                             format!(
-                                "fallow workspace root ({}) is a subdirectory of git toplevel ({}). \
+                                "plow workspace root ({}) is a subdirectory of git toplevel ({}). \
                                  Diagnostics for files outside the workspace are not produced; the \
                                  changedSince filter joins paths against the toplevel.",
                                 root.display(),
@@ -548,7 +548,7 @@ impl FallowLspServer {
         let version_snapshot = self.snapshot_document_versions().await;
 
         self.client
-            .log_message(MessageType::INFO, "Running fallow analysis...")
+            .log_message(MessageType::INFO, "Running plow analysis...")
             .await;
 
         let project_roots = find_project_roots(&root);
@@ -772,7 +772,7 @@ impl FallowLspServer {
     /// response. The refresh is a server-to-client request that
     /// `tower-lsp-server` resolves only once the client replies; awaiting it
     /// inline would let a slow or unresponsive client stall `run_analysis`
-    /// (which holds `analysis_guard`) and delay the `fallow/analysisComplete`
+    /// (which holds `analysis_guard`) and delay the `plow/analysisComplete`
     /// signal. Spawning keeps the request on the wire while decoupling analysis
     /// throughput from client responsiveness.
     fn spawn_diagnostic_refresh(&self) {
@@ -808,13 +808,13 @@ async fn main() {
             reason = "version query writes to stdout by design"
         )]
         {
-            println!("fallow-lsp {}", env!("CARGO_PKG_VERSION"));
+            println!("plow-lsp {}", env!("CARGO_PKG_VERSION"));
         }
         return;
     }
 
     tracing_subscriber::fmt()
-        .with_env_filter("fallow=info")
+        .with_env_filter("plow=info")
         .with_writer(std::io::stderr)
         .with_ansi(false)
         .init();
@@ -822,11 +822,11 @@ async fn main() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
-    let (service, socket) = LspService::build(FallowLspServer::new)
-        .custom_method("fallow/issueTypes", FallowLspServer::issue_types)
+    let (service, socket) = LspService::build(PlowLspServer::new)
+        .custom_method("plow/issueTypes", PlowLspServer::issue_types)
         .custom_method(
-            "fallow/refreshDiagnostics",
-            FallowLspServer::refresh_diagnostics,
+            "plow/refreshDiagnostics",
+            PlowLspServer::refresh_diagnostics,
         )
         .finish();
 
@@ -837,7 +837,7 @@ async fn main() {
 /// workspace root.
 ///
 /// The LSP analyzes the workspace root ONCE over the whole tree, matching the
-/// CLI (`fallow dead-code` loads one config via `find_and_load(root)` and runs one
+/// CLI (`plow dead-code` loads one config via `find_and_load(root)` and runs one
 /// `analyze_full` pass). `analyze_full` is already workspace-aware: it discovers
 /// every workspace package and runs `run_workspace_fast` per package for plugin
 /// and script detection, so a single root pass covers all sub-package source

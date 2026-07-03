@@ -3,7 +3,7 @@ use super::common::{create_config, fixture_path};
 fn unused_members(fixture: &str) -> Vec<String> {
     let root = fixture_path(fixture);
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     results
         .unused_class_members
         .iter()

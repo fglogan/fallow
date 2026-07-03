@@ -1,5 +1,5 @@
 /**
- * Clamp a `fallow.duplication.minOccurrences` setting value to what the CLI
+ * Clamp a `plow.duplication.minOccurrences` setting value to what the CLI
  * accepts. The CLI (and config deserializer) reject values below 2, so a
  * hand-edited `settings.json` that bypasses the schema `minimum` must degrade
  * to the floor rather than fail the entire sidebar run with a non-zero exit.

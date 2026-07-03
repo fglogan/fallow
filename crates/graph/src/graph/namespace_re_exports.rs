@@ -31,8 +31,8 @@
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_types::discover::FileId;
-use fallow_types::extract::ImportedName;
+use plow_types::discover::FileId;
+use plow_types::extract::ImportedName;
 
 use crate::resolve::ResolvedModule;
 
@@ -267,8 +267,8 @@ mod tests {
     use super::*;
     use crate::graph::ModuleGraph;
     use crate::resolve::{ResolveResult, ResolvedImport, ResolvedReExport};
-    use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
-    use fallow_types::extract::{
+    use plow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
+    use plow_types::extract::{
         ExportInfo, ExportName, ImportInfo, MemberAccess, ReExportInfo, VisibilityTag,
     };
     use std::path::PathBuf;

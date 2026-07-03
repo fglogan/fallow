@@ -14,7 +14,7 @@ use crate::api::{
 
 const CLOUD_CONNECT_TIMEOUT_SECS: u64 = 5;
 const CLOUD_TOTAL_TIMEOUT_SECS: u64 = 30;
-const RUNTIME_CONTEXT_FORMAT: &str = "fallow-cloud-runtime-v1";
+const RUNTIME_CONTEXT_FORMAT: &str = "plow-cloud-runtime-v1";
 
 #[derive(Clone)]
 pub struct CloudRequest {
@@ -135,7 +135,7 @@ pub struct CloudRuntimeSummary {
 pub struct CloudRuntimeFunction {
     pub file_path: String,
     pub function_name: String,
-    /// Cross-surface `FunctionIdentity` join key (`fallow:fn:<hash>`), emitted by
+    /// Cross-surface `FunctionIdentity` join key (`plow:fn:<hash>`), emitted by
     /// the cloud as snake_case `stable_id` (consistent with every other field on
     /// this struct). `None` for an older cloud that omits it, in which case the
     /// join falls back to `(file_path, function_name, line)` and the fuzzy line
@@ -268,10 +268,10 @@ pub fn fetch_runtime_context(request: &CloudRequest) -> Result<CloudRuntimeConte
 
     match (status, code) {
         (401, _) => Err(CloudError::Auth(
-            "Fallow API key is invalid or revoked.".to_owned(),
+            "Plow API key is invalid or revoked.".to_owned(),
         )),
         (403, Some("tier_required")) => Err(CloudError::TierRequired(
-            "cloud-pull is a Team-tier feature. Start a free trial:\n\n  fallow license activate --trial --email <addr>".to_owned(),
+            "cloud-pull is a Team-tier feature. Start a free trial:\n\n  plow license activate --trial --email <addr>".to_owned(),
         )),
         (404, Some("repo_not_found")) => Err(CloudError::NotFound(format!(
             "Repo not accessible to your org: {}",
@@ -290,7 +290,7 @@ pub fn fetch_runtime_context(request: &CloudRequest) -> Result<CloudRuntimeConte
 fn validate_request(request: &CloudRequest) -> Result<(), CloudError> {
     if request.api_key.trim().is_empty() {
         return Err(CloudError::Auth(
-            "Cloud runtime coverage requires an API key.\n\nSet FALLOW_API_KEY or pass --api-key:\n\n  FALLOW_API_KEY=fallow_live_... fallow coverage analyze --cloud --repo owner/repo".to_owned(),
+            "Cloud runtime coverage requires an API key.\n\nSet PLOW_API_KEY or pass --api-key:\n\n  PLOW_API_KEY=plow_live_... plow coverage analyze --cloud --repo owner/repo".to_owned(),
         ));
     }
     if request.repo.trim().is_empty() {
@@ -357,7 +357,7 @@ fn network_message(detail: &str) -> String {
         format!(" ({})", detail.trim())
     };
     format!(
-        "Could not reach fallow.cloud for cloud runtime coverage{suffix}.\n\nCloud mode is explicitly network-backed. Local runtime coverage still works:\n\n  fallow coverage analyze --runtime-coverage ./coverage"
+        "Could not reach plow.cloud for cloud runtime coverage{suffix}.\n\nCloud mode is explicitly network-backed. Local runtime coverage still works:\n\n  plow coverage analyze --runtime-coverage ./coverage"
     )
 }
 
@@ -390,7 +390,7 @@ mod tests {
 
     fn request(repo: &str) -> CloudRequest {
         CloudRequest {
-            api_key: "fallow_live_test".to_owned(),
+            api_key: "plow_live_test".to_owned(),
             api_endpoint: Some("http://127.0.0.1:3000/".to_owned()),
             repo: repo.to_owned(),
             project_id: None,
@@ -405,7 +405,7 @@ mod tests {
         let url = runtime_context_url(&request("acme/web"));
         assert!(url.starts_with("http://127.0.0.1:3000/v1/coverage/acme%2Fweb/runtime-context?"));
         assert!(url.contains("periodDays=30"));
-        assert!(url.contains("format=fallow-cloud-runtime-v1"));
+        assert!(url.contains("format=plow-cloud-runtime-v1"));
     }
 
     #[test]
@@ -433,8 +433,8 @@ mod tests {
     #[test]
     fn cloud_request_debug_masks_api_key() {
         let req = CloudRequest {
-            api_key: "fallow_live_secret_token_value".to_owned(),
-            api_endpoint: Some("https://api.fallow.cloud".to_owned()),
+            api_key: "plow_live_secret_token_value".to_owned(),
+            api_endpoint: Some("https://api.plow.cloud".to_owned()),
             repo: "acme/web".to_owned(),
             project_id: None,
             period_days: 30,
@@ -443,7 +443,7 @@ mod tests {
         };
         let formatted = format!("{req:?}");
         assert!(
-            !formatted.contains("fallow_live_secret_token_value"),
+            !formatted.contains("plow_live_secret_token_value"),
             "api_key leaked through Debug: {formatted}"
         );
         assert!(
@@ -465,7 +465,7 @@ mod tests {
         // uploaded (instead of a placeholder 0). Before this was Option, serde
         // failed to deserialize null into u32 and broke `analyze --cloud`.
         let with_null: CloudRuntimeBlastRadiusEntry = serde_json::from_str(
-            r#"{"id":"fallow:blast:1","file":"src/a.ts","function":"a","line":1,"caller_count":null,"caller_count_weighted_by_traffic":null,"risk_band":"unknown"}"#,
+            r#"{"id":"plow:blast:1","file":"src/a.ts","function":"a","line":1,"caller_count":null,"caller_count_weighted_by_traffic":null,"risk_band":"unknown"}"#,
         )
         .expect("null caller fields must deserialize");
         assert_eq!(with_null.caller_count, None);
@@ -474,7 +474,7 @@ mod tests {
 
         // Older clouds omit the fields entirely.
         let absent: CloudRuntimeBlastRadiusEntry = serde_json::from_str(
-            r#"{"id":"fallow:blast:1","file":"src/a.ts","function":"a","line":1,"risk_band":"low"}"#,
+            r#"{"id":"plow:blast:1","file":"src/a.ts","function":"a","line":1,"risk_band":"low"}"#,
         )
         .expect("absent caller fields must deserialize");
         assert_eq!(absent.caller_count, None);
@@ -482,7 +482,7 @@ mod tests {
 
         // Legacy numeric values still parse.
         let numeric: CloudRuntimeBlastRadiusEntry = serde_json::from_str(
-            r#"{"id":"fallow:blast:1","file":"src/a.ts","function":"a","line":1,"caller_count":5,"caller_count_weighted_by_traffic":1000,"risk_band":"high"}"#,
+            r#"{"id":"plow:blast:1","file":"src/a.ts","function":"a","line":1,"caller_count":5,"caller_count_weighted_by_traffic":1000,"risk_band":"high"}"#,
         )
         .expect("numeric caller fields must deserialize");
         assert_eq!(numeric.caller_count, Some(5));
@@ -494,14 +494,14 @@ mod tests {
         // The cloud emits `null` for cyclomatic/owner_count when complexity and
         // CODEOWNERS inputs are not available (instead of placeholder 1/0).
         let with_null: CloudRuntimeImportanceEntry = serde_json::from_str(
-            r#"{"id":"fallow:importance:1","file":"src/a.ts","function":"a","line":1,"invocations":42,"cyclomatic":null,"owner_count":null,"importance_score":12.5,"reason":"Moderate traffic"}"#,
+            r#"{"id":"plow:importance:1","file":"src/a.ts","function":"a","line":1,"invocations":42,"cyclomatic":null,"owner_count":null,"importance_score":12.5,"reason":"Moderate traffic"}"#,
         )
         .expect("null importance metrics must deserialize");
         assert_eq!(with_null.cyclomatic, None);
         assert_eq!(with_null.owner_count, None);
 
         let absent: CloudRuntimeImportanceEntry = serde_json::from_str(
-            r#"{"id":"fallow:importance:1","file":"src/a.ts","function":"a","line":1,"invocations":42,"importance_score":12.5,"reason":"Moderate traffic"}"#,
+            r#"{"id":"plow:importance:1","file":"src/a.ts","function":"a","line":1,"invocations":42,"importance_score":12.5,"reason":"Moderate traffic"}"#,
         )
         .expect("absent importance metrics must deserialize");
         assert_eq!(absent.cyclomatic, None);
@@ -510,14 +510,14 @@ mod tests {
 
     #[test]
     fn full_envelope_with_new_cloud_fields_deserializes() {
-        // Mirrors the fallow-cloud Wave 1 runtime-context response: the
+        // Mirrors the plow-cloud Wave 1 runtime-context response: the
         // `{ "data": ... }` envelope, null measurement fields, risk_band
         // "unknown", plus new top-level fields (actionable / verdict /
         // provenance) and per-entry fields (context_unavailable_reason) the CLI
         // does not model. None may break deserialization (no deny_unknown_fields).
         let body = r#"{
           "data": {
-            "schema_version": "fallow-cloud-runtime-v1",
+            "schema_version": "plow-cloud-runtime-v1",
             "repo": "owner/repo",
             "project_id": null,
             "actionable": true,
@@ -537,13 +537,13 @@ mod tests {
             },
             "functions": [],
             "blast_radius": [{
-              "id": "fallow:blast:1", "file": "src/a.ts", "function": "a", "line": 1,
+              "id": "plow:blast:1", "file": "src/a.ts", "function": "a", "line": 1,
               "caller_count": null, "caller_count_weighted_by_traffic": null,
               "risk_band": "unknown",
               "context_unavailable_reason": "caller-graph not uploaded"
             }],
             "importance": [{
-              "id": "fallow:importance:1", "file": "src/a.ts", "function": "a", "line": 1,
+              "id": "plow:importance:1", "file": "src/a.ts", "function": "a", "line": 1,
               "invocations": 42, "cyclomatic": null, "owner_count": null,
               "importance_score": 12.5, "reason": "Moderate traffic",
               "context_unavailable_reason": "complexity and CODEOWNERS data not available"

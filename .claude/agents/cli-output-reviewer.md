@@ -5,7 +5,7 @@ tools: Glob, Grep, Read, Bash
 model: opus
 ---
 
-Review changes to fallow's human-readable CLI output. This is the default user-facing surface and the most subjective.
+Review changes to plow's human-readable CLI output. This is the default user-facing surface and the most subjective.
 
 ## What to check
 
@@ -26,7 +26,7 @@ For each human-format diff, walk this list in addition to the generic checks abo
 ### Human format audit (Phase 3b)
 
 ```bash
-FALLOW_QUIET=1 fallow <command> --root benchmarks/fixtures/real-world/zod 2>/dev/null
+PLOW_QUIET=1 plow <command> --root benchmarks/fixtures/real-world/zod 2>/dev/null
 ```
 
 Check:

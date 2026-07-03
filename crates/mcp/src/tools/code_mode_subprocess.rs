@@ -9,7 +9,7 @@ use serde_json::json;
 const STDERR_LIMIT_BYTES: usize = 64 * 1024;
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
-pub(super) fn run_fallow_sync(
+pub(super) fn run_plow_sync(
     binary: &str,
     tool: &'static str,
     args: &[String],
@@ -32,19 +32,19 @@ pub(super) fn run_fallow_sync(
                 .reopen()
                 .map_err(|err| format!("failed to reopen stderr temp file: {err}"))?,
         ))
-        .env("FALLOW_INTEGRATION_SURFACE", "mcp")
-        .env("FALLOW_MCP_TOOL", tool)
+        .env("PLOW_INTEGRATION_SURFACE", "mcp")
+        .env("PLOW_MCP_TOOL", tool)
         .spawn()
         .map_err(|err| {
             format!(
-                "failed to execute fallow binary '{binary}': {err}. Ensure fallow is installed and available in PATH, or set FALLOW_BIN."
+                "failed to execute plow binary '{binary}': {err}. Ensure plow is installed and available in PATH, or set PLOW_BIN."
             )
         })?;
 
     loop {
         if let Some(status) = child
             .try_wait()
-            .map_err(|err| format!("failed to wait for fallow subprocess: {err}"))?
+            .map_err(|err| format!("failed to wait for plow subprocess: {err}"))?
         {
             let stdout_len = file_len(stdout_file.as_file())?;
             if stdout_len > max_output_bytes as u64 {
@@ -61,7 +61,7 @@ pub(super) fn run_fallow_sync(
         if Instant::now() >= deadline {
             let _ = child.kill();
             let _ = child.wait();
-            return Err("code mode execution timed out while running fallow".to_string());
+            return Err("code mode execution timed out while running plow".to_string());
         }
         if file_len(stdout_file.as_file())? > max_output_bytes as u64 {
             let _ = child.kill();
@@ -78,15 +78,15 @@ pub(super) fn run_fallow_sync(
 fn file_len(file: &fs::File) -> Result<u64, String> {
     file.metadata()
         .map(|metadata| metadata.len())
-        .map_err(|err| format!("failed to inspect fallow output file: {err}"))
+        .map_err(|err| format!("failed to inspect plow output file: {err}"))
 }
 
 fn read_file(file: &mut fs::File, label: &str) -> Result<Vec<u8>, String> {
     file.seek(SeekFrom::Start(0))
-        .map_err(|err| format!("failed to rewind fallow {label}: {err}"))?;
+        .map_err(|err| format!("failed to rewind plow {label}: {err}"))?;
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes)
-        .map_err(|err| format!("failed to read fallow {label}: {err}"))?;
+        .map_err(|err| format!("failed to read plow {label}: {err}"))?;
     Ok(bytes)
 }
 
@@ -118,7 +118,7 @@ pub(super) fn normalize_output(
         _ => Err(json!({
             "error": true,
             "message": if stderr.is_empty() {
-                format!("fallow exited with code {exit_code}")
+                format!("plow exited with code {exit_code}")
             } else {
                 stderr
             },

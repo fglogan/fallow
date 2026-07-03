@@ -10,7 +10,7 @@ use crate::common::{create_config, fixture_path};
 fn openlayers_dispatched_methods_are_not_flagged() {
     let root = fixture_path("issue-1638-openlayers-dispatch");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_members: Vec<String> = results
         .unused_class_members

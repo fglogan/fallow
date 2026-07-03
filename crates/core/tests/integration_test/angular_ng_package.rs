@@ -5,7 +5,7 @@ use super::common::{create_config, fixture_path};
 fn ng_package_entry_file_keeps_public_api_reachable() {
     let root = fixture_path("ng-package-entrypoint");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_paths: Vec<String> = results
         .unused_files

@@ -21,7 +21,7 @@ use std::path::Path;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_types::extract::ModuleInfo;
+use plow_types::extract::ModuleInfo;
 
 use crate::discover::FileId;
 use crate::graph::ModuleGraph;
@@ -136,7 +136,7 @@ fn component_name_for(path: &Path) -> String {
 mod tests {
     use std::path::PathBuf;
 
-    use fallow_types::extract::DispatchedEvent;
+    use plow_types::extract::DispatchedEvent;
 
     use super::super::test_support::empty_module;
     use super::*;

@@ -1,22 +1,22 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use fallow_config::RulesConfig;
+use plow_config::RulesConfig;
 #[cfg(test)]
-use fallow_config::Severity;
-use fallow_output::{
+use plow_config::Severity;
+use plow_output::{
     CodeClimateAnnotationField, CodeClimateIssue, HealthReport, annotate_codeclimate_issues,
     codeclimate_issues_to_value,
 };
 #[cfg(test)]
-use fallow_output::{CodeClimateSeverity, codeclimate_fingerprint_hash};
-use fallow_types::duplicates::DuplicationReport;
-use fallow_types::results::AnalysisResults;
+use plow_output::{CodeClimateSeverity, codeclimate_fingerprint_hash};
+use plow_types::duplicates::DuplicationReport;
+use plow_types::results::AnalysisResults;
 
 use super::grouping::{self, OwnershipResolver};
 use super::{emit_json, normalize_uri, relative_path};
 
-/// Map fallow severity to CodeClimate severity.
+/// Map plow severity to CodeClimate severity.
 #[cfg(test)]
 fn severity_to_codeclimate(s: Severity) -> CodeClimateSeverity {
     match s {
@@ -41,91 +41,89 @@ fn fingerprint_hash(parts: &[&str]) -> String {
 
 #[cfg(test)]
 fn coverage_intelligence_check_name(
-    recommendation: fallow_output::CoverageIntelligenceRecommendation,
+    recommendation: plow_output::CoverageIntelligenceRecommendation,
 ) -> &'static str {
     match recommendation {
-        fallow_output::CoverageIntelligenceRecommendation::AddTestOrSplitBeforeMerge => {
-            "fallow/coverage-intelligence-risky-change"
+        plow_output::CoverageIntelligenceRecommendation::AddTestOrSplitBeforeMerge => {
+            "plow/coverage-intelligence-risky-change"
         }
-        fallow_output::CoverageIntelligenceRecommendation::DeleteAfterConfirmingOwner => {
-            "fallow/coverage-intelligence-delete"
+        plow_output::CoverageIntelligenceRecommendation::DeleteAfterConfirmingOwner => {
+            "plow/coverage-intelligence-delete"
         }
-        fallow_output::CoverageIntelligenceRecommendation::ReviewBeforeChanging => {
-            "fallow/coverage-intelligence-review"
+        plow_output::CoverageIntelligenceRecommendation::ReviewBeforeChanging => {
+            "plow/coverage-intelligence-review"
         }
-        fallow_output::CoverageIntelligenceRecommendation::RefactorCarefullyKeepBehavior => {
-            "fallow/coverage-intelligence-refactor"
+        plow_output::CoverageIntelligenceRecommendation::RefactorCarefullyKeepBehavior => {
+            "plow/coverage-intelligence-refactor"
         }
     }
 }
 
 #[cfg(test)]
-const fn health_finding_severity(severity: fallow_output::FindingSeverity) -> CodeClimateSeverity {
+const fn health_finding_severity(severity: plow_output::FindingSeverity) -> CodeClimateSeverity {
     match severity {
-        fallow_output::FindingSeverity::Critical => CodeClimateSeverity::Critical,
-        fallow_output::FindingSeverity::High => CodeClimateSeverity::Major,
-        fallow_output::FindingSeverity::Moderate => CodeClimateSeverity::Minor,
+        plow_output::FindingSeverity::Critical => CodeClimateSeverity::Critical,
+        plow_output::FindingSeverity::High => CodeClimateSeverity::Major,
+        plow_output::FindingSeverity::Moderate => CodeClimateSeverity::Minor,
     }
 }
 
 #[cfg(test)]
-const fn runtime_coverage_check_name(
-    verdict: fallow_output::RuntimeCoverageVerdict,
-) -> &'static str {
+const fn runtime_coverage_check_name(verdict: plow_output::RuntimeCoverageVerdict) -> &'static str {
     match verdict {
-        fallow_output::RuntimeCoverageVerdict::SafeToDelete => "fallow/runtime-safe-to-delete",
-        fallow_output::RuntimeCoverageVerdict::ReviewRequired => "fallow/runtime-review-required",
-        fallow_output::RuntimeCoverageVerdict::LowTraffic => "fallow/runtime-low-traffic",
-        fallow_output::RuntimeCoverageVerdict::CoverageUnavailable => {
-            "fallow/runtime-coverage-unavailable"
+        plow_output::RuntimeCoverageVerdict::SafeToDelete => "plow/runtime-safe-to-delete",
+        plow_output::RuntimeCoverageVerdict::ReviewRequired => "plow/runtime-review-required",
+        plow_output::RuntimeCoverageVerdict::LowTraffic => "plow/runtime-low-traffic",
+        plow_output::RuntimeCoverageVerdict::CoverageUnavailable => {
+            "plow/runtime-coverage-unavailable"
         }
-        fallow_output::RuntimeCoverageVerdict::Active
-        | fallow_output::RuntimeCoverageVerdict::Unknown => "fallow/runtime-coverage",
+        plow_output::RuntimeCoverageVerdict::Active
+        | plow_output::RuntimeCoverageVerdict::Unknown => "plow/runtime-coverage",
     }
 }
 
 #[cfg(test)]
 const fn runtime_coverage_severity(
-    verdict: fallow_output::RuntimeCoverageVerdict,
+    verdict: plow_output::RuntimeCoverageVerdict,
 ) -> CodeClimateSeverity {
     match verdict {
-        fallow_output::RuntimeCoverageVerdict::SafeToDelete => CodeClimateSeverity::Critical,
-        fallow_output::RuntimeCoverageVerdict::ReviewRequired => CodeClimateSeverity::Major,
+        plow_output::RuntimeCoverageVerdict::SafeToDelete => CodeClimateSeverity::Critical,
+        plow_output::RuntimeCoverageVerdict::ReviewRequired => CodeClimateSeverity::Major,
         _ => CodeClimateSeverity::Minor,
     }
 }
 
 #[cfg(test)]
 const fn coverage_intelligence_severity(
-    verdict: fallow_output::CoverageIntelligenceVerdict,
+    verdict: plow_output::CoverageIntelligenceVerdict,
 ) -> Option<CodeClimateSeverity> {
     match verdict {
-        fallow_output::CoverageIntelligenceVerdict::RiskyChangeDetected
-        | fallow_output::CoverageIntelligenceVerdict::HighConfidenceDelete => {
+        plow_output::CoverageIntelligenceVerdict::RiskyChangeDetected
+        | plow_output::CoverageIntelligenceVerdict::HighConfidenceDelete => {
             Some(CodeClimateSeverity::Major)
         }
-        fallow_output::CoverageIntelligenceVerdict::ReviewRequired
-        | fallow_output::CoverageIntelligenceVerdict::RefactorCarefully => {
+        plow_output::CoverageIntelligenceVerdict::ReviewRequired
+        | plow_output::CoverageIntelligenceVerdict::RefactorCarefully => {
             Some(CodeClimateSeverity::Minor)
         }
-        fallow_output::CoverageIntelligenceVerdict::Clean
-        | fallow_output::CoverageIntelligenceVerdict::Unknown => None,
+        plow_output::CoverageIntelligenceVerdict::Clean
+        | plow_output::CoverageIntelligenceVerdict::Unknown => None,
     }
 }
 
 /// Fetch CodeClimate issues from the API-owned dead-code output builder.
 ///
 /// Returns the typed [`CodeClimateIssue`] vec; callers that emit the wire
-/// shape convert via [`fallow_output::codeclimate_issues_to_value`]. The schema
+/// shape convert via [`plow_output::codeclimate_issues_to_value`]. The schema
 /// drift gate locks the per-issue shape against
-/// [`fallow_output::CodeClimateOutput`].
+/// [`plow_output::CodeClimateOutput`].
 #[must_use]
 pub(super) fn api_codeclimate_issues(
     results: &AnalysisResults,
     root: &Path,
     rules: &RulesConfig,
 ) -> Vec<CodeClimateIssue> {
-    fallow_api::build_codeclimate(results, root, rules)
+    plow_api::build_codeclimate(results, root, rules)
 }
 
 /// Print dead-code analysis results in CodeClimate format.
@@ -165,7 +163,7 @@ pub(super) fn api_health_codeclimate_issues(
     report: &HealthReport,
     root: &Path,
 ) -> Vec<CodeClimateIssue> {
-    fallow_api::build_health_codeclimate(report, root)
+    plow_api::build_health_codeclimate(report, root)
 }
 
 /// Print health analysis results in CodeClimate format.
@@ -203,7 +201,7 @@ pub(super) fn api_duplication_codeclimate_issues(
     report: &DuplicationReport,
     root: &Path,
 ) -> Vec<CodeClimateIssue> {
-    fallow_api::build_duplication_codeclimate(report, root)
+    plow_api::build_duplication_codeclimate(report, root)
 }
 
 /// Print duplication analysis results in CodeClimate format.
@@ -253,9 +251,9 @@ pub(super) fn print_grouped_duplication_codeclimate(
 mod tests {
     use super::*;
     use crate::report::test_helpers::sample_results;
-    use fallow_config::RulesConfig;
-    use fallow_types::output_dead_code::*;
-    use fallow_types::results::*;
+    use plow_config::RulesConfig;
+    use plow_types::output_dead_code::*;
+    use plow_types::results::*;
     use std::path::PathBuf;
 
     /// Compute graduated severity for health findings based on threshold ratio.
@@ -320,7 +318,7 @@ mod tests {
 
         let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
 
-        assert_eq!(output[0]["check_name"], "fallow/missing-suppression-reason");
+        assert_eq!(output[0]["check_name"], "plow/missing-suppression-reason");
         assert_eq!(output[0]["severity"], "major");
     }
 
@@ -358,8 +356,8 @@ mod tests {
 
         let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
 
-        assert_eq!(output[0]["check_name"], "fallow/stale-suppression");
-        assert_eq!(output[1]["check_name"], "fallow/missing-suppression-reason");
+        assert_eq!(output[0]["check_name"], "plow/stale-suppression");
+        assert_eq!(output[1]["check_name"], "plow/missing-suppression-reason");
         assert_ne!(output[0]["fingerprint"], output[1]["fingerprint"]);
     }
 
@@ -377,7 +375,7 @@ mod tests {
         let issue = &output.as_array().unwrap()[0];
 
         assert_eq!(issue["type"], "issue");
-        assert_eq!(issue["check_name"], "fallow/unused-file");
+        assert_eq!(issue["check_name"], "plow/unused-file");
         assert!(issue["description"].is_string());
         assert!(issue["categories"].is_array());
         assert!(issue["severity"].is_string());
@@ -509,8 +507,8 @@ mod tests {
         let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
         let arr = output.as_array().unwrap();
         assert_eq!(arr.len(), 2);
-        assert_eq!(arr[0]["check_name"], "fallow/unlisted-dependency");
-        assert_eq!(arr[1]["check_name"], "fallow/unlisted-dependency");
+        assert_eq!(arr[0]["check_name"], "plow/unlisted-dependency");
+        assert_eq!(arr[1]["check_name"], "plow/unlisted-dependency");
     }
 
     #[test]
@@ -626,7 +624,7 @@ mod tests {
             ));
         let rules = RulesConfig::default();
         let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
-        assert_eq!(output[0]["check_name"], "fallow/type-only-dependency");
+        assert_eq!(output[0]["check_name"], "plow/type-only-dependency");
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("zod"));
         assert!(desc.contains("type-only"));
@@ -705,7 +703,7 @@ mod tests {
     /// rule short-circuit clears the vec, but the generic-iterator helpers
     /// in `codeclimate.rs` previously called `severity_to_codeclimate`
     /// before checking emptiness and panicked at `Severity::Off`).
-    /// `fallow dead-code --format codeclimate --production` on any project
+    /// `plow dead-code --format codeclimate --production` on any project
     /// with a `--production`-suppressed dep / export / member rule used to
     /// exit 101 with `entered unreachable code` at `ci/severity.rs:28`.
     /// This test exercises all three previously-vulnerable helpers
@@ -761,7 +759,7 @@ mod tests {
 
     #[test]
     fn health_codeclimate_includes_coverage_gaps() {
-        use fallow_output::*;
+        use plow_output::*;
 
         let root = PathBuf::from("/project");
         let report = HealthReport {
@@ -801,10 +799,10 @@ mod tests {
         let output = codeclimate_issues_to_value(&api_health_codeclimate_issues(&report, &root));
         let issues = output.as_array().unwrap();
         assert_eq!(issues.len(), 2);
-        assert_eq!(issues[0]["check_name"], "fallow/untested-file");
+        assert_eq!(issues[0]["check_name"], "plow/untested-file");
         assert_eq!(issues[0]["categories"][0], "Coverage");
         assert_eq!(issues[0]["location"]["path"], "src/app.ts");
-        assert_eq!(issues[1]["check_name"], "fallow/untested-export");
+        assert_eq!(issues[1]["check_name"], "plow/untested-export");
         assert_eq!(issues[1]["location"]["lines"]["begin"], 12);
         assert!(
             issues[1]["description"]
@@ -816,7 +814,7 @@ mod tests {
 
     #[test]
     fn health_codeclimate_includes_coverage_intelligence_issue() {
-        use fallow_output::{
+        use plow_output::{
             CoverageIntelligenceAction, CoverageIntelligenceConfidence,
             CoverageIntelligenceEvidence, CoverageIntelligenceFinding,
             CoverageIntelligenceMatchConfidence, CoverageIntelligenceRecommendation,
@@ -841,7 +839,7 @@ mod tests {
                     ..Default::default()
                 },
                 findings: vec![CoverageIntelligenceFinding {
-                    id: "fallow:coverage-intel:abc123".to_owned(),
+                    id: "plow:coverage-intel:abc123".to_owned(),
                     path: root.join("src/dead.ts"),
                     identity: Some("deadPath".to_owned()),
                     line: 9,
@@ -849,7 +847,7 @@ mod tests {
                     signals: vec![CoverageIntelligenceSignal::RuntimeCold],
                     recommendation: CoverageIntelligenceRecommendation::DeleteAfterConfirmingOwner,
                     confidence: CoverageIntelligenceConfidence::High,
-                    related_ids: vec!["fallow:prod:deadbeef".to_owned()],
+                    related_ids: vec!["plow:prod:deadbeef".to_owned()],
                     evidence: CoverageIntelligenceEvidence {
                         match_confidence: CoverageIntelligenceMatchConfidence::Direct,
                         ..Default::default()
@@ -867,10 +865,7 @@ mod tests {
         let output = codeclimate_issues_to_value(&api_health_codeclimate_issues(&report, &root));
         let issues = output.as_array().unwrap();
         assert_eq!(issues.len(), 1);
-        assert_eq!(
-            issues[0]["check_name"],
-            "fallow/coverage-intelligence-delete"
-        );
+        assert_eq!(issues[0]["check_name"], "plow/coverage-intelligence-delete");
         assert!(!issues[0]["fingerprint"].as_str().unwrap().is_empty());
         assert_eq!(issues[0]["location"]["path"], "src/dead.ts");
         assert!(
@@ -883,7 +878,7 @@ mod tests {
 
     #[test]
     fn health_codeclimate_skips_summary_only_coverage_intelligence() {
-        use fallow_output::{
+        use plow_output::{
             CoverageIntelligenceReport, CoverageIntelligenceSchemaVersion,
             CoverageIntelligenceSummary, CoverageIntelligenceVerdict, HealthReport,
         };
@@ -908,7 +903,7 @@ mod tests {
 
     #[test]
     fn health_codeclimate_crap_only_uses_crap_check_name() {
-        use fallow_output::{ComplexityViolation, FindingSeverity, HealthReport, HealthSummary};
+        use plow_output::{ComplexityViolation, FindingSeverity, HealthReport, HealthSummary};
         let root = PathBuf::from("/project");
         let report = HealthReport {
             findings: vec![
@@ -925,7 +920,7 @@ mod tests {
                     react_jsx_max_depth: 0,
                     react_prop_count: 0,
                     react_hook_profile: None,
-                    exceeded: fallow_output::ExceededThreshold::Crap,
+                    exceeded: plow_output::ExceededThreshold::Crap,
                     severity: FindingSeverity::High,
                     crap: Some(60.0),
                     coverage_pct: Some(25.0),
@@ -948,7 +943,7 @@ mod tests {
         };
         let json = codeclimate_issues_to_value(&api_health_codeclimate_issues(&report, &root));
         let issues = json.as_array().unwrap();
-        assert_eq!(issues[0]["check_name"], "fallow/high-crap-score");
+        assert_eq!(issues[0]["check_name"], "plow/high-crap-score");
         assert_eq!(issues[0]["severity"], "major");
         let description = issues[0]["description"].as_str().unwrap();
         assert!(description.contains("CRAP score"), "desc: {description}");
@@ -961,23 +956,23 @@ mod tests {
 
     #[test]
     fn coverage_intelligence_check_name_review_before_changing() {
-        use fallow_output::CoverageIntelligenceRecommendation;
+        use plow_output::CoverageIntelligenceRecommendation;
         assert_eq!(
             coverage_intelligence_check_name(
                 CoverageIntelligenceRecommendation::ReviewBeforeChanging
             ),
-            "fallow/coverage-intelligence-review"
+            "plow/coverage-intelligence-review"
         );
     }
 
     #[test]
     fn coverage_intelligence_check_name_refactor_carefully() {
-        use fallow_output::CoverageIntelligenceRecommendation;
+        use plow_output::CoverageIntelligenceRecommendation;
         assert_eq!(
             coverage_intelligence_check_name(
                 CoverageIntelligenceRecommendation::RefactorCarefullyKeepBehavior
             ),
-            "fallow/coverage-intelligence-refactor"
+            "plow/coverage-intelligence-refactor"
         );
     }
 
@@ -987,9 +982,9 @@ mod tests {
 
     #[test]
     fn complexity_description_both_threshold_exceeded() {
-        use fallow_output::{ComplexityViolation, ExceededThreshold, FindingSeverity};
+        use plow_output::{ComplexityViolation, ExceededThreshold, FindingSeverity};
         let root = PathBuf::from("/project");
-        let report = fallow_output::HealthReport {
+        let report = plow_output::HealthReport {
             findings: vec![
                 ComplexityViolation {
                     path: root.join("src/fn.ts"),
@@ -1022,7 +1017,7 @@ mod tests {
         };
         let json = codeclimate_issues_to_value(&api_health_codeclimate_issues(&report, &root));
         let issues = json.as_array().unwrap();
-        assert_eq!(issues[0]["check_name"], "fallow/high-complexity");
+        assert_eq!(issues[0]["check_name"], "plow/high-complexity");
         let desc = issues[0]["description"].as_str().unwrap();
         assert!(desc.contains("cyclomatic complexity"), "desc: {desc}");
         assert!(desc.contains("cognitive complexity"), "desc: {desc}");
@@ -1030,9 +1025,9 @@ mod tests {
 
     #[test]
     fn complexity_description_cyclomatic_only() {
-        use fallow_output::{ComplexityViolation, ExceededThreshold, FindingSeverity};
+        use plow_output::{ComplexityViolation, ExceededThreshold, FindingSeverity};
         let root = PathBuf::from("/project");
-        let report = fallow_output::HealthReport {
+        let report = plow_output::HealthReport {
             findings: vec![
                 ComplexityViolation {
                     path: root.join("src/fn.ts"),
@@ -1065,7 +1060,7 @@ mod tests {
         };
         let json = codeclimate_issues_to_value(&api_health_codeclimate_issues(&report, &root));
         let issues = json.as_array().unwrap();
-        assert_eq!(issues[0]["check_name"], "fallow/high-cyclomatic-complexity");
+        assert_eq!(issues[0]["check_name"], "plow/high-cyclomatic-complexity");
         let desc = issues[0]["description"].as_str().unwrap();
         assert!(desc.contains("cyclomatic complexity"), "desc: {desc}");
         assert!(
@@ -1076,9 +1071,9 @@ mod tests {
 
     #[test]
     fn complexity_description_cognitive_only() {
-        use fallow_output::{ComplexityViolation, ExceededThreshold, FindingSeverity};
+        use plow_output::{ComplexityViolation, ExceededThreshold, FindingSeverity};
         let root = PathBuf::from("/project");
-        let report = fallow_output::HealthReport {
+        let report = plow_output::HealthReport {
             findings: vec![
                 ComplexityViolation {
                     path: root.join("src/fn.ts"),
@@ -1111,7 +1106,7 @@ mod tests {
         };
         let json = codeclimate_issues_to_value(&api_health_codeclimate_issues(&report, &root));
         let issues = json.as_array().unwrap();
-        assert_eq!(issues[0]["check_name"], "fallow/high-cognitive-complexity");
+        assert_eq!(issues[0]["check_name"], "plow/high-cognitive-complexity");
         let desc = issues[0]["description"].as_str().unwrap();
         assert!(desc.contains("cognitive complexity"), "desc: {desc}");
         assert!(!desc.contains("cyclomatic"), "desc: {desc}");
@@ -1119,9 +1114,9 @@ mod tests {
 
     #[test]
     fn complexity_description_all_threshold_crap_no_coverage() {
-        use fallow_output::{ComplexityViolation, ExceededThreshold, FindingSeverity};
+        use plow_output::{ComplexityViolation, ExceededThreshold, FindingSeverity};
         let root = PathBuf::from("/project");
-        let report = fallow_output::HealthReport {
+        let report = plow_output::HealthReport {
             findings: vec![
                 ComplexityViolation {
                     path: root.join("src/fn.ts"),
@@ -1154,7 +1149,7 @@ mod tests {
         };
         let json = codeclimate_issues_to_value(&api_health_codeclimate_issues(&report, &root));
         let issues = json.as_array().unwrap();
-        assert_eq!(issues[0]["check_name"], "fallow/high-crap-score");
+        assert_eq!(issues[0]["check_name"], "plow/high-crap-score");
         let desc = issues[0]["description"].as_str().unwrap();
         assert!(desc.contains("CRAP score"), "desc: {desc}");
         assert!(
@@ -1169,7 +1164,7 @@ mod tests {
 
     #[test]
     fn coverage_intelligence_issue_none_identity_uses_code_label() {
-        use fallow_output::{
+        use plow_output::{
             CoverageIntelligenceAction, CoverageIntelligenceConfidence,
             CoverageIntelligenceEvidence, CoverageIntelligenceFinding,
             CoverageIntelligenceMatchConfidence, CoverageIntelligenceRecommendation,
@@ -1177,7 +1172,7 @@ mod tests {
             CoverageIntelligenceSummary, CoverageIntelligenceVerdict,
         };
         let root = PathBuf::from("/project");
-        let report = fallow_output::HealthReport {
+        let report = plow_output::HealthReport {
             coverage_intelligence: Some(CoverageIntelligenceReport {
                 schema_version: CoverageIntelligenceSchemaVersion::V1,
                 verdict: CoverageIntelligenceVerdict::ReviewRequired,
@@ -1186,7 +1181,7 @@ mod tests {
                     ..Default::default()
                 },
                 findings: vec![CoverageIntelligenceFinding {
-                    id: "fallow:coverage-intel:xyz".to_owned(),
+                    id: "plow:coverage-intel:xyz".to_owned(),
                     path: root.join("src/util.ts"),
                     identity: None,
                     line: 3,
@@ -1211,10 +1206,7 @@ mod tests {
         let json = codeclimate_issues_to_value(&api_health_codeclimate_issues(&report, &root));
         let issues = json.as_array().unwrap();
         assert_eq!(issues.len(), 1);
-        assert_eq!(
-            issues[0]["check_name"],
-            "fallow/coverage-intelligence-review"
-        );
+        assert_eq!(issues[0]["check_name"], "plow/coverage-intelligence-review");
         let desc = issues[0]["description"].as_str().unwrap();
         assert!(
             desc.contains("'code'"),
@@ -1228,7 +1220,7 @@ mod tests {
 
     #[test]
     fn coverage_intelligence_clean_verdict_emits_no_issue() {
-        use fallow_output::{
+        use plow_output::{
             CoverageIntelligenceAction, CoverageIntelligenceConfidence,
             CoverageIntelligenceEvidence, CoverageIntelligenceFinding,
             CoverageIntelligenceMatchConfidence, CoverageIntelligenceRecommendation,
@@ -1236,7 +1228,7 @@ mod tests {
             CoverageIntelligenceSummary, CoverageIntelligenceVerdict,
         };
         let root = PathBuf::from("/project");
-        let report = fallow_output::HealthReport {
+        let report = plow_output::HealthReport {
             coverage_intelligence: Some(CoverageIntelligenceReport {
                 schema_version: CoverageIntelligenceSchemaVersion::V1,
                 verdict: CoverageIntelligenceVerdict::Clean,
@@ -1245,7 +1237,7 @@ mod tests {
                     ..Default::default()
                 },
                 findings: vec![CoverageIntelligenceFinding {
-                    id: "fallow:coverage-intel:clean".to_owned(),
+                    id: "plow:coverage-intel:clean".to_owned(),
                     path: root.join("src/util.ts"),
                     identity: Some("cleanFn".to_owned()),
                     line: 3,
@@ -1280,9 +1272,9 @@ mod tests {
 
     #[test]
     fn untested_file_singular_export_count() {
-        use fallow_output::{CoverageGapSummary, CoverageGaps, UntestedFile, UntestedFileFinding};
+        use plow_output::{CoverageGapSummary, CoverageGaps, UntestedFile, UntestedFileFinding};
         let root = PathBuf::from("/project");
-        let report = fallow_output::HealthReport {
+        let report = plow_output::HealthReport {
             coverage_gaps: Some(CoverageGaps {
                 summary: CoverageGapSummary {
                     runtime_files: 1,
@@ -1315,9 +1307,9 @@ mod tests {
 
     #[test]
     fn untested_file_plural_export_count() {
-        use fallow_output::{CoverageGapSummary, CoverageGaps, UntestedFile, UntestedFileFinding};
+        use plow_output::{CoverageGapSummary, CoverageGaps, UntestedFile, UntestedFileFinding};
         let root = PathBuf::from("/project");
-        let report = fallow_output::HealthReport {
+        let report = plow_output::HealthReport {
             coverage_gaps: Some(CoverageGaps {
                 summary: CoverageGapSummary {
                     runtime_files: 1,
@@ -1349,7 +1341,7 @@ mod tests {
 
     #[test]
     fn health_finding_severity_critical_maps_to_critical() {
-        use fallow_output::FindingSeverity;
+        use plow_output::FindingSeverity;
         assert_eq!(
             health_finding_severity(FindingSeverity::Critical),
             CodeClimateSeverity::Critical
@@ -1358,7 +1350,7 @@ mod tests {
 
     #[test]
     fn health_finding_severity_moderate_maps_to_minor() {
-        use fallow_output::FindingSeverity;
+        use plow_output::FindingSeverity;
         assert_eq!(
             health_finding_severity(FindingSeverity::Moderate),
             CodeClimateSeverity::Minor
@@ -1371,41 +1363,41 @@ mod tests {
 
     #[test]
     fn runtime_coverage_check_name_safe_to_delete() {
-        use fallow_output::RuntimeCoverageVerdict;
+        use plow_output::RuntimeCoverageVerdict;
         assert_eq!(
             runtime_coverage_check_name(RuntimeCoverageVerdict::SafeToDelete),
-            "fallow/runtime-safe-to-delete"
+            "plow/runtime-safe-to-delete"
         );
     }
 
     #[test]
     fn runtime_coverage_check_name_low_traffic() {
-        use fallow_output::RuntimeCoverageVerdict;
+        use plow_output::RuntimeCoverageVerdict;
         assert_eq!(
             runtime_coverage_check_name(RuntimeCoverageVerdict::LowTraffic),
-            "fallow/runtime-low-traffic"
+            "plow/runtime-low-traffic"
         );
     }
 
     #[test]
     fn runtime_coverage_check_name_coverage_unavailable() {
-        use fallow_output::RuntimeCoverageVerdict;
+        use plow_output::RuntimeCoverageVerdict;
         assert_eq!(
             runtime_coverage_check_name(RuntimeCoverageVerdict::CoverageUnavailable),
-            "fallow/runtime-coverage-unavailable"
+            "plow/runtime-coverage-unavailable"
         );
     }
 
     #[test]
     fn runtime_coverage_check_name_active_and_unknown_use_generic() {
-        use fallow_output::RuntimeCoverageVerdict;
+        use plow_output::RuntimeCoverageVerdict;
         assert_eq!(
             runtime_coverage_check_name(RuntimeCoverageVerdict::Active),
-            "fallow/runtime-coverage"
+            "plow/runtime-coverage"
         );
         assert_eq!(
             runtime_coverage_check_name(RuntimeCoverageVerdict::Unknown),
-            "fallow/runtime-coverage"
+            "plow/runtime-coverage"
         );
     }
 
@@ -1415,7 +1407,7 @@ mod tests {
 
     #[test]
     fn runtime_coverage_severity_safe_to_delete_is_critical() {
-        use fallow_output::RuntimeCoverageVerdict;
+        use plow_output::RuntimeCoverageVerdict;
         assert_eq!(
             runtime_coverage_severity(RuntimeCoverageVerdict::SafeToDelete),
             CodeClimateSeverity::Critical
@@ -1424,7 +1416,7 @@ mod tests {
 
     #[test]
     fn runtime_coverage_severity_review_required_is_major() {
-        use fallow_output::RuntimeCoverageVerdict;
+        use plow_output::RuntimeCoverageVerdict;
         assert_eq!(
             runtime_coverage_severity(RuntimeCoverageVerdict::ReviewRequired),
             CodeClimateSeverity::Major
@@ -1433,7 +1425,7 @@ mod tests {
 
     #[test]
     fn runtime_coverage_severity_other_verdicts_are_minor() {
-        use fallow_output::RuntimeCoverageVerdict;
+        use plow_output::RuntimeCoverageVerdict;
         assert_eq!(
             runtime_coverage_severity(RuntimeCoverageVerdict::LowTraffic),
             CodeClimateSeverity::Minor
@@ -1450,7 +1442,7 @@ mod tests {
 
     #[test]
     fn coverage_intelligence_severity_review_required_is_minor() {
-        use fallow_output::CoverageIntelligenceVerdict;
+        use plow_output::CoverageIntelligenceVerdict;
         assert_eq!(
             coverage_intelligence_severity(CoverageIntelligenceVerdict::ReviewRequired),
             Some(CodeClimateSeverity::Minor)
@@ -1459,7 +1451,7 @@ mod tests {
 
     #[test]
     fn coverage_intelligence_severity_refactor_carefully_is_minor() {
-        use fallow_output::CoverageIntelligenceVerdict;
+        use plow_output::CoverageIntelligenceVerdict;
         assert_eq!(
             coverage_intelligence_severity(CoverageIntelligenceVerdict::RefactorCarefully),
             Some(CodeClimateSeverity::Minor)
@@ -1468,7 +1460,7 @@ mod tests {
 
     #[test]
     fn coverage_intelligence_severity_clean_is_none() {
-        use fallow_output::CoverageIntelligenceVerdict;
+        use plow_output::CoverageIntelligenceVerdict;
         assert_eq!(
             coverage_intelligence_severity(CoverageIntelligenceVerdict::Clean),
             None
@@ -1477,7 +1469,7 @@ mod tests {
 
     #[test]
     fn coverage_intelligence_severity_unknown_is_none() {
-        use fallow_output::CoverageIntelligenceVerdict;
+        use plow_output::CoverageIntelligenceVerdict;
         assert_eq!(
             coverage_intelligence_severity(CoverageIntelligenceVerdict::Unknown),
             None
@@ -1517,8 +1509,8 @@ mod tests {
 
     #[test]
     fn private_type_leak_emits_correct_check_name_and_description() {
-        use fallow_config::Severity;
-        use fallow_types::output_dead_code::PrivateTypeLeakFinding;
+        use plow_config::Severity;
+        use plow_types::output_dead_code::PrivateTypeLeakFinding;
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
         results
@@ -1539,7 +1531,7 @@ mod tests {
         let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
         let arr = output.as_array().unwrap();
         assert_eq!(arr.len(), 1);
-        assert_eq!(arr[0]["check_name"], "fallow/private-type-leak");
+        assert_eq!(arr[0]["check_name"], "plow/private-type-leak");
         let desc = arr[0]["description"].as_str().unwrap();
         assert!(desc.contains("ApiResponse"), "desc: {desc}");
         assert!(desc.contains("InternalState"), "desc: {desc}");
@@ -1583,7 +1575,7 @@ mod tests {
             ));
         let rules = RulesConfig::default();
         let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
-        assert_eq!(output[0]["check_name"], "fallow/test-only-dependency");
+        assert_eq!(output[0]["check_name"], "plow/test-only-dependency");
         assert_eq!(output[0]["location"]["lines"]["begin"], 1);
     }
 
@@ -1593,7 +1585,7 @@ mod tests {
 
     #[test]
     fn re_export_cycle_self_loop_description_contains_self_loop_tag() {
-        use fallow_types::output_dead_code::ReExportCycleFinding;
+        use plow_types::output_dead_code::ReExportCycleFinding;
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
         results
@@ -1604,14 +1596,14 @@ mod tests {
             }));
         let rules = RulesConfig::default();
         let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
-        assert_eq!(output[0]["check_name"], "fallow/re-export-cycle");
+        assert_eq!(output[0]["check_name"], "plow/re-export-cycle");
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("(self-loop)"), "desc: {desc}");
     }
 
     #[test]
     fn re_export_cycle_multi_node_description_has_no_kind_tag() {
-        use fallow_types::output_dead_code::ReExportCycleFinding;
+        use plow_types::output_dead_code::ReExportCycleFinding;
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
         results
@@ -1635,7 +1627,7 @@ mod tests {
 
     #[test]
     fn boundary_coverage_violation_emits_correct_check_name() {
-        use fallow_types::output_dead_code::BoundaryCoverageViolationFinding;
+        use plow_types::output_dead_code::BoundaryCoverageViolationFinding;
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
         results
@@ -1649,14 +1641,14 @@ mod tests {
             ));
         let rules = RulesConfig::default();
         let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
-        assert_eq!(output[0]["check_name"], "fallow/boundary-coverage");
+        assert_eq!(output[0]["check_name"], "plow/boundary-coverage");
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("no configured zone"), "desc: {desc}");
     }
 
     #[test]
     fn boundary_call_violation_emits_pattern_in_description() {
-        use fallow_types::output_dead_code::BoundaryCallViolationFinding;
+        use plow_types::output_dead_code::BoundaryCallViolationFinding;
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
         results
@@ -1673,7 +1665,7 @@ mod tests {
             ));
         let rules = RulesConfig::default();
         let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
-        assert_eq!(output[0]["check_name"], "fallow/boundary-call-violation");
+        assert_eq!(output[0]["check_name"], "plow/boundary-call-violation");
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("fs.readFile"), "desc: {desc}");
         assert!(desc.contains("fs.*"), "desc: {desc}");
@@ -1686,7 +1678,7 @@ mod tests {
 
     #[test]
     fn policy_violation_error_severity_maps_to_major() {
-        use fallow_types::output_dead_code::PolicyViolationFinding;
+        use plow_types::output_dead_code::PolicyViolationFinding;
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
         results
@@ -1704,7 +1696,7 @@ mod tests {
             }));
         let rules = RulesConfig::default();
         let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
-        assert_eq!(output[0]["check_name"], "fallow/policy-violation");
+        assert_eq!(output[0]["check_name"], "plow/policy-violation");
         assert_eq!(output[0]["severity"], "major");
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("eval"), "desc: {desc}");
@@ -1713,7 +1705,7 @@ mod tests {
 
     #[test]
     fn policy_violation_warn_severity_maps_to_minor() {
-        use fallow_types::output_dead_code::PolicyViolationFinding;
+        use plow_types::output_dead_code::PolicyViolationFinding;
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
         results
@@ -1745,7 +1737,7 @@ mod tests {
 
     #[test]
     fn invalid_client_export_emits_correct_check_name_and_directive() {
-        use fallow_types::output_dead_code::InvalidClientExportFinding;
+        use plow_types::output_dead_code::InvalidClientExportFinding;
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
         results
@@ -1761,7 +1753,7 @@ mod tests {
             ));
         let rules = RulesConfig::default();
         let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
-        assert_eq!(output[0]["check_name"], "fallow/invalid-client-export");
+        assert_eq!(output[0]["check_name"], "plow/invalid-client-export");
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("metadata"), "desc: {desc}");
         assert!(desc.contains("use client"), "desc: {desc}");
@@ -1769,7 +1761,7 @@ mod tests {
 
     #[test]
     fn mixed_client_server_barrel_emits_correct_check_name_and_origins() {
-        use fallow_types::output_dead_code::MixedClientServerBarrelFinding;
+        use plow_types::output_dead_code::MixedClientServerBarrelFinding;
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
         results
@@ -1785,7 +1777,7 @@ mod tests {
             ));
         let rules = RulesConfig::default();
         let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
-        assert_eq!(output[0]["check_name"], "fallow/mixed-client-server-barrel");
+        assert_eq!(output[0]["check_name"], "plow/mixed-client-server-barrel");
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("./client-comp"), "desc: {desc}");
         assert!(desc.contains("./server-only"), "desc: {desc}");
@@ -1797,7 +1789,7 @@ mod tests {
 
     #[test]
     fn misplaced_directive_emits_correct_check_name_and_guidance() {
-        use fallow_types::output_dead_code::MisplacedDirectiveFinding;
+        use plow_types::output_dead_code::MisplacedDirectiveFinding;
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
         results
@@ -1812,7 +1804,7 @@ mod tests {
             ));
         let rules = RulesConfig::default();
         let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
-        assert_eq!(output[0]["check_name"], "fallow/misplaced-directive");
+        assert_eq!(output[0]["check_name"], "plow/misplaced-directive");
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("use client"), "desc: {desc}");
         assert!(desc.contains("leading position"), "desc: {desc}");
@@ -1824,7 +1816,7 @@ mod tests {
 
     #[test]
     fn unrendered_component_emits_correct_check_name_and_description() {
-        use fallow_types::output_dead_code::UnrenderedComponentFinding;
+        use plow_types::output_dead_code::UnrenderedComponentFinding;
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
         results
@@ -1841,7 +1833,7 @@ mod tests {
             ));
         let rules = RulesConfig::default();
         let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
-        assert_eq!(output[0]["check_name"], "fallow/unrendered-component");
+        assert_eq!(output[0]["check_name"], "plow/unrendered-component");
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("`Dead`"), "desc: {desc}");
         assert!(desc.contains("rendered nowhere"), "desc: {desc}");
@@ -1853,7 +1845,7 @@ mod tests {
 
     #[test]
     fn unused_component_prop_emits_correct_check_name_and_description() {
-        use fallow_types::output_dead_code::UnusedComponentPropFinding;
+        use plow_types::output_dead_code::UnusedComponentPropFinding;
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
         results
@@ -1869,7 +1861,7 @@ mod tests {
             ));
         let rules = RulesConfig::default();
         let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
-        assert_eq!(output[0]["check_name"], "fallow/unused-component-prop");
+        assert_eq!(output[0]["check_name"], "plow/unused-component-prop");
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("`color`"), "desc: {desc}");
         assert!(desc.contains("Card"), "desc: {desc}");
@@ -1881,7 +1873,7 @@ mod tests {
 
     #[test]
     fn unused_component_emit_emits_correct_check_name_and_description() {
-        use fallow_types::output_dead_code::UnusedComponentEmitFinding;
+        use plow_types::output_dead_code::UnusedComponentEmitFinding;
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
         results
@@ -1897,7 +1889,7 @@ mod tests {
             ));
         let rules = RulesConfig::default();
         let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
-        assert_eq!(output[0]["check_name"], "fallow/unused-component-emit");
+        assert_eq!(output[0]["check_name"], "plow/unused-component-emit");
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("`close`"), "desc: {desc}");
         assert!(desc.contains("Button"), "desc: {desc}");
@@ -1909,7 +1901,7 @@ mod tests {
 
     #[test]
     fn unused_svelte_event_emits_correct_check_name_and_description() {
-        use fallow_types::output_dead_code::UnusedSvelteEventFinding;
+        use plow_types::output_dead_code::UnusedSvelteEventFinding;
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
         results
@@ -1923,7 +1915,7 @@ mod tests {
             }));
         let rules = RulesConfig::default();
         let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
-        assert_eq!(output[0]["check_name"], "fallow/unused-svelte-event");
+        assert_eq!(output[0]["check_name"], "plow/unused-svelte-event");
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("`submit`"), "desc: {desc}");
         assert!(desc.contains("listened to nowhere"), "desc: {desc}");
@@ -1935,7 +1927,7 @@ mod tests {
 
     #[test]
     fn unused_component_input_emits_correct_check_name_and_description() {
-        use fallow_types::output_dead_code::UnusedComponentInputFinding;
+        use plow_types::output_dead_code::UnusedComponentInputFinding;
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
         results
@@ -1951,7 +1943,7 @@ mod tests {
             ));
         let rules = RulesConfig::default();
         let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
-        assert_eq!(output[0]["check_name"], "fallow/unused-component-input");
+        assert_eq!(output[0]["check_name"], "plow/unused-component-input");
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("`label`"), "desc: {desc}");
         assert!(desc.contains("CardComponent"), "desc: {desc}");
@@ -1959,7 +1951,7 @@ mod tests {
 
     #[test]
     fn unused_component_output_emits_correct_check_name_and_description() {
-        use fallow_types::output_dead_code::UnusedComponentOutputFinding;
+        use plow_types::output_dead_code::UnusedComponentOutputFinding;
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
         results
@@ -1975,7 +1967,7 @@ mod tests {
             ));
         let rules = RulesConfig::default();
         let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
-        assert_eq!(output[0]["check_name"], "fallow/unused-component-output");
+        assert_eq!(output[0]["check_name"], "plow/unused-component-output");
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("`changed`"), "desc: {desc}");
         assert!(desc.contains("ToggleComponent"), "desc: {desc}");
@@ -1987,7 +1979,7 @@ mod tests {
 
     #[test]
     fn unused_server_action_emits_correct_check_name_and_description() {
-        use fallow_types::output_dead_code::UnusedServerActionFinding;
+        use plow_types::output_dead_code::UnusedServerActionFinding;
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
         results
@@ -2002,7 +1994,7 @@ mod tests {
             ));
         let rules = RulesConfig::default();
         let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
-        assert_eq!(output[0]["check_name"], "fallow/unused-server-action");
+        assert_eq!(output[0]["check_name"], "plow/unused-server-action");
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("`deleteUser`"), "desc: {desc}");
         assert!(desc.contains("\"use server\""), "desc: {desc}");
@@ -2014,7 +2006,7 @@ mod tests {
 
     #[test]
     fn unused_load_data_key_emits_correct_check_name_and_description() {
-        use fallow_types::output_dead_code::UnusedLoadDataKeyFinding;
+        use plow_types::output_dead_code::UnusedLoadDataKeyFinding;
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
         results
@@ -2028,7 +2020,7 @@ mod tests {
             }));
         let rules = RulesConfig::default();
         let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
-        assert_eq!(output[0]["check_name"], "fallow/unused-load-data-key");
+        assert_eq!(output[0]["check_name"], "plow/unused-load-data-key");
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("`postCount`"), "desc: {desc}");
         assert!(desc.contains("no consumer"), "desc: {desc}");
@@ -2040,7 +2032,7 @@ mod tests {
 
     #[test]
     fn route_collision_emits_correct_check_name_and_url_in_description() {
-        use fallow_types::output_dead_code::RouteCollisionFinding;
+        use plow_types::output_dead_code::RouteCollisionFinding;
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
         results
@@ -2054,7 +2046,7 @@ mod tests {
             }));
         let rules = RulesConfig::default();
         let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
-        assert_eq!(output[0]["check_name"], "fallow/route-collision");
+        assert_eq!(output[0]["check_name"], "plow/route-collision");
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("`/about`"), "desc: {desc}");
         assert!(desc.contains("1 other file"), "desc: {desc}");
@@ -2062,7 +2054,7 @@ mod tests {
 
     #[test]
     fn dynamic_segment_name_conflict_emits_correct_check_name_and_position() {
-        use fallow_types::output_dead_code::DynamicSegmentNameConflictFinding;
+        use plow_types::output_dead_code::DynamicSegmentNameConflictFinding;
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
         results.dynamic_segment_name_conflicts.push(
@@ -2079,7 +2071,7 @@ mod tests {
         let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
         assert_eq!(
             output[0]["check_name"],
-            "fallow/dynamic-segment-name-conflict"
+            "plow/dynamic-segment-name-conflict"
         );
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("`/shop`"), "desc: {desc}");
@@ -2093,7 +2085,7 @@ mod tests {
 
     #[test]
     fn unresolved_catalog_reference_default_catalog_description() {
-        use fallow_types::output_dead_code::UnresolvedCatalogReferenceFinding;
+        use plow_types::output_dead_code::UnresolvedCatalogReferenceFinding;
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
         results.unresolved_catalog_references.push(
@@ -2107,10 +2099,7 @@ mod tests {
         );
         let rules = RulesConfig::default();
         let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
-        assert_eq!(
-            output[0]["check_name"],
-            "fallow/unresolved-catalog-reference"
-        );
+        assert_eq!(output[0]["check_name"], "plow/unresolved-catalog-reference");
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("the default catalog"), "desc: {desc}");
         assert!(desc.contains("react"), "desc: {desc}");
@@ -2119,7 +2108,7 @@ mod tests {
 
     #[test]
     fn unresolved_catalog_reference_named_catalog_description() {
-        use fallow_types::output_dead_code::UnresolvedCatalogReferenceFinding;
+        use plow_types::output_dead_code::UnresolvedCatalogReferenceFinding;
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
         results.unresolved_catalog_references.push(
@@ -2145,7 +2134,7 @@ mod tests {
 
     #[test]
     fn unused_dependency_override_with_hint_includes_hint_in_description() {
-        use fallow_types::output_dead_code::UnusedDependencyOverrideFinding;
+        use plow_types::output_dead_code::UnusedDependencyOverrideFinding;
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
         results
@@ -2165,7 +2154,7 @@ mod tests {
             ));
         let rules = RulesConfig::default();
         let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
-        assert_eq!(output[0]["check_name"], "fallow/unused-dependency-override");
+        assert_eq!(output[0]["check_name"], "plow/unused-dependency-override");
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("react"), "desc: {desc}");
         assert!(desc.contains("verify lockfile"), "desc: {desc}");
@@ -2177,13 +2166,13 @@ mod tests {
 
     #[test]
     fn health_codeclimate_runtime_safe_to_delete_maps_to_critical_severity() {
-        use fallow_output::{
+        use plow_output::{
             RuntimeCoverageConfidence, RuntimeCoverageDataSource, RuntimeCoverageEvidence,
             RuntimeCoverageFinding, RuntimeCoverageReport, RuntimeCoverageReportVerdict,
             RuntimeCoverageSchemaVersion, RuntimeCoverageSummary, RuntimeCoverageVerdict,
         };
         let root = PathBuf::from("/project");
-        let report = fallow_output::HealthReport {
+        let report = plow_output::HealthReport {
             runtime_coverage: Some(RuntimeCoverageReport {
                 schema_version: RuntimeCoverageSchemaVersion::V1,
                 verdict: RuntimeCoverageReportVerdict::ColdCodeDetected,
@@ -2202,7 +2191,7 @@ mod tests {
                     capture_quality: None,
                 },
                 findings: vec![RuntimeCoverageFinding {
-                    id: "fallow:prod:aabbccdd".to_string(),
+                    id: "plow:prod:aabbccdd".to_string(),
                     stable_id: None,
                     source_hash: None,
                     path: root.join("src/legacy.ts"),
@@ -2230,14 +2219,14 @@ mod tests {
                 actionable: true,
                 actionability_reason: None,
                 actionability_verdict: None,
-                provenance: fallow_output::RuntimeCoverageProvenance::default(),
+                provenance: plow_output::RuntimeCoverageProvenance::default(),
             }),
             ..Default::default()
         };
         let json = codeclimate_issues_to_value(&api_health_codeclimate_issues(&report, &root));
         let issues = json.as_array().unwrap();
         assert_eq!(issues.len(), 1);
-        assert_eq!(issues[0]["check_name"], "fallow/runtime-safe-to-delete");
+        assert_eq!(issues[0]["check_name"], "plow/runtime-safe-to-delete");
         assert_eq!(issues[0]["severity"], "critical");
         let desc = issues[0]["description"].as_str().unwrap();
         assert!(desc.contains("legacyHelper"), "desc: {desc}");
@@ -2249,13 +2238,13 @@ mod tests {
 
     #[test]
     fn health_codeclimate_runtime_finding_with_none_invocations_shows_untracked() {
-        use fallow_output::{
+        use plow_output::{
             RuntimeCoverageConfidence, RuntimeCoverageDataSource, RuntimeCoverageEvidence,
             RuntimeCoverageFinding, RuntimeCoverageReport, RuntimeCoverageReportVerdict,
             RuntimeCoverageSchemaVersion, RuntimeCoverageSummary, RuntimeCoverageVerdict,
         };
         let root = PathBuf::from("/project");
-        let report = fallow_output::HealthReport {
+        let report = plow_output::HealthReport {
             runtime_coverage: Some(RuntimeCoverageReport {
                 schema_version: RuntimeCoverageSchemaVersion::V1,
                 verdict: RuntimeCoverageReportVerdict::ColdCodeDetected,
@@ -2274,7 +2263,7 @@ mod tests {
                     capture_quality: None,
                 },
                 findings: vec![RuntimeCoverageFinding {
-                    id: "fallow:prod:11223344".to_string(),
+                    id: "plow:prod:11223344".to_string(),
                     stable_id: None,
                     source_hash: None,
                     path: root.join("src/worker.ts"),
@@ -2302,7 +2291,7 @@ mod tests {
                 actionable: true,
                 actionability_reason: None,
                 actionability_verdict: None,
-                provenance: fallow_output::RuntimeCoverageProvenance::default(),
+                provenance: plow_output::RuntimeCoverageProvenance::default(),
             }),
             ..Default::default()
         };
@@ -2318,7 +2307,7 @@ mod tests {
 
     #[test]
     fn duplication_codeclimate_one_issue_per_instance() {
-        use fallow_types::duplicates::{
+        use plow_types::duplicates::{
             CloneGroup, CloneInstance, DuplicationReport, DuplicationStats,
         };
         let root = PathBuf::from("/project");
@@ -2353,8 +2342,8 @@ mod tests {
             codeclimate_issues_to_value(&api_duplication_codeclimate_issues(&report, &root));
         let issues = output.as_array().unwrap();
         assert_eq!(issues.len(), 2, "one issue per clone instance");
-        assert_eq!(issues[0]["check_name"], "fallow/code-duplication");
-        assert_eq!(issues[1]["check_name"], "fallow/code-duplication");
+        assert_eq!(issues[0]["check_name"], "plow/code-duplication");
+        assert_eq!(issues[1]["check_name"], "plow/code-duplication");
         assert_eq!(issues[0]["location"]["path"].as_str().unwrap(), "src/a.ts");
         assert_eq!(issues[1]["location"]["path"].as_str().unwrap(), "src/b.ts");
         assert_eq!(issues[0]["location"]["lines"]["begin"], 10);
@@ -2364,7 +2353,7 @@ mod tests {
 
     #[test]
     fn duplication_codeclimate_description_includes_group_number_and_line_count() {
-        use fallow_types::duplicates::{
+        use plow_types::duplicates::{
             CloneGroup, CloneInstance, DuplicationReport, DuplicationStats,
         };
         let root = PathBuf::from("/project");
@@ -2416,7 +2405,7 @@ mod tests {
 
     #[test]
     fn duplication_codeclimate_empty_report_produces_empty_array() {
-        use fallow_types::duplicates::{DuplicationReport, DuplicationStats};
+        use plow_types::duplicates::{DuplicationReport, DuplicationStats};
         let root = PathBuf::from("/project");
         let report = DuplicationReport {
             clone_groups: vec![],
@@ -2431,7 +2420,7 @@ mod tests {
 
     #[test]
     fn duplication_codeclimate_fingerprints_are_unique_across_instances() {
-        use fallow_types::duplicates::{
+        use plow_types::duplicates::{
             CloneGroup, CloneInstance, DuplicationReport, DuplicationStats,
         };
         let root = PathBuf::from("/project");
@@ -2479,7 +2468,7 @@ mod tests {
 
     #[test]
     fn circular_dep_cross_package_description_contains_label() {
-        use fallow_types::output_dead_code::CircularDependencyFinding;
+        use plow_types::output_dead_code::CircularDependencyFinding;
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
         results
@@ -2509,7 +2498,7 @@ mod tests {
 
     #[test]
     fn unused_type_re_export_uses_type_re_export_label() {
-        use fallow_types::output_dead_code::UnusedTypeFinding;
+        use plow_types::output_dead_code::UnusedTypeFinding;
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
         results
@@ -2525,7 +2514,7 @@ mod tests {
             }));
         let rules = RulesConfig::default();
         let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
-        assert_eq!(output[0]["check_name"], "fallow/unused-type");
+        assert_eq!(output[0]["check_name"], "plow/unused-type");
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("Type re-export"), "desc: {desc}");
     }
@@ -2534,7 +2523,7 @@ mod tests {
     fn codeclimate_result_contract_exclusions_are_explicit() {
         use std::collections::BTreeSet;
 
-        let missing: BTreeSet<&str> = fallow_output::issue_output_contracts()
+        let missing: BTreeSet<&str> = plow_output::issue_output_contracts()
             .filter(|contract| contract.codeclimate_check_names.is_empty())
             .map(|contract| contract.code)
             .collect();
@@ -2544,10 +2533,10 @@ mod tests {
             missing
         );
 
-        let check_names: BTreeSet<String> = fallow_output::issue_output_contracts()
+        let check_names: BTreeSet<String> = plow_output::issue_output_contracts()
             .flat_map(|contract| contract.codeclimate_check_names)
             .collect();
-        assert!(check_names.contains("fallow/stale-suppression"));
-        assert!(check_names.contains("fallow/missing-suppression-reason"));
+        assert!(check_names.contains("plow/stale-suppression"));
+        assert!(check_names.contains("plow/missing-suppression-reason"));
     }
 }

@@ -17,7 +17,7 @@ pub fn build_server_capabilities(advertise_pull_diagnostics: bool) -> ServerCapa
         hover_provider: Some(HoverProviderCapability::Simple(true)),
         diagnostic_provider: advertise_pull_diagnostics.then(|| {
             DiagnosticServerCapabilities::Options(DiagnosticOptions {
-                identifier: Some("fallow".to_string()),
+                identifier: Some("plow".to_string()),
                 inter_file_dependencies: true,
                 workspace_diagnostics: false,
                 work_done_progress_options: WorkDoneProgressOptions::default(),

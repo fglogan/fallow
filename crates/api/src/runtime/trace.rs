@@ -1,4 +1,4 @@
-use fallow_engine::AnalysisSession;
+use plow_engine::AnalysisSession;
 use rustc_hash::FxHashSet;
 
 use crate::{
@@ -11,7 +11,7 @@ use crate::{
 use super::{ProgrammaticResult, duplication, resolve_programmatic_analysis_context};
 
 struct TraceArtifacts {
-    graph: fallow_engine::RetainedModuleGraph,
+    graph: plow_engine::RetainedModuleGraph,
     script_used_packages: FxHashSet<String>,
 }
 
@@ -30,7 +30,7 @@ pub fn run_trace_export(
     resolved.install(|| {
         let session = load_trace_session(&resolved)?;
         let artifacts = trace_artifacts(&session)?;
-        let output = fallow_engine::trace_export(
+        let output = plow_engine::trace_export(
             &artifacts.graph,
             session.root(),
             &options.file,
@@ -44,7 +44,7 @@ pub fn run_trace_export(
                 ),
                 2,
             )
-            .with_code("FALLOW_TRACE_TARGET_NOT_FOUND")
+            .with_code("PLOW_TRACE_TARGET_NOT_FOUND")
             .with_context("trace_export")
         })?;
         Ok(TraceExportProgrammaticOutput { output })
@@ -65,13 +65,13 @@ pub fn run_trace_file(
     resolved.install(|| {
         let session = load_trace_session(&resolved)?;
         let artifacts = trace_artifacts(&session)?;
-        let output = fallow_engine::trace_file(&artifacts.graph, session.root(), &options.file)
+        let output = plow_engine::trace_file(&artifacts.graph, session.root(), &options.file)
             .ok_or_else(|| {
                 ProgrammaticError::new(
                     format!("file '{}' not found in module graph", options.file),
                     2,
                 )
-                .with_code("FALLOW_TRACE_TARGET_NOT_FOUND")
+                .with_code("PLOW_TRACE_TARGET_NOT_FOUND")
                 .with_context("trace_file")
             })?;
         Ok(TraceFileProgrammaticOutput { output })
@@ -92,7 +92,7 @@ pub fn run_trace_dependency(
     resolved.install(|| {
         let session = load_trace_session(&resolved)?;
         let artifacts = trace_artifacts(&session)?;
-        let output = fallow_engine::trace_dependency(
+        let output = plow_engine::trace_dependency(
             &artifacts.graph,
             session.root(),
             &options.package_name,
@@ -123,17 +123,17 @@ pub fn run_trace_clone(
             .report;
         let (trace, not_found) = match &options.target {
             TraceCloneTarget::Location { file, line } => (
-                fallow_engine::trace_clone(&report, session.root(), file, *line),
+                plow_engine::trace_clone(&report, session.root(), file, *line),
                 format!("no clone found at {file}:{line}"),
             ),
             TraceCloneTarget::Fingerprint(fingerprint) => (
-                fallow_engine::trace_clone_by_fingerprint(&report, session.root(), fingerprint),
+                plow_engine::trace_clone_by_fingerprint(&report, session.root(), fingerprint),
                 format!("no clone group with fingerprint {fingerprint}"),
             ),
         };
         if trace.matched_instance.is_none() {
             return Err(ProgrammaticError::new(not_found, 2)
-                .with_code("FALLOW_TRACE_TARGET_NOT_FOUND")
+                .with_code("PLOW_TRACE_TARGET_NOT_FOUND")
                 .with_context("trace_clone"));
         }
         Ok(TraceCloneProgrammaticOutput { output: trace })
@@ -144,7 +144,7 @@ fn validate_non_empty(field: &str, value: &str) -> ProgrammaticResult<()> {
     if value.trim().is_empty() {
         return Err(
             ProgrammaticError::new(format!("{field} must not be empty"), 2)
-                .with_code("FALLOW_INVALID_TRACE_OPTIONS")
+                .with_code("PLOW_INVALID_TRACE_OPTIONS")
                 .with_context(field.to_string()),
         );
     }
@@ -157,7 +157,7 @@ fn validate_trace_clone_target(target: &TraceCloneTarget) -> ProgrammaticResult<
             validate_non_empty("file", file)?;
             if *line == 0 {
                 return Err(ProgrammaticError::new("line must be greater than 0", 2)
-                    .with_code("FALLOW_INVALID_TRACE_OPTIONS")
+                    .with_code("PLOW_INVALID_TRACE_OPTIONS")
                     .with_context("trace_clone.line"));
             }
         }
@@ -182,12 +182,12 @@ fn trace_artifacts(session: &AnalysisSession) -> ProgrammaticResult<TraceArtifac
         .analyze_dead_code_with_session_artifacts(false, true, None)
         .map_err(|err| {
             ProgrammaticError::new(format!("trace analysis failed: {err}"), 2)
-                .with_code("FALLOW_TRACE_FAILED")
+                .with_code("PLOW_TRACE_FAILED")
                 .with_context("trace")
         })?;
     let graph = artifacts.analysis.graph.ok_or_else(|| {
         ProgrammaticError::new("trace requires a retained module graph", 2)
-            .with_code("FALLOW_TRACE_GRAPH_UNAVAILABLE")
+            .with_code("PLOW_TRACE_GRAPH_UNAVAILABLE")
             .with_context("trace.graph")
     })?;
     Ok(TraceArtifacts {

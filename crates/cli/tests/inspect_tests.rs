@@ -7,7 +7,7 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use common::{parse_json, run_fallow_in_root};
+use common::{parse_json, run_plow_in_root};
 use tempfile::tempdir;
 
 fn write_project(root: &std::path::Path) {
@@ -18,7 +18,7 @@ fn write_project(root: &std::path::Path) {
     )
     .unwrap();
     std::fs::write(root.join("tsconfig.json"), r#"{"include":["src"]}"#).unwrap();
-    std::fs::write(root.join(".fallowrc.json"), r#"{"entry":["src/index.ts"]}"#).unwrap();
+    std::fs::write(root.join(".plowrc.json"), r#"{"entry":["src/index.ts"]}"#).unwrap();
     std::fs::write(
         root.join("src/index.ts"),
         "import { fetchUser } from './api';\nexport const boot = () => fetchUser('1');\n",
@@ -36,7 +36,7 @@ fn inspect_file_outputs_typed_evidence_bundle() {
     let dir = tempdir().unwrap();
     write_project(dir.path());
 
-    let output = run_fallow_in_root(
+    let output = run_plow_in_root(
         "inspect",
         dir.path(),
         &["--file", "src/api.ts", "--format", "json", "--quiet"],
@@ -68,7 +68,7 @@ fn inspect_file_accepts_absolute_path_inside_root() {
     write_project(dir.path());
 
     let file = dir.path().join("src/api.ts");
-    let output = run_fallow_in_root(
+    let output = run_plow_in_root(
         "inspect",
         dir.path(),
         &[
@@ -91,7 +91,7 @@ fn inspect_symbol_outputs_trace_export_section() {
     let dir = tempdir().unwrap();
     write_project(dir.path());
 
-    let output = run_fallow_in_root(
+    let output = run_plow_in_root(
         "inspect",
         dir.path(),
         &[
@@ -125,7 +125,7 @@ fn inspect_human_output_includes_evidence_summary() {
     let dir = tempdir().unwrap();
     write_project(dir.path());
 
-    let output = run_fallow_in_root("inspect", dir.path(), &["--file", "src/api.ts"]);
+    let output = run_plow_in_root("inspect", dir.path(), &["--file", "src/api.ts"]);
     assert_eq!(output.code, 0, "inspect should exit 0: {}", output.stderr);
 
     assert!(output.stdout.contains("Evidence"));
@@ -145,7 +145,7 @@ fn inspect_file_includes_impact_closure_evidence() {
     // index.ts imports fetchUser from api.ts. Inspecting api.ts as the seed yields
     // an impact closure whose affected-not-shown set is {src/index.ts} and whose
     // coordination gap fires on index.ts consuming fetchUser (outside the seed).
-    let output = run_fallow_in_root(
+    let output = run_plow_in_root(
         "inspect",
         dir.path(),
         &["--file", "src/api.ts", "--format", "json", "--quiet"],
@@ -182,7 +182,7 @@ fn dead_code_impact_closure_flag_emits_closure_json() {
     let dir = tempdir().unwrap();
     write_project(dir.path());
 
-    let output = run_fallow_in_root(
+    let output = run_plow_in_root(
         "dead-code",
         dir.path(),
         &[

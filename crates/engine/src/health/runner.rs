@@ -4,8 +4,8 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Instant;
 
-use fallow_config::ProductionAnalysis;
-use fallow_types::output_format::OutputFormat;
+use plow_config::ProductionAnalysis;
+use plow_types::output_format::OutputFormat;
 
 use super::{
     HealthAnalysisResult, HealthExecutionOptions, HealthPipelineInputs, HealthScopeInputs,
@@ -90,6 +90,6 @@ pub fn run_ungrouped_health(
 fn programmatic_runtime_coverage_seam(
     _options: &RuntimeCoverageOptions,
     _input: RuntimeCoverageSeamInput<'_>,
-) -> Result<fallow_output::RuntimeCoverageReport, ExitCode> {
+) -> Result<plow_output::RuntimeCoverageReport, ExitCode> {
     Err(ExitCode::from(2))
 }

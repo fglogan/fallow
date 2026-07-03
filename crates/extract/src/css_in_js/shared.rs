@@ -5,7 +5,7 @@
 /// Single-sourced here because the template lifter (3b) and the object serializer
 /// (3c) MUST emit the SAME wrapper for the analytics to treat both forms alike;
 /// a drift between the two would silently split otherwise-identical clones.
-pub(super) const WRAPPER: &str = ".fallow-css-in-js";
+pub(super) const WRAPPER: &str = ".plow-css-in-js";
 
 /// Count `\n` bytes in `s`. Used by the template and object front-ends to
 /// blank-line-pad a lifted rule to its real source line so metric line numbers

@@ -8,7 +8,7 @@ use super::common::{create_config, fixture_path};
 fn pnpm_package_source_catalog_entries_credit_declared_names() {
     let root = fixture_path("issue-823-pnpm-package-sources");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_dependencies: Vec<&str> = results
         .unused_dependencies
@@ -65,7 +65,7 @@ fn pnpm_package_source_catalog_entries_credit_declared_names() {
 fn pnpm_package_source_catalog_entries_are_not_reported_unused() {
     let root = fixture_path("issue-823-pnpm-package-sources");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_catalog_entries: Vec<(&str, &str)> = results
         .unused_catalog_entries
@@ -99,7 +99,7 @@ fn pnpm_package_source_catalog_entries_are_not_reported_unused() {
 fn fixture_uses_workspace_package_source_without_marking_workspace_unused() {
     let root = fixture_path("issue-823-pnpm-package-sources");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files: Vec<PathBuf> = results
         .unused_files

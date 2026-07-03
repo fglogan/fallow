@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use fallow_config::{DetectionMode, DuplicatesConfig};
+use plow_config::{DetectionMode, DuplicatesConfig};
 use serde::Deserialize;
 
 pub fn initialization_config_path(

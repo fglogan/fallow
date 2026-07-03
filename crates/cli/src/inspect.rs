@@ -1,13 +1,13 @@
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, ExitCode};
 
-use fallow_config::OutputFormat;
+use plow_config::OutputFormat;
 use serde_json::{Value, json};
 
 use crate::error::emit_error;
 use crate::report;
 use crate::report::sink::outln;
-use fallow_output::{
+use plow_output::{
     InspectEvidence, InspectEvidenceScope, InspectEvidenceSection, InspectFileIdentity,
     InspectIdentity, InspectOutput, InspectSectionStatus, InspectSymbolIdentity,
     InspectTargetDescriptor,
@@ -32,7 +32,7 @@ pub struct InspectOptions<'a> {
     pub workspace: Option<&'a Vec<String>>,
     pub target: InspectTarget,
     /// OPT-IN: also run the best-effort symbol-level call chain
-    /// (`fallow trace`) and attach it as the `symbol_chain` evidence section.
+    /// (`plow trace`) and attach it as the `symbol_chain` evidence section.
     /// Only meaningful for a SYMBOL target. Default off (best-effort, off the
     /// ranked path).
     pub symbol_chain: bool,
@@ -290,7 +290,7 @@ fn build_inspect_identity(
 fn emit_inspect_bundle(bundle: InspectOutput, opts: &InspectOptions<'_>) -> ExitCode {
     match opts.output {
         OutputFormat::Json => {
-            let value = match fallow_output::serialize_inspect_json_output(
+            let value = match plow_output::serialize_inspect_json_output(
                 bundle,
                 crate::output_runtime::current_root_envelope_mode(),
                 crate::output_runtime::telemetry_analysis_run_id().as_deref(),
@@ -414,7 +414,7 @@ fn run_child_json(
     threads: usize,
 ) -> Result<ChildJson, String> {
     let binary = std::env::current_exe()
-        .map_err(|err| format!("failed to locate current fallow binary: {err}"))?;
+        .map_err(|err| format!("failed to locate current plow binary: {err}"))?;
     let mut command = Command::new(binary);
     command.args(build_child_args(opts, args, threads));
     let output = command
@@ -721,7 +721,7 @@ mod tests {
     #[test]
     fn child_args_forward_global_inspect_overrides() {
         let root = PathBuf::from("/repo");
-        let config_path = Some(PathBuf::from("/repo/.fallowrc.json"));
+        let config_path = Some(PathBuf::from("/repo/.plowrc.json"));
         let opts = inspect_options(
             &root,
             config_path.as_ref(),
@@ -734,7 +734,7 @@ mod tests {
 
         assert!(
             args.windows(2)
-                .any(|pair| pair == ["--config", "/repo/.fallowrc.json"])
+                .any(|pair| pair == ["--config", "/repo/.plowrc.json"])
         );
         assert!(args.contains(&"--no-cache".to_string()));
         assert!(args.contains(&"--no-production".to_string()));

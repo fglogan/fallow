@@ -1,8 +1,8 @@
 import * as path from "node:path";
 // VS Code calls TreeDataProvider members through the registered provider.
-// fallow-ignore-file unused-class-member
+// plow-ignore-file unused-class-member
 // VS Code injects this module into the extension host at runtime.
-// fallow-ignore-next-line unlisted-dependency
+// plow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
 import { countDiagnosticErrorIssues } from "./analysis-utils.js";
 import {
@@ -13,8 +13,8 @@ import {
 import { openFileCommand } from "./openFileCommand.js";
 import type {
   CloneGroupFinding,
-  FallowCheckResult,
-  FallowDupesResult,
+  PlowCheckResult,
+  PlowDupesResult,
   IssueCategory,
 } from "./types.js";
 import { ISSUE_CATEGORY_LABELS } from "./types.js";
@@ -109,7 +109,7 @@ const ISSUE_ICONS: Record<IssueCategory, string> = {
 };
 
 const staleSuppressionLabel = (
-  origin: NonNullable<FallowCheckResult["stale_suppressions"]>[number]["origin"],
+  origin: NonNullable<PlowCheckResult["stale_suppressions"]>[number]["origin"],
 ): string => {
   if (origin.type === "jsdoc_tag") {
     return `@expected-unused ${origin.export_name}`;
@@ -187,7 +187,7 @@ class CycleItem extends vscode.TreeItem {
 }
 
 export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeItem> {
-  private result: FallowCheckResult | null = null;
+  private result: PlowCheckResult | null = null;
   private view: vscode.TreeView<DeadCodeItem> | null = null;
 
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<
@@ -199,7 +199,7 @@ export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeIte
     this.view = view;
   }
 
-  update(result: FallowCheckResult | null): void {
+  update(result: PlowCheckResult | null): void {
     this.result = result;
     this._onDidChangeTreeData.fire();
     this.updateBadge();
@@ -735,7 +735,7 @@ class CloneFamilyItem extends vscode.TreeItem {
     const instanceItems = group.instances.map(
       (inst) => new CloneInstanceItem(inst.file, inst.start_line, inst.end_line),
     );
-    // Name the clone by what it is: fallow's dominant repeated identifier (e.g.
+    // Name the clone by what it is: plow's dominant repeated identifier (e.g.
     // a shared `parseCsv` function), falling back to the first instance's file
     // basename when the clone has no clear name. The list is already ordered by
     // impact, so an opaque "Clone #N" ordinal is not needed.
@@ -774,14 +774,14 @@ class CloneInstanceItem extends vscode.TreeItem {
 }
 
 export class DuplicatesTreeProvider implements vscode.TreeDataProvider<DuplicateItem> {
-  private result: FallowDupesResult | null = null;
+  private result: PlowDupesResult | null = null;
 
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<
     DuplicateItem | undefined | null | void
   >();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
-  update(result: FallowDupesResult | null): void {
+  update(result: PlowDupesResult | null): void {
     this.result = result;
     this._onDidChangeTreeData.fire();
   }

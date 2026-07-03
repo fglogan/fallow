@@ -25,15 +25,15 @@ const rendererDevUrl = (): string | undefined => process.env["ELECTRON_RENDERER_
 let mainWindow: BrowserWindow | null = null;
 let latestDoc: WalkthroughDocument | null = null;
 let appConfig = loadConfig();
-// A config-provided binary wins over the ambient PATH for `fallow`.
-if (appConfig.fallowBin) process.env["FALLOW_BIN"] = appConfig.fallowBin;
+// A config-provided binary wins over the ambient PATH for `plow`.
+if (appConfig.plowBin) process.env["PLOW_BIN"] = appConfig.plowBin;
 
 const createWindow = (): BrowserWindow => {
   const win = new BrowserWindow({
     width: 1400,
     height: 900,
     show: false,
-    title: "Fallow Review",
+    title: "Plow Review",
     backgroundColor: "#0e0c0a",
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
@@ -55,9 +55,9 @@ const createWindow = (): BrowserWindow => {
   return win;
 };
 
-// The repo under review. Defaults to the launch cwd; `FALLOW_REVIEW_ROOT` points
+// The repo under review. Defaults to the launch cwd; `PLOW_REVIEW_ROOT` points
 // the app at any checkout (e.g. a PR worktree) without a cwd dance.
-const reviewRoot = (): string => process.env.FALLOW_REVIEW_ROOT?.trim() || process.cwd();
+const reviewRoot = (): string => process.env.PLOW_REVIEW_ROOT?.trim() || process.cwd();
 
 ipcMain.handle("review:get", async (_event, root: string | undefined) => {
   latestDoc = await runReview(root ?? reviewRoot());
@@ -112,7 +112,7 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   void app.whenReady().then(() => {
-    electronApp.setAppUserModelId("dev.fallow.review");
+    electronApp.setAppUserModelId("dev.plow.review");
     app.on("browser-window-created", (_event, window) => optimizer.watchWindowShortcuts(window));
     app.on("web-contents-created", (_event, contents) => hardenContents(contents));
 

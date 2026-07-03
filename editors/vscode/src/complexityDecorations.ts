@@ -11,7 +11,7 @@ import { resolveFilePath } from "./treeView-utils.js";
  * function (see `complexityLens.ts`). The dense per-line `+N` breakdown is the
  * DETAIL tier: it renders only for functions the user has expanded, either by
  * pinning (clicking the lens) or selecting the finding in the Health view, or
- * for every function when `fallow.complexity.afterText` is on. Hover always
+ * for every function when `plow.complexity.afterText` is on. Hover always
  * shows the breakdown in a popup regardless, via `provideHover`.
  *
  * The per-decision-point breakdown arrives on each complexity finding as a
@@ -293,7 +293,7 @@ export class ComplexityDecorationController {
 
   /**
    * Re-render decorations and refresh lenses after a relevant setting change
-   * (`fallow.health.inlineComplexity`), without respawning the health analysis.
+   * (`plow.health.inlineComplexity`), without respawning the health analysis.
    */
   refresh(): void {
     this.renderVisibleEditors();
@@ -468,10 +468,10 @@ export class ComplexityDecorationController {
   }
 
   // Invoked by VS Code when the controller (pushed to context.subscriptions in
-  // extension.ts) is disposed on deactivate. fallow cannot see that runtime
+  // extension.ts) is disposed on deactivate. plow cannot see that runtime
   // Disposable-contract call because the object is registered directly rather
   // than via an explicit `.dispose()` wrapper.
-  // fallow-ignore-next-line unused-class-member
+  // plow-ignore-next-line unused-class-member
   dispose(): void {
     this.contributionType.dispose();
     this.changeEmitter.dispose();

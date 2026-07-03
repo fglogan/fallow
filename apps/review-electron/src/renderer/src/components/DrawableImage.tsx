@@ -11,10 +11,10 @@ type Point = [number, number];
 type Stroke = { color: string; points: Point[] };
 
 const SWATCHES = [
-  { name: "red", cssVar: "--fallow-red", fallback: "#f87171", bg: "bg-fallow-red" },
-  { name: "amber", cssVar: "--fallow-amber", fallback: "#fbbf24", bg: "bg-fallow-amber" },
-  { name: "green", cssVar: "--fallow-green", fallback: "#4ade80", bg: "bg-fallow-green" },
-  { name: "blue", cssVar: "--fallow-blue", fallback: "#60a5fa", bg: "bg-fallow-blue" },
+  { name: "red", cssVar: "--plow-red", fallback: "#f87171", bg: "bg-plow-red" },
+  { name: "amber", cssVar: "--plow-amber", fallback: "#fbbf24", bg: "bg-plow-amber" },
+  { name: "green", cssVar: "--plow-green", fallback: "#4ade80", bg: "bg-plow-green" },
+  { name: "blue", cssVar: "--plow-blue", fallback: "#60a5fa", bg: "bg-plow-blue" },
 ] as const;
 
 const canvasPoint = (e: MouseEvent<HTMLCanvasElement>): Point => {
@@ -107,7 +107,7 @@ export const DrawableImage = ({ dataUrl, target, onDone }: Props) => {
   const save = async (): Promise<void> => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    await window.fallow.saveShot({ annotatedDataUrl: canvas.toDataURL("image/png"), note, target });
+    await window.plow.saveShot({ annotatedDataUrl: canvas.toDataURL("image/png"), note, target });
     setStatus("saved to agent feed");
     setNote("");
     onDone?.();

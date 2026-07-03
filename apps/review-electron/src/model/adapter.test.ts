@@ -23,7 +23,7 @@ describe("toWalkthroughDocument over a decision-producing brief", () => {
     ]);
   });
 
-  it("drops any decision lacking a Fallow signal_id (anti-hallucination)", () => {
+  it("drops any decision lacking a Plow signal_id (anti-hallucination)", () => {
     const withUnanchored: AuditBrief = {
       ...brief,
       decisions: {

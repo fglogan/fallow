@@ -1,8 +1,8 @@
-//! `fallow health` complexity / health command.
+//! `plow health` complexity / health command.
 //!
 //! The command-neutral analysis pipeline (scoring, hotspots, targets, grouping,
 //! coverage gaps, vital signs, report assembly) lives in
-//! `fallow_engine` health root API. This module owns the CLI orchestration that the
+//! `plow_engine` health root API. This module owns the CLI orchestration that the
 //! engine intentionally does not: command option validation, workspace /
 //! changed-file / shared-diff scope resolution, CODEOWNERS-backed
 //! grouping-resolver construction, the runtime coverage sidecar seam,
@@ -12,14 +12,14 @@ pub mod coverage;
 
 /// Health scoring helpers, re-exported from the engine for CLI consumers that
 /// still address them through `crate::health::scoring`.
-pub use fallow_engine::health_scoring as scoring;
+pub use plow_engine::health_scoring as scoring;
 
 use std::process::ExitCode;
 use std::time::Instant;
 
 use colored::Colorize;
-use fallow_config::OutputFormat;
-use fallow_engine::{
+use plow_config::OutputFormat;
+use plow_engine::{
     HealthExecutionOptions, HealthGateOptions, HealthGroupResolver, HealthPipelineInputs,
     HealthScopeInputs, HealthSeams, HealthSharedParseData, HealthSort, RuntimeCoverageSeamInput,
     execute_health_inner, validate_health_churn_file,
@@ -68,7 +68,7 @@ impl HealthGroupResolver for OwnershipResolver {
 
 /// Resolve the diff index for a health run: an explicit `--diff-file` index
 /// wins, otherwise the process-shared diff cache when the caller opted in.
-fn health_diff_index<'a>(opts: &HealthOptions<'a>) -> Option<&'a fallow_output::DiffIndex> {
+fn health_diff_index<'a>(opts: &HealthOptions<'a>) -> Option<&'a plow_output::DiffIndex> {
     match opts.diff_index {
         Some(index) => Some(index),
         None if opts.use_shared_diff_index => crate::report::ci::diff_filter::shared_diff_index(),
@@ -79,7 +79,7 @@ fn health_diff_index<'a>(opts: &HealthOptions<'a>) -> Option<&'a fallow_output::
 /// Build the CODEOWNERS / package-backed grouping resolver for `--group-by`.
 fn build_health_group_resolver(
     opts: &HealthOptions<'_>,
-    config: &fallow_config::ResolvedConfig,
+    config: &plow_config::ResolvedConfig,
 ) -> Result<Option<OwnershipResolver>, ExitCode> {
     crate::runtime_support::build_ownership_resolver_for_mode(
         opts.group_by,
@@ -92,7 +92,7 @@ fn build_health_group_resolver(
 /// Record health telemetry from the finished report. Mirrors the per-analysis
 /// telemetry the other commands record; lives in the CLI because the telemetry
 /// sinks are process-global CLI state.
-fn record_health_telemetry(report: &fallow_output::HealthReport, coverage_gaps_has_findings: bool) {
+fn record_health_telemetry(report: &plow_output::HealthReport, coverage_gaps_has_findings: bool) {
     if coverage_gaps_has_findings && report.findings.is_empty() {
         crate::telemetry::note_findings_present(true);
     } else {
@@ -123,9 +123,9 @@ fn health_seams<'a>() -> HealthSeams<'a> {
     reason = "by-value input matches the engine RuntimeCoverageAnalyzer seam signature"
 )]
 fn runtime_coverage_seam(
-    options: &fallow_engine::RuntimeCoverageOptions,
+    options: &plow_engine::RuntimeCoverageOptions,
     input: RuntimeCoverageSeamInput<'_>,
-) -> Result<fallow_output::RuntimeCoverageReport, ExitCode> {
+) -> Result<plow_output::RuntimeCoverageReport, ExitCode> {
     coverage::analyze(
         options,
         &coverage::RuntimeCoverageAnalysisInput {
@@ -149,7 +149,7 @@ fn runtime_coverage_seam(
 /// the diff index, workspace roots, and the grouping resolver.
 fn build_health_scope_inputs<'a>(
     opts: &HealthOptions<'a>,
-    config: &fallow_config::ResolvedConfig,
+    config: &plow_config::ResolvedConfig,
 ) -> Result<HealthScopeInputs<'a, OwnershipResolver>, ExitCode> {
     let changed_files = opts
         .changed_since
@@ -174,8 +174,8 @@ fn build_health_scope_inputs<'a>(
 /// up front (loud exit 2 on a malformed input).
 fn load_health_config(
     opts: &HealthOptions<'_>,
-) -> Result<(fallow_config::ResolvedConfig, f64), ExitCode> {
-    fallow_engine::validate_coverage_root_absolute(opts.coverage_inputs.coverage_root)
+) -> Result<(plow_config::ResolvedConfig, f64), ExitCode> {
+    plow_engine::validate_coverage_root_absolute(opts.coverage_inputs.coverage_root)
         .map_err(|e| emit_error(&e, 2, opts.output))?;
     validate_health_churn_file(opts)?;
     let t = Instant::now();
@@ -191,7 +191,7 @@ fn load_health_config(
                 .or_else(|| opts.production.then_some(true)),
             quiet: opts.quiet,
         },
-        fallow_config::ProductionAnalysis::Health,
+        plow_config::ProductionAnalysis::Health,
     )?;
     let config_ms = t.elapsed().as_secs_f64() * 1000.0;
     Ok((config, config_ms))
@@ -206,7 +206,7 @@ pub fn execute_health_with_shared_parse(
 ) -> Result<HealthResult, ExitCode> {
     let (config, config_ms) = load_health_config(opts)?;
     let scope_inputs = build_health_scope_inputs(opts, &config)?;
-    let workspace_diagnostics = fallow_config::workspace_diagnostics_for(&config.root);
+    let workspace_diagnostics = plow_config::workspace_diagnostics_for(&config.root);
     let seams = health_seams();
     let result = execute_health_inner(
         opts,
@@ -233,7 +233,7 @@ pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode
     let (config, config_ms) = load_health_config(opts)?;
 
     let t = Instant::now();
-    let session = fallow_engine::AnalysisSession::from_resolved_config(config);
+    let session = plow_engine::AnalysisSession::from_resolved_config(config);
     let discover_ms = t.elapsed().as_secs_f64() * 1000.0;
     let session = session.into_parsed_parts(true);
     let config = session.config;
@@ -290,14 +290,14 @@ pub fn run_health(opts: &HealthOptions<'_>) -> ExitCode {
 }
 
 /// Result of executing health analysis without printing.
-pub type HealthResult = fallow_engine::HealthAnalysisResult<crate::report::OwnershipResolver>;
+pub type HealthResult = plow_engine::HealthAnalysisResult<crate::report::OwnershipResolver>;
 
 /// Print health results and return appropriate exit code.
 ///
-/// When called from combined mode (`fallow --score` / `fallow --trend`),
+/// When called from combined mode (`plow --score` / `plow --trend`),
 /// `skip_score_and_trend` MUST be `true`: the orientation header already
 /// renders both blocks and rendering them a second time here would duplicate
-/// the lines. Standalone `fallow health` invocations pass `false`.
+/// the lines. Standalone `plow health` invocations pass `false`.
 ///
 /// Exit-code gating (when `report_only` is `false`): the score gate
 /// (`--min-score`), the findings gate (`--min-severity`, or any finding when
@@ -420,12 +420,12 @@ fn has_failing_runtime_coverage(result: &HealthResult) -> bool {
         .is_some_and(|report| report.findings.iter().any(is_failing_runtime_coverage))
 }
 
-fn is_failing_runtime_coverage(finding: &fallow_output::RuntimeCoverageFinding) -> bool {
+fn is_failing_runtime_coverage(finding: &plow_output::RuntimeCoverageFinding) -> bool {
     matches!(
         finding.verdict,
-        fallow_output::RuntimeCoverageVerdict::SafeToDelete
-            | fallow_output::RuntimeCoverageVerdict::ReviewRequired
-            | fallow_output::RuntimeCoverageVerdict::LowTraffic
+        plow_output::RuntimeCoverageVerdict::SafeToDelete
+            | plow_output::RuntimeCoverageVerdict::ReviewRequired
+            | plow_output::RuntimeCoverageVerdict::LowTraffic
     )
 }
 
@@ -451,8 +451,8 @@ fn maybe_print_score_gate_note(result: &HealthResult, options: HealthPrintOption
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_config::{FallowConfig, OutputFormat};
-    use fallow_output::{ComplexityViolation, ExceededThreshold, FindingSeverity};
+    use plow_config::{OutputFormat, PlowConfig};
+    use plow_output::{ComplexityViolation, ExceededThreshold, FindingSeverity};
     use std::path::PathBuf;
     use std::time::Duration;
 
@@ -496,8 +496,8 @@ mod tests {
         }
     }
 
-    fn test_resolved_config() -> fallow_config::ResolvedConfig {
-        FallowConfig::default().resolve(
+    fn test_resolved_config() -> plow_config::ResolvedConfig {
+        PlowConfig::default().resolve(
             PathBuf::from("/project"),
             OutputFormat::Json,
             1,
@@ -512,7 +512,7 @@ mod tests {
         hit: usize,
         unhit: usize,
         untracked: usize,
-    ) -> fallow_output::RuntimeCoverageSummary {
+    ) -> plow_output::RuntimeCoverageSummary {
         #[expect(
             clippy::cast_precision_loss,
             reason = "test fixture totals are tiny, f64 precision is fine"
@@ -522,8 +522,8 @@ mod tests {
         } else {
             (hit as f64 / tracked as f64) * 100.0
         };
-        fallow_output::RuntimeCoverageSummary {
-            data_source: fallow_output::RuntimeCoverageDataSource::Local,
+        plow_output::RuntimeCoverageSummary {
+            data_source: plow_output::RuntimeCoverageDataSource::Local,
             last_received_at: None,
             functions_tracked: tracked,
             functions_hit: hit,
@@ -541,8 +541,8 @@ mod tests {
         static_status: &str,
         test_coverage: &str,
         v8_tracking: &str,
-    ) -> fallow_output::RuntimeCoverageEvidence {
-        fallow_output::RuntimeCoverageEvidence {
+    ) -> plow_output::RuntimeCoverageEvidence {
+        plow_output::RuntimeCoverageEvidence {
             static_status: static_status.to_owned(),
             test_coverage: test_coverage.to_owned(),
             v8_tracking: v8_tracking.to_owned(),
@@ -552,12 +552,12 @@ mod tests {
         }
     }
 
-    fn fx_health_score(score: f64, grade: &'static str) -> fallow_output::HealthScore {
-        fallow_output::HealthScore {
+    fn fx_health_score(score: f64, grade: &'static str) -> plow_output::HealthScore {
+        plow_output::HealthScore {
             formula_version: 2,
             score,
             grade,
-            penalties: fallow_output::HealthScorePenalties {
+            penalties: plow_output::HealthScorePenalties {
                 dead_files: None,
                 dead_exports: None,
                 complexity: 0.0,
@@ -575,14 +575,14 @@ mod tests {
     }
 
     fn fx_gate_result(
-        findings: Vec<fallow_output::HealthFinding>,
-        score: Option<fallow_output::HealthScore>,
+        findings: Vec<plow_output::HealthFinding>,
+        score: Option<plow_output::HealthScore>,
     ) -> HealthResult {
         HealthResult {
-            report: fallow_output::HealthReport {
+            report: plow_output::HealthReport {
                 findings,
                 health_score: score,
-                ..fallow_output::HealthReport::default()
+                ..plow_output::HealthReport::default()
             },
             grouping: None,
             group_resolver: None,
@@ -595,11 +595,11 @@ mod tests {
         }
     }
 
-    fn moderate_finding() -> fallow_output::HealthFinding {
+    fn moderate_finding() -> plow_output::HealthFinding {
         make_finding("moderate", ExceededThreshold::Cyclomatic).into()
     }
 
-    fn critical_finding() -> fallow_output::HealthFinding {
+    fn critical_finding() -> plow_output::HealthFinding {
         let mut v = make_finding("critical", ExceededThreshold::All);
         v.severity = FindingSeverity::Critical;
         v.into()
@@ -738,21 +738,21 @@ mod tests {
 
     fn fx_low_traffic_runtime_result() -> HealthResult {
         HealthResult {
-            report: fallow_output::HealthReport {
-                runtime_coverage: Some(fallow_output::RuntimeCoverageReport {
-                    schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
-                    verdict: fallow_output::RuntimeCoverageReportVerdict::ColdCodeDetected,
+            report: plow_output::HealthReport {
+                runtime_coverage: Some(plow_output::RuntimeCoverageReport {
+                    schema_version: plow_output::RuntimeCoverageSchemaVersion::V1,
+                    verdict: plow_output::RuntimeCoverageReportVerdict::ColdCodeDetected,
                     signals: Vec::new(),
                     summary: fx_summary(1, 0, 1, 0),
-                    findings: vec![fallow_output::RuntimeCoverageFinding {
-                        id: "fallow:prod:lowtraffic".to_owned(),
+                    findings: vec![plow_output::RuntimeCoverageFinding {
+                        id: "plow:prod:lowtraffic".to_owned(),
                         stable_id: None,
                         path: PathBuf::from("/project/src/cold.ts"),
                         function: "coldPath".to_owned(),
                         line: 14,
-                        verdict: fallow_output::RuntimeCoverageVerdict::LowTraffic,
+                        verdict: plow_output::RuntimeCoverageVerdict::LowTraffic,
                         invocations: Some(1),
-                        confidence: fallow_output::RuntimeCoverageConfidence::Low,
+                        confidence: plow_output::RuntimeCoverageConfidence::Low,
                         evidence: fx_evidence("used", "not_covered", "tracked"),
                         actions: vec![],
                         source_hash: None,
@@ -766,9 +766,9 @@ mod tests {
                     actionable: true,
                     actionability_reason: None,
                     actionability_verdict: None,
-                    provenance: fallow_output::RuntimeCoverageProvenance::default(),
+                    provenance: plow_output::RuntimeCoverageProvenance::default(),
                 }),
-                ..fallow_output::HealthReport::default()
+                ..plow_output::HealthReport::default()
             },
             grouping: None,
             group_resolver: None,

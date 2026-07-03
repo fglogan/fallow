@@ -2,7 +2,7 @@
 
 use std::process::ExitCode;
 
-use fallow_config::ResolvedConfig;
+use plow_config::ResolvedConfig;
 
 use super::analysis_data::{
     HealthAnalysisData, HealthAnalysisDataInput, prepare_health_analysis_data,
@@ -18,7 +18,7 @@ use super::{HealthDerivedSections, HealthOptions, HealthSeams, HealthVitalData, 
 pub(super) struct HealthCoreSectionsInput<'a, R> {
     pub(super) opts: &'a HealthOptions<'a>,
     pub(super) config: &'a ResolvedConfig,
-    pub(super) files: &'a [fallow_types::discover::DiscoveredFile],
+    pub(super) files: &'a [plow_types::discover::DiscoveredFile],
     pub(super) modules: &'a [crate::source::ModuleInfo],
     pub(super) scope: &'a HealthScope<'a, R>,
     pub(super) pre_computed_analysis: Option<crate::DeadCodeAnalysisArtifacts>,

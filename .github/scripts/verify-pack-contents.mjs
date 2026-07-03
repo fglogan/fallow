@@ -4,10 +4,10 @@
 //
 // Why this exists: npm silently drops a `files` entry that has no matching
 // file on disk at pack time (a whitelist glob with zero matches is skipped,
-// no warning, no error). The 2.76.0 release packed the `@fallow-cli/<platform>`
+// no warning, no error). The 2.76.0 release packed the `@plow-cli/<platform>`
 // packages before the `.sig` staging step in the build job was wired, so each
-// platform tarball shipped without its `fallow.sig` / `fallow-lsp.sig` /
-// `fallow-mcp.sig` siblings even though the `files` field listed them. The
+// platform tarball shipped without its `plow.sig` / `plow-lsp.sig` /
+// `plow-mcp.sig` siblings even though the `files` field listed them. The
 // GitHub Action installer then hard-failed every install resolving to 2.76.0
 // with `sig-missing`. The `pack()` helper in release.yml only checked that a
 // tarball was produced, never that its contents satisfied the contract, so the
@@ -18,7 +18,7 @@
 // the release if any declared plain-file entry is absent. Glob and negation
 // entries are skipped because npm globs may legitimately match nothing.
 //
-// It also enforces a second, independent invariant for `@fallow-cli/<platform>`
+// It also enforces a second, independent invariant for `@plow-cli/<platform>`
 // packages: every shipped binary must have a `.sig` sibling. The declared-files
 // check alone would pass a package that dropped the `.sig` entries from BOTH
 // `files` and disk (self-consistent but unsigned), which is the more likely
@@ -38,18 +38,18 @@ import { pathToFileURL } from "node:url";
 // legitimately, so they are out of scope for a strict presence check.
 const GLOB_CHARS = /[*?[\]{}!]/;
 
-// Files a `@fallow-cli/<platform>` package ships that are NOT signed binaries,
+// Files a `@plow-cli/<platform>` package ships that are NOT signed binaries,
 // so they have no `.sig` sibling. Matched case-insensitively at the top level.
 const PLATFORM_METADATA = /^(package\.json|readme|licen[sc]e)/i;
 
-// True for the signed CLI platform packages (`@fallow-cli/linux-x64-gnu`, ...),
-// false for the `fallow` wrapper and the NAPI packages (`@fallow-cli/fallow-node*`),
+// True for the signed CLI platform packages (`@plow-cli/linux-x64-gnu`, ...),
+// false for the `plow` wrapper and the NAPI packages (`@plow-cli/plow-node*`),
 // which ship no signed binaries.
 function requiresSignedBinaries(name) {
-  if (typeof name !== "string" || !name.startsWith("@fallow-cli/")) {
+  if (typeof name !== "string" || !name.startsWith("@plow-cli/")) {
     return false;
   }
-  return !name.slice("@fallow-cli/".length).startsWith("fallow-node");
+  return !name.slice("@plow-cli/".length).startsWith("plow-node");
 }
 
 // The declared-files check only verifies "deliver what you declare": if a
@@ -57,7 +57,7 @@ function requiresSignedBinaries(name) {
 // tarball would be self-consistent and pass, silently reproducing #944. This
 // independent invariant asserts the load-bearing property directly: every
 // shipped binary in a CLI platform package has a `.sig` sibling. It is
-// platform-agnostic (`fallow.exe` on win32 requires `fallow.exe.sig`) because
+// platform-agnostic (`plow.exe` on win32 requires `plow.exe.sig`) because
 // it derives the requirement from the binaries actually present, not a
 // hardcoded list. Returns the names of binaries whose signature is absent.
 function missingSignatureSiblings(name, entries) {

@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use super::common::{create_config, fixture_path};
-use fallow_types::results::AnalysisResults;
+use plow_types::results::AnalysisResults;
 
 fn normalize_path(root: &Path, path: &Path) -> String {
     path.strip_prefix(root)
@@ -38,7 +38,7 @@ fn pinia_store_auto_imports_keep_direct_store_files_reachable() {
     let root = fixture_path("nuxt-pinia-store-auto-imports");
     let config = create_config(root.clone());
 
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused = unused_file_paths(&results, &root);
 
     for reachable in ["stores/user.ts", "app/stores/settings.ts"] {
@@ -60,7 +60,7 @@ fn include_entry_exports_credits_pinia_store_exports() {
     let mut config = create_config(root.clone());
     config.include_entry_exports = true;
 
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused = unused_exports(&results, &root);
 
     for used in [
@@ -87,7 +87,7 @@ fn package_without_pinia_nuxt_does_not_credit_store_files() {
     let root = fixture_path("nuxt-pinia-store-auto-imports-disabled");
     let config = create_config(root.clone());
 
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused = unused_file_paths(&results, &root);
 
     assert!(

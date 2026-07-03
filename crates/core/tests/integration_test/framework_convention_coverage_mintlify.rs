@@ -5,7 +5,7 @@ use super::framework_convention_coverage_common::collect_unused_files;
 fn mintlify_docs_root_is_credited_and_cli_dependency_is_tooling() {
     let root = fixture_path("mintlify-docs-project");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files = collect_unused_files(&root, &results);
 

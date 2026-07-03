@@ -15,14 +15,14 @@ export const AnnotateCanvas = () => {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    void window.fallow.getConfig().then((cfg) => setUrl(cfg.defaultUrl));
+    void window.plow.getConfig().then((cfg) => setUrl(cfg.defaultUrl));
   }, []);
 
   const capture = async (): Promise<void> => {
     setPhase("capturing");
     setError(null);
     try {
-      const shot = await window.fallow.capture(url);
+      const shot = await window.plow.capture(url);
       setImg(shot.dataUrl);
       setPhase("idle");
     } catch (e) {

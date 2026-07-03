@@ -10,7 +10,7 @@ import {
 } from "./walkthrough";
 import type { Severity, TradeOff, TradeOffEnvelope } from "./tradeoff";
 
-/** Minimal structural view of `fallow review --format json` (kind: audit-brief). */
+/** Minimal structural view of `plow review --format json` (kind: audit-brief). */
 type RawScore = {
   fan_io?: number;
   security_taint?: number;
@@ -121,7 +121,7 @@ const maxRank = (files: WalkthroughFile[]): Rank =>
 /**
  * Normalize a raw audit-brief into a {@link WalkthroughDocument}. Pure: takes
  * parsed JSON, returns the render model. Anti-hallucination: decisions without a
- * Fallow `signal_id` are dropped.
+ * Plow `signal_id` are dropped.
  */
 export const toWalkthroughDocument = (brief: AuditBrief): WalkthroughDocument => {
   const factByFile = new Map<string, WalkthroughFile>();

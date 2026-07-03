@@ -1,11 +1,11 @@
 {
-  "name": "@fallow-cli/linux-arm64-musl",
+  "name": "@plow-cli/linux-arm64-musl",
   "version": "2.104.0",
-  "description": "Fallow CLI binary for Linux ARM64 (musl)",
+  "description": "Plow CLI binary for Linux ARM64 (musl)",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/fallow-rs/fallow.git"
+    "url": "git+https://github.com/fglogan/genesis-plow.git"
   },
   "os": [
     "linux"
@@ -14,11 +14,11 @@
     "arm64"
   ],
   "files": [
-    "fallow",
-    "fallow.sig",
-    "fallow-lsp",
-    "fallow-lsp.sig",
-    "fallow-mcp",
-    "fallow-mcp.sig"
+    "plow",
+    "plow.sig",
+    "plow-lsp",
+    "plow-lsp.sig",
+    "plow-mcp",
+    "plow-mcp.sig"
   ]
 }

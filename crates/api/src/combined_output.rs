@@ -3,14 +3,14 @@
 use std::path::Path;
 use std::time::Duration;
 
-use fallow_output::{
+use plow_output::{
     CHECK_SCHEMA_VERSION, CombinedMeta, CombinedOutput, HealthReport, RootEnvelopeMode, check_meta,
     dupes_meta, harmonize_dead_code_health_suppress_line_actions, health_meta,
     serialize_combined_json_output, strip_root_prefix,
 };
-use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
-use fallow_types::output::NextStep;
-use fallow_types::results::AnalysisResults;
+use plow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
+use plow_types::output::NextStep;
+use plow_types::results::AnalysisResults;
 
 use crate::{
     CheckJsonExtraOutputs, CheckJsonPayloadInput, DupesReportPayload, serialize_check_json_payload,
@@ -25,7 +25,7 @@ pub struct CombinedCheckJsonSection<'a> {
     pub extras: CheckJsonExtraOutputs,
 }
 
-/// Inputs for bare `fallow --format json` output assembly.
+/// Inputs for bare `plow --format json` output assembly.
 pub struct CombinedJsonOutputInput<'a> {
     pub check: Option<CombinedCheckJsonSection<'a>>,
     pub dupes: Option<&'a DupesReportPayload>,
@@ -153,13 +153,13 @@ fn combined_meta_for_output(
 mod tests {
     use std::time::Duration;
 
-    use fallow_output::{
+    use plow_output::{
         ComplexityViolation, ExceededThreshold, FindingSeverity, HealthFinding, HealthReport,
         RootEnvelopeMode,
     };
-    use fallow_types::output_dead_code::UnusedExportFinding;
-    use fallow_types::output_health::{HealthFindingAction, HealthFindingActionType};
-    use fallow_types::results::{AnalysisResults, UnusedExport};
+    use plow_types::output_dead_code::UnusedExportFinding;
+    use plow_types::output_health::{HealthFindingAction, HealthFindingActionType};
+    use plow_types::results::{AnalysisResults, UnusedExport};
 
     use super::{CombinedCheckJsonSection, CombinedJsonOutputInput, serialize_combined_json};
 
@@ -239,7 +239,7 @@ mod tests {
                     description: "Suppress with an inline comment above the function declaration"
                         .to_string(),
                     note: None,
-                    comment: Some("// fallow-ignore-next-line complexity".to_string()),
+                    comment: Some("// plow-ignore-next-line complexity".to_string()),
                     placement: Some("above-function-declaration".to_string()),
                     target_path: None,
                 }],
@@ -269,11 +269,11 @@ mod tests {
 
         assert_eq!(
             output["check"]["unused_exports"][0]["actions"][1]["comment"],
-            "// fallow-ignore-next-line unused-export, complexity"
+            "// plow-ignore-next-line unused-export, complexity"
         );
         assert_eq!(
             output["health"]["findings"][0]["actions"][0]["comment"],
-            "// fallow-ignore-next-line unused-export, complexity"
+            "// plow-ignore-next-line unused-export, complexity"
         );
     }
 }

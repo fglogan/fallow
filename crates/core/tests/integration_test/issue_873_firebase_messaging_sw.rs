@@ -5,7 +5,7 @@ use super::framework_convention_coverage_common::collect_unused_files;
 fn firebase_messaging_service_workers_are_not_unused_files() {
     let root = fixture_path("issue-873-firebase-messaging-sw");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files = collect_unused_files(&root, &results);
 

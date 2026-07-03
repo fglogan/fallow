@@ -1,9 +1,9 @@
-//! `fallow audit --brief` (alias `fallow review`): a deterministic rendering
+//! `plow audit --brief` (alias `plow review`): a deterministic rendering
 //! mode layered over the existing audit analysis.
 //!
 //! The brief answers "where do I look?" rather than "will CI block this?". It
 //! is composition + rendering over the same [`crate::audit::AuditResult`] that
-//! drives `fallow audit`; it runs no new analysis and, critically, ALWAYS exits
+//! drives `plow audit`; it runs no new analysis and, critically, ALWAYS exits
 //! 0 so a reviewer or agent can read the orientation even when the underlying
 //! audit verdict is `fail`. The verdict is still computed and carried in the
 //! brief JSON informationally, but it never drives the exit code on this path.
@@ -14,18 +14,18 @@
 
 use std::process::ExitCode;
 
-pub use fallow_output::{
+pub use plow_output::{
     CoordinationGapFact, DiffTriage, GraphFacts, ImpactClosureFacts, PartitionFacts,
     ReviewBriefSchemaVersion, ReviewBriefSubtractSections, ReviewDeltas, ReviewEffort,
     ReviewUnitFact, RiskClass,
 };
-use fallow_types::results::AnalysisResults;
+use plow_types::results::AnalysisResults;
 use rustc_hash::FxHashSet;
 
 use crate::audit::AuditResult;
 use crate::report::sink::outln;
 
-pub type ReviewBriefOutput = fallow_output::StandardReviewBriefOutput;
+pub type ReviewBriefOutput = plow_output::StandardReviewBriefOutput;
 
 /// A file count at or above which a changeset is classified [`RiskClass::High`].
 const RISK_HIGH_FILES: usize = 20;
@@ -118,7 +118,7 @@ pub fn build_triage(result: &AuditResult) -> DiffTriage {
 #[must_use]
 pub fn derive_graph_facts(
     results: &AnalysisResults,
-    closure: Option<&fallow_engine::ImpactClosurePaths>,
+    closure: Option<&plow_engine::ImpactClosurePaths>,
 ) -> GraphFacts {
     let mut zones: FxHashSet<String> = FxHashSet::default();
     for finding in &results.boundary_violations {
@@ -203,7 +203,7 @@ fn build_partition_facts(result: &AuditResult) -> PartitionFacts {
 /// whose introduced edge is in `deltas.boundary_introduced` (the same surface
 /// the decision surface reads). The security taint signal is wired as an EMPTY
 /// slice today: the brief path runs the bare dead-code analysis, not the opt-in
-/// `fallow security` taint engine, so `results.security_findings` is empty. The
+/// `plow security` taint engine, so `results.security_findings` is empty. The
 /// seam lights up the moment a security pass is threaded onto the brief, with no
 /// focus-map code change.
 #[must_use]
@@ -250,7 +250,7 @@ fn build_focus_map(result: &AuditResult, deltas: &ReviewDeltas) -> crate::audit_
         .unwrap_or_default();
 
     // Security taint touch: the brief path carries no security findings (the taint
-    // engine is the opt-in `fallow security` command), so this is empty today. The
+    // engine is the opt-in `plow security` command), so this is empty today. The
     // seam is a pure function of this slice; it lights up when a security pass is
     // threaded onto the brief.
     let taint_touched_files = taint_touched_files(result.check.as_ref());
@@ -316,7 +316,7 @@ fn build_runtime_focus(
         let file = crate::audit::keys::relative_key_path(&finding.path, root);
         if matches!(
             finding.verdict,
-            fallow_output::RuntimeCoverageVerdict::SafeToDelete
+            plow_output::RuntimeCoverageVerdict::SafeToDelete
         ) {
             safe_to_delete.insert(file);
         } else {
@@ -442,7 +442,7 @@ pub fn build_brief_output(result: &AuditResult) -> ReviewBriefOutput {
 }
 
 /// Build the reused "subtract" section (dead-code / duplication / complexity)
-/// for the brief JSON value, mirroring `fallow audit --format json`.
+/// for the brief JSON value, mirroring `plow audit --format json`.
 fn build_brief_subtract_sections(
     result: &AuditResult,
 ) -> Result<ReviewBriefSubtractSections, ExitCode> {
@@ -468,22 +468,22 @@ fn build_brief_subtract_sections(
 /// reused subtract section.
 fn build_brief_json(result: &AuditResult) -> Result<serde_json::Value, ExitCode> {
     let brief = build_brief_output(result);
-    let audit_header = fallow_api::build_audit_header_map(crate::audit::audit_json_header_input(
+    let audit_header = plow_api::build_audit_header_map(crate::audit::audit_json_header_input(
         result,
     ))
     .map_err(|err| {
         crate::error::emit_error(
             &format!("JSON serialization error: {err}"),
             2,
-            fallow_config::OutputFormat::Json,
+            plow_config::OutputFormat::Json,
         )
     })?;
     let subtract = build_brief_subtract_sections(result)?;
-    fallow_output::build_review_brief_json_output(&brief, audit_header, subtract).map_err(|err| {
+    plow_output::build_review_brief_json_output(&brief, audit_header, subtract).map_err(|err| {
         crate::error::emit_error(
             &format!("JSON serialization error: {err}"),
             2,
-            fallow_config::OutputFormat::Json,
+            plow_config::OutputFormat::Json,
         )
     })
 }
@@ -493,7 +493,7 @@ fn build_brief_json(result: &AuditResult) -> Result<serde_json::Value, ExitCode>
 fn print_brief_json(result: &AuditResult) -> ExitCode {
     match build_brief_json(result) {
         Ok(output) => {
-            let Ok(output) = fallow_output::serialize_review_brief_json_output(
+            let Ok(output) = plow_output::serialize_review_brief_json_output(
                 output,
                 crate::output_runtime::current_root_envelope_mode(),
                 crate::output_runtime::telemetry_analysis_run_id().as_deref(),
@@ -509,7 +509,7 @@ fn print_brief_json(result: &AuditResult) -> ExitCode {
 
 /// Render the brief in human / compact / markdown form: a short orientation
 /// header (scope, risk, effort, boundaries) followed by the same findings
-/// sections `fallow audit` prints.
+/// sections `plow audit` prints.
 fn print_brief_human(result: &AuditResult, quiet: bool, explain: bool, show_deprioritized: bool) {
     let brief = build_brief_output(result);
 
@@ -772,7 +772,7 @@ fn effort_label(effort: ReviewEffort) -> &'static str {
 
 /// Print the brief and return an exit code that is ALWAYS `SUCCESS`.
 ///
-/// This is the exit-0 seam: `fallow review` (and `fallow audit --brief`) never
+/// This is the exit-0 seam: `plow review` (and `plow audit --brief`) never
 /// gate on the audit verdict. The verdict is still carried in the JSON output
 /// informationally. Format dispatch mirrors `print_audit_result`, but every arm
 /// forces success: JSON renders the brief envelope; human / compact / markdown
@@ -787,7 +787,7 @@ pub fn print_brief_result(
     explain: bool,
     show_deprioritized: bool,
 ) -> ExitCode {
-    use fallow_config::OutputFormat;
+    use plow_config::OutputFormat;
 
     match result.output {
         OutputFormat::Json => print_brief_json(result),
@@ -806,20 +806,20 @@ pub fn print_brief_result(
 }
 
 /// Render the SEPARABLE decision-surface envelope (the `decision_surface` MCP
-/// tool's output + `fallow decision-surface`). Emits ONLY the ranked, capped
+/// tool's output + `plow decision-surface`). Emits ONLY the ranked, capped
 /// decisions with structured `actions[]`, never the full brief. Always exit 0.
 ///
 /// JSON renders the typed decision-surface envelope (`kind:
 /// "decision-surface"`); human / compact / markdown render the apex header.
 #[must_use]
 pub fn print_decision_surface_result(result: &AuditResult, quiet: bool) -> ExitCode {
-    use fallow_config::OutputFormat;
+    use plow_config::OutputFormat;
 
     let surface = result.decision_surface.clone().unwrap_or_default();
     match result.output {
         OutputFormat::Json => {
             let output = crate::audit_decision_surface::build_decision_surface_output(&surface);
-            match fallow_output::serialize_decision_surface_json_output(
+            match plow_output::serialize_decision_surface_json_output(
                 output,
                 crate::output_runtime::current_root_envelope_mode(),
                 crate::output_runtime::telemetry_analysis_run_id().as_deref(),
@@ -849,7 +849,7 @@ pub fn print_decision_surface_result(result: &AuditResult, quiet: bool) -> ExitC
 #[must_use]
 pub fn print_walkthrough_guide_result(result: &AuditResult) -> ExitCode {
     let guide = crate::audit_walkthrough::build_guide_from_result(result);
-    if let Ok(value) = fallow_output::serialize_walkthrough_guide_json_output(
+    if let Ok(value) = plow_output::serialize_walkthrough_guide_json_output(
         guide,
         crate::output_runtime::current_root_envelope_mode(),
         crate::output_runtime::telemetry_analysis_run_id().as_deref(),
@@ -882,7 +882,7 @@ pub fn print_walkthrough_file_result(result: &AuditResult, path: &std::path::Pat
         &change_anchor_ids,
         &current_hash,
     );
-    if let Ok(value) = fallow_output::serialize_walkthrough_validation_json_output(
+    if let Ok(value) = plow_output::serialize_walkthrough_validation_json_output(
         validation,
         crate::output_runtime::current_root_envelope_mode(),
         crate::output_runtime::telemetry_analysis_run_id().as_deref(),
@@ -920,7 +920,7 @@ pub fn print_walkthrough_human_result(
     show_cleared: bool,
     quiet: bool,
 ) -> ExitCode {
-    use fallow_config::OutputFormat;
+    use plow_config::OutputFormat;
 
     // JSON reuses the single guide JSON path verbatim (no second serializer).
     if matches!(result.output, OutputFormat::Json) {
@@ -938,7 +938,7 @@ pub fn print_walkthrough_human_result(
 
     if matches!(result.output, OutputFormat::Markdown) {
         let viewed_files = crate::report::walkthrough_viewed_files(&guide, &viewed);
-        let markdown = fallow_api::build_walkthrough_markdown(&guide, root, &viewed_files);
+        let markdown = plow_api::build_walkthrough_markdown(&guide, root, &viewed_files);
         outln!("{markdown}");
         return ExitCode::SUCCESS;
     }
@@ -990,8 +990,8 @@ fn walkthrough_view_key(path: &std::path::Path, root: &std::path::Path) -> Strin
 mod tests {
     use std::time::Duration;
 
-    use fallow_config::{AuditGate, OutputFormat};
-    use fallow_output::REVIEW_BRIEF_SCHEMA_VERSION;
+    use plow_config::{AuditGate, OutputFormat};
+    use plow_output::REVIEW_BRIEF_SCHEMA_VERSION;
     use rustc_hash::FxHashSet;
 
     use crate::audit::{AuditAttribution, AuditResult, AuditSummary, AuditVerdict};
@@ -1092,7 +1092,7 @@ mod tests {
     #[test]
     fn brief_json_validates_against_audit_brief_schema_variant() {
         let result = audit_result(AuditVerdict::Fail, OutputFormat::Json);
-        let value = fallow_output::serialize_review_brief_json_output(
+        let value = plow_output::serialize_review_brief_json_output(
             build_brief_json(&result).expect("brief json must build"),
             crate::output_runtime::current_root_envelope_mode(),
             crate::output_runtime::telemetry_analysis_run_id().as_deref(),
@@ -1144,7 +1144,7 @@ mod tests {
 
     #[test]
     fn derive_graph_facts_populates_reachable_from_from_closure() {
-        use fallow_engine::{CoordinationGapPaths, ImpactClosurePaths};
+        use plow_engine::{CoordinationGapPaths, ImpactClosurePaths};
         let results = AnalysisResults::default();
         let closure = ImpactClosurePaths {
             in_diff: vec!["src/core.ts".to_string()],

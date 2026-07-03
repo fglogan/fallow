@@ -7,7 +7,7 @@
 
 use std::process::ExitCode;
 
-use fallow_config::ResolvedConfig;
+use plow_config::ResolvedConfig;
 
 use crate::error::emit_error;
 
@@ -23,11 +23,11 @@ pub(super) fn prepare_health_coverage_settings(
     opts: &HealthExecutionOptions<'_>,
     config: &ResolvedConfig,
 ) -> Result<HealthCoverageSettings, ExitCode> {
-    let config_coverage_enabled = config.rules.coverage_gaps != fallow_config::Severity::Off;
+    let config_coverage_enabled = config.rules.coverage_gaps != plow_config::Severity::Off;
     let report_coverage_gaps =
         opts.coverage_gaps || (opts.config_activates_coverage_gaps && config_coverage_enabled);
     let enforce_coverage_gaps = opts.enforce_coverage_gap_gate
-        && config.rules.coverage_gaps == fallow_config::Severity::Error;
+        && config.rules.coverage_gaps == plow_config::Severity::Error;
     let istanbul_coverage = load_health_coverage(opts, config)?;
 
     Ok(HealthCoverageSettings {

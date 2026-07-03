@@ -133,7 +133,7 @@ pub struct ModuleInfo {
     /// `el.innerHTML = DOMPurify.sanitize(input)`.
     pub sanitized_sink_args: Vec<SanitizedSinkArg>,
     /// Known defensive control call sites found in this module. Consumed only by
-    /// the `fallow security --surface` agent JSON path.
+    /// the `plow security --surface` agent JSON path.
     pub security_control_sites: Vec<SecurityControlSite>,
     /// Statically flattenable callee paths invoked in this module, deduped per
     /// unique path (first occurrence wins). Consumed by the
@@ -246,7 +246,7 @@ pub struct ModuleInfo {
     /// registration is intentionally NOT harvested here (that is the dead case the
     /// rule catches). Empty for non-Angular files.
     pub angular_entry_component_refs: Vec<String>,
-    /// `true` when this file dynamically renders an Angular component fallow
+    /// `true` when this file dynamically renders an Angular component plow
     /// cannot attribute to a literal class reference: a
     /// `ViewContainerRef.createComponent(...)` / `*.createComponent(<ident>)`
     /// call, or an `*ngComponentOutlet` template binding. The Angular
@@ -913,7 +913,7 @@ pub struct FunctionComplexity {
 /// id selector, a complex selector, a `!important` declaration, or deep
 /// nesting), so the vector stays bounded on normal stylesheets.
 ///
-/// Not persisted in the extraction cache: `fallow health` computes these
+/// Not persisted in the extraction cache: `plow health` computes these
 /// on demand from the CSS source, so there is no `bitcode` derive.
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -955,7 +955,7 @@ pub struct CssDeclarationBlock {
 }
 
 /// Stylesheet-level structural CSS analytics, computed from the parsed CSS
-/// syntax tree. Feeds `fallow health` penalty weights and located findings,
+/// syntax tree. Feeds `plow health` penalty weights and located findings,
 /// never a standalone CSS score.
 #[derive(Debug, Clone, Default, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -1320,7 +1320,7 @@ pub struct MemberInfo {
     /// Whether this member has decorators (e.g., `@Column()`, `@Inject()`).
     /// Decorated members are used by frameworks at runtime and should not be
     /// flagged as unused class members, unless every decorator on the member
-    /// is opted out via `FallowConfig.ignore_decorators`.
+    /// is opted out via `PlowConfig.ignore_decorators`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub has_decorator: bool,
     /// Full dotted path of each decorator on this member, in source order.
@@ -2070,7 +2070,7 @@ pub struct LoadReturnKey {
 
 /// The syntactic shape of an identified React component definition. Drives the
 /// abstain ladder later phases apply: a `forwardRef` / `memo` wrapper whose
-/// props come from an imported interface fallow cannot resolve must abstain
+/// props come from an imported interface plow cannot resolve must abstain
 /// (ADR-001), not guess.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, bitcode::Encode, bitcode::Decode)]
 pub enum ComponentFunctionKind {
@@ -2103,7 +2103,7 @@ pub struct ComponentFunction {
     /// `true` when the component's props are not statically harvestable: a
     /// rest/spread in the signature (`{ ...rest }`), props passed wholesale to a
     /// hook/helper, or a `forwardRef` / `memo` wrapper whose props come from an
-    /// imported interface generic fallow cannot resolve (ADR-001). The prop
+    /// imported interface generic plow cannot resolve (ADR-001). The prop
     /// phase abstains on the whole component when set.
     pub has_unharvestable_props: bool,
     /// `true` when the component body calls `cloneElement` / `React.cloneElement`.
@@ -2339,7 +2339,7 @@ pub struct DynamicImportInfo {
     /// The local variable name for `const x = await import(...)`.
     /// Used for namespace import narrowing via member access tracking.
     pub local_name: Option<String>,
-    /// True when this dynamic import was synthesised by fallow rather than appearing in user source.
+    /// True when this dynamic import was synthesised by plow rather than appearing in user source.
     pub is_speculative: bool,
 }
 

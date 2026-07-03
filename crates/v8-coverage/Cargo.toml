@@ -1,5 +1,5 @@
 [package]
-name = "fallow-v8-coverage"
+name = "plow-v8-coverage"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,7 +8,7 @@ homepage.workspace = true
 documentation.workspace = true
 keywords.workspace = true
 categories.workspace = true
-description = "V8 ScriptCoverage JSON parser and UTF-16 source-offset mapper for the fallow CLI"
+description = "V8 ScriptCoverage JSON parser and UTF-16 source-offset mapper for the plow CLI"
 readme = "../../README.md"
 
 [lib]

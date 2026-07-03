@@ -28,7 +28,7 @@ mod code_mode_tools;
 
 #[cfg(test)]
 use code_mode_subprocess::normalize_output;
-use code_mode_subprocess::run_fallow_sync;
+use code_mode_subprocess::run_plow_sync;
 use code_mode_tools::{
     CODE_MODE_ALIASES, CodeModeTool, build_tool_args, merge_default_root, run_api_tool,
 };
@@ -136,10 +136,10 @@ fn install_globals(ctx: &Ctx<'_>, state: &Rc<RefCell<CodeModeState>>) -> rquickj
     let globals = ctx.globals();
     harden_globals(&globals)?;
 
-    let fallow = Object::new(ctx.clone())?;
-    install_host_api(ctx, &fallow, state)?;
-    globals.set("fallow", fallow)?;
-    ctx.eval::<(), _>("Object.freeze(globalThis.fallow);")?;
+    let plow = Object::new(ctx.clone())?;
+    install_host_api(ctx, &plow, state)?;
+    globals.set("plow", plow)?;
+    ctx.eval::<(), _>("Object.freeze(globalThis.plow);")?;
     Ok(())
 }
 
@@ -164,11 +164,11 @@ fn harden_globals(globals: &Object<'_>) -> rquickjs::Result<()> {
 
 fn install_host_api<'js>(
     ctx: &Ctx<'js>,
-    fallow: &Object<'js>,
+    plow: &Object<'js>,
     state: &Rc<RefCell<CodeModeState>>,
 ) -> rquickjs::Result<()> {
     let run_state = Rc::clone(state);
-    fallow.set(
+    plow.set(
         "run",
         Func::from(MutFn::from(
             move |ctx: Ctx<'js>, tool: String, params: Value<'js>| {
@@ -179,7 +179,7 @@ fn install_host_api<'js>(
 
     for (alias, tool) in CODE_MODE_ALIASES {
         let alias_state = Rc::clone(state);
-        fallow.set(
+        plow.set(
             *alias,
             Func::from(MutFn::from(move |ctx: Ctx<'js>, params: Value<'js>| {
                 run_host_call(&ctx, &alias_state, tool, params)
@@ -251,7 +251,7 @@ fn user_source(code: &str) -> String {
     } else {
         format!(
             "(({{
-                fallow,
+                plow,
                 root
             }}) => {{
                 {trimmed}
@@ -266,9 +266,9 @@ fn user_source(code: &str) -> String {
         if (typeof __codeModeUser !== "function") {{
             throw new Error("code must evaluate to a function or function body");
         }}
-        const __codeModeResult = __codeModeUser({{ fallow: globalThis.fallow, root: globalThis.root }});
+        const __codeModeResult = __codeModeUser({{ plow: globalThis.plow, root: globalThis.root }});
         if (__codeModeResult && typeof __codeModeResult.then === "function") {{
-            throw new Error("async Code Mode snippets are not supported; use synchronous fallow host calls");
+            throw new Error("async Code Mode snippets are not supported; use synchronous plow host calls");
         }}
         __codeModeResult;
         "#
@@ -340,7 +340,7 @@ impl CodeModeState {
             serde_json::to_string(&value).unwrap_or_else(|_| "{}".to_string())
         } else {
             let args = build_tool_args(tool, params)?;
-            run_fallow_sync(
+            run_plow_sync(
                 &self.binary,
                 "code_execute",
                 &args,
@@ -375,7 +375,7 @@ struct CodeModeCall {
 
 fn classify_host_error(message: &str) -> &'static str {
     if message.contains("does not expose fix tools")
-        || message.contains("unsupported code mode fallow tool")
+        || message.contains("unsupported code mode plow tool")
     {
         return "unsupported_tool";
     }
@@ -427,13 +427,13 @@ mod tests {
     fn statement_body_is_wrapped_as_function_body() {
         let source = user_source("return { ok: true };");
         assert!(source.contains("return { ok: true };"));
-        assert!(source.contains("__codeModeUser({ fallow: globalThis.fallow"));
+        assert!(source.contains("__codeModeUser({ plow: globalThis.plow"));
     }
 
     #[test]
     fn function_expression_is_preserved() {
-        let source = user_source("({ fallow }) => fallow.projectInfo({ files: true })");
-        assert!(source.contains("({ fallow }) => fallow.projectInfo({ files: true })"));
+        let source = user_source("({ plow }) => plow.projectInfo({ files: true })");
+        assert!(source.contains("({ plow }) => plow.projectInfo({ files: true })"));
     }
 
     #[test]
@@ -445,14 +445,14 @@ mod tests {
 
     #[test]
     fn async_snippets_are_rejected_explicitly() {
-        let source = user_source("async ({ fallow }) => fallow.projectInfo({ files: true })");
+        let source = user_source("async ({ plow }) => plow.projectInfo({ files: true })");
         assert!(source.contains("async Code Mode snippets are not supported"));
     }
 
     #[test]
     fn oversized_code_is_rejected_before_runtime() {
         let output = execute_code_mode(
-            "fallow".to_string(),
+            "plow".to_string(),
             CodeExecuteParams {
                 code: "x".repeat(MAX_CODE_BYTES + 1),
                 root: None,
@@ -488,10 +488,10 @@ mod tests {
         .expect("source");
 
         let output = execute_code_mode(
-            "/definitely/not/fallow".to_string(),
+            "/definitely/not/plow".to_string(),
             CodeExecuteParams {
                 code:
-                    r#"return fallow.analyze({ issue_types: ["unused-exports"], no_cache: true });"#
+                    r#"return plow.analyze({ issue_types: ["unused-exports"], no_cache: true });"#
                         .to_string(),
                 root: Some(temp.path().display().to_string()),
                 timeout_ms: Some(5_000),
@@ -520,11 +520,10 @@ mod tests {
         fs::write(temp.path().join("src/b.ts"), "import './a';\n").expect("source b");
 
         let output = execute_code_mode(
-            "/definitely/not/fallow".to_string(),
+            "/definitely/not/plow".to_string(),
             CodeExecuteParams {
-                code:
-                    r#"return fallow.analyze({ issue_types: ["circular-deps"], no_cache: true });"#
-                        .to_string(),
+                code: r#"return plow.analyze({ issue_types: ["circular-deps"], no_cache: true });"#
+                    .to_string(),
                 root: Some(temp.path().display().to_string()),
                 timeout_ms: Some(5_000),
                 max_output_bytes: Some(200_000),
@@ -582,10 +581,9 @@ mod tests {
         .expect("changed source");
 
         let output = execute_code_mode(
-            "/definitely/not/fallow".to_string(),
+            "/definitely/not/plow".to_string(),
             CodeExecuteParams {
-                code: r#"return fallow.checkChanged({ since: "HEAD", no_cache: true });"#
-                    .to_string(),
+                code: r#"return plow.checkChanged({ since: "HEAD", no_cache: true });"#.to_string(),
                 root: Some(temp.path().display().to_string()),
                 timeout_ms: Some(5_000),
                 max_output_bytes: Some(200_000),
@@ -617,9 +615,9 @@ mod tests {
         .expect("source");
 
         let output = execute_code_mode(
-            "/definitely/not/fallow".to_string(),
+            "/definitely/not/plow".to_string(),
             CodeExecuteParams {
-                code: "return fallow.featureFlags({ no_cache: true });".to_string(),
+                code: "return plow.featureFlags({ no_cache: true });".to_string(),
                 root: Some(temp.path().display().to_string()),
                 timeout_ms: Some(5_000),
                 max_output_bytes: Some(200_000),
@@ -649,7 +647,7 @@ mod tests {
         )
         .expect("package json");
         fs::write(
-            temp.path().join(".fallowrc.json"),
+            temp.path().join(".plowrc.json"),
             r#"{
                 "boundaries": {
                     "zones": [
@@ -675,9 +673,9 @@ mod tests {
         .expect("shared source");
 
         let output = execute_code_mode(
-            "/definitely/not/fallow".to_string(),
+            "/definitely/not/plow".to_string(),
             CodeExecuteParams {
-                code: "return fallow.listBoundaries({ no_cache: true });".to_string(),
+                code: "return plow.listBoundaries({ no_cache: true });".to_string(),
                 root: Some(temp.path().display().to_string()),
                 timeout_ms: Some(5_000),
                 max_output_bytes: Some(200_000),
@@ -697,9 +695,9 @@ mod tests {
     #[test]
     fn api_backed_explain_does_not_spawn_binary() {
         let output = execute_code_mode(
-            "/definitely/not/fallow".to_string(),
+            "/definitely/not/plow".to_string(),
             CodeExecuteParams {
-                code: "return fallow.explain({ issue_type: 'unused-export' });".to_string(),
+                code: "return plow.explain({ issue_type: 'unused-export' });".to_string(),
                 root: None,
                 timeout_ms: Some(5_000),
                 max_output_bytes: Some(200_000),
@@ -710,8 +708,8 @@ mod tests {
         let json: serde_json::Value = serde_json::from_str(&output).expect("code mode json");
         assert_eq!(json["ok"].as_bool(), Some(true));
         assert_eq!(json["result"]["kind"].as_str(), Some("explain"));
-        assert_eq!(json["result"]["id"].as_str(), Some("fallow/unused-export"));
-        assert_eq!(json["calls"][0]["tool"].as_str(), Some("fallow_explain"));
+        assert_eq!(json["result"]["id"].as_str(), Some("plow/unused-export"));
+        assert_eq!(json["calls"][0]["tool"].as_str(), Some("plow_explain"));
         assert_eq!(json["calls"][0]["ok"].as_bool(), Some(true));
     }
 
@@ -740,9 +738,9 @@ mod tests {
         .expect("source");
 
         let output = execute_code_mode(
-            "/definitely/not/fallow".to_string(),
+            "/definitely/not/plow".to_string(),
             CodeExecuteParams {
-                code: "return fallow.projectInfo({ files: true, no_cache: true });".to_string(),
+                code: "return plow.projectInfo({ files: true, no_cache: true });".to_string(),
                 root: Some(temp.path().display().to_string()),
                 timeout_ms: Some(5_000),
                 max_output_bytes: Some(200_000),
@@ -761,7 +759,7 @@ mod tests {
     #[test]
     fn cpu_bound_snippets_report_timeout() {
         let output = execute_code_mode(
-            "fallow".to_string(),
+            "plow".to_string(),
             CodeExecuteParams {
                 code: "while (true) {}".to_string(),
                 root: None,
@@ -796,7 +794,7 @@ mod tests {
             "trace_clone",
             "check_health",
             "audit",
-            "fallow_explain",
+            "plow_explain",
             "list_boundaries",
             "feature_flags",
             "impact",
@@ -820,7 +818,7 @@ mod tests {
             panic!("expected Err for unknown tool")
         };
         assert!(
-            err.contains("unsupported code mode fallow tool"),
+            err.contains("unsupported code mode plow tool"),
             "error was: {err}"
         );
         assert!(err.contains("nonexistent_tool"), "error was: {err}");
@@ -862,7 +860,7 @@ mod tests {
             ("trace_clone", "trace_clone"),
             ("check_health", "check_health"),
             ("audit", "audit"),
-            ("fallow_explain", "fallow_explain"),
+            ("plow_explain", "plow_explain"),
             ("list_boundaries", "list_boundaries"),
             ("feature_flags", "feature_flags"),
             ("impact", "impact"),
@@ -895,7 +893,7 @@ mod tests {
     #[test]
     fn classify_unsupported_tool_via_unsupported_code_mode() {
         assert_eq!(
-            classify_host_error("unsupported code mode fallow tool 'bad_name'"),
+            classify_host_error("unsupported code mode plow tool 'bad_name'"),
             "unsupported_tool"
         );
     }
@@ -935,7 +933,7 @@ mod tests {
     #[test]
     fn classify_invalid_params_via_params_must_be_object() {
         assert_eq!(
-            classify_host_error("fallow host call params must be an object"),
+            classify_host_error("plow host call params must be an object"),
             "invalid_params"
         );
     }
@@ -951,7 +949,7 @@ mod tests {
     #[test]
     fn classify_unknown_error_falls_back_to_subprocess() {
         assert_eq!(
-            classify_host_error("failed to execute fallow binary 'fallow': No such file"),
+            classify_host_error("failed to execute plow binary 'plow': No such file"),
             "subprocess"
         );
     }
@@ -1042,9 +1040,9 @@ mod tests {
 
     #[test]
     fn parenthesized_expression_is_preserved() {
-        let source = user_source("({ fallow }) => ({ ok: true })");
+        let source = user_source("({ plow }) => ({ ok: true })");
         assert!(
-            source.contains("({ fallow }) => ({ ok: true })"),
+            source.contains("({ plow }) => ({ ok: true })"),
             "source was: {source}"
         );
     }
@@ -1242,10 +1240,10 @@ mod tests {
     }
 
     #[test]
-    fn build_tool_args_fallow_explain_includes_explain_subcommand() {
+    fn build_tool_args_plow_explain_includes_explain_subcommand() {
         let params = serde_json::json!({ "issue_type": "unused-export" });
-        let args = build_tool_args(CodeModeTool::FallowExplain, params)
-            .expect("fallow_explain args should build");
+        let args = build_tool_args(CodeModeTool::PlowExplain, params)
+            .expect("plow_explain args should build");
         assert!(args.contains(&"explain".to_string()));
     }
 
@@ -1352,14 +1350,14 @@ mod tests {
         );
     }
 
-    // ---- execute_code_mode: sandbox behavior (no real fallow binary) -------
+    // ---- execute_code_mode: sandbox behavior (no real plow binary) -------
 
     #[test]
     fn snippet_that_is_not_a_function_is_rejected() {
         // A string literal like "hello" parses as a paren-expression that wraps
         // to a non-function value, triggering the type-check throw.
         let output = execute_code_mode(
-            "fallow".to_string(),
+            "plow".to_string(),
             CodeExecuteParams {
                 code: r#"("hello")"#.to_string(),
                 root: None,
@@ -1383,7 +1381,7 @@ mod tests {
     #[test]
     fn snippet_returning_json_value_succeeds() {
         let output = execute_code_mode(
-            "fallow".to_string(),
+            "plow".to_string(),
             CodeExecuteParams {
                 code: "return { status: \"ok\", count: 3 };".to_string(),
                 root: None,
@@ -1403,7 +1401,7 @@ mod tests {
     #[test]
     fn snippet_can_access_root_from_params() {
         let output = execute_code_mode(
-            "fallow".to_string(),
+            "plow".to_string(),
             CodeExecuteParams {
                 code: "return root;".to_string(),
                 root: Some("/my/project".to_string()),
@@ -1421,7 +1419,7 @@ mod tests {
     #[test]
     fn snippet_returning_null_produces_null_result() {
         let output = execute_code_mode(
-            "fallow".to_string(),
+            "plow".to_string(),
             CodeExecuteParams {
                 code: "return null;".to_string(),
                 root: None,
@@ -1439,7 +1437,7 @@ mod tests {
     #[test]
     fn snippet_throwing_error_populates_error_field() {
         let output = execute_code_mode(
-            "fallow".to_string(),
+            "plow".to_string(),
             CodeExecuteParams {
                 code: r#"throw new Error("intentional test error");"#.to_string(),
                 root: None,
@@ -1463,7 +1461,7 @@ mod tests {
     #[test]
     fn response_always_includes_limits_block() {
         let output = execute_code_mode(
-            "fallow".to_string(),
+            "plow".to_string(),
             CodeExecuteParams {
                 code: "return 1;".to_string(),
                 root: None,
@@ -1482,7 +1480,7 @@ mod tests {
     #[test]
     fn timeout_is_capped_at_max_timeout_ms() {
         let output = execute_code_mode(
-            "fallow".to_string(),
+            "plow".to_string(),
             CodeExecuteParams {
                 code: "return 1;".to_string(),
                 root: None,
@@ -1499,7 +1497,7 @@ mod tests {
     #[test]
     fn max_output_bytes_is_capped_at_max_output_bytes_constant() {
         let output = execute_code_mode(
-            "fallow".to_string(),
+            "plow".to_string(),
             CodeExecuteParams {
                 code: "return 1;".to_string(),
                 root: None,
@@ -1516,7 +1514,7 @@ mod tests {
     #[test]
     fn missing_timeout_uses_default() {
         let output = execute_code_mode(
-            "fallow".to_string(),
+            "plow".to_string(),
             CodeExecuteParams {
                 code: "return 1;".to_string(),
                 root: None,
@@ -1538,7 +1536,7 @@ mod tests {
     fn hardened_globals_are_inaccessible_in_snippet() {
         for blocked in ["fetch", "process", "require", "Deno", "Bun"] {
             let output = execute_code_mode(
-                "fallow".to_string(),
+                "plow".to_string(),
                 CodeExecuteParams {
                     code: format!("return typeof {blocked};"),
                     root: None,
@@ -1557,28 +1555,28 @@ mod tests {
     }
 
     #[test]
-    fn fallow_object_is_accessible_in_snippet() {
+    fn plow_object_is_accessible_in_snippet() {
         let output = execute_code_mode(
-            "fallow".to_string(),
+            "plow".to_string(),
             CodeExecuteParams {
-                code: "return typeof fallow;".to_string(),
+                code: "return typeof plow;".to_string(),
                 root: None,
                 timeout_ms: Some(5_000),
                 max_output_bytes: Some(10_000),
             },
         )
-        .expect("fallow typeof should succeed");
+        .expect("plow typeof should succeed");
 
         let json: serde_json::Value = serde_json::from_str(&output).unwrap();
         assert_eq!(json["result"], "object");
     }
 
     #[test]
-    fn fallow_run_is_callable_and_fails_fast_on_missing_binary() {
+    fn plow_run_is_callable_and_fails_fast_on_missing_binary() {
         let output = execute_code_mode(
             "nonexistent-binary-xyz-12345".to_string(),
             CodeExecuteParams {
-                code: r#"return fallow.run("impact", {});"#.to_string(),
+                code: r#"return plow.run("impact", {});"#.to_string(),
                 root: Some("/tmp".to_string()),
                 timeout_ms: Some(5_000),
                 max_output_bytes: Some(10_000),
@@ -1596,11 +1594,11 @@ mod tests {
     }
 
     #[test]
-    fn fallow_run_with_unsupported_tool_records_unsupported_tool_error_kind() {
+    fn plow_run_with_unsupported_tool_records_unsupported_tool_error_kind() {
         let output = execute_code_mode(
-            "fallow".to_string(),
+            "plow".to_string(),
             CodeExecuteParams {
-                code: r#"return fallow.run("fix_apply", {});"#.to_string(),
+                code: r#"return plow.run("fix_apply", {});"#.to_string(),
                 root: None,
                 timeout_ms: Some(5_000),
                 max_output_bytes: Some(10_000),
@@ -1619,7 +1617,7 @@ mod tests {
     #[test]
     fn successful_response_has_empty_calls_array_when_no_host_calls_made() {
         let output = execute_code_mode(
-            "fallow".to_string(),
+            "plow".to_string(),
             CodeExecuteParams {
                 code: "return { computed: 1 + 2 };".to_string(),
                 root: None,

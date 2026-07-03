@@ -12,7 +12,7 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use common::{parse_json, run_fallow_in_root};
+use common::{parse_json, run_plow_in_root};
 use std::path::Path;
 use tempfile::tempdir;
 
@@ -138,7 +138,7 @@ export function loopsAndCatch(items: number[]): number {
 ",
     );
 
-    let output = run_fallow_in_root(
+    let output = run_plow_in_root(
         "health",
         dir.path(),
         &[

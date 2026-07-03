@@ -3,7 +3,7 @@ use serde_json::Value;
 use crate::codeclimate::codeclimate_fingerprint_hash;
 
 /// Fingerprint key used in SARIF partialFingerprints and other CI formats.
-pub const SARIF_FINGERPRINT_KEY: &str = "tools.fallow.fingerprint/v1";
+pub const SARIF_FINGERPRINT_KEY: &str = "tools.plow.fingerprint/v1";
 
 /// Conventional SARIF key consumed by GitHub Code Scanning.
 pub const GHAS_SARIF_FINGERPRINT_KEY: &str = "primaryLocationLineHash/v1";
@@ -131,9 +131,9 @@ pub fn build_sarif_document(input: SarifDocumentInput<'_>) -> Value {
         "runs": [{
             "tool": {
                 "driver": {
-                    "name": "fallow",
+                    "name": "plow",
                     "version": input.tool_version,
-                    "informationUri": "https://github.com/fallow-rs/fallow",
+                    "informationUri": "https://github.com/fglogan/genesis-plow",
                     "rules": input.rules
                 }
             },
@@ -149,7 +149,7 @@ mod tests {
     #[test]
     fn sarif_result_includes_location_and_fingerprints() {
         let result = build_sarif_result(SarifResultInput {
-            rule_id: "fallow/test",
+            rule_id: "plow/test",
             level: "warning",
             message: "description",
             uri: "src/app.ts",
@@ -157,7 +157,7 @@ mod tests {
             snippet: Some("  export const value = 1;  "),
         });
 
-        assert_eq!(result["ruleId"], "fallow/test");
+        assert_eq!(result["ruleId"], "plow/test");
         assert_eq!(
             result["locations"][0]["physicalLocation"]["region"]["startLine"],
             7
@@ -169,7 +169,7 @@ mod tests {
     #[test]
     fn sarif_rule_omits_optional_docs_when_absent() {
         let rule = build_sarif_rule(SarifRuleInput {
-            id: "fallow/test",
+            id: "plow/test",
             short_description: "short",
             level: "warning",
             full_description: None,

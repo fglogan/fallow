@@ -2,7 +2,7 @@
 
 use serde::Serialize;
 
-/// Wire version for the `fallow decision-surface --format json` envelope.
+/// Wire version for the `plow decision-surface --format json` envelope.
 pub const DECISION_SURFACE_SCHEMA_VERSION: u32 = 1;
 
 /// The exactly-three shippable decision categories (the SOLID-3). No cut category
@@ -55,11 +55,11 @@ impl DecisionCategory {
 }
 
 /// One consequential structural decision, framed as a judgment question for a
-/// human with taste, anchored to a fallow-emitted signal.
+/// human with taste, anchored to a plow-emitted signal.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Decision {
-    /// Deterministic anchor to the fallow-emitted candidate this decision frames.
+    /// Deterministic anchor to the plow-emitted candidate this decision frames.
     /// `accept_signal_id` rejects any id not in the emitted set.
     pub signal_id: String,
     /// One of the SOLID-3 categories.
@@ -70,7 +70,7 @@ pub struct Decision {
     pub anchor_file: String,
     /// 1-based anchor line, when the underlying signal carries one (0 = file head).
     pub anchor_line: u32,
-    /// The raw fallow-emitted candidate key the `signal_id` hashes.
+    /// The raw plow-emitted candidate key the `signal_id` hashes.
     pub signal_key: String,
     /// The `signal_id` this decision WOULD have had before any rename in this
     /// change (the anchor file's pre-rename path). Present only when the anchor was
@@ -130,7 +130,7 @@ pub struct DecisionSurface {
 }
 
 impl DecisionSurface {
-    /// Accept an agent-proposed `signal_id` only if fallow emitted it.
+    /// Accept an agent-proposed `signal_id` only if plow emitted it.
     #[must_use]
     pub fn accept_signal_id(&self, signal_id: &str) -> bool {
         self.emitted_signal_ids.iter().any(|id| id == signal_id)
@@ -150,7 +150,7 @@ impl Default for DecisionSurfaceSchemaVersion {
 }
 
 /// A structured action attached to a surfaced decision (the agent-actionable
-/// surface). Mirrors the typed-action shape the rest of fallow emits.
+/// surface). Mirrors the typed-action shape the rest of plow emits.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DecisionAction {
@@ -162,7 +162,7 @@ pub struct DecisionAction {
     /// Runnable command or paste-ready suppression comment.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
-    /// Whether fallow can carry the action out automatically. Always `false`:
+    /// Whether plow can carry the action out automatically. Always `false`:
     /// a decision is a human judgment, never auto-applied.
     pub auto_fixable: bool,
 }
@@ -174,7 +174,7 @@ pub struct DecisionAction {
 pub enum DecisionActionType {
     /// Route the decision to the named expert(s) for a judgment call.
     AskExpert,
-    /// Suppress the decision with a `// fallow-ignore` comment.
+    /// Suppress the decision with a `// plow-ignore` comment.
     Suppress,
 }
 
@@ -197,12 +197,12 @@ pub struct DecisionWithActions {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
     feature = "schema",
-    schemars(title = "fallow decision-surface --format json")
+    schemars(title = "plow decision-surface --format json")
 )]
 pub struct DecisionSurfaceOutput {
     /// Independently-versioned schema version.
     pub schema_version: DecisionSurfaceSchemaVersion,
-    /// Fallow CLI version that produced this output.
+    /// Plow CLI version that produced this output.
     pub version: String,
     /// Command discriminator singleton: always `"decision-surface"`.
     pub command: String,
@@ -211,7 +211,7 @@ pub struct DecisionSurfaceOutput {
     /// Present when more than the cap were extracted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub truncated: Option<TruncationNote>,
-    /// Count of fallow-emitted signal_ids (the anti-hallucination allowlist size).
+    /// Count of plow-emitted signal_ids (the anti-hallucination allowlist size).
     pub signal_count: usize,
 }
 
@@ -219,7 +219,7 @@ pub struct DecisionSurfaceOutput {
 #[must_use]
 pub fn suppress_comment(category: DecisionCategory) -> String {
     format!(
-        "// fallow-ignore-next-line decision-surface {}",
+        "// plow-ignore-next-line decision-surface {}",
         category.tag()
     )
 }

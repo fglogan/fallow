@@ -7,7 +7,7 @@ body:
     attributes:
       label: Problem
       description: What problem does this solve? What's the use case?
-      placeholder: "I have a monorepo with custom entry points that fallow doesn't detect..."
+      placeholder: "I have a monorepo with custom entry points that plow doesn't detect..."
     validations:
       required: true
 

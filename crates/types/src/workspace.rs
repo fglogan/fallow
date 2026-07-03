@@ -1,10 +1,10 @@
 //! Workspace and source-discovery diagnostic data types.
 //!
 //! The serializable `WorkspaceDiagnostic` / `WorkspaceDiagnosticKind` pair
-//! lives here, upstream of both `fallow-config` (which owns the registry and
+//! lives here, upstream of both `plow-config` (which owns the registry and
 //! emission logic and re-exports these types for back-compat) and
-//! `fallow-output` (which embeds `Vec<WorkspaceDiagnostic>` in its JSON
-//! envelopes). Keeping the data types in `fallow-types` lets the output layer
+//! `plow-output` (which embeds `Vec<WorkspaceDiagnostic>` in its JSON
+//! envelopes). Keeping the data types in `plow-types` lets the output layer
 //! reference the real, schema-bearing type instead of an opaque
 //! `serde_json::Value` newtype, so `workspace_diagnostics[]` keeps its typed
 //! `kind`/`path`/`message` shape (and the 7-variant `kind` oneOf) in
@@ -56,12 +56,12 @@ pub enum WorkspaceDiagnosticKind {
     /// existing directory.
     TsconfigReferenceDirMissing,
     /// A source file was skipped at discovery because it exceeds the configured
-    /// per-file size limit (`--max-file-size` / `FALLOW_MAX_FILE_SIZE`, default
+    /// per-file size limit (`--max-file-size` / `PLOW_MAX_FILE_SIZE`, default
     /// 5 MB). The file is never read, parsed, or analyzed, guarding against the
     /// out-of-memory blowup a single multi-MB generated/vendored/bundled file
     /// causes (issue #1086). Surfaced by source discovery, not workspace
     /// discovery, but shares this channel so the skip is visible in
-    /// `workspace_diagnostics[]` on `fallow dead-code / dupes / health` JSON.
+    /// `workspace_diagnostics[]` on `plow dead-code / dupes / health` JSON.
     SkippedLargeFile {
         /// On-disk size of the skipped file in bytes.
         size_bytes: u64,
@@ -97,7 +97,7 @@ impl WorkspaceDiagnosticKind {
     /// discovery diagnostics are APPENDED to the registry after config load, so
     /// `stash_workspace_diagnostics` must preserve them when it replaces the
     /// workspace-discovery set, otherwise the per-analysis config re-loads in
-    /// combined-mode (`fallow` with no subcommand re-loads config for check,
+    /// combined-mode (`plow` with no subcommand re-loads config for check,
     /// dupes, and health) wipe them before the JSON envelope is built (issue
     /// #1086).
     #[must_use]
@@ -233,7 +233,7 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
         WorkspaceDiagnosticKind::SkippedLargeFile { size_bytes } => format!(
             "Skipped '{display}' ({size}): exceeds the max file size limit. \
              Its imports and exports are not analyzed. Raise the limit with \
-             --max-file-size <MB> (or FALLOW_MAX_FILE_SIZE), or add '{display}' \
+             --max-file-size <MB> (or PLOW_MAX_FILE_SIZE), or add '{display}' \
              to ignorePatterns.",
             size = format_size_mb(*size_bytes)
         ),

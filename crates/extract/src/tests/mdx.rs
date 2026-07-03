@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use fallow_types::discover::FileId;
+use plow_types::discover::FileId;
 
 use crate::parse::parse_source_to_module;
 
@@ -121,7 +121,7 @@ import { Footer } from './Footer'
         .find(|i| i.source == "./Footer")
         .expect("Footer import extracted");
     let (line, _col) =
-        fallow_types::extract::byte_offset_to_line_col(&info.line_offsets, footer.span.start);
+        plow_types::extract::byte_offset_to_line_col(&info.line_offsets, footer.span.start);
     assert_eq!(line, 7);
     assert_eq!(
         &source[footer.source_span.start as usize..footer.source_span.end as usize],

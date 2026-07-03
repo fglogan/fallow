@@ -1,17 +1,17 @@
 //! Re-export cycle detector: maps graph-layer `GraphReExportCycle` entries to
 //! typed `ReExportCycleFinding` entries on `AnalysisResults`, applying file-
 //! level suppression so any member file carrying
-//! `// fallow-ignore-file re-export-cycle` short-circuits the whole cycle.
+//! `// plow-ignore-file re-export-cycle` short-circuits the whole cycle.
 
 use crate::graph::ModuleGraph;
 use crate::suppress::{IssueKind, SuppressionContext};
-use fallow_types::output_dead_code::ReExportCycleFinding;
-use fallow_types::results::{ReExportCycle, ReExportCycleKind};
+use plow_types::output_dead_code::ReExportCycleFinding;
+use plow_types::results::{ReExportCycle, ReExportCycleKind};
 
 /// Walk `graph.re_export_cycles` and produce one `ReExportCycleFinding` per
 /// surviving cycle. A cycle is dropped when ANY member file carries a
 /// file-level suppression for `IssueKind::ReExportCycle`; a single
-/// `// fallow-ignore-file re-export-cycle` on the alphabetically-first member
+/// `// plow-ignore-file re-export-cycle` on the alphabetically-first member
 /// is enough to silence the entire finding, matching the action's primary
 /// suggestion.
 ///

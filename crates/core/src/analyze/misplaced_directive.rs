@@ -8,11 +8,11 @@
 //! string-literal expression statement in `program.body` instead. The bundler
 //! then SILENTLY IGNORES it: the developer intended a client (or server)
 //! boundary, but the file is treated as a server module. This is a silent
-//! footgun, so fallow flags it; the fix is to move the directive to the very
+//! footgun, so plow flags it; the fix is to move the directive to the very
 //! top of the file.
 //!
 //! The extract layer records every such misplaced directive string on
-//! [`ModuleInfo::misplaced_directives`](fallow_types::extract::ModuleInfo); this
+//! [`ModuleInfo::misplaced_directives`](plow_types::extract::ModuleInfo); this
 //! detector resolves each site to a `(line, col)` and emits one finding per
 //! occurrence.
 //!
@@ -28,7 +28,7 @@ use std::path::Path;
 
 use rustc_hash::FxHashMap;
 
-use fallow_types::extract::{MisplacedDirectiveSite, ModuleInfo};
+use plow_types::extract::{MisplacedDirectiveSite, ModuleInfo};
 
 use crate::discover::FileId;
 use crate::graph::ModuleGraph;
@@ -52,11 +52,11 @@ const USE_SERVER: &str = "use server";
 /// without one the directives carry no special meaning.
 ///
 /// For each module, every entry in
-/// [`ModuleInfo::misplaced_directives`](fallow_types::extract::ModuleInfo) is
+/// [`ModuleInfo::misplaced_directives`](plow_types::extract::ModuleInfo) is
 /// resolved to a `(line, col)` via [`byte_offset_to_line_col`] and emitted as a
 /// [`MisplacedDirective`] anchored at the offending statement. Suppression is
 /// routed through [`SuppressionContext`] with [`IssueKind::MisplacedDirective`]
-/// so a `// fallow-ignore-next-line misplaced-directive` comment works and is
+/// so a `// plow-ignore-next-line misplaced-directive` comment works and is
 /// recorded as consumed.
 #[must_use]
 pub fn find_misplaced_directives(

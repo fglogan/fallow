@@ -1,0 +1,35 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fglogan/genesis-plow/main/schema.json",
+  "entry": [
+    "src/extension.ts",
+    "src/types.ts",
+    "src/generated/output-contract.d.ts"
+  ],
+  "ignorePatterns": [
+    "test/integration/fixtures/**"
+  ],
+  "ignoreUnresolvedImports": [
+    "./generated/output-contract.js",
+    "../src/generated/output-contract.js"
+  ],
+  "ignoreDependencies": ["@vscode/vsce"],
+  "ignoreExports": [
+    {
+      "file": "src/types.ts",
+      "exports": ["*"]
+    },
+    {
+      "file": "src/workspacePicker.ts",
+      "exports": [
+        "CLEAR_WORKSPACE_SCOPE",
+        "WORKSPACE_STATE_KEY",
+        "getWorkspaceStateOverride",
+        "resolveWorkspaceScope"
+      ]
+    }
+  ],
+  "rules": {
+    "unlisted-dependencies": "warn",
+    "unresolved-imports": "warn"
+  }
+}

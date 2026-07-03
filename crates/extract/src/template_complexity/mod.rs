@@ -11,7 +11,7 @@ mod engine;
 mod svelte;
 mod vue;
 
-use fallow_types::extract::{FunctionComplexity, byte_offset_to_line_col, compute_line_offsets};
+use plow_types::extract::{FunctionComplexity, byte_offset_to_line_col, compute_line_offsets};
 
 use engine::{
     ScanError, TemplateComplexity, find_matching_delimiter, find_tag_end, is_identifier_after,

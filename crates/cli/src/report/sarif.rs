@@ -1,12 +1,12 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use fallow_config::RulesConfig;
+use plow_config::RulesConfig;
 #[cfg(test)]
-use fallow_config::Severity;
-use fallow_output::{SarifRuleInput, build_sarif_rule};
-use fallow_types::duplicates::DuplicationReport;
-use fallow_types::results::AnalysisResults;
+use plow_config::Severity;
+use plow_output::{SarifRuleInput, build_sarif_rule};
+use plow_types::duplicates::DuplicationReport;
+use plow_types::results::AnalysisResults;
 
 use super::emit_json;
 use super::grouping::{self, OwnershipResolver};
@@ -43,7 +43,7 @@ pub fn api_sarif_document(
     root: &Path,
     rules: &RulesConfig,
 ) -> serde_json::Value {
-    fallow_api::build_sarif(results, root, rules, &sarif_rule)
+    plow_api::build_sarif(results, root, rules, &sarif_rule)
 }
 
 pub(super) fn print_sarif(results: &AnalysisResults, root: &Path, rules: &RulesConfig) -> ExitCode {
@@ -59,7 +59,7 @@ pub(super) fn print_grouped_sarif(
     resolver: &OwnershipResolver,
 ) -> ExitCode {
     let mut sarif = api_sarif_document(results, root, rules);
-    fallow_api::annotate_sarif_results(&mut sarif, "owner", |uri| {
+    plow_api::annotate_sarif_results(&mut sarif, "owner", |uri| {
         let decoded = uri.replace("%5B", "[").replace("%5D", "]");
         grouping::resolve_owner(Path::new(&decoded), Path::new(""), resolver)
     });
@@ -68,7 +68,7 @@ pub(super) fn print_grouped_sarif(
 }
 
 pub(super) fn print_duplication_sarif(report: &DuplicationReport, root: &Path) -> ExitCode {
-    let sarif = fallow_api::build_duplication_sarif(report, root, &sarif_rule);
+    let sarif = plow_api::build_duplication_sarif(report, root, &sarif_rule);
     emit_json(&sarif, "SARIF")
 }
 
@@ -77,7 +77,7 @@ pub(super) fn print_grouped_duplication_sarif(
     root: &Path,
     resolver: &OwnershipResolver,
 ) -> ExitCode {
-    let sarif = fallow_api::build_grouped_duplication_sarif(report, root, &sarif_rule, |group| {
+    let sarif = plow_api::build_grouped_duplication_sarif(report, root, &sarif_rule, |group| {
         super::dupes_grouping::largest_owner(group, root, resolver)
     });
     emit_json(&sarif, "SARIF")
@@ -85,24 +85,24 @@ pub(super) fn print_grouped_duplication_sarif(
 
 #[must_use]
 pub fn api_health_sarif_document(
-    report: &fallow_output::HealthReport,
+    report: &plow_output::HealthReport,
     root: &Path,
 ) -> serde_json::Value {
-    fallow_api::build_health_sarif(report, root, &sarif_rule)
+    plow_api::build_health_sarif(report, root, &sarif_rule)
 }
 
-pub(super) fn print_health_sarif(report: &fallow_output::HealthReport, root: &Path) -> ExitCode {
+pub(super) fn print_health_sarif(report: &plow_output::HealthReport, root: &Path) -> ExitCode {
     let sarif = api_health_sarif_document(report, root);
     emit_json(&sarif, "SARIF")
 }
 
 pub(super) fn print_grouped_health_sarif(
-    report: &fallow_output::HealthReport,
+    report: &plow_output::HealthReport,
     root: &Path,
     resolver: &OwnershipResolver,
 ) -> ExitCode {
     let mut sarif = api_health_sarif_document(report, root);
-    fallow_api::annotate_sarif_results(&mut sarif, "group", |uri| {
+    plow_api::annotate_sarif_results(&mut sarif, "group", |uri| {
         let decoded = uri.replace("%5B", "[").replace("%5D", "]");
         grouping::resolve_owner(Path::new(&decoded), Path::new(""), resolver)
     });
@@ -123,8 +123,8 @@ mod tests {
 
     #[test]
     fn sarif_rule_uses_fallback_for_unknown_rule() {
-        let rule = sarif_rule("fallow/nonexistent", "fallback text", "warning");
-        assert_eq!(rule["id"], "fallow/nonexistent");
+        let rule = sarif_rule("plow/nonexistent", "fallback text", "warning");
+        assert_eq!(rule["id"], "plow/nonexistent");
         assert_eq!(rule["shortDescription"]["text"], "fallback text");
         assert!(rule.get("fullDescription").is_none());
         assert!(rule.get("helpUri").is_none());

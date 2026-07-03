@@ -9,7 +9,7 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_config::{ScopedUsedClassMemberRule, UsedClassMemberRule};
+use plow_config::{ScopedUsedClassMemberRule, UsedClassMemberRule};
 use serde_json::Value;
 
 use super::{Plugin, manifest::has_matching_manifest_json};
@@ -106,7 +106,7 @@ fn is_obsidian_manifest(manifest: &Value) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use fallow_config::EntryPointRole;
+    use plow_config::EntryPointRole;
 
     use super::*;
 

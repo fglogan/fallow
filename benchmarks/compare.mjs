@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Deep comparison of fallow vs knip results on real-world projects.
+ * Deep comparison of plow vs knip results on real-world projects.
  * Outputs detailed diffs per issue category.
  */
 import { spawnSync } from "node:child_process";
@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, "..");
-const fallowBin = join(rootDir, "target", "release", "fallow");
+const plowBin = join(rootDir, "target", "release", "plow");
 const knipBin = join(__dirname, "node_modules", ".bin", "knip");
 
 function normalizeProjectPath(projectDir, value) {
@@ -45,7 +45,7 @@ function run(cmd, args, cwd) {
   };
 }
 
-function parseFallow(stdout, projectDir) {
+function parsePlow(stdout, projectDir) {
   const data = parseJsonOutput(stdout);
   const result = {
     unused_files: new Set(),
@@ -119,24 +119,24 @@ function parseKnip(stdout, _projectDir) {
   return result;
 }
 
-function diffSets(fallowSet, knipSet) {
-  const onlyFallow = [...fallowSet].filter((x) => !knipSet.has(x)).toSorted();
-  const onlyKnip = [...knipSet].filter((x) => !fallowSet.has(x)).toSorted();
-  const both = [...fallowSet].filter((x) => knipSet.has(x)).toSorted();
-  return { onlyFallow, onlyKnip, both };
+function diffSets(plowSet, knipSet) {
+  const onlyPlow = [...plowSet].filter((x) => !knipSet.has(x)).toSorted();
+  const onlyKnip = [...knipSet].filter((x) => !plowSet.has(x)).toSorted();
+  const both = [...plowSet].filter((x) => knipSet.has(x)).toSorted();
+  return { onlyPlow, onlyKnip, both };
 }
 
-function printCategory(name, fallowSet, knipSet) {
-  const { onlyFallow, onlyKnip, both } = diffSets(fallowSet, knipSet);
-  if (both.length === 0 && onlyFallow.length === 0 && onlyKnip.length === 0) return;
+function printCategory(name, plowSet, knipSet) {
+  const { onlyPlow, onlyKnip, both } = diffSets(plowSet, knipSet);
+  if (both.length === 0 && onlyPlow.length === 0 && onlyKnip.length === 0) return;
   console.log(`\n  ### ${name}`);
   console.log(
-    `  Both: ${both.length} | Only fallow: ${onlyFallow.length} | Only knip: ${onlyKnip.length}`,
+    `  Both: ${both.length} | Only plow: ${onlyPlow.length} | Only knip: ${onlyKnip.length}`,
   );
-  if (onlyFallow.length > 0) {
-    console.log(`  --- Only in fallow (${onlyFallow.length}):`);
-    for (const item of onlyFallow.slice(0, 30)) console.log(`    + ${item}`);
-    if (onlyFallow.length > 30) console.log(`    ... and ${onlyFallow.length - 30} more`);
+  if (onlyPlow.length > 0) {
+    console.log(`  --- Only in plow (${onlyPlow.length}):`);
+    for (const item of onlyPlow.slice(0, 30)) console.log(`    + ${item}`);
+    if (onlyPlow.length > 30) console.log(`    ... and ${onlyPlow.length - 30} more`);
   }
   if (onlyKnip.length > 0) {
     console.log(`  --- Only in knip (${onlyKnip.length}):`);
@@ -150,11 +150,11 @@ function compareProject(name, dir) {
   console.log(`PROJECT: ${name}`);
   console.log(`${"=".repeat(60)}`);
 
-  const fr = run(fallowBin, ["dead-code", "--quiet", "--format", "json", "--no-cache"], dir);
+  const fr = run(plowBin, ["dead-code", "--quiet", "--format", "json", "--no-cache"], dir);
   const kr = run(knipBin, ["--reporter", "json"], dir);
 
   if (fr.status === 2) {
-    console.log(`  fallow ERROR: ${fr.stderr.slice(0, 200)}`);
+    console.log(`  plow ERROR: ${fr.stderr.slice(0, 200)}`);
     return null;
   }
   if (!kr.stdout) {
@@ -162,11 +162,11 @@ function compareProject(name, dir) {
     return null;
   }
 
-  let fallow, knip;
+  let plow, knip;
   try {
-    fallow = parseFallow(fr.stdout, dir);
+    plow = parsePlow(fr.stdout, dir);
   } catch (e) {
-    console.log(`  fallow parse error: ${e.message}`);
+    console.log(`  plow parse error: ${e.message}`);
     return null;
   }
   try {
@@ -194,9 +194,9 @@ function compareProject(name, dir) {
 
   const summary = {};
   for (const cat of categories) {
-    const { onlyFallow, onlyKnip, both } = diffSets(fallow[cat], knip[cat]);
-    summary[cat] = { both: both.length, onlyFallow: onlyFallow.length, onlyKnip: onlyKnip.length };
-    printCategory(cat, fallow[cat], knip[cat]);
+    const { onlyPlow, onlyKnip, both } = diffSets(plow[cat], knip[cat]);
+    summary[cat] = { both: both.length, onlyPlow: onlyPlow.length, onlyKnip: onlyKnip.length };
+    printCategory(cat, plow[cat], knip[cat]);
   }
   return summary;
 }
@@ -223,12 +223,12 @@ for (const [project, summary] of Object.entries(allSummaries)) {
   if (!summary) continue;
   console.log(`${project}:`);
   for (const [cat, counts] of Object.entries(summary)) {
-    if (counts.both === 0 && counts.onlyFallow === 0 && counts.onlyKnip === 0) continue;
+    if (counts.both === 0 && counts.onlyPlow === 0 && counts.onlyKnip === 0) continue;
     const knipComparable = counts.both + counts.onlyKnip;
     const pct =
       knipComparable > 0 ? `${((counts.both / knipComparable) * 100).toFixed(0)}%` : "n/a";
     console.log(
-      `  ${cat}: agree=${counts.both} fallow-only=${counts.onlyFallow} knip-only=${counts.onlyKnip} (${pct} knip coverage)`,
+      `  ${cat}: agree=${counts.both} plow-only=${counts.onlyPlow} knip-only=${counts.onlyKnip} (${pct} knip coverage)`,
     );
   }
 }

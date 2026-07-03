@@ -1,6 +1,6 @@
 use rustc_hash::FxHashSet;
 
-use fallow_types::discover::FileId;
+use plow_types::discover::FileId;
 
 use super::ModuleGraph;
 

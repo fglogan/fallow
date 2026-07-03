@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 #
-# Ecosystem test runner for fallow
+# Ecosystem test runner for plow
 #
-# Tests fallow against real-world open-source JS/TS projects to catch crashes
-# and regressions. Exit code 0 or 1 from fallow is expected (issues found),
+# Tests plow against real-world open-source JS/TS projects to catch crashes
+# and regressions. Exit code 0 or 1 from plow is expected (issues found),
 # but exit code 2+ or signals indicate a crash and fail this script.
 #
 # Usage:
-#   ./tests/ecosystem/run.sh [--fallow-bin PATH]
+#   ./tests/ecosystem/run.sh [--plow-bin PATH]
 #
 # Environment:
-#   FALLOW_BIN       — path to fallow binary (default: cargo-built release binary)
-#   ECOSYSTEM_DIR    — directory for cloned repos (default: /tmp/fallow-ecosystem)
-#   FALLOW_QUIET     — set to 1 to suppress progress bars (default: 1)
+#   PLOW_BIN       — path to plow binary (default: cargo-built release binary)
+#   ECOSYSTEM_DIR    — directory for cloned repos (default: /tmp/plow-ecosystem)
+#   PLOW_QUIET     — set to 1 to suppress progress bars (default: 1)
 
 set -euo pipefail
 
@@ -23,19 +23,19 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-FALLOW_BIN="${FALLOW_BIN:-}"
-ECOSYSTEM_DIR="${ECOSYSTEM_DIR:-/tmp/fallow-ecosystem}"
-export FALLOW_QUIET="${FALLOW_QUIET:-1}"
+PLOW_BIN="${PLOW_BIN:-}"
+ECOSYSTEM_DIR="${ECOSYSTEM_DIR:-/tmp/plow-ecosystem}"
+export PLOW_QUIET="${PLOW_QUIET:-1}"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --fallow-bin)
-            FALLOW_BIN="$2"
+        --plow-bin)
+            PLOW_BIN="$2"
             shift 2
             ;;
-        --fallow-bin=*)
-            FALLOW_BIN="${1#*=}"
+        --plow-bin=*)
+            PLOW_BIN="${1#*=}"
             shift
             ;;
         *)
@@ -45,19 +45,19 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Build or locate fallow binary
-if [[ -z "$FALLOW_BIN" ]]; then
-    echo "==> Building fallow (release)..."
-    cargo build --release -p fallow-cli --manifest-path "$REPO_ROOT/Cargo.toml"
-    FALLOW_BIN="$REPO_ROOT/target/release/fallow"
+# Build or locate plow binary
+if [[ -z "$PLOW_BIN" ]]; then
+    echo "==> Building plow (release)..."
+    cargo build --release -p plow-cli --manifest-path "$REPO_ROOT/Cargo.toml"
+    PLOW_BIN="$REPO_ROOT/target/release/plow"
 fi
 
-if [[ ! -x "$FALLOW_BIN" ]]; then
-    echo "ERROR: fallow binary not found or not executable: $FALLOW_BIN" >&2
+if [[ ! -x "$PLOW_BIN" ]]; then
+    echo "ERROR: plow binary not found or not executable: $PLOW_BIN" >&2
     exit 1
 fi
 
-echo "==> Using fallow binary: $FALLOW_BIN"
+echo "==> Using plow binary: $PLOW_BIN"
 echo "==> Ecosystem directory: $ECOSYSTEM_DIR"
 
 mkdir -p "$ECOSYSTEM_DIR"
@@ -130,21 +130,21 @@ install_deps() {
     return 1
 }
 
-run_fallow() {
+run_plow() {
     local project_dir="$1" name="$2" output_file="$3"
     local exit_code=0
     local stderr_file="${output_file%.json}.stderr.log"
 
-    # Run fallow with a timeout (5 minutes per project)
+    # Run plow with a timeout (5 minutes per project)
     if command -v timeout &>/dev/null; then
-        timeout 300 "$FALLOW_BIN" dead-code --format json --quiet --root "$project_dir" \
+        timeout 300 "$PLOW_BIN" dead-code --format json --quiet --root "$project_dir" \
             > "$output_file" 2> "$stderr_file" || exit_code=$?
     elif command -v gtimeout &>/dev/null; then
-        gtimeout 300 "$FALLOW_BIN" dead-code --format json --quiet --root "$project_dir" \
+        gtimeout 300 "$PLOW_BIN" dead-code --format json --quiet --root "$project_dir" \
             > "$output_file" 2> "$stderr_file" || exit_code=$?
     else
         # No timeout command available, run without timeout
-        "$FALLOW_BIN" dead-code --format json --quiet --root "$project_dir" \
+        "$PLOW_BIN" dead-code --format json --quiet --root "$project_dir" \
             > "$output_file" 2> "$stderr_file" || exit_code=$?
     fi
 
@@ -162,7 +162,7 @@ run_fallow() {
 # ---------------------------------------------------------------------------
 
 echo ""
-echo "==> Testing fallow against ${total} projects"
+echo "==> Testing plow against ${total} projects"
 echo "==========================================="
 
 results_dir="$ECOSYSTEM_DIR/results"
@@ -199,10 +199,10 @@ for entry in "${PROJECTS[@]}"; do
         continue
     fi
 
-    # Run fallow
+    # Run plow
     output_file="$results_dir/${name}.json"
     exit_code=0
-    run_fallow "$project_dir" "$name" "$output_file" || exit_code=$?
+    run_plow "$project_dir" "$name" "$output_file" || exit_code=$?
 
     if [[ $exit_code -eq 0 ]]; then
         echo "    PASS (no issues)"
@@ -240,7 +240,7 @@ if [[ $crashed -gt 0 ]]; then
     echo ""
     echo "Results saved to: $results_dir/"
     echo ""
-    echo "FAIL: $crashed project(s) caused fallow to crash"
+    echo "FAIL: $crashed project(s) caused plow to crash"
     exit 1
 fi
 

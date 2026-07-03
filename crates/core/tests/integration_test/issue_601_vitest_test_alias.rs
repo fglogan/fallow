@@ -72,7 +72,7 @@ fn aliased_mock_for_installed_package_credits_exports() {
     );
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_exports: Vec<&str> = results
         .unused_exports
@@ -150,7 +150,7 @@ fn virtual_module_alias_resolves_and_credits_mock() {
     );
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unresolved: Vec<&str> = results
         .unresolved_imports
@@ -236,7 +236,7 @@ fn test_alias_does_not_shadow_tsconfig_alias() {
     );
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files: Vec<String> = results
         .unused_files
@@ -303,7 +303,7 @@ fn vite_config_embedded_test_alias_resolves_virtual_module() {
     );
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unresolved: Vec<&str> = results
         .unresolved_imports
@@ -384,7 +384,7 @@ fn vitest_config_resolve_alias_directory_and_project_mock() {
     );
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files: Vec<String> = results
         .unused_files
@@ -461,7 +461,7 @@ fn vitest_workspace_array_file_aliases_resolve() {
     );
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unresolved: Vec<&str> = results
         .unresolved_imports

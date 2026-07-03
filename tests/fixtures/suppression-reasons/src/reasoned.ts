@@ -1,7 +1,7 @@
-// fallow-ignore-next-line unused-export -- public compatibility export
+// plow-ignore-next-line unused-export -- public compatibility export
 export const reasonedUnused = 'kept';
 
-// fallow-ignore-next-line unused-export
+// plow-ignore-next-line unused-export
 export const missingReasonUnused = 'missing reason';
 
 /** @expected-unused -- package surface */

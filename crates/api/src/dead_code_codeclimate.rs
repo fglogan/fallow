@@ -2,12 +2,12 @@
 
 use std::path::Path;
 
-use fallow_config::{RulesConfig, Severity};
-use fallow_output::{
+use plow_config::{RulesConfig, Severity};
+use plow_output::{
     CodeClimateIssue, CodeClimateIssueInput, CodeClimateSeverity, build_codeclimate_issue,
     codeclimate_fingerprint_hash, normalize_uri,
 };
-use fallow_types::results::AnalysisResults;
+use plow_types::results::AnalysisResults;
 
 fn severity_to_codeclimate(s: Severity) -> CodeClimateSeverity {
     match s {
@@ -40,7 +40,7 @@ fn push_dep_cc_issues<'a, I>(
     location_label: &str,
     severity: Severity,
 ) where
-    I: IntoIterator<Item = &'a fallow_types::results::UnusedDependency>,
+    I: IntoIterator<Item = &'a plow_types::results::UnusedDependency>,
 {
     for dep in deps {
         let level = severity_to_codeclimate(severity);
@@ -75,7 +75,7 @@ fn push_dep_cc_issues<'a, I>(
 
 fn push_unused_file_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    files: &[fallow_types::output_dead_code::UnusedFileFinding],
+    files: &[plow_types::output_dead_code::UnusedFileFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -85,9 +85,9 @@ fn push_unused_file_issues(
     let level = severity_to_codeclimate(severity);
     for entry in files {
         let path = cc_path(&entry.file.path, root);
-        let fp = fingerprint_hash(&["fallow/unused-file", &path]);
+        let fp = fingerprint_hash(&["plow/unused-file", &path]);
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
-            check_name: "fallow/unused-file",
+            check_name: "plow/unused-file",
             description: "File is not reachable from any entry point",
             severity: level,
             category: "Bug Risk",
@@ -115,7 +115,7 @@ struct UnusedExportIssuesInput<'a, I> {
 
 fn push_unused_export_issues<'a, I>(input: UnusedExportIssuesInput<'a, I>)
 where
-    I: IntoIterator<Item = &'a fallow_types::results::UnusedExport>,
+    I: IntoIterator<Item = &'a plow_types::results::UnusedExport>,
 {
     for export in input.exports {
         let level = severity_to_codeclimate(input.severity);
@@ -146,7 +146,7 @@ where
 
 fn push_private_type_leak_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    leaks: &[fallow_types::output_dead_code::PrivateTypeLeakFinding],
+    leaks: &[plow_types::output_dead_code::PrivateTypeLeakFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -159,14 +159,14 @@ fn push_private_type_leak_issues(
         let path = cc_path(&leak.path, root);
         let line_str = leak.line.to_string();
         let fp = fingerprint_hash(&[
-            "fallow/private-type-leak",
+            "plow/private-type-leak",
             &path,
             &line_str,
             &leak.export_name,
             &leak.type_name,
         ]);
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
-            check_name: "fallow/private-type-leak",
+            check_name: "plow/private-type-leak",
             description: &format!(
                 "Export '{}' references private type '{}'",
                 leak.export_name, leak.type_name
@@ -182,7 +182,7 @@ fn push_private_type_leak_issues(
 
 fn push_type_only_dep_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    deps: &[fallow_types::output_dead_code::TypeOnlyDependencyFinding],
+    deps: &[plow_types::output_dead_code::TypeOnlyDependencyFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -194,9 +194,9 @@ fn push_type_only_dep_issues(
         let dep = &entry.dep;
         let path = cc_path(&dep.path, root);
         let line = if dep.line > 0 { Some(dep.line) } else { None };
-        let fp = fingerprint_hash(&["fallow/type-only-dependency", &dep.package_name]);
+        let fp = fingerprint_hash(&["plow/type-only-dependency", &dep.package_name]);
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
-            check_name: "fallow/type-only-dependency",
+            check_name: "plow/type-only-dependency",
             description: &format!(
                 "Package '{}' is only imported via type-only imports (consider moving to devDependencies)",
                 dep.package_name
@@ -212,7 +212,7 @@ fn push_type_only_dep_issues(
 
 fn push_test_only_dep_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    deps: &[fallow_types::output_dead_code::TestOnlyDependencyFinding],
+    deps: &[plow_types::output_dead_code::TestOnlyDependencyFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -224,9 +224,9 @@ fn push_test_only_dep_issues(
         let dep = &entry.dep;
         let path = cc_path(&dep.path, root);
         let line = if dep.line > 0 { Some(dep.line) } else { None };
-        let fp = fingerprint_hash(&["fallow/test-only-dependency", &dep.package_name]);
+        let fp = fingerprint_hash(&["plow/test-only-dependency", &dep.package_name]);
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
-            check_name: "fallow/test-only-dependency",
+            check_name: "plow/test-only-dependency",
             description: &format!(
                 "Package '{}' is only imported by test files (consider moving to devDependencies)",
                 dep.package_name
@@ -252,7 +252,7 @@ fn push_unused_member_issues<'a, I>(
     entity_label: &str,
     severity: Severity,
 ) where
-    I: IntoIterator<Item = &'a fallow_types::results::UnusedMember>,
+    I: IntoIterator<Item = &'a plow_types::results::UnusedMember>,
 {
     for member in members {
         let level = severity_to_codeclimate(severity);
@@ -282,7 +282,7 @@ fn push_unused_member_issues<'a, I>(
 
 fn push_unresolved_import_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    imports: &[fallow_types::output_dead_code::UnresolvedImportFinding],
+    imports: &[plow_types::output_dead_code::UnresolvedImportFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -295,13 +295,13 @@ fn push_unresolved_import_issues(
         let path = cc_path(&import.path, root);
         let line_str = import.line.to_string();
         let fp = fingerprint_hash(&[
-            "fallow/unresolved-import",
+            "plow/unresolved-import",
             &path,
             &line_str,
             &import.specifier,
         ]);
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
-            check_name: "fallow/unresolved-import",
+            check_name: "plow/unresolved-import",
             description: &format!("Import '{}' could not be resolved", import.specifier),
             severity: level,
             category: "Bug Risk",
@@ -314,7 +314,7 @@ fn push_unresolved_import_issues(
 
 fn push_unlisted_dep_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    deps: &[fallow_types::output_dead_code::UnlistedDependencyFinding],
+    deps: &[plow_types::output_dead_code::UnlistedDependencyFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -328,13 +328,13 @@ fn push_unlisted_dep_issues(
             let path = cc_path(&site.path, root);
             let line_str = site.line.to_string();
             let fp = fingerprint_hash(&[
-                "fallow/unlisted-dependency",
+                "plow/unlisted-dependency",
                 &path,
                 &line_str,
                 &dep.package_name,
             ]);
             issues.push(build_codeclimate_issue(CodeClimateIssueInput {
-                check_name: "fallow/unlisted-dependency",
+                check_name: "plow/unlisted-dependency",
                 description: &format!(
                     "Package '{}' is imported but not listed in package.json",
                     dep.package_name
@@ -351,7 +351,7 @@ fn push_unlisted_dep_issues(
 
 fn push_duplicate_export_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    dups: &[fallow_types::output_dead_code::DuplicateExportFinding],
+    dups: &[plow_types::output_dead_code::DuplicateExportFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -364,14 +364,10 @@ fn push_duplicate_export_issues(
         for loc in &dup.locations {
             let path = cc_path(&loc.path, root);
             let line_str = loc.line.to_string();
-            let fp = fingerprint_hash(&[
-                "fallow/duplicate-export",
-                &path,
-                &line_str,
-                &dup.export_name,
-            ]);
+            let fp =
+                fingerprint_hash(&["plow/duplicate-export", &path, &line_str, &dup.export_name]);
             issues.push(build_codeclimate_issue(CodeClimateIssueInput {
-                check_name: "fallow/duplicate-export",
+                check_name: "plow/duplicate-export",
                 description: &format!("Export '{}' appears in multiple modules", dup.export_name),
                 severity: level,
                 category: "Bug Risk",
@@ -385,7 +381,7 @@ fn push_duplicate_export_issues(
 
 fn push_circular_dep_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    cycles: &[fallow_types::output_dead_code::CircularDependencyFinding],
+    cycles: &[plow_types::output_dead_code::CircularDependencyFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -401,14 +397,14 @@ fn push_circular_dep_issues(
         let path = cc_path(first, root);
         let chain: Vec<String> = cycle.files.iter().map(|f| cc_path(f, root)).collect();
         let chain_str = chain.join(":");
-        let fp = fingerprint_hash(&["fallow/circular-dependency", &chain_str]);
+        let fp = fingerprint_hash(&["plow/circular-dependency", &chain_str]);
         let line = if cycle.line > 0 {
             Some(cycle.line)
         } else {
             None
         };
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
-            check_name: "fallow/circular-dependency",
+            check_name: "plow/circular-dependency",
             description: &format!(
                 "Circular dependency{}: {}",
                 if cycle.is_cross_package {
@@ -429,7 +425,7 @@ fn push_circular_dep_issues(
 
 fn push_re_export_cycle_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    cycles: &[fallow_types::output_dead_code::ReExportCycleFinding],
+    cycles: &[plow_types::output_dead_code::ReExportCycleFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -446,16 +442,16 @@ fn push_re_export_cycle_issues(
         let chain: Vec<String> = cycle.files.iter().map(|f| cc_path(f, root)).collect();
         let chain_str = chain.join(":");
         let kind_token = match cycle.kind {
-            fallow_types::results::ReExportCycleKind::SelfLoop => "self-loop",
-            fallow_types::results::ReExportCycleKind::MultiNode => "multi-node",
+            plow_types::results::ReExportCycleKind::SelfLoop => "self-loop",
+            plow_types::results::ReExportCycleKind::MultiNode => "multi-node",
         };
         let kind_tag = match cycle.kind {
-            fallow_types::results::ReExportCycleKind::SelfLoop => " (self-loop)",
-            fallow_types::results::ReExportCycleKind::MultiNode => "",
+            plow_types::results::ReExportCycleKind::SelfLoop => " (self-loop)",
+            plow_types::results::ReExportCycleKind::MultiNode => "",
         };
-        let fp = fingerprint_hash(&["fallow/re-export-cycle", kind_token, &chain_str]);
+        let fp = fingerprint_hash(&["plow/re-export-cycle", kind_token, &chain_str]);
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
-            check_name: "fallow/re-export-cycle",
+            check_name: "plow/re-export-cycle",
             description: &format!("Re-export cycle{}: {}", kind_tag, chain.join(" <-> ")),
             severity: level,
             category: "Bug Risk",
@@ -468,7 +464,7 @@ fn push_re_export_cycle_issues(
 
 fn push_boundary_violation_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    violations: &[fallow_types::output_dead_code::BoundaryViolationFinding],
+    violations: &[plow_types::output_dead_code::BoundaryViolationFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -480,10 +476,10 @@ fn push_boundary_violation_issues(
         let v = &entry.violation;
         let path = cc_path(&v.from_path, root);
         let to = cc_path(&v.to_path, root);
-        let fp = fingerprint_hash(&["fallow/boundary-violation", &path, &to]);
+        let fp = fingerprint_hash(&["plow/boundary-violation", &path, &to]);
         let line = if v.line > 0 { Some(v.line) } else { None };
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
-            check_name: "fallow/boundary-violation",
+            check_name: "plow/boundary-violation",
             description: &format!(
                 "Boundary violation: {} -> {} ({} -> {})",
                 path, to, v.from_zone, v.to_zone
@@ -499,7 +495,7 @@ fn push_boundary_violation_issues(
 
 fn push_boundary_coverage_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    violations: &[fallow_types::output_dead_code::BoundaryCoverageViolationFinding],
+    violations: &[plow_types::output_dead_code::BoundaryCoverageViolationFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -510,10 +506,10 @@ fn push_boundary_coverage_issues(
     for entry in violations {
         let v = &entry.violation;
         let path = cc_path(&v.path, root);
-        let fp = fingerprint_hash(&["fallow/boundary-coverage", &path]);
+        let fp = fingerprint_hash(&["plow/boundary-coverage", &path]);
         let line = if v.line > 0 { Some(v.line) } else { None };
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
-            check_name: "fallow/boundary-coverage",
+            check_name: "plow/boundary-coverage",
             description: &format!("Boundary coverage: {path} matches no configured zone"),
             severity: level,
             category: "Bug Risk",
@@ -526,7 +522,7 @@ fn push_boundary_coverage_issues(
 
 fn push_boundary_call_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    violations: &[fallow_types::output_dead_code::BoundaryCallViolationFinding],
+    violations: &[plow_types::output_dead_code::BoundaryCallViolationFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -537,10 +533,10 @@ fn push_boundary_call_issues(
     for entry in violations {
         let v = &entry.violation;
         let path = cc_path(&v.path, root);
-        let fp = fingerprint_hash(&["fallow/boundary-call-violation", &path, &v.callee]);
+        let fp = fingerprint_hash(&["plow/boundary-call-violation", &path, &v.callee]);
         let line = if v.line > 0 { Some(v.line) } else { None };
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
-            check_name: "fallow/boundary-call-violation",
+            check_name: "plow/boundary-call-violation",
             description: &format!(
                 "Boundary call: `{}` matches forbidden pattern `{}` in zone '{}'",
                 v.callee, v.pattern, v.zone
@@ -556,16 +552,16 @@ fn push_boundary_call_issues(
 
 fn push_policy_violation_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    violations: &[fallow_types::output_dead_code::PolicyViolationFinding],
+    violations: &[plow_types::output_dead_code::PolicyViolationFinding],
     root: &Path,
 ) {
-    use fallow_types::results::PolicyViolationSeverity;
+    use plow_types::results::PolicyViolationSeverity;
 
     for entry in violations {
         let v = &entry.violation;
         let path = cc_path(&v.path, root);
         let rule = format!("{}/{}", v.pack, v.rule_id);
-        let fp = fingerprint_hash(&["fallow/policy-violation", &path, &rule, &v.matched]);
+        let fp = fingerprint_hash(&["plow/policy-violation", &path, &rule, &v.matched]);
         let line = if v.line > 0 { Some(v.line) } else { None };
         // Severity comes from the EFFECTIVE per-finding value, not the
         // policy-violation master, so a severity: "error" rule under a warn
@@ -582,7 +578,7 @@ fn push_policy_violation_issues(
             None => format!("Policy violation: `{}` is banned by `{rule}`", v.matched),
         };
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
-            check_name: "fallow/policy-violation",
+            check_name: "plow/policy-violation",
             description: &message,
             severity: level,
             category: "Bug Risk",
@@ -595,7 +591,7 @@ fn push_policy_violation_issues(
 
 fn push_invalid_client_export_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    findings: &[fallow_types::output_dead_code::InvalidClientExportFinding],
+    findings: &[plow_types::output_dead_code::InvalidClientExportFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -606,14 +602,14 @@ fn push_invalid_client_export_issues(
     for entry in findings {
         let e = &entry.export;
         let path = cc_path(&e.path, root);
-        let fp = fingerprint_hash(&["fallow/invalid-client-export", &path, &e.export_name]);
+        let fp = fingerprint_hash(&["plow/invalid-client-export", &path, &e.export_name]);
         let line = if e.line > 0 { Some(e.line) } else { None };
         let message = format!(
             "Export `{}` is not allowed in a \"{}\" file (Next.js server-only / route-config name)",
             e.export_name, e.directive
         );
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
-            check_name: "fallow/invalid-client-export",
+            check_name: "plow/invalid-client-export",
             description: &message,
             severity: level,
             category: "Bug Risk",
@@ -626,7 +622,7 @@ fn push_invalid_client_export_issues(
 
 fn push_mixed_client_server_barrel_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    findings: &[fallow_types::output_dead_code::MixedClientServerBarrelFinding],
+    findings: &[plow_types::output_dead_code::MixedClientServerBarrelFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -638,7 +634,7 @@ fn push_mixed_client_server_barrel_issues(
         let b = &entry.barrel;
         let path = cc_path(&b.path, root);
         let fp = fingerprint_hash(&[
-            "fallow/mixed-client-server-barrel",
+            "plow/mixed-client-server-barrel",
             &path,
             &b.client_origin,
             &b.server_origin,
@@ -649,7 +645,7 @@ fn push_mixed_client_server_barrel_issues(
             b.client_origin, b.server_origin
         );
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
-            check_name: "fallow/mixed-client-server-barrel",
+            check_name: "plow/mixed-client-server-barrel",
             description: &message,
             severity: level,
             category: "Bug Risk",
@@ -662,7 +658,7 @@ fn push_mixed_client_server_barrel_issues(
 
 fn push_misplaced_directive_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    findings: &[fallow_types::output_dead_code::MisplacedDirectiveFinding],
+    findings: &[plow_types::output_dead_code::MisplacedDirectiveFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -674,7 +670,7 @@ fn push_misplaced_directive_issues(
         let d = &entry.directive_site;
         let path = cc_path(&d.path, root);
         let fp = fingerprint_hash(&[
-            "fallow/misplaced-directive",
+            "plow/misplaced-directive",
             &path,
             &d.line.to_string(),
             &d.directive,
@@ -685,7 +681,7 @@ fn push_misplaced_directive_issues(
             d.directive
         );
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
-            check_name: "fallow/misplaced-directive",
+            check_name: "plow/misplaced-directive",
             description: &message,
             severity: level,
             category: "Bug Risk",
@@ -698,7 +694,7 @@ fn push_misplaced_directive_issues(
 
 fn push_unprovided_inject_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    findings: &[fallow_types::output_dead_code::UnprovidedInjectFinding],
+    findings: &[plow_types::output_dead_code::UnprovidedInjectFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -710,7 +706,7 @@ fn push_unprovided_inject_issues(
         let i = &entry.inject;
         let path = cc_path(&i.path, root);
         let fp = fingerprint_hash(&[
-            "fallow/unprovided-inject",
+            "plow/unprovided-inject",
             &path,
             &i.line.to_string(),
             &i.key_name,
@@ -721,7 +717,7 @@ fn push_unprovided_inject_issues(
             i.key_name, i.key_name
         );
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
-            check_name: "fallow/unprovided-inject",
+            check_name: "plow/unprovided-inject",
             description: &message,
             severity: level,
             category: "Bug Risk",
@@ -734,7 +730,7 @@ fn push_unprovided_inject_issues(
 
 fn push_unrendered_component_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    findings: &[fallow_types::output_dead_code::UnrenderedComponentFinding],
+    findings: &[plow_types::output_dead_code::UnrenderedComponentFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -746,7 +742,7 @@ fn push_unrendered_component_issues(
         let c = &entry.component;
         let path = cc_path(&c.path, root);
         let fp = fingerprint_hash(&[
-            "fallow/unrendered-component",
+            "plow/unrendered-component",
             &path,
             &c.line.to_string(),
             &c.component_name,
@@ -757,7 +753,7 @@ fn push_unrendered_component_issues(
             c.component_name
         );
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
-            check_name: "fallow/unrendered-component",
+            check_name: "plow/unrendered-component",
             description: &message,
             severity: level,
             category: "Bug Risk",
@@ -770,7 +766,7 @@ fn push_unrendered_component_issues(
 
 fn push_unused_component_prop_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    findings: &[fallow_types::output_dead_code::UnusedComponentPropFinding],
+    findings: &[plow_types::output_dead_code::UnusedComponentPropFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -782,7 +778,7 @@ fn push_unused_component_prop_issues(
         let p = &entry.prop;
         let path = cc_path(&p.path, root);
         let fp = fingerprint_hash(&[
-            "fallow/unused-component-prop",
+            "plow/unused-component-prop",
             &path,
             &p.line.to_string(),
             &p.prop_name,
@@ -793,7 +789,7 @@ fn push_unused_component_prop_issues(
             p.prop_name, p.component_name
         );
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
-            check_name: "fallow/unused-component-prop",
+            check_name: "plow/unused-component-prop",
             description: &message,
             severity: level,
             category: "Bug Risk",
@@ -806,7 +802,7 @@ fn push_unused_component_prop_issues(
 
 fn push_unused_component_emit_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    findings: &[fallow_types::output_dead_code::UnusedComponentEmitFinding],
+    findings: &[plow_types::output_dead_code::UnusedComponentEmitFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -818,7 +814,7 @@ fn push_unused_component_emit_issues(
         let e = &entry.emit;
         let path = cc_path(&e.path, root);
         let fp = fingerprint_hash(&[
-            "fallow/unused-component-emit",
+            "plow/unused-component-emit",
             &path,
             &e.line.to_string(),
             &e.emit_name,
@@ -829,7 +825,7 @@ fn push_unused_component_emit_issues(
             e.emit_name, e.component_name
         );
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
-            check_name: "fallow/unused-component-emit",
+            check_name: "plow/unused-component-emit",
             description: &message,
             severity: level,
             category: "Bug Risk",
@@ -842,7 +838,7 @@ fn push_unused_component_emit_issues(
 
 fn push_unused_svelte_event_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    findings: &[fallow_types::output_dead_code::UnusedSvelteEventFinding],
+    findings: &[plow_types::output_dead_code::UnusedSvelteEventFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -854,7 +850,7 @@ fn push_unused_svelte_event_issues(
         let e = &entry.event;
         let path = cc_path(&e.path, root);
         let fp = fingerprint_hash(&[
-            "fallow/unused-svelte-event",
+            "plow/unused-svelte-event",
             &path,
             &e.line.to_string(),
             &e.event_name,
@@ -865,7 +861,7 @@ fn push_unused_svelte_event_issues(
             e.event_name, e.component_name
         );
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
-            check_name: "fallow/unused-svelte-event",
+            check_name: "plow/unused-svelte-event",
             description: &message,
             severity: level,
             category: "Bug Risk",
@@ -878,7 +874,7 @@ fn push_unused_svelte_event_issues(
 
 fn push_unused_component_input_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    findings: &[fallow_types::output_dead_code::UnusedComponentInputFinding],
+    findings: &[plow_types::output_dead_code::UnusedComponentInputFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -890,7 +886,7 @@ fn push_unused_component_input_issues(
         let i = &entry.input;
         let path = cc_path(&i.path, root);
         let fp = fingerprint_hash(&[
-            "fallow/unused-component-input",
+            "plow/unused-component-input",
             &path,
             &i.line.to_string(),
             &i.input_name,
@@ -901,7 +897,7 @@ fn push_unused_component_input_issues(
             i.input_name, i.component_name
         );
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
-            check_name: "fallow/unused-component-input",
+            check_name: "plow/unused-component-input",
             description: &message,
             severity: level,
             category: "Bug Risk",
@@ -914,7 +910,7 @@ fn push_unused_component_input_issues(
 
 fn push_unused_component_output_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    findings: &[fallow_types::output_dead_code::UnusedComponentOutputFinding],
+    findings: &[plow_types::output_dead_code::UnusedComponentOutputFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -926,7 +922,7 @@ fn push_unused_component_output_issues(
         let o = &entry.output;
         let path = cc_path(&o.path, root);
         let fp = fingerprint_hash(&[
-            "fallow/unused-component-output",
+            "plow/unused-component-output",
             &path,
             &o.line.to_string(),
             &o.output_name,
@@ -937,7 +933,7 @@ fn push_unused_component_output_issues(
             o.output_name, o.component_name
         );
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
-            check_name: "fallow/unused-component-output",
+            check_name: "plow/unused-component-output",
             description: &message,
             severity: level,
             category: "Bug Risk",
@@ -950,7 +946,7 @@ fn push_unused_component_output_issues(
 
 fn push_unused_server_action_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    findings: &[fallow_types::output_dead_code::UnusedServerActionFinding],
+    findings: &[plow_types::output_dead_code::UnusedServerActionFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -962,7 +958,7 @@ fn push_unused_server_action_issues(
         let a = &entry.action;
         let path = cc_path(&a.path, root);
         let fp = fingerprint_hash(&[
-            "fallow/unused-server-action",
+            "plow/unused-server-action",
             &path,
             &a.line.to_string(),
             &a.action_name,
@@ -973,7 +969,7 @@ fn push_unused_server_action_issues(
             a.action_name
         );
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
-            check_name: "fallow/unused-server-action",
+            check_name: "plow/unused-server-action",
             description: &message,
             severity: level,
             category: "Bug Risk",
@@ -986,7 +982,7 @@ fn push_unused_server_action_issues(
 
 fn push_unused_load_data_key_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    findings: &[fallow_types::output_dead_code::UnusedLoadDataKeyFinding],
+    findings: &[plow_types::output_dead_code::UnusedLoadDataKeyFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -998,7 +994,7 @@ fn push_unused_load_data_key_issues(
         let k = &entry.key;
         let path = cc_path(&k.path, root);
         let fp = fingerprint_hash(&[
-            "fallow/unused-load-data-key",
+            "plow/unused-load-data-key",
             &path,
             &k.line.to_string(),
             &k.key_name,
@@ -1009,7 +1005,7 @@ fn push_unused_load_data_key_issues(
             k.key_name
         );
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
-            check_name: "fallow/unused-load-data-key",
+            check_name: "plow/unused-load-data-key",
             description: &message,
             severity: level,
             category: "Bug Risk",
@@ -1022,7 +1018,7 @@ fn push_unused_load_data_key_issues(
 
 fn push_route_collision_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    findings: &[fallow_types::output_dead_code::RouteCollisionFinding],
+    findings: &[plow_types::output_dead_code::RouteCollisionFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -1033,7 +1029,7 @@ fn push_route_collision_issues(
     for entry in findings {
         let c = &entry.collision;
         let path = cc_path(&c.path, root);
-        let fp = fingerprint_hash(&["fallow/route-collision", &path, &c.url]);
+        let fp = fingerprint_hash(&["plow/route-collision", &path, &c.url]);
         let line = if c.line > 0 { Some(c.line) } else { None };
         let message = format!(
             "Route file resolves to `{}`, also owned by {} other file(s); Next.js fails the build because a URL can have only one owner",
@@ -1041,7 +1037,7 @@ fn push_route_collision_issues(
             c.conflicting_paths.len()
         );
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
-            check_name: "fallow/route-collision",
+            check_name: "plow/route-collision",
             description: &message,
             severity: level,
             category: "Bug Risk",
@@ -1054,7 +1050,7 @@ fn push_route_collision_issues(
 
 fn push_dynamic_segment_name_conflict_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    findings: &[fallow_types::output_dead_code::DynamicSegmentNameConflictFinding],
+    findings: &[plow_types::output_dead_code::DynamicSegmentNameConflictFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -1065,7 +1061,7 @@ fn push_dynamic_segment_name_conflict_issues(
     for entry in findings {
         let c = &entry.conflict;
         let path = cc_path(&c.path, root);
-        let fp = fingerprint_hash(&["fallow/dynamic-segment-name-conflict", &path, &c.position]);
+        let fp = fingerprint_hash(&["plow/dynamic-segment-name-conflict", &path, &c.position]);
         let line = if c.line > 0 { Some(c.line) } else { None };
         let message = format!(
             "Dynamic segments at `{}` use different slug names ({}); Next.js requires one consistent name per dynamic path",
@@ -1073,7 +1069,7 @@ fn push_dynamic_segment_name_conflict_issues(
             c.conflicting_segments.join(", ")
         );
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
-            check_name: "fallow/dynamic-segment-name-conflict",
+            check_name: "plow/dynamic-segment-name-conflict",
             description: &message,
             severity: level,
             category: "Bug Risk",
@@ -1086,7 +1082,7 @@ fn push_dynamic_segment_name_conflict_issues(
 
 fn push_stale_suppression_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    suppressions: &[fallow_types::results::StaleSuppression],
+    suppressions: &[plow_types::results::StaleSuppression],
     root: &Path,
     rules: &RulesConfig,
 ) {
@@ -1103,9 +1099,9 @@ fn push_stale_suppression_issues(
         let path = cc_path(&s.path, root);
         let line_str = s.line.to_string();
         let check_name = if s.missing_reason {
-            "fallow/missing-suppression-reason"
+            "plow/missing-suppression-reason"
         } else {
-            "fallow/stale-suppression"
+            "plow/stale-suppression"
         };
         let fp = fingerprint_hash(&[check_name, &path, &line_str]);
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
@@ -1122,7 +1118,7 @@ fn push_stale_suppression_issues(
 
 fn push_unused_catalog_entry_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    entries: &[fallow_types::output_dead_code::UnusedCatalogEntryFinding],
+    entries: &[plow_types::output_dead_code::UnusedCatalogEntryFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -1135,7 +1131,7 @@ fn push_unused_catalog_entry_issues(
         let path = cc_path(&entry.path, root);
         let line_str = entry.line.to_string();
         let fp = fingerprint_hash(&[
-            "fallow/unused-catalog-entry",
+            "plow/unused-catalog-entry",
             &path,
             &line_str,
             &entry.catalog_name,
@@ -1153,7 +1149,7 @@ fn push_unused_catalog_entry_issues(
             )
         };
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
-            check_name: "fallow/unused-catalog-entry",
+            check_name: "plow/unused-catalog-entry",
             description: &description,
             severity: level,
             category: "Bug Risk",
@@ -1166,7 +1162,7 @@ fn push_unused_catalog_entry_issues(
 
 fn push_unresolved_catalog_reference_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    findings: &[fallow_types::output_dead_code::UnresolvedCatalogReferenceFinding],
+    findings: &[plow_types::output_dead_code::UnresolvedCatalogReferenceFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -1179,7 +1175,7 @@ fn push_unresolved_catalog_reference_issues(
         let path = cc_path(&finding.path, root);
         let line_str = finding.line.to_string();
         let fp = fingerprint_hash(&[
-            "fallow/unresolved-catalog-reference",
+            "plow/unresolved-catalog-reference",
             &path,
             &line_str,
             &finding.catalog_name,
@@ -1209,7 +1205,7 @@ fn push_unresolved_catalog_reference_issues(
             );
         }
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
-            check_name: "fallow/unresolved-catalog-reference",
+            check_name: "plow/unresolved-catalog-reference",
             description: &description,
             severity: level,
             category: "Bug Risk",
@@ -1222,7 +1218,7 @@ fn push_unresolved_catalog_reference_issues(
 
 fn push_empty_catalog_group_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    groups: &[fallow_types::output_dead_code::EmptyCatalogGroupFinding],
+    groups: &[plow_types::output_dead_code::EmptyCatalogGroupFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -1235,13 +1231,13 @@ fn push_empty_catalog_group_issues(
         let path = cc_path(&group.path, root);
         let line_str = group.line.to_string();
         let fp = fingerprint_hash(&[
-            "fallow/empty-catalog-group",
+            "plow/empty-catalog-group",
             &path,
             &line_str,
             &group.catalog_name,
         ]);
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
-            check_name: "fallow/empty-catalog-group",
+            check_name: "plow/empty-catalog-group",
             description: &format!("Catalog group '{}' has no entries", group.catalog_name),
             severity: level,
             category: "Bug Risk",
@@ -1254,7 +1250,7 @@ fn push_empty_catalog_group_issues(
 
 fn push_unused_dependency_override_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    findings: &[fallow_types::output_dead_code::UnusedDependencyOverrideFinding],
+    findings: &[plow_types::output_dead_code::UnusedDependencyOverrideFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -1267,7 +1263,7 @@ fn push_unused_dependency_override_issues(
         let path = cc_path(&finding.path, root);
         let line_str = finding.line.to_string();
         let fp = fingerprint_hash(&[
-            "fallow/unused-dependency-override",
+            "plow/unused-dependency-override",
             &path,
             &line_str,
             finding.source.as_label(),
@@ -1282,7 +1278,7 @@ fn push_unused_dependency_override_issues(
             let _ = write!(description, " ({hint})");
         }
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
-            check_name: "fallow/unused-dependency-override",
+            check_name: "plow/unused-dependency-override",
             description: &description,
             severity: level,
             category: "Bug Risk",
@@ -1295,7 +1291,7 @@ fn push_unused_dependency_override_issues(
 
 fn push_misconfigured_dependency_override_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    findings: &[fallow_types::output_dead_code::MisconfiguredDependencyOverrideFinding],
+    findings: &[plow_types::output_dead_code::MisconfiguredDependencyOverrideFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -1308,7 +1304,7 @@ fn push_misconfigured_dependency_override_issues(
         let path = cc_path(&finding.path, root);
         let line_str = finding.line.to_string();
         let fp = fingerprint_hash(&[
-            "fallow/misconfigured-dependency-override",
+            "plow/misconfigured-dependency-override",
             &path,
             &line_str,
             finding.source.as_label(),
@@ -1321,7 +1317,7 @@ fn push_misconfigured_dependency_override_issues(
             finding.reason.describe(),
         );
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
-            check_name: "fallow/misconfigured-dependency-override",
+            check_name: "plow/misconfigured-dependency-override",
             description: &description,
             severity: level,
             category: "Bug Risk",
@@ -1335,9 +1331,9 @@ fn push_misconfigured_dependency_override_issues(
 /// Build CodeClimate issues from dead-code analysis results.
 ///
 /// Returns the typed [`CodeClimateIssue`] vec; callers that emit the wire
-/// shape convert via [`fallow_output::codeclimate_issues_to_value`]. The schema
+/// shape convert via [`plow_output::codeclimate_issues_to_value`]. The schema
 /// drift gate locks the per-issue shape against
-/// [`fallow_output::CodeClimateOutput`].
+/// [`plow_output::CodeClimateOutput`].
 #[must_use]
 pub fn build_codeclimate(
     results: &AnalysisResults,
@@ -1386,7 +1382,7 @@ impl CodeClimateBuilder<'_> {
             issues: &mut self.issues,
             exports: self.results.unused_exports.iter().map(|e| &e.export),
             root: self.root,
-            rule_id: "fallow/unused-export",
+            rule_id: "plow/unused-export",
             direct_label: "Export",
             re_export_label: "Re-export",
             severity: self.rules.unused_exports,
@@ -1395,7 +1391,7 @@ impl CodeClimateBuilder<'_> {
             issues: &mut self.issues,
             exports: self.results.unused_types.iter().map(|e| &e.export),
             root: self.root,
-            rule_id: "fallow/unused-type",
+            rule_id: "plow/unused-type",
             direct_label: "Type export",
             re_export_label: "Type re-export",
             severity: self.rules.unused_types,
@@ -1416,7 +1412,7 @@ impl CodeClimateBuilder<'_> {
             &mut self.issues,
             self.results.unused_dependencies.iter().map(|f| &f.dep),
             self.root,
-            "fallow/unused-dependency",
+            "plow/unused-dependency",
             "dependencies",
             self.rules.unused_dependencies,
         );
@@ -1424,7 +1420,7 @@ impl CodeClimateBuilder<'_> {
             &mut self.issues,
             self.results.unused_dev_dependencies.iter().map(|f| &f.dep),
             self.root,
-            "fallow/unused-dev-dependency",
+            "plow/unused-dev-dependency",
             "devDependencies",
             self.rules.unused_dev_dependencies,
         );
@@ -1435,7 +1431,7 @@ impl CodeClimateBuilder<'_> {
                 .iter()
                 .map(|f| &f.dep),
             self.root,
-            "fallow/unused-optional-dependency",
+            "plow/unused-optional-dependency",
             "optionalDependencies",
             self.rules.unused_optional_dependencies,
         );
@@ -1461,7 +1457,7 @@ impl CodeClimateBuilder<'_> {
             &mut self.issues,
             self.results.unused_enum_members.iter().map(|m| &m.member),
             self.root,
-            "fallow/unused-enum-member",
+            "plow/unused-enum-member",
             "Enum",
             self.rules.unused_enum_members,
         );
@@ -1469,7 +1465,7 @@ impl CodeClimateBuilder<'_> {
             &mut self.issues,
             self.results.unused_class_members.iter().map(|m| &m.member),
             self.root,
-            "fallow/unused-class-member",
+            "plow/unused-class-member",
             "Class",
             self.rules.unused_class_members,
         );
@@ -1477,7 +1473,7 @@ impl CodeClimateBuilder<'_> {
             &mut self.issues,
             self.results.unused_store_members.iter().map(|m| &m.member),
             self.root,
-            "fallow/unused-store-member",
+            "plow/unused-store-member",
             "Store",
             self.rules.unused_store_members,
         );

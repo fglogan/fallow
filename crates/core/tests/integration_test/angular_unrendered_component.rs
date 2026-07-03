@@ -12,7 +12,7 @@ use super::common::{create_config, fixture_path};
 fn flags_orphan_angular_component_and_abstains_on_rendered_routed_bootstrapped() {
     let root = fixture_path("angular-unrendered-component");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let flagged: Vec<String> = results
         .unrendered_components
         .iter()
@@ -55,7 +55,7 @@ fn flags_orphan_angular_component_and_abstains_on_rendered_routed_bootstrapped()
 fn dynamic_component_render_abstains_entire_project() {
     let root = fixture_path("angular-unrendered-component-dynamic");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let flagged: Vec<String> = results
         .unrendered_components
         .iter()

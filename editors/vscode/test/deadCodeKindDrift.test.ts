@@ -14,7 +14,7 @@ import { countCheckIssues } from "../src/analysis-utils.js";
 import { DIAGNOSTIC_CATEGORIES } from "../src/diagnosticFilter.js";
 import { ISSUE_CATEGORY_LABELS, type IssueCategory } from "../src/labels.js";
 import { DeadCodeTreeProvider } from "../src/treeView.js";
-import type { CheckOutput, FallowCheckResult } from "../src/types.js";
+import type { CheckOutput, PlowCheckResult } from "../src/types.js";
 import { emptyCheck } from "./checkFixtures.js";
 import type { TestTreeItem } from "./vscodeTreeMock.js";
 
@@ -328,11 +328,11 @@ const DEAD_CODE_WIRING = {
 type MappedCode = keyof typeof DEAD_CODE_WIRING;
 
 /** Build a `CheckOutput` with exactly one finding in `field`. */
-const checkWith = (field: keyof CheckOutput, finding: unknown): FallowCheckResult =>
+const checkWith = (field: keyof CheckOutput, finding: unknown): PlowCheckResult =>
   ({
     ...emptyCheck(),
     [field]: [finding],
-  }) as FallowCheckResult;
+  }) as PlowCheckResult;
 
 /** The DIAGNOSTIC_CATEGORIES label for a code (the canonical human label). */
 const canonicalLabel = (code: string): string => {

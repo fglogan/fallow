@@ -1,11 +1,11 @@
-//! Internal adapter over the current `fallow-core` backend.
+//! Internal adapter over the current `plow-core` backend.
 //!
 //! New engine code should call this module instead of reaching into
-//! `fallow-core` directly. The goal is to keep core-backed orchestration
+//! `plow-core` directly. The goal is to keep core-backed orchestration
 //! contained while the engine-owned contracts continue to stabilize.
 
-use fallow_config::ResolvedConfig;
-use fallow_graph::graph::ModuleGraph;
+use plow_config::ResolvedConfig;
+use plow_graph::graph::ModuleGraph;
 use rustc_hash::FxHashSet;
 use std::path::{Path, PathBuf};
 
@@ -16,14 +16,14 @@ use crate::{
 };
 
 pub fn prepare_analysis_discovery(config: &ResolvedConfig) -> AnalysisDiscovery {
-    AnalysisDiscovery::from_core(fallow_core::prepare_analysis_discovery(config))
+    AnalysisDiscovery::from_core(plow_core::prepare_analysis_discovery(config))
 }
 
 pub fn analyze_with_usages_from_discovery(
     config: &ResolvedConfig,
     discovery: &AnalysisDiscovery,
 ) -> EngineResult<DeadCodeAnalysis> {
-    fallow_core::analyze_with_usages_from_discovery(config, discovery.as_core())
+    plow_core::analyze_with_usages_from_discovery(config, discovery.as_core())
         .map(|results| DeadCodeAnalysis { results })
         .map_err(engine_error)
 }
@@ -32,7 +32,7 @@ pub fn analyze_with_usages_and_complexity_from_discovery(
     config: &ResolvedConfig,
     discovery: &AnalysisDiscovery,
 ) -> EngineResult<DeadCodeAnalysisOutput> {
-    fallow_core::analyze_with_usages_and_complexity_from_discovery(config, discovery.as_core())
+    plow_core::analyze_with_usages_and_complexity_from_discovery(config, discovery.as_core())
         .map(|output| DeadCodeAnalysisOutput {
             results: output.results,
             modules: output.modules,
@@ -47,7 +47,7 @@ pub fn analyze_retaining_modules_from_discovery(
     need_complexity: bool,
     retain_graph: bool,
 ) -> EngineResult<DeadCodeAnalysisArtifacts> {
-    fallow_core::analyze_retaining_modules_from_discovery(
+    plow_core::analyze_retaining_modules_from_discovery(
         config,
         discovery.as_core(),
         need_complexity,
@@ -63,14 +63,14 @@ pub fn analyze_with_parse_result(
 ) -> EngineResult<DeadCodeAnalysisArtifacts> {
     #[expect(
         deprecated,
-        reason = "fallow-engine is the typed migration boundary over the internal core backend"
+        reason = "plow-engine is the typed migration boundary over the internal core backend"
     )]
-    fallow_core::analyze_with_parse_result(config, modules)
+    plow_core::analyze_with_parse_result(config, modules)
         .map(dead_code_artifacts)
         .map_err(engine_error)
 }
 
-fn dead_code_artifacts(output: fallow_core::AnalysisOutput) -> DeadCodeAnalysisArtifacts {
+fn dead_code_artifacts(output: plow_core::AnalysisOutput) -> DeadCodeAnalysisArtifacts {
     DeadCodeAnalysisArtifacts {
         results: output.results,
         timings: output.timings,
@@ -86,7 +86,7 @@ pub fn filter_results_by_changed_files(
     results: &mut AnalysisResults,
     changed_files: &FxHashSet<PathBuf>,
 ) {
-    fallow_core::changed_files::filter_results_by_changed_files(results, changed_files);
+    plow_core::changed_files::filter_results_by_changed_files(results, changed_files);
 }
 
 pub fn trace_export(
@@ -94,16 +94,16 @@ pub fn trace_export(
     root: &Path,
     file_path: &str,
     export_name: &str,
-) -> Option<fallow_types::trace::ExportTrace> {
-    fallow_core::trace::trace_export(graph, root, file_path, export_name)
+) -> Option<plow_types::trace::ExportTrace> {
+    plow_core::trace::trace_export(graph, root, file_path, export_name)
 }
 
 pub fn trace_file(
     graph: &ModuleGraph,
     root: &Path,
     file_path: &str,
-) -> Option<fallow_types::trace::FileTrace> {
-    fallow_core::trace::trace_file(graph, root, file_path)
+) -> Option<plow_types::trace::FileTrace> {
+    plow_core::trace::trace_file(graph, root, file_path)
 }
 
 pub fn trace_dependency(
@@ -111,8 +111,8 @@ pub fn trace_dependency(
     root: &Path,
     package_name: &str,
     script_used_packages: &FxHashSet<String>,
-) -> fallow_types::trace::DependencyTrace {
-    fallow_core::trace::trace_dependency(graph, root, package_name, script_used_packages)
+) -> plow_types::trace::DependencyTrace {
+    plow_core::trace::trace_dependency(graph, root, package_name, script_used_packages)
 }
 
 pub fn trace_clone(
@@ -120,31 +120,31 @@ pub fn trace_clone(
     root: &Path,
     file_path: &str,
     line: usize,
-) -> fallow_types::trace::CloneTrace {
-    fallow_core::trace::trace_clone(report, root, file_path, line)
+) -> plow_types::trace::CloneTrace {
+    plow_core::trace::trace_clone(report, root, file_path, line)
 }
 
 pub fn trace_clone_by_fingerprint(
     report: &DuplicationReport,
     root: &Path,
     fingerprint: &str,
-) -> fallow_types::trace::CloneTrace {
-    fallow_core::trace::trace_clone_by_fingerprint(report, root, fingerprint)
+) -> plow_types::trace::CloneTrace {
+    plow_core::trace::trace_clone_by_fingerprint(report, root, fingerprint)
 }
 
 pub fn trace_impact_closure(
     graph: &ModuleGraph,
     root: &Path,
     file_path: &str,
-) -> Option<fallow_types::trace::ImpactClosureTrace> {
-    fallow_core::trace::trace_impact_closure(graph, root, file_path)
+) -> Option<plow_types::trace::ImpactClosureTrace> {
+    plow_core::trace::trace_impact_closure(graph, root, file_path)
 }
 
 pub fn trace_symbol_chain(
     graph: &ModuleGraph,
     modules: &[ModuleInfo],
     root: &Path,
-    query: fallow_types::trace_chain::SymbolChainQuery<'_>,
-) -> Option<fallow_types::trace_chain::SymbolChainTrace> {
-    fallow_core::trace_chain::trace_symbol_chain(graph, modules, root, query)
+    query: plow_types::trace_chain::SymbolChainQuery<'_>,
+) -> Option<plow_types::trace_chain::SymbolChainTrace> {
+    plow_core::trace_chain::trace_symbol_chain(graph, modules, root, query)
 }

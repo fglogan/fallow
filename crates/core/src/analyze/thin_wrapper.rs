@@ -38,7 +38,7 @@ use std::path::Path;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_types::extract::{
+use plow_types::extract::{
     ComponentFunction, ComponentFunctionKind, FunctionComplexity, ModuleInfo, RenderEdge,
 };
 

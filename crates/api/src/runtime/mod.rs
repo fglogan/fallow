@@ -1,10 +1,10 @@
-//! Programmatic runtime entry points that avoid depending on `fallow-cli`.
+//! Programmatic runtime entry points that avoid depending on `plow-cli`.
 
 use std::path::PathBuf;
 
-use fallow_output::{HealthGrouping, HealthReport, RootEnvelopeMode};
-use fallow_types::output_format::OutputFormat;
-use fallow_types::workspace::WorkspaceDiagnostic;
+use plow_output::{HealthGrouping, HealthReport, RootEnvelopeMode};
+use plow_types::output_format::OutputFormat;
+use plow_types::workspace::WorkspaceDiagnostic;
 
 mod audit;
 mod dead_code;
@@ -42,11 +42,11 @@ type ProgrammaticResult<T> = Result<T, ProgrammaticError>;
 /// Runtime probes used by programmatic health output assembly.
 ///
 /// Concrete runners supply environment and project facts while the stable
-/// command strings and output ordering remain owned by `fallow-output`.
+/// command strings and output ordering remain owned by `plow-output`.
 pub struct ProgrammaticHealthNextStepFacts {
     pub suggestions_enabled: bool,
     pub offer_setup: bool,
-    pub impact_digest: Option<fallow_output::ImpactDigestCounts>,
+    pub impact_digest: Option<plow_output::ImpactDigestCounts>,
     pub audit_changed: bool,
 }
 
@@ -63,7 +63,7 @@ pub struct ProgrammaticHealthAnalysis {
 
 impl ProgrammaticHealthAnalysis {
     fn from_engine<GroupResolver>(
-        analysis: fallow_engine::HealthAnalysisResult<GroupResolver>,
+        analysis: plow_engine::HealthAnalysisResult<GroupResolver>,
     ) -> Self {
         Self {
             root: analysis.config.root,
@@ -102,14 +102,14 @@ pub trait ProgrammaticHealthRunner {
     ) -> Result<ProgrammaticHealthRun, ProgrammaticError>;
 }
 
-/// Default health runner backed directly by `fallow-engine`.
+/// Default health runner backed directly by `plow-engine`.
 ///
 /// This runs the command-neutral health pipeline through the engine health
 /// runner without touching the CLI crate: the programmatic
 /// path never groups (`--group-by`), never drives the runtime coverage sidecar,
 /// and never records CLI telemetry, so the runner hooks are inert. NAPI and
 /// future Rust embedders use this runner; the CLI keeps its own runner for the
-/// `fallow health` command path.
+/// `plow health` command path.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct EngineHealthRunner;
 
@@ -129,7 +129,7 @@ fn run_programmatic_health_on_engine(
 ) -> ProgrammaticResult<ProgrammaticHealthRun> {
     let health_options = derive_programmatic_health_execution_options(resolved, options);
     let result =
-        fallow_engine::run_ungrouped_health(&health_options, resolved.workspace_roots.clone())
+        plow_engine::run_ungrouped_health(&health_options, resolved.workspace_roots.clone())
             .map_err(|_| generic_health_error("health"))?;
 
     let root = result.config.root.clone();
@@ -137,7 +137,7 @@ fn run_programmatic_health_on_engine(
         suggestions_enabled: suggestions_enabled(),
         offer_setup: setup_pointer_applicable(&root),
         impact_digest: None,
-        audit_changed: fallow_engine::is_git_repo(&root),
+        audit_changed: plow_engine::is_git_repo(&root),
     };
     Ok(ProgrammaticHealthRun {
         workspace_diagnostics: result.workspace_diagnostics.clone(),
@@ -149,14 +149,14 @@ fn run_programmatic_health_on_engine(
 
 fn generic_health_error(command: &str) -> ProgrammaticError {
     let code = format!(
-        "FALLOW_{}_FAILED",
+        "PLOW_{}_FAILED",
         command.replace('-', "_").to_ascii_uppercase()
     );
     ProgrammaticError::new(format!("{command} failed"), 2)
         .with_code(code)
-        .with_context(format!("fallow {command}"))
+        .with_context(format!("plow {command}"))
         .with_help(format!(
-            "Re-run `fallow {command} --format json --quiet` in the target project for CLI diagnostics"
+            "Re-run `plow {command} --format json --quiet` in the target project for CLI diagnostics"
         ))
 }
 
@@ -174,10 +174,10 @@ pub fn run_health(options: &ComplexityOptions) -> ProgrammaticResult<HealthProgr
 fn derive_programmatic_health_execution_options<'a>(
     resolved: &'a ProgrammaticAnalysisContext,
     options: &'a ComplexityOptions,
-) -> fallow_engine::HealthExecutionOptions<'a> {
+) -> plow_engine::HealthExecutionOptions<'a> {
     let run = crate::derive_complexity_run_options(options);
 
-    fallow_engine::HealthExecutionOptions {
+    plow_engine::HealthExecutionOptions {
         root: resolved.root(),
         config_path: resolved.config_path(),
         output: OutputFormat::Human,
@@ -210,7 +210,7 @@ fn derive_programmatic_health_execution_options<'a>(
         enforce_coverage_gap_gate: true,
         effort: run.effort.map(crate::target_effort_to_output),
         score: run.sections.score,
-        gates: fallow_engine::HealthGateOptions::default(),
+        gates: plow_engine::HealthGateOptions::default(),
         since: run.since,
         min_commits: run.min_commits,
         explain: resolved.explain_enabled(),
@@ -252,7 +252,7 @@ pub fn run_complexity_with_runner(
     } = runner.run_programmatic_health(options)?;
     let root = analysis.root.clone();
     let next_steps =
-        fallow_output::build_health_next_steps(fallow_output::build_health_next_steps_input(
+        plow_output::build_health_next_steps(plow_output::build_health_next_steps_input(
             &analysis.report,
             next_step_facts.suggestions_enabled,
             next_step_facts.offer_setup,

@@ -17,7 +17,7 @@ describe("parseSourceAttr", () => {
 });
 
 describe("readSourceFromElement", () => {
-  it("reads the nearest data-fallow-source ancestor", () => {
+  it("reads the nearest data-plow-source ancestor", () => {
     const el: SourceElement = {
       closest: () => ({ getAttribute: () => "src/Card.tsx:9:3" }),
     };

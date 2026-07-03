@@ -2,20 +2,20 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_engine::{
+use plow_engine::{
     CloneFingerprintSet, clone_fingerprint, dominant_identifier, fingerprint_for_fragment,
 };
-use fallow_output::{
+use plow_output::{
     CloneFamilyAction, CloneGroupAction, CodeClimateIssue, CodeClimateIssueInput,
     CodeClimateSeverity, clone_family_actions, clone_group_actions, codeclimate_fingerprint_hash,
     normalize_uri,
 };
-use fallow_types::duplicates::{
+use plow_types::duplicates::{
     CloneFamily, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats, MirroredDirectory,
     RefactoringSuggestion,
 };
-use fallow_types::envelope::AuditIntroduced;
-use fallow_types::serde_path;
+use plow_types::envelope::AuditIntroduced;
+use plow_types::serde_path;
 use serde::Serialize;
 
 /// A clone instance plus its per-instance owner key (for inline JSON / SARIF
@@ -67,10 +67,10 @@ impl AttributedCloneGroup {
 }
 
 /// Wire-shape envelope for an [`AttributedCloneGroup`] finding (per-bucket
-/// duplication attribution emitted under `fallow dupes --group-by`).
+/// duplication attribution emitted under `plow dupes --group-by`).
 /// Flattens the attributed group and carries the same typed
 /// `CloneGroupAction` array as `CloneGroupFinding`; no `introduced`
-/// field because `fallow audit` does not run on grouped output.
+/// field because `plow audit` does not run on grouped output.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AttributedCloneGroupFinding {
@@ -78,7 +78,7 @@ pub struct AttributedCloneGroupFinding {
     #[serde(flatten)]
     pub group: AttributedCloneGroup,
     /// Stable content fingerprint, usually `dup:<8hex>` and widened on rare
-    /// report collisions. Addressable via `fallow dupes --trace dup:<fp>`.
+    /// report collisions. Addressable via `plow dupes --trace dup:<fp>`.
     /// Computed from the group's instances, so it matches the top-level
     /// `clone_groups[].fingerprint` for the same clone.
     pub fingerprint: String,
@@ -154,7 +154,7 @@ pub struct CloneGroupFinding {
     #[serde(flatten)]
     pub group: CloneGroup,
     /// Stable content fingerprint, usually `dup:<8hex>` and widened on rare
-    /// report collisions. Addressable via `fallow dupes --trace dup:<fp>` (and
+    /// report collisions. Addressable via `plow dupes --trace dup:<fp>` (and
     /// the `trace_clone` MCP tool) to deep-dive this group; shown alongside
     /// each group in the human listing.
     pub fingerprint: String,
@@ -211,7 +211,7 @@ impl CloneGroupFinding {
 /// `CloneGroupFinding` wrapper too (so every nested clone group gets its
 /// own `actions[]` array, matching the legacy post-pass behavior; see issue
 /// #393 regression test). The wire shape stays byte-identical to the
-/// previous post-pass output. No `introduced` field because `fallow audit`
+/// previous post-pass output. No `introduced` field because `plow audit`
 /// attributes clone groups (not families) when running against a base ref.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -289,7 +289,7 @@ fn build_clone_family_actions(
     )
 }
 
-/// Wire-shape payload for `fallow dupes --format json` (the body that
+/// Wire-shape payload for `plow dupes --format json` (the body that
 /// flattens into the `DupesOutput` envelope and is also
 /// emitted under the `dupes` / `duplication` key inside the combined and
 /// audit envelopes).
@@ -347,7 +347,7 @@ impl DupesReportPayload {
 
 /// Build CodeClimate issues from duplication analysis results.
 ///
-/// `fallow-output` owns the CodeClimate wire DTOs. This API layer combines
+/// `plow-output` owns the CodeClimate wire DTOs. This API layer combines
 /// those DTOs with the engine-owned duplication report so CLI and future
 /// embedders can share the same issue construction policy.
 #[must_use]
@@ -374,16 +374,16 @@ pub fn build_duplication_codeclimate(
             let path = codeclimate_path(&instance.file, root);
             let start_str = instance.start_line.to_string();
             let fp = codeclimate_fingerprint_hash(&[
-                "fallow/code-duplication",
+                "plow/code-duplication",
                 &path,
                 &start_str,
                 &token_str,
                 &line_count_str,
                 &fragment_prefix,
             ]);
-            issues.push(fallow_output::build_codeclimate_issue(
+            issues.push(plow_output::build_codeclimate_issue(
                 CodeClimateIssueInput {
-                    check_name: "fallow/code-duplication",
+                    check_name: "plow/code-duplication",
                     description: &format!(
                         "Code clone group {} ({} lines, {} instances)",
                         i + 1,
@@ -417,8 +417,8 @@ fn codeclimate_path(path: &Path, root: &Path) -> String {
 mod tests {
     use std::path::Path;
 
-    use fallow_output::{CloneFamilyActionType, CloneGroupActionType};
-    use fallow_types::duplicates::{
+    use plow_output::{CloneFamilyActionType, CloneGroupActionType};
+    use plow_types::duplicates::{
         CloneInstance, DuplicationStats, RefactoringKind, RefactoringSuggestion,
     };
 
@@ -631,7 +631,7 @@ mod tests {
 
         assert_eq!(issues.len(), 1);
         let issue = &issues[0];
-        assert_eq!(issue.check_name, "fallow/code-duplication");
+        assert_eq!(issue.check_name, "plow/code-duplication");
         assert_eq!(issue.location.path, "app/%5Bid%5D/page.tsx");
         assert_eq!(issue.location.lines.begin, 4);
         assert_eq!(issue.categories, vec!["Duplication"]);

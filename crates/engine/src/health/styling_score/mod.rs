@@ -97,7 +97,7 @@
 //! is high or low. The framing is "thin authored-CSS surface", not "unreliable
 //! analysis": a utility-first Tailwind project legitimately authors little CSS,
 //! so a low mark means the declaration-normalized rubric had little to measure,
-//! not that fallow's analysis failed. The EMPTY case (no import-reachable
+//! not that plow's analysis failed. The EMPTY case (no import-reachable
 //! stylesheet, so `css_analytics` and `styling_health` are both `None`) is the
 //! strongest form of withholding and is handled one layer up by the human "No
 //! stylesheets analyzed" note; this function only ever runs on a non-empty report.
@@ -118,13 +118,13 @@
 //! duplication down-weight moves moderate-dup projects by ~1-2pt (no band flip).
 //!
 //! Consumer note: a v2 -> v3 bump moves `styling_health.score`/`grade` for some
-//! projects, so `--format json` snapshot diffs (including fallow's own golden
+//! projects, so `--format json` snapshot diffs (including plow's own golden
 //! snapshots) and styling-grade trend dashboards see a one-time step-change at the
 //! version boundary; gate on `formula_version`. No exit-code, badge, gate, regression
 //! baseline, or trend-snapshot consumes the styling score, so nothing fails; the
 //! code `health_score` is byte-unchanged.
 
-use fallow_output::{
+use plow_output::{
     CssAnalyticsReport, STYLING_HEALTH_FORMULA_VERSION, StylingHealth, StylingHealthConfidence,
     StylingHealthPenalties, letter_grade,
 };
@@ -154,7 +154,7 @@ const STRUCTURAL_CAP: f64 = 10.0;
 /// declarations a single finding can move an entire penalty category to its
 /// ceiling and the grade reflects sampling noise rather than systematic quality;
 /// above it, individual findings contribute proportionally. Empirically separates
-/// the calibration corpus: fallow-tools (24 declarations) and leenders-coaching
+/// the calibration corpus: plow-tools (24 declarations) and leenders-coaching
 /// (38) read as thin authored surfaces, while every design system and the
 /// `>= 145`-declaration Tailwind apps stay confident.
 const MIN_CONFIDENT_DECLARATIONS: u32 = 50;
@@ -393,7 +393,7 @@ fn styling_confidence(
         && total > 0
         && f64::from(inputs.atomic_declarations) / f64::from(total) >= ATOMIC_CONFIDENCE_SHARE
     {
-        // Atomic CSS is flat at the COMPILED layer; the source rules fallow lifts
+        // Atomic CSS is flat at the COMPILED layer; the source rules plow lifts
         // are not representative of structure, so the structural axis is inert.
         let reason = "structure (nesting, !important density) is not assessable for \
                       compile-time-atomic CSS-in-JS (StyleX/Panda); this grade reflects \
@@ -546,7 +546,7 @@ fn token_erosion_penalty(report: &CssAnalyticsReport) -> f64 {
 /// values accrues a bounded, gently-growing penalty. Counts come from
 /// `summary.unique_*` (recomputed at health time, never cached); see the module
 /// docs and the [`SHADOW_SPRAWL_BASELINE`] / [`SPRAWL_DIVISOR`] rationale.
-fn value_sprawl_term(s: &fallow_output::CssAnalyticsSummary) -> f64 {
+fn value_sprawl_term(s: &plow_output::CssAnalyticsSummary) -> f64 {
     let excess = s
         .unique_box_shadows
         .saturating_sub(SHADOW_SPRAWL_BASELINE)

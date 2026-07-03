@@ -1,12 +1,12 @@
-# Contributing to Fallow
+# Contributing to Plow
 
-Thanks for your interest in contributing to fallow! This guide covers everything you need to get started.
+Thanks for your interest in contributing to plow! This guide covers everything you need to get started.
 
 ## Getting started
 
 ```bash
-git clone https://github.com/fallow-rs/fallow.git
-cd fallow
+git clone https://github.com/fglogan/genesis-plow.git
+cd plow
 git config core.hooksPath .githooks    # Enable commit-msg/pre-commit/pre-push hooks
 npm install                            # Install repo tooling such as commitlint
 cargo build --workspace
@@ -30,14 +30,14 @@ them when packaging the published crate.
 
 ```bash
 cargo build --workspace              # Debug build
-cargo build --release -p fallow-cli  # Release build (CLI only)
+cargo build --release -p plow-cli  # Release build (CLI only)
 ```
 
 ### Testing
 
 ```bash
 cargo test --workspace               # All tests
-cargo test -p fallow-core            # Single crate
+cargo test -p plow-core            # Single crate
 cargo clippy --workspace -- -D warnings
 cargo fmt --all -- --check
 ```
@@ -45,11 +45,11 @@ cargo fmt --all -- --check
 ### Running locally
 
 ```bash
-cargo run --bin fallow -- dead-code       # Unused code analysis
-cargo run --bin fallow -- dupes           # Duplication detection
-cargo run --bin fallow -- health          # Complexity metrics
-cargo run --bin fallow -- fix --dry-run   # Auto-fix preview
-cargo run --bin fallow -- list --plugins  # Show detected plugins
+cargo run --bin plow -- dead-code       # Unused code analysis
+cargo run --bin plow -- dupes           # Duplication detection
+cargo run --bin plow -- health          # Complexity metrics
+cargo run --bin plow -- fix --dry-run   # Auto-fix preview
+cargo run --bin plow -- list --plugins  # Show detected plugins
 ```
 
 ### Benchmarks
@@ -76,7 +76,7 @@ crates/
 editors/
   vscode/   — VS Code extension
 npm/
-  fallow/   — npm wrapper package
+  plow/   — npm wrapper package
 ```
 
 ## Adding a framework plugin
@@ -121,11 +121,11 @@ ecosystem = "core"
 
 - Use `[[prefix]]` when every package under a scope or name family is tooling (matched with `name.starts_with(pattern)`); use `[[exact]]` for a single package name. `notes` / `ecosystem` are optional, for human context only.
 - Do **not** add framework-plugin packages (`vite-plugin-*`, `prettier-plugin-*`, `eslint-plugin-*`, `@rollup/plugin-*`, or scoped forms like `@ianvs/prettier-plugin-sort-imports`). Those must be credited by the relevant plugin's config parser when they actually appear in the config file; listing them here would hide a declared-but-unused plugin. The catalogue's parse tests reject such entries.
-- Run `cargo test -p fallow-core plugins::tooling` to validate the catalogue (it checks the TOML parses, has no empty/whitespace prefixes, no duplicates, and no framework-plugin entries). The file is embedded into the binary via `include_str!`, so a passing test means a working release.
+- Run `cargo test -p plow-core plugins::tooling` to validate the catalogue (it checks the TOML parses, has no empty/whitespace prefixes, no duplicates, and no framework-plugin entries). The file is embedded into the binary via `include_str!`, so a passing test means a working release.
 
 ## Editing the JSON output contract
 
-Fallow's JSON output schema lives in `docs/output-schema.json` (JSON Schema draft-07) and is consumed by downstream tools (VS Code extension TypeScript codegen, GitHub Action jq scripts, AI agents using AJV validation).
+Plow's JSON output schema lives in `docs/output-schema.json` (JSON Schema draft-07) and is consumed by downstream tools (VS Code extension TypeScript codegen, GitHub Action jq scripts, AI agents using AJV validation).
 
 The schema covers two layers, with different ownership rules:
 
@@ -133,9 +133,9 @@ The schema covers two layers, with different ownership rules:
 
 The per-finding structs in `crates/types/src/results.rs` and `crates/core/src/duplicates/types.rs`, the JSON-layer augmentation types in `crates/types/src/output.rs`, the per-finding action wrappers in `crates/types/src/output_health.rs`, the health output subtree in `crates/cli/src/health_types/`, the shared envelope and utility shapes in `crates/types/src/envelope.rs`, and the per-command envelope structs in `crates/cli/src/output_envelope.rs` all carry `#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]`. The full list of derived definitions is `derived_definition_names()` in `crates/cli/src/bin/schema_emit.rs`.
 
-The health and envelope types live on `fallow-cli` (the binary crate) rather than `fallow-types`, so deriving `JsonSchema` on them required a sibling `schema` cargo feature on `fallow-cli`. The `schema-emit` feature now depends on `fallow-cli/schema` alongside `fallow-types/schema` + `fallow-core/schema`, so a single `cargo run -p fallow-cli --features schema-emit --bin fallow-schema-emit` covers the whole tree.
+The health and envelope types live on `plow-cli` (the binary crate) rather than `plow-types`, so deriving `JsonSchema` on them required a sibling `schema` cargo feature on `plow-cli`. The `schema-emit` feature now depends on `plow-cli/schema` alongside `plow-types/schema` + `plow-core/schema`, so a single `cargo run -p plow-cli --features schema-emit --bin plow-schema-emit` covers the whole tree.
 
-A drift gate (`cargo test -p fallow-cli --features schema-emit --bin fallow-schema-emit`) compares the derived shape against the committed `docs/output-schema.json` and fails when:
+A drift gate (`cargo test -p plow-cli --features schema-emit --bin plow-schema-emit`) compares the derived shape against the committed `docs/output-schema.json` and fails when:
 - a Rust struct gains a field that is missing from the schema,
 - a Rust struct loses a field that is still listed in the schema,
 - a Rust field is required but the schema has it optional (or vice versa),
@@ -144,7 +144,7 @@ A drift gate (`cargo test -p fallow-cli --features schema-emit --bin fallow-sche
 To regenerate `docs/output-schema.json` against the Rust source of truth:
 
 ```bash
-cargo run -p fallow-cli --features schema-emit --bin fallow-schema-emit > docs/output-schema.json
+cargo run -p plow-cli --features schema-emit --bin plow-schema-emit > docs/output-schema.json
 ```
 
 Phase 8 closed the prose-and-shape escape hatch: every type in `derived_definition_names()` is regenerated from Rust, with descriptions sourced from `///` doc comments and per-envelope titles from `#[schemars(title = "...")]`. Editing the committed schema by hand on any in-scope definition will fail the strict gate on the next `cargo test`.
@@ -159,9 +159,9 @@ The following surfaces of `docs/output-schema.json` stay hand-maintained today:
 
 The `committed_property_refs_match_derived_property_refs` drift test catches `$ref`-value drift between derived and committed property shapes (e.g. if a future change repoints `CombinedOutput.dupes` away from `DuplicationReport`); this is a check, not a hand-maintained section.
 
-The document-root `oneOf` is now derived from Rust as of #384 item 6: the typed `FallowOutput` enum (in `crates/cli/src/output_envelope.rs`) wraps every object-shaped envelope and emits the root union via the `rewrite_document_root_one_of` step in `crates/cli/src/bin/schema_emit.rs`. Editing the root `oneOf` by hand will be reverted on the next regeneration. The root union is `[FallowOutput, CodeClimateOutput, ...HAND_MAINTAINED_ROOT_ENVELOPES]`: `CodeClimateOutput` (a bare JSON array via `#[serde(transparent)]`) is a sibling branch because the planned future move to `#[serde(tag = "kind")]` requires every variant of `FallowOutput` to serialize as an object, which the Code Climate / GitLab Code Quality spec forbids for that one envelope.
+The document-root `oneOf` is now derived from Rust as of #384 item 6: the typed `PlowOutput` enum (in `crates/cli/src/output_envelope.rs`) wraps every object-shaped envelope and emits the root union via the `rewrite_document_root_one_of` step in `crates/cli/src/bin/schema_emit.rs`. Editing the root `oneOf` by hand will be reverted on the next regeneration. The root union is `[PlowOutput, CodeClimateOutput, ...HAND_MAINTAINED_ROOT_ENVELOPES]`: `CodeClimateOutput` (a bare JSON array via `#[serde(transparent)]`) is a sibling branch because the planned future move to `#[serde(tag = "kind")]` requires every variant of `PlowOutput` to serialize as an object, which the Code Climate / GitLab Code Quality spec forbids for that one envelope.
 
-If you add a new finding type or utility shape, derive `JsonSchema` on the matching Rust struct, register it in `derived_definition_names()`, and the drift gate forces the schema to follow. **Adding a new top-level envelope** also requires adding a new variant to `FallowOutput` in `crates/cli/src/output_envelope.rs` so the document root keeps documenting every wire shape.
+If you add a new finding type or utility shape, derive `JsonSchema` on the matching Rust struct, register it in `derived_definition_names()`, and the drift gate forces the schema to follow. **Adding a new top-level envelope** also requires adding a new variant to `PlowOutput` in `crates/cli/src/output_envelope.rs` so the document root keeps documenting every wire shape.
 
 ### After editing the schema
 
@@ -199,10 +199,10 @@ CI runs `pnpm run check:codegen` to confirm the committed generated file matches
 
 ## Reporting issues
 
-- **Bug reports**: [Open an issue](https://github.com/fallow-rs/fallow/issues/new?template=bug_report.yml) with reproduction steps
-- **Feature requests**: [Open an issue](https://github.com/fallow-rs/fallow/issues/new?template=feature_request.yml) describing the problem and proposed solution
-- **False positives**: Include the fallow output and a minimal reproduction
+- **Bug reports**: [Open an issue](https://github.com/fglogan/genesis-plow/issues/new?template=bug_report.yml) with reproduction steps
+- **Feature requests**: [Open an issue](https://github.com/fglogan/genesis-plow/issues/new?template=feature_request.yml) describing the problem and proposed solution
+- **False positives**: Include the plow output and a minimal reproduction
 
 ## Documentation
 
-Documentation lives at [docs.fallow.tools](https://docs.fallow.tools). For documentation improvements, open a PR or issue.
+Documentation lives at [docs.genesis-plow.dev](https://docs.genesis-plow.dev). For documentation improvements, open a PR or issue.

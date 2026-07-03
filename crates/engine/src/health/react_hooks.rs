@@ -16,8 +16,8 @@
 //! alongside `react_hook_count` / `react_prop_count`.
 
 use crate::source::ModuleInfo;
-use fallow_output::ReactHookProfile;
-use fallow_types::extract::{FunctionComplexity, HookUse, HookUseKind};
+use plow_output::ReactHookProfile;
+use plow_types::extract::{FunctionComplexity, HookUse, HookUseKind};
 
 /// Accumulator mirroring [`ReactHookProfile`] but always present per frame; the
 /// caller converts it to `Option<ReactHookProfile>` only when non-empty.
@@ -151,7 +151,7 @@ fn innermost_enclosing_frame(frame_spans: &[(u32, u32)], span_start: u32) -> Opt
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_types::extract::compute_line_offsets;
+    use plow_types::extract::compute_line_offsets;
 
     fn fc(name: &str, line: u32, line_count: u32, react_hook_count: u16) -> FunctionComplexity {
         fc_at(name, line, 0, line_count, react_hook_count)

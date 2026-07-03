@@ -1,5 +1,5 @@
 [package]
-name = "fallow-engine"
+name = "plow-engine"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,19 +8,19 @@ homepage.workspace = true
 documentation.workspace = true
 keywords.workspace = true
 categories.workspace = true
-description = "Typed analysis engine facade for fallow consumers"
+description = "Typed analysis engine facade for plow consumers"
 readme = "../../README.md"
 
 [lib]
 doctest = false
 
 [dependencies]
-fallow-config = { workspace = true }
-fallow-core = { workspace = true }
-fallow-extract = { workspace = true }
-fallow-graph = { workspace = true }
-fallow-output = { workspace = true }
-fallow-types = { workspace = true }
+plow-config = { workspace = true }
+plow-core = { workspace = true }
+plow-extract = { workspace = true }
+plow-graph = { workspace = true }
+plow-output = { workspace = true }
+plow-types = { workspace = true }
 colored = { workspace = true }
 dunce = { workspace = true }
 globset = { workspace = true }
@@ -33,7 +33,7 @@ tracing = { workspace = true }
 xxhash-rust = { workspace = true }
 
 [features]
-schema = ["fallow-output/schema", "fallow-types/schema"]
+schema = ["plow-output/schema", "plow-types/schema"]
 
 [dev-dependencies]
 oxc_span = { workspace = true }

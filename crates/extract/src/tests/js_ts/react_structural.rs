@@ -1,6 +1,6 @@
 //! React / JSX structural extraction tests (Phase 0 foundation).
 
-use fallow_types::extract::{ComponentFunctionKind, HookUseKind};
+use plow_types::extract::{ComponentFunctionKind, HookUseKind};
 
 use crate::tests::{parse_ts, parse_tsx};
 
@@ -1277,7 +1277,7 @@ fn host_element_child_in_passthrough_is_not_pure() {
 fn typed_prop<'a>(
     info: &'a crate::ModuleInfo,
     name: &str,
-) -> &'a fallow_types::extract::ComponentProp {
+) -> &'a plow_types::extract::ComponentProp {
     info.react_props
         .iter()
         .find(|p| p.name == name)

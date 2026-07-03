@@ -79,7 +79,7 @@ Status: draft
 - [ ] Keep extraction, graph facts, and reporting in the narrowest crate that owns the stage.
 - [ ] Reuse existing framework detection and config resolution helpers before adding new abstractions.
 - [ ] Add rule severity defaults, aliases, and unknown-key suggestions in \`crates/config/src/config/rules.rs\`.
-- [ ] Add \`fallow explain\` coverage in \`crates/cli/src/explain.rs\`.
+- [ ] Add \`plow explain\` coverage in \`crates/cli/src/explain.rs\`.
 - [ ] Update LSP, MCP, schemas, generated types, and CI-facing formats when the finding is user visible.
 
 ## Fixture Matrix

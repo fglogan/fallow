@@ -1,4 +1,4 @@
-//! Batch-atomicity layer for `fallow fix`.
+//! Batch-atomicity layer for `plow fix`.
 //!
 //! Fixers stage writes into a shared [`FixPlan`], then the orchestrator
 //! commits them atomically per file and records any skips.
@@ -48,11 +48,11 @@ impl SkipReason {
     pub(super) fn human_message(self, path: &Path) -> String {
         match self {
             Self::ContentChanged => format!(
-                "Skipping {}: file content changed since `fallow dead-code` ran. Re-run `fallow fix` to refresh the analysis first.",
+                "Skipping {}: file content changed since `plow dead-code` ran. Re-run `plow fix` to refresh the analysis first.",
                 path.display(),
             ),
             Self::MixedLineEndings => format!(
-                "Skipping {}: file has mixed CRLF/LF line endings. Normalize it, then re-run `fallow fix`.",
+                "Skipping {}: file has mixed CRLF/LF line endings. Normalize it, then re-run `plow fix`.",
                 path.display(),
             ),
             Self::LowConfidenceOffGraph => format!(
@@ -94,7 +94,7 @@ impl CommitOutcome {
     }
 }
 
-/// Accumulator for batched writes during a `fallow fix` run.
+/// Accumulator for batched writes during a `plow fix` run.
 pub(super) struct FixPlan {
     entries: Vec<PlannedWrite>,
     skipped: Vec<SkippedFile>,
@@ -192,7 +192,7 @@ impl FixPlan {
 /// caller asked for (`requested`) and the symlink-resolved path the
 /// rename will actually write through (`resolved`). Tracking both is
 /// required so the rename writes through symlinks (matching
-/// `fallow_config::atomic_write`) while user-facing reporting still
+/// `plow_config::atomic_write`) while user-facing reporting still
 /// references the path the user knows.
 struct StagedEntry {
     handle: NamedTempFile,
@@ -212,7 +212,7 @@ fn stage_one(target: &Path, content: &[u8]) -> std::io::Result<StagedEntry> {
     use std::io::Write;
     handle.write_all(content)?;
     handle.as_file().sync_all()?;
-    fallow_config::preserve_target_mode(handle.path(), &resolved);
+    plow_config::preserve_target_mode(handle.path(), &resolved);
     Ok(StagedEntry {
         handle,
         requested: target.to_path_buf(),
@@ -548,7 +548,7 @@ mod tests {
     fn _atomic_write_still_works_for_callers_not_routed_through_the_plan() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.json");
-        fallow_config::atomic_write(&path, b"{}").unwrap();
+        plow_config::atomic_write(&path, b"{}").unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "{}");
     }
 

@@ -17,19 +17,19 @@ export const resolveBackend = (id: string): AgentBackend | null =>
 
 /**
  * Build the trade-off elicitation prompt from the deterministic digest. The agent
- * reads the diff through the non-deterministic lenses fallow cannot prove
+ * reads the diff through the non-deterministic lenses plow cannot prove
  * (abstraction, error handling, data-model shape, ...) and emits the trade-off
  * envelope. Governing principle is TASTE OWNERSHIP: name the open question, never
- * prescribe the answer. The full honesty contract lives in the `fallow-review`
+ * prescribe the answer. The full honesty contract lives in the `plow-review`
  * skill's `tradeoff-elicitation.md`; this is the wire-level instruction.
  */
 export const buildTradeOffPrompt = (digest: unknown, graphSnapshotHash: string): string =>
   [
     "You are a code reviewer surfacing the NON-DETERMINISTIC trade-offs in a diff:",
-    "the architectural choices fallow cannot prove from the module graph (abstraction,",
+    "the architectural choices plow cannot prove from the module graph (abstraction,",
     "error handling, data-model shape, coupling, naming, testability, trust boundaries).",
     "",
-    "Here is the deterministic review digest (facts fallow already owns):",
+    "Here is the deterministic review digest (facts plow already owns):",
     "",
     JSON.stringify(digest, null, 2),
     "",

@@ -1,15 +1,15 @@
-//! `fallow flags` subcommand: detect and report feature flag patterns.
+//! `plow flags` subcommand: detect and report feature flag patterns.
 
 use std::path::Path;
 use std::process::ExitCode;
 use std::time::Instant;
 
-use fallow_config::{OutputFormat, ResolvedConfig};
-use fallow_types::results::{FeatureFlag, FlagKind};
+use plow_config::{OutputFormat, ResolvedConfig};
+use plow_types::results::{FeatureFlag, FlagKind};
 
 use crate::error::emit_error;
 
-/// Options for the `fallow flags` subcommand.
+/// Options for the `plow flags` subcommand.
 pub struct FlagsOptions<'a> {
     pub root: &'a Path,
     pub config_path: &'a Option<std::path::PathBuf>,
@@ -25,7 +25,7 @@ pub struct FlagsOptions<'a> {
     pub top: Option<usize>,
 }
 
-/// Run the `fallow flags` subcommand.
+/// Run the `plow flags` subcommand.
 pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
     let start = Instant::now();
 
@@ -33,7 +33,7 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
         Ok(c) => c,
         Err(code) => return code,
     };
-    let analysis = fallow_engine::analyze_feature_flags(&config);
+    let analysis = plow_engine::analyze_feature_flags(&config);
     if analysis.files_scanned == 0 {
         return emit_error("no files discovered", 2, opts.output);
     }
@@ -44,7 +44,7 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
     }
     // Note find-state for telemetry before any exit (issue #1650 follow-up): the
     // flags command emits a `code_quality_review` workflow event (the same label
-    // as combined `fallow`), so without this its findings_present serialized as
+    // as combined `plow`), so without this its findings_present serialized as
     // null. Count the scope-filtered flags BEFORE `--top` truncation so the
     // bucket reflects the full set, not the displayed head.
     crate::telemetry::note_result_count(flags.len());
@@ -189,10 +189,10 @@ fn print_file_path(display: &str) {
     }
 }
 
-/// When `fallow flags` finds nothing, surface the configuration surface so the
-/// user can distinguish a true negative from "fallow does not recognize my SDK
+/// When `plow flags` finds nothing, surface the configuration surface so the
+/// user can distinguish a true negative from "plow does not recognize my SDK
 /// yet". On full defaults the hint enumerates the built-in detectors (sourced
-/// from `fallow-engine`, never hardcoded) and points at the config knobs. When
+/// from `plow-engine`, never hardcoded) and points at the config knobs. When
 /// custom `flags.*` config is present, it collapses to a single terse
 /// acknowledgement so users who already found the surface are not nagged. All
 /// lines go to stderr, mirroring the empty-result line they follow.
@@ -259,12 +259,12 @@ fn print_empty_flags_custom_hint(
 fn print_empty_flags_default_hint(files_scanned: usize, files_label: &str) {
     use colored::Colorize;
 
-    let env_prefixes = fallow_engine::builtin_env_prefixes()
+    let env_prefixes = plow_engine::builtin_env_prefixes()
         .iter()
         .map(|p| format!("{p}*"))
         .collect::<Vec<_>>()
         .join(", ");
-    let providers = fallow_engine::builtin_sdk_providers().join(", ");
+    let providers = plow_engine::builtin_sdk_providers().join(", ");
 
     eprintln!(
         "  {}",
@@ -287,7 +287,7 @@ fn print_empty_flags_default_hint(files_scanned: usize, files_label: &str) {
     );
     eprintln!(
         "  {}",
-        "Docs: https://docs.fallow.tools/cli/flags#configuration".dimmed()
+        "Docs: https://docs.genesis-plow.dev/cli/flags#configuration".dimmed()
     );
 }
 
@@ -372,7 +372,7 @@ fn print_flags_by_file_section(flags: &[FeatureFlag], config: &ResolvedConfig) {
     }
 }
 
-/// Human-readable output for `fallow flags`.
+/// Human-readable output for `plow flags`.
 fn print_flags_human(
     flags: &[FeatureFlag],
     config: &ResolvedConfig,
@@ -408,7 +408,7 @@ fn print_flags_human(
     }
 }
 
-/// Compact output (one line per finding) for `fallow flags`.
+/// Compact output (one line per finding) for `plow flags`.
 ///
 /// Follows the established `tag:path:line:detail` convention from `compact.rs`.
 fn print_flags_compact(flags: &[FeatureFlag], config: &ResolvedConfig) {
@@ -461,16 +461,16 @@ fn kind_label(flag: &FeatureFlag) -> &'static str {
     }
 }
 
-/// SARIF output for `fallow flags`.
+/// SARIF output for `plow flags`.
 #[expect(
     clippy::expect_used,
     reason = "feature flag SARIF JSON is built from serializable literals"
 )]
 fn print_flags_sarif(flags: &[FeatureFlag], config: &ResolvedConfig) {
     let rules = vec![serde_json::json!({
-        "id": "fallow/feature-flag",
+        "id": "plow/feature-flag",
         "shortDescription": { "text": "Feature flag pattern detected" },
-        "helpUri": "https://docs.fallow.tools/cli/flags",
+        "helpUri": "https://docs.genesis-plow.dev/cli/flags",
         "defaultConfiguration": { "level": "note" },
     })];
 
@@ -489,7 +489,7 @@ fn print_flags_sarif(flags: &[FeatureFlag], config: &ResolvedConfig) {
                 );
             }
             serde_json::json!({
-                "ruleId": "fallow/feature-flag",
+                "ruleId": "plow/feature-flag",
                 "level": "note",
                 "message": { "text": msg },
                 "locations": [{
@@ -508,9 +508,9 @@ fn print_flags_sarif(flags: &[FeatureFlag], config: &ResolvedConfig) {
         "runs": [{
             "tool": {
                 "driver": {
-                    "name": "fallow",
+                    "name": "plow",
                     "version": env!("CARGO_PKG_VERSION"),
-                    "informationUri": "https://github.com/fallow-rs/fallow",
+                    "informationUri": "https://github.com/fglogan/genesis-plow",
                     "rules": rules,
                 }
             },
@@ -528,7 +528,7 @@ fn escape_backticks(s: &str) -> String {
     s.replace('`', "\\`")
 }
 
-/// Markdown output for `fallow flags` (PR comments).
+/// Markdown output for `plow flags` (PR comments).
 fn print_flags_markdown(flags: &[FeatureFlag], config: &ResolvedConfig) {
     if flags.is_empty() {
         println!("## Feature flags: no flags detected");
@@ -576,7 +576,7 @@ fn print_flags_markdown(flags: &[FeatureFlag], config: &ResolvedConfig) {
     }
 }
 
-/// CodeClimate output for `fallow flags` (GitLab Code Quality).
+/// CodeClimate output for `plow flags` (GitLab Code Quality).
 #[expect(
     clippy::expect_used,
     reason = "feature flag CodeClimate JSON is built from serializable literals"
@@ -603,7 +603,7 @@ fn print_flags_codeclimate(flags: &[FeatureFlag], config: &ResolvedConfig) {
                 fnv_fingerprint(&["feature-flag", &path, &f.line.to_string(), &f.flag_name]);
             serde_json::json!({
                 "type": "issue",
-                "check_name": "fallow/feature-flag",
+                "check_name": "plow/feature-flag",
                 "description": description,
                 "categories": ["Clarity"],
                 "severity": "info",
@@ -622,7 +622,7 @@ fn print_flags_codeclimate(flags: &[FeatureFlag], config: &ResolvedConfig) {
     );
 }
 
-/// JSON output for `fallow flags`.
+/// JSON output for `plow flags`.
 #[expect(
     clippy::expect_used,
     reason = "feature flag JSON output is built from serializable literals"
@@ -633,16 +633,15 @@ fn print_flags_json(
     elapsed: std::time::Duration,
     explain: bool,
 ) {
-    let output =
-        fallow_output::build_feature_flags_output(fallow_output::FeatureFlagsOutputInput {
-            schema_version: crate::report::SCHEMA_VERSION,
-            version: env!("CARGO_PKG_VERSION").to_string(),
-            elapsed,
-            flags,
-            root: &config.root,
-            meta: explain.then(fallow_output::feature_flags_meta),
-        });
-    let output = fallow_output::serialize_feature_flags_json_output(
+    let output = plow_output::build_feature_flags_output(plow_output::FeatureFlagsOutputInput {
+        schema_version: crate::report::SCHEMA_VERSION,
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        elapsed,
+        flags,
+        root: &config.root,
+        meta: explain.then(plow_output::feature_flags_meta),
+    });
+    let output = plow_output::serialize_feature_flags_json_output(
         output,
         crate::output_runtime::current_root_envelope_mode(),
         crate::output_runtime::telemetry_analysis_run_id().as_deref(),
@@ -658,7 +657,7 @@ fn print_flags_json(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_types::results::FlagConfidence;
+    use plow_types::results::FlagConfidence;
     use std::path::PathBuf;
 
     /// No explicit `--config`; static so the `&Option<PathBuf>` field borrows it.

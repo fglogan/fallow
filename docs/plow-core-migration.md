@@ -1,0 +1,102 @@
+# Migrating from plow-core analyzer functions
+
+ADR-008 makes `plow-core` an internal implementation crate. Starting with
+2.76.0, the top-level `plow_core::analyze*` entry points plus the
+detector helpers under `plow_core::analyze::*` emit deprecation
+warnings. The publish cutoff is now tracked as part of the next
+breaking-compatible cleanup release so it can align with the `plow-api`
+surface.
+
+Use the supported embedder API in `plow_api`. New Rust consumers should call
+the typed `run_*` functions (`run_dead_code`, `run_duplication`,
+`run_feature_flags`, `run_health`, `run_circular_dependencies`,
+`run_boundary_violations`) and serialize only at their own protocol boundary
+via the matching `serialize_*_programmatic_json` function.
+
+Use `plow_engine` for in-process consumers that need typed analysis results.
+It owns the migration boundary over the internal `plow-core` backend and is
+where editor, API, and embedding surfaces should move before depending on
+typed `AnalysisResults`.
+
+## Function mapping
+
+| Deprecated `plow_core` function | Replacement |
+| --- | --- |
+| `plow_core::analyze`, `analyze_with_usages`, `analyze_with_trace`, `analyze_retaining_modules`, `analyze_with_parse_result`, `analyze_project` | `plow_api::run_dead_code` for typed output before serialization, or `plow_engine` for lower-level in-process analysis |
+| `plow_core::analyze::find_dead_code_full` | `plow_api::run_dead_code` |
+| `find_unused_files` | `plow_api::run_dead_code` |
+| `find_unused_exports` | `plow_api::run_dead_code` |
+| `find_duplicate_exports` | `plow_api::run_dead_code` |
+| `find_unused_dependencies` | `plow_api::run_dead_code` |
+| `find_unused_members` | `plow_api::run_dead_code` |
+| Catalog and dependency-override finders | `plow_api::run_dead_code` |
+| `find_boundary_violations` | `plow_api::run_boundary_violations` |
+| `collect_feature_flags`, `correlate_with_dead_code` | `plow_api::run_feature_flags` for typed output before serialization. The `guarded_dead_exports` field on each flag carries the dead-code correlation. |
+
+For duplication clone detection, use
+`plow_api::run_duplication`. For health, complexity, hotspots, targets, and
+coverage-gap output, use `plow_api::run_health` or
+`plow_api::run_health_with_runner` for typed output. If a Rust embedder needs
+JSON, call the matching `serialize_*_programmatic_json` function at its
+protocol boundary.
+
+## Minimal example
+
+```rust
+use plow_api::{AnalysisOptions, DeadCodeOptions, run_dead_code};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let options = DeadCodeOptions {
+        analysis: AnalysisOptions {
+            root: Some(std::env::current_dir()?),
+            ..AnalysisOptions::default()
+        },
+        ..DeadCodeOptions::default()
+    };
+
+    let output = run_dead_code(&options)?;
+    let total = output.output.summary.total_issues;
+    println!("{total} issues");
+    Ok(())
+}
+```
+
+The JSON contract is documented in `docs/output-schema.json`. Consumers that
+want CLI parity can call the matching `serialize_*_programmatic_json` function
+on a typed programmatic output at their protocol boundary. Object-shaped JSON
+roots always carry the top-level `kind` discriminator; consumers should branch
+on `kind` rather than probing for unique field presence.
+
+## Semantic differences vs. the typed Rust API
+
+The programmatic API runs the full analysis pipeline (discovery, parsing,
+plugins, scripts, module resolution, graph construction, all detectors) for
+every call. If you previously invoked one detector in isolation, the new call
+still runs the entire pipeline. There is no per-detector programmatic entry
+point today; if you need to filter, use the typed `run_*` output's retained
+result arrays. Consumers that intentionally need JSON can serialize the typed
+output and select the relevant JSON array at their boundary.
+
+The JSON compatibility envelope wraps each finding in the same `*Finding` shape
+as the typed programmatic output. JSON field access patterns differ from the old
+Rust structs; for example:
+
+```jsonc
+// old (Rust):     results.unused_exports[i].export.path
+// new (JSON):     json["unused_exports"][i]["export"]["path"]
+```
+
+Introspect the shape against any real fixture with:
+
+```bash
+plow check --format json --root path/to/project | jq '.unused_exports[0]'
+```
+
+`ProgrammaticError` carries the same exit-code ladder as the CLI
+(`exit_code: 0` ok, `2` generic, `7` network, etc.) so CI integrations that
+branch on exit codes work identically through the programmatic surface.
+
+## Removed compatibility debt
+
+- The previous root-envelope compatibility options have been removed. Tagged
+  root envelopes are the only supported object-shaped JSON protocol.

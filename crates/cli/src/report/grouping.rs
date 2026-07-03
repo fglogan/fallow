@@ -5,9 +5,9 @@
 
 use std::path::{Path, PathBuf};
 
-pub use fallow_api::ResultGroup;
-use fallow_config::WorkspaceInfo;
-use fallow_types::results::AnalysisResults;
+pub use plow_api::ResultGroup;
+use plow_config::WorkspaceInfo;
+use plow_types::results::AnalysisResults;
 
 use super::relative_path;
 use crate::codeowners::{self, CodeOwners, NO_SECTION_LABEL, UNOWNED_LABEL};
@@ -144,7 +144,7 @@ pub fn group_analysis_results(
     resolver: &OwnershipResolver,
 ) -> Vec<ResultGroup> {
     let is_section_mode = matches!(resolver, OwnershipResolver::Section(_));
-    fallow_api::group_analysis_results_with(
+    plow_api::group_analysis_results_with(
         results,
         |path| {
             let rel = relative_path(path, root);
@@ -167,8 +167,8 @@ pub fn resolve_owner(path: &Path, root: &Path, resolver: &OwnershipResolver) -> 
 mod tests {
     use std::path::{Path, PathBuf};
 
-    use fallow_types::output_dead_code::*;
-    use fallow_types::results::*;
+    use plow_types::output_dead_code::*;
+    use plow_types::results::*;
 
     use super::*;
     use crate::codeowners::CodeOwners;

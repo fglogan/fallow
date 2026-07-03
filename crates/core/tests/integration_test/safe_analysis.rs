@@ -1,10 +1,10 @@
-//! Runtime backstop for fallow's "static analysis never executes the analyzed
+//! Runtime backstop for plow's "static analysis never executes the analyzed
 //! project's code" invariant. The compile-time guarantee is the
 //! `#![cfg_attr(not(test), deny(clippy::disallowed_methods))]` ban on raw
-//! `Command::new` in fallow-core/extract/graph (only `fallow_core::spawn::git`
+//! `Command::new` in plow-core/extract/graph (only `plow_core::spawn::git`
 //! is permitted); this test proves the behavioral consequence end-to-end: a
 //! `package.json` lifecycle script that would write a sentinel file never runs,
-//! because fallow reads `package.json` as data and never invokes a package
+//! because plow reads `package.json` as data and never invokes a package
 //! manager.
 
 use super::common::create_config;
@@ -41,11 +41,11 @@ fn analysis_never_runs_package_json_lifecycle_scripts() {
     fs::write(root.join("orphan.ts"), "export const orphan = 2;\n").expect("write orphan.ts");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         !sentinel.exists(),
-        "fallow executed a package.json lifecycle script during analysis: the sentinel \
+        "plow executed a package.json lifecycle script during analysis: the sentinel \
          file was created. Static analysis must never run the analyzed project's code.",
     );
 

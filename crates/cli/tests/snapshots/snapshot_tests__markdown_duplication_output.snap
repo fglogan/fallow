@@ -2,7 +2,7 @@
 source: crates/cli/tests/snapshot_tests.rs
 expression: output
 ---
-## Fallow: 1 clone group found (0.2% duplication)
+## Plow: 1 clone group found (0.2% duplication)
 
 ### Duplicates
 

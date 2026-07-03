@@ -1,5 +1,5 @@
 [package]
-name = "fallow-benchmarks"
+name = "plow-benchmarks"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -7,7 +7,7 @@ repository.workspace = true
 homepage.workspace = true
 documentation.workspace = true
 publish = false
-description = "CodSpeed benchmark suites for fallow"
+description = "CodSpeed benchmark suites for plow"
 
 [[bench]]
 name = "programmatic_commands"
@@ -19,9 +19,9 @@ harness = false
 
 [dev-dependencies]
 criterion2 = { workspace = true }
-fallow-api = { workspace = true }
-fallow-core = { workspace = true }
-fallow-types = { workspace = true }
+plow-api = { workspace = true }
+plow-core = { workspace = true }
+plow-types = { workspace = true }
 tempfile = { workspace = true }
 
 [features]

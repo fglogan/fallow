@@ -14,7 +14,7 @@
 //! blank-line-padded virtual stylesheet 3b emits, so both forms converge on one
 //! [`crate::compute_css_analytics`] + styling-health pipeline (no forked metric
 //! logic). The object -> CSS transform is unavoidable (it happens in the bundler
-//! fallow does not run); the AST just removes the lexing pain and hands us a
+//! plow does not run); the AST just removes the lexing pain and hands us a
 //! structured object.
 //!
 //! It is health-time-only, like 3b: it runs over file SOURCE in the engine's CSS
@@ -894,7 +894,7 @@ mod tests {
         assert!(s.structural.is_none(), "bucket had a drop: {s:?}");
         let css = s.structural_partial.expect("partial");
         assert!(
-            !css.contains("fallowinterp"),
+            !css.contains("plowinterp"),
             "no placeholder, value dropped: {css:?}"
         );
         assert!(
@@ -994,7 +994,7 @@ mod tests {
                    const x = style({ color: v.a, background: v.b });\n";
         let s = sheets(src);
         // Every value dynamic -> body empty -> bucket dropped entirely, no empty
-        // `.fallow-css-in-js{}` rule in any sheet.
+        // `.plow-css-in-js{}` rule in any sheet.
         assert!(s.is_empty(), "all-dynamic bucket dropped entirely: {s:?}");
     }
 

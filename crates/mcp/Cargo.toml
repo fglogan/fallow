@@ -1,5 +1,5 @@
 [package]
-name = "fallow-mcp"
+name = "plow-mcp"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,18 +9,18 @@ homepage.workspace = true
 documentation.workspace = true
 keywords.workspace = true
 categories.workspace = true
-description = "MCP server for fallow codebase intelligence (exposes fallow as typed tools to AI agents)"
+description = "MCP server for plow codebase intelligence (exposes plow as typed tools to AI agents)"
 readme = "../../README.md"
 
 [[bin]]
-name = "fallow-mcp"
+name = "plow-mcp"
 path = "src/main.rs"
 
 [dependencies]
 rmcp = { version = "1.7", features = ["transport-io"] }
 rquickjs = "0.12"
-fallow-api.workspace = true
-fallow-types.workspace = true
+plow-api.workspace = true
+plow-types.workspace = true
 tokio.workspace = true
 serde.workspace = true
 serde_json = { workspace = true, features = ["preserve_order"] }

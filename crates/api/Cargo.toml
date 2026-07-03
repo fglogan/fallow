@@ -1,5 +1,5 @@
 [package]
-name = "fallow-api"
+name = "plow-api"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,17 +8,17 @@ homepage.workspace = true
 documentation.workspace = true
 keywords.workspace = true
 categories.workspace = true
-description = "Programmatic API contract types for fallow"
+description = "Programmatic API contract types for plow"
 readme = "../../README.md"
 
 [lib]
 doctest = false
 
 [dependencies]
-fallow-config = { workspace = true }
-fallow-engine = { workspace = true }
-fallow-output = { workspace = true }
-fallow-types = { workspace = true }
+plow-config = { workspace = true }
+plow-engine = { workspace = true }
+plow-output = { workspace = true }
+plow-types = { workspace = true }
 dunce = { workspace = true }
 globset = { workspace = true }
 rayon = { workspace = true }
@@ -29,7 +29,7 @@ schemars = { workspace = true, optional = true }
 xxhash-rust = { workspace = true }
 
 [features]
-schema = ["dep:schemars", "fallow-engine/schema", "fallow-output/schema", "fallow-types/schema"]
+schema = ["dep:schemars", "plow-engine/schema", "plow-output/schema", "plow-types/schema"]
 
 [dev-dependencies]
 tempfile = { workspace = true }

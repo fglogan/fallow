@@ -2,10 +2,10 @@
 //!
 //! Two paths:
 //!
-//! - **Edit**: a fallow config file already exists at or above `root`.
+//! - **Edit**: a plow config file already exists at or above `root`.
 //!   Append `ignoreExports` entries to it via `add_ignore_exports_rule`.
-//! - **Create-fallback**: no fallow config file exists. Generate a fresh
-//!   `.fallowrc.json` seed via the same scaffolding `fallow init` uses
+//! - **Create-fallback**: no plow config file exists. Generate a fresh
+//!   `.plowrc.json` seed via the same scaffolding `plow init` uses
 //!   (framework detection, `$schema`, `entry`, `ignorePatterns`, etc.) and
 //!   then layer the new `ignoreExports` entries on top so the user gets one
 //!   coherent config instead of a thin `{ "ignoreExports": [...] }` shell.
@@ -14,11 +14,11 @@
 //! subpackage with a workspace root somewhere above (`pnpm-workspace.yaml`,
 //! `package.json#workspaces`, `turbo.json`, `lerna.json`); fragmenting
 //! per-package configs across 8 sub-packages is a worse default than the
-//! existing "skip and warn" behavior. The user must either run `fallow init`
-//! at the workspace root or invoke `fallow fix` from there.
+//! existing "skip and warn" behavior. The user must either run `plow init`
+//! at the workspace root or invoke `plow fix` from there.
 //!
 //! `--no-create-config` (FixOptions::no_create_config) is the escape hatch
-//! for pre-commit hooks, `fallow watch`, and CI bots that must NOT
+//! for pre-commit hooks, `plow watch`, and CI bots that must NOT
 //! materialize new top-level files.
 //!
 //! Dry-run output:
@@ -34,12 +34,12 @@ use std::ffi::OsString;
 use std::fmt::Write as _;
 use std::path::{Component, Path, PathBuf};
 
-use fallow_config::{
+use plow_config::{
     ConfigFixPlan as ResolvedConfigPlan, IgnoreExportRule, OutputFormat,
     add_ignore_exports_rule_to_string, classify_config_fix_plan as classify_plan,
 };
-use fallow_types::output_dead_code::DuplicateExportFinding;
-use fallow_types::results::AnalysisResults;
+use plow_types::output_dead_code::DuplicateExportFinding;
+use plow_types::results::AnalysisResults;
 use rustc_hash::FxHashSet;
 
 use super::io::atomic_write;
@@ -119,7 +119,7 @@ fn apply_edit(
         return apply_edit_dry_run(config_path, &config_file, &entries, output, fixes);
     }
 
-    match fallow_config::add_ignore_exports_rule(config_path, &entries) {
+    match plow_config::add_ignore_exports_rule(config_path, &entries) {
         Ok(()) => {
             fixes.push(serde_json::json!({
                 "type": "add_ignore_exports",
@@ -271,14 +271,14 @@ fn emit_blocked_monorepo(
     output: OutputFormat,
     fixes: &mut Vec<serde_json::Value>,
 ) {
-    let target_display = display_path(root, &root.join(".fallowrc.json"));
+    let target_display = display_path(root, &root.join(".plowrc.json"));
     let workspace_relative = display_workspace_path(root, workspace_root);
     if !matches!(output, OutputFormat::Json) {
         let absolute = workspace_root.display();
         eprintln!(
-            "Skipped duplicate-export config fix: no fallow config file at {} \
+            "Skipped duplicate-export config fix: no plow config file at {} \
              and the directory is inside a monorepo (workspace root: {}). \
-             Run `fallow init` at the workspace root, or invoke `fallow fix` \
+             Run `plow init` at the workspace root, or invoke `plow fix` \
              from {} instead of from a subpackage.",
             root.display(),
             absolute,
@@ -292,7 +292,7 @@ fn emit_blocked_monorepo(
         "skipped": true,
         "skip_reason": "monorepo_subpackage",
         "workspace_root": workspace_relative,
-        "description": "Skipped: refusing to create .fallowrc.json inside a monorepo subpackage. Run `fallow init` at the workspace root.",
+        "description": "Skipped: refusing to create .plowrc.json inside a monorepo subpackage. Run `plow init` at the workspace root.",
     }));
 }
 
@@ -343,9 +343,9 @@ fn emit_blocked_no_create(
     let target_display = display_path(root, target);
     if !matches!(output, OutputFormat::Json) {
         eprintln!(
-            "Skipped duplicate-export config fix: no fallow config file at {} \
-             and --no-create-config was passed. Either re-run `fallow fix` \
-             without --no-create-config, or run `fallow init` first.",
+            "Skipped duplicate-export config fix: no plow config file at {} \
+             and --no-create-config was passed. Either re-run `plow fix` \
+             without --no-create-config, or run `plow init` first.",
             root.display()
         );
     }
@@ -355,7 +355,7 @@ fn emit_blocked_no_create(
         "file": target_display,
         "skipped": true,
         "skip_reason": "no_create_config",
-        "description": "Skipped: --no-create-config was passed and no fallow config file exists.",
+        "description": "Skipped: --no-create-config was passed and no plow config file exists.",
     }));
 }
 
@@ -459,7 +459,7 @@ fn display_path(root: &Path, path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_types::results::{DuplicateExport, DuplicateLocation};
+    use plow_types::results::{DuplicateExport, DuplicateLocation};
 
     fn duplicate(paths: &[PathBuf]) -> DuplicateExportFinding {
         DuplicateExportFinding::with_actions(DuplicateExport {
@@ -478,7 +478,7 @@ mod tests {
     #[test]
     fn config_fix_reanchors_paths_to_workspace_config_dir() {
         let root = Path::new("/repo");
-        let config_path = root.join("packages/ui/.fallowrc.json");
+        let config_path = root.join("packages/ui/.plowrc.json");
         let entries = ignore_export_entries(
             root,
             &config_path,
@@ -495,7 +495,7 @@ mod tests {
     #[test]
     fn config_fix_dedupes_exact_files_preserving_first_order() {
         let root = Path::new("/repo");
-        let config_path = root.join(".fallowrc.json");
+        let config_path = root.join(".plowrc.json");
         let entries = ignore_export_entries(
             root,
             &config_path,
@@ -512,9 +512,9 @@ mod tests {
 
     #[test]
     fn create_diff_renders_addition_only_prefix() {
-        let out = render_create_diff(".fallowrc.json", "{\n  \"a\": 1\n}\n");
-        assert!(out.contains("--- .fallowrc.json (does not exist)"));
-        assert!(out.contains("+++ .fallowrc.json (proposed)"));
+        let out = render_create_diff(".plowrc.json", "{\n  \"a\": 1\n}\n");
+        assert!(out.contains("--- .plowrc.json (does not exist)"));
+        assert!(out.contains("+++ .plowrc.json (proposed)"));
         assert!(out.contains("+{"));
         assert!(out.contains("+  \"a\": 1"));
         assert!(out.contains("+}"));
@@ -525,9 +525,9 @@ mod tests {
     fn unified_diff_renders_additions_against_existing() {
         let current = "{\n  \"rules\": {}\n}\n";
         let proposed = "{\n  \"ignoreExports\": [\n    { \"file\": \"src/a.ts\", \"exports\": [\"*\"] }\n  ],\n  \"rules\": {}\n}\n";
-        let diff = render_unified_diff(".fallowrc.json", current, proposed);
-        assert!(diff.contains("--- .fallowrc.json (current)"));
-        assert!(diff.contains("+++ .fallowrc.json (proposed)"));
+        let diff = render_unified_diff(".plowrc.json", current, proposed);
+        assert!(diff.contains("--- .plowrc.json (current)"));
+        assert!(diff.contains("+++ .plowrc.json (proposed)"));
         assert!(
             diff.lines()
                 .any(|l| l.starts_with("+    { \"file\": \"src/a.ts\""))
@@ -537,7 +537,7 @@ mod tests {
     #[cfg(not(miri))]
     mod fs {
         use super::*;
-        use fallow_types::results::AnalysisResults;
+        use plow_types::results::AnalysisResults;
 
         fn results_with_duplicate(root: &Path, name: &str) -> AnalysisResults {
             AnalysisResults {
@@ -557,10 +557,10 @@ mod tests {
         fn classify_returns_edit_when_config_exists() {
             let dir = tempfile::tempdir().unwrap();
             let root = dir.path();
-            std::fs::write(root.join(".fallowrc.json"), "{}\n").unwrap();
+            std::fs::write(root.join(".plowrc.json"), "{}\n").unwrap();
             match classify_plan(root, None, false) {
                 ResolvedConfigPlan::Edit { config_path } => {
-                    assert!(config_path.ends_with(".fallowrc.json"));
+                    assert!(config_path.ends_with(".plowrc.json"));
                 }
                 other => panic!("expected Edit, got {other:?}"),
             }
@@ -572,7 +572,7 @@ mod tests {
             let root = dir.path();
             match classify_plan(root, None, false) {
                 ResolvedConfigPlan::Create { target } => {
-                    assert_eq!(target, root.join(".fallowrc.json"));
+                    assert_eq!(target, root.join(".plowrc.json"));
                 }
                 other => panic!("expected Create, got {other:?}"),
             }
@@ -584,7 +584,7 @@ mod tests {
             let root = dir.path();
             match classify_plan(root, None, true) {
                 ResolvedConfigPlan::BlockedNoCreate { target } => {
-                    assert_eq!(target, root.join(".fallowrc.json"));
+                    assert_eq!(target, root.join(".plowrc.json"));
                 }
                 other => panic!("expected BlockedNoCreate, got {other:?}"),
             }
@@ -667,18 +667,15 @@ mod tests {
             });
             assert!(!err);
             assert!(
-                !root.join(".fallowrc.json").exists(),
+                !root.join(".plowrc.json").exists(),
                 "dry-run must not write"
             );
             assert_eq!(fixes.len(), 1);
             let entry = &fixes[0];
             assert_eq!(entry["dry_run"], serde_json::json!(true));
-            assert_eq!(
-                entry["created_files"],
-                serde_json::json!([".fallowrc.json"])
-            );
+            assert_eq!(entry["created_files"], serde_json::json!([".plowrc.json"]));
             let diff = entry["proposed_diff"].as_str().expect("proposed_diff");
-            assert!(diff.contains("--- .fallowrc.json (does not exist)"));
+            assert!(diff.contains("--- .plowrc.json (does not exist)"));
             assert!(diff.contains("\"ignoreExports\""));
         }
 
@@ -710,10 +707,10 @@ mod tests {
             assert_eq!(fixes[0]["applied"], serde_json::json!(true));
             assert_eq!(
                 fixes[0]["created_files"],
-                serde_json::json!([".fallowrc.json"])
+                serde_json::json!([".plowrc.json"])
             );
 
-            let path = root.join(".fallowrc.json");
+            let path = root.join(".plowrc.json");
             assert!(path.exists());
             let content = std::fs::read_to_string(&path).unwrap();
             let parsed: serde_json::Value = jsonc_parser::parse_to_serde_value(
@@ -754,7 +751,7 @@ mod tests {
                     fixes: &mut fixes,
             });
             assert!(!err);
-            assert!(!root.join(".fallowrc.json").exists());
+            assert!(!root.join(".plowrc.json").exists());
             assert_eq!(fixes.len(), 1);
             assert_eq!(fixes[0]["skipped"], serde_json::json!(true));
             assert_eq!(fixes[0]["skip_reason"], "no_create_config");
@@ -783,7 +780,7 @@ mod tests {
                     fixes: &mut fixes,
             });
             assert!(!err);
-            assert!(!sub.join(".fallowrc.json").exists());
+            assert!(!sub.join(".plowrc.json").exists());
             assert_eq!(fixes.len(), 1);
             assert_eq!(fixes[0]["skipped"], serde_json::json!(true));
             assert_eq!(fixes[0]["skip_reason"], "monorepo_subpackage");
@@ -794,7 +791,7 @@ mod tests {
         fn dry_run_existing_jsonc_renders_diff_and_does_not_write() {
             let dir = tempfile::tempdir().unwrap();
             let root = dir.path();
-            let cfg_path = root.join(".fallowrc.jsonc");
+            let cfg_path = root.join(".plowrc.jsonc");
             std::fs::write(&cfg_path, "{\n  // keep this comment\n  \"rules\": {}\n}\n").unwrap();
             let before = std::fs::read_to_string(&cfg_path).unwrap();
             let results = results_with_duplicate(root, "Card");
@@ -823,7 +820,7 @@ mod tests {
         fn dry_run_existing_toml_renders_diff() {
             let dir = tempfile::tempdir().unwrap();
             let root = dir.path();
-            let cfg_path = root.join("fallow.toml");
+            let cfg_path = root.join("plow.toml");
             std::fs::write(&cfg_path, "production = true\n").unwrap();
             let results = results_with_duplicate(root, "Card");
             let mut fixes = Vec::new();
@@ -846,10 +843,10 @@ mod tests {
         }
 
         #[test]
-        fn dry_run_existing_dot_fallow_toml_renders_diff() {
+        fn dry_run_existing_dot_plow_toml_renders_diff() {
             let dir = tempfile::tempdir().unwrap();
             let root = dir.path();
-            let cfg_path = root.join(".fallow.toml");
+            let cfg_path = root.join(".plow.toml");
             std::fs::write(&cfg_path, "").unwrap();
             let results = results_with_duplicate(root, "Card");
             let mut fixes = Vec::new();
@@ -871,7 +868,7 @@ mod tests {
         fn dry_run_existing_json_renders_diff() {
             let dir = tempfile::tempdir().unwrap();
             let root = dir.path();
-            let cfg_path = root.join(".fallowrc.json");
+            let cfg_path = root.join(".plowrc.json");
             std::fs::write(&cfg_path, "{\n}\n").unwrap();
             let results = results_with_duplicate(root, "Card");
             let mut fixes = Vec::new();
@@ -912,14 +909,14 @@ mod tests {
         #[test]
         fn is_config_fixable_true_when_config_exists() {
             let dir = tempfile::tempdir().unwrap();
-            std::fs::write(dir.path().join(".fallowrc.json"), "{}\n").unwrap();
-            assert!(fallow_config::is_config_fixable(dir.path(), None));
+            std::fs::write(dir.path().join(".plowrc.json"), "{}\n").unwrap();
+            assert!(plow_config::is_config_fixable(dir.path(), None));
         }
 
         #[test]
         fn is_config_fixable_true_when_can_create_at_root() {
             let dir = tempfile::tempdir().unwrap();
-            assert!(fallow_config::is_config_fixable(dir.path(), None));
+            assert!(plow_config::is_config_fixable(dir.path(), None));
         }
 
         #[test]
@@ -928,7 +925,7 @@ mod tests {
             std::fs::write(dir.path().join("pnpm-workspace.yaml"), "packages:\n").unwrap();
             let sub = dir.path().join("packages/ui");
             std::fs::create_dir_all(&sub).unwrap();
-            assert!(!fallow_config::is_config_fixable(&sub, None));
+            assert!(!plow_config::is_config_fixable(&sub, None));
         }
     }
 }

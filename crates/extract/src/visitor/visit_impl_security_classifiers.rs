@@ -4,7 +4,7 @@ use oxc_ast::ast::{
 };
 use rustc_hash::FxHashMap;
 
-use fallow_types::extract::{SecurityUrlShape, SinkArgKind, SinkLiteralValue, SinkObjectProperty};
+use plow_types::extract::{SecurityUrlShape, SinkArgKind, SinkLiteralValue, SinkObjectProperty};
 
 use super::{flatten_callee_path, unwrap_parens, unwrap_static_expr};
 

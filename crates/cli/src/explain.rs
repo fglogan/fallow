@@ -1,15 +1,15 @@
 //! CLI rendering for explainable rule output.
 //!
-//! The rule registry and JSON contract live in `fallow-api` so embedders and
+//! The rule registry and JSON contract live in `plow-api` so embedders and
 //! MCP do not depend on the CLI crate. This module keeps terminal rendering and
 //! compatibility re-exports for existing CLI call sites.
 
 use std::process::ExitCode;
 
 use colored::Colorize;
-use fallow_config::OutputFormat;
+use plow_config::OutputFormat;
 
-pub use fallow_api::{
+pub use plow_api::{
     CHECK_RULES, DUPES_RULES, FLAGS_RULES, HEALTH_RULES, RuleDef, RuleGuide, SECURITY_RULES,
     coverage_analyze_meta, coverage_setup_meta, rule_by_id, rule_by_token, rule_docs_url,
     rule_guide, security_meta, serialize_explain_programmatic_json,
@@ -20,7 +20,7 @@ pub use fallow_api::{
 pub fn run_explain(issue_type: &str, output: OutputFormat) -> ExitCode {
     let Some(rule) = rule_by_token(issue_type) else {
         return crate::error::emit_error(
-            &fallow_api::unknown_explain_error(issue_type).message,
+            &plow_api::unknown_explain_error(issue_type).message,
             2,
             output,
         );

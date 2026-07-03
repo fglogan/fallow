@@ -8,12 +8,12 @@ use std::path::Path;
 
 use ls_types::{CodeDescription, Diagnostic, Position, Range, Uri};
 
-use fallow_api::{
+use plow_api::{
     EditorAnalysisResults as AnalysisResults, EditorDuplicationReport as DuplicationReport,
 };
 
 /// Base URL for diagnostic documentation links.
-const DOCS_BASE: &str = "https://docs.fallow.tools/explanations/dead-code#";
+const DOCS_BASE: &str = "https://docs.genesis-plow.dev/explanations/dead-code#";
 
 /// Build a `CodeDescription` with a documentation URL for the given anchor.
 fn doc_link(anchor: &str) -> Option<CodeDescription> {
@@ -103,8 +103,8 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    use fallow_api::editor_duplicates::{DuplicationReport, DuplicationStats};
-    use fallow_api::editor_results::{
+    use plow_api::editor_duplicates::{DuplicationReport, DuplicationStats};
+    use plow_api::editor_results::{
         AnalysisResults, SecuritySeverity, UnresolvedImport, UnresolvedImportFinding, UnusedExport,
         UnusedExportFinding, UnusedFile, UnusedFileFinding,
     };
@@ -193,7 +193,7 @@ mod tests {
     }
 
     #[test]
-    fn all_diagnostics_have_fallow_source() {
+    fn all_diagnostics_have_plow_source() {
         let root = test_root();
         let mut results = AnalysisResults::default();
         results
@@ -227,7 +227,7 @@ mod tests {
 
         for file_diags in diags.values() {
             for d in file_diags {
-                assert_eq!(d.source, Some("fallow".to_string()));
+                assert_eq!(d.source, Some("plow".to_string()));
             }
         }
     }
@@ -239,12 +239,12 @@ mod tests {
         let mut results = AnalysisResults::default();
         results
             .security_findings
-            .push(fallow_api::editor_results::SecurityFinding {
+            .push(plow_api::editor_results::SecurityFinding {
                 finding_id: String::new(),
-                candidate: fallow_api::editor_results::SecurityCandidate::default(),
+                candidate: plow_api::editor_results::SecurityCandidate::default(),
                 taint_flow: None,
                 attack_surface: None,
-                kind: fallow_api::editor_results::SecurityFindingKind::TaintedSink,
+                kind: plow_api::editor_results::SecurityFindingKind::TaintedSink,
                 category: Some("dangerous-html".to_string()),
                 cwe: Some(79),
                 path: path.clone(),
@@ -278,7 +278,7 @@ mod tests {
         let desc = link.unwrap();
         assert_eq!(
             desc.href.as_str(),
-            "https://docs.fallow.tools/explanations/dead-code#unused-exports"
+            "https://docs.genesis-plow.dev/explanations/dead-code#unused-exports"
         );
     }
 
@@ -306,7 +306,7 @@ mod tests {
 ///    in [`severity_gate_emits_expected_severity_per_kind`]) or a
 ///    destructured-and-ignored non-diagnostic field (metadata / counts /
 ///    advisory). `AnalysisResults` is NOT `#[non_exhaustive]` (defined in
-///    `fallow_types::results`, re-exported via `fallow_api::editor_results`), so the
+///    `plow_types::results`, re-exported via `plow_api::editor_results`), so the
 ///    exhaustive destructure compiles cross-crate -- the preferred mechanism.
 ///
 /// 2. [`severity_gate_emits_expected_severity_per_kind`] builds a synthetic
@@ -316,16 +316,16 @@ mod tests {
 ///    ERROR -> WARNING) fails this test. For the two kinds whose LSP severity
 ///    must agree with the core `RulesConfig` default
 ///    (`route-collision` + `dynamic-segment-name-conflict`), the expected
-///    ERROR is cross-checked against `fallow_config::RulesConfig::default()` so
+///    ERROR is cross-checked against `plow_config::RulesConfig::default()` so
 ///    the table cannot silently drift from core.
 #[cfg(test)]
 mod severity_gate {
     use std::path::PathBuf;
 
-    use fallow_api::editor_duplicates::{DuplicationReport, DuplicationStats};
-    use fallow_api::editor_results::AnalysisResults;
-    use fallow_config::{RulesConfig, Severity};
     use ls_types::DiagnosticSeverity;
+    use plow_api::editor_duplicates::{DuplicationReport, DuplicationStats};
+    use plow_api::editor_results::AnalysisResults;
+    use plow_config::{RulesConfig, Severity};
 
     use crate::diagnostics::build_diagnostics_for_test;
 
@@ -506,13 +506,12 @@ mod severity_gate {
                 "unused-file",
                 S::WARNING,
                 Box::new(|root, r| {
-                    r.unused_files.push(
-                        fallow_api::editor_results::UnusedFileFinding::with_actions(
-                            fallow_api::editor_results::UnusedFile {
+                    r.unused_files
+                        .push(plow_api::editor_results::UnusedFileFinding::with_actions(
+                            plow_api::editor_results::UnusedFile {
                                 path: root.join("a.ts"),
                             },
-                        ),
-                    );
+                        ));
                 }),
             ),
             (
@@ -520,8 +519,8 @@ mod severity_gate {
                 S::HINT,
                 Box::new(|root, r| {
                     r.unused_exports.push(
-                        fallow_api::editor_results::UnusedExportFinding::with_actions(
-                            fallow_api::editor_results::UnusedExport {
+                        plow_api::editor_results::UnusedExportFinding::with_actions(
+                            plow_api::editor_results::UnusedExport {
                                 path: root.join("a.ts"),
                                 export_name: "x".to_string(),
                                 is_type_only: false,
@@ -543,9 +542,9 @@ mod severity_gate {
                 "unused-type",
                 S::HINT,
                 Box::new(|root, r| {
-                    r.unused_types.push(
-                        fallow_api::editor_results::UnusedTypeFinding::with_actions(
-                            fallow_api::editor_results::UnusedExport {
+                    r.unused_types
+                        .push(plow_api::editor_results::UnusedTypeFinding::with_actions(
+                            plow_api::editor_results::UnusedExport {
                                 path: root.join("a.ts"),
                                 export_name: "T".to_string(),
                                 is_type_only: true,
@@ -554,8 +553,7 @@ mod severity_gate {
                                 span_start: 0,
                                 is_re_export: false,
                             },
-                        ),
-                    );
+                        ));
                 }),
             ),
             (
@@ -563,8 +561,8 @@ mod severity_gate {
                 S::WARNING,
                 Box::new(|root, r| {
                     r.private_type_leaks.push(
-                        fallow_api::editor_results::PrivateTypeLeakFinding::with_actions(
-                            fallow_api::editor_results::PrivateTypeLeak {
+                        plow_api::editor_results::PrivateTypeLeakFinding::with_actions(
+                            plow_api::editor_results::PrivateTypeLeak {
                                 path: root.join("a.ts"),
                                 export_name: "pub_fn".to_string(),
                                 type_name: "Secret".to_string(),
@@ -581,11 +579,11 @@ mod severity_gate {
                 S::WARNING,
                 Box::new(|root, r| {
                     r.unused_dependencies.push(
-                        fallow_api::editor_results::UnusedDependencyFinding::with_actions(
-                            fallow_api::editor_results::UnusedDependency {
+                        plow_api::editor_results::UnusedDependencyFinding::with_actions(
+                            plow_api::editor_results::UnusedDependency {
                                 package_name: "dep".to_string(),
                                 location:
-                                    fallow_api::editor_results::DependencyLocation::Dependencies,
+                                    plow_api::editor_results::DependencyLocation::Dependencies,
                                 path: root.join("package.json"),
                                 line: 3,
                                 used_in_workspaces: Vec::new(),
@@ -599,11 +597,11 @@ mod severity_gate {
                 S::WARNING,
                 Box::new(|root, r| {
                     r.unused_dev_dependencies.push(
-                        fallow_api::editor_results::UnusedDevDependencyFinding::with_actions(
-                            fallow_api::editor_results::UnusedDependency {
+                        plow_api::editor_results::UnusedDevDependencyFinding::with_actions(
+                            plow_api::editor_results::UnusedDependency {
                                 package_name: "dev-dep".to_string(),
                                 location:
-                                    fallow_api::editor_results::DependencyLocation::DevDependencies,
+                                    plow_api::editor_results::DependencyLocation::DevDependencies,
                                 path: root.join("package.json"),
                                 line: 4,
                                 used_in_workspaces: Vec::new(),
@@ -617,11 +615,11 @@ mod severity_gate {
                 S::WARNING,
                 Box::new(|root, r| {
                     r.unused_optional_dependencies.push(
-                        fallow_api::editor_results::UnusedOptionalDependencyFinding::with_actions(
-                            fallow_api::editor_results::UnusedDependency {
+                        plow_api::editor_results::UnusedOptionalDependencyFinding::with_actions(
+                            plow_api::editor_results::UnusedDependency {
                                 package_name: "opt-dep".to_string(),
                                 location:
-                                    fallow_api::editor_results::DependencyLocation::OptionalDependencies,
+                                    plow_api::editor_results::DependencyLocation::OptionalDependencies,
                                 path: root.join("package.json"),
                                 line: 5,
                                 used_in_workspaces: Vec::new(),
@@ -635,12 +633,12 @@ mod severity_gate {
                 S::HINT,
                 Box::new(|root, r| {
                     r.unused_enum_members.push(
-                        fallow_api::editor_results::UnusedEnumMemberFinding::with_actions(
-                            fallow_api::editor_results::UnusedMember {
+                        plow_api::editor_results::UnusedEnumMemberFinding::with_actions(
+                            plow_api::editor_results::UnusedMember {
                                 path: root.join("a.ts"),
                                 parent_name: "E".to_string(),
                                 member_name: "A".to_string(),
-                                kind: fallow_api::editor_extract::MemberKind::EnumMember,
+                                kind: plow_api::editor_extract::MemberKind::EnumMember,
                                 line: 6,
                                 col: 0,
                             },
@@ -653,12 +651,12 @@ mod severity_gate {
                 S::HINT,
                 Box::new(|root, r| {
                     r.unused_class_members.push(
-                        fallow_api::editor_results::UnusedClassMemberFinding::with_actions(
-                            fallow_api::editor_results::UnusedMember {
+                        plow_api::editor_results::UnusedClassMemberFinding::with_actions(
+                            plow_api::editor_results::UnusedMember {
                                 path: root.join("a.ts"),
                                 parent_name: "C".to_string(),
                                 member_name: "m".to_string(),
-                                kind: fallow_api::editor_extract::MemberKind::ClassMethod,
+                                kind: plow_api::editor_extract::MemberKind::ClassMethod,
                                 line: 7,
                                 col: 0,
                             },
@@ -671,12 +669,12 @@ mod severity_gate {
                 S::HINT,
                 Box::new(|root, r| {
                     r.unused_store_members.push(
-                        fallow_api::editor_results::UnusedStoreMemberFinding::with_actions(
-                            fallow_api::editor_results::UnusedMember {
+                        plow_api::editor_results::UnusedStoreMemberFinding::with_actions(
+                            plow_api::editor_results::UnusedMember {
                                 path: root.join("a.ts"),
                                 parent_name: "S".to_string(),
                                 member_name: "a".to_string(),
-                                kind: fallow_api::editor_extract::MemberKind::StoreMember,
+                                kind: plow_api::editor_extract::MemberKind::StoreMember,
                                 line: 8,
                                 col: 0,
                             },
@@ -689,8 +687,8 @@ mod severity_gate {
                 S::ERROR,
                 Box::new(|root, r| {
                     r.unresolved_imports.push(
-                        fallow_api::editor_results::UnresolvedImportFinding::with_actions(
-                            fallow_api::editor_results::UnresolvedImport {
+                        plow_api::editor_results::UnresolvedImportFinding::with_actions(
+                            plow_api::editor_results::UnresolvedImport {
                                 path: root.join("a.ts"),
                                 specifier: "./gone".to_string(),
                                 line: 1,
@@ -706,8 +704,8 @@ mod severity_gate {
                 S::WARNING,
                 Box::new(|_root, r| {
                     r.unlisted_dependencies.push(
-                        fallow_api::editor_results::UnlistedDependencyFinding::with_actions(
-                            fallow_api::editor_results::UnlistedDependency {
+                        plow_api::editor_results::UnlistedDependencyFinding::with_actions(
+                            plow_api::editor_results::UnlistedDependency {
                                 package_name: "unlisted".to_string(),
                                 imported_from: vec![],
                             },
@@ -720,10 +718,10 @@ mod severity_gate {
                 S::WARNING,
                 Box::new(|root, r| {
                     r.duplicate_exports.push(
-                        fallow_api::editor_results::DuplicateExportFinding::with_actions(
-                            fallow_api::editor_results::DuplicateExport {
+                        plow_api::editor_results::DuplicateExportFinding::with_actions(
+                            plow_api::editor_results::DuplicateExport {
                                 export_name: "dup".to_string(),
-                                locations: vec![fallow_api::editor_results::DuplicateLocation {
+                                locations: vec![plow_api::editor_results::DuplicateLocation {
                                     path: root.join("a.ts"),
                                     line: 1,
                                     col: 0,
@@ -738,8 +736,8 @@ mod severity_gate {
                 S::INFORMATION,
                 Box::new(|root, r| {
                     r.type_only_dependencies.push(
-                        fallow_api::editor_results::TypeOnlyDependencyFinding::with_actions(
-                            fallow_api::editor_results::TypeOnlyDependency {
+                        plow_api::editor_results::TypeOnlyDependencyFinding::with_actions(
+                            plow_api::editor_results::TypeOnlyDependency {
                                 package_name: "type-only".to_string(),
                                 path: root.join("package.json"),
                                 line: 9,
@@ -753,8 +751,8 @@ mod severity_gate {
                 S::INFORMATION,
                 Box::new(|root, r| {
                     r.test_only_dependencies.push(
-                        fallow_api::editor_results::TestOnlyDependencyFinding::with_actions(
-                            fallow_api::editor_results::TestOnlyDependency {
+                        plow_api::editor_results::TestOnlyDependencyFinding::with_actions(
+                            plow_api::editor_results::TestOnlyDependency {
                                 package_name: "test-only".to_string(),
                                 path: root.join("package.json"),
                                 line: 10,
@@ -773,8 +771,8 @@ mod severity_gate {
                 S::WARNING,
                 Box::new(|root, r| {
                     r.circular_dependencies.push(
-                        fallow_api::editor_results::CircularDependencyFinding::with_actions(
-                            fallow_api::editor_results::CircularDependency {
+                        plow_api::editor_results::CircularDependencyFinding::with_actions(
+                            plow_api::editor_results::CircularDependency {
                                 files: vec![root.join("a.ts"), root.join("b.ts")],
                                 length: 2,
                                 line: 1,
@@ -791,10 +789,10 @@ mod severity_gate {
                 S::WARNING,
                 Box::new(|root, r| {
                     r.re_export_cycles.push(
-                        fallow_api::editor_results::ReExportCycleFinding::with_actions(
-                            fallow_api::editor_results::ReExportCycle {
+                        plow_api::editor_results::ReExportCycleFinding::with_actions(
+                            plow_api::editor_results::ReExportCycle {
                                 files: vec![root.join("barrel.ts")],
-                                kind: fallow_api::editor_results::ReExportCycleKind::SelfLoop,
+                                kind: plow_api::editor_results::ReExportCycleKind::SelfLoop,
                             },
                         ),
                     );
@@ -809,8 +807,8 @@ mod severity_gate {
                 S::WARNING,
                 Box::new(|root, r| {
                     r.boundary_violations.push(
-                        fallow_api::editor_results::BoundaryViolationFinding::with_actions(
-                            fallow_api::editor_results::BoundaryViolation {
+                        plow_api::editor_results::BoundaryViolationFinding::with_actions(
+                            plow_api::editor_results::BoundaryViolation {
                                 from_path: root.join("a.ts"),
                                 to_path: root.join("b.ts"),
                                 from_zone: "ui".to_string(),
@@ -830,8 +828,8 @@ mod severity_gate {
                 S::WARNING,
                 Box::new(|root, r| {
                     r.boundary_coverage_violations.push(
-                        fallow_api::editor_results::BoundaryCoverageViolationFinding::with_actions(
-                            fallow_api::editor_results::BoundaryCoverageViolation {
+                        plow_api::editor_results::BoundaryCoverageViolationFinding::with_actions(
+                            plow_api::editor_results::BoundaryCoverageViolation {
                                 path: root.join("unzoned.ts"),
                                 line: 1,
                                 col: 0,
@@ -845,8 +843,8 @@ mod severity_gate {
                 S::WARNING,
                 Box::new(|root, r| {
                     r.boundary_call_violations.push(
-                        fallow_api::editor_results::BoundaryCallViolationFinding::with_actions(
-                            fallow_api::editor_results::BoundaryCallViolation {
+                        plow_api::editor_results::BoundaryCallViolationFinding::with_actions(
+                            plow_api::editor_results::BoundaryCallViolation {
                                 path: root.join("zoned.ts"),
                                 line: 1,
                                 col: 0,
@@ -866,16 +864,16 @@ mod severity_gate {
                 S::WARNING,
                 Box::new(|root, r| {
                     r.policy_violations.push(
-                        fallow_api::editor_results::PolicyViolationFinding::with_actions(
-                            fallow_api::editor_results::PolicyViolation {
+                        plow_api::editor_results::PolicyViolationFinding::with_actions(
+                            plow_api::editor_results::PolicyViolation {
                                 path: root.join("zoned.ts"),
                                 line: 1,
                                 col: 0,
                                 pack: "team-policy".to_string(),
                                 rule_id: "no-console".to_string(),
-                                kind: fallow_api::editor_results::PolicyRuleKind::BannedCall,
+                                kind: plow_api::editor_results::PolicyRuleKind::BannedCall,
                                 matched: "console.log".to_string(),
-                                severity: fallow_api::editor_results::PolicyViolationSeverity::Warn,
+                                severity: plow_api::editor_results::PolicyViolationSeverity::Warn,
                                 message: None,
                             },
                         ),
@@ -887,20 +885,18 @@ mod severity_gate {
                 S::HINT,
                 Box::new(|root, r| {
                     r.stale_suppressions
-                        .push(fallow_api::editor_results::StaleSuppression {
+                        .push(plow_api::editor_results::StaleSuppression {
                             path: root.join("a.ts"),
                             line: 1,
                             col: 0,
-                            origin: fallow_api::editor_results::SuppressionOrigin::Comment {
+                            origin: plow_api::editor_results::SuppressionOrigin::Comment {
                                 issue_kind: None,
                                 reason: None,
                                 is_file_level: false,
                                 kind_known: true,
                             },
                             missing_reason: false,
-                            actions: fallow_api::editor_results::StaleSuppression::actions_for(
-                                false,
-                            ),
+                            actions: plow_api::editor_results::StaleSuppression::actions_for(false),
                         });
                 }),
             ),
@@ -909,8 +905,8 @@ mod severity_gate {
                 S::WARNING,
                 Box::new(|root, r| {
                     r.unused_catalog_entries.push(
-                        fallow_api::editor_results::UnusedCatalogEntryFinding::with_actions(
-                            fallow_api::editor_results::UnusedCatalogEntry {
+                        plow_api::editor_results::UnusedCatalogEntryFinding::with_actions(
+                            plow_api::editor_results::UnusedCatalogEntry {
                                 entry_name: "react".to_string(),
                                 catalog_name: "default".to_string(),
                                 path: root.join("pnpm-workspace.yaml"),
@@ -926,8 +922,8 @@ mod severity_gate {
                 S::WARNING,
                 Box::new(|root, r| {
                     r.empty_catalog_groups.push(
-                        fallow_api::editor_results::EmptyCatalogGroupFinding::with_actions(
-                            fallow_api::editor_results::EmptyCatalogGroup {
+                        plow_api::editor_results::EmptyCatalogGroupFinding::with_actions(
+                            plow_api::editor_results::EmptyCatalogGroup {
                                 catalog_name: "ui".to_string(),
                                 path: root.join("pnpm-workspace.yaml"),
                                 line: 1,
@@ -941,8 +937,8 @@ mod severity_gate {
                 S::ERROR,
                 Box::new(|root, r| {
                     r.unresolved_catalog_references.push(
-                        fallow_api::editor_results::UnresolvedCatalogReferenceFinding::with_actions(
-                            fallow_api::editor_results::UnresolvedCatalogReference {
+                        plow_api::editor_results::UnresolvedCatalogReferenceFinding::with_actions(
+                            plow_api::editor_results::UnresolvedCatalogReference {
                                 entry_name: "vue".to_string(),
                                 catalog_name: "default".to_string(),
                                 path: root.join("package.json"),
@@ -958,15 +954,15 @@ mod severity_gate {
                 S::WARNING,
                 Box::new(|root, r| {
                     r.unused_dependency_overrides.push(
-                        fallow_api::editor_results::UnusedDependencyOverrideFinding::with_actions(
-                            fallow_api::editor_results::UnusedDependencyOverride {
+                        plow_api::editor_results::UnusedDependencyOverrideFinding::with_actions(
+                            plow_api::editor_results::UnusedDependencyOverride {
                                 raw_key: "react".to_string(),
                                 target_package: "react".to_string(),
                                 parent_package: None,
                                 version_constraint: None,
                                 version_range: "18".to_string(),
                                 source:
-                                    fallow_api::editor_results::DependencyOverrideSource::PnpmWorkspaceYaml,
+                                    plow_api::editor_results::DependencyOverrideSource::PnpmWorkspaceYaml,
                                 path: root.join("pnpm-workspace.yaml"),
                                 line: 1,
                                 hint: None,
@@ -980,15 +976,15 @@ mod severity_gate {
                 S::ERROR,
                 Box::new(|root, r| {
                     r.misconfigured_dependency_overrides.push(
-                        fallow_api::editor_results::MisconfiguredDependencyOverrideFinding::with_actions(
-                            fallow_api::editor_results::MisconfiguredDependencyOverride {
+                        plow_api::editor_results::MisconfiguredDependencyOverrideFinding::with_actions(
+                            plow_api::editor_results::MisconfiguredDependencyOverride {
                                 raw_key: "bad>".to_string(),
                                 target_package: None,
                                 raw_value: String::new(),
                                 reason:
-                                    fallow_api::editor_results::DependencyOverrideMisconfigReason::EmptyValue,
+                                    plow_api::editor_results::DependencyOverrideMisconfigReason::EmptyValue,
                                 source:
-                                    fallow_api::editor_results::DependencyOverrideSource::PnpmPackageJson,
+                                    plow_api::editor_results::DependencyOverrideSource::PnpmPackageJson,
                                 path: root.join("package.json"),
                                 line: 1,
                             },
@@ -1001,8 +997,8 @@ mod severity_gate {
                 S::WARNING,
                 Box::new(|root, r| {
                     r.invalid_client_exports.push(
-                        fallow_api::editor_results::InvalidClientExportFinding::with_actions(
-                            fallow_api::editor_results::InvalidClientExport {
+                        plow_api::editor_results::InvalidClientExportFinding::with_actions(
+                            plow_api::editor_results::InvalidClientExport {
                                 path: root.join("app/page.tsx"),
                                 export_name: "metadata".to_string(),
                                 directive: "use client".to_string(),
@@ -1018,8 +1014,8 @@ mod severity_gate {
                 S::WARNING,
                 Box::new(|root, r| {
                     r.mixed_client_server_barrels.push(
-                        fallow_api::editor_results::MixedClientServerBarrelFinding::with_actions(
-                            fallow_api::editor_results::MixedClientServerBarrel {
+                        plow_api::editor_results::MixedClientServerBarrelFinding::with_actions(
+                            plow_api::editor_results::MixedClientServerBarrel {
                                 path: root.join("app/index.ts"),
                                 client_origin: "./Button".to_string(),
                                 server_origin: "./fetchUser".to_string(),
@@ -1035,8 +1031,8 @@ mod severity_gate {
                 S::WARNING,
                 Box::new(|root, r| {
                     r.misplaced_directives.push(
-                        fallow_api::editor_results::MisplacedDirectiveFinding::with_actions(
-                            fallow_api::editor_results::MisplacedDirective {
+                        plow_api::editor_results::MisplacedDirectiveFinding::with_actions(
+                            plow_api::editor_results::MisplacedDirective {
                                 path: root.join("app/widget.tsx"),
                                 directive: "use client".to_string(),
                                 line: 1,
@@ -1051,8 +1047,8 @@ mod severity_gate {
                 S::WARNING,
                 Box::new(|root, r| {
                     r.unprovided_injects.push(
-                        fallow_api::editor_results::UnprovidedInjectFinding::with_actions(
-                            fallow_api::editor_results::UnprovidedInject {
+                        plow_api::editor_results::UnprovidedInjectFinding::with_actions(
+                            plow_api::editor_results::UnprovidedInject {
                                 path: root.join("Comp.vue"),
                                 key_name: "ApiKey".to_string(),
                                 framework: "vue".to_string(),
@@ -1068,8 +1064,8 @@ mod severity_gate {
                 S::HINT,
                 Box::new(|root, r| {
                     r.unrendered_components.push(
-                        fallow_api::editor_results::UnrenderedComponentFinding::with_actions(
-                            fallow_api::editor_results::UnrenderedComponent {
+                        plow_api::editor_results::UnrenderedComponentFinding::with_actions(
+                            plow_api::editor_results::UnrenderedComponent {
                                 path: root.join("Widget.vue"),
                                 component_name: "Widget".to_string(),
                                 framework: "vue".to_string(),
@@ -1086,8 +1082,8 @@ mod severity_gate {
                 S::HINT,
                 Box::new(|root, r| {
                     r.unused_component_props.push(
-                        fallow_api::editor_results::UnusedComponentPropFinding::with_actions(
-                            fallow_api::editor_results::UnusedComponentProp {
+                        plow_api::editor_results::UnusedComponentPropFinding::with_actions(
+                            plow_api::editor_results::UnusedComponentProp {
                                 path: root.join("Widget.vue"),
                                 component_name: "Widget".to_string(),
                                 prop_name: "size".to_string(),
@@ -1103,8 +1099,8 @@ mod severity_gate {
                 S::HINT,
                 Box::new(|root, r| {
                     r.unused_component_emits.push(
-                        fallow_api::editor_results::UnusedComponentEmitFinding::with_actions(
-                            fallow_api::editor_results::UnusedComponentEmit {
+                        plow_api::editor_results::UnusedComponentEmitFinding::with_actions(
+                            plow_api::editor_results::UnusedComponentEmit {
                                 path: root.join("Widget.vue"),
                                 component_name: "Widget".to_string(),
                                 emit_name: "change".to_string(),
@@ -1120,8 +1116,8 @@ mod severity_gate {
                 S::HINT,
                 Box::new(|root, r| {
                     r.unused_component_inputs.push(
-                        fallow_api::editor_results::UnusedComponentInputFinding::with_actions(
-                            fallow_api::editor_results::UnusedComponentInput {
+                        plow_api::editor_results::UnusedComponentInputFinding::with_actions(
+                            plow_api::editor_results::UnusedComponentInput {
                                 path: root.join("widget.component.ts"),
                                 component_name: "WidgetComponent".to_string(),
                                 input_name: "size".to_string(),
@@ -1137,8 +1133,8 @@ mod severity_gate {
                 S::HINT,
                 Box::new(|root, r| {
                     r.unused_component_outputs.push(
-                        fallow_api::editor_results::UnusedComponentOutputFinding::with_actions(
-                            fallow_api::editor_results::UnusedComponentOutput {
+                        plow_api::editor_results::UnusedComponentOutputFinding::with_actions(
+                            plow_api::editor_results::UnusedComponentOutput {
                                 path: root.join("widget.component.ts"),
                                 component_name: "WidgetComponent".to_string(),
                                 output_name: "change".to_string(),
@@ -1154,8 +1150,8 @@ mod severity_gate {
                 S::HINT,
                 Box::new(|root, r| {
                     r.unused_svelte_events.push(
-                        fallow_api::editor_results::UnusedSvelteEventFinding::with_actions(
-                            fallow_api::editor_results::UnusedSvelteEvent {
+                        plow_api::editor_results::UnusedSvelteEventFinding::with_actions(
+                            plow_api::editor_results::UnusedSvelteEvent {
                                 path: root.join("Child.svelte"),
                                 component_name: "Child".to_string(),
                                 event_name: "dead".to_string(),
@@ -1171,8 +1167,8 @@ mod severity_gate {
                 S::HINT,
                 Box::new(|root, r| {
                     r.unused_server_actions.push(
-                        fallow_api::editor_results::UnusedServerActionFinding::with_actions(
-                            fallow_api::editor_results::UnusedServerAction {
+                        plow_api::editor_results::UnusedServerActionFinding::with_actions(
+                            plow_api::editor_results::UnusedServerAction {
                                 path: root.join("app/actions.ts"),
                                 action_name: "createUser".to_string(),
                                 line: 1,
@@ -1187,8 +1183,8 @@ mod severity_gate {
                 S::HINT,
                 Box::new(|root, r| {
                     r.unused_load_data_keys.push(
-                        fallow_api::editor_results::UnusedLoadDataKeyFinding::with_actions(
-                            fallow_api::editor_results::UnusedLoadDataKey {
+                        plow_api::editor_results::UnusedLoadDataKeyFinding::with_actions(
+                            plow_api::editor_results::UnusedLoadDataKey {
                                 path: root.join("src/routes/blog/+page.server.ts"),
                                 key_name: "posts".to_string(),
                                 line: 1,
@@ -1205,8 +1201,8 @@ mod severity_gate {
                 S::ERROR,
                 Box::new(|root, r| {
                     r.route_collisions.push(
-                        fallow_api::editor_results::RouteCollisionFinding::with_actions(
-                            fallow_api::editor_results::RouteCollision {
+                        plow_api::editor_results::RouteCollisionFinding::with_actions(
+                            plow_api::editor_results::RouteCollision {
                                 path: root.join("app/(a)/about/page.tsx"),
                                 url: "/about".to_string(),
                                 conflicting_paths: vec![root.join("app/(b)/about/page.tsx")],
@@ -1223,8 +1219,8 @@ mod severity_gate {
                 S::ERROR,
                 Box::new(|root, r| {
                     r.dynamic_segment_name_conflicts.push(
-                        fallow_api::editor_results::DynamicSegmentNameConflictFinding::with_actions(
-                            fallow_api::editor_results::DynamicSegmentNameConflict {
+                        plow_api::editor_results::DynamicSegmentNameConflictFinding::with_actions(
+                            plow_api::editor_results::DynamicSegmentNameConflict {
                                 path: root.join("app/blog/[id]/page.tsx"),
                                 position: "/blog".to_string(),
                                 conflicting_segments: vec![

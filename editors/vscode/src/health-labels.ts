@@ -1,6 +1,6 @@
 /**
  * Health tree-view section labels and icons. Kept separate from `labels.ts`
- * so the dead-code `IssueCategory` surface (which mirrors `fallow.issueTypes.*`
+ * so the dead-code `IssueCategory` surface (which mirrors `plow.issueTypes.*`
  * setting keys) is untouched: these section names are pure UI strings, not
  * rule names or setting keys.
  *

@@ -1,6 +1,6 @@
 use crate::params::DecisionSurfaceParams;
 
-use fallow_api::{
+use plow_api::{
     AnalysisOptions, DecisionSurfaceOptions, run_decision_surface as run_decision_surface_api,
     serialize_decision_surface_programmatic_json,
 };

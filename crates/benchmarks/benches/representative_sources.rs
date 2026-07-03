@@ -7,8 +7,8 @@
 use std::path::{Path, PathBuf};
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
-use fallow_api::{AnalysisOptions, DeadCodeOptions, run_dead_code};
-use fallow_core::{
+use plow_api::{AnalysisOptions, DeadCodeOptions, run_dead_code};
+use plow_core::{
     discover::{DiscoveredFile, FileId},
     extract::parse_single_file,
 };

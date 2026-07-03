@@ -1,4 +1,4 @@
-//! Parsing and extraction engine for fallow codebase intelligence.
+//! Parsing and extraction engine for plow codebase intelligence.
 //!
 //! This crate handles all file parsing: JS/TS via Oxc, Vue/Svelte SFC extraction,
 //! Astro frontmatter, MDX import/export extraction, CSS Module class name extraction,
@@ -50,9 +50,9 @@ use std::path::Path;
 use rayon::prelude::*;
 
 use cache::CacheStore;
-use fallow_types::discover::{DiscoveredFile, FileId};
+use plow_types::discover::{DiscoveredFile, FileId};
 
-pub use fallow_types::extract::{
+pub use plow_types::extract::{
     AngularTemplateMemberAccessFact, AngularThisSpreadFact, ClassHeritageInfo,
     DynamicCustomElementRenderFact, DynamicImportInfo, DynamicImportPattern, ExportInfo,
     ExportName, FactoryCallMemberAccessFact, FactoryFnMemberAccessFact, FactoryReturnExport,
@@ -100,9 +100,9 @@ pub use parse::parse_source_to_module;
 /// Leading UTF-8 byte order mark codepoint.
 ///
 /// Windows editors (Notepad, older VS settings, some IDE plugins) emit a UTF-8
-/// BOM at the start of source files. fallow's contract is "UTF-8 with or
+/// BOM at the start of source files. plow's contract is "UTF-8 with or
 /// without BOM; line offsets are computed against the post-BOM view; the BOM,
-/// if present on input, is preserved on output by `fallow fix`."
+/// if present on input, is preserved on output by `plow fix`."
 const BOM_CHAR: char = '\u{FEFF}';
 
 /// Strip the leading UTF-8 BOM if present.
@@ -110,7 +110,7 @@ const BOM_CHAR: char = '\u{FEFF}';
 /// Called at every file-read entry point in this crate so the rest of the
 /// pipeline (content hash, `compute_line_offsets`, oxc parser, downstream
 /// analyses) sees a consistent post-BOM view. Mirrors the
-/// `fallow_config` layer (`config_writer.rs::BOM`) so config-shaped sources
+/// `plow_config` layer (`config_writer.rs::BOM`) so config-shaped sources
 /// and source-code-shaped sources are processed symmetrically. See issue #475.
 #[must_use]
 pub(crate) fn strip_bom(source: &str) -> &str {
@@ -220,7 +220,7 @@ fn parse_single_file_cached(
         && metadata.len() == cached.file_size
     {
         let fingerprint =
-            fallow_types::source_fingerprint::SourceFingerprint::from_metadata(&metadata);
+            plow_types::source_fingerprint::SourceFingerprint::from_metadata(&metadata);
         if cached.source_fingerprint() == fingerprint
             && fingerprint.has_known_mtime()
             && (!need_complexity || !cached.complexity.is_empty())

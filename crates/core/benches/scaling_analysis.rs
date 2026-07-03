@@ -5,7 +5,7 @@
 )]
 #![expect(
     deprecated,
-    reason = "ADR-008: benchmark exercises the workspace path-dep fallow_core::analyze surface"
+    reason = "ADR-008: benchmark exercises the workspace path-dep plow_core::analyze surface"
 )]
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
@@ -15,14 +15,14 @@ mod helpers;
 
 struct ConfigInput {
     _temp_dir: TempDir,
-    config: fallow_config::ResolvedConfig,
+    config: plow_config::ResolvedConfig,
 }
 
 struct DupesInput {
     _temp_dir: TempDir,
     root: std::path::PathBuf,
-    files: Vec<fallow_core::discover::DiscoveredFile>,
-    config: fallow_config::DuplicatesConfig,
+    files: Vec<plow_core::discover::DiscoveredFile>,
+    config: plow_config::DuplicatesConfig,
 }
 
 fn create_config_input(name: &str, file_count: usize) -> ConfigInput {
@@ -35,12 +35,12 @@ fn create_config_input(name: &str, file_count: usize) -> ConfigInput {
 
 fn create_dupes_input(name: &str, file_count: usize) -> DupesInput {
     let (temp_dir, resolved_config) = helpers::create_dupe_project(name, file_count);
-    let files = fallow_core::discover::discover_files(&resolved_config);
+    let files = plow_core::discover::discover_files(&resolved_config);
     DupesInput {
         _temp_dir: temp_dir,
         root: resolved_config.root,
         files,
-        config: fallow_config::DuplicatesConfig::default(),
+        config: plow_config::DuplicatesConfig::default(),
     }
 }
 
@@ -50,7 +50,7 @@ fn bench_scaling_analysis(c: &mut Criterion) {
     group.bench_function("full_pipeline_2000_files", |bencher| {
         bencher.iter_batched_ref(
             || create_config_input("2000", 2000),
-            |input| fallow_core::analyze(&input.config),
+            |input| plow_core::analyze(&input.config),
             BatchSize::LargeInput,
         );
     });
@@ -59,7 +59,7 @@ fn bench_scaling_analysis(c: &mut Criterion) {
         bencher.iter_batched_ref(
             || create_dupes_input("1000", 1000),
             |input| {
-                fallow_core::duplicates::find_duplicates(&input.root, &input.files, &input.config);
+                plow_core::duplicates::find_duplicates(&input.root, &input.files, &input.config);
             },
             BatchSize::LargeInput,
         );

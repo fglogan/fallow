@@ -12,7 +12,7 @@
 //! signal is an attention pointer ("the diff weakened a guardrail here"), framed
 //! so a reviewer decides.
 
-pub use fallow_output::{WeakeningKind, WeakeningSignal};
+pub use plow_output::{WeakeningKind, WeakeningSignal};
 
 /// Detect skipped-test additions: an `it.skip` / `xit` / `describe.skip` /
 /// `.only` token present in head but not base. `.only` narrows the run to a
@@ -56,7 +56,7 @@ pub fn detect_removed_tests(base: &str, head: &str) -> Vec<String> {
     signals
 }
 
-/// Detect added suppressions: a `fallow-ignore` / `eslint-disable` / `@ts-ignore`
+/// Detect added suppressions: a `plow-ignore` / `eslint-disable` / `@ts-ignore`
 /// / `@ts-expect-error` count that increased between base and head. Only counts
 /// occurrences on a COMMENT line (a line containing `//`, `#`, `/*`, `*`, or
 /// `<!--`), since a real suppression directive always lives in a comment. This
@@ -65,7 +65,7 @@ pub fn detect_removed_tests(base: &str, head: &str) -> Vec<String> {
 #[must_use]
 pub fn detect_added_suppressions(base: &str, head: &str) -> Vec<String> {
     const SUPPRESS_TOKENS: &[&str] = &[
-        "fallow-ignore",
+        "plow-ignore",
         "eslint-disable",
         "@ts-ignore",
         "@ts-expect-error",
@@ -126,7 +126,7 @@ pub fn detect_removed_security_steps(base: &str, head: &str) -> Vec<String> {
         "npm audit",
         "yarn audit",
         "pnpm audit",
-        "fallow security",
+        "plow security",
         "codeql",
         "snyk",
         "trivy",

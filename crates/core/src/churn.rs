@@ -10,7 +10,7 @@ use std::sync::OnceLock;
 
 use serde::Deserialize;
 
-pub use fallow_types::churn::ChurnTrend;
+pub use plow_types::churn::ChurnTrend;
 
 /// Function pointer signature used by `set_spawn_hook` to intercept the
 /// `git log --numstat` subprocess. Lets the CLI route long-running git
@@ -46,7 +46,7 @@ const SECS_PER_DAY: f64 = 86_400.0;
 const HALF_LIFE_DAYS: f64 = 90.0;
 
 /// Schema discriminator a `--churn-file` document must declare.
-const CHURN_FILE_SCHEMA: &str = "fallow-churn/v1";
+const CHURN_FILE_SCHEMA: &str = "plow-churn/v1";
 
 /// Upper bound on imported churn events. A file past this size is a sign of a
 /// pathological export (whole-history dump of a giant monorepo) rather than a
@@ -192,7 +192,7 @@ pub fn analyze_churn(root: &Path, since: &SinceDuration) -> Option<ChurnResult> 
     Some(build_churn_result(state, shallow))
 }
 
-/// A `fallow-churn/v1` import document: a normalized, VCS-agnostic stand-in for
+/// A `plow-churn/v1` import document: a normalized, VCS-agnostic stand-in for
 /// `git log --numstat` output. Unknown fields are ignored (no
 /// `deny_unknown_fields`) so wrappers may carry extra metadata and so the
 /// reserved `commit` field can be added in a future revision without breaking
@@ -215,7 +215,7 @@ struct ChurnFileEvent {
     /// Commit time, unix SECONDS UTC (not milliseconds).
     timestamp: u64,
     /// Opaque author identity (email recommended); absent contributes no
-    /// ownership signal. fallow does NOT apply mailmap to imported authors.
+    /// ownership signal. plow does NOT apply mailmap to imported authors.
     #[serde(default)]
     author: Option<String>,
     /// Lines added in this file in this commit.
@@ -224,10 +224,10 @@ struct ChurnFileEvent {
     deleted: u32,
 }
 
-/// Build churn data from a normalized `fallow-churn/v1` JSON import instead of
+/// Build churn data from a normalized `plow-churn/v1` JSON import instead of
 /// `git log`. Lets projects on a non-git VCS (Yandex Arc, Mercurial, Perforce)
 /// feed change history into hotspot / ownership / bus-factor analysis: a small
-/// wrapper translates the VCS log into the contract and fallow runs all the
+/// wrapper translates the VCS log into the contract and plow runs all the
 /// usual recency-weighting, trend, and ownership logic on the imported events.
 ///
 /// `root` is the project root that relative event paths are joined to (matching
@@ -260,7 +260,7 @@ pub fn analyze_churn_from_file(path: &Path, root: &Path) -> Result<ChurnResult, 
     Ok(build_churn_result(state, false))
 }
 
-/// Validate and fold a parsed `fallow-churn/v1` document into event state.
+/// Validate and fold a parsed `plow-churn/v1` document into event state.
 ///
 /// Rejects empty paths and far-future (likely millisecond) timestamps; interns
 /// authors into the pool exactly as the git-log path does.
@@ -1632,7 +1632,7 @@ mod tests {
         let path = write_churn_file(
             dir.path(),
             r#"{
-              "schema": "fallow-churn/v1",
+              "schema": "plow-churn/v1",
               "events": [
                 { "path": "src/a.ts", "timestamp": 1700000000, "author": "alice@corp", "added": 10, "deleted": 5 },
                 { "path": "src/a.ts", "timestamp": 1700100000, "author": "bob@corp", "added": 3, "deleted": 2 }
@@ -1663,7 +1663,7 @@ mod tests {
         let path = write_churn_file(
             dir.path(),
             r#"{
-              "schema": "fallow-churn/v1",
+              "schema": "plow-churn/v1",
               "events": [
                 { "path": "src/a.ts", "timestamp": 1700000000, "author": "alice@corp", "added": 10, "deleted": 5 },
                 { "path": "src/b.ts", "timestamp": 1700000000, "author": "alice@corp", "added": 3, "deleted": 1 },
@@ -1701,10 +1701,7 @@ mod tests {
     #[test]
     fn churn_file_empty_events_is_valid() {
         let dir = tempfile::tempdir().unwrap();
-        let path = write_churn_file(
-            dir.path(),
-            r#"{ "schema": "fallow-churn/v1", "events": [] }"#,
-        );
+        let path = write_churn_file(dir.path(), r#"{ "schema": "plow-churn/v1", "events": [] }"#);
         let result = analyze_churn_from_file(&path, Path::new("/project")).unwrap();
         assert!(result.files.is_empty());
         assert!(result.author_pool.is_empty());
@@ -1713,7 +1710,7 @@ mod tests {
     #[test]
     fn churn_file_missing_events_key_is_valid() {
         let dir = tempfile::tempdir().unwrap();
-        let path = write_churn_file(dir.path(), r#"{ "schema": "fallow-churn/v1" }"#);
+        let path = write_churn_file(dir.path(), r#"{ "schema": "plow-churn/v1" }"#);
         let result = analyze_churn_from_file(&path, Path::new("/project")).unwrap();
         assert!(result.files.is_empty());
     }
@@ -1721,12 +1718,9 @@ mod tests {
     #[test]
     fn churn_file_bad_schema_rejected() {
         let dir = tempfile::tempdir().unwrap();
-        let path = write_churn_file(
-            dir.path(),
-            r#"{ "schema": "fallow-churn/v2", "events": [] }"#,
-        );
+        let path = write_churn_file(dir.path(), r#"{ "schema": "plow-churn/v2", "events": [] }"#);
         let err = analyze_churn_from_file(&path, Path::new("/project")).unwrap_err();
-        assert!(err.contains("expected \"fallow-churn/v1\""), "{err}");
+        assert!(err.contains("expected \"plow-churn/v1\""), "{err}");
     }
 
     #[test]
@@ -1748,7 +1742,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = write_churn_file(
             dir.path(),
-            r#"{ "schema": "fallow-churn/v1", "events": [ { "path": "  ", "timestamp": 1700000000, "added": 1, "deleted": 0 } ] }"#,
+            r#"{ "schema": "plow-churn/v1", "events": [ { "path": "  ", "timestamp": 1700000000, "added": 1, "deleted": 0 } ] }"#,
         );
         let err = analyze_churn_from_file(&path, Path::new("/project")).unwrap_err();
         assert!(err.contains("empty path"), "{err}");
@@ -1760,7 +1754,7 @@ mod tests {
         // 1700000000000 is milliseconds; ~52000 years in the future as seconds.
         let path = write_churn_file(
             dir.path(),
-            r#"{ "schema": "fallow-churn/v1", "events": [ { "path": "src/a.ts", "timestamp": 1700000000000, "added": 1, "deleted": 0 } ] }"#,
+            r#"{ "schema": "plow-churn/v1", "events": [ { "path": "src/a.ts", "timestamp": 1700000000000, "added": 1, "deleted": 0 } ] }"#,
         );
         let err = analyze_churn_from_file(&path, Path::new("/project")).unwrap_err();
         assert!(err.contains("milliseconds"), "{err}");
@@ -1771,7 +1765,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = write_churn_file(
             dir.path(),
-            r#"{ "schema": "fallow-churn/v1", "events": [ { "path": "src/a.ts", "timestamp": 1700000000, "added": 1, "deleted": 0 } ] }"#,
+            r#"{ "schema": "plow-churn/v1", "events": [ { "path": "src/a.ts", "timestamp": 1700000000, "added": 1, "deleted": 0 } ] }"#,
         );
         let result = analyze_churn_from_file(&path, Path::new("/project")).unwrap();
         let churn = &result.files[&PathBuf::from("/project/src/a.ts")];
@@ -1785,7 +1779,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = write_churn_file(
             dir.path(),
-            r#"{ "schema": "fallow-churn/v1", "events": [ { "path": "src/a.ts", "timestamp": 1700000000, "author": "  ", "added": 1, "deleted": 0 } ] }"#,
+            r#"{ "schema": "plow-churn/v1", "events": [ { "path": "src/a.ts", "timestamp": 1700000000, "author": "  ", "added": 1, "deleted": 0 } ] }"#,
         );
         let result = analyze_churn_from_file(&path, Path::new("/project")).unwrap();
         assert!(result.author_pool.is_empty());
@@ -1798,7 +1792,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = write_churn_file(
             dir.path(),
-            r#"{ "schema": "fallow-churn/v1", "extra": true, "events": [ { "path": "src/a.ts", "timestamp": 1700000000, "author": "alice@corp", "added": 1, "deleted": 0, "commit": "abc123", "tz": "+0200" } ] }"#,
+            r#"{ "schema": "plow-churn/v1", "extra": true, "events": [ { "path": "src/a.ts", "timestamp": 1700000000, "author": "alice@corp", "added": 1, "deleted": 0, "commit": "abc123", "tz": "+0200" } ] }"#,
         );
         let result = analyze_churn_from_file(&path, Path::new("/project")).unwrap();
         assert_eq!(result.files[&PathBuf::from("/project/src/a.ts")].commits, 1);
@@ -1809,7 +1803,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = write_churn_file(
             dir.path(),
-            r#"{ "schema": "fallow-churn/v1", "events": [ { "path": "src\\a.ts", "timestamp": 1700000000, "added": 1, "deleted": 0 } ] }"#,
+            r#"{ "schema": "plow-churn/v1", "events": [ { "path": "src\\a.ts", "timestamp": 1700000000, "added": 1, "deleted": 0 } ] }"#,
         );
         let result = analyze_churn_from_file(&path, Path::new("/project")).unwrap();
         assert!(

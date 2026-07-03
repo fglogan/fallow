@@ -9,7 +9,7 @@ use super::common::{create_config, fixture_path};
 fn flags_unused_emits_but_credits_renamed_template_and_abstains_on_dynamic() {
     let root = fixture_path("unused-component-emit");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let flagged: Vec<&str> = results
         .unused_component_emits
         .iter()

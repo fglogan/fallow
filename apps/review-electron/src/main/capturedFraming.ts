@@ -5,7 +5,7 @@ import { runGuide, validateWalkthrough } from "./review";
 
 /**
  * Reader for AUTHOR-CAPTURED framing: the framing an author agent recorded at
- * write-time, persisted to `.fallow-review/captured.jsonl`. Distinct module name
+ * write-time, persisted to `.plow-review/captured.jsonl`. Distinct module name
  * from `capture.ts` (the PNG screenshotter) to avoid a collision.
  *
  * Captured framing is fact-ish about authorial intent, but it is still held to
@@ -28,7 +28,7 @@ export type CapturedLine = {
 };
 
 export const capturedFramingPath = (root: string): string =>
-  join(root, ".fallow-review", "captured.jsonl");
+  join(root, ".plow-review", "captured.jsonl");
 
 const isCapturedLine = (value: unknown): value is CapturedLine => {
   if (typeof value !== "object" || value === null) return false;

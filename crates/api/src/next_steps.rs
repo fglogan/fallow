@@ -1,15 +1,15 @@
 //! Runtime probes for programmatic `next_steps` output.
 //!
-//! Pure next-step builders live in `fallow-output`. This module owns the small
+//! Pure next-step builders live in `plow-output`. This module owns the small
 //! env/fs/git probes needed by the API and NAPI surfaces without depending on
 //! the CLI suggestion renderer.
 
 use std::path::Path;
 
-/// `FALLOW_SUGGESTIONS=off` (or `0`/`false`/`no`/`disabled`) disables the
+/// `PLOW_SUGGESTIONS=off` (or `0`/`false`/`no`/`disabled`) disables the
 /// `next_steps[]` array. Mirrors `report::suggestions::suggestions_enabled`.
 pub fn suggestions_enabled() -> bool {
-    match std::env::var("FALLOW_SUGGESTIONS").ok().as_deref() {
+    match std::env::var("PLOW_SUGGESTIONS").ok().as_deref() {
         Some(raw) => !matches!(
             raw.trim().to_ascii_lowercase().as_str(),
             "off" | "0" | "false" | "no" | "disabled"
@@ -18,18 +18,18 @@ pub fn suggestions_enabled() -> bool {
     }
 }
 
-/// First-contact `setup` next-step gate: no fallow config up to the repo root
+/// First-contact `setup` next-step gate: no plow config up to the repo root
 /// and not running in CI. The CLI additionally consults the impact store for a
 /// declined-onboarding flag; that store is CLI-owned, so the API surface omits
-/// it. Embedders can suppress all suggestions with `FALLOW_SUGGESTIONS`.
+/// it. Embedders can suppress all suggestions with `PLOW_SUGGESTIONS`.
 pub fn setup_pointer_applicable(root: &Path) -> bool {
-    root.exists() && fallow_config::FallowConfig::find_config_path(root).is_none() && !is_ci()
+    root.exists() && plow_config::PlowConfig::find_config_path(root).is_none() && !is_ci()
 }
 
 /// Resolve a concrete `--changed-workspaces` ref for the `scope-workspaces`
 /// next step, or `None` when no workspace or resolvable ref exists.
 pub fn default_workspace_ref(root: &Path) -> Option<String> {
-    if fallow_config::discover_workspaces(root).is_empty() {
+    if plow_config::discover_workspaces(root).is_empty() {
         return None;
     }
     if let Some(reference) = run_git(

@@ -1,7 +1,7 @@
 //! Plugin system for framework-aware codebase analysis.
 //!
 //! Unlike knip's JavaScript plugin system that evaluates config files at runtime,
-//! fallow's plugin system uses Oxc's parser to extract configuration values from
+//! plow's plugin system uses Oxc's parser to extract configuration values from
 //! JS/TS/JSON config files via AST walking, no JavaScript evaluation needed.
 //!
 //! Each plugin implements the [`Plugin`] trait with:
@@ -11,7 +11,7 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_config::{AutoImportRule, EntryPointRole, PackageJson, UsedClassMemberRule};
+use plow_config::{AutoImportRule, EntryPointRole, PackageJson, UsedClassMemberRule};
 use regex::Regex;
 
 const TEST_ENTRY_POINT_PLUGINS: &[&str] = &[

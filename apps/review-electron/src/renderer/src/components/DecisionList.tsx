@@ -11,14 +11,14 @@ const ORIGIN_PRESENTATION: Record<FramingOrigin, { label: string; tone: string }
   // tone, but still fenced + deterministic:false: it is intent, not a graph fact.
   captured: {
     label: "captured at write-time (author agent):",
-    tone: "text-fallow-green",
+    tone: "text-plow-green",
   },
   // Review-time inference from the opt-in agent run. Amber/muted + the explicit
   // "confirm with author" warning: a confident-wrong reconstruction is the worst
   // failure mode, so this treatment is non-negotiable.
   reconstructed: {
     label: "agent framing (unverified, confirm with author):",
-    tone: "text-fallow-amber",
+    tone: "text-plow-amber",
   },
 };
 
@@ -90,7 +90,7 @@ const DecisionRow = ({
   framing: ReadonlyArray<InlineFraming>;
 }) => {
   const linkable = d.anchorFile.length > 0;
-  // Only show the in-repo consumer count when fallow actually emitted it (the
+  // Only show the in-repo consumer count when plow actually emitted it (the
   // honest count is > 0); a missing field must NOT render as a contradictory "0".
   const consumerLabel =
     d.internalConsumerCount === 1
@@ -99,7 +99,7 @@ const DecisionRow = ({
   return (
     <li className="rounded-md border border-border bg-muted/20 p-2 text-xs">
       <div className="flex gap-2">
-        <GitBranchPlus className="mt-0.5 size-3.5 shrink-0 text-fallow-amber" />
+        <GitBranchPlus className="mt-0.5 size-3.5 shrink-0 text-plow-amber" />
         <div className="min-w-0 flex-1 space-y-1">
           {/* anchor (clickable) + category + routed expert, subtle inline header;
               the anchor is always visible here, not behind a full-height toggle */}

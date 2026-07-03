@@ -2,7 +2,7 @@
 
 use serde::Serialize;
 
-/// Gate mode for `fallow security --gate <mode>`.
+/// Gate mode for `plow security --gate <mode>`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]

@@ -1066,7 +1066,7 @@ mod tests {
         let result = plugin.resolve_config(
             std::path::Path::new("jest.config.js"),
             source,
-            std::path::Path::new("/tmp/fallow-jest-projects-nonexistent-zzz"),
+            std::path::Path::new("/tmp/plow-jest-projects-nonexistent-zzz"),
         );
         assert!(
             result.referenced_dependencies.is_empty(),

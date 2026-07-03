@@ -7,13 +7,13 @@ import type { TradeOffEnvelope } from "../model/tradeoff";
  * Persisted store for the MODEL-INFERRED trade-off surface: a single JSON envelope
  * written by the trade-off elicitation run and read back at cold-start, beside
  * `feed.ts`'s JSONL feed. Distinct from the deterministic decision surface
- * (`fallow review`); these anchors fallow cannot post-validate, so nothing here is
+ * (`plow review`); these anchors plow cannot post-validate, so nothing here is
  * graph-checked.
  */
 
 /** Path to the persisted trade-off envelope. */
 export const tradeoffsPath = (root: string): string =>
-  join(root, ".fallow-review", "tradeoffs.json");
+  join(root, ".plow-review", "tradeoffs.json");
 
 /**
  * Read + adapt the persisted trade-off envelope. Returns `null` when the file does

@@ -11,13 +11,13 @@
 
 use std::path::{Path, PathBuf};
 
-pub use fallow_output::{RoutingFacts, RoutingUnit};
+pub use plow_output::{RoutingFacts, RoutingUnit};
 use rustc_hash::FxHashSet;
 
-use fallow_config::ResolvedConfig;
-use fallow_engine::codeowners::CodeOwners;
-use fallow_engine::health_ownership::{OwnershipContext, compile_bot_globs, compute_ownership};
-use fallow_engine::{ChurnResult, SinceDuration, analyze_churn};
+use plow_config::ResolvedConfig;
+use plow_engine::codeowners::CodeOwners;
+use plow_engine::health_ownership::{OwnershipContext, compile_bot_globs, compute_ownership};
+use plow_engine::{ChurnResult, SinceDuration, analyze_churn};
 
 /// Default churn window for routing: one year of history is enough to identify
 /// the per-file experts without an unbounded `git log`.
@@ -161,7 +161,7 @@ fn route_one(
 
 #[cfg(test)]
 mod tests {
-    use fallow_output::{
+    use plow_output::{
         ContributorEntry, ContributorIdentifierFormat, OwnershipMetrics, OwnershipState,
     };
 

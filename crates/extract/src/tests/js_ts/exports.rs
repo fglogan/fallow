@@ -1,4 +1,4 @@
-use fallow_types::extract::ExportName;
+use plow_types::extract::ExportName;
 
 use crate::tests::{parse_ts as parse_source, parse_ts_with_complexity};
 

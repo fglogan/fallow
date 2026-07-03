@@ -10,7 +10,7 @@ use super::common::{create_config, fixture_path};
 fn flags_unrendered_lit_element_but_credits_rendered_and_imperative() {
     let root = fixture_path("lit-unrendered-element");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let flagged: Vec<(&str, &str)> = results
         .unrendered_components

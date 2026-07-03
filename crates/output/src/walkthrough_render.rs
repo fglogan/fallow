@@ -1,7 +1,7 @@
 //! Shared, render-surface-agnostic helpers for the review walkthrough (W2).
 //!
-//! Both the human terminal renderer (`fallow-cli`) and the markdown renderer
-//! (`fallow-api`) project the SAME [`StandardWalkthroughGuide`] into a staged
+//! Both the human terminal renderer (`plow-cli`) and the markdown renderer
+//! (`plow-api`) project the SAME [`StandardWalkthroughGuide`] into a staged
 //! tour. The per-file "why" fact line, the staged/cleared membership split, and
 //! the file-accounting math were independently re-derived in each surface and
 //! drifted (double-counted files, a path printed twice, mid-word truncation,

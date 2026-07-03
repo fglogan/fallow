@@ -14,8 +14,8 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_types::discover::FileId;
 use fixedbitset::FixedBitSet;
+use plow_types::discover::FileId;
 use rustc_hash::FxHashMap;
 
 use super::ModuleGraph;
@@ -271,7 +271,7 @@ fn is_dev_glue_path(path: &Path) -> bool {
 }
 
 /// Strip `root` and forward-slash-normalize a module path for cross-platform
-/// JSON parity (mirrors `fallow_core::trace`'s relativization).
+/// JSON parity (mirrors `plow_core::trace`'s relativization).
 fn relativize(path: &Path, root: &Path) -> String {
     let rel: PathBuf = path.strip_prefix(root).unwrap_or(path).to_path_buf();
     rel.to_string_lossy().replace('\\', "/")
@@ -281,8 +281,8 @@ fn relativize(path: &Path, root: &Path) -> String {
 mod tests {
     use super::*;
     use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
-    use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
-    use fallow_types::extract::{ExportInfo, ExportName, ImportInfo, ImportedName, VisibilityTag};
+    use plow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
+    use plow_types::extract::{ExportInfo, ExportName, ImportInfo, ImportedName, VisibilityTag};
     use std::path::PathBuf;
 
     fn file(id: u32, path: &str) -> DiscoveredFile {
@@ -362,7 +362,7 @@ mod tests {
     /// from the barrel. entry is consumer.
     fn build_re_export_graph() -> ModuleGraph {
         use crate::resolve::ResolvedReExport;
-        use fallow_types::extract::ReExportInfo;
+        use plow_types::extract::ReExportInfo;
 
         let files = vec![
             file(0, "/p/src/impl.ts"),
@@ -428,7 +428,7 @@ mod tests {
 
     #[test]
     fn coordination_gap_skips_story_and_test_consumers() {
-        use fallow_types::discover::{EntryPoint, EntryPointSource};
+        use plow_types::discover::{EntryPoint, EntryPointSource};
         // button.component (0) is changed; consumed by a co-located story (1) AND a
         // real panel component (2), both OUTSIDE the diff. Only the real consumer is
         // a coordination gap; the story is dev-only glue that fails in its own run.

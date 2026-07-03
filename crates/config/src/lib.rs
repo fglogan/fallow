@@ -28,8 +28,8 @@ use std::path::{Path, PathBuf};
 /// Basename of the local walkthrough viewed-state ledger inside the cache dir.
 const WALKTHROUGH_STATE_FILE: &str = "walkthrough-state.json";
 
-/// Path to the local `fallow review --walkthrough` viewed-state ledger inside a
-/// resolved cache directory (default `<root>/.fallow`, already gitignored).
+/// Path to the local `plow review --walkthrough` viewed-state ledger inside a
+/// resolved cache directory (default `<root>/.plow`, already gitignored).
 ///
 /// Pure path join, mirroring the `cache.bin` / `graph-cache.bin` / `churn.bin`
 /// conventions; the file IO and serde live in the CLI crate to keep this crate
@@ -46,7 +46,7 @@ mod walkthrough_state_path_tests {
 
     #[test]
     fn joins_state_file_under_cache_dir() {
-        let path = walkthrough_state_path(Path::new("/project/.fallow"));
-        assert_eq!(path, Path::new("/project/.fallow/walkthrough-state.json"));
+        let path = walkthrough_state_path(Path::new("/project/.plow"));
+        assert_eq!(path, Path::new("/project/.plow/walkthrough-state.json"));
     }
 }

@@ -10,11 +10,11 @@ def file_link(path; start; end_line):
   if (repo | length) > 0 and (sha | length) > 0 then
     "[`\($display):\(start)-\(end_line)`](https://github.com/\(repo)/blob/\(sha)/\(prefix)\(path)#L\(start)-L\(end_line))"
   else "`\($display):\(start)-\(end_line)`" end;
-def dead_code_docs: "https://docs.fallow.tools/explanations/dead-code";
+def dead_code_docs: "https://docs.genesis-plow.dev/explanations/dead-code";
 def docs(anchor): dead_code_docs + "#" + anchor;
-def health_docs: "https://docs.fallow.tools/explanations/health";
-def dupes_docs: "https://docs.fallow.tools/explanations/duplication";
-def suppression_docs: "https://docs.fallow.tools/configuration/suppression";
+def health_docs: "https://docs.genesis-plow.dev/explanations/health";
+def dupes_docs: "https://docs.genesis-plow.dev/explanations/duplication";
+def suppression_docs: "https://docs.genesis-plow.dev/configuration/suppression";
 def metric_delta(name):
   (.health.health_trend.metrics // []) | map(select(.name == name)) | first // null;
 def exceeded_priority:
@@ -82,7 +82,7 @@ def prod_hot_path_label($n):
 else "" end) +
 
 if $total == 0 then
-  "# \ud83c\udf3f Fallow\n\n" +
+  "# \ud83c\udf3f Plow\n\n" +
   (if $prod_advisory > 0 or $hot_paths > 0 then
     "> [!NOTE]\n> **No blocking issues found**\n\n" +
     ":white_check_mark: No code issues \u00b7 :white_check_mark: No duplication \u00b7 :white_check_mark: No blocking health findings" +
@@ -97,7 +97,7 @@ if $total == 0 then
     "| [Maintainability](\(health_docs)#maintainability-index-mi) | **\(pct($vitals.maintainability_avg))** / 100 |\n"
   else "" end)
 else
-  "# \ud83c\udf3f Fallow\n\n" +
+  "# \ud83c\udf3f Plow\n\n" +
 
   # One-line status
   (if $check > 0 then ":warning: **\($check)** code \(if $check == 1 then "issue" else "issues" end)" else ":white_check_mark: No code issues" end) +
@@ -229,9 +229,9 @@ else
   # Conditional tips based on which categories were found
   (if ((.check.unused_exports // []) + (.check.unused_dependencies // []) + (.check.unused_enum_members // [])) | length > 0 then
     "> [!TIP]\n" +
-    "> Run `fallow fix --dry-run` to preview auto-fixes.\n" +
+    "> Run `plow fix --dry-run` to preview auto-fixes.\n" +
     (if (.check.unused_exports // []) | length > 0 then
-      "> Add [`/** @public */`](https://docs.fallow.tools/configuration/suppression) above exports to preserve them.\n"
+      "> Add [`/** @public */`](https://docs.genesis-plow.dev/configuration/suppression) above exports to preserve them.\n"
     else "" end)
   else "" end)
 end

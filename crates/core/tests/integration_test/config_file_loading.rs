@@ -1,11 +1,11 @@
 use super::common::{create_config, fixture_path};
-use fallow_config::{FallowConfig, OutputFormat, Severity};
+use plow_config::{OutputFormat, PlowConfig, Severity};
 
 #[test]
 fn hidden_dir_allowlist_includes_storybook() {
     let root = fixture_path("hidden-dir-allowlist");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files: Vec<String> = results
         .unused_files
@@ -23,7 +23,7 @@ fn hidden_dir_allowlist_includes_storybook() {
 fn hidden_dir_non_allowlisted_is_skipped() {
     let root = fixture_path("hidden-dir-allowlist");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let all_paths: Vec<String> = results
         .unused_files
@@ -47,7 +47,7 @@ fn hidden_dir_non_allowlisted_is_skipped() {
 fn astro_files_parsed_and_analyzed() {
     let root = fixture_path("astro-project");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files: Vec<String> = results
         .unused_files
@@ -65,7 +65,7 @@ fn astro_files_parsed_and_analyzed() {
 fn mdx_unused_file_detected() {
     let root = fixture_path("mdx-project");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files: Vec<String> = results
         .unused_files
@@ -83,7 +83,7 @@ fn mdx_unused_file_detected() {
 fn mdx_code_fence_imports_do_not_report_unresolved() {
     let root = fixture_path("mdx-project");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unresolved_specifiers: Vec<&str> = results
         .unresolved_imports
@@ -107,7 +107,7 @@ fn mdx_code_fence_imports_do_not_report_unresolved() {
 fn complexity_project_analyzes_without_errors() {
     let root = fixture_path("complexity-project");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.unresolved_imports.is_empty(),
@@ -119,7 +119,7 @@ fn complexity_project_analyzes_without_errors() {
 fn error_no_package_json_produces_empty_results() {
     let root = fixture_path("error-no-package-json");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert_eq!(
         results.total_issues(),
@@ -131,21 +131,21 @@ fn error_no_package_json_produces_empty_results() {
 #[test]
 fn toml_config_loads_and_applies_rules() {
     let root = fixture_path("config-toml-project");
-    let config_path = root.join("fallow.toml");
+    let config_path = root.join("plow.toml");
 
-    let found = FallowConfig::find_config_path(&root);
+    let found = PlowConfig::find_config_path(&root);
     assert_eq!(
         found.as_deref(),
         Some(config_path.as_path()),
-        "find_config_path should discover fallow.toml"
+        "find_config_path should discover plow.toml"
     );
 
-    let loaded = FallowConfig::load(&config_path).expect("TOML config should load");
+    let loaded = PlowConfig::load(&config_path).expect("TOML config should load");
 
     assert_eq!(
         loaded.rules.unused_files,
         Severity::Warn,
-        "unused-files should be Warn per fallow.toml"
+        "unused-files should be Warn per plow.toml"
     );
 
     assert_eq!(
@@ -155,7 +155,7 @@ fn toml_config_loads_and_applies_rules() {
     );
 
     let resolved = loaded.resolve(root, OutputFormat::Human, 4, true, true, None);
-    let results = fallow_core::analyze(&resolved).expect("analysis should succeed");
+    let results = plow_core::analyze(&resolved).expect("analysis should succeed");
 
     let unused_files: Vec<String> = results
         .unused_files

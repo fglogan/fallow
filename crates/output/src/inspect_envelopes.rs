@@ -3,17 +3,17 @@
 use crate::root_envelopes::{RootEnvelopeMode, attach_telemetry_meta, serialize_named_json_output};
 use serde::Serialize;
 
-/// Envelope emitted by `fallow explain <issue-type> --format json`.
+/// Envelope emitted by `plow explain <issue-type> --format json`.
 ///
 /// Standalone rule explanation. This command does not run project analysis
 /// and intentionally returns a compact object without `schema_version` /
 /// `version` metadata; consumers that need those should call any other
-/// fallow JSON-producing command.
+/// plow JSON-producing command.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
     feature = "schema",
-    schemars(title = "fallow explain <issue-type> --format json")
+    schemars(title = "plow explain <issue-type> --format json")
 )]
 pub struct ExplainOutput {
     pub id: String,
@@ -25,7 +25,7 @@ pub struct ExplainOutput {
     pub docs: String,
 }
 
-/// Serialize the `fallow explain --format json` envelope.
+/// Serialize the `plow explain --format json` envelope.
 ///
 /// # Errors
 ///
@@ -40,10 +40,10 @@ pub fn serialize_explain_json_output(
     Ok(value)
 }
 
-/// Envelope emitted by `fallow inspect --format json`.
+/// Envelope emitted by `plow inspect --format json`.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(feature = "schema", schemars(title = "fallow inspect --format json"))]
+#[cfg_attr(feature = "schema", schemars(title = "plow inspect --format json"))]
 pub struct InspectOutput {
     pub target: InspectTargetDescriptor,
     pub identity: InspectIdentity,
@@ -143,7 +143,7 @@ impl InspectEvidenceSection {
     }
 }
 
-/// Serialize the `fallow inspect --format json` envelope.
+/// Serialize the `plow inspect --format json` envelope.
 ///
 /// # Errors
 ///

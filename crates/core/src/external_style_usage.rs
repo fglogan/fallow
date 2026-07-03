@@ -2,9 +2,9 @@ use std::path::{Path, PathBuf};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_config::{PackageJson, ResolvedConfig, WorkspaceInfo};
-use fallow_types::discover::{DiscoveredFile, FileId};
 use oxc_span::Span;
+use plow_config::{PackageJson, ResolvedConfig, WorkspaceInfo};
+use plow_types::discover::{DiscoveredFile, FileId};
 
 use crate::extract::{ImportInfo, ImportedName, parse_from_content};
 use crate::plugins::AggregatedPluginResult;

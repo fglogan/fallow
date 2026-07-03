@@ -1,4 +1,4 @@
-//! Human terminal renderer for `fallow review --walkthrough`.
+//! Human terminal renderer for `plow review --walkthrough`.
 //!
 //! Renders the EXISTING [`StandardWalkthroughGuide`] (already built by
 //! `crate::audit_walkthrough::build_guide_from_result`) as a staged, codiff-style
@@ -25,7 +25,7 @@
 //! never a wire field.
 
 use colored::Colorize;
-use fallow_output::{
+use plow_output::{
     DecisionCategory, DirectionUnit, MAX_CONTRACT_MEMBERS, ReviewEffort, RiskClass,
     StandardWalkthroughGuide, WalkthroughAccounting, cap_names, clean_decision_fact,
     visible_stage_units,
@@ -514,7 +514,7 @@ fn effort_label(effort: ReviewEffort) -> &'static str {
 mod tests {
     use super::*;
     use crate::report::human::plain;
-    use fallow_output::{
+    use plow_output::{
         AgentSchema, Decision, DecisionCategory, DecisionSurface, DiffTriage, DirectionUnit,
         FocusLabel, FocusMap, FocusScore, FocusUnit, INJECTION_NOTE, ImpactClosureFacts,
         PartitionFacts, ReviewBriefSchemaVersion, ReviewDeltas, ReviewDirection, ReviewEffort,
@@ -571,7 +571,7 @@ mod tests {
                 risk_class: RiskClass::Medium,
                 review_effort: ReviewEffort::Review,
             },
-            graph_facts: fallow_output::GraphFacts {
+            graph_facts: plow_output::GraphFacts {
                 exports_added: 0,
                 api_width_delta: 0,
                 reachable_from: Vec::new(),

@@ -3,12 +3,12 @@
 use crate::root_envelopes::{RootEnvelopeMode, attach_telemetry_meta, serialize_named_json_output};
 use serde::Serialize;
 
-/// Envelope emitted by `fallow --format review-github` / `review-gitlab`.
+/// Envelope emitted by `plow --format review-github` / `review-gitlab`.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
     feature = "schema",
-    schemars(title = "fallow --format review-github / review-gitlab")
+    schemars(title = "plow --format review-github / review-gitlab")
 )]
 pub struct ReviewEnvelopeOutput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -61,8 +61,7 @@ pub fn default_marker_regex_flags() -> String {
 }
 
 /// Canonical v2 marker-regex literal.
-pub const MARKER_REGEX_V2: &str =
-    r"^<!-- fallow-fingerprint:v2: ((?:[a-z]+:)?[0-9a-f]{16}) -->\s*$";
+pub const MARKER_REGEX_V2: &str = r"^<!-- plow-fingerprint:v2: ((?:[a-z]+:)?[0-9a-f]{16}) -->\s*$";
 
 /// Canonical v2 marker-regex flags.
 pub const MARKER_REGEX_FLAGS_V2: &str = "m";
@@ -189,14 +188,14 @@ pub struct ReviewEnvelopeMeta {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum ReviewEnvelopeSchema {
     /// Historical first release of the review envelope format.
-    #[serde(rename = "fallow-review-envelope/v1")]
+    #[serde(rename = "plow-review-envelope/v1")]
     #[allow(
         dead_code,
         reason = "kept for forward-compat with v1 historical inputs once Deserialize is derived"
     )]
     V1,
     /// Issue #528 review envelope format.
-    #[serde(rename = "fallow-review-envelope/v2")]
+    #[serde(rename = "plow-review-envelope/v2")]
     V2,
 }
 
@@ -225,14 +224,14 @@ pub enum ReviewCheckConclusion {
     Failure,
 }
 
-/// Envelope emitted by `fallow ci reconcile-review --format json`. Used by
+/// Envelope emitted by `plow ci reconcile-review --format json`. Used by
 /// CI integrations to drive comment carry-over and stale-comment cleanup
 /// across PR / MR revisions.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
     feature = "schema",
-    schemars(title = "fallow ci reconcile-review --format json")
+    schemars(title = "plow ci reconcile-review --format json")
 )]
 pub struct ReviewReconcileOutput {
     pub schema: ReviewReconcileSchema,
@@ -277,7 +276,7 @@ pub fn serialize_review_reconcile_json_output(
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum ReviewReconcileSchema {
     /// First release of the review reconcile format.
-    #[serde(rename = "fallow-review-reconcile/v1")]
+    #[serde(rename = "plow-review-reconcile/v1")]
     V1,
 }
 

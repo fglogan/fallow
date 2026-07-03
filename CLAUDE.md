@@ -1,8 +1,8 @@
-# Fallow: Rust-native codebase intelligence for TypeScript and JavaScript
+# Plow: Rust-native codebase intelligence for TypeScript and JavaScript
 
-Fallow is codebase intelligence for TypeScript and JavaScript. The free static layer finds unused files, exports, dependencies, types, enum members, class members, unresolved imports, unlisted deps, duplicate exports, circular dependencies, boundary violations, code duplication, and complexity hotspots, plus opt-in API hygiene checks such as private type leaks. A paid runtime intelligence layer (Fallow Runtime) adds production execution evidence (hot and cold paths, runtime-backed review, runtime-weighted health, stale-flag evidence, trends, alerts). Rust alternative to [knip](https://github.com/webpro-nl/knip) built on the Oxc parser ecosystem.
+Plow is codebase intelligence for TypeScript and JavaScript. The free static layer finds unused files, exports, dependencies, types, enum members, class members, unresolved imports, unlisted deps, duplicate exports, circular dependencies, boundary violations, code duplication, and complexity hotspots, plus opt-in API hygiene checks such as private type leaks. A paid runtime intelligence layer (Plow Runtime) adds production execution evidence (hot and cold paths, runtime-backed review, runtime-weighted health, stale-flag evidence, trends, alerts). Rust alternative to [knip](https://github.com/webpro-nl/knip) built on the Oxc parser ecosystem.
 
-For shared domain vocabulary, term definitions, and flagged ambiguities: see @CONTEXT.md. For the feature-workflow chain (when /fallow-implement, /panel-review, /user-panel, /fallow-review are invoked and how the .plans/ artefact threads them together): see @.claude/rules/workflow.md.
+For shared domain vocabulary, term definitions, and flagged ambiguities: see @CONTEXT.md. For the feature-workflow chain (when /plow-implement, /panel-review, /user-panel, /plow-review are invoked and how the .plans/ artefact threads them together): see @.claude/rules/workflow.md.
 
 ## Project structure
 
@@ -21,11 +21,11 @@ crates/
     duplicates/ -- Clone detection (families, normalize, tokenize)
   engine/   -- Command-neutral analysis runners and typed engine results
   api/      -- Programmatic API boundary for JS/native callers
-  napi/     -- napi-rs native Node addon (cdylib, #[napi] bindings) behind the @fallow/node package
+  napi/     -- napi-rs native Node addon (cdylib, #[napi] bindings) behind the @plow/node package
   cli/      -- CLI binary, split into per-command modules
     audit.rs, check.rs, dupes.rs, health/, watch.rs, fix/, init.rs, list.rs, schema.rs, validate.rs, regression/, impact.rs, security.rs
-    license/    -- `fallow license {activate, status, refresh, deactivate}` with offline JWT verify plus live trial / refresh flows
-    coverage/   -- `fallow coverage setup` resumable first-run state machine for runtime coverage
+    license/    -- `plow license {activate, status, refresh, deactivate}` with offline JWT verify plus live trial / refresh flows
+    coverage/   -- `plow coverage setup` resumable first-run state machine for runtime coverage
     report/     -- Output formatting (mod.rs dispatch, human/, json.rs, sarif.rs, compact.rs, markdown.rs)
     migrate/    -- Config migration (mod.rs, knip.rs, jscpd.rs)
   lsp/      -- LSP server, split into modules
@@ -34,7 +34,7 @@ crates/
 editors/
   vscode/   -- VS Code extension (LSP client, tree views, status bar, auto-download)
 npm/
-  fallow/   -- npm wrapper package with optionalDependencies pattern
+  plow/   -- npm wrapper package with optionalDependencies pattern
 action/       -- GitHub Action (composite)
   jq/         -- jq scripts for summaries, annotations, review comments, merging
   scripts/    -- Bash scripts (install, analyze, annotate, comment, review, summary)
@@ -60,19 +60,19 @@ cargo build --workspace
 cargo test --workspace --all-targets
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
-cargo run --bin fallow                       # Run all analyses (dead-code + dupes + health)
-cargo run --bin fallow -- watch              # Watch mode
-cargo run --bin fallow -- fix --dry-run      # Auto-fix preview
+cargo run --bin plow                       # Run all analyses (dead-code + dupes + health)
+cargo run --bin plow -- watch              # Watch mode
+cargo run --bin plow -- fix --dry-run      # Auto-fix preview
 ```
 
 ## Code conventions
 
-- Config files: `.fallowrc.json` > `.fallowrc.jsonc` > `fallow.toml` > `.fallow.toml`
+- Config files: `.plowrc.json` > `.plowrc.jsonc` > `plow.toml` > `.plow.toml`
 - No `detect` section in config; use `rules` with `"off"` severity
 - No `output` in config; output format is CLI-only via `--format`
 - Rules severity: `error` (fail CI, default) | `warn` (exit 0) | `off` (skip)
-- Inline suppression: `// fallow-ignore-next-line [issue-type]` and `// fallow-ignore-file [issue-type]`
-- Environment variables: `FALLOW_FORMAT`, `FALLOW_QUIET`, `FALLOW_BIN` (binary path for MCP), `FALLOW_CACHE_MAX_SIZE` (extraction cache cap in MB; default 256)
+- Inline suppression: `// plow-ignore-next-line [issue-type]` and `// plow-ignore-file [issue-type]`
+- Environment variables: `PLOW_FORMAT`, `PLOW_QUIET`, `PLOW_BIN` (binary path for MCP), `PLOW_CACHE_MAX_SIZE` (extraction cache cap in MB; default 256)
 - See `.claude/rules/code-quality.md` for clippy, size assertions, and CI hardening details
 
 ## Key design decisions
@@ -94,26 +94,26 @@ Documented as Architecture Decision Records in `decisions/` (kept in a private r
 
 ## Project communication
 
-- Never reduce fallow to "dead code tool" in taglines or summaries; reference all 5 analysis areas (unused code, circular deps, duplication, complexity hotspots, boundary violations). Category is "codebase analyzer."
+- Never reduce plow to "dead code tool" in taglines or summaries; reference all 5 analysis areas (unused code, circular deps, duplication, complexity hotspots, boundary violations). Category is "codebase analyzer."
 - Comparison pages must be research-backed with source links; never claim a competitor "can't" do something without checking
 - Design specs are definitions, not implementations: tokens, rules, components, ASCII wireframes, table-described behavior; no CSS/JS/HTML code blocks
 
 ## Repo layout (for this working tree)
 
-- `~/Sites/fallow-2/` is a working copy of fallow main; primary checkout is the bare-config'd `~/Sites/fallow/`
-- `.internal/`, `quality/`, `reference/`, `benchmarks/fixtures/`, `benchmarks/knip6/` are gitignored symlinks; `.internal/` points at `~/Sites/fallow-cloud/.internal/` (single source of truth, edit only there); the rest point at `~/Sites/fallow/`
-- `npm/fallow/skills/` is a vendored copy of `~/Sites/fallow-skills/`; refresh happens at release time, not manually
-- Edit fallow skills in `~/Sites/fallow-skills/fallow/skills/fallow/`, never in the symlinked `~/.agents/skills/fallow/`
-- GitHub org: `fallow-rs/fallow` (use `gh ... --repo fallow-rs/fallow`); never `bartwaardenburg/fallow`
-- `fallow dead-code` is dead-code only (legacy alias `check` still works); bare `fallow` runs the full pipeline (dead-code + dupes + health)
+- `~/Sites/plow-2/` is a working copy of plow main; primary checkout is the bare-config'd `~/Sites/plow/`
+- `.internal/`, `quality/`, `reference/`, `benchmarks/fixtures/`, `benchmarks/knip6/` are gitignored symlinks; `.internal/` points at `~/Sites/plow-cloud/.internal/` (single source of truth, edit only there); the rest point at `~/Sites/plow/`
+- `npm/plow/skills/` is a vendored copy of `~/Sites/plow-skills/`; refresh happens at release time, not manually
+- Edit plow skills in `~/Sites/plow-skills/plow/skills/plow/`, never in the symlinked `~/.agents/skills/plow/`
+- GitHub org: `fglogan/genesis-plow` (use `gh ... --repo fglogan/genesis-plow`); never `bartwaardenburg/plow`
+- `plow dead-code` is dead-code only (legacy alias `check` still works); bare `plow` runs the full pipeline (dead-code + dupes + health)
 
 ## Worktree / parallel-agent rules
 
-Multiple agents and background sessions frequently land commits in fallow main concurrently. Treat every working tree as racy:
+Multiple agents and background sessions frequently land commits in plow main concurrently. Treat every working tree as racy:
 
 - **Commit WIP early.** If a feature takes more than ~10 minutes and parallel sessions are active, switch to a feature branch (`git checkout -b feat/<name>`) and commit per chunk. Uncommitted state in main does not survive even one parallel `git stash` cycle, especially for untracked files.
 - **Verify commit authors before every push.** Run `git log --format="%H %ae %s" <base>..HEAD` and abort if any author is not `bart@waardenburg.dev`, a contributor email, or `...@users.noreply.github.com`. Worktrees and pre-push hooks have leaked `test@example.com` and `test@test.com` commits in the past.
-- **Never push fallow commits via fallow-2 (or any worktree) when WIP exists.** Fix the bare-repo push at its root (e.g. unset `GIT_DIR`/`GIT_WORK_TREE` in `.githooks/pre-push`) or create a fresh ephemeral worktree with `git -C <bare> worktree add /tmp/fallow-push <branch>`.
+- **Never push plow commits via plow-2 (or any worktree) when WIP exists.** Fix the bare-repo push at its root (e.g. unset `GIT_DIR`/`GIT_WORK_TREE` in `.githooks/pre-push`) or create a fresh ephemeral worktree with `git -C <bare> worktree add /tmp/plow-push <branch>`.
 - **`combined/mod.rs` is the merge-conflict magnet.** `combined.rs` was split into a `combined/` module: `mod.rs` keeps the orchestrator (`run_combined`'s `rayon::join` + shared-parse threading, analysis resolution, health-options wiring), while `output.rs` (format printers + regression/summary), `orientation.rs` (orientation header + entry-point display), and `impact.rs` (impact recording) are independent files editable in parallel. Assign ALL `combined/mod.rs` edits to a single agent that runs after parallel crate-level work finishes; the submodules no longer need serialization.
 - **After cherry-picking from worktree agents, always run `cargo fmt --all`.** Worktree agents do not always produce rustfmt-compliant code.
 - **After every worktree merge, scan for orphan conflict markers.** `grep -r '<<<<<<' crates/` (already auto-enforced by the conflict-marker-scan PostToolUse hook, but run manually before pushing).

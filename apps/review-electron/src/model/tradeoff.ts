@@ -2,11 +2,11 @@
  * Render model for the MODEL-INFERRED trade-off surface, the non-deterministic
  * companion to the deterministic {@link import("./walkthrough").Decision} surface.
  *
- * Where decisions are proved from the module graph (a `signal_id` fallow can
- * re-validate), trade-offs are a model reading the diff through the lenses fallow
+ * Where decisions are proved from the module graph (a `signal_id` plow can
+ * re-validate), trade-offs are a model reading the diff through the lenses plow
  * cannot see (abstraction, error handling, data-model shape, ...). They are NEVER
  * graph facts: `deterministic` is pinned to the literal `false` so a consumer can
- * never mistake one for a decision. See the `fallow-review` skill's
+ * never mistake one for a decision. See the `plow-review` skill's
  * `tradeoff-elicitation.md` for the producing prompt and its honesty contract.
  */
 

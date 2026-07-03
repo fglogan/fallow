@@ -1,4 +1,3 @@
-use fallow_types::extract::{SinkArgKind, SinkShape, SinkSite};
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
     BinaryOperator, CallExpression, Expression, ObjectExpression, ObjectPropertyKind, Statement,
@@ -7,6 +6,7 @@ use oxc_ast_visit::Visit;
 use oxc_parser::Parser;
 use oxc_semantic::SemanticBuilder;
 use oxc_span::SourceType;
+use plow_types::extract::{SinkArgKind, SinkShape, SinkSite};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::MemberAccess;

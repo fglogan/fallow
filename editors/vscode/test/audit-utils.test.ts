@@ -20,7 +20,7 @@ const baseAuditArgsOptions = {
 };
 
 /**
- * Trimmed from a real `fallow audit --format json` pass envelope (no changed
+ * Trimmed from a real `plow audit --format json` pass envelope (no changed
  * files, default gate). Volatile fields (version, elapsed_ms, head_sha) are
  * dropped; nothing under test reads them.
  */
@@ -51,7 +51,7 @@ const passAudit: AuditOutput = {
 };
 
 /**
- * Trimmed from a real `fallow audit --format json --gate all` fail envelope
+ * Trimmed from a real `plow audit --format json --gate all` fail envelope
  * (one changed file with a dead-code finding, exit code 1).
  */
 const failAudit: AuditOutput = {
@@ -104,7 +104,7 @@ describe("buildAuditArgs", () => {
       production: true,
       changedSince: "main",
       workspace: "pkg-a",
-      configPath: "/abs/.fallowrc.json",
+      configPath: "/abs/.plowrc.json",
       gate: "all",
     });
     expect(args).toEqual([
@@ -118,7 +118,7 @@ describe("buildAuditArgs", () => {
       "pkg-a",
       "--production",
       "--config",
-      "/abs/.fallowrc.json",
+      "/abs/.plowrc.json",
       "--gate",
       "all",
     ]);
@@ -288,9 +288,9 @@ describe("auditScopeSummary", () => {
         ...failAudit,
         changed_files_count: 2,
         base_ref: "origin/main",
-        base_description: "FALLOW_AUDIT_BASE=origin/main",
+        base_description: "PLOW_AUDIT_BASE=origin/main",
       }),
-    ).toBe("2 changed files vs origin/main (FALLOW_AUDIT_BASE=origin/main)");
+    ).toBe("2 changed files vs origin/main (PLOW_AUDIT_BASE=origin/main)");
   });
 });
 
@@ -331,8 +331,8 @@ describe("buildAuditTooltipMarkdown", () => {
 
   it("includes both command links", () => {
     const md = buildAuditTooltipMarkdown(passAudit);
-    expect(md).toContain("command:fallow.audit");
-    expect(md).toContain("command:fallow.showOutput");
+    expect(md).toContain("command:plow.audit");
+    expect(md).toContain("command:plow.showOutput");
   });
 
   it("includes the candidate-framing header (never defect/vulnerability wording)", () => {

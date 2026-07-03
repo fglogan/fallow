@@ -3,7 +3,7 @@ use std::path::Path;
 use ls_types::{CodeLens, Command, Position, Range, Uri};
 use serde::Serialize;
 
-use fallow_api::{
+use plow_api::{
     EditorAnalysisResults as AnalysisResults,
     EditorInlineComplexityExceeded as InlineComplexityExceeded,
     EditorInlineComplexityFinding as InlineComplexityFinding,
@@ -105,7 +105,7 @@ fn react_component_code_lenses(results: &AnalysisResults, file_path: &Path) -> V
         .collect()
 }
 
-fn react_component_code_lens(intel: &fallow_api::editor_results::ReactComponentIntel) -> CodeLens {
+fn react_component_code_lens(intel: &plow_api::editor_results::ReactComponentIntel) -> CodeLens {
     let position = Position {
         line: intel.anchor_line.saturating_sub(1),
         character: intel.anchor_col,
@@ -117,7 +117,7 @@ fn react_component_code_lens(intel: &fallow_api::editor_results::ReactComponentI
         },
         command: Some(Command {
             title: react_component_lens_title(intel),
-            command: "fallow.noop".to_string(),
+            command: "plow.noop".to_string(),
             arguments: None,
         }),
         data: None,
@@ -130,7 +130,7 @@ fn react_component_code_lens(intel: &fallow_api::editor_results::ReactComponentI
 /// honored (`1 prop`, `1 parent`). A component with no render sites, no props,
 /// and no hooks falls back to a bare `component` label so the lens is never
 /// empty.
-fn react_component_lens_title(intel: &fallow_api::editor_results::ReactComponentIntel) -> String {
+fn react_component_lens_title(intel: &plow_api::editor_results::ReactComponentIntel) -> String {
     let mut segments: Vec<String> = Vec::new();
 
     if intel.render_sites > 0 {
@@ -153,7 +153,7 @@ fn react_component_lens_title(intel: &fallow_api::editor_results::ReactComponent
 
 /// Build the `N hooks (a state, b effect, ...)` segment, or `None` when the
 /// component uses no hooks. Each kind sub-count is omitted when zero.
-fn react_hook_segment(hooks: &fallow_api::editor_results::ReactHookSummary) -> Option<String> {
+fn react_hook_segment(hooks: &plow_api::editor_results::ReactHookSummary) -> Option<String> {
     let total = u32::from(hooks.state)
         + u32::from(hooks.effect)
         + u32::from(hooks.memo)
@@ -207,7 +207,7 @@ fn export_usage_code_lenses(
 }
 
 fn export_usage_code_lens(
-    usage: &fallow_api::editor_results::ExportUsage,
+    usage: &plow_api::editor_results::ExportUsage,
     document_uri: &Uri,
 ) -> CodeLens {
     let line = usage.line.saturating_sub(1);
@@ -243,7 +243,7 @@ fn export_usage_code_lens(
 }
 
 fn reference_location_payload(
-    loc: &fallow_api::editor_results::ReferenceLocation,
+    loc: &plow_api::editor_results::ReferenceLocation,
 ) -> Option<ReferenceLocationPayload> {
     let uri = Uri::from_file_path(&loc.path)?;
     let ref_line = loc.line.saturating_sub(1);
@@ -266,11 +266,11 @@ fn reference_command(
     ref_locations: &[ReferenceLocationPayload],
 ) -> (String, Option<Vec<serde_json::Value>>) {
     if ref_locations.is_empty() {
-        return ("fallow.noop".to_string(), None);
+        return ("plow.noop".to_string(), None);
     }
 
     (
-        "fallow.showReferences".to_string(),
+        "plow.showReferences".to_string(),
         reference_command_arguments(document_uri, export_position, ref_locations),
     )
 }
@@ -320,7 +320,7 @@ fn complexity_code_lens(finding: &InlineComplexityFinding) -> CodeLens {
                 finding.cognitive,
                 complexity_exceeded_label(finding.exceeded)
             ),
-            command: "fallow.noop".to_string(),
+            command: "plow.noop".to_string(),
             arguments: None,
         }),
         data: None,
@@ -332,7 +332,7 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    use fallow_api::editor_results::{
+    use plow_api::editor_results::{
         ExportUsage, ReactComponentIntel, ReactHookSummary, ReactPropIntel, ReferenceLocation,
     };
 
@@ -510,7 +510,7 @@ mod tests {
         assert_eq!(lenses.len(), 1);
 
         let cmd = lenses[0].command.as_ref().unwrap();
-        assert_eq!(cmd.command, "fallow.noop");
+        assert_eq!(cmd.command, "plow.noop");
         assert!(cmd.arguments.is_none());
     }
 
@@ -544,7 +544,7 @@ mod tests {
         assert_eq!(lenses.len(), 1);
 
         let cmd = lenses[0].command.as_ref().unwrap();
-        assert_eq!(cmd.command, "fallow.showReferences");
+        assert_eq!(cmd.command, "plow.showReferences");
 
         let args = cmd.arguments.as_ref().unwrap();
         assert_eq!(args.len(), 3);
@@ -654,7 +654,7 @@ mod tests {
         assert_eq!(lenses.len(), 1);
 
         let cmd = lenses[0].command.as_ref().unwrap();
-        assert_eq!(cmd.command, "fallow.showReferences");
+        assert_eq!(cmd.command, "plow.showReferences");
 
         let args = cmd.arguments.as_ref().unwrap();
         let ref_locs = args[2].as_array().unwrap();
@@ -755,7 +755,7 @@ mod tests {
         assert_eq!(lenses[0].range.start.line, 11);
         assert_eq!(lenses[0].range.start.character, 2);
         let command = lenses[0].command.as_ref().expect("complexity lens command");
-        assert_eq!(command.command, "fallow.noop");
+        assert_eq!(command.command, "plow.noop");
         assert_eq!(
             command.title,
             "parseConfig complexity: 31 cyc, 26 cog (cyclomatic, cognitive)"
@@ -805,7 +805,7 @@ mod tests {
         // Anchored at the component definition (1-based line 7 -> 0-based 6).
         assert_eq!(lenses[0].range.start.line, 6);
         assert_eq!(lenses[0].range.start.character, 13);
-        assert_eq!(cmd.command, "fallow.noop");
+        assert_eq!(cmd.command, "plow.noop");
     }
 
     #[test]

@@ -1,9 +1,9 @@
 //! Markup CSS-class reference scanning and class-name similarity.
 //!
-//! Supports the `fallow health --css` class-reach candidates (the CSS analogue
+//! Supports the `plow health --css` class-reach candidates (the CSS analogue
 //! of `unresolved-import`). [`scan_markup_class_tokens`] pulls the STATIC class
 //! tokens out of `class` / `className` attributes across every markup surface
-//! fallow visits (JSX/TSX, HTML, Vue/Svelte/Astro), and flags whether the file
+//! plow visits (JSX/TSX, HTML, Vue/Svelte/Astro), and flags whether the file
 //! also constructs classes DYNAMICALLY (`clsx(...)`, `` `btn-${x}` ``,
 //! `:class`, spread props), which downstream consumers use to abstain.
 //!

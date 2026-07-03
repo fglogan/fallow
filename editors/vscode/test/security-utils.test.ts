@@ -46,7 +46,7 @@ describe("buildSecurityArgs", () => {
 
   it("adds --changed-since and --config when set", () => {
     expect(
-      buildSecurityArgs({ configPath: "/abs/.fallowrc.json", changedSince: "main" }),
+      buildSecurityArgs({ configPath: "/abs/.plowrc.json", changedSince: "main" }),
     ).toEqual([
       "security",
       "--format",
@@ -55,11 +55,11 @@ describe("buildSecurityArgs", () => {
       "--changed-since",
       "main",
       "--config",
-      "/abs/.fallowrc.json",
+      "/abs/.plowrc.json",
     ]);
   });
 
-  it("never emits --production or any --dupes-* flag (rejected by `fallow security`)", () => {
+  it("never emits --production or any --dupes-* flag (rejected by `plow security`)", () => {
     const args = buildSecurityArgs({ configPath: "/abs/cfg.json", changedSince: "HEAD~3" });
     expect(args).not.toContain("--production");
     expect(args.some((arg) => arg.startsWith("--dupes"))).toBe(false);
@@ -152,7 +152,7 @@ describe("parseUnknownSubcommand", () => {
   });
 
   it("returns false for unrelated errors", () => {
-    expect(parseUnknownSubcommand("fallow exited with code 2")).toBe(false);
+    expect(parseUnknownSubcommand("plow exited with code 2")).toBe(false);
     expect(parseUnknownSubcommand("unrecognized subcommand 'health'")).toBe(false);
   });
 

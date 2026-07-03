@@ -3,8 +3,8 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::resolve::{ResolvedImport, ResolvedModule};
-use fallow_types::discover::{DiscoveredFile, FileId};
-use fallow_types::extract::{ExportName, ImportedName, VisibilityTag};
+use plow_types::discover::{DiscoveredFile, FileId};
+use plow_types::extract::{ExportName, ImportedName, VisibilityTag};
 
 use super::narrowing::attach_symbol_reference;
 use super::types::ModuleNode;
@@ -385,8 +385,8 @@ pub(super) fn export_matches(export: &ExportName, import: &ImportedName) -> bool
 mod tests {
     use super::*;
     use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
-    use fallow_types::discover::{DiscoveredFile, FileId};
-    use fallow_types::extract::ImportedName;
+    use plow_types::discover::{DiscoveredFile, FileId};
+    use plow_types::extract::ImportedName;
 
     #[test]
     fn export_matches_named_same() {
@@ -562,7 +562,7 @@ mod tests {
 
     fn make_import(imported_name: ImportedName, target: ResolveResult) -> ResolvedImport {
         ResolvedImport {
-            info: fallow_types::extract::ImportInfo {
+            info: plow_types::extract::ImportInfo {
                 source: "./target".to_string(),
                 imported_name,
                 local_name: "localVar".to_string(),
@@ -662,7 +662,7 @@ mod tests {
         let mut acc = make_acc(4);
         let mut edges: FxHashMap<FileId, Vec<ImportedSymbol>> = FxHashMap::default();
         let import = ResolvedImport {
-            info: fallow_types::extract::ImportInfo {
+            info: plow_types::extract::ImportInfo {
                 source: "react".to_string(),
                 imported_name: ImportedName::Named("FC".to_string()),
                 local_name: "FC".to_string(),
@@ -713,7 +713,7 @@ mod tests {
             path: std::path::PathBuf::from("/project/entry.ts"),
             resolved_imports: vec![
                 ResolvedImport {
-                    info: fallow_types::extract::ImportInfo {
+                    info: plow_types::extract::ImportInfo {
                         source: "./c".to_string(),
                         imported_name: ImportedName::Named("c".to_string()),
                         local_name: "c".to_string(),
@@ -725,7 +725,7 @@ mod tests {
                     target: ResolveResult::InternalModule(FileId(3)),
                 },
                 ResolvedImport {
-                    info: fallow_types::extract::ImportInfo {
+                    info: plow_types::extract::ImportInfo {
                         source: "./a".to_string(),
                         imported_name: ImportedName::Named("a".to_string()),
                         local_name: "a".to_string(),
@@ -753,7 +753,7 @@ mod tests {
             file_id: FileId(0),
             path: std::path::PathBuf::from("/project/barrel.ts"),
             re_exports: vec![crate::resolve::ResolvedReExport {
-                info: fallow_types::extract::ReExportInfo {
+                info: plow_types::extract::ReExportInfo {
                     source: "./utils".to_string(),
                     imported_name: "foo".to_string(),
                     exported_name: "foo".to_string(),
@@ -781,7 +781,7 @@ mod tests {
             file_id: FileId(0),
             path: std::path::PathBuf::from("/project/barrel.ts"),
             re_exports: vec![crate::resolve::ResolvedReExport {
-                info: fallow_types::extract::ReExportInfo {
+                info: plow_types::extract::ReExportInfo {
                     source: "react".to_string(),
                     imported_name: "useState".to_string(),
                     exported_name: "useState".to_string(),
@@ -801,7 +801,7 @@ mod tests {
 
     #[test]
     fn collect_edges_dynamic_patterns_set_namespace() {
-        let pattern = fallow_types::extract::DynamicImportPattern {
+        let pattern = plow_types::extract::DynamicImportPattern {
             prefix: "./locales/".to_string(),
             suffix: Some(".json".to_string()),
             span: oxc_span::Span::new(0, 10),
@@ -826,7 +826,7 @@ mod tests {
         // all overlap on FileId(1). Without per-file dedup, FileId(1) would accrue one
         // Namespace symbol per matching pattern (the O(patterns * files) blow-up of
         // issue #963). With dedup it is credited exactly once.
-        let mk = |prefix: &str| fallow_types::extract::DynamicImportPattern {
+        let mk = |prefix: &str| plow_types::extract::DynamicImportPattern {
             prefix: prefix.to_string(),
             suffix: None,
             span: oxc_span::Span::new(0, 1),
@@ -864,7 +864,7 @@ mod tests {
         // The dedup set is per-file (rebuilt per `collect_edges_for_module` call), so
         // each importer independently creates its own edge to FileId(2). A global
         // dedup would silently drop the second importer's reachability contribution.
-        let mk = || fallow_types::extract::DynamicImportPattern {
+        let mk = || plow_types::extract::DynamicImportPattern {
             prefix: "./x/".to_string(),
             suffix: None,
             span: oxc_span::Span::new(0, 1),
@@ -913,16 +913,16 @@ mod tests {
                 size_bytes: 50,
             },
         ];
-        let entry_points = vec![fallow_types::discover::EntryPoint {
+        let entry_points = vec![plow_types::discover::EntryPoint {
             path: std::path::PathBuf::from("/project/barrel.ts"),
-            source: fallow_types::discover::EntryPointSource::PackageJsonMain,
+            source: plow_types::discover::EntryPointSource::PackageJsonMain,
         }];
         let resolved_modules = vec![
             ResolvedModule {
                 file_id: FileId(0),
                 path: std::path::PathBuf::from("/project/barrel.ts"),
                 re_exports: vec![crate::resolve::ResolvedReExport {
-                    info: fallow_types::extract::ReExportInfo {
+                    info: plow_types::extract::ReExportInfo {
                         source: "./source".to_string(),
                         imported_name: "*".to_string(),
                         exported_name: "*".to_string(),
@@ -936,7 +936,7 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(1),
                 path: std::path::PathBuf::from("/project/source.ts"),
-                exports: vec![fallow_types::extract::ExportInfo {
+                exports: vec![plow_types::extract::ExportInfo {
                     name: ExportName::Named("helper".to_string()),
                     local_name: Some("helper".to_string()),
                     is_type_only: false,
@@ -966,14 +966,14 @@ mod tests {
             path: std::path::PathBuf::from("/project/barrel.ts"),
             size_bytes: 50,
         }];
-        let entry_points = vec![fallow_types::discover::EntryPoint {
+        let entry_points = vec![plow_types::discover::EntryPoint {
             path: std::path::PathBuf::from("/project/barrel.ts"),
-            source: fallow_types::discover::EntryPointSource::PackageJsonMain,
+            source: plow_types::discover::EntryPointSource::PackageJsonMain,
         }];
         let resolved_modules = vec![ResolvedModule {
             file_id: FileId(0),
             path: std::path::PathBuf::from("/project/barrel.ts"),
-            exports: vec![fallow_types::extract::ExportInfo {
+            exports: vec![plow_types::extract::ExportInfo {
                 name: ExportName::Named("foo".to_string()),
                 local_name: Some("foo".to_string()),
                 is_type_only: false,
@@ -985,7 +985,7 @@ mod tests {
                 super_class: None,
             }],
             re_exports: vec![crate::resolve::ResolvedReExport {
-                info: fallow_types::extract::ReExportInfo {
+                info: plow_types::extract::ReExportInfo {
                     source: "./source".to_string(),
                     imported_name: "foo".to_string(),
                     exported_name: "foo".to_string(),

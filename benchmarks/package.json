@@ -1,5 +1,5 @@
 {
-  "name": "fallow-benchmarks",
+  "name": "plow-benchmarks",
   "private": true,
   "type": "module",
   "scripts": {

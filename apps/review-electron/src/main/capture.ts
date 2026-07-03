@@ -7,7 +7,7 @@ import { describeLoadError } from "./errors";
 export type Capture = { dataUrl: string; path: string };
 
 /**
- * Load `url` in a hidden window and capture it to a PNG under `.fallow-review/
+ * Load `url` in a hidden window and capture it to a PNG under `.plow-review/
  * shots/`. Returns a data URL (for the renderer canvas) + the saved path.
  */
 export const captureUrl = async (root: string, url: string, at: number): Promise<Capture> => {

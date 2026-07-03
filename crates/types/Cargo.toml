@@ -1,5 +1,5 @@
 [package]
-name = "fallow-types"
+name = "plow-types"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,7 +8,7 @@ homepage.workspace = true
 documentation.workspace = true
 keywords.workspace = true
 categories.workspace = true
-description = "Shared types and serde paths for fallow codebase intelligence"
+description = "Shared types and serde paths for plow codebase intelligence"
 readme = "../../README.md"
 
 [dependencies]
@@ -22,8 +22,8 @@ oxc_span = { workspace = true }
 bitcode = { workspace = true }
 
 # JSON Schema generation for the public JSON output contract.
-# Gated by the `schema` feature so consumers (fallow-graph, fallow-extract,
-# fallow-cli, fallow-napi) do not pay the schemars compile cost
+# Gated by the `schema` feature so consumers (plow-graph, plow-extract,
+# plow-cli, plow-napi) do not pay the schemars compile cost
 # unless they explicitly opt in (only the schema-emit binary needs it).
 schemars = { workspace = true, optional = true }
 # `serde_json` carries the free-form rule-object payload on

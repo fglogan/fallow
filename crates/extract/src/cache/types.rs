@@ -102,7 +102,7 @@ use crate::MemberKind;
 /// Pre-fix entries omit these candidates, so convention script auto-imports
 /// are not edge-credited until the file is re-extracted.
 ///
-/// Bumped to 106 for `fallow security`: JS/TS extraction now stores file-level
+/// Bumped to 106 for `plow security`: JS/TS extraction now stores file-level
 /// directives (`"use client"`, `"use server"`) in the parse cache so client
 /// boundary detection does not depend on stale cached module info.
 ///
@@ -266,7 +266,7 @@ use crate::MemberKind;
 /// re-extracted.
 ///
 /// Bumped to 134 for issue #928: JS/TS extraction now captures risky literal
-/// regex application sites in `security_sinks` so `fallow security` can report
+/// regex application sites in `security_sinks` so `plow security` can report
 /// source-backed ReDoS candidates. Pre-134 entries omit those sink sites until
 /// the file is re-extracted.
 ///
@@ -305,7 +305,7 @@ use crate::MemberKind;
 /// trace's source node at the real read line; pre-141 entries lack the offset.
 /// Bumped to 142 for issue #1134: JS/TS extraction now stores compact
 /// diagnostics for security sink-shaped callees that could not be flattened, so
-/// warm-cache `fallow security` runs can report the same blind-spot metadata as
+/// warm-cache `plow security` runs can report the same blind-spot metadata as
 /// cold extraction.
 ///
 /// Bumped to 143 for issue #1138: JS/TS extraction now propagates simple
@@ -741,7 +741,7 @@ pub(super) const CACHE_VERSION: u32 = 220;
 pub const DUPES_CACHE_VERSION: u32 = 9;
 
 /// Default maximum cache size (256 MB). Overridable per-project via
-/// `cache.maxSizeMb` in the config file or `FALLOW_CACHE_MAX_SIZE` env var.
+/// `cache.maxSizeMb` in the config file or `PLOW_CACHE_MAX_SIZE` env var.
 /// Also used as the hard ceiling on load-time deserialization as a defence
 /// against pathological on-disk files.
 pub const DEFAULT_CACHE_MAX_SIZE: usize = 256 * 1024 * 1024;
@@ -791,16 +791,16 @@ assert_cached_type_size!(CachedReExport, 88);
 assert_cached_type_size!(CachedMember, 64);
 assert_cached_type_size!(CachedDynamicImportPattern, 56);
 assert_cached_type_size!(crate::MemberAccess, 48);
-assert_cached_type_size!(fallow_types::extract::SemanticFact, 96);
-assert_cached_type_size!(fallow_types::extract::CalleeUse, 32);
-assert_cached_type_size!(fallow_types::extract::MisplacedDirectiveSite, 8);
-assert_cached_type_size!(fallow_types::extract::SinkSite, 216);
-assert_cached_type_size!(fallow_types::extract::FunctionComplexity, 96);
-assert_cached_type_size!(fallow_types::extract::ComplexityContribution, 16);
-assert_cached_type_size!(fallow_types::extract::FlagUse, 80);
-assert_cached_type_size!(fallow_types::extract::ClassHeritageInfo, 96);
-assert_cached_type_size!(fallow_types::extract::FactoryReturnExport, 48);
-assert_cached_type_size!(fallow_types::extract::LoadReturnKey, 32);
+assert_cached_type_size!(plow_types::extract::SemanticFact, 96);
+assert_cached_type_size!(plow_types::extract::CalleeUse, 32);
+assert_cached_type_size!(plow_types::extract::MisplacedDirectiveSite, 8);
+assert_cached_type_size!(plow_types::extract::SinkSite, 216);
+assert_cached_type_size!(plow_types::extract::FunctionComplexity, 96);
+assert_cached_type_size!(plow_types::extract::ComplexityContribution, 16);
+assert_cached_type_size!(plow_types::extract::FlagUse, 80);
+assert_cached_type_size!(plow_types::extract::ClassHeritageInfo, 96);
+assert_cached_type_size!(plow_types::extract::FactoryReturnExport, 48);
+assert_cached_type_size!(plow_types::extract::LoadReturnKey, 32);
 
 /// Cached data for a single module.
 #[derive(Debug, Clone, Encode, Decode)]
@@ -836,7 +836,7 @@ pub struct CachedModule {
     pub member_accesses: Vec<crate::MemberAccess>,
     /// Typed semantic facts produced by extraction for cross-layer analysis.
     /// `None` means no facts, which keeps the common warm-cache payload lean.
-    pub semantic_facts: Option<Box<[fallow_types::extract::SemanticFact]>>,
+    pub semantic_facts: Option<Box<[plow_types::extract::SemanticFact]>>,
     /// Identifiers used as whole objects (Object.values, for..in, spread, etc.).
     pub whole_object_uses: Box<[String]>,
     /// Dynamic import patterns with partial static resolution.
@@ -860,15 +860,15 @@ pub struct CachedModule {
     /// Pre-computed line-start byte offsets for O(log N) byte-to-line/col conversion.
     pub line_offsets: Vec<u32>,
     /// Per-function complexity metrics.
-    pub complexity: Vec<fallow_types::extract::FunctionComplexity>,
+    pub complexity: Vec<plow_types::extract::FunctionComplexity>,
     /// Feature flag use sites.
-    pub flag_uses: Vec<fallow_types::extract::FlagUse>,
+    pub flag_uses: Vec<plow_types::extract::FlagUse>,
     /// Heritage metadata for exported classes.
-    pub class_heritage: Vec<fallow_types::extract::ClassHeritageInfo>,
+    pub class_heritage: Vec<plow_types::extract::ClassHeritageInfo>,
     /// Exported free-function factories that provably return one class instance
     /// (`export function useApi() { return new RESTApi() }`). Compacted to `None`
     /// when empty so the common no-factory module pays no payload. See #1441 Part A.
-    pub exported_factory_returns: Option<Box<[fallow_types::extract::FactoryReturnExport]>>,
+    pub exported_factory_returns: Option<Box<[plow_types::extract::FactoryReturnExport]>>,
     /// Angular `InjectionToken<Interface>` `(token, interface)` pairs (#920).
     pub injection_tokens: Vec<(String, String)>,
     /// Local type-capable declarations.
@@ -898,28 +898,28 @@ pub struct CachedModule {
     /// Captured security sink sites (category-blind). Round-trips through the
     /// cache so the catalogue-driven `tainted_sink` detector sees sinks on
     /// warm-cache loads.
-    pub security_sinks: Vec<fallow_types::extract::SinkSite>,
+    pub security_sinks: Vec<plow_types::extract::SinkSite>,
     /// Count of sink-shaped nodes whose callee could not be flattened to a
     /// static path. Round-trips so the in-band blind-spot count is stable.
     pub security_sinks_skipped: u32,
     /// Span-level diagnostics for skipped security sink callees.
-    pub security_unresolved_callee_sites: Vec<fallow_types::extract::SkippedSecurityCalleeSite>,
+    pub security_unresolved_callee_sites: Vec<plow_types::extract::SkippedSecurityCalleeSite>,
     /// Local bindings tied to the member-access path they were sourced from.
     /// Round-trips so the security `tainted_sink` source-to-sink association
     /// sees source-tainted bindings on warm-cache loads.
-    pub tainted_bindings: Vec<fallow_types::extract::TaintedBinding>,
+    pub tainted_bindings: Vec<plow_types::extract::TaintedBinding>,
     /// Direct sink arguments recognized as sanitizer calls.
-    pub sanitized_sink_args: Vec<fallow_types::extract::SanitizedSinkArg>,
+    pub sanitized_sink_args: Vec<plow_types::extract::SanitizedSinkArg>,
     /// Defensive control call sites for security surface output.
-    pub security_control_sites: Vec<fallow_types::extract::SecurityControlSite>,
+    pub security_control_sites: Vec<plow_types::extract::SecurityControlSite>,
     /// Deduped statically flattenable callee paths. Round-trips so the
     /// `boundaries.calls.forbidden` detector sees call sites on warm-cache
     /// loads.
-    pub callee_uses: Vec<fallow_types::extract::CalleeUse>,
+    pub callee_uses: Vec<plow_types::extract::CalleeUse>,
     /// Misplaced `"use client"` / `"use server"` directive sites.
     /// Round-trips so the `misplaced-directive` detector sees them on
     /// warm-cache loads.
-    pub misplaced_directives: Vec<fallow_types::extract::MisplacedDirectiveSite>,
+    pub misplaced_directives: Vec<plow_types::extract::MisplacedDirectiveSite>,
     /// Export local names of inline `"use server"` body Server Actions.
     /// Round-trips so the `unused-server-action` reclassifier sees them on
     /// warm-cache loads.
@@ -927,14 +927,14 @@ pub struct CachedModule {
     /// Vue `provide`/`inject` and Svelte `setContext`/`getContext` key sites.
     /// Round-trips so the `unprovided-inject` detector sees them on warm-cache
     /// loads.
-    pub di_key_sites: Vec<fallow_types::extract::DiKeySite>,
+    pub di_key_sites: Vec<plow_types::extract::DiKeySite>,
     /// Whether the module had an unknowable-key provide. Round-trips so the
     /// `unprovided-inject` project-wide abstain holds on warm-cache loads.
     pub has_dynamic_provide: bool,
     /// Vue `<script setup>` `defineProps` and Svelte 5 `$props()` declared props.
     /// Round-trips so the `unused-component-prop` detector sees them on
     /// warm-cache loads.
-    pub component_props: Vec<fallow_types::extract::ComponentProp>,
+    pub component_props: Vec<plow_types::extract::ComponentProp>,
     /// Whether the template spreads `$attrs`/`$props`/`props` or the
     /// `defineProps` return is rest-destructured. Round-trips for the abstain.
     pub has_props_attrs_fallthrough: bool,
@@ -947,22 +947,22 @@ pub struct CachedModule {
     pub has_unharvestable_props: bool,
     /// Vue `<script setup>` `defineEmits` declared events. Round-trips so the
     /// `unused-component-emit` detector sees them on warm-cache loads.
-    pub component_emits: Vec<fallow_types::extract::ComponentEmit>,
+    pub component_emits: Vec<plow_types::extract::ComponentEmit>,
     /// Angular component/directive inputs (`@Input()` decorators and signal
     /// `input()` / `model()` initializers). Round-trips so the
     /// `unused-component-input` detector sees them on warm-cache loads.
-    pub angular_inputs: Vec<fallow_types::extract::AngularInputMember>,
+    pub angular_inputs: Vec<plow_types::extract::AngularInputMember>,
     /// Angular component/directive outputs (`@Output()` decorators and signal
     /// `output()` / `outputFromObservable()` initializers). Round-trips so the
     /// `unused-component-output` detector sees them on warm-cache loads.
-    pub angular_outputs: Vec<fallow_types::extract::AngularOutputMember>,
+    pub angular_outputs: Vec<plow_types::extract::AngularOutputMember>,
     /// Angular `@Component` declarations with their `selector` value(s).
     /// Round-trips so the Angular `unrendered-component` arm sees them on
     /// warm-cache loads.
-    pub angular_component_selectors: Vec<fallow_types::extract::AngularComponentSelector>,
+    pub angular_component_selectors: Vec<plow_types::extract::AngularComponentSelector>,
     /// Lit / web-component custom elements registered in this file. Round-trips so
     /// the Lit `unrendered-component` arm sees them on warm-cache loads.
-    pub registered_custom_elements: Vec<fallow_types::extract::RegisteredCustomElement>,
+    pub registered_custom_elements: Vec<plow_types::extract::RegisteredCustomElement>,
     /// Custom-element tag names used (rendered) in this file's `html` templates.
     /// Round-trips for the Lit `unrendered-component` rendered-tag union.
     pub used_custom_element_tags: Vec<String>,
@@ -985,7 +985,7 @@ pub struct CachedModule {
     pub has_emit_whole_object_use: bool,
     /// SvelteKit `load()` return-object keys. Round-trips so the
     /// `unused-load-data-key` detector sees them on warm-cache loads.
-    pub load_return_keys: Vec<fallow_types::extract::LoadReturnKey>,
+    pub load_return_keys: Vec<plow_types::extract::LoadReturnKey>,
     /// Whether this file's `load()` body could not be harvested safely.
     /// Round-trips for the abstain.
     pub has_unharvestable_load: bool,
@@ -994,18 +994,18 @@ pub struct CachedModule {
     pub has_load_data_whole_use: bool,
     /// React/JSX component definitions. Round-trips so the React-health phases
     /// see them on warm-cache loads.
-    pub component_functions: Vec<fallow_types::extract::ComponentFunction>,
+    pub component_functions: Vec<plow_types::extract::ComponentFunction>,
     /// React component props. Round-trips so the React `unused-component-prop`
     /// arm sees them on warm-cache loads.
-    pub react_props: Vec<fallow_types::extract::ComponentProp>,
+    pub react_props: Vec<plow_types::extract::ComponentProp>,
     /// React hook call sites. Round-trips for the complexity-fold phase.
-    pub hook_uses: Vec<fallow_types::extract::HookUse>,
+    pub hook_uses: Vec<plow_types::extract::HookUse>,
     /// React render edges (child name captured; resolution deferred to graph
     /// build). Round-trips so the render graph survives a warm cache.
-    pub render_edges: Vec<fallow_types::extract::RenderEdge>,
+    pub render_edges: Vec<plow_types::extract::RenderEdge>,
     /// Svelte custom events dispatched via `dispatch('<name>')`. Round-trips so
     /// the `unused-svelte-event` detector sees them on warm-cache loads.
-    pub svelte_dispatched_events: Vec<fallow_types::extract::DispatchedEvent>,
+    pub svelte_dispatched_events: Vec<plow_types::extract::DispatchedEvent>,
     /// Svelte template `on:<name>` listener names on component tags. Round-trips
     /// so the project-wide listened set is correct on warm-cache loads.
     pub svelte_listened_events: Vec<String>,
@@ -1018,8 +1018,8 @@ impl CachedModule {
     /// Source metadata fingerprint stored with this cache entry.
     ///
     #[must_use]
-    pub fn source_fingerprint(&self) -> fallow_types::source_fingerprint::SourceFingerprint {
-        fallow_types::source_fingerprint::SourceFingerprint::new(self.mtime_ns, self.file_size)
+    pub fn source_fingerprint(&self) -> plow_types::source_fingerprint::SourceFingerprint {
+        plow_types::source_fingerprint::SourceFingerprint::new(self.mtime_ns, self.file_size)
     }
 }
 
@@ -1082,7 +1082,7 @@ pub struct CachedSuppression {
 pub struct CachedUnknownSuppressionKind {
     /// 1-based line where the comment itself appears.
     pub comment_line: u32,
-    /// True when the marker was `fallow-ignore-file`.
+    /// True when the marker was `plow-ignore-file`.
     pub is_file_level: bool,
     /// The verbatim token that did not parse.
     pub token: String,
@@ -1158,7 +1158,7 @@ pub struct CachedDynamicImport {
     pub destructured_names: Vec<String>,
     /// Local variable name for namespace imports.
     pub local_name: Option<String>,
-    /// True when this dynamic import was synthesised by fallow (see
+    /// True when this dynamic import was synthesised by plow (see
     /// `DynamicImportInfo::is_speculative`).
     pub is_speculative: bool,
 }

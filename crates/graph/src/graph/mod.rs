@@ -23,8 +23,8 @@ use fixedbitset::FixedBitSet;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::resolve::ResolvedModule;
-use fallow_types::discover::{DiscoveredFile, EntryPoint, FileId};
-use fallow_types::extract::ImportedName;
+use plow_types::discover::{DiscoveredFile, EntryPoint, FileId};
+use plow_types::extract::ImportedName;
 
 pub use fan_io::{FocusFileFacts, FocusFileFactsPaths};
 pub use impact_closure::{
@@ -38,7 +38,7 @@ pub use types::{ExportSymbol, ModuleNode, ReExportEdge, ReferenceKind, SymbolRef
 /// file (`.d.ts`, `.d.mts`, `.d.cts`). Used to seed declaration files as
 /// overall entry points so ambient `typeof import()` references stay alive.
 ///
-/// Keep in sync with `fallow_core::analyze::predicates::is_declaration_file`;
+/// Keep in sync with `plow_core::analyze::predicates::is_declaration_file`;
 /// the graph crate cannot depend on core, so the predicate is duplicated.
 fn is_declaration_file_path(path: &Path) -> bool {
     path.file_name()
@@ -50,7 +50,7 @@ fn is_declaration_file_path(path: &Path) -> bool {
 
 /// The core module dependency graph.
 ///
-/// Derives `serde` so the whole graph can be persisted to `.fallow/graph-cache.bin`
+/// Derives `serde` so the whole graph can be persisted to `.plow/graph-cache.bin`
 /// (see `crate::cache`) and skipped on a re-run whose inputs are byte-identical.
 /// `namespace_imported` is a derived `FixedBitSet` reconstructed from the edge
 /// set on cache load (`reconstruct_namespace_imported`), so it is
@@ -97,14 +97,14 @@ pub struct ModuleGraph {
     /// lexicographically) and a `is_self_loop` flag distinguishing
     /// single-file self-re-exports from multi-node cycles. Populated by
     /// `re_exports::find_re_export_cycles` and consumed by
-    /// `fallow_core::analyze::re_export_cycles::find_re_export_cycles` which
+    /// `plow_core::analyze::re_export_cycles::find_re_export_cycles` which
     /// wraps each entry in a typed `ReExportCycleFinding`.
     pub re_export_cycles: Vec<GraphReExportCycle>,
 }
 
 /// An edge in the module graph.
 ///
-/// Public surface: `fallow trace` walks the raw per-symbol `imported_name`
+/// Public surface: `plow trace` walks the raw per-symbol `imported_name`
 /// / `local_name` in BOTH directions (callers via `reverse_deps`, callees via
 /// outgoing edges), which the flattened summary structs cannot express. The
 /// field layout (and the `Edge == 32` size assertion below) is unchanged by the
@@ -331,7 +331,7 @@ impl ModuleGraph {
 
     /// Iterate the outgoing edges of `file_id` with full per-symbol data.
     ///
-    /// `fallow trace` needs the raw `ImportedSymbol` set on each edge in
+    /// `plow trace` needs the raw `ImportedSymbol` set on each edge in
     /// both directions, which the flattened summary structs cannot express.
     /// Returns an empty iterator for out-of-range file ids.
     pub fn outgoing_symbol_edges(
@@ -432,10 +432,10 @@ impl ModuleGraph {
     /// when every symbol is type-only).
     ///
     /// When `featureB` has both `import type { Foo } from './x'` and
-    /// `import { bar } from './x'`, fallow groups them into ONE edge with the
+    /// `import { bar } from './x'`, plow groups them into ONE edge with the
     /// type-only symbol first and the value symbol second. Consumers need the
     /// value span so findings anchor on the runtime import line; otherwise a
-    /// `// fallow-ignore-next-line` above the type-only line would silently
+    /// `// plow-ignore-next-line` above the type-only line would silently
     /// suppress the real violation.
     ///
     /// Returns an empty iterator for out-of-range file ids.
@@ -516,8 +516,8 @@ fn imported_name_label(name: &ImportedName) -> String {
 mod tests {
     use super::*;
     use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
-    use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
-    use fallow_types::extract::{ExportName, ImportInfo, ImportedName, VisibilityTag};
+    use plow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
+    use plow_types::extract::{ExportName, ImportInfo, ImportedName, VisibilityTag};
     use std::path::PathBuf;
 
     fn build_simple_graph() -> ModuleGraph {
@@ -561,7 +561,7 @@ mod tests {
                 file_id: FileId(1),
                 path: PathBuf::from("/project/src/utils.ts"),
                 exports: vec![
-                    fallow_types::extract::ExportInfo {
+                    plow_types::extract::ExportInfo {
                         name: ExportName::Named("foo".to_string()),
                         local_name: Some("foo".to_string()),
                         is_type_only: false,
@@ -572,7 +572,7 @@ mod tests {
                         is_side_effect_used: false,
                         super_class: None,
                     },
-                    fallow_types::extract::ExportInfo {
+                    plow_types::extract::ExportInfo {
                         name: ExportName::Named("bar".to_string()),
                         local_name: Some("bar".to_string()),
                         is_type_only: false,
@@ -698,7 +698,7 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(1),
                 path: PathBuf::from("/project/src/runtime-only.ts"),
-                exports: vec![fallow_types::extract::ExportInfo {
+                exports: vec![plow_types::extract::ExportInfo {
                     name: ExportName::Named("runtimeOnly".to_string()),
                     local_name: Some("runtimeOnly".to_string()),
                     is_type_only: false,
@@ -748,7 +748,7 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(4),
                 path: PathBuf::from("/project/src/covered.ts"),
-                exports: vec![fallow_types::extract::ExportInfo {
+                exports: vec![plow_types::extract::ExportInfo {
                     name: ExportName::Named("covered".to_string()),
                     local_name: Some("covered".to_string()),
                     is_type_only: false,
@@ -864,7 +864,7 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(1),
                 path: PathBuf::from("/project/utils.ts"),
-                exports: vec![fallow_types::extract::ExportInfo {
+                exports: vec![plow_types::extract::ExportInfo {
                     name: ExportName::Named("foo".to_string()),
                     local_name: Some("foo".to_string()),
                     is_type_only: false,
@@ -959,7 +959,7 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(2),
                 path: PathBuf::from("/project/named-only.ts"),
-                exports: vec![fallow_types::extract::ExportInfo {
+                exports: vec![plow_types::extract::ExportInfo {
                     name: ExportName::Named("foo".to_string()),
                     local_name: Some("foo".to_string()),
                     is_type_only: false,
@@ -1040,7 +1040,7 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(1),
                 path: PathBuf::from("/project/utils.ts"),
-                exports: vec![fallow_types::extract::ExportInfo {
+                exports: vec![plow_types::extract::ExportInfo {
                     name: ExportName::Named("foo".to_string()),
                     local_name: Some("foo".to_string()),
                     is_type_only: false,
@@ -1056,7 +1056,7 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(2),
                 path: PathBuf::from("/project/orphan.ts"),
-                exports: vec![fallow_types::extract::ExportInfo {
+                exports: vec![plow_types::extract::ExportInfo {
                     name: ExportName::Named("orphan".to_string()),
                     local_name: Some("orphan".to_string()),
                     is_type_only: false,
@@ -1429,7 +1429,7 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(1),
                 path: PathBuf::from("/project/utils.ts"),
-                exports: vec![fallow_types::extract::ExportInfo {
+                exports: vec![plow_types::extract::ExportInfo {
                     name: ExportName::Default,
                     local_name: None,
                     is_type_only: false,
@@ -1497,7 +1497,7 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(1),
                 path: PathBuf::from("/project/styles.ts"),
-                exports: vec![fallow_types::extract::ExportInfo {
+                exports: vec![plow_types::extract::ExportInfo {
                     name: ExportName::Named("primaryColor".to_string()),
                     local_name: Some("primaryColor".to_string()),
                     is_type_only: false,
@@ -1577,7 +1577,7 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(2),
                 path: PathBuf::from("/project/shared.ts"),
-                exports: vec![fallow_types::extract::ExportInfo {
+                exports: vec![plow_types::extract::ExportInfo {
                     name: ExportName::Named("helper".to_string()),
                     local_name: Some("helper".to_string()),
                     is_type_only: false,

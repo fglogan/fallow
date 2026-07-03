@@ -1,6 +1,6 @@
 use crate::params::FeatureFlagsParams;
 
-use fallow_api::{
+use plow_api::{
     AnalysisOptions, FeatureFlagsOptions, run_feature_flags as run_api_feature_flags,
     serialize_feature_flags_programmatic_json,
 };

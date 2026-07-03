@@ -8,9 +8,9 @@ use super::common::{create_config, fixture_path};
 
 /// Find one component's intel by name.
 fn intel_for<'a>(
-    results: &'a fallow_core::results::AnalysisResults,
+    results: &'a plow_core::results::AnalysisResults,
     name: &str,
-) -> Option<&'a fallow_core::results::ReactComponentIntel> {
+) -> Option<&'a plow_core::results::ReactComponentIntel> {
     results
         .react_component_intel
         .iter()
@@ -26,9 +26,9 @@ fn summarizes_render_props_and_hooks() {
     let root = fixture_path("react-component-intel");
     let config = create_config(root);
     // react_component_intel is computed only on the editor/LSP `collect_usages`
-    // path (gated off bare `fallow` / `audit`), so exercise it via the same
+    // path (gated off bare `plow` / `audit`), so exercise it via the same
     // analyze entry the LSP uses.
-    let results = fallow_core::analyze_with_usages(&config).expect("analysis should succeed");
+    let results = plow_core::analyze_with_usages(&config).expect("analysis should succeed");
 
     let card = intel_for(&results, "Card").expect("Card is in the intel set");
 
@@ -102,9 +102,9 @@ fn attributes_hooks_per_component_in_multi_component_file() {
     let root = fixture_path("react-multi-component-hooks");
     let config = create_config(root);
     // react_component_intel is computed only on the editor/LSP `collect_usages`
-    // path (gated off bare `fallow` / `audit`), so exercise it via the same
+    // path (gated off bare `plow` / `audit`), so exercise it via the same
     // analyze entry the LSP uses.
-    let results = fallow_core::analyze_with_usages(&config).expect("analysis should succeed");
+    let results = plow_core::analyze_with_usages(&config).expect("analysis should succeed");
 
     let a = intel_for(&results, "ComponentA").expect("ComponentA is in the intel set");
     assert_eq!(a.hooks.state, 1, "ComponentA owns the one useState");
@@ -132,9 +132,9 @@ fn carries_prop_drilling_trace_on_chain_source() {
     let root = fixture_path("prop-drilling");
     let config = create_config(root);
     // react_component_intel is computed only on the editor/LSP `collect_usages`
-    // path (gated off bare `fallow` / `audit`), so exercise it via the same
+    // path (gated off bare `plow` / `audit`), so exercise it via the same
     // analyze entry the LSP uses.
-    let results = fallow_core::analyze_with_usages(&config).expect("analysis should succeed");
+    let results = plow_core::analyze_with_usages(&config).expect("analysis should succeed");
 
     // The rule is off by default, so no prop-drilling FINDINGS are emitted: the
     // descriptive trace must still be present.
@@ -190,9 +190,9 @@ fn no_intel_on_non_react_project() {
     let root = fixture_path("complexity-project");
     let config = create_config(root);
     // react_component_intel is computed only on the editor/LSP `collect_usages`
-    // path (gated off bare `fallow` / `audit`), so exercise it via the same
+    // path (gated off bare `plow` / `audit`), so exercise it via the same
     // analyze entry the LSP uses.
-    let results = fallow_core::analyze_with_usages(&config).expect("analysis should succeed");
+    let results = plow_core::analyze_with_usages(&config).expect("analysis should succeed");
     assert!(
         results.react_component_intel.is_empty(),
         "no React intel on a non-React project"

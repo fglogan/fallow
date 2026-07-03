@@ -5,7 +5,7 @@ use super::framework_convention_coverage_common::{
 
 fn collect_unresolved_imports(
     root: &std::path::Path,
-    results: &fallow_core::results::AnalysisResults,
+    results: &plow_core::results::AnalysisResults,
 ) -> Vec<(String, String)> {
     results
         .unresolved_imports
@@ -27,7 +27,7 @@ fn collect_unresolved_imports(
 
 fn assert_bundle_boundary_modules_are_traversed(
     root: &std::path::Path,
-    results: &fallow_core::results::AnalysisResults,
+    results: &plow_core::results::AnalysisResults,
 ) {
     let unresolved = collect_unresolved_imports(root, results);
 
@@ -57,7 +57,7 @@ fn assert_bundle_boundary_modules_are_traversed(
 fn react_router_route_config_root_and_route_exports_are_covered() {
     let root = fixture_path("react-router-conventions");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     assert_bundle_boundary_modules_are_traversed(&root, &results);
 
     let unused_files = collect_unused_files(&root, &results);
@@ -99,7 +99,7 @@ fn react_router_route_config_root_and_route_exports_are_covered() {
 fn react_router_generated_route_type_imports_are_not_unresolved() {
     let root = fixture_path("react-router-conventions");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unresolved = collect_unresolved_imports(&root, &results);
 
     assert!(
@@ -120,7 +120,7 @@ fn react_router_generated_route_type_imports_are_not_unresolved() {
 fn remix_root_and_client_data_exports_are_covered() {
     let root = fixture_path("remix-conventions");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     assert_bundle_boundary_modules_are_traversed(&root, &results);
 
     let unused_exports = collect_unused_exports(&root, &results);
@@ -156,7 +156,7 @@ fn remix_root_and_client_data_exports_are_covered() {
 fn remix_generated_route_type_imports_are_not_unresolved() {
     let root = fixture_path("remix-conventions");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unresolved = collect_unresolved_imports(&root, &results);
 
     assert!(
@@ -171,7 +171,7 @@ fn remix_generated_route_type_imports_are_not_unresolved() {
 fn react_router_route_config_discovers_modules_outside_routes_dir() {
     let root = fixture_path("react-router-config-routes");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files = collect_unused_files(&root, &results);
     for expected_used_file in [
@@ -224,7 +224,7 @@ fn react_router_route_config_discovers_modules_outside_routes_dir() {
 fn react_router_custom_app_directory_keeps_src_routes_alive() {
     let root = fixture_path("react-router-src-app");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files = collect_unused_files(&root, &results);
     for expected_used_file in [
@@ -273,7 +273,7 @@ fn react_router_custom_app_directory_keeps_src_routes_alive() {
 fn react_router_flat_routes_custom_root_is_framework_used() {
     let root = fixture_path("react-router-flat-routes-root");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files = collect_unused_files(&root, &results);
     assert!(

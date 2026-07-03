@@ -5,13 +5,13 @@ tools: Glob, Grep, Read, Bash
 model: sonnet
 ---
 
-Review changes to fallow's VS Code extension. This is the editor integration layer that connects VS Code to the fallow LSP server.
+Review changes to plow's VS Code extension. This is the editor integration layer that connects VS Code to the plow LSP server.
 
 ## What to check
 
 1. **Activation correctness**: Extension should activate on workspace open (not on every file), deactivate cleanly. No leaked processes or file handles
 2. **Binary resolution chain**: Settings path -> node_modules -> PATH -> cached download -> auto-download. Each step must fail gracefully to the next. Version mismatch detection between extension and binary
-3. **Command registration**: All commands in `package.json` must have implementations. Command palette titles must be clear ("Fallow: Analyze Project" not "Run Analysis")
+3. **Command registration**: All commands in `package.json` must have implementations. Command palette titles must be clear ("Plow: Analyze Project" not "Run Analysis")
 4. **Settings design**: Settings must have descriptions, valid defaults, and correct types. Enum settings need `enumDescriptions`. Settings changes should take effect without restart where possible
 5. **Tree view UX**: Issues grouped logically (by type, by file). Click-to-navigate must open the correct file at the correct line. Empty state when no issues found
 6. **Status bar**: Show analysis state (running/done/error), issue count. Click action should be useful (open output, re-run, or open sidebar)
@@ -25,7 +25,7 @@ Review changes to fallow's VS Code extension. This is the editor integration lay
 For each VS Code extension diff, walk this list in addition to the generic checks above:
 
 - [ ] **VS Code `dist/` bundle is NOT committed (build output only)**: `editors/vscode/dist/` is gitignored. Do not flag a source change for "missing dist rebuild", and reject any diff that re-adds `dist/extension.js` or `dist/extension.js.map` to version control. The shipped VSIX is built fresh from `src/` by CI (`.github/workflows/ci.yml`: `pnpm build`) and the release pipeline (`vscode-prep`: `pnpm build` then `pnpm package`), so the marketplace consumer always sees current source. A stale committed bundle used to recur (#902/#903/#907/#908 and the `7267aada` type-only `.map` drift) precisely because the artifact was tracked; untracking it removed the failure class. Source still needs `pnpm run build` to pass locally as a compile check, but nothing under `dist/` should ever appear in `git status`.
-- [ ] **VS Code generated types regenerated when `docs/output-schema.json` changes**: any diff touching `docs/output-schema.json` OR any file under `editors/vscode/` requires running `pnpm run check:codegen` to confirm the committed `editors/vscode/src/generated/output-contract.d.ts` (and `npm/fallow/types/output-contract.d.ts`) is in sync with the schema. The codegen runs as a CI job in `.github/workflows/*.yml`; a stale generated file passes local `cargo test` + `pnpm run lint` (`tsc --noEmit` ignores upstream-schema-vs-generated drift) but fails CI's `check:codegen` job. Run alongside `pnpm run lint`:
+- [ ] **VS Code generated types regenerated when `docs/output-schema.json` changes**: any diff touching `docs/output-schema.json` OR any file under `editors/vscode/` requires running `pnpm run check:codegen` to confirm the committed `editors/vscode/src/generated/output-contract.d.ts` (and `npm/plow/types/output-contract.d.ts`) is in sync with the schema. The codegen runs as a CI job in `.github/workflows/*.yml`; a stale generated file passes local `cargo test` + `pnpm run lint` (`tsc --noEmit` ignores upstream-schema-vs-generated drift) but fails CI's `check:codegen` job. Run alongside `pnpm run lint`:
   ```bash
   if git diff origin/main..HEAD --name-only | grep -qE '^(docs/output-schema\.json|editors/vscode/)'; then
     (cd editors/vscode && pnpm run lint 2>&1 | tail -3 && pnpm run check:codegen 2>&1 | tail -3)

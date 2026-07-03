@@ -27,7 +27,7 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_types::discover::FileId;
+use plow_types::discover::FileId;
 use rustc_hash::FxHashSet;
 
 use super::ModuleGraph;
@@ -121,8 +121,8 @@ fn relativize(path: &Path, root: &Path) -> String {
 mod tests {
     use super::*;
     use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport};
-    use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
-    use fallow_types::extract::{
+    use plow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
+    use plow_types::extract::{
         ExportInfo, ExportName, ImportInfo, ImportedName, ReExportInfo, VisibilityTag,
     };
     use std::path::PathBuf;

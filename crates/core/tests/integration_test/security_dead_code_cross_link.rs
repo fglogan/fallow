@@ -1,10 +1,10 @@
 //! Integration tests for security sink dead-code cross-links (#884).
 
-use fallow_config::Severity;
-use fallow_core::results::{
+use plow_config::Severity;
+use plow_core::results::{
     AnalysisResults, SecurityDeadCodeKind, SecurityFinding, SecurityFindingKind,
 };
-use fallow_types::output::{FixActionType, IssueAction};
+use plow_types::output::{FixActionType, IssueAction};
 
 use super::common::{create_config_with_rules, fixture_path};
 
@@ -15,7 +15,7 @@ fn analyze_with_security_and_dead_code() -> AnalysisResults {
         rules.unused_files = Severity::Warn;
         rules.unused_exports = Severity::Warn;
     });
-    fallow_core::analyze(&config).expect("analysis should succeed")
+    plow_core::analyze(&config).expect("analysis should succeed")
 }
 
 fn sink_for<'a>(results: &'a AnalysisResults, suffix: &str) -> &'a SecurityFinding {

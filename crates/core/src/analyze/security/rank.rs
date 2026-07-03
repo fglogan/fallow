@@ -1,6 +1,6 @@
 //! Reachability-weighted ranking of security candidates (issues #860 and #885).
 //!
-//! Reuses the existing module graph to rank `fallow security` candidates by
+//! Reuses the existing module graph to rank `plow security` candidates by
 //! runtime reachability, source-backed evidence, module-level untrusted-source
 //! reachability, reverse-dependency fan-in, boundary crossings, and dead-code
 //! context. This is graph-side glue plus output ordering only: it touches
@@ -14,10 +14,10 @@ use std::path::{Path, PathBuf};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_types::extract::{ExportName, ModuleInfo};
-use fallow_types::output::{FixAction, FixActionType, IssueAction};
-use fallow_types::output_dead_code::{UnusedExportFinding, UnusedFileFinding};
-use fallow_types::results::{
+use plow_types::extract::{ExportName, ModuleInfo};
+use plow_types::output::{FixAction, FixActionType, IssueAction};
+use plow_types::output_dead_code::{UnusedExportFinding, UnusedFileFinding};
+use plow_types::results::{
     SecurityAttackSurfaceEntry, SecurityCandidateBoundary, SecurityDeadCodeContext,
     SecurityDeadCodeKind, SecurityDefensiveBoundary, SecurityDefensiveControl, SecurityFinding,
     SecurityFindingKind, SecurityReachability, SecurityRuntimeState, SecuritySeverity,
@@ -30,8 +30,8 @@ use crate::graph::ModuleGraph;
 
 use super::{LineOffsetsMap, byte_offset_to_line_col, catalogue::catalogue};
 
-const UNUSED_FILE_GUIDANCE: &str = "This sink sits in a file fallow also reports as unused. Verify the dead-code finding, then delete the file instead of hardening the sink.";
-const UNUSED_EXPORT_GUIDANCE: &str = "This sink sits on an export fallow also reports as unused. Verify the dead-code finding, then remove the export instead of hardening the sink.";
+const UNUSED_FILE_GUIDANCE: &str = "This sink sits in a file plow also reports as unused. Verify the dead-code finding, then delete the file instead of hardening the sink.";
+const UNUSED_EXPORT_GUIDANCE: &str = "This sink sits on an export plow also reports as unused. Verify the dead-code finding, then remove the export instead of hardening the sink.";
 const ZERO_CONTROL_PROMPT: &str = "No known control library was detected on this path. Should validation, sanitization, or auth be required before this sink?";
 const CONTROL_PRESENT_PROMPT: &str = "Known defensive controls were detected on this path. Are they sufficient for this sink and untrusted input?";
 
@@ -787,13 +787,13 @@ fn transitive_dependent_count(graph: &ModuleGraph, target: FileId) -> u32 {
 mod tests {
     use super::*;
 
-    use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
-    use fallow_types::extract::{
+    use plow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
+    use plow_types::extract::{
         MemberAccess, SecurityControlKind, SecurityControlSite, TaintedBinding,
     };
-    use fallow_types::output::{FixActionType, IssueAction};
-    use fallow_types::output_dead_code::{UnusedExportFinding, UnusedFileFinding};
-    use fallow_types::results::{
+    use plow_types::output::{FixActionType, IssueAction};
+    use plow_types::output_dead_code::{UnusedExportFinding, UnusedFileFinding};
+    use plow_types::results::{
         SecurityDeadCodeKind, SecurityFindingKind, SecurityRuntimeContext, TraceHop, TraceHopRole,
         UnusedExport, UnusedFile,
     };
@@ -834,9 +834,9 @@ mod tests {
                     .filter(|(from, _, _)| *from == f.id.0 as usize)
                     .map(|&(_, to, is_type_only)| ResolvedImport {
                         target: ResolveResult::InternalModule(FileId(to as u32)),
-                        info: fallow_types::extract::ImportInfo {
+                        info: plow_types::extract::ImportInfo {
                             source: format!("./{}", file_names[to]),
-                            imported_name: fallow_types::extract::ImportedName::Default,
+                            imported_name: plow_types::extract::ImportedName::Default,
                             local_name: "x".to_string(),
                             is_type_only,
                             from_style: false,
@@ -1039,7 +1039,7 @@ mod tests {
     }
 
     fn finding(name: &str) -> SecurityFinding {
-        use fallow_types::results::{SecurityCandidate, SecurityCandidateSink};
+        use plow_types::results::{SecurityCandidate, SecurityCandidateSink};
         let path = PathBuf::from(ROOT).join(name);
         SecurityFinding {
             finding_id: String::new(),
@@ -1148,7 +1148,7 @@ mod tests {
             function: "handler".to_string(),
             line: 1,
             invocations: Some(500),
-            stable_id: Some("fallow:fn:test".to_string()),
+            stable_id: Some("plow:fn:test".to_string()),
             evidence: Some("runtime hot path".to_string()),
         });
 

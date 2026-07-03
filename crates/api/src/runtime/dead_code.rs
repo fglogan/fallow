@@ -1,15 +1,15 @@
 use std::path::Path;
 use std::time::Instant;
 
-use fallow_config::ProductionAnalysis;
-use fallow_engine::{AnalysisSession, ProjectConfig, ProjectConfigOptions};
-use fallow_output::{
+use plow_config::ProductionAnalysis;
+use plow_engine::{AnalysisSession, ProjectConfig, ProjectConfigOptions};
+use plow_output::{
     CHECK_SCHEMA_VERSION, CheckOutputInput, DeadCodeNextStepsInput, DiffIndex, build_check_output,
     build_dead_code_next_steps, check_meta, relative_to_diff_path,
 };
-use fallow_types::output_format::OutputFormat;
-use fallow_types::path_util::is_absolute_path_any_platform;
-use fallow_types::results::{AnalysisResults, TraceHopRole};
+use plow_types::output_format::OutputFormat;
+use plow_types::path_util::is_absolute_path_any_platform;
+use plow_types::results::{AnalysisResults, TraceHopRole};
 use rustc_hash::FxHashSet;
 
 use crate::{
@@ -83,7 +83,7 @@ pub(super) fn run_dead_code_with_session(
 ) -> ProgrammaticResult<DeadCodeProgrammaticOutput> {
     let analysis = session.analyze_dead_code().map_err(|err| {
         ProgrammaticError::new(format!("dead-code analysis failed: {err}"), 2)
-            .with_code("FALLOW_DEAD_CODE_FAILED")
+            .with_code("PLOW_DEAD_CODE_FAILED")
             .with_context("dead-code")
     })?;
     let mut results = analysis.results;
@@ -100,14 +100,14 @@ pub(super) fn run_dead_code_with_session(
         offer_setup: setup_pointer_applicable(root),
         impact_digest: None,
         workspace_ref: default_workspace_ref(root).as_deref(),
-        audit_changed: fallow_engine::is_git_repo(root),
+        audit_changed: plow_engine::is_git_repo(root),
     });
     let output = build_check_output(CheckOutputInput {
         schema_version: CHECK_SCHEMA_VERSION,
         version: env!("CARGO_PKG_VERSION").to_string(),
         elapsed: start.elapsed(),
         results,
-        config_fixable: fallow_config::is_config_fixable(
+        config_fixable: plow_config::is_config_fixable(
             &resolved.root,
             resolved.config_path.as_ref(),
         ),
@@ -147,7 +147,7 @@ pub(super) fn load_dead_code_session(
     options: &DeadCodeOptions,
     resolved: &ProgrammaticAnalysisContext,
 ) -> ProgrammaticResult<AnalysisSession> {
-    let project_config = fallow_engine::config_for_project_analysis(
+    let project_config = plow_engine::config_for_project_analysis(
         &resolved.root,
         resolved.config_path.as_deref(),
         ProjectConfigOptions {
@@ -161,7 +161,7 @@ pub(super) fn load_dead_code_session(
     )
     .map_err(|err| {
         ProgrammaticError::new(format!("failed to load config: {err}"), 2)
-            .with_code("FALLOW_CONFIG_LOAD_FAILED")
+            .with_code("PLOW_CONFIG_LOAD_FAILED")
             .with_context("analysis.configPath")
     })?;
     let project_config = configure_project_for_dead_code(project_config, options);
@@ -203,10 +203,10 @@ fn configure_project_for_dead_code(
 
 fn activate_explicit_dead_code_opt_ins(
     filters: &DeadCodeFilters,
-    rules: &mut fallow_config::RulesConfig,
+    rules: &mut plow_config::RulesConfig,
 ) {
-    if filters.private_type_leaks && rules.private_type_leaks == fallow_config::Severity::Off {
-        rules.private_type_leaks = fallow_config::Severity::Warn;
+    if filters.private_type_leaks && rules.private_type_leaks == plow_config::Severity::Off {
+        rules.private_type_leaks = plow_config::Severity::Warn;
     }
 }
 
@@ -218,7 +218,7 @@ fn apply_dead_code_scope(
     results: &mut AnalysisResults,
 ) -> ProgrammaticResult<()> {
     if let Some(workspace_roots) = resolved.workspace_roots.as_ref() {
-        fallow_engine::filter_to_workspaces(results, workspace_roots);
+        plow_engine::filter_to_workspaces(results, workspace_roots);
     }
     let resolved_changed_files = if changed_files.is_some() {
         None
@@ -226,7 +226,7 @@ fn apply_dead_code_scope(
         changed_files_for_run(resolved)?
     };
     if let Some(changed_files) = changed_files.or(resolved_changed_files.as_ref()) {
-        fallow_engine::filter_by_changed_files(results, changed_files);
+        plow_engine::filter_by_changed_files(results, changed_files);
     }
     if let Some(diff) = resolved.diff.as_ref() {
         filter_dead_code_by_diff(results, diff, session.root());
@@ -413,7 +413,7 @@ fn apply_dead_code_file_filter(
             }
         })
         .collect::<FxHashSet<_>>();
-    fallow_engine::filter_by_changed_files(results, &file_set);
+    plow_engine::filter_by_changed_files(results, &file_set);
     clear_dead_code_dependency_findings(results);
 }
 

@@ -63,7 +63,7 @@ fn is_k6_script_path(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_config::EntryPointRole;
+    use plow_config::EntryPointRole;
 
     #[test]
     fn activates_from_k6_dependency() {

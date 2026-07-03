@@ -4,21 +4,21 @@ use std::path::{Path, PathBuf};
 
 use rustc_hash::FxHashSet;
 
-use fallow_types::{discover::DiscoveredFile, extract::ModuleInfo};
+use plow_types::{discover::DiscoveredFile, extract::ModuleInfo};
 
-pub type EditorCloneFamily = fallow_types::duplicates::CloneFamily;
-pub type EditorCloneGroup = fallow_types::duplicates::CloneGroup;
-pub type EditorCloneInstance = fallow_types::duplicates::CloneInstance;
-pub type EditorDuplicationReport = fallow_types::duplicates::DuplicationReport;
-pub type EditorDuplicationStats = fallow_types::duplicates::DuplicationStats;
-pub type EditorMirroredDirectory = fallow_types::duplicates::MirroredDirectory;
-pub type EditorRefactoringKind = fallow_types::duplicates::RefactoringKind;
-pub type EditorRefactoringSuggestion = fallow_types::duplicates::RefactoringSuggestion;
+pub type EditorCloneFamily = plow_types::duplicates::CloneFamily;
+pub type EditorCloneGroup = plow_types::duplicates::CloneGroup;
+pub type EditorCloneInstance = plow_types::duplicates::CloneInstance;
+pub type EditorDuplicationReport = plow_types::duplicates::DuplicationReport;
+pub type EditorDuplicationStats = plow_types::duplicates::DuplicationStats;
+pub type EditorMirroredDirectory = plow_types::duplicates::MirroredDirectory;
+pub type EditorRefactoringKind = plow_types::duplicates::RefactoringKind;
+pub type EditorRefactoringSuggestion = plow_types::duplicates::RefactoringSuggestion;
 
 /// Report-scoped clone fingerprint assignment for editor-facing duplication output.
 #[derive(Debug, Clone)]
 pub struct EditorCloneFingerprintSet {
-    inner: fallow_engine::CloneFingerprintSet,
+    inner: plow_engine::CloneFingerprintSet,
 }
 
 impl EditorCloneFingerprintSet {
@@ -26,7 +26,7 @@ impl EditorCloneFingerprintSet {
     #[must_use]
     pub fn from_groups(groups: &[EditorCloneGroup]) -> Self {
         Self {
-            inner: fallow_engine::CloneFingerprintSet::from_groups(groups),
+            inner: plow_engine::CloneFingerprintSet::from_groups(groups),
         }
     }
 
@@ -107,13 +107,13 @@ impl ChangedFilesError {
     }
 }
 
-impl From<fallow_engine::ChangedFilesError> for ChangedFilesError {
-    fn from(error: fallow_engine::ChangedFilesError) -> Self {
+impl From<plow_engine::ChangedFilesError> for ChangedFilesError {
+    fn from(error: plow_engine::ChangedFilesError) -> Self {
         match error {
-            fallow_engine::ChangedFilesError::InvalidRef(err) => Self::InvalidRef(err),
-            fallow_engine::ChangedFilesError::GitMissing(err) => Self::GitMissing(err),
-            fallow_engine::ChangedFilesError::NotARepository => Self::NotARepository,
-            fallow_engine::ChangedFilesError::GitFailed(stderr) => Self::GitFailed(stderr),
+            plow_engine::ChangedFilesError::InvalidRef(err) => Self::InvalidRef(err),
+            plow_engine::ChangedFilesError::GitMissing(err) => Self::GitMissing(err),
+            plow_engine::ChangedFilesError::NotARepository => Self::NotARepository,
+            plow_engine::ChangedFilesError::GitFailed(stderr) => Self::GitFailed(stderr),
         }
     }
 }
@@ -125,7 +125,7 @@ impl From<fallow_engine::ChangedFilesError> for ChangedFilesError {
 /// Returns an API-owned changed-file error when git cannot inspect the
 /// repository.
 pub fn resolve_git_toplevel(cwd: &Path) -> Result<PathBuf, ChangedFilesError> {
-    fallow_engine::resolve_git_toplevel(cwd).map_err(ChangedFilesError::from)
+    plow_engine::resolve_git_toplevel(cwd).map_err(ChangedFilesError::from)
 }
 
 /// Get changed files and the git toplevel used to resolve them.
@@ -139,12 +139,12 @@ pub fn try_get_changed_files_with_toplevel(
     toplevel: &Path,
     git_ref: &str,
 ) -> Result<FxHashSet<PathBuf>, ChangedFilesError> {
-    fallow_engine::try_get_changed_files_with_toplevel(cwd, toplevel, git_ref)
+    plow_engine::try_get_changed_files_with_toplevel(cwd, toplevel, git_ref)
         .map_err(ChangedFilesError::from)
 }
 
 pub mod editor_extract {
-    pub use fallow_types::extract::{
+    pub use plow_types::extract::{
         AngularComponentSelector, AngularInputMember, AngularOutputMember,
         AngularTemplateMemberAccessFact, AngularThisSpreadFact, CalleeUse, ClassHeritageInfo,
         ComplexityContribution, ComplexityContributionKind, ComplexityMetric, ComponentEmit,
@@ -168,7 +168,7 @@ pub mod editor_extract {
 }
 
 pub mod editor_results {
-    pub use fallow_types::output_dead_code::{
+    pub use plow_types::output_dead_code::{
         BoundaryCallViolationFinding, BoundaryCoverageViolationFinding, BoundaryViolationFinding,
         CircularDependencyFinding, DuplicateExportFinding, DuplicatePropShapeFinding,
         DynamicSegmentNameConflictFinding, EmptyCatalogGroupFinding, InvalidClientExportFinding,
@@ -185,7 +185,7 @@ pub mod editor_results {
         UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
         UnusedSvelteEventFinding, UnusedTypeFinding,
     };
-    pub use fallow_types::results::{
+    pub use plow_types::results::{
         ActiveSuppression, AnalysisResults, BoundaryCallViolation, BoundaryCoverageViolation,
         BoundaryViolation, CircularDependency, CircularDependencyEdge, DependencyLocation,
         DependencyOverrideMisconfigReason, DependencyOverrideSource, DuplicateExport,
@@ -215,15 +215,15 @@ pub mod editor_security {
     /// Return the human-readable security catalogue title for a finding kind.
     #[must_use]
     pub fn security_catalogue_title(kind: &str) -> Option<&'static str> {
-        fallow_engine::security_catalogue_title(kind)
+        plow_engine::security_catalogue_title(kind)
     }
 }
 
 pub mod editor_suppress {
-    pub use fallow_types::suppress::{IssueKind, is_suppressed};
+    pub use plow_types::suppress::{IssueKind, is_suppressed};
 }
 
-pub type EditorAnalysisResults = fallow_types::results::AnalysisResults;
+pub type EditorAnalysisResults = plow_types::results::AnalysisResults;
 
 /// Dead-code output retained for editor integrations.
 ///
@@ -237,7 +237,7 @@ pub struct EditorDeadCodeAnalysisOutput {
 }
 
 impl EditorDeadCodeAnalysisOutput {
-    fn from_engine(output: fallow_engine::DeadCodeAnalysisOutput) -> Self {
+    fn from_engine(output: plow_engine::DeadCodeAnalysisOutput) -> Self {
         Self {
             results: output.results,
             modules: output.modules,
@@ -273,7 +273,7 @@ pub enum EditorInlineComplexityExceeded {
 /// Collect inline complexity findings from retained editor analysis artifacts.
 #[must_use]
 pub fn collect_inline_complexity(
-    config: &fallow_config::ResolvedConfig,
+    config: &plow_config::ResolvedConfig,
     output: &EditorDeadCodeAnalysisOutput,
 ) -> Vec<EditorInlineComplexityFinding> {
     let Some(modules) = output.modules.as_ref() else {
@@ -301,10 +301,10 @@ pub fn collect_inline_complexity(
         }
 
         for function in &module.complexity {
-            if fallow_types::suppress::is_suppressed(
+            if plow_types::suppress::is_suppressed(
                 &module.suppressions,
                 function.line,
-                fallow_types::suppress::IssueKind::Complexity,
+                plow_types::suppress::IssueKind::Complexity,
             ) {
                 continue;
             }
@@ -363,7 +363,7 @@ fn build_health_ignore_set(patterns: &[String]) -> Option<globset::GlobSet> {
 /// Reusable editor analysis session owned by the API boundary.
 #[derive(Debug)]
 pub struct EditorAnalysisSession {
-    inner: fallow_engine::AnalysisSession,
+    inner: plow_engine::AnalysisSession,
 }
 
 impl EditorAnalysisSession {
@@ -372,8 +372,8 @@ impl EditorAnalysisSession {
     /// # Errors
     ///
     /// Returns an engine error when project config loading fails.
-    pub fn load(root: &Path, config_path: Option<&Path>) -> fallow_engine::EngineResult<Self> {
-        fallow_engine::AnalysisSession::load(root, config_path).map(Self::from_engine)
+    pub fn load(root: &Path, config_path: Option<&Path>) -> plow_engine::EngineResult<Self> {
+        plow_engine::AnalysisSession::load(root, config_path).map(Self::from_engine)
     }
 
     /// Load config, apply one editor-specific adjustment, then discover files.
@@ -384,21 +384,21 @@ impl EditorAnalysisSession {
     pub fn load_with_config(
         root: &Path,
         config_path: Option<&Path>,
-        configure: impl FnOnce(&mut fallow_config::ResolvedConfig),
-    ) -> fallow_engine::EngineResult<Self> {
-        fallow_engine::AnalysisSession::load_with_config(root, config_path, configure)
+        configure: impl FnOnce(&mut plow_config::ResolvedConfig),
+    ) -> plow_engine::EngineResult<Self> {
+        plow_engine::AnalysisSession::load_with_config(root, config_path, configure)
             .map(Self::from_engine)
     }
 
     /// Build a session from built-in defaults, ignoring project config files.
     #[must_use]
     pub fn load_default(root: &Path) -> Self {
-        Self::from_engine(fallow_engine::AnalysisSession::load_default(root))
+        Self::from_engine(plow_engine::AnalysisSession::load_default(root))
     }
 
     /// Resolved project config.
     #[must_use]
-    pub fn config(&self) -> &fallow_config::ResolvedConfig {
+    pub fn config(&self) -> &plow_config::ResolvedConfig {
         self.inner.config()
     }
 
@@ -415,15 +415,15 @@ impl EditorAnalysisSession {
     /// Returns an engine error when dead-code parsing or analysis fails.
     pub fn analyze_project_with(
         &self,
-        duplicates_config: &fallow_config::DuplicatesConfig,
+        duplicates_config: &plow_config::DuplicatesConfig,
         retain_complexity_artifacts: bool,
-    ) -> fallow_engine::EngineResult<EditorProjectAnalysisOutput> {
+    ) -> plow_engine::EngineResult<EditorProjectAnalysisOutput> {
         self.inner
             .analyze_project_with(duplicates_config, retain_complexity_artifacts)
             .map(EditorProjectAnalysisOutput::from_engine)
     }
 
-    const fn from_engine(inner: fallow_engine::AnalysisSession) -> Self {
+    const fn from_engine(inner: plow_engine::AnalysisSession) -> Self {
         Self { inner }
     }
 }
@@ -436,7 +436,7 @@ pub struct EditorProjectAnalysisOutput {
 }
 
 impl EditorProjectAnalysisOutput {
-    fn from_engine(output: fallow_engine::ProjectAnalysisOutput) -> Self {
+    fn from_engine(output: plow_engine::ProjectAnalysisOutput) -> Self {
         Self {
             dead_code: EditorDeadCodeAnalysisOutput::from_engine(output.dead_code),
             duplication: output.duplication,
@@ -502,8 +502,8 @@ impl EditorAnalysisOutput {
     }
 
     pub fn filter_by_changed_files(&mut self, changed_files: &FxHashSet<PathBuf>, root: &Path) {
-        fallow_engine::filter_results_by_changed_files(&mut self.results, changed_files);
-        fallow_engine::filter_duplication_by_changed_files(
+        plow_engine::filter_results_by_changed_files(&mut self.results, changed_files);
+        plow_engine::filter_duplication_by_changed_files(
             &mut self.duplication,
             changed_files,
             root,
@@ -527,7 +527,7 @@ impl EditorAnalysisOutput {
 mod tests {
     use super::*;
 
-    use fallow_types::duplicates::{CloneGroup, CloneInstance, DuplicationStats};
+    use plow_types::duplicates::{CloneGroup, CloneInstance, DuplicationStats};
 
     #[test]
     fn merges_duplication_stats_and_recomputes_percentage() {
@@ -608,7 +608,7 @@ mod tests {
 
         let session = EditorAnalysisSession::load(root, None).expect("session loads");
         let output = session
-            .analyze_project_with(&fallow_config::DuplicatesConfig::default(), true)
+            .analyze_project_with(&plow_config::DuplicatesConfig::default(), true)
             .expect("analysis runs");
 
         assert!(output.dead_code.modules.is_some());

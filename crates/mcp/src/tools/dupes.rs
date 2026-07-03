@@ -1,6 +1,6 @@
 use crate::params::FindDupesParams;
 
-use fallow_api::{
+use plow_api::{
     AnalysisOptions, DuplicationMode, DuplicationOptions, run_duplication,
     serialize_duplication_programmatic_json,
 };

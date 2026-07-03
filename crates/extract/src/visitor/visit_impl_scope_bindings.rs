@@ -4,7 +4,7 @@
 use oxc_ast::ast::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_types::extract::{SanitizerScope, SinkLiteralValue};
+use plow_types::extract::{SanitizerScope, SinkLiteralValue};
 
 use super::super::{ModuleInfoExtractor, SecurityPathSinkBinding};
 use super::{sink_literal_value, static_sink_literal_to_string, unwrap_static_expr};

@@ -4,7 +4,7 @@ use super::common::{create_config, fixture_path};
 fn pino_transport_target_credits_runtime_dependency() {
     let root = fixture_path("issue-954-pino-transport-target");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_dependencies: Vec<&str> = results
         .unused_dependencies

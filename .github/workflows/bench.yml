@@ -46,19 +46,19 @@ jobs:
         include:
           - label: core analysis
             cache_key: core-analysis
-            package: fallow-core
+            package: plow-core
             bench: analysis
           - label: programmatic commands
             cache_key: programmatic-commands
-            package: fallow-benchmarks
+            package: plow-benchmarks
             bench: programmatic_commands
           - label: representative sources
             cache_key: representative-sources
-            package: fallow-benchmarks
+            package: plow-benchmarks
             bench: representative_sources
           - label: scaling analysis
             cache_key: scaling-analysis
-            package: fallow-core
+            package: plow-core
             bench: scaling_analysis
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -107,10 +107,10 @@ jobs:
           tool: cargo-codspeed@4.7.0
 
       - name: Build large benchmark shard
-        run: cargo codspeed build -p fallow-core --bench large_analysis --features codspeed
+        run: cargo codspeed build -p plow-core --bench large_analysis --features codspeed
 
       - name: Run large benchmark shard
         uses: CodSpeedHQ/action@63f3e98b61959fe67f146a3ff022e4136fe9bb9c # v4.17.6
         with:
           mode: simulation
-          run: cargo codspeed run -p fallow-core --bench large_analysis
+          run: cargo codspeed run -p plow-core --bench large_analysis

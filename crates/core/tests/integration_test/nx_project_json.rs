@@ -42,7 +42,7 @@ fn nx_project_json_marks_nested_main_as_reachable_without_workspace_package_json
     .expect("helper.ts should be written");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files: Vec<String> = results
         .unused_files

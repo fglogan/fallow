@@ -3,7 +3,7 @@ use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use fallow_config::{CatalogPrecedingCommentPolicy, OutputFormat};
+use plow_config::{CatalogPrecedingCommentPolicy, OutputFormat};
 
 mod catalog;
 mod config;
@@ -14,15 +14,15 @@ mod exports;
 mod io;
 mod plan;
 
-pub use fallow_config::is_config_fixable;
+pub use plow_config::is_config_fixable;
 
 use plan::{CapturedHashes, CommitOutcome, FixPlan, SkippedFile};
 
 fn run_analyze(
-    config: &fallow_config::ResolvedConfig,
+    config: &plow_config::ResolvedConfig,
     output: OutputFormat,
-) -> Result<(fallow_types::results::AnalysisResults, CapturedHashes), ExitCode> {
-    let output_struct = fallow_engine::analyze_with_file_hashes(config)
+) -> Result<(plow_types::results::AnalysisResults, CapturedHashes), ExitCode> {
+    let output_struct = plow_engine::analyze_with_file_hashes(config)
         .map_err(|e| crate::error::emit_error(&format!("Analysis error: {e}"), 2, output))?;
     Ok((output_struct.results, output_struct.file_hashes))
 }
@@ -37,7 +37,7 @@ pub struct FixOptions<'a> {
     pub dry_run: bool,
     pub yes: bool,
     pub production: bool,
-    /// Refuse to create a new fallow config file when none exists. The
+    /// Refuse to create a new plow config file when none exists. The
     /// duplicate-export config-add path is skipped with an explanatory
     /// entry; source-file fixes proceed normally. Honored by
     /// `fix::config::apply_config_fixes`.
@@ -137,8 +137,8 @@ fn finalize_fix_run(
 /// Run every per-issue-type fixer, returning `(had_write_error, catalog_totals)`.
 fn apply_all_fixes(
     opts: &FixOptions<'_>,
-    config: &fallow_config::ResolvedConfig,
-    results: &fallow_types::results::AnalysisResults,
+    config: &plow_config::ResolvedConfig,
+    results: &plow_types::results::AnalysisResults,
     file_hashes: &CapturedHashes,
     plan: &mut FixPlan,
     fixes: &mut Vec<serde_json::Value>,
@@ -201,7 +201,7 @@ fn apply_all_fixes(
 fn emit_empty_fix_output(opts: &FixOptions<'_>) -> ExitCode {
     if matches!(opts.output, OutputFormat::Json) {
         let fixes = [];
-        match fallow_output::serialize_fix_json_output(fallow_output::FixJsonOutputInput {
+        match plow_output::serialize_fix_json_output(plow_output::FixJsonOutputInput {
             dry_run: opts.dry_run,
             fixes: &fixes,
             skipped_content_changed: 0,
@@ -224,7 +224,7 @@ fn emit_empty_fix_output(opts: &FixOptions<'_>) -> ExitCode {
 
 struct FixApplicationInput<'a> {
     root: &'a Path,
-    results: &'a fallow_types::results::AnalysisResults,
+    results: &'a plow_types::results::AnalysisResults,
     file_hashes: &'a CapturedHashes,
     plan: &'a mut FixPlan,
     output: OutputFormat,
@@ -233,7 +233,7 @@ struct FixApplicationInput<'a> {
 }
 
 fn apply_unused_export_fixes(input: &mut FixApplicationInput<'_>) {
-    let mut exports_by_file: FxHashMap<PathBuf, Vec<&fallow_types::results::UnusedExport>> =
+    let mut exports_by_file: FxHashMap<PathBuf, Vec<&plow_types::results::UnusedExport>> =
         FxHashMap::default();
     for finding in &input.results.unused_exports {
         exports_by_file
@@ -263,7 +263,7 @@ fn apply_unused_enum_member_fixes(input: &mut FixApplicationInput<'_>) {
     if input.results.unused_enum_members.is_empty() {
         return;
     }
-    let mut enum_members_by_file: FxHashMap<PathBuf, Vec<&fallow_types::results::UnusedMember>> =
+    let mut enum_members_by_file: FxHashMap<PathBuf, Vec<&plow_types::results::UnusedMember>> =
         FxHashMap::default();
     for finding in &input.results.unused_enum_members {
         enum_members_by_file
@@ -319,7 +319,7 @@ struct CatalogFixTotals {
 
 struct CatalogFixRequest<'a> {
     root: &'a Path,
-    results: &'a fallow_types::results::AnalysisResults,
+    results: &'a plow_types::results::AnalysisResults,
     file_hashes: &'a CapturedHashes,
     plan: &'a mut FixPlan,
     delete_preceding_comments: CatalogPrecedingCommentPolicy,
@@ -410,7 +410,7 @@ fn commit_fix_plan(
 
 fn emit_fix_output(input: &FixOutputInput<'_>) -> Result<(), ExitCode> {
     if matches!(input.output, OutputFormat::Json) {
-        match fallow_output::serialize_fix_json_output(fallow_output::FixJsonOutputInput {
+        match plow_output::serialize_fix_json_output(plow_output::FixJsonOutputInput {
             dry_run: input.dry_run,
             fixes: input.fixes,
             skipped_content_changed: input.content_changed_count,
@@ -552,7 +552,7 @@ fn emit_fix_count_line(
         eprintln!("Dry run complete. No files were modified.");
         return;
     }
-    let fixed_count = fallow_output::count_applied_fixes(fixes);
+    let fixed_count = plow_output::count_applied_fixes(fixes);
     if catalog_comment_lines_removed > 0 {
         let line_word = if catalog_comment_lines_removed == 1 {
             "line"
@@ -588,7 +588,7 @@ fn emit_residual_skip_warnings(input: &HumanSummaryInput<'_>) {
             "files"
         };
         eprintln!(
-            "Skipped {} {files_word} that changed since `fallow dead-code` ran. Re-run `fallow fix` to refresh the analysis.",
+            "Skipped {} {files_word} that changed since `plow dead-code` ran. Re-run `plow fix` to refresh the analysis.",
             input.content_changed_count,
         );
     }
@@ -610,7 +610,7 @@ fn emit_residual_skip_warnings(input: &HumanSummaryInput<'_>) {
             "files"
         };
         eprintln!(
-            "Kept unused exports in {} {files_word} where consumers may be invisible to fallow (test, mock, and fixture directories, or files with unresolved imports). Still listed by `fallow dead-code`; remove by hand if you have confirmed they are unused.",
+            "Kept unused exports in {} {files_word} where consumers may be invisible to plow (test, mock, and fixture directories, or files with unresolved imports). Still listed by `plow dead-code`; remove by hand if you have confirmed they are unused.",
             input.low_confidence_count,
         );
     }

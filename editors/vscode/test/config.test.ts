@@ -179,15 +179,15 @@ describe("resolved config path", () => {
   });
 
   it("reads folder-scoped config when a workspace root override is supplied", () => {
-    configured = { configPath: ".fallow-root.json" };
+    configured = { configPath: ".plow-root.json" };
     scopedConfigured = {
       "/repo/packages/app": {
-        configPath: ".fallow-app.json",
+        configPath: ".plow-app.json",
       },
     };
 
     expect(getResolvedConfigPath("/repo/packages/app")).toBe(
-      "/repo/packages/app/.fallow-app.json",
+      "/repo/packages/app/.plow-app.json",
     );
   });
 });

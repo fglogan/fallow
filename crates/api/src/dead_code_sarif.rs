@@ -2,13 +2,13 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_config::{RulesConfig, Severity};
-use fallow_output::{
+use plow_config::{RulesConfig, Severity};
+use plow_output::{
     SarifDocumentInput, SarifResultInput, build_sarif_document, build_sarif_result,
     issue_output_contract_by_code, normalize_uri,
 };
-use fallow_types::output_dead_code::*;
-use fallow_types::results::{
+use plow_types::output_dead_code::*;
+use plow_types::results::{
     AnalysisResults, BoundaryCallViolation, BoundaryCoverageViolation, BoundaryViolation,
     CircularDependency, DuplicatePropShape, DynamicSegmentNameConflict, InvalidClientExport,
     MisplacedDirective, MixedClientServerBarrel, PolicyViolation, PolicyViolationSeverity,
@@ -171,7 +171,7 @@ fn sarif_private_type_leak_fields(
     level: &'static str,
 ) -> SarifFields {
     SarifFields {
-        rule_id: "fallow/private-type-leak",
+        rule_id: "plow/private-type-leak",
         level,
         message: format!(
             "Export '{}' references private type '{}'",
@@ -245,7 +245,7 @@ fn sarif_member_fields(
 
 fn sarif_unused_file_fields(file: &UnusedFile, root: &Path, level: &'static str) -> SarifFields {
     SarifFields {
-        rule_id: "fallow/unused-file",
+        rule_id: "plow/unused-file",
         level,
         message: "File is not reachable from any entry point".to_string(),
         uri: relative_uri(&file.path, root),
@@ -261,7 +261,7 @@ fn sarif_type_only_dep_fields(
     level: &'static str,
 ) -> SarifFields {
     SarifFields {
-        rule_id: "fallow/type-only-dependency",
+        rule_id: "plow/type-only-dependency",
         level,
         message: format!(
             "Package '{}' is only imported via type-only imports (consider moving to devDependencies)",
@@ -284,7 +284,7 @@ fn sarif_test_only_dep_fields(
     level: &'static str,
 ) -> SarifFields {
     SarifFields {
-        rule_id: "fallow/test-only-dependency",
+        rule_id: "plow/test-only-dependency",
         level,
         message: format!(
             "Package '{}' is only imported by test files (consider moving to devDependencies)",
@@ -307,7 +307,7 @@ fn sarif_unresolved_import_fields(
     level: &'static str,
 ) -> SarifFields {
     SarifFields {
-        rule_id: "fallow/unresolved-import",
+        rule_id: "plow/unresolved-import",
         level,
         message: format!("Import '{}' could not be resolved", import.specifier),
         uri: relative_uri(&import.path, root),
@@ -330,7 +330,7 @@ fn sarif_circular_dep_fields(
     let first_uri = chain.first().map_or_else(String::new, Clone::clone);
     let first_path = cycle.files.first().cloned();
     SarifFields {
-        rule_id: "fallow/circular-dependency",
+        rule_id: "plow/circular-dependency",
         level,
         message: format!(
             "Circular dependency{}: {}",
@@ -353,7 +353,7 @@ fn sarif_circular_dep_fields(
 }
 
 fn sarif_re_export_cycle_fields(
-    cycle: &fallow_types::results::ReExportCycle,
+    cycle: &plow_types::results::ReExportCycle,
     root: &Path,
     level: &'static str,
 ) -> SarifFields {
@@ -361,11 +361,11 @@ fn sarif_re_export_cycle_fields(
     let first_uri = chain.first().map_or_else(String::new, Clone::clone);
     let first_path = cycle.files.first().cloned();
     let kind_tag = match cycle.kind {
-        fallow_types::results::ReExportCycleKind::SelfLoop => " (self-loop)",
-        fallow_types::results::ReExportCycleKind::MultiNode => "",
+        plow_types::results::ReExportCycleKind::SelfLoop => " (self-loop)",
+        plow_types::results::ReExportCycleKind::MultiNode => "",
     };
     SarifFields {
-        rule_id: "fallow/re-export-cycle",
+        rule_id: "plow/re-export-cycle",
         level,
         message: format!("Re-export cycle{}: {}", kind_tag, chain.join(" <-> ")),
         uri: first_uri,
@@ -383,7 +383,7 @@ fn sarif_boundary_violation_fields(
     let from_uri = relative_uri(&violation.from_path, root);
     let to_uri = relative_uri(&violation.to_path, root);
     SarifFields {
-        rule_id: "fallow/boundary-violation",
+        rule_id: "plow/boundary-violation",
         level,
         message: format!(
             "Import from zone '{}' to zone '{}' is not allowed ({})",
@@ -406,7 +406,7 @@ fn sarif_boundary_coverage_fields(
     level: &'static str,
 ) -> SarifFields {
     SarifFields {
-        rule_id: "fallow/boundary-coverage",
+        rule_id: "plow/boundary-coverage",
         level,
         message: "File does not match any configured architecture boundary zone".to_string(),
         uri: relative_uri(&violation.path, root),
@@ -422,7 +422,7 @@ fn sarif_boundary_call_fields(
     level: &'static str,
 ) -> SarifFields {
     SarifFields {
-        rule_id: "fallow/boundary-call-violation",
+        rule_id: "plow/boundary-call-violation",
         level,
         message: format!(
             "Call to `{}` matches forbidden pattern `{}` in zone '{}'",
@@ -451,13 +451,13 @@ fn sarif_policy_violation_fields(violation: &PolicyViolation, root: &Path) -> Sa
         ),
     };
     SarifFields {
-        rule_id: "fallow/policy-violation",
+        rule_id: "plow/policy-violation",
         level,
         message,
         uri: relative_uri(&violation.path, root),
         region: Some((violation.line, violation.col + 1)),
         source_path: Some(violation.path.clone()),
-        // The SARIF rule id is the static `fallow/policy-violation`; the
+        // The SARIF rule id is the static `plow/policy-violation`; the
         // per-rule policy identity rides in properties so code-scanning
         // consumers can group or filter per pack rule without parsing the
         // message. Dynamic per-rule SARIF rule synthesis is a tracked
@@ -474,7 +474,7 @@ fn sarif_invalid_client_export_fields(
     level: &'static str,
 ) -> SarifFields {
     SarifFields {
-        rule_id: "fallow/invalid-client-export",
+        rule_id: "plow/invalid-client-export",
         level,
         message: format!(
             "Export '{}' is not allowed in a \"{}\" file (Next.js server-only / route-config name)",
@@ -493,7 +493,7 @@ fn sarif_mixed_client_server_barrel_fields(
     level: &'static str,
 ) -> SarifFields {
     SarifFields {
-        rule_id: "fallow/mixed-client-server-barrel",
+        rule_id: "plow/mixed-client-server-barrel",
         level,
         message: format!(
             "Barrel re-exports both a \"use client\" module ('{}') and a server-only module ('{}'); one import drags the other's directive across the boundary",
@@ -512,7 +512,7 @@ fn sarif_misplaced_directive_fields(
     level: &'static str,
 ) -> SarifFields {
     SarifFields {
-        rule_id: "fallow/misplaced-directive",
+        rule_id: "plow/misplaced-directive",
         level,
         message: format!(
             "Directive \"{}\" is not in the leading position, so the RSC bundler ignores it; move it to the top of the file",
@@ -531,7 +531,7 @@ fn sarif_unprovided_inject_fields(
     level: &'static str,
 ) -> SarifFields {
     SarifFields {
-        rule_id: "fallow/unprovided-inject",
+        rule_id: "plow/unprovided-inject",
         level,
         message: format!(
             "inject(\"{}\") has no matching provide(\"{}\") in this project; at runtime it returns undefined; provide the key or remove this inject",
@@ -550,7 +550,7 @@ fn sarif_unrendered_component_fields(
     level: &'static str,
 ) -> SarifFields {
     SarifFields {
-        rule_id: "fallow/unrendered-component",
+        rule_id: "plow/unrendered-component",
         level,
         message: format!(
             "component \"{}\" is reachable but rendered nowhere in this project; render it somewhere or remove it",
@@ -569,7 +569,7 @@ fn sarif_unused_component_prop_fields(
     level: &'static str,
 ) -> SarifFields {
     SarifFields {
-        rule_id: "fallow/unused-component-prop",
+        rule_id: "plow/unused-component-prop",
         level,
         message: format!(
             "prop \"{}\" is declared but referenced nowhere inside component \"{}\"; remove it or use it",
@@ -588,7 +588,7 @@ fn sarif_unused_component_emit_fields(
     level: &'static str,
 ) -> SarifFields {
     SarifFields {
-        rule_id: "fallow/unused-component-emit",
+        rule_id: "plow/unused-component-emit",
         level,
         message: format!(
             "emit \"{}\" is declared but emitted nowhere inside component \"{}\"; remove it or emit it",
@@ -607,7 +607,7 @@ fn sarif_unused_svelte_event_fields(
     level: &'static str,
 ) -> SarifFields {
     SarifFields {
-        rule_id: "fallow/unused-svelte-event",
+        rule_id: "plow/unused-svelte-event",
         level,
         message: format!(
             "event \"{}\" is dispatched by component \"{}\" but listened to nowhere in the project; remove it or listen for it",
@@ -626,7 +626,7 @@ fn sarif_unused_component_input_fields(
     level: &'static str,
 ) -> SarifFields {
     SarifFields {
-        rule_id: "fallow/unused-component-input",
+        rule_id: "plow/unused-component-input",
         level,
         message: format!(
             "input \"{}\" is declared but read nowhere inside component \"{}\"; remove it or use it",
@@ -645,7 +645,7 @@ fn sarif_unused_component_output_fields(
     level: &'static str,
 ) -> SarifFields {
     SarifFields {
-        rule_id: "fallow/unused-component-output",
+        rule_id: "plow/unused-component-output",
         level,
         message: format!(
             "output \"{}\" is declared but emitted nowhere inside component \"{}\"; remove it or emit it",
@@ -664,7 +664,7 @@ fn sarif_unused_server_action_fields(
     level: &'static str,
 ) -> SarifFields {
     SarifFields {
-        rule_id: "fallow/unused-server-action",
+        rule_id: "plow/unused-server-action",
         level,
         message: format!(
             "server action \"{}\" is exported from a \"use server\" file but no code in this project references it; wire it to a consumer or remove it",
@@ -678,12 +678,12 @@ fn sarif_unused_server_action_fields(
 }
 
 fn sarif_unused_load_data_key_fields(
-    key: &fallow_types::results::UnusedLoadDataKey,
+    key: &plow_types::results::UnusedLoadDataKey,
     root: &Path,
     level: &'static str,
 ) -> SarifFields {
     SarifFields {
-        rule_id: "fallow/unused-load-data-key",
+        rule_id: "plow/unused-load-data-key",
         level,
         message: format!(
             "load() return key \"{}\" is read by no consumer (sibling +page.svelte data.<key> or project-wide page.data.<key>); delete the key or wire a consumer",
@@ -708,7 +708,7 @@ fn sarif_prop_drilling_fields(
     let (path, line) = source.map_or((std::path::PathBuf::new(), 1), |h| (h.file.clone(), h.line));
     let consumer_name = consumer.map_or("a distant component", |h| h.component.as_str());
     SarifFields {
-        rule_id: "fallow/prop-drilling",
+        rule_id: "plow/prop-drilling",
         level,
         message: format!(
             "prop \"{}\" is forwarded unchanged through {} component(s) before \"{}\" consumes it; colocate, lift to context, or compose",
@@ -727,7 +727,7 @@ fn sarif_thin_wrapper_fields(
     level: &'static str,
 ) -> SarifFields {
     SarifFields {
-        rule_id: "fallow/thin-wrapper",
+        rule_id: "plow/thin-wrapper",
         level,
         message: format!(
             "\"{}\" is a thin wrapper: its whole body forwards props to \"{}\"; inline it at call sites or delete it",
@@ -746,7 +746,7 @@ fn sarif_duplicate_prop_shape_fields(
     level: &'static str,
 ) -> SarifFields {
     SarifFields {
-        rule_id: "fallow/duplicate-prop-shape",
+        rule_id: "plow/duplicate-prop-shape",
         level,
         message: format!(
             "\"{}\" shares an identical prop shape {{{}}} with {} other component(s); extract a shared Props type or base component",
@@ -767,7 +767,7 @@ fn sarif_route_collision_fields(
     level: &'static str,
 ) -> SarifFields {
     SarifFields {
-        rule_id: "fallow/route-collision",
+        rule_id: "plow/route-collision",
         level,
         message: format!(
             "Route file resolves to '{}', which is also owned by {} other file(s); Next.js fails the build because a URL can have only one owner",
@@ -787,7 +787,7 @@ fn sarif_dynamic_segment_name_conflict_fields(
     level: &'static str,
 ) -> SarifFields {
     SarifFields {
-        rule_id: "fallow/dynamic-segment-name-conflict",
+        rule_id: "plow/dynamic-segment-name-conflict",
         level,
         message: format!(
             "Dynamic segments at '{}' use different slug names ({}); Next.js requires one consistent name per dynamic path",
@@ -808,9 +808,9 @@ fn sarif_stale_suppression_fields(
 ) -> SarifFields {
     SarifFields {
         rule_id: if suppression.missing_reason {
-            "fallow/missing-suppression-reason"
+            "plow/missing-suppression-reason"
         } else {
-            "fallow/stale-suppression"
+            "plow/stale-suppression"
         },
         level,
         message: suppression.display_message(),
@@ -847,7 +847,7 @@ fn sarif_unused_catalog_entry_fields(
         )
     };
     SarifFields {
-        rule_id: "fallow/unused-catalog-entry",
+        rule_id: "plow/unused-catalog-entry",
         level,
         message,
         uri: relative_uri(&entry.path, root),
@@ -872,7 +872,7 @@ fn sarif_unused_dependency_override_fields(
         let _ = write!(message, " ({hint})");
     }
     SarifFields {
-        rule_id: "fallow/unused-dependency-override",
+        rule_id: "plow/unused-dependency-override",
         level,
         message,
         uri: relative_uri(&finding.path, root),
@@ -895,7 +895,7 @@ fn sarif_misconfigured_dependency_override_fields(
         finding.reason.describe(),
     );
     SarifFields {
-        rule_id: "fallow/misconfigured-dependency-override",
+        rule_id: "plow/misconfigured-dependency-override",
         level,
         message,
         uri: relative_uri(&finding.path, root),
@@ -935,7 +935,7 @@ fn sarif_unresolved_catalog_reference_fields(
         );
     }
     SarifFields {
-        rule_id: "fallow/unresolved-catalog-reference",
+        rule_id: "plow/unresolved-catalog-reference",
         level,
         message,
         uri: relative_uri(&finding.path, root),
@@ -952,7 +952,7 @@ fn sarif_empty_catalog_group_fields(
 ) -> SarifFields {
     let group = &group.group;
     SarifFields {
-        rule_id: "fallow/empty-catalog-group",
+        rule_id: "plow/empty-catalog-group",
         level,
         message: format!("Catalog group '{}' has no entries", group.catalog_name),
         uri: relative_uri(&group.path, root),
@@ -977,7 +977,7 @@ fn push_sarif_unlisted_deps(
             let uri = relative_uri(&site.path, root);
             let source_snippet = snippets.line(&site.path, site.line);
             sarif_results.push(sarif_result_with_snippet(
-                "fallow/unlisted-dependency",
+                "plow/unlisted-dependency",
                 level,
                 &format!(
                     "Package '{}' is imported but not listed in package.json",
@@ -1006,7 +1006,7 @@ fn push_sarif_duplicate_exports(
             let uri = relative_uri(&loc.path, root);
             let source_snippet = snippets.line(&loc.path, loc.line);
             sarif_results.push(sarif_result_with_snippet(
-                "fallow/duplicate-export",
+                "plow/duplicate-export",
                 level,
                 &format!("Export '{}' appears in multiple modules", dup.export_name),
                 &uri,
@@ -1051,7 +1051,7 @@ struct SarifRuleSpec {
 
 impl SarifRuleSpec {
     fn rule_id(self) -> String {
-        let canonical_rule_id = format!("fallow/{}", self.issue_code);
+        let canonical_rule_id = format!("plow/{}", self.issue_code);
         let Some(contract) = issue_output_contract_by_code(self.issue_code) else {
             panic!(
                 "dead-code SARIF rule spec must reference an output contract: {}",
@@ -1203,7 +1203,7 @@ fn sarif_graph_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
     ));
     specs.push(sarif_rule_spec_with_id(
         "stale-suppression",
-        "fallow/missing-suppression-reason",
+        "plow/missing-suppression-reason",
         "Suppression comment or tag is missing a required reason",
         rules.require_suppression_reason,
     ));
@@ -1440,7 +1440,7 @@ fn push_primary_dead_code_sarif_results(
             sarif_export_fields(
                 &finding.export,
                 root,
-                "fallow/unused-export",
+                "plow/unused-export",
                 severity_to_sarif_level(rules.unused_exports),
                 "Export",
                 "Re-export",
@@ -1451,7 +1451,7 @@ fn push_primary_dead_code_sarif_results(
         sarif_export_fields(
             &finding.export,
             root,
-            "fallow/unused-type",
+            "plow/unused-type",
             severity_to_sarif_level(rules.unused_types),
             "Type export",
             "Type re-export",
@@ -1507,7 +1507,7 @@ fn push_unused_dependency_sarif_results(
         sarif_dep_fields(
             &d.dep,
             root,
-            "fallow/unused-dependency",
+            "plow/unused-dependency",
             severity_to_sarif_level(rules.unused_dependencies),
             "dependencies",
         )
@@ -1520,7 +1520,7 @@ fn push_unused_dependency_sarif_results(
             sarif_dep_fields(
                 &d.dep,
                 root,
-                "fallow/unused-dev-dependency",
+                "plow/unused-dev-dependency",
                 severity_to_sarif_level(rules.unused_dev_dependencies),
                 "devDependencies",
             )
@@ -1534,7 +1534,7 @@ fn push_unused_dependency_sarif_results(
             sarif_dep_fields(
                 &d.dep,
                 root,
-                "fallow/unused-optional-dependency",
+                "plow/unused-optional-dependency",
                 severity_to_sarif_level(rules.unused_optional_dependencies),
                 "optionalDependencies",
             )
@@ -1595,7 +1595,7 @@ fn push_member_sarif_results(
         sarif_member_fields(
             &m.member,
             root,
-            "fallow/unused-enum-member",
+            "plow/unused-enum-member",
             severity_to_sarif_level(rules.unused_enum_members),
             "Enum",
         )
@@ -1608,7 +1608,7 @@ fn push_member_sarif_results(
             sarif_member_fields(
                 &m.member,
                 root,
-                "fallow/unused-class-member",
+                "plow/unused-class-member",
                 severity_to_sarif_level(rules.unused_class_members),
                 "Class",
             )
@@ -1622,7 +1622,7 @@ fn push_member_sarif_results(
             sarif_member_fields(
                 &m.member,
                 root,
-                "fallow/unused-store-member",
+                "plow/unused-store-member",
                 severity_to_sarif_level(rules.unused_store_members),
                 "Store",
             )
@@ -2160,8 +2160,8 @@ mod tests {
     use std::collections::BTreeSet;
     use std::path::Path;
 
-    use fallow_config::RulesConfig;
-    use fallow_types::results::AnalysisResults;
+    use plow_config::RulesConfig;
+    use plow_types::results::AnalysisResults;
 
     use super::*;
 
@@ -2193,7 +2193,7 @@ mod tests {
             .filter_map(|rule| rule.get("id").and_then(serde_json::Value::as_str))
             .collect::<BTreeSet<_>>();
 
-        assert!(ids.contains("fallow/unused-file"));
-        assert!(ids.contains("fallow/missing-suppression-reason"));
+        assert!(ids.contains("plow/unused-file"));
+        assert!(ids.contains("plow/missing-suppression-reason"));
     }
 }

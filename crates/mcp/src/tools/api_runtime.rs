@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use fallow_api::ProgrammaticError;
+use plow_api::ProgrammaticError;
 use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, Content};
 use serde::Serialize;
@@ -29,7 +29,7 @@ where
 }
 
 pub(super) fn env_diff_file() -> Option<PathBuf> {
-    std::env::var_os("FALLOW_DIFF_FILE")
+    std::env::var_os("PLOW_DIFF_FILE")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
 }

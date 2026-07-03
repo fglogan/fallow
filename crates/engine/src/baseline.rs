@@ -60,11 +60,11 @@ pub struct BaselineData {
     pub private_type_leaks: Vec<String>,
     /// Unused dependencies, keyed by `package.json:package_name`. Legacy
     /// bare `package_name` keys are still matched for back-compat with
-    /// baselines saved by older fallow versions.
+    /// baselines saved by older plow versions.
     pub unused_dependencies: Vec<String>,
     /// Unused dev dependencies, keyed by `package.json:package_name`. Legacy
     /// bare `package_name` keys are still matched for back-compat with
-    /// baselines saved by older fallow versions.
+    /// baselines saved by older plow versions.
     pub unused_dev_dependencies: Vec<String>,
     /// Circular dependency chains, keyed by sorted file paths joined with `->`.
     #[serde(default)]
@@ -77,7 +77,7 @@ pub struct BaselineData {
     pub re_export_cycles: Vec<String>,
     /// Unused optional dependencies, keyed by `package.json:package_name`.
     /// Legacy bare `package_name` keys are still matched for back-compat
-    /// with baselines saved by older fallow versions.
+    /// with baselines saved by older plow versions.
     #[serde(default)]
     pub unused_optional_dependencies: Vec<String>,
     /// Unused enum members, keyed by `file:parent.member`.
@@ -127,12 +127,12 @@ pub struct BaselineData {
     pub duplicate_exports: Vec<String>,
     /// Type-only dependencies, keyed by `package.json:package_name`. Legacy
     /// bare `package_name` keys are still matched for back-compat with
-    /// baselines saved by older fallow versions.
+    /// baselines saved by older plow versions.
     #[serde(default)]
     pub type_only_dependencies: Vec<String>,
     /// Test-only dependencies, keyed by `package.json:package_name`. Legacy
     /// bare `package_name` keys are still matched for back-compat with
-    /// baselines saved by older fallow versions.
+    /// baselines saved by older plow versions.
     #[serde(default)]
     pub test_only_dependencies: Vec<String>,
     /// Boundary violations, keyed by `from_path->to_path`.
@@ -911,7 +911,7 @@ fn private_type_leak_key(leak: &crate::results::PrivateTypeLeak, root: &Path) ->
 }
 
 fn filter_private_type_leaks(
-    leaks: &mut Vec<fallow_types::output_dead_code::PrivateTypeLeakFinding>,
+    leaks: &mut Vec<plow_types::output_dead_code::PrivateTypeLeakFinding>,
     baseline_keys: &[String],
     root: &Path,
 ) {
@@ -1584,26 +1584,26 @@ enum HealthFindingDimension {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct HealthFindingCategory {
     dimension: HealthFindingDimension,
-    severity: fallow_output::FindingSeverity,
+    severity: plow_output::FindingSeverity,
 }
 
 impl HealthFindingCategory {
     const fn key(self) -> &'static str {
         match (self.dimension, self.severity) {
-            (HealthFindingDimension::Complexity, fallow_output::FindingSeverity::Moderate) => {
+            (HealthFindingDimension::Complexity, plow_output::FindingSeverity::Moderate) => {
                 "complexity_moderate"
             }
-            (HealthFindingDimension::Complexity, fallow_output::FindingSeverity::High) => {
+            (HealthFindingDimension::Complexity, plow_output::FindingSeverity::High) => {
                 "complexity_high"
             }
-            (HealthFindingDimension::Complexity, fallow_output::FindingSeverity::Critical) => {
+            (HealthFindingDimension::Complexity, plow_output::FindingSeverity::Critical) => {
                 "complexity_critical"
             }
-            (HealthFindingDimension::Crap, fallow_output::FindingSeverity::Moderate) => {
+            (HealthFindingDimension::Crap, plow_output::FindingSeverity::Moderate) => {
                 "crap_moderate"
             }
-            (HealthFindingDimension::Crap, fallow_output::FindingSeverity::High) => "crap_high",
-            (HealthFindingDimension::Crap, fallow_output::FindingSeverity::Critical) => {
+            (HealthFindingDimension::Crap, plow_output::FindingSeverity::High) => "crap_high",
+            (HealthFindingDimension::Crap, plow_output::FindingSeverity::Critical) => {
                 "crap_critical"
             }
         }
@@ -1618,9 +1618,9 @@ const HEALTH_FINDING_DIMENSIONS: [HealthFindingDimension; 2] = [
 impl HealthBaselineData {
     /// Build a health baseline from findings and targets.
     pub fn from_findings(
-        findings: &[fallow_output::ComplexityViolation],
-        runtime_coverage_findings: &[fallow_output::RuntimeCoverageFinding],
-        targets: &[fallow_output::RefactoringTarget],
+        findings: &[plow_output::ComplexityViolation],
+        runtime_coverage_findings: &[plow_output::RuntimeCoverageFinding],
+        targets: &[plow_output::RefactoringTarget],
         root: &Path,
     ) -> Self {
         Self {
@@ -1655,7 +1655,7 @@ impl HealthBaselineData {
 
     pub fn overlap_entry_count(
         &self,
-        findings: &[fallow_output::ComplexityViolation],
+        findings: &[plow_output::ComplexityViolation],
         root: &Path,
     ) -> usize {
         if !self.finding_counts.is_empty() {
@@ -1674,7 +1674,7 @@ impl HealthBaselineData {
 }
 
 /// Generate a stable key for a refactoring target: `relative_path:category`.
-fn target_baseline_key(target: &fallow_output::RefactoringTarget, root: &Path) -> String {
+fn target_baseline_key(target: &plow_output::RefactoringTarget, root: &Path) -> String {
     format!(
         "{}:{}",
         relative_path(&target.path, root),
@@ -1683,7 +1683,7 @@ fn target_baseline_key(target: &fallow_output::RefactoringTarget, root: &Path) -
 }
 
 /// Generate a stable key for a health finding.
-fn health_finding_key(finding: &fallow_output::ComplexityViolation, root: &Path) -> String {
+fn health_finding_key(finding: &plow_output::ComplexityViolation, root: &Path) -> String {
     format!(
         "{}:{}:{}",
         relative_path(&finding.path, root),
@@ -1693,7 +1693,7 @@ fn health_finding_key(finding: &fallow_output::ComplexityViolation, root: &Path)
 }
 
 fn health_finding_counts(
-    findings: &[fallow_output::ComplexityViolation],
+    findings: &[plow_output::ComplexityViolation],
     root: &Path,
 ) -> HealthFindingCountMap {
     let mut counts = BTreeMap::new();
@@ -1711,7 +1711,7 @@ fn health_finding_counts(
 }
 
 fn health_finding_categories(
-    finding: &fallow_output::ComplexityViolation,
+    finding: &plow_output::ComplexityViolation,
 ) -> [Option<HealthFindingCategory>; 2] {
     let complexity_category = HealthFindingCategory {
         dimension: HealthFindingDimension::Complexity,
@@ -1730,11 +1730,11 @@ fn health_finding_categories(
     ]
 }
 
-fn severity_index(severity: fallow_output::FindingSeverity) -> usize {
+fn severity_index(severity: plow_output::FindingSeverity) -> usize {
     match severity {
-        fallow_output::FindingSeverity::Moderate => 0,
-        fallow_output::FindingSeverity::High => 1,
-        fallow_output::FindingSeverity::Critical => 2,
+        plow_output::FindingSeverity::Moderate => 0,
+        plow_output::FindingSeverity::High => 1,
+        plow_output::FindingSeverity::Critical => 2,
     }
 }
 
@@ -1744,9 +1744,9 @@ fn severity_counts_for_dimension(
 ) -> [usize; 3] {
     let mut counts = [0; 3];
     for severity in [
-        fallow_output::FindingSeverity::Moderate,
-        fallow_output::FindingSeverity::High,
-        fallow_output::FindingSeverity::Critical,
+        plow_output::FindingSeverity::Moderate,
+        plow_output::FindingSeverity::High,
+        plow_output::FindingSeverity::Critical,
     ] {
         let category = HealthFindingCategory {
             dimension,
@@ -1797,9 +1797,9 @@ fn health_overflow_categories(
             let overflow = overflowing_severities(current, baseline);
 
             for severity in [
-                fallow_output::FindingSeverity::Moderate,
-                fallow_output::FindingSeverity::High,
-                fallow_output::FindingSeverity::Critical,
+                plow_output::FindingSeverity::Moderate,
+                plow_output::FindingSeverity::High,
+                plow_output::FindingSeverity::Critical,
             ] {
                 if overflow[severity_index(severity)] {
                     overflow_categories.insert(
@@ -1847,7 +1847,7 @@ fn health_overlap_entry_count(
 }
 
 fn runtime_coverage_finding_key(
-    finding: &fallow_output::RuntimeCoverageFinding,
+    finding: &plow_output::RuntimeCoverageFinding,
     _root: &Path,
 ) -> String {
     finding
@@ -1863,7 +1863,7 @@ fn runtime_coverage_finding_key(
 /// line-sensitive `runtime_coverage_finding_key` for suppression. The NUL
 /// separator avoids collisions with paths/names that contain `:`.
 fn runtime_coverage_source_hash_key(
-    finding: &fallow_output::RuntimeCoverageFinding,
+    finding: &plow_output::RuntimeCoverageFinding,
     root: &Path,
 ) -> Option<String> {
     finding.source_hash.as_deref().map(|hash| {
@@ -1878,10 +1878,10 @@ fn runtime_coverage_source_hash_key(
 
 /// Filter health findings to only include those not present in the baseline.
 pub fn filter_new_health_findings(
-    mut findings: Vec<fallow_output::ComplexityViolation>,
+    mut findings: Vec<plow_output::ComplexityViolation>,
     baseline: &HealthBaselineData,
     root: &Path,
-) -> Vec<fallow_output::ComplexityViolation> {
+) -> Vec<plow_output::ComplexityViolation> {
     if !baseline.finding_counts.is_empty() {
         let current_counts = health_finding_counts(&findings, root);
         let overflow_categories =
@@ -1907,10 +1907,10 @@ pub fn filter_new_health_findings(
 }
 
 pub fn filter_new_runtime_coverage_findings(
-    mut findings: Vec<fallow_output::RuntimeCoverageFinding>,
+    mut findings: Vec<plow_output::RuntimeCoverageFinding>,
     baseline: &HealthBaselineData,
     root: &Path,
-) -> Vec<fallow_output::RuntimeCoverageFinding> {
+) -> Vec<plow_output::RuntimeCoverageFinding> {
     let baseline_keys: FxHashSet<&str> = baseline
         .runtime_coverage_findings
         .iter()
@@ -1936,10 +1936,10 @@ pub fn filter_new_runtime_coverage_findings(
 
 /// Filter refactoring targets to only include those not present in the baseline.
 pub fn filter_new_health_targets(
-    mut targets: Vec<fallow_output::RefactoringTarget>,
+    mut targets: Vec<plow_output::RefactoringTarget>,
     baseline: &HealthBaselineData,
     root: &Path,
-) -> Vec<fallow_output::RefactoringTarget> {
+) -> Vec<plow_output::RefactoringTarget> {
     let baseline_keys: FxHashSet<&str> = baseline.target_keys.iter().map(String::as_str).collect();
     targets.retain(|t| {
         let key = target_baseline_key(t, root);
@@ -1977,9 +1977,7 @@ mod tests {
         UnusedDependency, UnusedDependencyFinding, UnusedDevDependencyFinding, UnusedExport,
         UnusedFile,
     };
-    use fallow_types::output_dead_code::{
-        UnusedExportFinding, UnusedFileFinding, UnusedTypeFinding,
-    };
+    use plow_types::output_dead_code::{UnusedExportFinding, UnusedFileFinding, UnusedTypeFinding};
     use std::path::PathBuf;
 
     fn make_results() -> AnalysisResults {
@@ -2535,17 +2533,13 @@ mod tests {
         assert!((stats.duplication_percentage - 0.0).abs() < f64::EPSILON);
     }
 
-    fn make_health_finding(
-        root: &Path,
-        name: &str,
-        line: u32,
-    ) -> fallow_output::ComplexityViolation {
+    fn make_health_finding(root: &Path, name: &str, line: u32) -> plow_output::ComplexityViolation {
         make_health_finding_with(
             root,
             name,
             line,
-            fallow_output::ExceededThreshold::Both,
-            fallow_output::FindingSeverity::High,
+            plow_output::ExceededThreshold::Both,
+            plow_output::FindingSeverity::High,
         )
     }
 
@@ -2553,10 +2547,10 @@ mod tests {
         root: &Path,
         name: &str,
         line: u32,
-        exceeded: fallow_output::ExceededThreshold,
-        severity: fallow_output::FindingSeverity,
-    ) -> fallow_output::ComplexityViolation {
-        fallow_output::ComplexityViolation {
+        exceeded: plow_output::ExceededThreshold,
+        severity: plow_output::FindingSeverity,
+    ) -> plow_output::ComplexityViolation {
+        plow_output::ComplexityViolation {
             path: root.join("src/utils.ts"),
             name: name.to_string(),
             line,
@@ -2676,8 +2670,8 @@ mod tests {
                 &root,
                 "parseExpression",
                 42,
-                fallow_output::ExceededThreshold::Crap,
-                fallow_output::FindingSeverity::High,
+                plow_output::ExceededThreshold::Crap,
+                plow_output::FindingSeverity::High,
             )],
             &[],
             &[],
@@ -2689,8 +2683,8 @@ mod tests {
                     &root,
                     "parseExpression",
                     43,
-                    fallow_output::ExceededThreshold::Crap,
-                    fallow_output::FindingSeverity::High,
+                    plow_output::ExceededThreshold::Crap,
+                    plow_output::FindingSeverity::High,
                 ),
                 make_health_finding(&root, "newComplexityOnlyFunction", 100),
             ],
@@ -2709,8 +2703,8 @@ mod tests {
                 &root,
                 "parseExpression",
                 42,
-                fallow_output::ExceededThreshold::Both,
-                fallow_output::FindingSeverity::Critical,
+                plow_output::ExceededThreshold::Both,
+                plow_output::FindingSeverity::Critical,
             )],
             &[],
             &[],
@@ -2721,8 +2715,8 @@ mod tests {
                 &root,
                 "parseExpression",
                 42,
-                fallow_output::ExceededThreshold::Both,
-                fallow_output::FindingSeverity::High,
+                plow_output::ExceededThreshold::Both,
+                plow_output::FindingSeverity::High,
             )],
             &baseline,
             &root,
@@ -2738,8 +2732,8 @@ mod tests {
                 &root,
                 "parseExpression",
                 42,
-                fallow_output::ExceededThreshold::Both,
-                fallow_output::FindingSeverity::High,
+                plow_output::ExceededThreshold::Both,
+                plow_output::FindingSeverity::High,
             )],
             &[],
             &[],
@@ -2750,8 +2744,8 @@ mod tests {
                 &root,
                 "parseExpression",
                 42,
-                fallow_output::ExceededThreshold::Both,
-                fallow_output::FindingSeverity::Critical,
+                plow_output::ExceededThreshold::Both,
+                plow_output::FindingSeverity::Critical,
             )],
             &baseline,
             &root,
@@ -2760,7 +2754,7 @@ mod tests {
         assert_eq!(filtered[0].name, "parseExpression");
         assert!(matches!(
             filtered[0].severity,
-            fallow_output::FindingSeverity::Critical
+            plow_output::FindingSeverity::Critical
         ));
     }
 
@@ -2943,7 +2937,7 @@ mod tests {
                 col: 0,
             }));
         r.unresolved_imports.push(
-            fallow_types::output_dead_code::UnresolvedImportFinding::with_actions(
+            plow_types::output_dead_code::UnresolvedImportFinding::with_actions(
                 crate::results::UnresolvedImport {
                     path: PathBuf::from("src/app.ts"),
                     specifier: "./missing".to_string(),
@@ -2995,7 +2989,7 @@ mod tests {
                 },
             ));
         r.boundary_violations.push(
-            fallow_types::output_dead_code::BoundaryViolationFinding::with_actions(
+            plow_types::output_dead_code::BoundaryViolationFinding::with_actions(
                 crate::results::BoundaryViolation {
                     from_path: PathBuf::from("src/ui/btn.ts"),
                     to_path: PathBuf::from("src/db/query.ts"),
@@ -3131,25 +3125,25 @@ mod tests {
     fn health_targets_baseline_filters_known() {
         let root = PathBuf::from("/project");
         let targets = vec![
-            fallow_output::RefactoringTarget {
+            plow_output::RefactoringTarget {
                 path: root.join("src/complex.ts"),
                 priority: 80.0,
                 efficiency: 40.0,
                 recommendation: "Split file".to_string(),
-                category: fallow_output::RecommendationCategory::SplitHighImpact,
-                effort: fallow_output::EffortEstimate::Medium,
-                confidence: fallow_output::Confidence::Medium,
+                category: plow_output::RecommendationCategory::SplitHighImpact,
+                effort: plow_output::EffortEstimate::Medium,
+                confidence: plow_output::Confidence::Medium,
                 factors: vec![],
                 evidence: None,
             },
-            fallow_output::RefactoringTarget {
+            plow_output::RefactoringTarget {
                 path: root.join("src/new-issue.ts"),
                 priority: 60.0,
                 efficiency: 30.0,
                 recommendation: "Extract function".to_string(),
-                category: fallow_output::RecommendationCategory::ExtractComplexFunctions,
-                effort: fallow_output::EffortEstimate::Low,
-                confidence: fallow_output::Confidence::High,
+                category: plow_output::RecommendationCategory::ExtractComplexFunctions,
+                effort: plow_output::EffortEstimate::Low,
+                confidence: plow_output::Confidence::High,
                 factors: vec![],
                 evidence: None,
             },
@@ -3410,18 +3404,18 @@ mod tests {
         stable_id: Option<&str>,
         line: u32,
         source_hash: Option<&str>,
-    ) -> fallow_output::RuntimeCoverageFinding {
-        fallow_output::RuntimeCoverageFinding {
+    ) -> plow_output::RuntimeCoverageFinding {
+        plow_output::RuntimeCoverageFinding {
             id: id.to_owned(),
             stable_id: stable_id.map(str::to_owned),
             source_hash: source_hash.map(str::to_owned),
             path: PathBuf::from("src/a.ts"),
             function: "alpha".to_owned(),
             line,
-            verdict: fallow_output::RuntimeCoverageVerdict::ReviewRequired,
+            verdict: plow_output::RuntimeCoverageVerdict::ReviewRequired,
             invocations: Some(0),
-            confidence: fallow_output::RuntimeCoverageConfidence::Medium,
-            evidence: fallow_output::RuntimeCoverageEvidence {
+            confidence: plow_output::RuntimeCoverageConfidence::Medium,
+            evidence: plow_output::RuntimeCoverageEvidence {
                 static_status: "used".to_owned(),
                 test_coverage: "not_covered".to_owned(),
                 v8_tracking: "tracked".to_owned(),
@@ -3437,12 +3431,12 @@ mod tests {
     #[test]
     fn legacy_prod_baseline_still_suppresses_finding() {
         let baseline = HealthBaselineData {
-            runtime_coverage_findings: vec!["fallow:prod:deadbeef".to_owned()],
+            runtime_coverage_findings: vec!["plow:prod:deadbeef".to_owned()],
             ..HealthBaselineData::default()
         };
         let findings = vec![runtime_finding(
-            "fallow:prod:deadbeef",
-            Some("fallow:fn:00000001"),
+            "plow:prod:deadbeef",
+            Some("plow:fn:00000001"),
             14,
             None,
         )];
@@ -3455,8 +3449,8 @@ mod tests {
     fn source_hash_baseline_survives_line_move() {
         let root = Path::new("/repo");
         let baselined = runtime_finding(
-            "fallow:prod:deadbeef",
-            Some("fallow:fn:00000001"),
+            "plow:prod:deadbeef",
+            Some("plow:fn:00000001"),
             14,
             Some("0123456789abcdef"),
         );
@@ -3464,8 +3458,8 @@ mod tests {
         assert_eq!(baseline.runtime_coverage_source_hashes.len(), 1);
 
         let findings = vec![runtime_finding(
-            "fallow:prod:99999999",
-            Some("fallow:fn:cafe0002"),
+            "plow:prod:99999999",
+            Some("plow:fn:cafe0002"),
             40,
             Some("0123456789abcdef"),
         )];
@@ -3479,12 +3473,12 @@ mod tests {
     #[test]
     fn unbaselined_finding_is_reported() {
         let baseline = HealthBaselineData {
-            runtime_coverage_findings: vec!["fallow:fn:00000001".to_owned()],
+            runtime_coverage_findings: vec!["plow:fn:00000001".to_owned()],
             ..HealthBaselineData::default()
         };
         let findings = vec![runtime_finding(
-            "fallow:prod:abc1234d",
-            Some("fallow:fn:beefcafe"),
+            "plow:prod:abc1234d",
+            Some("plow:fn:beefcafe"),
             7,
             None,
         )];

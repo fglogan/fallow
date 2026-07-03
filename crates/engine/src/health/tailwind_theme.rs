@@ -50,7 +50,7 @@ fn namespaces() -> &'static Namespaces {
     NAMESPACES.get_or_init(|| {
         let parsed: ThemeNamespacesToml = toml::from_str(THEME_TOML).expect(
             "embedded crates/cli/data/tailwind-theme.toml must parse; run \
-             `cargo test -p fallow-cli theme_namespaces_parse` to see the error",
+             `cargo test -p plow-cli theme_namespaces_parse` to see the error",
         );
         let mut ordered: Vec<(String, bool)> = parsed
             .suffix

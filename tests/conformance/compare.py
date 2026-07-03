@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Compare fallow and knip JSON outputs and produce a conformance report.
+"""Compare plow and knip JSON outputs and produce a conformance report.
 
 Usage:
-    python3 compare.py <fallow.json> <knip.json> <project_root>
+    python3 compare.py <plow.json> <knip.json> <project_root>
 
 Reads the JSON output from both tools, normalizes them into comparable
 (file, export_name, issue_type) tuples, and reports agreement/disagreement.
@@ -15,8 +15,8 @@ import os
 import sys
 
 
-# Issue type mapping: fallow key -> knip key
-FALLOW_TO_KNIP = {
+# Issue type mapping: plow key -> knip key
+PLOW_TO_KNIP = {
     "unused_files": "files",
     "unused_exports": "exports",
     "unused_types": "types",
@@ -29,7 +29,7 @@ FALLOW_TO_KNIP = {
     "unused_class_members": "classMembers",
 }
 
-KNIP_TO_FALLOW = {v: k for k, v in FALLOW_TO_KNIP.items()}
+KNIP_TO_PLOW = {v: k for k, v in PLOW_TO_KNIP.items()}
 
 
 def normalize_path(path, project_root):
@@ -48,8 +48,8 @@ def normalize_path(path, project_root):
     return path
 
 
-def extract_fallow_issues(data, project_root):
-    """Extract normalized (file, name, issue_type) tuples from fallow JSON."""
+def extract_plow_issues(data, project_root):
+    """Extract normalized (file, name, issue_type) tuples from plow JSON."""
     issues = set()
 
     # unused_files: [{path: "..."}]
@@ -156,18 +156,18 @@ def extract_knip_issues(data, project_root):
             "duplicates": "duplicate_exports",
         }
 
-        for knip_key, fallow_type in named_types.items():
+        for knip_key, plow_type in named_types.items():
             for item in file_entry.get(knip_key, []):
                 name = item.get("name", "") if isinstance(item, dict) else str(item)
                 # For dependency types, use package.json as the file
-                if fallow_type in (
+                if plow_type in (
                     "unused_dependencies",
                     "unused_dev_dependencies",
                     "unlisted_dependencies",
                 ):
-                    issues.add(("package.json", name, fallow_type))
+                    issues.add(("package.json", name, plow_type))
                 else:
-                    issues.add((path, name, fallow_type))
+                    issues.add((path, name, plow_type))
 
         # Enum members: {"EnumName": [{"name": "MemberName", ...}]}
         enum_members = file_entry.get("enumMembers", {})
@@ -206,34 +206,34 @@ def extract_knip_issues(data, project_root):
     return issues
 
 
-def compare_issues(fallow_issues, knip_issues):
+def compare_issues(plow_issues, knip_issues):
     """Compare two sets of issues and produce a comparison report."""
-    agreed = fallow_issues & knip_issues
-    fallow_only = fallow_issues - knip_issues
-    knip_only = knip_issues - fallow_issues
-    total_unique = len(fallow_issues | knip_issues)
+    agreed = plow_issues & knip_issues
+    plow_only = plow_issues - knip_issues
+    knip_only = knip_issues - plow_issues
+    total_unique = len(plow_issues | knip_issues)
 
     agreement_pct = (len(agreed) / total_unique * 100) if total_unique > 0 else 100.0
 
     return {
         "agreed": sorted(agreed),
-        "fallow_only": sorted(fallow_only),
+        "plow_only": sorted(plow_only),
         "knip_only": sorted(knip_only),
         "total_unique": total_unique,
         "agreement_pct": round(agreement_pct, 1),
     }
 
 
-def build_report(fallow_issues, knip_issues, comparison):
+def build_report(plow_issues, knip_issues, comparison):
     """Build a structured JSON report from the comparison."""
     # Break down by issue type
     all_types = set()
-    for _, _, issue_type in fallow_issues | knip_issues:
+    for _, _, issue_type in plow_issues | knip_issues:
         all_types.add(issue_type)
 
     by_type = {}
     for issue_type in sorted(all_types):
-        f_typed = {(f, n, t) for f, n, t in fallow_issues if t == issue_type}
+        f_typed = {(f, n, t) for f, n, t in plow_issues if t == issue_type}
         k_typed = {(f, n, t) for f, n, t in knip_issues if t == issue_type}
         agreed = f_typed & k_typed
         f_only = f_typed - k_typed
@@ -242,10 +242,10 @@ def build_report(fallow_issues, knip_issues, comparison):
         pct = (len(agreed) / total * 100) if total > 0 else 100.0
 
         by_type[issue_type] = {
-            "fallow_count": len(f_typed),
+            "plow_count": len(f_typed),
             "knip_count": len(k_typed),
             "agreed": len(agreed),
-            "fallow_only": len(f_only),
+            "plow_only": len(f_only),
             "knip_only": len(k_only),
             "agreement_pct": round(pct, 1),
         }
@@ -255,17 +255,17 @@ def build_report(fallow_issues, knip_issues, comparison):
 
     return {
         "summary": {
-            "fallow_total": len(fallow_issues),
+            "plow_total": len(plow_issues),
             "knip_total": len(knip_issues),
             "agreed": len(comparison["agreed"]),
-            "fallow_only": len(comparison["fallow_only"]),
+            "plow_only": len(comparison["plow_only"]),
             "knip_only": len(comparison["knip_only"]),
             "agreement_pct": comparison["agreement_pct"],
         },
         "by_type": by_type,
         "details": {
             "agreed": [issue_to_dict(i) for i in comparison["agreed"]],
-            "fallow_only": [issue_to_dict(i) for i in comparison["fallow_only"]],
+            "plow_only": [issue_to_dict(i) for i in comparison["plow_only"]],
             "knip_only": [issue_to_dict(i) for i in comparison["knip_only"]],
         },
     }
@@ -274,25 +274,25 @@ def build_report(fallow_issues, knip_issues, comparison):
 def main():
     if len(sys.argv) != 4:
         print(
-            f"Usage: {sys.argv[0]} <fallow.json> <knip.json> <project_root>",
+            f"Usage: {sys.argv[0]} <plow.json> <knip.json> <project_root>",
             file=sys.stderr,
         )
         sys.exit(1)
 
-    fallow_path = sys.argv[1]
+    plow_path = sys.argv[1]
     knip_path = sys.argv[2]
     project_root = os.path.abspath(sys.argv[3])
 
-    with open(fallow_path) as f:
-        fallow_data = json.load(f)
+    with open(plow_path) as f:
+        plow_data = json.load(f)
 
     with open(knip_path) as f:
         knip_data = json.load(f)
 
-    fallow_issues = extract_fallow_issues(fallow_data, project_root)
+    plow_issues = extract_plow_issues(plow_data, project_root)
     knip_issues = extract_knip_issues(knip_data, project_root)
-    comparison = compare_issues(fallow_issues, knip_issues)
-    report = build_report(fallow_issues, knip_issues, comparison)
+    comparison = compare_issues(plow_issues, knip_issues)
+    report = build_report(plow_issues, knip_issues, comparison)
 
     print(json.dumps(report, indent=2))
 

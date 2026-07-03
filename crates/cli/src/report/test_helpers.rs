@@ -1,7 +1,7 @@
 use std::path::Path;
 
-use fallow_types::extract::MemberKind;
-use fallow_types::output_dead_code::{
+use plow_types::extract::MemberKind;
+use plow_types::output_dead_code::{
     BoundaryViolationFinding, CircularDependencyFinding, DuplicateExportFinding,
     TestOnlyDependencyFinding, TypeOnlyDependencyFinding, UnlistedDependencyFinding,
     UnprovidedInjectFinding, UnrenderedComponentFinding, UnresolvedImportFinding,
@@ -11,7 +11,7 @@ use fallow_types::output_dead_code::{
     UnusedLoadDataKeyFinding, UnusedOptionalDependencyFinding, UnusedServerActionFinding,
     UnusedStoreMemberFinding, UnusedSvelteEventFinding, UnusedTypeFinding,
 };
-use fallow_types::results::*;
+use plow_types::results::*;
 
 /// Build an `AnalysisResults` populated with one issue of every type.
 ///

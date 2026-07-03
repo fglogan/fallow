@@ -1,14 +1,14 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::PathBuf;
 
-use fallow_config::{
-    ConfigOverride, EffectKind, FallowConfig, OutputFormat, PartialRulesConfig, ResolvedConfig,
+use plow_config::{
+    ConfigOverride, EffectKind, OutputFormat, PartialRulesConfig, PlowConfig, ResolvedConfig,
     RulePackDef, RulePackRule, RulePackRuleKind, RulesConfig, Severity,
 };
-use fallow_types::extract::{
+use plow_types::extract::{
     CalleeUse, ImportInfo, ImportedName, ModuleInfo, ReExportInfo, RequireCallInfo,
 };
-use fallow_types::results::{PolicyRuleKind, PolicyViolationSeverity, SuppressionOrigin};
+use plow_types::results::{PolicyRuleKind, PolicyViolationSeverity, SuppressionOrigin};
 
 use crate::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
 use crate::graph::ModuleGraph;
@@ -64,7 +64,7 @@ fn pack(rules: Vec<RulePackRule>) -> RulePackDef {
 }
 
 fn make_config(root: PathBuf, packs: Vec<RulePackDef>, master: Severity) -> ResolvedConfig {
-    let mut config = FallowConfig {
+    let mut config = PlowConfig {
         rules: RulesConfig {
             policy_violation: master,
             ..RulesConfig::default()
@@ -236,7 +236,7 @@ fn find_policy_violations(
     config: &ResolvedConfig,
     suppressions: &SuppressionContext<'_>,
     line_offsets_by_file: &super::super::LineOffsetsMap<'_>,
-) -> Vec<fallow_types::results::PolicyViolation> {
+) -> Vec<plow_types::results::PolicyViolation> {
     find_policy_violations_raw(
         graph,
         modules,
@@ -666,7 +666,7 @@ fn per_file_override_off_is_a_kill_switch() {
     let root = PathBuf::from("/tmp/policy-test");
     let mut error_rule = banned_call("no-console", &["console.*"]);
     error_rule.severity = Some(Severity::Error);
-    let mut config = FallowConfig {
+    let mut config = PlowConfig {
         rules: RulesConfig {
             policy_violation: Severity::Warn,
             ..RulesConfig::default()
@@ -711,7 +711,7 @@ fn line_and_file_suppressions_are_honored_and_consumed() {
     let mut line_module = module(0, vec![callee("console.log", 25)], Vec::new());
     line_module
         .suppressions
-        .push(fallow_types::suppress::Suppression::issue(
+        .push(plow_types::suppress::Suppression::issue(
             3,
             2,
             crate::suppress::IssueKind::PolicyViolation,
@@ -722,7 +722,7 @@ fn line_and_file_suppressions_are_honored_and_consumed() {
     let mut file_module = module(1, vec![callee("console.log", 0)], Vec::new());
     file_module
         .suppressions
-        .push(fallow_types::suppress::Suppression::issue(
+        .push(plow_types::suppress::Suppression::issue(
             0,
             1,
             crate::suppress::IssueKind::PolicyViolation,
@@ -764,7 +764,7 @@ fn scoped_policy_suppression_only_suppresses_matching_rule() {
     );
     module
         .suppressions
-        .push(fallow_types::suppress::Suppression::policy_rule(
+        .push(plow_types::suppress::Suppression::policy_rule(
             1,
             0,
             "team-policy",
@@ -800,7 +800,7 @@ fn file_scoped_policy_suppression_only_suppresses_matching_rule() {
     );
     module
         .suppressions
-        .push(fallow_types::suppress::Suppression::policy_rule(
+        .push(plow_types::suppress::Suppression::policy_rule(
             0,
             1,
             "team-policy",
@@ -829,7 +829,7 @@ fn stale_scoped_policy_suppression_preserves_full_token() {
     let mut module = module(0, Vec::new(), Vec::new());
     module
         .suppressions
-        .push(fallow_types::suppress::Suppression::policy_rule(
+        .push(plow_types::suppress::Suppression::policy_rule(
             0,
             1,
             "team-policy",
@@ -863,7 +863,7 @@ fn scoped_policy_suppression_is_dormant_when_master_is_off() {
     let mut module = module(0, Vec::new(), Vec::new());
     module
         .suppressions
-        .push(fallow_types::suppress::Suppression::policy_rule(
+        .push(plow_types::suppress::Suppression::policy_rule(
             0,
             1,
             "team-policy",
@@ -889,7 +889,7 @@ fn scoped_policy_suppression_is_dormant_when_rule_is_off() {
     let mut module = module(0, Vec::new(), Vec::new());
     module
         .suppressions
-        .push(fallow_types::suppress::Suppression::policy_rule(
+        .push(plow_types::suppress::Suppression::policy_rule(
             0,
             1,
             "team-policy",

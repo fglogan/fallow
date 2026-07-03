@@ -20,15 +20,15 @@ use crate::{
     PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact, ReExportInfo, RequireCallInfo,
     SemanticFact, VisibilityTag,
 };
-use fallow_types::extract::{
+use helpers::LitCustomElementDecorator;
+use helpers::array_element_type_from_type;
+use plow_types::extract::{
     AngularComponentSelector, AngularInputMember, AngularOutputMember, CalleeUse,
     ClassHeritageInfo, ComponentFunction, ComponentProp, DiKeySite, DispatchedEvent, HookUse,
     LocalTypeDeclaration, MisplacedDirectiveSite, PublicSignatureTypeReference, RenderEdge,
     SanitizedSinkArg, SanitizerScope, SecurityControlSite, SinkLiteralValue, SinkSite,
     SkippedSecurityCalleeSite, TaintedBinding,
 };
-use helpers::LitCustomElementDecorator;
-use helpers::array_element_type_from_type;
 
 /// Infer the element class of a Vue `defineProps` field whose declared type is an
 /// array (or nullable array) of a non-builtin class (`items: Util[]` /
@@ -244,7 +244,7 @@ pub(crate) struct ModuleInfoExtractor {
     pub(crate) inline_template_findings: Vec<InlineTemplateFinding>,
     pub(crate) side_effect_registered_class_names: FxHashSet<String>,
     lit_custom_element_candidates: Vec<LitCustomElementCandidate>,
-    pub(crate) registered_custom_elements: Vec<fallow_types::extract::RegisteredCustomElement>,
+    pub(crate) registered_custom_elements: Vec<plow_types::extract::RegisteredCustomElement>,
     pub(crate) used_custom_element_tags: FxHashSet<String>,
     pub(crate) factory_call_candidates: Vec<FactoryCallCandidate>,
     /// Same-file functions whose body returns `new Class()`, mapped to the class
@@ -442,7 +442,7 @@ pub(crate) struct ModuleInfoExtractor {
     /// Basename-gated to page-load producers in `parse.rs` (cleared for any
     /// non-`+page.{ts,server.ts,js,server.js}` file). Consumed by the
     /// `unused-load-data-key` detector.
-    pub(crate) load_return_keys: Vec<fallow_types::extract::LoadReturnKey>,
+    pub(crate) load_return_keys: Vec<plow_types::extract::LoadReturnKey>,
     /// `true` when a `load` export was seen whose body could not be harvested
     /// safely (spread/non-literal/multi-return/computed-key/wrapped). Forces the
     /// `unused-load-data-key` detector to abstain on the whole file.
@@ -557,7 +557,7 @@ pub(crate) struct PendingComponentArrow {
     /// The binding name.
     pub(crate) name: String,
     /// The component kind (`Arrow`, or a `forwardRef` / `memo` wrapper).
-    pub(crate) kind: fallow_types::extract::ComponentFunctionKind,
+    pub(crate) kind: plow_types::extract::ComponentFunctionKind,
     /// Whether the binding is exported.
     pub(crate) is_exported: bool,
     /// For a `forwardRef<Ref, Props>((props, ref) => ...)` wrapper, the bare
@@ -1045,7 +1045,7 @@ impl ModuleInfoExtractor {
                     SideEffectRegistrationTarget::LocalClass(name) => name.clone(),
                     SideEffectRegistrationTarget::AnonymousDefaultExport(_) => String::new(),
                 };
-                registrations.push(fallow_types::extract::RegisteredCustomElement {
+                registrations.push(plow_types::extract::RegisteredCustomElement {
                     tag: tag.clone(),
                     class_local_name,
                     span_start: candidate.span_start,
@@ -1464,7 +1464,7 @@ impl ModuleInfoExtractor {
     /// export. Only strict entries qualify, bounding over-credit. Must run after
     /// `resolve_factory_return_aliases` has populated the strict map. See issue
     /// #1441 (Part A).
-    fn collect_exported_factory_returns(&self) -> Vec<fallow_types::extract::FactoryReturnExport> {
+    fn collect_exported_factory_returns(&self) -> Vec<plow_types::extract::FactoryReturnExport> {
         if self.strict_factory_return_functions.is_empty() {
             return Vec::new();
         }
@@ -1479,7 +1479,7 @@ impl ModuleInfoExtractor {
                 (None, ExportName::Default) => continue,
             };
             if let Some(class_local_name) = self.strict_factory_return_functions.get(local_name) {
-                out.push(fallow_types::extract::FactoryReturnExport {
+                out.push(plow_types::extract::FactoryReturnExport {
                     export_name: export.name.to_string(),
                     class_local_name: class_local_name.clone(),
                 });
@@ -1628,7 +1628,7 @@ impl ModuleInfoExtractor {
         }
     }
 
-    fn collect_namespace_object_aliases(&self) -> Vec<fallow_types::extract::NamespaceObjectAlias> {
+    fn collect_namespace_object_aliases(&self) -> Vec<plow_types::extract::NamespaceObjectAlias> {
         if self.binding_target_names.is_empty() || self.namespace_binding_names.is_empty() {
             return Vec::new();
         }
@@ -1655,7 +1655,7 @@ impl ModuleInfoExtractor {
                     ExportName::Named(name) => name.clone(),
                     ExportName::Default => "default".to_string(),
                 };
-                aliases.push(fallow_types::extract::NamespaceObjectAlias {
+                aliases.push(plow_types::extract::NamespaceObjectAlias {
                     via_export_name: canonical_name,
                     suffix: suffix.to_string(),
                     namespace_local: target_name.to_string(),
@@ -1681,7 +1681,7 @@ impl ModuleInfoExtractor {
 
     /// Run every finalize/resolve pass shared by `into_module_info` and
     /// `merge_into`, returning the collected namespace object aliases.
-    fn finalize_resolution_phase(&mut self) -> Vec<fallow_types::extract::NamespaceObjectAlias> {
+    fn finalize_resolution_phase(&mut self) -> Vec<plow_types::extract::NamespaceObjectAlias> {
         self.resolve_typed_destructure_bindings();
         self.resolve_pending_local_export_specifiers();
         self.enrich_local_class_exports();
@@ -1709,7 +1709,7 @@ impl ModuleInfoExtractor {
 
     pub(crate) fn into_module_info(
         mut self,
-        file_id: fallow_types::discover::FileId,
+        file_id: plow_types::discover::FileId,
         content_hash: u64,
         parsed: ParsedSuppressions,
     ) -> ModuleInfo {
@@ -1819,7 +1819,7 @@ impl ModuleInfoExtractor {
     fn merge_module_graph(
         &mut self,
         info: &mut ModuleInfo,
-        mut namespace_object_aliases: Vec<fallow_types::extract::NamespaceObjectAlias>,
+        mut namespace_object_aliases: Vec<plow_types::extract::NamespaceObjectAlias>,
     ) {
         // Compute before `self.exports` is drained below; the join reads exports.
         let mut exported_factory_returns = self.collect_exported_factory_returns();

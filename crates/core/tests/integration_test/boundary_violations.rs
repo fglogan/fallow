@@ -1,6 +1,6 @@
-use fallow_config::{
+use plow_config::{
     BoundaryCallsConfig, BoundaryConfig, BoundaryCoverageConfig, BoundaryPreset, BoundaryRule,
-    BoundaryZone, DuplicatesConfig, FallowConfig, FlagsConfig, HealthConfig, OutputFormat,
+    BoundaryZone, DuplicatesConfig, FlagsConfig, HealthConfig, OutputFormat, PlowConfig,
     ResolveConfig, RulesConfig, Severity,
 };
 
@@ -9,7 +9,7 @@ use super::common::fixture_path;
 fn create_boundary_config(
     root: std::path::PathBuf,
     boundaries: BoundaryConfig,
-) -> fallow_config::ResolvedConfig {
+) -> plow_config::ResolvedConfig {
     create_boundary_config_with_entry(root, boundaries, "src/ui/App.ts")
 }
 
@@ -17,8 +17,8 @@ fn create_boundary_config_with_entry(
     root: std::path::PathBuf,
     boundaries: BoundaryConfig,
     entry: &str,
-) -> fallow_config::ResolvedConfig {
-    FallowConfig {
+) -> plow_config::ResolvedConfig {
+    PlowConfig {
         schema: None,
         extends: vec![],
         entry: vec![entry.to_string()],
@@ -30,10 +30,10 @@ fn create_boundary_config_with_entry(
         ignore_exports: vec![],
         ignore_catalog_references: vec![],
         ignore_dependency_overrides: vec![],
-        ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+        ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
-        unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
+        unused_component_props: plow_config::UnusedComponentPropsConfig::default(),
         duplicates: DuplicatesConfig::default(),
         health: HealthConfig::default(),
         rules: RulesConfig {
@@ -47,17 +47,17 @@ fn create_boundary_config_with_entry(
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
-        audit: fallow_config::AuditConfig::default(),
+        audit: plow_config::AuditConfig::default(),
         codeowners: None,
         public_packages: vec![],
         flags: FlagsConfig::default(),
-        security: fallow_config::SecurityConfig::default(),
-        fix: fallow_config::FixConfig::default(),
+        security: plow_config::SecurityConfig::default(),
+        fix: plow_config::FixConfig::default(),
         resolve: ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
         auto_imports: false,
-        cache: fallow_config::CacheConfig::default(),
+        cache: plow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None)
 }
@@ -103,7 +103,7 @@ fn detects_boundary_violation() {
         ],
     };
     let config = create_boundary_config(root, boundaries);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert_eq!(
         results.boundary_violations.len(),
@@ -143,7 +143,7 @@ fn detects_boundary_violation() {
 fn no_violations_when_boundaries_disabled() {
     let root = fixture_path("boundary-violations");
     let config = super::common::create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.boundary_violations.is_empty(),
@@ -168,7 +168,7 @@ fn reports_unmatched_files_when_boundary_coverage_is_required() {
         ..BoundaryConfig::default()
     };
     let config = create_boundary_config(root, boundaries);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let paths = results
         .boundary_coverage_violations
@@ -198,7 +198,7 @@ fn allow_unmatched_excludes_boundary_coverage_findings() {
         ..BoundaryConfig::default()
     };
     let config = create_boundary_config(root, boundaries);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.boundary_coverage_violations.iter().all(|v| !v
@@ -211,7 +211,7 @@ fn allow_unmatched_excludes_boundary_coverage_findings() {
     );
 }
 
-fn calls_boundaries(forbidden: Vec<fallow_config::ForbiddenCallRule>) -> BoundaryConfig {
+fn calls_boundaries(forbidden: Vec<plow_config::ForbiddenCallRule>) -> BoundaryConfig {
     BoundaryConfig {
         zones: vec![
             BoundaryZone {
@@ -232,10 +232,10 @@ fn calls_boundaries(forbidden: Vec<fallow_config::ForbiddenCallRule>) -> Boundar
     }
 }
 
-fn forbid_call(from: &str, callee: &str) -> fallow_config::ForbiddenCallRule {
-    fallow_config::ForbiddenCallRule {
+fn forbid_call(from: &str, callee: &str) -> plow_config::ForbiddenCallRule {
+    plow_config::ForbiddenCallRule {
         from: from.to_string(),
-        callee: fallow_config::ForbiddenCallee::Single(callee.to_string()),
+        callee: plow_config::ForbiddenCallee::Single(callee.to_string()),
     }
 }
 
@@ -247,7 +247,7 @@ fn reports_forbidden_calls_from_zoned_files() {
         forbid_call("domain", "console.*"),
     ]);
     let config = create_boundary_config_with_entry(root, boundaries, "src/**/*.ts");
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let entries: Vec<(String, String, String, String)> = results
         .boundary_call_violations
@@ -316,7 +316,7 @@ fn no_forbidden_call_findings_without_calls_config() {
     let root = fixture_path("boundary-violations");
     let boundaries = calls_boundaries(vec![]);
     let config = create_boundary_config_with_entry(root, boundaries, "src/**/*.ts");
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     assert!(results.boundary_call_violations.is_empty());
 }
 
@@ -347,7 +347,7 @@ fn no_violations_when_rule_is_off() {
             allow_type_only: vec![],
         }],
     };
-    let config = FallowConfig {
+    let config = PlowConfig {
         schema: None,
         extends: vec![],
         entry: vec!["src/ui/App.ts".to_string()],
@@ -359,10 +359,10 @@ fn no_violations_when_rule_is_off() {
         ignore_exports: vec![],
         ignore_catalog_references: vec![],
         ignore_dependency_overrides: vec![],
-        ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+        ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
-        unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
+        unused_component_props: plow_config::UnusedComponentPropsConfig::default(),
         duplicates: DuplicatesConfig::default(),
         health: HealthConfig::default(),
         rules: RulesConfig {
@@ -376,21 +376,21 @@ fn no_violations_when_rule_is_off() {
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
-        audit: fallow_config::AuditConfig::default(),
+        audit: plow_config::AuditConfig::default(),
         codeowners: None,
         public_packages: vec![],
         flags: FlagsConfig::default(),
-        security: fallow_config::SecurityConfig::default(),
-        fix: fallow_config::FixConfig::default(),
+        security: plow_config::SecurityConfig::default(),
+        fix: plow_config::FixConfig::default(),
         resolve: ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
         auto_imports: false,
-        cache: fallow_config::CacheConfig::default(),
+        cache: plow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None);
 
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     assert!(
         results.boundary_violations.is_empty(),
         "boundary violations should be empty when rule is off"
@@ -407,7 +407,7 @@ fn preset_detects_boundary_violation() {
         zones: vec![],
         rules: vec![],
     };
-    let config = FallowConfig {
+    let config = PlowConfig {
         schema: None,
         extends: vec![],
         entry: vec!["src/adapters/http.ts".to_string()],
@@ -419,10 +419,10 @@ fn preset_detects_boundary_violation() {
         ignore_exports: vec![],
         ignore_catalog_references: vec![],
         ignore_dependency_overrides: vec![],
-        ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+        ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
-        unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
+        unused_component_props: plow_config::UnusedComponentPropsConfig::default(),
         duplicates: DuplicatesConfig::default(),
         health: HealthConfig::default(),
         rules: RulesConfig {
@@ -436,20 +436,20 @@ fn preset_detects_boundary_violation() {
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
-        audit: fallow_config::AuditConfig::default(),
+        audit: plow_config::AuditConfig::default(),
         codeowners: None,
         public_packages: vec![],
         flags: FlagsConfig::default(),
-        security: fallow_config::SecurityConfig::default(),
-        fix: fallow_config::FixConfig::default(),
+        security: plow_config::SecurityConfig::default(),
+        fix: plow_config::FixConfig::default(),
         resolve: ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
         auto_imports: false,
-        cache: fallow_config::CacheConfig::default(),
+        cache: plow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert_eq!(
         results.boundary_violations.len(),
@@ -507,7 +507,7 @@ fn root_field_classifies_per_subtree() {
             },
         ],
     };
-    let config = FallowConfig {
+    let config = PlowConfig {
         schema: None,
         extends: vec![],
         entry: vec!["packages/app/src/login.tsx".to_string()],
@@ -519,10 +519,10 @@ fn root_field_classifies_per_subtree() {
         ignore_exports: vec![],
         ignore_catalog_references: vec![],
         ignore_dependency_overrides: vec![],
-        ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+        ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
-        unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
+        unused_component_props: plow_config::UnusedComponentPropsConfig::default(),
         duplicates: DuplicatesConfig::default(),
         health: HealthConfig::default(),
         rules: RulesConfig {
@@ -536,20 +536,20 @@ fn root_field_classifies_per_subtree() {
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
-        audit: fallow_config::AuditConfig::default(),
+        audit: plow_config::AuditConfig::default(),
         codeowners: None,
         public_packages: vec![],
         flags: FlagsConfig::default(),
-        security: fallow_config::SecurityConfig::default(),
-        fix: fallow_config::FixConfig::default(),
+        security: plow_config::SecurityConfig::default(),
+        fix: plow_config::FixConfig::default(),
         resolve: ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
         auto_imports: false,
-        cache: fallow_config::CacheConfig::default(),
+        cache: plow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert_eq!(
         results.boundary_violations.len(),
@@ -611,7 +611,7 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
             allow_type_only: vec![],
         }],
     };
-    let flat_config = FallowConfig {
+    let flat_config = PlowConfig {
         schema: None,
         extends: vec![],
         entry: vec!["packages/app/src/login.tsx".to_string()],
@@ -623,10 +623,10 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
         ignore_exports: vec![],
         ignore_catalog_references: vec![],
         ignore_dependency_overrides: vec![],
-        ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+        ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
-        unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
+        unused_component_props: plow_config::UnusedComponentPropsConfig::default(),
         duplicates: DuplicatesConfig::default(),
         health: HealthConfig::default(),
         rules: RulesConfig {
@@ -640,20 +640,20 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
-        audit: fallow_config::AuditConfig::default(),
+        audit: plow_config::AuditConfig::default(),
         codeowners: None,
         public_packages: vec![],
         flags: FlagsConfig::default(),
-        security: fallow_config::SecurityConfig::default(),
-        fix: fallow_config::FixConfig::default(),
+        security: plow_config::SecurityConfig::default(),
+        fix: plow_config::FixConfig::default(),
         resolve: ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
         auto_imports: false,
-        cache: fallow_config::CacheConfig::default(),
+        cache: plow_config::CacheConfig::default(),
     }
     .resolve(root.clone(), OutputFormat::Human, 4, true, true, None);
-    let flat_results = fallow_core::analyze(&flat_config).expect("analysis should succeed");
+    let flat_results = plow_core::analyze(&flat_config).expect("analysis should succeed");
     assert!(
         flat_results.boundary_violations.is_empty(),
         "without root, both files share the same zone so self-imports are allowed"
@@ -683,7 +683,7 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
             allow_type_only: vec![],
         }],
     };
-    let scoped_config = FallowConfig {
+    let scoped_config = PlowConfig {
         schema: None,
         extends: vec![],
         entry: vec!["packages/app/src/login.tsx".to_string()],
@@ -695,10 +695,10 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
         ignore_exports: vec![],
         ignore_catalog_references: vec![],
         ignore_dependency_overrides: vec![],
-        ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+        ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
-        unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
+        unused_component_props: plow_config::UnusedComponentPropsConfig::default(),
         duplicates: DuplicatesConfig::default(),
         health: HealthConfig::default(),
         rules: RulesConfig {
@@ -712,20 +712,20 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
-        audit: fallow_config::AuditConfig::default(),
+        audit: plow_config::AuditConfig::default(),
         codeowners: None,
         public_packages: vec![],
         flags: FlagsConfig::default(),
-        security: fallow_config::SecurityConfig::default(),
-        fix: fallow_config::FixConfig::default(),
+        security: plow_config::SecurityConfig::default(),
+        fix: plow_config::FixConfig::default(),
         resolve: ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
         auto_imports: false,
-        cache: fallow_config::CacheConfig::default(),
+        cache: plow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None);
-    let scoped_results = fallow_core::analyze(&scoped_config).expect("analysis should succeed");
+    let scoped_results = plow_core::analyze(&scoped_config).expect("analysis should succeed");
     assert_eq!(
         scoped_results.boundary_violations.len(),
         1,
@@ -777,7 +777,7 @@ fn auto_discover_isolates_child_boundary_zones() {
         ],
     };
     let config = create_boundary_config_with_entry(root, boundaries, "src/app/page.ts");
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert_eq!(
         results.boundary_violations.len(),
@@ -823,7 +823,7 @@ fn bulletproof_preset_detects_violation() {
         zones: vec![],
         rules: vec![],
     };
-    let config = FallowConfig {
+    let config = PlowConfig {
         schema: None,
         extends: vec![],
         entry: vec!["src/app/page.ts".to_string()],
@@ -835,10 +835,10 @@ fn bulletproof_preset_detects_violation() {
         ignore_exports: vec![],
         ignore_catalog_references: vec![],
         ignore_dependency_overrides: vec![],
-        ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+        ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
-        unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
+        unused_component_props: plow_config::UnusedComponentPropsConfig::default(),
         duplicates: DuplicatesConfig::default(),
         health: HealthConfig::default(),
         rules: RulesConfig {
@@ -852,20 +852,20 @@ fn bulletproof_preset_detects_violation() {
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
-        audit: fallow_config::AuditConfig::default(),
+        audit: plow_config::AuditConfig::default(),
         codeowners: None,
         public_packages: vec![],
         flags: FlagsConfig::default(),
-        security: fallow_config::SecurityConfig::default(),
-        fix: fallow_config::FixConfig::default(),
+        security: plow_config::SecurityConfig::default(),
+        fix: plow_config::FixConfig::default(),
         resolve: ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
         auto_imports: false,
-        cache: fallow_config::CacheConfig::default(),
+        cache: plow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert_eq!(
         results.boundary_violations.len(),
@@ -928,7 +928,7 @@ fn bulletproof_top_level_features_file_is_strict_without_barrel_false_positive()
         zones: vec![],
         rules: vec![],
     };
-    let config = FallowConfig {
+    let config = PlowConfig {
         schema: None,
         extends: vec![],
         entry: vec!["src/app/page.ts".to_string()],
@@ -940,10 +940,10 @@ fn bulletproof_top_level_features_file_is_strict_without_barrel_false_positive()
         ignore_exports: vec![],
         ignore_catalog_references: vec![],
         ignore_dependency_overrides: vec![],
-        ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+        ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
-        unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
+        unused_component_props: plow_config::UnusedComponentPropsConfig::default(),
         duplicates: DuplicatesConfig::default(),
         health: HealthConfig::default(),
         rules: RulesConfig {
@@ -957,20 +957,20 @@ fn bulletproof_top_level_features_file_is_strict_without_barrel_false_positive()
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
-        audit: fallow_config::AuditConfig::default(),
+        audit: plow_config::AuditConfig::default(),
         codeowners: None,
         public_packages: vec![],
         flags: FlagsConfig::default(),
-        security: fallow_config::SecurityConfig::default(),
-        fix: fallow_config::FixConfig::default(),
+        security: plow_config::SecurityConfig::default(),
+        fix: plow_config::FixConfig::default(),
         resolve: ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
         auto_imports: false,
-        cache: fallow_config::CacheConfig::default(),
+        cache: plow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert_eq!(
         results.boundary_violations.len(),
@@ -1061,7 +1061,7 @@ fn type_only_boundaries(allow_type_only_db: Vec<String>) -> BoundaryConfig {
 /// Collect violation paths relative to the fixture root, with forward
 /// slashes, for stable cross-platform assertions.
 fn collect_violation_from_paths(
-    results: &fallow_types::results::AnalysisResults,
+    results: &plow_types::results::AnalysisResults,
     fixture_root: &std::path::Path,
 ) -> std::collections::BTreeSet<String> {
     results
@@ -1084,7 +1084,7 @@ fn allow_type_only_admits_whole_decl_inline_and_namespace_type_imports() {
     let root = fixture_path("boundary-type-only");
     let boundaries = type_only_boundaries(vec!["db".to_string()]);
     let config = create_boundary_config_with_entry(root.clone(), boundaries, "src/ui/App.ts");
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let from_paths = collect_violation_from_paths(&results, &root);
 
@@ -1110,7 +1110,7 @@ fn mixed_edge_violation_anchors_on_the_value_import_line_not_the_type_only_one()
     let root = fixture_path("boundary-type-only");
     let boundaries = type_only_boundaries(vec!["db".to_string()]);
     let config = create_boundary_config_with_entry(root.clone(), boundaries, "src/ui/App.ts");
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let sibling = results
         .boundary_violations
@@ -1152,7 +1152,7 @@ fn empty_allow_type_only_flags_every_cross_zone_import() {
     let root = fixture_path("boundary-type-only");
     let boundaries = type_only_boundaries(vec![]);
     let config = create_boundary_config_with_entry(root.clone(), boundaries, "src/ui/App.ts");
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let from_paths = collect_violation_from_paths(&results, &root);
 
@@ -1182,7 +1182,7 @@ fn allow_type_only_with_unlisted_zone_does_not_admit_db_imports() {
     let root = fixture_path("boundary-type-only");
     let boundaries = type_only_boundaries(vec!["sandbox".to_string()]);
     let config = create_boundary_config_with_entry(root.clone(), boundaries, "src/ui/App.ts");
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let from_paths = collect_violation_from_paths(&results, &root);
 
@@ -1211,7 +1211,7 @@ fn allow_type_only_admits_type_only_re_exports() {
     let root = fixture_path("boundary-type-only");
     let boundaries = type_only_boundaries(vec!["db".to_string()]);
     let config = create_boundary_config_with_entry(root.clone(), boundaries, "src/ui/App.ts");
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let from_paths = collect_violation_from_paths(&results, &root);
     assert!(

@@ -31,19 +31,19 @@ const run = (cmd, args, options = {}) =>
     stdio: options.stdio ?? ["ignore", "pipe", "inherit"],
   });
 
-const cargoFallow = (subcommand) =>
-  run("cargo", ["run", "--quiet", "-p", "fallow-cli", "--bin", "fallow", "--", subcommand]);
+const cargoPlow = (subcommand) =>
+  run("cargo", ["run", "--quiet", "-p", "plow-cli", "--bin", "plow", "--", subcommand]);
 
 const outputSchema = () =>
   run("cargo", [
     "run",
     "--quiet",
     "-p",
-    "fallow-cli",
+    "plow-cli",
     "--features",
     "schema-emit",
     "--bin",
-    "fallow-schema-emit",
+    "plow-schema-emit",
   ]);
 
 const read = (path) => readFileSync(join(REPO_ROOT, path), "utf8");
@@ -59,15 +59,15 @@ const assertSame = (path, actual) => {
 const ensureTrailingNewline = (text) => (text.endsWith("\n") ? text : `${text}\n`);
 
 const generateSchemaFiles = () => {
-  const configSchema = ensureTrailingNewline(cargoFallow("config-schema"));
-  const pluginSchema = ensureTrailingNewline(cargoFallow("plugin-schema"));
-  const rulePackSchema = ensureTrailingNewline(cargoFallow("rule-pack-schema"));
+  const configSchema = ensureTrailingNewline(cargoPlow("config-schema"));
+  const pluginSchema = ensureTrailingNewline(cargoPlow("plugin-schema"));
+  const rulePackSchema = ensureTrailingNewline(cargoPlow("rule-pack-schema"));
   const output = ensureTrailingNewline(outputSchema());
 
   if (CHECK) {
     assertSame("schema.json", configSchema);
-    if (existsSync(join(REPO_ROOT, "npm/fallow/schema.json"))) {
-      assertSame("npm/fallow/schema.json", configSchema);
+    if (existsSync(join(REPO_ROOT, "npm/plow/schema.json"))) {
+      assertSame("npm/plow/schema.json", configSchema);
     }
     assertSame("plugin-schema.json", pluginSchema);
     assertSame("rule-pack-schema.json", rulePackSchema);
@@ -79,8 +79,8 @@ const generateSchemaFiles = () => {
   write("plugin-schema.json", pluginSchema);
   write("rule-pack-schema.json", rulePackSchema);
   write("docs/output-schema.json", output);
-  if (existsSync(join(REPO_ROOT, "npm/fallow/schema.json"))) {
-    copyFileSync(join(REPO_ROOT, "schema.json"), join(REPO_ROOT, "npm/fallow/schema.json"));
+  if (existsSync(join(REPO_ROOT, "npm/plow/schema.json"))) {
+    copyFileSync(join(REPO_ROOT, "schema.json"), join(REPO_ROOT, "npm/plow/schema.json"));
   }
 };
 
@@ -91,16 +91,16 @@ const generateOutputTypes = () => {
 };
 
 const generateAgentDocs = () => {
-  const dir = mkdtempSync(join(tmpdir(), "fallow-generate-all-"));
+  const dir = mkdtempSync(join(tmpdir(), "plow-generate-all-"));
   const capabilityPath = join(dir, "schema.json");
   try {
-    writeFileSync(capabilityPath, ensureTrailingNewline(cargoFallow("schema")));
+    writeFileSync(capabilityPath, ensureTrailingNewline(cargoPlow("schema")));
     const args = [
       "scripts/generate-agent-docs.mjs",
       "--schema",
       capabilityPath,
       "--target",
-      "npm/fallow/skills/fallow",
+      "npm/plow/skills/plow",
     ];
     if (CHECK) {
       args.push("--check");

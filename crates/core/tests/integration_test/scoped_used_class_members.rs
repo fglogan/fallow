@@ -1,5 +1,5 @@
 use super::common::{create_config, fixture_path};
-use fallow_config::{ScopedUsedClassMemberRule, UsedClassMemberRule};
+use plow_config::{ScopedUsedClassMemberRule, UsedClassMemberRule};
 
 #[test]
 fn scoped_used_class_members_respect_class_heritage() {
@@ -29,7 +29,7 @@ fn scoped_used_class_members_respect_class_heritage() {
         }),
     ];
 
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused_members: Vec<String> = results
         .unused_class_members
         .iter()
@@ -97,7 +97,7 @@ fn scoped_used_class_members_support_glob_patterns() {
         ],
     })];
 
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused_members: Vec<String> = results
         .unused_class_members
         .iter()

@@ -5,13 +5,13 @@ expression: json_str
 [
   {
     "type": "issue",
-    "check_name": "fallow/unused-dev-dependency",
+    "check_name": "plow/unused-dev-dependency",
     "description": "Package 'jest' is in devDependencies but never imported",
     "categories": [
       "Bug Risk"
     ],
     "severity": "minor",
-    "fingerprint": "2a4393b133ea1523",
+    "fingerprint": "74a05f7f893190e6",
     "location": {
       "path": "package.json",
       "lines": {

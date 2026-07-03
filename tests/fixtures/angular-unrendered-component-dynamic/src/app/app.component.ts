@@ -3,7 +3,7 @@ import { OrphanComponent } from "./orphan.component";
 
 // This project renders a component DYNAMICALLY via
 // `ViewContainerRef.createComponent(...)`, so a component could be instantiated
-// from a non-literal class reference fallow cannot attribute. The Angular
+// from a non-literal class reference plow cannot attribute. The Angular
 // `unrendered-component` detector abstains on the WHOLE project: `OrphanComponent`
 // (whose `<app-orphan>` appears in no template) is NOT flagged.
 @Component({

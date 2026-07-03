@@ -16,10 +16,10 @@ use super::{
 use crate::health::scoring::{FileScoreConcern, file_score_concern_axis};
 
 /// Docs base URL for health explanations.
-const DOCS_HEALTH: &str = "https://docs.fallow.tools/explanations/health";
+const DOCS_HEALTH: &str = "https://docs.genesis-plow.dev/explanations/health";
 
 pub(in crate::report) struct PrintHealthHumanInput<'a> {
-    pub(in crate::report) report: &'a fallow_output::HealthReport,
+    pub(in crate::report) report: &'a plow_output::HealthReport,
     pub(in crate::report) root: &'a Path,
     pub(in crate::report) elapsed: Duration,
     pub(in crate::report) quiet: bool,
@@ -87,7 +87,7 @@ pub(in crate::report) fn print_health_human(input: &PrintHealthHumanInput<'_>) {
     }
 }
 
-fn print_health_empty_state(report: &fallow_output::HealthReport, elapsed: Duration, quiet: bool) {
+fn print_health_empty_state(report: &plow_output::HealthReport, elapsed: Duration, quiet: bool) {
     if quiet {
         return;
     }
@@ -114,7 +114,7 @@ fn print_health_empty_state(report: &fallow_output::HealthReport, elapsed: Durat
     );
 }
 
-fn print_health_final_status(report: &fallow_output::HealthReport, elapsed: Duration) {
+fn print_health_final_status(report: &plow_output::HealthReport, elapsed: Duration) {
     let s = &report.summary;
     let mut parts = Vec::new();
     parts.push(format!("{} above threshold", s.functions_above_threshold));
@@ -157,12 +157,12 @@ fn print_health_final_status(report: &fallow_output::HealthReport, elapsed: Dura
 /// Build human-readable output lines for health (complexity) findings.
 ///
 #[cfg(test)]
-fn build_health_human_lines(report: &fallow_output::HealthReport, root: &Path) -> Vec<String> {
+fn build_health_human_lines(report: &plow_output::HealthReport, root: &Path) -> Vec<String> {
     build_health_human_lines_with_explain(report, root, false, false, false)
 }
 
 fn build_health_human_lines_with_explain(
-    report: &fallow_output::HealthReport,
+    report: &plow_output::HealthReport,
     root: &Path,
     explain: bool,
     skip_score_and_trend: bool,
@@ -198,14 +198,14 @@ fn build_health_human_lines_with_explain(
 /// specificity, then complexity, then `!important`).
 fn render_css_analytics(
     lines: &mut Vec<String>,
-    report: &fallow_output::HealthReport,
+    report: &plow_output::HealthReport,
     css_requested: bool,
 ) {
     let Some(ref css) = report.css_analytics else {
         // `--css` was requested but no stylesheet was import-reachable (so neither
         // `css_analytics` nor `styling_health` was produced). Render the header
         // plus a one-line reason instead of silently dropping the section, so the
-        // empty result is explained. A plain `fallow health` run (css not
+        // empty result is explained. A plain `plow health` run (css not
         // requested) renders nothing, leaving non-css output byte-unchanged.
         if css_requested && report.styling_health.is_none() {
             lines.push(String::new());
@@ -239,7 +239,7 @@ fn render_css_analytics(
 /// Render the styling-health grade line: the SECOND health axis (the CSS /
 /// design-system grade), styled like the code `Health score:` line. Present only
 /// alongside `--css`; the code grade is rendered separately and is unaffected.
-fn render_styling_health(lines: &mut Vec<String>, report: &fallow_output::HealthReport) {
+fn render_styling_health(lines: &mut Vec<String>, report: &plow_output::HealthReport) {
     let Some(ref styling) = report.styling_health else {
         return;
     };
@@ -273,7 +273,7 @@ fn render_styling_health(lines: &mut Vec<String>, report: &fallow_output::Health
 /// magnitude descending) mirroring `health_score_penalties` for the code score.
 /// Unlike the code penalties these fields are plain `f64` (never `Option`), so a
 /// zero means "evaluated and clean" rather than "not evaluated".
-fn styling_health_penalties(p: &fallow_output::StylingHealthPenalties) -> Vec<(&'static str, f64)> {
+fn styling_health_penalties(p: &plow_output::StylingHealthPenalties) -> Vec<(&'static str, f64)> {
     let mut penalties = vec![
         ("duplication", p.duplication),
         ("dead surface", p.dead_surface),
@@ -286,14 +286,14 @@ fn styling_health_penalties(p: &fallow_output::StylingHealthPenalties) -> Vec<(&
     penalties
 }
 
-fn styling_health_colored(styling: &fallow_output::StylingHealth) -> String {
+fn styling_health_colored(styling: &plow_output::StylingHealth) -> String {
     // A low-confidence grade is dimmed and prefixed with `~` regardless of score
     // band: rendering a sparse-surface 89 in confident green-bold would fight the
     // "Low confidence:" caveat line. The band coloring is reserved for grades the
     // analyzed CSS surface is large enough to back.
     if matches!(
         styling.confidence,
-        fallow_output::StylingHealthConfidence::Low
+        plow_output::StylingHealthConfidence::Low
     ) {
         return format!("~{:.0} {}", styling.score, styling.grade)
             .dimmed()
@@ -313,7 +313,7 @@ fn styling_health_colored(styling: &fallow_output::StylingHealth) -> String {
 
 fn render_css_analytics_summary(
     lines: &mut Vec<String>,
-    summary: &fallow_output::CssAnalyticsSummary,
+    summary: &plow_output::CssAnalyticsSummary,
 ) {
     let important_pct = if summary.total_declarations > 0 {
         f64::from(summary.important_declarations) / f64::from(summary.total_declarations) * 100.0
@@ -358,7 +358,7 @@ fn render_css_analytics_summary(
     }
 }
 
-fn render_css_scoped_unused(lines: &mut Vec<String>, css: &fallow_output::CssAnalyticsReport) {
+fn render_css_scoped_unused(lines: &mut Vec<String>, css: &plow_output::CssAnalyticsReport) {
     let summary = &css.summary;
     if !css.scoped_unused.is_empty() {
         let class_word = if summary.scoped_unused_classes == 1 {
@@ -390,9 +390,9 @@ fn render_css_scoped_unused(lines: &mut Vec<String>, css: &fallow_output::CssAna
 }
 
 fn sorted_css_notable_rules(
-    css: &fallow_output::CssAnalyticsReport,
-) -> Vec<(&str, &fallow_types::extract::CssRuleMetric)> {
-    let mut notable: Vec<(&str, &fallow_types::extract::CssRuleMetric)> = css
+    css: &plow_output::CssAnalyticsReport,
+) -> Vec<(&str, &plow_types::extract::CssRuleMetric)> {
+    let mut notable: Vec<(&str, &plow_types::extract::CssRuleMetric)> = css
         .files
         .iter()
         .flat_map(|file| {
@@ -403,7 +403,7 @@ fn sorted_css_notable_rules(
         })
         .collect();
     notable.sort_by(|a, b| {
-        let key = |m: &fallow_types::extract::CssRuleMetric| {
+        let key = |m: &plow_types::extract::CssRuleMetric| {
             (
                 m.specificity_a,
                 m.specificity_b,
@@ -421,7 +421,7 @@ fn sorted_css_notable_rules(
     notable
 }
 
-fn render_css_notable_rules(lines: &mut Vec<String>, css: &fallow_output::CssAnalyticsReport) {
+fn render_css_notable_rules(lines: &mut Vec<String>, css: &plow_output::CssAnalyticsReport) {
     let notable = sorted_css_notable_rules(css);
     let total_notable = notable.len();
 
@@ -449,10 +449,7 @@ fn render_css_notable_rules(lines: &mut Vec<String>, css: &fallow_output::CssAna
 
 /// Render the two located `@keyframes` candidate lines: defined-but-unused
 /// (`unreferenced`) and used-but-defined-nowhere (`undefined`).
-fn render_css_keyframe_candidates(
-    lines: &mut Vec<String>,
-    css: &fallow_output::CssAnalyticsReport,
-) {
+fn render_css_keyframe_candidates(lines: &mut Vec<String>, css: &plow_output::CssAnalyticsReport) {
     let summary = &css.summary;
     if summary.keyframes_defined > 0 {
         if css.unreferenced_keyframes.is_empty() {
@@ -490,8 +487,8 @@ fn render_css_keyframe_candidates(
 /// Render unused CSS at-rule entities: `@property` registrations never read via
 /// `var()`, and cascade layers declared but never populated. One line per kind,
 /// shown only when present, with up to 5 located names.
-fn render_css_unused_at_rules(lines: &mut Vec<String>, css: &fallow_output::CssAnalyticsReport) {
-    use fallow_output::UnusedAtRuleKind;
+fn render_css_unused_at_rules(lines: &mut Vec<String>, css: &plow_output::CssAnalyticsReport) {
+    use plow_output::UnusedAtRuleKind;
     if css.unused_at_rules.is_empty() {
         return;
     }
@@ -537,7 +534,7 @@ fn render_css_unused_at_rules(lines: &mut Vec<String>, css: &fallow_output::CssA
 
 /// Render likely class-name typos: static markup class tokens one edit from a
 /// defined CSS class, with the suggested class. Up to 5 located entries.
-fn render_css_unresolved_classes(lines: &mut Vec<String>, css: &fallow_output::CssAnalyticsReport) {
+fn render_css_unresolved_classes(lines: &mut Vec<String>, css: &plow_output::CssAnalyticsReport) {
     if css.unresolved_class_references.is_empty() {
         return;
     }
@@ -564,10 +561,7 @@ fn render_css_unresolved_classes(lines: &mut Vec<String>, css: &fallow_output::C
 
 /// Render global CSS classes referenced by no in-project markup, with the
 /// "we did not scan emails / server templates / CMS" disclosure. Up to 5 located.
-fn render_css_unreferenced_classes(
-    lines: &mut Vec<String>,
-    css: &fallow_output::CssAnalyticsReport,
-) {
+fn render_css_unreferenced_classes(lines: &mut Vec<String>, css: &plow_output::CssAnalyticsReport) {
     if css.unreferenced_css_classes.is_empty() {
         return;
     }
@@ -591,7 +585,7 @@ fn render_css_unreferenced_classes(
 
 /// Render `@font-face` families declared but never applied (dead web-font
 /// payload), with the residual inline-style / JS caveat. Up to 5 located.
-fn render_css_unused_font_faces(lines: &mut Vec<String>, css: &fallow_output::CssAnalyticsReport) {
+fn render_css_unused_font_faces(lines: &mut Vec<String>, css: &plow_output::CssAnalyticsReport) {
     if css.unused_font_faces.is_empty() {
         return;
     }
@@ -616,10 +610,7 @@ fn render_css_unused_font_faces(lines: &mut Vec<String>, css: &fallow_output::Cs
 /// Render Tailwind v4 `@theme` design tokens whose generated utility, `var()`
 /// reads, and `@apply` uses appear nowhere (dead design tokens), with the
 /// residual plugin / downstream-consumer caveat. Up to 5 located.
-fn render_css_unused_theme_tokens(
-    lines: &mut Vec<String>,
-    css: &fallow_output::CssAnalyticsReport,
-) {
+fn render_css_unused_theme_tokens(lines: &mut Vec<String>, css: &plow_output::CssAnalyticsReport) {
     if css.unused_theme_tokens.is_empty() {
         return;
     }
@@ -644,7 +635,7 @@ fn render_css_unused_theme_tokens(
 /// Render the font-size unit-mix candidate: the project authors its type scale
 /// in several length units (a px/rem accessibility smell), with the per-unit
 /// distinct-value breakdown. Advisory; one line plus the breakdown.
-fn render_css_font_size_unit_mix(lines: &mut Vec<String>, css: &fallow_output::CssAnalyticsReport) {
+fn render_css_font_size_unit_mix(lines: &mut Vec<String>, css: &plow_output::CssAnalyticsReport) {
     let Some(mix) = &css.font_size_unit_mix else {
         return;
     };
@@ -662,7 +653,7 @@ fn render_css_font_size_unit_mix(lines: &mut Vec<String>, css: &fallow_output::C
 
 /// Render the value-sprawl lines: colors / font-sizes / z-indexes always, plus a
 /// continuation line for shadow / radius / line-height scales when present.
-fn render_css_value_sprawl(lines: &mut Vec<String>, summary: &fallow_output::CssAnalyticsSummary) {
+fn render_css_value_sprawl(lines: &mut Vec<String>, summary: &plow_output::CssAnalyticsSummary) {
     lines.push(format!(
         "  value sprawl: {} distinct color{} \u{00b7} {} font size{} \u{00b7} {} z-index value{}",
         summary.unique_colors,
@@ -711,7 +702,7 @@ fn render_css_value_sprawl(lines: &mut Vec<String>, summary: &fallow_output::Css
 /// Render the Tailwind arbitrary-value section: a summary line plus the top 5
 /// most-used tokens (token, use count, first location). Present only when the
 /// project uses Tailwind and any arbitrary values were found.
-fn render_css_tailwind_arbitrary(lines: &mut Vec<String>, css: &fallow_output::CssAnalyticsReport) {
+fn render_css_tailwind_arbitrary(lines: &mut Vec<String>, css: &plow_output::CssAnalyticsReport) {
     if css.tailwind_arbitrary_values.is_empty() {
         return;
     }
@@ -740,7 +731,7 @@ fn render_css_tailwind_arbitrary(lines: &mut Vec<String>, css: &fallow_output::C
 
 /// Render the duplicate-declaration-block candidate section: a summary line plus
 /// the top 5 groups (declaration count, occurrence count, located occurrences).
-fn render_css_duplicate_blocks(lines: &mut Vec<String>, css: &fallow_output::CssAnalyticsReport) {
+fn render_css_duplicate_blocks(lines: &mut Vec<String>, css: &plow_output::CssAnalyticsReport) {
     if css.duplicate_declaration_blocks.is_empty() {
         return;
     }
@@ -804,7 +795,7 @@ fn join_located_keyframes<'a>(
 
 fn render_coverage_intelligence(
     lines: &mut Vec<String>,
-    report: &fallow_output::HealthReport,
+    report: &plow_output::HealthReport,
     root: &Path,
 ) {
     let Some(ref intelligence) = report.coverage_intelligence else {
@@ -874,7 +865,7 @@ fn inject_explain_blocks(lines: Vec<String>) -> Vec<String> {
 
 fn health_explain_for_header(line: &str) -> Option<String> {
     if line.contains("Runtime coverage:") {
-        return rule_full("fallow/runtime-coverage");
+        return rule_full("plow/runtime-coverage");
     }
     if line.contains("Health score:") {
         return Some(
@@ -889,10 +880,10 @@ fn health_explain_for_header(line: &str) -> Option<String> {
         );
     }
     if line.contains("Large functions (") {
-        return rule_full("fallow/high-cyclomatic-complexity");
+        return rule_full("plow/high-cyclomatic-complexity");
     }
     if line.contains("High complexity functions (") {
-        return rule_full("fallow/high-complexity");
+        return rule_full("plow/high-complexity");
     }
     if line.contains("Coverage gaps (") {
         return Some(
@@ -907,7 +898,7 @@ fn health_explain_for_header(line: &str) -> Option<String> {
         );
     }
     if line.contains("Refactoring targets (") {
-        return rule_full("fallow/refactoring-target");
+        return rule_full("plow/refactoring-target");
     }
     None
 }
@@ -937,7 +928,7 @@ pub(in crate::report) fn format_window(seconds: u64) -> String {
     }
 }
 
-pub fn render_health_score(lines: &mut Vec<String>, report: &fallow_output::HealthReport) {
+pub fn render_health_score(lines: &mut Vec<String>, report: &plow_output::HealthReport) {
     let Some(ref hs) = report.health_score else {
         return;
     };
@@ -971,7 +962,7 @@ pub fn render_health_score(lines: &mut Vec<String>, report: &fallow_output::Heal
     lines.push(String::new());
 }
 
-fn health_score_colored(hs: &fallow_output::HealthScore) -> String {
+fn health_score_colored(hs: &plow_output::HealthScore) -> String {
     let score_str = format!("{:.0}", hs.score);
     let grade_str = hs.grade;
     if hs.score >= 85.0 {
@@ -991,7 +982,7 @@ fn health_score_colored(hs: &fallow_output::HealthScore) -> String {
     }
 }
 
-fn health_score_penalties(p: &fallow_output::HealthScorePenalties) -> Vec<(&'static str, f64)> {
+fn health_score_penalties(p: &plow_output::HealthScorePenalties) -> Vec<(&'static str, f64)> {
     let mut penalties = Vec::new();
     push_optional_penalty(&mut penalties, "dead files", p.dead_files);
     push_optional_penalty(&mut penalties, "dead exports", p.dead_exports);
@@ -1035,7 +1026,7 @@ fn render_health_score_penalties(penalties: &[(&str, f64)]) -> String {
     parts.join(&format!(" {} ", "\u{00b7}".dimmed()))
 }
 
-fn health_score_na_line(p: &fallow_output::HealthScorePenalties) -> Option<String> {
+fn health_score_na_line(p: &plow_output::HealthScorePenalties) -> Option<String> {
     let mut na_parts = Vec::new();
     if p.dead_files.is_none() {
         na_parts.push("dead code");
@@ -1076,12 +1067,12 @@ fn fmt_trend_delta(v: f64, unit: &str) -> String {
     }
 }
 
-pub fn render_health_trend(lines: &mut Vec<String>, report: &fallow_output::HealthReport) {
+pub fn render_health_trend(lines: &mut Vec<String>, report: &plow_output::HealthReport) {
     let Some(ref trend) = report.health_trend else {
         return;
     };
 
-    use fallow_output::TrendDirection;
+    use plow_output::TrendDirection;
 
     push_trend_header_line(lines, trend);
     push_trend_model_notes(lines, trend, report);
@@ -1104,8 +1095,8 @@ pub fn render_health_trend(lines: &mut Vec<String>, report: &fallow_output::Heal
 }
 
 /// Renders the trend header line with date, SHA, and colored overall direction.
-fn push_trend_header_line(lines: &mut Vec<String>, trend: &fallow_output::HealthTrend) {
-    use fallow_output::TrendDirection;
+fn push_trend_header_line(lines: &mut Vec<String>, trend: &plow_output::HealthTrend) {
+    use plow_output::TrendDirection;
 
     let date = trend
         .compared_to
@@ -1139,8 +1130,8 @@ fn push_trend_header_line(lines: &mut Vec<String>, trend: &fallow_output::Health
 /// Renders the optional CRAP-model-change and snapshot-schema-version notes.
 fn push_trend_model_notes(
     lines: &mut Vec<String>,
-    trend: &fallow_output::HealthTrend,
-    report: &fallow_output::HealthReport,
+    trend: &plow_output::HealthTrend,
+    report: &plow_output::HealthReport,
 ) {
     if let (Some(prev_model), Some(cur_model)) = (
         &trend.compared_to.coverage_model,
@@ -1161,13 +1152,13 @@ fn push_trend_model_notes(
     }
 
     if let Some(prev_version) = trend.compared_to.snapshot_schema_version
-        && prev_version < fallow_output::SNAPSHOT_SCHEMA_VERSION
+        && prev_version < plow_output::SNAPSHOT_SCHEMA_VERSION
     {
         lines.push(format!(
             "  {}",
             format!(
                 "note: snapshot schema updated to v{} (added total LOC vital sign); score comparison still valid",
-                fallow_output::SNAPSHOT_SCHEMA_VERSION
+                plow_output::SNAPSHOT_SCHEMA_VERSION
             )
                 .yellow()
         ));
@@ -1175,8 +1166,8 @@ fn push_trend_model_notes(
 }
 
 /// Renders one row per trend metric with previous/current values and direction.
-fn push_trend_metric_rows(lines: &mut Vec<String>, trend: &fallow_output::HealthTrend) {
-    use fallow_output::TrendDirection;
+fn push_trend_metric_rows(lines: &mut Vec<String>, trend: &plow_output::HealthTrend) {
+    use plow_output::TrendDirection;
 
     for m in &trend.metrics {
         let label = format!("{:<18}", m.label);
@@ -1203,7 +1194,7 @@ fn push_trend_metric_rows(lines: &mut Vec<String>, trend: &fallow_output::Health
     }
 }
 
-fn render_vital_signs(lines: &mut Vec<String>, report: &fallow_output::HealthReport) {
+fn render_vital_signs(lines: &mut Vec<String>, report: &plow_output::HealthReport) {
     if report.health_trend.is_some() {
         return;
     }
@@ -1224,7 +1215,7 @@ fn render_vital_signs(lines: &mut Vec<String>, report: &fallow_output::HealthRep
 }
 
 /// Appends the LOC, dead-code, cyclomatic, and maintainability vital-sign parts.
-fn push_vital_core_parts(parts: &mut Vec<String>, vs: &fallow_output::VitalSigns) {
+fn push_vital_core_parts(parts: &mut Vec<String>, vs: &plow_output::VitalSigns) {
     if vs.total_loc > 0 {
         parts.push(format!("{} LOC", thousands(vs.total_loc as usize)));
     }
@@ -1251,8 +1242,8 @@ fn push_vital_core_parts(parts: &mut Vec<String>, vs: &fallow_output::VitalSigns
 /// Appends the hotspot, circular-dep, unused-dep, and duplication vital-sign parts.
 fn push_vital_signal_parts(
     parts: &mut Vec<String>,
-    vs: &fallow_output::VitalSigns,
-    report: &fallow_output::HealthReport,
+    vs: &plow_output::VitalSigns,
+    report: &plow_output::HealthReport,
 ) {
     if let Some(hc) = vs.hotspot_count {
         let since_suffix = report
@@ -1286,12 +1277,12 @@ fn push_vital_signal_parts(
     }
 }
 
-fn render_risk_profiles(lines: &mut Vec<String>, report: &fallow_output::HealthReport) {
+fn render_risk_profiles(lines: &mut Vec<String>, report: &plow_output::HealthReport) {
     let Some(ref vs) = report.vital_signs else {
         return;
     };
 
-    let format_profile = |profile: &fallow_output::RiskProfile| -> String {
+    let format_profile = |profile: &plow_output::RiskProfile| -> String {
         format!(
             "{:.0}% low \u{00b7} {:.0}% medium \u{00b7} {:.0}% high \u{00b7} {:.0}% very high",
             profile.low_risk, profile.medium_risk, profile.high_risk, profile.very_high_risk
@@ -1337,7 +1328,7 @@ fn render_risk_profiles(lines: &mut Vec<String>, report: &fallow_output::HealthR
 /// non-empty `top_render_fan_in` so non-React output is byte-identical. The
 /// list is already sorted by distinct parents descending and project-relativized
 /// in the health layer; this only renders a capped, dimmed summary line.
-fn render_render_fan_in(lines: &mut Vec<String>, report: &fallow_output::HealthReport) {
+fn render_render_fan_in(lines: &mut Vec<String>, report: &plow_output::HealthReport) {
     let Some(ref vs) = report.vital_signs else {
         return;
     };
@@ -1371,7 +1362,7 @@ fn render_render_fan_in(lines: &mut Vec<String>, report: &fallow_output::HealthR
 
 fn render_large_functions(
     lines: &mut Vec<String>,
-    report: &fallow_output::HealthReport,
+    report: &plow_output::HealthReport,
     root: &Path,
 ) {
     if report.large_functions.is_empty() {
@@ -1429,7 +1420,7 @@ fn render_large_functions(
 /// findings get the catch-all hint above a `>=3` noise threshold. Extracted
 /// from `render_findings` to keep that function under the SIG unit-size
 /// threshold.
-fn append_suppression_hints(lines: &mut Vec<String>, report: &fallow_output::HealthReport) {
+fn append_suppression_hints(lines: &mut Vec<String>, report: &plow_output::HealthReport) {
     let has_html_template = report.findings.iter().any(|finding| {
         finding.name == "<template>"
             && finding
@@ -1457,27 +1448,27 @@ fn append_suppression_hints(lines: &mut Vec<String>, report: &fallow_output::Hea
     if has_html_template {
         lines.push(format!(
             "  {}",
-            "To suppress HTML templates: <!-- fallow-ignore-file complexity -->".dimmed()
+            "To suppress HTML templates: <!-- plow-ignore-file complexity -->".dimmed()
         ));
     }
     if has_inline_template {
         lines.push(format!(
             "  {}",
-            "To suppress inline templates: // fallow-ignore-next-line complexity (above @Component)"
+            "To suppress inline templates: // plow-ignore-next-line complexity (above @Component)"
                 .dimmed()
         ));
     }
     if has_component_rollup {
         lines.push(format!(
             "  {}",
-            "To suppress a <component> rollup: suppress the worst class method (// fallow-ignore-next-line complexity above it hides both)"
+            "To suppress a <component> rollup: suppress the worst class method (// plow-ignore-next-line complexity above it hides both)"
                 .dimmed()
         ));
     }
     if has_function_finding && report.findings.len() >= 3 {
         lines.push(format!(
             "  {}",
-            "To suppress: // fallow-ignore-next-line complexity".dimmed()
+            "To suppress: // plow-ignore-next-line complexity".dimmed()
         ));
     }
 }
@@ -1493,9 +1484,9 @@ fn append_suppression_hints(lines: &mut Vec<String>, report: &fallow_output::Hea
 ///
 /// Renders `template_path` workspace-relative (issue #547) so Angular
 /// projects with many `*.component.html` files unambiguously identify the
-/// template fallow scored.
+/// template plow scored.
 fn render_component_rollup_breakdown(
-    finding: &fallow_output::ComplexityViolation,
+    finding: &plow_output::ComplexityViolation,
     root: &Path,
 ) -> Option<String> {
     let rollup = finding.component_rollup.as_ref()?;
@@ -1516,7 +1507,7 @@ fn render_component_rollup_breakdown(
     ))
 }
 
-fn render_findings(lines: &mut Vec<String>, report: &fallow_output::HealthReport, root: &Path) {
+fn render_findings(lines: &mut Vec<String>, report: &plow_output::HealthReport, root: &Path) {
     if report.findings.is_empty() {
         return;
     }
@@ -1552,7 +1543,7 @@ fn render_findings(lines: &mut Vec<String>, report: &fallow_output::HealthReport
     lines.push(String::new());
 }
 
-fn push_findings_header(lines: &mut Vec<String>, report: &fallow_output::HealthReport) {
+fn push_findings_header(lines: &mut Vec<String>, report: &plow_output::HealthReport) {
     let subject = if has_synthetic_complexity_entries(report) {
         "High complexity findings"
     } else {
@@ -1570,7 +1561,7 @@ fn push_findings_header(lines: &mut Vec<String>, report: &fallow_output::HealthR
     lines.push(format!("{} {}", "\u{25cf}".red(), title.red().bold()));
 }
 
-fn has_synthetic_complexity_entries(report: &fallow_output::HealthReport) -> bool {
+fn has_synthetic_complexity_entries(report: &plow_output::HealthReport) -> bool {
     report
         .findings
         .iter()
@@ -1587,7 +1578,7 @@ fn display_complexity_entry_name(name: &str) -> Cow<'_, str> {
 
 fn push_finding_file_header(
     lines: &mut Vec<String>,
-    finding: &fallow_output::ComplexityViolation,
+    finding: &plow_output::ComplexityViolation,
     root: &Path,
     last_file: &mut String,
 ) {
@@ -1600,8 +1591,8 @@ fn push_finding_file_header(
 
 fn push_finding_metric_rows(
     lines: &mut Vec<String>,
-    finding: &fallow_output::ComplexityViolation,
-    report: &fallow_output::HealthReport,
+    finding: &plow_output::ComplexityViolation,
+    report: &plow_output::HealthReport,
     root: &Path,
 ) {
     let thresholds = finding_thresholds(finding, report);
@@ -1641,7 +1632,7 @@ fn push_finding_metric_rows(
 /// only) and are shown only when a profile was attributed; `react_hook_count`
 /// stays the headline so the documented breakdown-vs-total divergence is a
 /// non-issue.
-fn render_react_context(finding: &fallow_output::ComplexityViolation) -> Option<String> {
+fn render_react_context(finding: &plow_output::ComplexityViolation) -> Option<String> {
     if finding.react_prop_count == 0
         && finding.react_hook_count == 0
         && finding.react_jsx_max_depth == 0
@@ -1696,8 +1687,8 @@ const BLAST_RADIUS_MIN_SITES: u32 = 2;
 /// file has no inspectable high-fan-in component (so non-React findings render
 /// unchanged) or the metric was not computed (non-React run / score-only).
 fn render_blast_radius_context(
-    finding: &fallow_output::ComplexityViolation,
-    report: &fallow_output::HealthReport,
+    finding: &plow_output::ComplexityViolation,
+    report: &plow_output::HealthReport,
 ) -> Option<String> {
     let (component, render_sites) = report.render_fan_in_top.get(&finding.path)?;
     if *render_sites < BLAST_RADIUS_MIN_SITES {
@@ -1712,7 +1703,7 @@ fn render_blast_radius_context(
 /// Build the per-kind hook breakdown parenthetical (`3 state, 4 effect, 2
 /// memo`), gating each segment on `> 0` so empty kinds never produce dangling
 /// fragments. Returns an empty string when no kind was attributed.
-fn hook_breakdown_fragment(profile: &fallow_output::ReactHookProfile) -> String {
+fn hook_breakdown_fragment(profile: &plow_output::ReactHookProfile) -> String {
     let mut segments: Vec<String> = Vec::new();
     if profile.state > 0 {
         segments.push(format!("{} state", profile.state));
@@ -1733,12 +1724,12 @@ fn hook_breakdown_fragment(profile: &fallow_output::ReactHookProfile) -> String 
 }
 
 fn finding_thresholds(
-    finding: &fallow_output::ComplexityViolation,
-    report: &fallow_output::HealthReport,
-) -> fallow_output::HealthEffectiveThresholds {
+    finding: &plow_output::ComplexityViolation,
+    report: &plow_output::HealthReport,
+) -> plow_output::HealthEffectiveThresholds {
     finding
         .effective_thresholds
-        .unwrap_or(fallow_output::HealthEffectiveThresholds {
+        .unwrap_or(plow_output::HealthEffectiveThresholds {
             max_cyclomatic: report.summary.max_cyclomatic_threshold,
             max_cognitive: report.summary.max_cognitive_threshold,
             max_crap: report.summary.max_crap_threshold,
@@ -1754,15 +1745,15 @@ fn threshold_colored(value: u16, threshold: u16) -> String {
     }
 }
 
-fn finding_severity_tag(finding: &fallow_output::ComplexityViolation) -> String {
+fn finding_severity_tag(finding: &plow_output::ComplexityViolation) -> String {
     match finding.severity {
-        fallow_output::FindingSeverity::Critical => format!(" {}", "CRITICAL".red().bold()),
-        fallow_output::FindingSeverity::High => format!(" {}", "HIGH".yellow().bold()),
-        fallow_output::FindingSeverity::Moderate => String::new(),
+        plow_output::FindingSeverity::Critical => format!(" {}", "CRITICAL".red().bold()),
+        plow_output::FindingSeverity::High => format!(" {}", "HIGH".yellow().bold()),
+        plow_output::FindingSeverity::Moderate => String::new(),
     }
 }
 
-fn finding_generated_tag(finding: &fallow_output::ComplexityViolation) -> String {
+fn finding_generated_tag(finding: &plow_output::ComplexityViolation) -> String {
     if is_likely_generated(&finding.name, finding.cyclomatic) {
         format!(" {}", "(generated)".dimmed())
     } else {
@@ -1770,14 +1761,14 @@ fn finding_generated_tag(finding: &fallow_output::ComplexityViolation) -> String
     }
 }
 
-fn finding_crap_line(finding: &fallow_output::ComplexityViolation, root: &Path) -> Option<String> {
+fn finding_crap_line(finding: &plow_output::ComplexityViolation, root: &Path) -> Option<String> {
     let crap = finding.crap?;
     let crap_colored = format!("{crap:>5.1}").red().bold().to_string();
     let coverage_suffix = if let Some(pct) = finding.coverage_pct {
         format!("  ({pct:.0}% tested)")
     } else if matches!(
         finding.coverage_source,
-        Some(fallow_output::CoverageSource::EstimatedComponentInherited)
+        Some(plow_output::CoverageSource::EstimatedComponentInherited)
     ) && let Some(ref owner) = finding.inherited_from
     {
         let owner_display = crate::report::format_display_path(owner, root);
@@ -1793,7 +1784,7 @@ fn finding_crap_line(finding: &fallow_output::ComplexityViolation, root: &Path) 
 
 fn render_threshold_overrides(
     lines: &mut Vec<String>,
-    report: &fallow_output::HealthReport,
+    report: &plow_output::HealthReport,
     root: &Path,
 ) {
     if report.threshold_overrides.is_empty() {
@@ -1812,9 +1803,9 @@ fn render_threshold_overrides(
     ));
     for entry in &report.threshold_overrides {
         let status = match entry.status {
-            fallow_output::ThresholdOverrideStatus::Active => "active",
-            fallow_output::ThresholdOverrideStatus::Stale => "stale",
-            fallow_output::ThresholdOverrideStatus::NoMatch => "no_match",
+            plow_output::ThresholdOverrideStatus::Active => "active",
+            plow_output::ThresholdOverrideStatus::Stale => "stale",
+            plow_output::ThresholdOverrideStatus::NoMatch => "no_match",
         };
         let target = entry.path.as_ref().map_or_else(
             || "<no matching file or function>".to_string(),
@@ -1843,7 +1834,7 @@ fn render_threshold_overrides(
     lines.push(String::new());
 }
 
-fn crap_coverage_note(report: &fallow_output::HealthReport) -> Option<String> {
+fn crap_coverage_note(report: &plow_output::HealthReport) -> Option<String> {
     if !report.findings.iter().any(|finding| finding.crap.is_some()) {
         return None;
     }
@@ -1856,7 +1847,7 @@ fn crap_coverage_note(report: &fallow_output::HealthReport) -> Option<String> {
 
     if matches!(
         report.summary.coverage_model,
-        Some(fallow_output::CoverageModel::Istanbul)
+        Some(plow_output::CoverageModel::Istanbul)
     ) || has_istanbul_counts
     {
         let match_info = match (
@@ -1879,7 +1870,7 @@ fn crap_coverage_note(report: &fallow_output::HealthReport) -> Option<String> {
     }
 
     Some(
-        "CRAP scores are estimated from export references; run `fallow health --coverage <coverage-final.json>` for exact scores."
+        "CRAP scores are estimated from export references; run `plow health --coverage <coverage-final.json>` for exact scores."
             .to_string(),
     )
 }
@@ -1899,7 +1890,7 @@ fn is_likely_generated(name: &str, cyclomatic: u16) -> bool {
     false
 }
 
-fn render_file_scores(lines: &mut Vec<String>, report: &fallow_output::HealthReport, root: &Path) {
+fn render_file_scores(lines: &mut Vec<String>, report: &plow_output::HealthReport, root: &Path) {
     if report.file_scores.is_empty() {
         return;
     }
@@ -1933,7 +1924,7 @@ fn push_file_scores_header(lines: &mut Vec<String>, score_count: usize) {
 
 fn render_file_score_row(
     lines: &mut Vec<String>,
-    score: &fallow_output::FileHealthScore,
+    score: &plow_output::FileHealthScore,
     root: &Path,
 ) {
     let file_str = relative_path(&score.path, root).display().to_string();
@@ -1973,7 +1964,7 @@ fn maintainability_colored(mi: f64) -> String {
     }
 }
 
-fn file_score_concern_colored(score: &fallow_output::FileHealthScore) -> String {
+fn file_score_concern_colored(score: &plow_output::FileHealthScore) -> String {
     let label = file_score_concern_axis(score).label();
     match file_score_concern_axis(score) {
         FileScoreConcern::Risk => {
@@ -1997,7 +1988,7 @@ fn file_score_concern_colored(score: &fallow_output::FileHealthScore) -> String 
     }
 }
 
-fn file_score_risk_suffix(score: &fallow_output::FileHealthScore) -> String {
+fn file_score_risk_suffix(score: &plow_output::FileHealthScore) -> String {
     if score.crap_max <= 0.0 {
         return String::new();
     }
@@ -2031,10 +2022,10 @@ fn push_file_scores_overflow(lines: &mut Vec<String>, score_count: usize) {
     lines.push(String::new());
 }
 
-fn file_scores_crap_note(report: &fallow_output::HealthReport) -> String {
+fn file_scores_crap_note(report: &plow_output::HealthReport) -> String {
     if matches!(
         report.summary.coverage_model,
-        Some(fallow_output::CoverageModel::Istanbul)
+        Some(plow_output::CoverageModel::Istanbul)
     ) {
         let match_info = match (
             report.summary.istanbul_matched,
@@ -2045,15 +2036,11 @@ fn file_scores_crap_note(report: &fallow_output::HealthReport) -> String {
         };
         format!("CRAP from Istanbul coverage data{match_info}.")
     } else {
-        "CRAP estimated from export references (85% direct, 40% indirect, 0% untested). Run `fallow health --coverage <coverage-final.json>` for exact scores.".to_string()
+        "CRAP estimated from export references (85% direct, 40% indirect, 0% untested). Run `plow health --coverage <coverage-final.json>` for exact scores.".to_string()
     }
 }
 
-fn render_coverage_gaps(
-    lines: &mut Vec<String>,
-    report: &fallow_output::HealthReport,
-    root: &Path,
-) {
+fn render_coverage_gaps(lines: &mut Vec<String>, report: &plow_output::HealthReport, root: &Path) {
     let Some(ref gaps) = report.coverage_gaps else {
         return;
     };
@@ -2071,7 +2058,7 @@ fn render_coverage_gaps(
     lines.push(String::new());
 }
 
-fn push_coverage_gaps_header(lines: &mut Vec<String>, gaps: &fallow_output::CoverageGaps) {
+fn push_coverage_gaps_header(lines: &mut Vec<String>, gaps: &plow_output::CoverageGaps) {
     lines.push(format!(
         "{} {}",
         "\u{25cf}".yellow(),
@@ -2097,11 +2084,7 @@ fn push_coverage_gaps_header(lines: &mut Vec<String>, gaps: &fallow_output::Cove
     lines.push(String::new());
 }
 
-fn push_coverage_gap_files(
-    lines: &mut Vec<String>,
-    gaps: &fallow_output::CoverageGaps,
-    root: &Path,
-) {
+fn push_coverage_gap_files(lines: &mut Vec<String>, gaps: &plow_output::CoverageGaps, root: &Path) {
     if gaps.files.is_empty() {
         return;
     }
@@ -2127,7 +2110,7 @@ fn push_coverage_gap_files(
 
 fn push_coverage_gap_exports(
     lines: &mut Vec<String>,
-    gaps: &fallow_output::CoverageGaps,
+    gaps: &plow_output::CoverageGaps,
     root: &Path,
 ) {
     if gaps.exports.is_empty() {
@@ -2152,10 +2135,9 @@ fn push_coverage_gap_exports(
 }
 
 fn group_coverage_gap_exports_by_file(
-    exports: &[fallow_output::UntestedExportFinding],
-) -> Vec<(&std::path::Path, Vec<&fallow_output::UntestedExportFinding>)> {
-    let mut by_file: Vec<(&std::path::Path, Vec<&fallow_output::UntestedExportFinding>)> =
-        Vec::new();
+    exports: &[plow_output::UntestedExportFinding],
+) -> Vec<(&std::path::Path, Vec<&plow_output::UntestedExportFinding>)> {
+    let mut by_file: Vec<(&std::path::Path, Vec<&plow_output::UntestedExportFinding>)> = Vec::new();
     for item in exports {
         match by_file.last_mut() {
             Some((path, items)) if *path == item.export.path.as_path() => items.push(item),
@@ -2167,7 +2149,7 @@ fn group_coverage_gap_exports_by_file(
 
 fn push_coverage_gap_export_rows(
     lines: &mut Vec<String>,
-    by_file: &[(&std::path::Path, Vec<&fallow_output::UntestedExportFinding>)],
+    by_file: &[(&std::path::Path, Vec<&plow_output::UntestedExportFinding>)],
     root: &Path,
 ) -> usize {
     let mut shown = 0;
@@ -2192,7 +2174,7 @@ fn push_coverage_gap_export_rows(
 
 fn push_coverage_gap_export_names(
     lines: &mut Vec<String>,
-    exports: &[&fallow_output::UntestedExportFinding],
+    exports: &[&plow_output::UntestedExportFinding],
     file_str: &str,
     mut shown: usize,
 ) -> usize {
@@ -2214,7 +2196,7 @@ fn push_coverage_gap_export_names(
 
 /// Print a concise health summary showing only aggregate statistics.
 pub(in crate::report) fn print_health_summary(
-    report: &fallow_output::HealthReport,
+    report: &plow_output::HealthReport,
     elapsed: Duration,
     quiet: bool,
     heading: bool,
@@ -2243,7 +2225,7 @@ pub(in crate::report) fn print_health_summary(
 }
 
 /// Prints the function-count, maintainability, and health-score summary rows.
-fn print_health_summary_metrics(report: &fallow_output::HealthReport) {
+fn print_health_summary_metrics(report: &plow_output::HealthReport) {
     let s = &report.summary;
     outln!("  {:>6}  Functions analyzed", s.functions_analyzed);
     outln!("  {:>6}  Above threshold", s.functions_above_threshold);
@@ -2263,7 +2245,7 @@ fn print_health_summary_metrics(report: &fallow_output::HealthReport) {
 }
 
 /// Prints the coverage-gap and runtime-coverage summary rows.
-fn print_health_summary_coverage(report: &fallow_output::HealthReport) {
+fn print_health_summary_coverage(report: &plow_output::HealthReport) {
     if let Some(ref gaps) = report.coverage_gaps {
         outln!(
             "  {:>6}  Untested {} ({:.1}% file coverage)",
@@ -2314,11 +2296,11 @@ fn print_health_summary_coverage(report: &fallow_output::HealthReport) {
 /// D/F red.
 ///
 /// Goes to stdout (the rows are content, not progress) so the block survives
-/// `fallow health --group-by package > out.txt`. The leading blank line,
+/// `plow health --group-by package > out.txt`. The leading blank line,
 /// the `(root)` legend, and the JSON-parity hint go to stderr because they
 /// are display affordances, not data.
 pub(in crate::report) fn print_health_grouping(
-    grouping: &fallow_output::HealthGrouping,
+    grouping: &plow_output::HealthGrouping,
     _root: &Path,
     quiet: bool,
 ) {
@@ -2343,7 +2325,7 @@ pub(in crate::report) fn print_health_grouping(
     let any_score = grouping.groups.iter().any(|g| g.health_score.is_some());
     let any_vitals = grouping.groups.iter().any(|g| g.vital_signs.is_some());
 
-    let mut ordered: Vec<&fallow_output::HealthGroup> = grouping.groups.iter().collect();
+    let mut ordered: Vec<&plow_output::HealthGroup> = grouping.groups.iter().collect();
     if any_score {
         ordered.sort_by(|a, b| {
             let a_score = a.health_score.as_ref().map_or(f64::INFINITY, |hs| hs.score);
@@ -2398,7 +2380,7 @@ fn grouping_header(key_width: usize, any_score: bool, any_vitals: bool) -> Strin
 
 /// Builds one per-group data row, matching the column layout of `grouping_header`.
 fn grouping_row(
-    group: &fallow_output::HealthGroup,
+    group: &plow_output::HealthGroup,
     key_width: usize,
     any_score: bool,
     any_vitals: bool,
@@ -2442,8 +2424,8 @@ mod tests {
     #[test]
     fn health_empty_findings_produces_no_header() {
         let root = PathBuf::from("/project");
-        let report = fallow_output::HealthReport {
-            summary: fallow_output::HealthSummary {
+        let report = plow_output::HealthReport {
+            summary: plow_output::HealthSummary {
                 files_analyzed: 10,
                 functions_analyzed: 50,
                 ..Default::default()
@@ -2458,9 +2440,9 @@ mod tests {
     #[test]
     fn health_findings_show_function_details() {
         let root = PathBuf::from("/project");
-        let report = fallow_output::HealthReport {
+        let report = plow_output::HealthReport {
             findings: vec![
-                fallow_output::ComplexityViolation {
+                plow_output::ComplexityViolation {
                     path: root.join("src/parser.ts"),
                     name: "parseExpression".to_string(),
                     line: 42,
@@ -2473,8 +2455,8 @@ mod tests {
                     react_jsx_max_depth: 0,
                     react_prop_count: 0,
                     react_hook_profile: None,
-                    exceeded: fallow_output::ExceededThreshold::Both,
-                    severity: fallow_output::FindingSeverity::High,
+                    exceeded: plow_output::ExceededThreshold::Both,
+                    severity: plow_output::FindingSeverity::High,
                     crap: None,
                     coverage_pct: None,
                     coverage_tier: None,
@@ -2487,7 +2469,7 @@ mod tests {
                 }
                 .into(),
             ],
-            summary: fallow_output::HealthSummary {
+            summary: plow_output::HealthSummary {
                 files_analyzed: 10,
                 functions_analyzed: 50,
                 functions_above_threshold: 1,
@@ -2509,9 +2491,9 @@ mod tests {
     #[test]
     fn health_findings_label_template_complexity_entries() {
         let root = PathBuf::from("/project");
-        let report = fallow_output::HealthReport {
+        let report = plow_output::HealthReport {
             findings: vec![
-                fallow_output::ComplexityViolation {
+                plow_output::ComplexityViolation {
                     path: root.join("src/Card.vue"),
                     name: "<template>".to_string(),
                     line: 1,
@@ -2524,8 +2506,8 @@ mod tests {
                     react_jsx_max_depth: 0,
                     react_prop_count: 0,
                     react_hook_profile: None,
-                    exceeded: fallow_output::ExceededThreshold::Cognitive,
-                    severity: fallow_output::FindingSeverity::Moderate,
+                    exceeded: plow_output::ExceededThreshold::Cognitive,
+                    severity: plow_output::FindingSeverity::Moderate,
                     crap: None,
                     coverage_pct: None,
                     coverage_tier: None,
@@ -2538,7 +2520,7 @@ mod tests {
                 }
                 .into(),
             ],
-            summary: fallow_output::HealthSummary {
+            summary: plow_output::HealthSummary {
                 files_analyzed: 1,
                 functions_analyzed: 1,
                 functions_above_threshold: 1,
@@ -2556,9 +2538,9 @@ mod tests {
     #[test]
     fn health_shown_vs_total_when_truncated() {
         let root = PathBuf::from("/project");
-        let report = fallow_output::HealthReport {
+        let report = plow_output::HealthReport {
             findings: vec![
-                fallow_output::ComplexityViolation {
+                plow_output::ComplexityViolation {
                     path: root.join("src/a.ts"),
                     name: "fn1".to_string(),
                     line: 1,
@@ -2571,8 +2553,8 @@ mod tests {
                     react_jsx_max_depth: 0,
                     react_prop_count: 0,
                     react_hook_profile: None,
-                    exceeded: fallow_output::ExceededThreshold::Both,
-                    severity: fallow_output::FindingSeverity::High,
+                    exceeded: plow_output::ExceededThreshold::Both,
+                    severity: plow_output::FindingSeverity::High,
                     crap: None,
                     coverage_pct: None,
                     coverage_tier: None,
@@ -2585,7 +2567,7 @@ mod tests {
                 }
                 .into(),
             ],
-            summary: fallow_output::HealthSummary {
+            summary: plow_output::HealthSummary {
                 files_analyzed: 100,
                 functions_analyzed: 500,
                 functions_above_threshold: 10,
@@ -2601,9 +2583,9 @@ mod tests {
     #[test]
     fn health_findings_explain_estimated_crap_scores() {
         let root = PathBuf::from("/project");
-        let report = fallow_output::HealthReport {
+        let report = plow_output::HealthReport {
             findings: vec![
-                fallow_output::ComplexityViolation {
+                plow_output::ComplexityViolation {
                     path: root.join("src/risky.ts"),
                     name: "risky".to_string(),
                     line: 7,
@@ -2616,12 +2598,12 @@ mod tests {
                     react_jsx_max_depth: 0,
                     react_prop_count: 0,
                     react_hook_profile: None,
-                    exceeded: fallow_output::ExceededThreshold::Crap,
-                    severity: fallow_output::FindingSeverity::High,
+                    exceeded: plow_output::ExceededThreshold::Crap,
+                    severity: plow_output::FindingSeverity::High,
                     crap: Some(650.0),
                     coverage_pct: None,
-                    coverage_tier: Some(fallow_output::CoverageTier::None),
-                    coverage_source: Some(fallow_output::CoverageSource::Estimated),
+                    coverage_tier: Some(plow_output::CoverageTier::None),
+                    coverage_source: Some(plow_output::CoverageSource::Estimated),
                     inherited_from: None,
                     component_rollup: None,
                     contributions: Vec::new(),
@@ -2630,11 +2612,11 @@ mod tests {
                 }
                 .into(),
             ],
-            summary: fallow_output::HealthSummary {
+            summary: plow_output::HealthSummary {
                 files_analyzed: 1,
                 functions_analyzed: 1,
                 functions_above_threshold: 1,
-                coverage_model: Some(fallow_output::CoverageModel::StaticEstimated),
+                coverage_model: Some(plow_output::CoverageModel::StaticEstimated),
                 coverage_source_consistency: None,
                 ..Default::default()
             },
@@ -2642,15 +2624,15 @@ mod tests {
         };
         let text = plain(&build_health_human_lines(&report, &root));
         assert!(text.contains("CRAP scores are estimated from export references"));
-        assert!(text.contains("fallow health --coverage <coverage-final.json>"));
+        assert!(text.contains("plow health --coverage <coverage-final.json>"));
     }
 
     #[test]
     fn health_findings_explain_mixed_istanbul_crap_scores() {
         let root = PathBuf::from("/project");
-        let report = fallow_output::HealthReport {
+        let report = plow_output::HealthReport {
             findings: vec![
-                fallow_output::ComplexityViolation {
+                plow_output::ComplexityViolation {
                     path: root.join("src/risky.ts"),
                     name: "risky".to_string(),
                     line: 7,
@@ -2663,12 +2645,12 @@ mod tests {
                     react_jsx_max_depth: 0,
                     react_prop_count: 0,
                     react_hook_profile: None,
-                    exceeded: fallow_output::ExceededThreshold::Crap,
-                    severity: fallow_output::FindingSeverity::High,
+                    exceeded: plow_output::ExceededThreshold::Crap,
+                    severity: plow_output::FindingSeverity::High,
                     crap: Some(45.0),
                     coverage_pct: Some(40.0),
-                    coverage_tier: Some(fallow_output::CoverageTier::Partial),
-                    coverage_source: Some(fallow_output::CoverageSource::Istanbul),
+                    coverage_tier: Some(plow_output::CoverageTier::Partial),
+                    coverage_source: Some(plow_output::CoverageSource::Istanbul),
                     inherited_from: None,
                     component_rollup: None,
                     contributions: Vec::new(),
@@ -2677,11 +2659,11 @@ mod tests {
                 }
                 .into(),
             ],
-            summary: fallow_output::HealthSummary {
+            summary: plow_output::HealthSummary {
                 files_analyzed: 1,
                 functions_analyzed: 2,
                 functions_above_threshold: 1,
-                coverage_model: Some(fallow_output::CoverageModel::Istanbul),
+                coverage_model: Some(plow_output::CoverageModel::Istanbul),
                 coverage_source_consistency: None,
                 istanbul_matched: Some(1),
                 istanbul_total: Some(2),
@@ -2701,9 +2683,9 @@ mod tests {
     #[test]
     fn health_findings_explain_istanbul_counts_without_summary_model() {
         let root = PathBuf::from("/project");
-        let report = fallow_output::HealthReport {
+        let report = plow_output::HealthReport {
             findings: vec![
-                fallow_output::ComplexityViolation {
+                plow_output::ComplexityViolation {
                     path: root.join("src/risky.ts"),
                     name: "risky".to_string(),
                     line: 7,
@@ -2716,12 +2698,12 @@ mod tests {
                     react_jsx_max_depth: 0,
                     react_prop_count: 0,
                     react_hook_profile: None,
-                    exceeded: fallow_output::ExceededThreshold::Crap,
-                    severity: fallow_output::FindingSeverity::High,
+                    exceeded: plow_output::ExceededThreshold::Crap,
+                    severity: plow_output::FindingSeverity::High,
                     crap: Some(45.0),
                     coverage_pct: None,
-                    coverage_tier: Some(fallow_output::CoverageTier::None),
-                    coverage_source: Some(fallow_output::CoverageSource::Estimated),
+                    coverage_tier: Some(plow_output::CoverageTier::None),
+                    coverage_source: Some(plow_output::CoverageSource::Estimated),
                     inherited_from: None,
                     component_rollup: None,
                     contributions: Vec::new(),
@@ -2730,7 +2712,7 @@ mod tests {
                 }
                 .into(),
             ],
-            summary: fallow_output::HealthSummary {
+            summary: plow_output::HealthSummary {
                 files_analyzed: 1,
                 functions_analyzed: 2,
                 functions_above_threshold: 1,
@@ -2754,9 +2736,9 @@ mod tests {
     #[test]
     fn health_findings_grouped_by_file() {
         let root = PathBuf::from("/project");
-        let report = fallow_output::HealthReport {
+        let report = plow_output::HealthReport {
             findings: vec![
-                fallow_output::ComplexityViolation {
+                plow_output::ComplexityViolation {
                     path: root.join("src/parser.ts"),
                     name: "fn1".to_string(),
                     line: 10,
@@ -2769,8 +2751,8 @@ mod tests {
                     react_jsx_max_depth: 0,
                     react_prop_count: 0,
                     react_hook_profile: None,
-                    exceeded: fallow_output::ExceededThreshold::Both,
-                    severity: fallow_output::FindingSeverity::High,
+                    exceeded: plow_output::ExceededThreshold::Both,
+                    severity: plow_output::FindingSeverity::High,
                     crap: None,
                     coverage_pct: None,
                     coverage_tier: None,
@@ -2782,7 +2764,7 @@ mod tests {
                     threshold_source: None,
                 }
                 .into(),
-                fallow_output::ComplexityViolation {
+                plow_output::ComplexityViolation {
                     path: root.join("src/parser.ts"),
                     name: "fn2".to_string(),
                     line: 60,
@@ -2795,8 +2777,8 @@ mod tests {
                     react_jsx_max_depth: 0,
                     react_prop_count: 0,
                     react_hook_profile: None,
-                    exceeded: fallow_output::ExceededThreshold::Both,
-                    severity: fallow_output::FindingSeverity::High,
+                    exceeded: plow_output::ExceededThreshold::Both,
+                    severity: plow_output::FindingSeverity::High,
                     crap: None,
                     coverage_pct: None,
                     coverage_tier: None,
@@ -2809,7 +2791,7 @@ mod tests {
                 }
                 .into(),
             ],
-            summary: fallow_output::HealthSummary {
+            summary: plow_output::HealthSummary {
                 files_analyzed: 10,
                 functions_analyzed: 50,
                 functions_above_threshold: 2,
@@ -2823,9 +2805,9 @@ mod tests {
         assert_eq!(count, 1, "File header should appear once for grouped items");
     }
 
-    fn empty_report() -> fallow_output::HealthReport {
-        fallow_output::HealthReport {
-            summary: fallow_output::HealthSummary {
+    fn empty_report() -> plow_output::HealthReport {
+        plow_output::HealthReport {
+            summary: plow_output::HealthSummary {
                 files_analyzed: 10,
                 functions_analyzed: 50,
                 ..Default::default()
@@ -2838,12 +2820,12 @@ mod tests {
     fn health_runtime_coverage_renders_section() {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
-        report.runtime_coverage = Some(fallow_output::RuntimeCoverageReport {
-            schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
-            verdict: fallow_output::RuntimeCoverageReportVerdict::ColdCodeDetected,
+        report.runtime_coverage = Some(plow_output::RuntimeCoverageReport {
+            schema_version: plow_output::RuntimeCoverageSchemaVersion::V1,
+            verdict: plow_output::RuntimeCoverageReportVerdict::ColdCodeDetected,
             signals: Vec::new(),
-            summary: fallow_output::RuntimeCoverageSummary {
-                data_source: fallow_output::RuntimeCoverageDataSource::Local,
+            summary: plow_output::RuntimeCoverageSummary {
+                data_source: plow_output::RuntimeCoverageDataSource::Local,
                 last_received_at: None,
                 functions_tracked: 4,
                 functions_hit: 2,
@@ -2855,16 +2837,16 @@ mod tests {
                 deployments_seen: 14,
                 capture_quality: None,
             },
-            findings: vec![fallow_output::RuntimeCoverageFinding {
-                id: "fallow:prod:deadbeef".to_owned(),
+            findings: vec![plow_output::RuntimeCoverageFinding {
+                id: "plow:prod:deadbeef".to_owned(),
                 stable_id: None,
                 path: root.join("src/cold.ts"),
                 function: "coldPath".to_owned(),
                 line: 14,
-                verdict: fallow_output::RuntimeCoverageVerdict::ReviewRequired,
+                verdict: plow_output::RuntimeCoverageVerdict::ReviewRequired,
                 invocations: Some(0),
-                confidence: fallow_output::RuntimeCoverageConfidence::Medium,
-                evidence: fallow_output::RuntimeCoverageEvidence {
+                confidence: plow_output::RuntimeCoverageConfidence::Medium,
+                evidence: plow_output::RuntimeCoverageEvidence {
                     static_status: "used".to_owned(),
                     test_coverage: "not_covered".to_owned(),
                     v8_tracking: "tracked".to_owned(),
@@ -2876,8 +2858,8 @@ mod tests {
                 source_hash: None,
                 discriminators: None,
             }],
-            hot_paths: vec![fallow_output::RuntimeCoverageHotPath {
-                id: "fallow:hot:cafebabe".to_owned(),
+            hot_paths: vec![plow_output::RuntimeCoverageHotPath {
+                id: "plow:hot:cafebabe".to_owned(),
                 stable_id: None,
                 path: root.join("src/hot.ts"),
                 function: "hotPath".to_owned(),
@@ -2889,12 +2871,12 @@ mod tests {
             }],
             blast_radius: vec![],
             importance: vec![],
-            watermark: Some(fallow_output::RuntimeCoverageWatermark::LicenseExpiredGrace),
+            watermark: Some(plow_output::RuntimeCoverageWatermark::LicenseExpiredGrace),
             warnings: vec![],
             actionable: true,
             actionability_reason: None,
             actionability_verdict: None,
-            provenance: fallow_output::RuntimeCoverageProvenance::default(),
+            provenance: plow_output::RuntimeCoverageProvenance::default(),
         });
 
         let text = plain(&build_health_human_lines(&report, &root));
@@ -2909,7 +2891,7 @@ mod tests {
 
     #[test]
     fn health_coverage_intelligence_renders_findings_and_ambiguity_summary() {
-        use fallow_output::{
+        use plow_output::{
             CoverageIntelligenceAction, CoverageIntelligenceConfidence,
             CoverageIntelligenceEvidence, CoverageIntelligenceFinding,
             CoverageIntelligenceMatchConfidence, CoverageIntelligenceRecommendation,
@@ -2928,7 +2910,7 @@ mod tests {
                 ..Default::default()
             },
             findings: vec![CoverageIntelligenceFinding {
-                id: "fallow:coverage-intel:abc123".to_owned(),
+                id: "plow:coverage-intel:abc123".to_owned(),
                 path: root.join("src/dead.ts"),
                 identity: Some("deadPath".to_owned()),
                 line: 9,
@@ -2968,14 +2950,14 @@ mod tests {
     }
 
     fn runtime_coverage_report_with_quality(
-        quality: Option<fallow_output::RuntimeCoverageCaptureQuality>,
-    ) -> fallow_output::RuntimeCoverageReport {
-        fallow_output::RuntimeCoverageReport {
-            schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
-            verdict: fallow_output::RuntimeCoverageReportVerdict::Clean,
+        quality: Option<plow_output::RuntimeCoverageCaptureQuality>,
+    ) -> plow_output::RuntimeCoverageReport {
+        plow_output::RuntimeCoverageReport {
+            schema_version: plow_output::RuntimeCoverageSchemaVersion::V1,
+            verdict: plow_output::RuntimeCoverageReportVerdict::Clean,
             signals: Vec::new(),
-            summary: fallow_output::RuntimeCoverageSummary {
-                data_source: fallow_output::RuntimeCoverageDataSource::Local,
+            summary: plow_output::RuntimeCoverageSummary {
+                data_source: plow_output::RuntimeCoverageDataSource::Local,
                 last_received_at: None,
                 functions_tracked: 10,
                 functions_hit: 7,
@@ -2996,7 +2978,7 @@ mod tests {
             actionable: true,
             actionability_reason: None,
             actionability_verdict: None,
-            provenance: fallow_output::RuntimeCoverageProvenance::default(),
+            provenance: plow_output::RuntimeCoverageProvenance::default(),
         }
     }
 
@@ -3005,7 +2987,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
         report.runtime_coverage = Some(runtime_coverage_report_with_quality(Some(
-            fallow_output::RuntimeCoverageCaptureQuality {
+            plow_output::RuntimeCoverageCaptureQuality {
                 window_seconds: 720, // 12 min
                 instances_observed: 1,
                 lazy_parse_warning: true,
@@ -3032,7 +3014,7 @@ mod tests {
             "upgrade prompt body missing in:\n{text}"
         );
         assert!(
-            text.contains("fallow license activate --trial --email you@company.com"),
+            text.contains("plow license activate --trial --email you@company.com"),
             "trial CTA command missing in:\n{text}"
         );
     }
@@ -3042,7 +3024,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
         report.runtime_coverage = Some(runtime_coverage_report_with_quality(Some(
-            fallow_output::RuntimeCoverageCaptureQuality {
+            plow_output::RuntimeCoverageCaptureQuality {
                 window_seconds: 7 * 24 * 3600, // 7 days
                 instances_observed: 4,
                 lazy_parse_warning: false,
@@ -3071,7 +3053,7 @@ mod tests {
 
     #[test]
     fn health_coverage_gaps_render_section() {
-        use fallow_output::*;
+        use plow_output::*;
 
         let root = PathBuf::from("/project");
         let mut report = empty_report();
@@ -3149,11 +3131,11 @@ mod tests {
     fn health_score_grade_a_display() {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
-        report.health_score = Some(fallow_output::HealthScore {
-            formula_version: fallow_output::HEALTH_SCORE_FORMULA_VERSION,
+        report.health_score = Some(plow_output::HealthScore {
+            formula_version: plow_output::HEALTH_SCORE_FORMULA_VERSION,
             score: 92.0,
             grade: "A",
-            penalties: fallow_output::HealthScorePenalties {
+            penalties: plow_output::HealthScorePenalties {
                 dead_files: Some(3.0),
                 dead_exports: Some(2.0),
                 complexity: 1.5,
@@ -3182,11 +3164,11 @@ mod tests {
     fn health_score_grade_b_display() {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
-        report.health_score = Some(fallow_output::HealthScore {
-            formula_version: fallow_output::HEALTH_SCORE_FORMULA_VERSION,
+        report.health_score = Some(plow_output::HealthScore {
+            formula_version: plow_output::HEALTH_SCORE_FORMULA_VERSION,
             score: 76.0,
             grade: "B",
-            penalties: fallow_output::HealthScorePenalties {
+            penalties: plow_output::HealthScorePenalties {
                 dead_files: Some(5.0),
                 dead_exports: Some(6.0),
                 complexity: 3.0,
@@ -3215,11 +3197,11 @@ mod tests {
     fn health_score_grade_c_display() {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
-        report.health_score = Some(fallow_output::HealthScore {
-            formula_version: fallow_output::HEALTH_SCORE_FORMULA_VERSION,
+        report.health_score = Some(plow_output::HealthScore {
+            formula_version: plow_output::HEALTH_SCORE_FORMULA_VERSION,
             score: 60.0,
             grade: "C",
-            penalties: fallow_output::HealthScorePenalties {
+            penalties: plow_output::HealthScorePenalties {
                 dead_files: Some(10.0),
                 dead_exports: Some(10.0),
                 complexity: 10.0,
@@ -3243,11 +3225,11 @@ mod tests {
     fn health_score_grade_f_display() {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
-        report.health_score = Some(fallow_output::HealthScore {
-            formula_version: fallow_output::HEALTH_SCORE_FORMULA_VERSION,
+        report.health_score = Some(plow_output::HealthScore {
+            formula_version: plow_output::HEALTH_SCORE_FORMULA_VERSION,
             score: 30.0,
             grade: "F",
-            penalties: fallow_output::HealthScorePenalties {
+            penalties: plow_output::HealthScorePenalties {
                 dead_files: Some(15.0),
                 dead_exports: Some(15.0),
                 complexity: 20.0,
@@ -3271,11 +3253,11 @@ mod tests {
     fn health_score_na_components_shown() {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
-        report.health_score = Some(fallow_output::HealthScore {
-            formula_version: fallow_output::HEALTH_SCORE_FORMULA_VERSION,
+        report.health_score = Some(plow_output::HealthScore {
+            formula_version: plow_output::HEALTH_SCORE_FORMULA_VERSION,
             score: 90.0,
             grade: "A",
-            penalties: fallow_output::HealthScorePenalties {
+            penalties: plow_output::HealthScorePenalties {
                 dead_files: None,
                 dead_exports: None,
                 complexity: 0.0,
@@ -3300,11 +3282,11 @@ mod tests {
     fn health_score_no_na_when_all_present() {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
-        report.health_score = Some(fallow_output::HealthScore {
-            formula_version: fallow_output::HEALTH_SCORE_FORMULA_VERSION,
+        report.health_score = Some(plow_output::HealthScore {
+            formula_version: plow_output::HEALTH_SCORE_FORMULA_VERSION,
             score: 85.0,
             grade: "A",
-            penalties: fallow_output::HealthScorePenalties {
+            penalties: plow_output::HealthScorePenalties {
                 dead_files: Some(0.0),
                 dead_exports: Some(0.0),
                 complexity: 0.0,
@@ -3328,11 +3310,11 @@ mod tests {
     fn health_score_zero_penalties_suppressed() {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
-        report.health_score = Some(fallow_output::HealthScore {
-            formula_version: fallow_output::HEALTH_SCORE_FORMULA_VERSION,
+        report.health_score = Some(plow_output::HealthScore {
+            formula_version: plow_output::HEALTH_SCORE_FORMULA_VERSION,
             score: 100.0,
             grade: "A",
-            penalties: fallow_output::HealthScorePenalties {
+            penalties: plow_output::HealthScorePenalties {
                 dead_files: Some(0.0),
                 dead_exports: Some(0.0),
                 complexity: 0.0,
@@ -3357,8 +3339,8 @@ mod tests {
     fn health_trend_improving_display() {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
-        report.health_trend = Some(fallow_output::HealthTrend {
-            compared_to: fallow_output::TrendPoint {
+        report.health_trend = Some(plow_output::HealthTrend {
+            compared_to: plow_output::TrendPoint {
                 timestamp: "2026-03-25T14:30:00Z".into(),
                 git_sha: Some("abc1234".into()),
                 score: Some(72.0),
@@ -3367,31 +3349,31 @@ mod tests {
                 snapshot_schema_version: None,
             },
             metrics: vec![
-                fallow_output::TrendMetric {
+                plow_output::TrendMetric {
                     name: "score",
                     label: "Health Score",
                     previous: 72.0,
                     current: 85.0,
                     delta: 13.0,
-                    direction: fallow_output::TrendDirection::Improving,
+                    direction: plow_output::TrendDirection::Improving,
                     unit: "",
                     previous_count: None,
                     current_count: None,
                 },
-                fallow_output::TrendMetric {
+                plow_output::TrendMetric {
                     name: "dead_file_pct",
                     label: "Dead Files",
                     previous: 10.0,
                     current: 5.0,
                     delta: -5.0,
-                    direction: fallow_output::TrendDirection::Improving,
+                    direction: plow_output::TrendDirection::Improving,
                     unit: "%",
                     previous_count: None,
                     current_count: None,
                 },
             ],
             snapshots_loaded: 2,
-            overall_direction: fallow_output::TrendDirection::Improving,
+            overall_direction: plow_output::TrendDirection::Improving,
         });
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
@@ -3409,8 +3391,8 @@ mod tests {
     fn health_trend_declining_display() {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
-        report.health_trend = Some(fallow_output::HealthTrend {
-            compared_to: fallow_output::TrendPoint {
+        report.health_trend = Some(plow_output::HealthTrend {
+            compared_to: plow_output::TrendPoint {
                 timestamp: "2026-03-20T10:00:00Z".into(),
                 git_sha: None,
                 score: None,
@@ -3418,19 +3400,19 @@ mod tests {
                 coverage_model: None,
                 snapshot_schema_version: None,
             },
-            metrics: vec![fallow_output::TrendMetric {
+            metrics: vec![plow_output::TrendMetric {
                 name: "unused_deps",
                 label: "Unused Deps",
                 previous: 5.0,
                 current: 10.0,
                 delta: 5.0,
-                direction: fallow_output::TrendDirection::Declining,
+                direction: plow_output::TrendDirection::Declining,
                 unit: "",
                 previous_count: None,
                 current_count: None,
             }],
             snapshots_loaded: 1,
-            overall_direction: fallow_output::TrendDirection::Declining,
+            overall_direction: plow_output::TrendDirection::Declining,
         });
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
@@ -3442,8 +3424,8 @@ mod tests {
     fn health_trend_all_stable_collapsed() {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
-        report.health_trend = Some(fallow_output::HealthTrend {
-            compared_to: fallow_output::TrendPoint {
+        report.health_trend = Some(plow_output::HealthTrend {
+            compared_to: plow_output::TrendPoint {
                 timestamp: "2026-03-25T14:30:00Z".into(),
                 git_sha: Some("def5678".into()),
                 score: Some(80.0),
@@ -3452,31 +3434,31 @@ mod tests {
                 snapshot_schema_version: None,
             },
             metrics: vec![
-                fallow_output::TrendMetric {
+                plow_output::TrendMetric {
                     name: "score",
                     label: "Health Score",
                     previous: 80.0,
                     current: 80.0,
                     delta: 0.0,
-                    direction: fallow_output::TrendDirection::Stable,
+                    direction: plow_output::TrendDirection::Stable,
                     unit: "",
                     previous_count: None,
                     current_count: None,
                 },
-                fallow_output::TrendMetric {
+                plow_output::TrendMetric {
                     name: "avg_cyclomatic",
                     label: "Avg Cyclomatic",
                     previous: 2.0,
                     current: 2.0,
                     delta: 0.0,
-                    direction: fallow_output::TrendDirection::Stable,
+                    direction: plow_output::TrendDirection::Stable,
                     unit: "",
                     previous_count: None,
                     current_count: None,
                 },
             ],
             snapshots_loaded: 3,
-            overall_direction: fallow_output::TrendDirection::Stable,
+            overall_direction: plow_output::TrendDirection::Stable,
         });
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
@@ -3489,8 +3471,8 @@ mod tests {
     fn health_trend_without_sha() {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
-        report.health_trend = Some(fallow_output::HealthTrend {
-            compared_to: fallow_output::TrendPoint {
+        report.health_trend = Some(plow_output::HealthTrend {
+            compared_to: plow_output::TrendPoint {
                 timestamp: "2026-03-20T10:00:00Z".into(),
                 git_sha: None,
                 score: None,
@@ -3498,19 +3480,19 @@ mod tests {
                 coverage_model: None,
                 snapshot_schema_version: None,
             },
-            metrics: vec![fallow_output::TrendMetric {
+            metrics: vec![plow_output::TrendMetric {
                 name: "score",
                 label: "Health Score",
                 previous: 80.0,
                 current: 82.0,
                 delta: 2.0,
-                direction: fallow_output::TrendDirection::Improving,
+                direction: plow_output::TrendDirection::Improving,
                 unit: "",
                 previous_count: None,
                 current_count: None,
             }],
             snapshots_loaded: 1,
-            overall_direction: fallow_output::TrendDirection::Improving,
+            overall_direction: plow_output::TrendDirection::Improving,
         });
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
@@ -3522,7 +3504,7 @@ mod tests {
     fn vital_signs_shown_without_trend() {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
-        report.vital_signs = Some(fallow_output::VitalSigns {
+        report.vital_signs = Some(plow_output::VitalSigns {
             dead_file_pct: Some(3.2),
             dead_export_pct: Some(8.1),
             avg_cyclomatic: 4.7,
@@ -3540,7 +3522,7 @@ mod tests {
             total_loc: 42_381,
             ..Default::default()
         });
-        report.hotspot_summary = Some(fallow_output::HotspotSummary {
+        report.hotspot_summary = Some(plow_output::HotspotSummary {
             since: "6 months".to_string(),
             min_commits: 3,
             files_analyzed: 50,
@@ -3564,14 +3546,14 @@ mod tests {
     fn vital_signs_zero_hotspots_still_show_window() {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
-        report.vital_signs = Some(fallow_output::VitalSigns {
+        report.vital_signs = Some(plow_output::VitalSigns {
             avg_cyclomatic: 2.0,
             p90_cyclomatic: 5,
             hotspot_count: Some(0),
             total_loc: 1_000,
             ..Default::default()
         });
-        report.hotspot_summary = Some(fallow_output::HotspotSummary {
+        report.hotspot_summary = Some(plow_output::HotspotSummary {
             since: "90 days".to_string(),
             min_commits: 3,
             files_analyzed: 10,
@@ -3588,7 +3570,7 @@ mod tests {
     fn vital_signs_hotspot_count_without_summary_omits_window() {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
-        report.vital_signs = Some(fallow_output::VitalSigns {
+        report.vital_signs = Some(plow_output::VitalSigns {
             avg_cyclomatic: 2.0,
             p90_cyclomatic: 5,
             hotspot_count: Some(1),
@@ -3606,7 +3588,7 @@ mod tests {
     fn vital_signs_suppressed_when_trend_active() {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
-        report.vital_signs = Some(fallow_output::VitalSigns {
+        report.vital_signs = Some(plow_output::VitalSigns {
             dead_file_pct: Some(3.2),
             dead_export_pct: Some(8.1),
             avg_cyclomatic: 4.7,
@@ -3624,8 +3606,8 @@ mod tests {
             total_loc: 0,
             ..Default::default()
         });
-        report.health_trend = Some(fallow_output::HealthTrend {
-            compared_to: fallow_output::TrendPoint {
+        report.health_trend = Some(plow_output::HealthTrend {
+            compared_to: plow_output::TrendPoint {
                 timestamp: "2026-03-25T14:30:00Z".into(),
                 git_sha: None,
                 score: None,
@@ -3635,7 +3617,7 @@ mod tests {
             },
             metrics: vec![],
             snapshots_loaded: 1,
-            overall_direction: fallow_output::TrendDirection::Stable,
+            overall_direction: plow_output::TrendDirection::Stable,
         });
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
@@ -3647,7 +3629,7 @@ mod tests {
     fn vital_signs_optional_fields_omitted_when_none() {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
-        report.vital_signs = Some(fallow_output::VitalSigns {
+        report.vital_signs = Some(plow_output::VitalSigns {
             dead_file_pct: None,
             dead_export_pct: None,
             avg_cyclomatic: 2.0,
@@ -3679,7 +3661,7 @@ mod tests {
     fn vital_signs_zero_counts_suppressed() {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
-        report.vital_signs = Some(fallow_output::VitalSigns {
+        report.vital_signs = Some(plow_output::VitalSigns {
             dead_file_pct: None,
             dead_export_pct: None,
             avg_cyclomatic: 1.0,
@@ -3707,7 +3689,7 @@ mod tests {
     fn vital_signs_plural_vs_singular() {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
-        report.vital_signs = Some(fallow_output::VitalSigns {
+        report.vital_signs = Some(plow_output::VitalSigns {
             dead_file_pct: None,
             dead_export_pct: None,
             avg_cyclomatic: 1.0,
@@ -3738,7 +3720,7 @@ mod tests {
     fn file_scores_single_entry() {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
-        report.file_scores = vec![fallow_output::FileHealthScore {
+        report.file_scores = vec![plow_output::FileHealthScore {
             path: root.join("src/utils.ts"),
             fan_in: 5,
             fan_out: 3,
@@ -3769,7 +3751,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
         report.file_scores = vec![
-            fallow_output::FileHealthScore {
+            plow_output::FileHealthScore {
                 path: root.join("src/risky.ts"),
                 fan_in: 0,
                 fan_out: 0,
@@ -3783,7 +3765,7 @@ mod tests {
                 crap_max: 552.0,
                 crap_above_threshold: 1,
             },
-            fallow_output::FileHealthScore {
+            plow_output::FileHealthScore {
                 path: root.join("src/messy.ts"),
                 fan_in: 0,
                 fan_out: 0,
@@ -3822,7 +3804,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
         report.file_scores = vec![
-            fallow_output::FileHealthScore {
+            plow_output::FileHealthScore {
                 path: root.join("src/good.ts"),
                 fan_in: 1,
                 fan_out: 1,
@@ -3836,7 +3818,7 @@ mod tests {
                 crap_max: 0.0,
                 crap_above_threshold: 0,
             },
-            fallow_output::FileHealthScore {
+            plow_output::FileHealthScore {
                 path: root.join("src/okay.ts"),
                 fan_in: 2,
                 fan_out: 3,
@@ -3850,7 +3832,7 @@ mod tests {
                 crap_max: 0.0,
                 crap_above_threshold: 0,
             },
-            fallow_output::FileHealthScore {
+            plow_output::FileHealthScore {
                 path: root.join("src/bad.ts"),
                 fan_in: 8,
                 fan_out: 12,
@@ -3878,7 +3860,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
         for i in 0..12 {
-            report.file_scores.push(fallow_output::FileHealthScore {
+            report.file_scores.push(plow_output::FileHealthScore {
                 path: root.join(format!("src/file{i}.ts")),
                 fan_in: 1,
                 fan_out: 1,
@@ -3907,7 +3889,7 @@ mod tests {
     fn file_scores_docs_link() {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
-        report.file_scores = vec![fallow_output::FileHealthScore {
+        report.file_scores = vec![plow_output::FileHealthScore {
             path: root.join("src/a.ts"),
             fan_in: 1,
             fan_out: 1,
@@ -3923,7 +3905,7 @@ mod tests {
         }];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
-        assert!(text.contains("docs.fallow.tools/explanations/health#file-health-scores"));
+        assert!(text.contains("docs.genesis-plow.dev/explanations/health#file-health-scores"));
     }
 
     #[test]
@@ -3931,7 +3913,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
         report.hotspots = vec![
-            fallow_output::HotspotEntry {
+            plow_output::HotspotEntry {
                 path: root.join("src/core.ts"),
                 score: 75.0,
                 commits: 42,
@@ -3940,7 +3922,7 @@ mod tests {
                 lines_deleted: 200,
                 complexity_density: 0.85,
                 fan_in: 10,
-                trend: fallow_engine::ChurnTrend::Accelerating,
+                trend: plow_engine::ChurnTrend::Accelerating,
                 ownership: None,
                 is_test_path: false,
             }
@@ -3963,7 +3945,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
         report.hotspots = vec![
-            fallow_output::HotspotEntry {
+            plow_output::HotspotEntry {
                 path: root.join("src/old.ts"),
                 score: 20.0,
                 commits: 5,
@@ -3972,7 +3954,7 @@ mod tests {
                 lines_deleted: 30,
                 complexity_density: 0.3,
                 fan_in: 2,
-                trend: fallow_engine::ChurnTrend::Cooling,
+                trend: plow_engine::ChurnTrend::Cooling,
                 ownership: None,
                 is_test_path: false,
             }
@@ -3989,7 +3971,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
         report.hotspots = vec![
-            fallow_output::HotspotEntry {
+            plow_output::HotspotEntry {
                 path: root.join("src/mid.ts"),
                 score: 45.0,
                 commits: 15,
@@ -3998,7 +3980,7 @@ mod tests {
                 lines_deleted: 100,
                 complexity_density: 0.5,
                 fan_in: 5,
-                trend: fallow_engine::ChurnTrend::Stable,
+                trend: plow_engine::ChurnTrend::Stable,
                 ownership: None,
                 is_test_path: false,
             }
@@ -4015,7 +3997,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
         report.hotspots = vec![
-            fallow_output::HotspotEntry {
+            plow_output::HotspotEntry {
                 path: root.join("src/a.ts"),
                 score: 50.0,
                 commits: 10,
@@ -4024,13 +4006,13 @@ mod tests {
                 lines_deleted: 50,
                 complexity_density: 0.4,
                 fan_in: 3,
-                trend: fallow_engine::ChurnTrend::Stable,
+                trend: plow_engine::ChurnTrend::Stable,
                 ownership: None,
                 is_test_path: false,
             }
             .into(),
         ];
-        report.hotspot_summary = Some(fallow_output::HotspotSummary {
+        report.hotspot_summary = Some(plow_output::HotspotSummary {
             since: "6 months".to_string(),
             min_commits: 3,
             files_analyzed: 50,
@@ -4048,7 +4030,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
         report.hotspots = vec![
-            fallow_output::HotspotEntry {
+            plow_output::HotspotEntry {
                 path: root.join("src/a.ts"),
                 score: 50.0,
                 commits: 10,
@@ -4057,13 +4039,13 @@ mod tests {
                 lines_deleted: 50,
                 complexity_density: 0.4,
                 fan_in: 3,
-                trend: fallow_engine::ChurnTrend::Stable,
+                trend: plow_engine::ChurnTrend::Stable,
                 ownership: None,
                 is_test_path: false,
             }
             .into(),
         ];
-        report.hotspot_summary = Some(fallow_output::HotspotSummary {
+        report.hotspot_summary = Some(plow_output::HotspotSummary {
             since: "3 months".to_string(),
             min_commits: 2,
             files_analyzed: 50,
@@ -4080,7 +4062,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
         report.hotspots = vec![
-            fallow_output::HotspotEntry {
+            plow_output::HotspotEntry {
                 path: root.join("src/a.ts"),
                 score: 50.0,
                 commits: 10,
@@ -4089,7 +4071,7 @@ mod tests {
                 lines_deleted: 50,
                 complexity_density: 0.4,
                 fan_in: 3,
-                trend: fallow_engine::ChurnTrend::Stable,
+                trend: plow_engine::ChurnTrend::Stable,
                 ownership: None,
                 is_test_path: false,
             }
@@ -4097,7 +4079,7 @@ mod tests {
         ];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
-        assert!(text.contains("docs.fallow.tools/explanations/health#hotspot-metrics"));
+        assert!(text.contains("docs.genesis-plow.dev/explanations/health#hotspot-metrics"));
     }
 
     #[test]
@@ -4105,14 +4087,14 @@ mod tests {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
         report.targets = vec![
-            fallow_output::RefactoringTarget {
+            plow_output::RefactoringTarget {
                 path: root.join("src/legacy.ts"),
                 priority: 65.0,
                 efficiency: 65.0,
                 recommendation: "Extract complex logic into helper functions".to_string(),
-                category: fallow_output::RecommendationCategory::ExtractComplexFunctions,
-                effort: fallow_output::EffortEstimate::Low,
-                confidence: fallow_output::Confidence::High,
+                category: plow_output::RecommendationCategory::ExtractComplexFunctions,
+                effort: plow_output::EffortEstimate::Low,
+                confidence: plow_output::Confidence::High,
                 factors: vec![],
                 evidence: None,
             }
@@ -4136,32 +4118,32 @@ mod tests {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
         report.targets = vec![
-            fallow_output::RefactoringTarget {
+            plow_output::RefactoringTarget {
                 path: root.join("src/legacy.ts"),
                 priority: 65.0,
                 efficiency: 65.0,
                 recommendation: "Extract complex logic into helper functions".to_string(),
-                category: fallow_output::RecommendationCategory::ExtractComplexFunctions,
-                effort: fallow_output::EffortEstimate::Low,
-                confidence: fallow_output::Confidence::High,
+                category: plow_output::RecommendationCategory::ExtractComplexFunctions,
+                effort: plow_output::EffortEstimate::Low,
+                confidence: plow_output::Confidence::High,
                 factors: vec![],
-                evidence: Some(fallow_output::TargetEvidence {
-                    direct_callers: vec![fallow_output::DirectCallerEvidence {
+                evidence: Some(plow_output::TargetEvidence {
+                    direct_callers: vec![plow_output::DirectCallerEvidence {
                         path: root.join("src/consumer.ts"),
                         symbols: vec![
-                            fallow_output::DirectCallerSymbolEvidence {
+                            plow_output::DirectCallerSymbolEvidence {
                                 imported: "loadLegacy".into(),
                                 local: "load".into(),
                                 type_only: false,
                             },
-                            fallow_output::DirectCallerSymbolEvidence {
+                            plow_output::DirectCallerSymbolEvidence {
                                 imported: "side-effect".into(),
                                 local: String::new(),
                                 type_only: false,
                             },
                         ],
                     }],
-                    clone_siblings: vec![fallow_output::CloneSiblingEvidence {
+                    clone_siblings: vec![plow_output::CloneSiblingEvidence {
                         path: root.join("src/peer.ts"),
                         start_line: 12,
                         end_line: 20,
@@ -4184,38 +4166,38 @@ mod tests {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
         report.targets = vec![
-            fallow_output::RefactoringTarget {
+            plow_output::RefactoringTarget {
                 path: root.join("src/a.ts"),
                 priority: 80.0,
                 efficiency: 80.0,
                 recommendation: "Remove dead exports".to_string(),
-                category: fallow_output::RecommendationCategory::RemoveDeadCode,
-                effort: fallow_output::EffortEstimate::Low,
-                confidence: fallow_output::Confidence::High,
+                category: plow_output::RecommendationCategory::RemoveDeadCode,
+                effort: plow_output::EffortEstimate::Low,
+                confidence: plow_output::Confidence::High,
                 factors: vec![],
                 evidence: None,
             }
             .into(),
-            fallow_output::RefactoringTarget {
+            plow_output::RefactoringTarget {
                 path: root.join("src/b.ts"),
                 priority: 60.0,
                 efficiency: 30.0,
                 recommendation: "Split into smaller modules".to_string(),
-                category: fallow_output::RecommendationCategory::SplitHighImpact,
-                effort: fallow_output::EffortEstimate::Medium,
-                confidence: fallow_output::Confidence::Medium,
+                category: plow_output::RecommendationCategory::SplitHighImpact,
+                effort: plow_output::EffortEstimate::Medium,
+                confidence: plow_output::Confidence::Medium,
                 factors: vec![],
                 evidence: None,
             }
             .into(),
-            fallow_output::RefactoringTarget {
+            plow_output::RefactoringTarget {
                 path: root.join("src/c.ts"),
                 priority: 50.0,
                 efficiency: 16.7,
                 recommendation: "Break circular dependency".to_string(),
-                category: fallow_output::RecommendationCategory::BreakCircularDependency,
-                effort: fallow_output::EffortEstimate::High,
-                confidence: fallow_output::Confidence::Low,
+                category: plow_output::RecommendationCategory::BreakCircularDependency,
+                effort: plow_output::EffortEstimate::High,
+                confidence: plow_output::Confidence::Low,
                 factors: vec![],
                 evidence: None,
             }
@@ -4241,14 +4223,14 @@ mod tests {
         let mut report = empty_report();
         for i in 0..12 {
             report.targets.push(
-                fallow_output::RefactoringTarget {
+                plow_output::RefactoringTarget {
                     path: root.join(format!("src/target{i}.ts")),
                     priority: 50.0,
                     efficiency: 25.0,
                     recommendation: format!("Fix target {i}"),
-                    category: fallow_output::RecommendationCategory::ExtractComplexFunctions,
-                    effort: fallow_output::EffortEstimate::Medium,
-                    confidence: fallow_output::Confidence::Medium,
+                    category: plow_output::RecommendationCategory::ExtractComplexFunctions,
+                    effort: plow_output::EffortEstimate::Medium,
+                    confidence: plow_output::Confidence::Medium,
                     factors: vec![],
                     evidence: None,
                 }
@@ -4269,14 +4251,14 @@ mod tests {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
         report.targets = vec![
-            fallow_output::RefactoringTarget {
+            plow_output::RefactoringTarget {
                 path: root.join("src/a.ts"),
                 priority: 50.0,
                 efficiency: 50.0,
                 recommendation: "Fix it".to_string(),
-                category: fallow_output::RecommendationCategory::ExtractDependencies,
-                effort: fallow_output::EffortEstimate::Low,
-                confidence: fallow_output::Confidence::High,
+                category: plow_output::RecommendationCategory::ExtractDependencies,
+                effort: plow_output::EffortEstimate::Low,
+                confidence: plow_output::Confidence::High,
                 factors: vec![],
                 evidence: None,
             }
@@ -4284,7 +4266,7 @@ mod tests {
         ];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
-        assert!(text.contains("docs.fallow.tools/explanations/health#refactoring-targets"));
+        assert!(text.contains("docs.genesis-plow.dev/explanations/health#refactoring-targets"));
     }
 
     #[test]
@@ -4293,44 +4275,44 @@ mod tests {
         let mut report = empty_report();
         let categories = [
             (
-                fallow_output::RecommendationCategory::UrgentChurnComplexity,
+                plow_output::RecommendationCategory::UrgentChurnComplexity,
                 "churn+complexity",
             ),
             (
-                fallow_output::RecommendationCategory::BreakCircularDependency,
+                plow_output::RecommendationCategory::BreakCircularDependency,
                 "circular dependency",
             ),
             (
-                fallow_output::RecommendationCategory::SplitHighImpact,
+                plow_output::RecommendationCategory::SplitHighImpact,
                 "high impact",
             ),
             (
-                fallow_output::RecommendationCategory::RemoveDeadCode,
+                plow_output::RecommendationCategory::RemoveDeadCode,
                 "dead code",
             ),
             (
-                fallow_output::RecommendationCategory::ExtractComplexFunctions,
+                plow_output::RecommendationCategory::ExtractComplexFunctions,
                 "complexity",
             ),
             (
-                fallow_output::RecommendationCategory::ExtractDependencies,
+                plow_output::RecommendationCategory::ExtractDependencies,
                 "coupling",
             ),
             (
-                fallow_output::RecommendationCategory::AddTestCoverage,
+                plow_output::RecommendationCategory::AddTestCoverage,
                 "untested risk",
             ),
         ];
         for (i, (cat, _label)) in categories.iter().enumerate() {
             report.targets.push(
-                fallow_output::RefactoringTarget {
+                plow_output::RefactoringTarget {
                     path: root.join(format!("src/cat{i}.ts")),
                     priority: 50.0,
                     efficiency: 50.0,
                     recommendation: format!("Fix cat{i}"),
                     category: cat.clone(),
-                    effort: fallow_output::EffortEstimate::Low,
-                    confidence: fallow_output::Confidence::High,
+                    effort: plow_output::EffortEstimate::Low,
+                    confidence: plow_output::Confidence::High,
                     factors: vec![],
                     evidence: None,
                 }
@@ -4352,38 +4334,38 @@ mod tests {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
         report.targets = vec![
-            fallow_output::RefactoringTarget {
+            plow_output::RefactoringTarget {
                 path: root.join("src/high.ts"),
                 priority: 50.0,
                 efficiency: 50.0, // green: >= 40
                 recommendation: "High eff".to_string(),
-                category: fallow_output::RecommendationCategory::RemoveDeadCode,
-                effort: fallow_output::EffortEstimate::Low,
-                confidence: fallow_output::Confidence::High,
+                category: plow_output::RecommendationCategory::RemoveDeadCode,
+                effort: plow_output::EffortEstimate::Low,
+                confidence: plow_output::Confidence::High,
                 factors: vec![],
                 evidence: None,
             }
             .into(),
-            fallow_output::RefactoringTarget {
+            plow_output::RefactoringTarget {
                 path: root.join("src/mid.ts"),
                 priority: 50.0,
                 efficiency: 25.0, // yellow: >= 20
                 recommendation: "Mid eff".to_string(),
-                category: fallow_output::RecommendationCategory::RemoveDeadCode,
-                effort: fallow_output::EffortEstimate::Medium,
-                confidence: fallow_output::Confidence::Medium,
+                category: plow_output::RecommendationCategory::RemoveDeadCode,
+                effort: plow_output::EffortEstimate::Medium,
+                confidence: plow_output::Confidence::Medium,
                 factors: vec![],
                 evidence: None,
             }
             .into(),
-            fallow_output::RefactoringTarget {
+            plow_output::RefactoringTarget {
                 path: root.join("src/low.ts"),
                 priority: 50.0,
                 efficiency: 10.0, // dimmed: < 20
                 recommendation: "Low eff".to_string(),
-                category: fallow_output::RecommendationCategory::RemoveDeadCode,
-                effort: fallow_output::EffortEstimate::High,
-                confidence: fallow_output::Confidence::Low,
+                category: plow_output::RecommendationCategory::RemoveDeadCode,
+                effort: plow_output::EffortEstimate::High,
+                confidence: plow_output::Confidence::Low,
                 factors: vec![],
                 evidence: None,
             }
@@ -4406,7 +4388,7 @@ mod tests {
         let mut report = empty_report();
         report.summary.functions_above_threshold = 1;
         report.findings = vec![
-            fallow_output::ComplexityViolation {
+            plow_output::ComplexityViolation {
                 path: root.join("src/complex.ts"),
                 name: "bigFn".to_string(),
                 line: 10,
@@ -4419,8 +4401,8 @@ mod tests {
                 react_jsx_max_depth: 0,
                 react_prop_count: 0,
                 react_hook_profile: None,
-                exceeded: fallow_output::ExceededThreshold::Both,
-                severity: fallow_output::FindingSeverity::Moderate,
+                exceeded: plow_output::ExceededThreshold::Both,
+                severity: plow_output::FindingSeverity::Moderate,
                 crap: None,
                 coverage_pct: None,
                 coverage_tier: None,
@@ -4433,11 +4415,11 @@ mod tests {
             }
             .into(),
         ];
-        report.health_score = Some(fallow_output::HealthScore {
-            formula_version: fallow_output::HEALTH_SCORE_FORMULA_VERSION,
+        report.health_score = Some(plow_output::HealthScore {
+            formula_version: plow_output::HEALTH_SCORE_FORMULA_VERSION,
             score: 75.0,
             grade: "B",
-            penalties: fallow_output::HealthScorePenalties {
+            penalties: plow_output::HealthScorePenalties {
                 dead_files: Some(5.0),
                 dead_exports: Some(5.0),
                 complexity: 5.0,
@@ -4452,7 +4434,7 @@ mod tests {
                 prop_drilling: None,
             },
         });
-        report.file_scores = vec![fallow_output::FileHealthScore {
+        report.file_scores = vec![plow_output::FileHealthScore {
             path: root.join("src/complex.ts"),
             fan_in: 5,
             fan_out: 3,
@@ -4467,7 +4449,7 @@ mod tests {
             crap_above_threshold: 0,
         }];
         report.hotspots = vec![
-            fallow_output::HotspotEntry {
+            plow_output::HotspotEntry {
                 path: root.join("src/complex.ts"),
                 score: 65.0,
                 commits: 20,
@@ -4476,21 +4458,21 @@ mod tests {
                 lines_deleted: 100,
                 complexity_density: 0.5,
                 fan_in: 5,
-                trend: fallow_engine::ChurnTrend::Accelerating,
+                trend: plow_engine::ChurnTrend::Accelerating,
                 ownership: None,
                 is_test_path: false,
             }
             .into(),
         ];
         report.targets = vec![
-            fallow_output::RefactoringTarget {
+            plow_output::RefactoringTarget {
                 path: root.join("src/complex.ts"),
                 priority: 70.0,
                 efficiency: 70.0,
                 recommendation: "Extract complex functions".to_string(),
-                category: fallow_output::RecommendationCategory::ExtractComplexFunctions,
-                effort: fallow_output::EffortEstimate::Low,
-                confidence: fallow_output::Confidence::High,
+                category: plow_output::RecommendationCategory::ExtractComplexFunctions,
+                effort: plow_output::EffortEstimate::Low,
+                confidence: plow_output::Confidence::High,
                 factors: vec![],
                 evidence: None,
             }
@@ -4519,7 +4501,7 @@ mod tests {
         let mut report = empty_report();
         report.summary.functions_above_threshold = 1;
         report.findings = vec![
-            fallow_output::ComplexityViolation {
+            plow_output::ComplexityViolation {
                 path: root.join("src/a.ts"),
                 name: "fn1".to_string(),
                 line: 1,
@@ -4532,8 +4514,8 @@ mod tests {
                 react_jsx_max_depth: 0,
                 react_prop_count: 0,
                 react_hook_profile: None,
-                exceeded: fallow_output::ExceededThreshold::Cyclomatic,
-                severity: fallow_output::FindingSeverity::Moderate,
+                exceeded: plow_output::ExceededThreshold::Cyclomatic,
+                severity: plow_output::FindingSeverity::Moderate,
                 crap: None,
                 coverage_pct: None,
                 coverage_tier: None,
@@ -4558,7 +4540,7 @@ mod tests {
         let mut report = empty_report();
         report.summary.functions_above_threshold = 1;
         report.findings = vec![
-            fallow_output::ComplexityViolation {
+            plow_output::ComplexityViolation {
                 path: root.join("src/a.ts"),
                 name: "fn1".to_string(),
                 line: 1,
@@ -4571,8 +4553,8 @@ mod tests {
                 react_jsx_max_depth: 0,
                 react_prop_count: 0,
                 react_hook_profile: None,
-                exceeded: fallow_output::ExceededThreshold::Cognitive,
-                severity: fallow_output::FindingSeverity::High,
+                exceeded: plow_output::ExceededThreshold::Cognitive,
+                severity: plow_output::FindingSeverity::High,
                 crap: None,
                 coverage_pct: None,
                 coverage_tier: None,
@@ -4597,7 +4579,7 @@ mod tests {
         let mut report = empty_report();
         report.summary.functions_above_threshold = 2;
         report.findings = vec![
-            fallow_output::ComplexityViolation {
+            plow_output::ComplexityViolation {
                 path: root.join("src/a.ts"),
                 name: "fn1".to_string(),
                 line: 1,
@@ -4610,8 +4592,8 @@ mod tests {
                 react_jsx_max_depth: 0,
                 react_prop_count: 0,
                 react_hook_profile: None,
-                exceeded: fallow_output::ExceededThreshold::Both,
-                severity: fallow_output::FindingSeverity::Moderate,
+                exceeded: plow_output::ExceededThreshold::Both,
+                severity: plow_output::FindingSeverity::Moderate,
                 crap: None,
                 coverage_pct: None,
                 coverage_tier: None,
@@ -4623,7 +4605,7 @@ mod tests {
                 threshold_source: None,
             }
             .into(),
-            fallow_output::ComplexityViolation {
+            plow_output::ComplexityViolation {
                 path: root.join("src/b.ts"),
                 name: "fn2".to_string(),
                 line: 5,
@@ -4636,8 +4618,8 @@ mod tests {
                 react_jsx_max_depth: 0,
                 react_prop_count: 0,
                 react_hook_profile: None,
-                exceeded: fallow_output::ExceededThreshold::Both,
-                severity: fallow_output::FindingSeverity::Moderate,
+                exceeded: plow_output::ExceededThreshold::Both,
+                severity: plow_output::FindingSeverity::Moderate,
                 crap: None,
                 coverage_pct: None,
                 coverage_tier: None,
@@ -4662,7 +4644,7 @@ mod tests {
         let mut report = empty_report();
         report.summary.functions_above_threshold = 1;
         report.findings = vec![
-            fallow_output::ComplexityViolation {
+            plow_output::ComplexityViolation {
                 path: root.join("src/a.ts"),
                 name: "fn1".to_string(),
                 line: 1,
@@ -4675,8 +4657,8 @@ mod tests {
                 react_jsx_max_depth: 0,
                 react_prop_count: 0,
                 react_hook_profile: None,
-                exceeded: fallow_output::ExceededThreshold::Both,
-                severity: fallow_output::FindingSeverity::Moderate,
+                exceeded: plow_output::ExceededThreshold::Both,
+                severity: plow_output::FindingSeverity::Moderate,
                 crap: None,
                 coverage_pct: None,
                 coverage_tier: None,
@@ -4691,7 +4673,7 @@ mod tests {
         ];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
-        assert!(text.contains("docs.fallow.tools/explanations/health#complexity-metrics"));
+        assert!(text.contains("docs.genesis-plow.dev/explanations/health#complexity-metrics"));
     }
 
     #[test]
@@ -4699,7 +4681,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
         report.hotspots = vec![
-            fallow_output::HotspotEntry {
+            plow_output::HotspotEntry {
                 path: root.join("src/high.ts"),
                 score: 80.0, // red: >= 70
                 commits: 30,
@@ -4708,12 +4690,12 @@ mod tests {
                 lines_deleted: 200,
                 complexity_density: 0.9,
                 fan_in: 8,
-                trend: fallow_engine::ChurnTrend::Accelerating,
+                trend: plow_engine::ChurnTrend::Accelerating,
                 ownership: None,
                 is_test_path: false,
             }
             .into(),
-            fallow_output::HotspotEntry {
+            plow_output::HotspotEntry {
                 path: root.join("src/medium.ts"),
                 score: 45.0, // yellow: >= 30
                 commits: 15,
@@ -4722,12 +4704,12 @@ mod tests {
                 lines_deleted: 100,
                 complexity_density: 0.5,
                 fan_in: 4,
-                trend: fallow_engine::ChurnTrend::Stable,
+                trend: plow_engine::ChurnTrend::Stable,
                 ownership: None,
                 is_test_path: false,
             }
             .into(),
-            fallow_output::HotspotEntry {
+            plow_output::HotspotEntry {
                 path: root.join("src/low.ts"),
                 score: 15.0, // green: < 30
                 commits: 5,
@@ -4736,7 +4718,7 @@ mod tests {
                 lines_deleted: 20,
                 complexity_density: 0.2,
                 fan_in: 1,
-                trend: fallow_engine::ChurnTrend::Cooling,
+                trend: plow_engine::ChurnTrend::Cooling,
                 ownership: None,
                 is_test_path: false,
             }
@@ -4755,7 +4737,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let template =
             root.join("apps/admin/src/app/payments/payment-list/payment-list.component.html");
-        let finding = fallow_output::ComplexityViolation {
+        let finding = plow_output::ComplexityViolation {
             path: root.join("apps/admin/src/app/payments/payment-list/payment-list.component.ts"),
             name: "<component>".to_string(),
             line: 1,
@@ -4768,14 +4750,14 @@ mod tests {
             react_jsx_max_depth: 0,
             react_prop_count: 0,
             react_hook_profile: None,
-            exceeded: fallow_output::ExceededThreshold::Both,
-            severity: fallow_output::FindingSeverity::High,
+            exceeded: plow_output::ExceededThreshold::Both,
+            severity: plow_output::FindingSeverity::High,
             crap: None,
             coverage_pct: None,
             coverage_tier: None,
             coverage_source: None,
             inherited_from: None,
-            component_rollup: Some(fallow_output::ComponentRollup {
+            component_rollup: Some(plow_output::ComponentRollup {
                 component: "PaymentListComponent".to_string(),
                 class_worst_function: "ngOnInit".to_string(),
                 class_cyclomatic: 12,
@@ -4806,9 +4788,9 @@ mod tests {
         let owner = root.join("apps/admin/src/app/auth/permissions/permissions.component.ts");
         let template_path =
             root.join("apps/admin/src/app/auth/permissions/permissions.component.html");
-        let report = fallow_output::HealthReport {
+        let report = plow_output::HealthReport {
             findings: vec![
-                fallow_output::ComplexityViolation {
+                plow_output::ComplexityViolation {
                     path: template_path,
                     name: "<template>".to_string(),
                     line: 1,
@@ -4821,14 +4803,12 @@ mod tests {
                     react_jsx_max_depth: 0,
                     react_prop_count: 0,
                     react_hook_profile: None,
-                    exceeded: fallow_output::ExceededThreshold::Both,
-                    severity: fallow_output::FindingSeverity::High,
+                    exceeded: plow_output::ExceededThreshold::Both,
+                    severity: plow_output::FindingSeverity::High,
                     crap: Some(45.0),
                     coverage_pct: None,
-                    coverage_tier: Some(fallow_output::CoverageTier::Partial),
-                    coverage_source: Some(
-                        fallow_output::CoverageSource::EstimatedComponentInherited,
-                    ),
+                    coverage_tier: Some(plow_output::CoverageTier::Partial),
+                    coverage_source: Some(plow_output::CoverageSource::EstimatedComponentInherited),
                     inherited_from: Some(owner),
                     component_rollup: None,
                     contributions: Vec::new(),
@@ -4837,7 +4817,7 @@ mod tests {
                 }
                 .into(),
             ],
-            summary: fallow_output::HealthSummary {
+            summary: plow_output::HealthSummary {
                 files_analyzed: 1,
                 functions_analyzed: 1,
                 functions_above_threshold: 1,
@@ -4863,9 +4843,9 @@ mod tests {
         react_hook_count: u16,
         react_prop_count: u16,
         react_jsx_max_depth: u16,
-        profile: Option<fallow_output::ReactHookProfile>,
-    ) -> fallow_output::ComplexityViolation {
-        fallow_output::ComplexityViolation {
+        profile: Option<plow_output::ReactHookProfile>,
+    ) -> plow_output::ComplexityViolation {
+        plow_output::ComplexityViolation {
             path: PathBuf::from("src/Dashboard.tsx"),
             name: "Dashboard".to_string(),
             line: 1,
@@ -4878,8 +4858,8 @@ mod tests {
             react_jsx_max_depth,
             react_prop_count,
             react_hook_profile: profile,
-            exceeded: fallow_output::ExceededThreshold::Both,
-            severity: fallow_output::FindingSeverity::High,
+            exceeded: plow_output::ExceededThreshold::Both,
+            severity: plow_output::FindingSeverity::High,
             crap: None,
             coverage_pct: None,
             coverage_tier: None,
@@ -4898,7 +4878,7 @@ mod tests {
             9,
             14,
             7,
-            Some(fallow_output::ReactHookProfile {
+            Some(plow_output::ReactHookProfile {
                 state: 3,
                 effect: 4,
                 memo: 2,
@@ -4938,7 +4918,7 @@ mod tests {
             2,
             0,
             0,
-            Some(fallow_output::ReactHookProfile {
+            Some(plow_output::ReactHookProfile {
                 state: 1,
                 effect: 1,
                 memo: 0,

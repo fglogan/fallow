@@ -5,13 +5,13 @@ pub(super) use std::path::{Path, PathBuf};
 pub(super) use rustc_hash::{FxHashMap, FxHashSet};
 
 #[allow(unused_imports, reason = "shared re-export for sibling test modules")]
-pub(super) use fallow_config::{
-    BoundaryConfig, FallowConfig, OutputFormat, PackageJson, ResolvedConfig, WorkspaceInfo,
+pub(super) use plow_config::{
+    BoundaryConfig, OutputFormat, PackageJson, PlowConfig, ResolvedConfig, WorkspaceInfo,
 };
 #[allow(unused_imports, reason = "shared re-export for sibling test modules")]
-pub(super) use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
+pub(super) use plow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
 #[allow(unused_imports, reason = "shared re-export for sibling test modules")]
-pub(super) use fallow_types::extract::{ImportInfo, ImportedName};
+pub(super) use plow_types::extract::{ImportInfo, ImportedName};
 
 #[allow(unused_imports, reason = "shared re-export for sibling test modules")]
 pub(super) use crate::graph::ModuleGraph;
@@ -58,7 +58,7 @@ pub(super) fn find_unlisted_dependencies(
 
 /// Build a minimal ResolvedConfig for testing.
 pub(super) fn test_config(root: PathBuf) -> ResolvedConfig {
-    FallowConfig::default().resolve(root, OutputFormat::Human, 1, true, true, None)
+    PlowConfig::default().resolve(root, OutputFormat::Human, 1, true, true, None)
 }
 
 /// Build a PackageJson with specific dependency fields via JSON deserialization.

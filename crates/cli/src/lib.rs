@@ -24,7 +24,7 @@ mod api;
     reason = "shared CLI library compiles bin-oriented support modules for reuse"
 )]
 pub mod audit;
-/// `fallow audit --brief` (alias `fallow review`): deterministic, always-exit-0
+/// `plow audit --brief` (alias `plow review`): deterministic, always-exit-0
 /// rendering mode layered over the audit analysis. Public so the schema-emit
 /// binary can derive the `ReviewBriefOutput` envelope.
 #[allow(
@@ -77,7 +77,7 @@ pub mod walkthrough_state;
     unused_imports,
     reason = "shared CLI library compiles bin-oriented support modules for reuse"
 )]
-use fallow_engine::baseline;
+use plow_engine::baseline;
 #[allow(
     dead_code,
     unused_imports,
@@ -91,7 +91,7 @@ mod cache_notice;
 )]
 mod check;
 /// CODEOWNERS file parser and ownership lookup.
-pub use fallow_engine::codeowners;
+pub use plow_engine::codeowners;
 #[allow(
     dead_code,
     unused_imports,
@@ -107,7 +107,7 @@ mod dupes;
 
 /// Structured error output for CLI and JSON formats.
 pub mod error {
-    pub use fallow_engine::emit_error;
+    pub use plow_engine::emit_error;
 }
 
 #[allow(
@@ -208,8 +208,8 @@ mod task_matrix;
     unused_imports,
     reason = "shared CLI library compiles bin-oriented support modules for reuse"
 )]
-use fallow_engine::validate;
-use fallow_engine::vital_signs;
+use plow_engine::validate;
+use plow_engine::vital_signs;
 
 pub use runtime_support::{AnalysisKind, GroupBy};
 pub(crate) use runtime_support::{

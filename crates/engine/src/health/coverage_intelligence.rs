@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use xxhash_rust::xxh3::xxh3_64;
 
-use fallow_output::{
+use plow_output::{
     CoverageGaps, CoverageIntelligenceAction, CoverageIntelligenceConfidence,
     CoverageIntelligenceEvidence, CoverageIntelligenceFinding, CoverageIntelligenceMatchConfidence,
     CoverageIntelligenceRecommendation, CoverageIntelligenceReport,
@@ -93,7 +93,7 @@ fn build_risky_change_findings(
 fn build_risky_finding_evidence(
     report: &HealthReport,
     root: &Path,
-    hot_path: &fallow_output::RuntimeCoverageHotPath,
+    hot_path: &plow_output::RuntimeCoverageHotPath,
     matched: &MatchedComplexity<'_>,
 ) -> CoverageIntelligenceEvidence {
     CoverageIntelligenceEvidence {
@@ -116,7 +116,7 @@ fn build_risky_finding_evidence(
 fn risky_finding_for_hot_path(
     report: &HealthReport,
     root: &Path,
-    hot_path: &fallow_output::RuntimeCoverageHotPath,
+    hot_path: &plow_output::RuntimeCoverageHotPath,
     skipped_ambiguous_matches: &mut usize,
 ) -> Option<CoverageIntelligenceFinding> {
     let matched = match_complexity(
@@ -415,12 +415,12 @@ fn coverage_intelligence_id(input: &FindingInput) -> String {
     if let Some(preferred) = input
         .related_ids
         .iter()
-        .find(|id| id.starts_with("fallow:fn:") || id.len() == 16)
+        .find(|id| id.starts_with("plow:fn:") || id.len() == 16)
     {
         key.push('|');
         key.push_str(preferred);
     }
-    format!("fallow:coverage-intel:{:016x}", xxh3_64(key.as_bytes()))
+    format!("plow:coverage-intel:{:016x}", xxh3_64(key.as_bytes()))
 }
 
 fn action_description(
@@ -647,7 +647,7 @@ fn normalize_path(root: &Path, path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_output::{
+    use plow_output::{
         ComplexityViolation, ContributorEntry, ContributorIdentifierFormat, CoverageGapSummary,
         CoverageGaps, ExceededThreshold, FindingSeverity, HealthSummary, HotspotEntry,
         OwnershipMetrics, RuntimeCoverageEvidence, RuntimeCoverageHotPath,
@@ -826,7 +826,7 @@ mod tests {
             ]),
             recommendation: CoverageIntelligenceRecommendation::RefactorCarefullyKeepBehavior,
             confidence: CoverageIntelligenceConfidence::Medium,
-            related_ids: vec!["fallow:fn:abc".to_owned()],
+            related_ids: vec!["plow:fn:abc".to_owned()],
             evidence: CoverageIntelligenceEvidence::default(),
         };
         let mut b = a.clone();
@@ -897,13 +897,13 @@ mod tests {
 
     fn runtime_with_hot(path: &str, function: &str, line: u32) -> RuntimeCoverageReport {
         let mut report = RuntimeCoverageReport {
-            schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
+            schema_version: plow_output::RuntimeCoverageSchemaVersion::V1,
             verdict: RuntimeCoverageReportVerdict::HotPathTouched,
-            signals: vec![fallow_output::RuntimeCoverageSignal::HotPathTouched],
+            signals: vec![plow_output::RuntimeCoverageSignal::HotPathTouched],
             summary: RuntimeCoverageSummary::default(),
             findings: vec![],
             hot_paths: vec![RuntimeCoverageHotPath {
-                id: "fallow:hot:deadbeef".to_owned(),
+                id: "plow:hot:deadbeef".to_owned(),
                 stable_id: None,
                 path: PathBuf::from(path),
                 function: function.to_owned(),
@@ -920,7 +920,7 @@ mod tests {
             actionable: true,
             actionability_reason: None,
             actionability_verdict: None,
-            provenance: fallow_output::RuntimeCoverageProvenance::default(),
+            provenance: plow_output::RuntimeCoverageProvenance::default(),
         };
         report.summary.functions_tracked = 1;
         report
@@ -928,20 +928,20 @@ mod tests {
 
     fn runtime_with_cold_delete(path: &str, function: &str, line: u32) -> RuntimeCoverageReport {
         RuntimeCoverageReport {
-            schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
+            schema_version: plow_output::RuntimeCoverageSchemaVersion::V1,
             verdict: RuntimeCoverageReportVerdict::ColdCodeDetected,
-            signals: vec![fallow_output::RuntimeCoverageSignal::ColdCodeDetected],
+            signals: vec![plow_output::RuntimeCoverageSignal::ColdCodeDetected],
             summary: RuntimeCoverageSummary::default(),
             findings: vec![RuntimeCoverageFinding {
-                id: "fallow:prod:deadbeef".to_owned(),
-                stable_id: Some("fallow:fn:deadbeef".to_owned()),
+                id: "plow:prod:deadbeef".to_owned(),
+                stable_id: Some("plow:fn:deadbeef".to_owned()),
                 source_hash: Some("feedfacefeedface".to_owned()),
                 path: PathBuf::from(path),
                 function: function.to_owned(),
                 line,
                 verdict: RuntimeCoverageVerdict::SafeToDelete,
                 invocations: Some(0),
-                confidence: fallow_output::RuntimeCoverageConfidence::High,
+                confidence: plow_output::RuntimeCoverageConfidence::High,
                 evidence: RuntimeCoverageEvidence {
                     static_status: "unused".to_owned(),
                     test_coverage: "not_covered".to_owned(),
@@ -961,7 +961,7 @@ mod tests {
             actionable: true,
             actionability_reason: None,
             actionability_verdict: None,
-            provenance: fallow_output::RuntimeCoverageProvenance::default(),
+            provenance: plow_output::RuntimeCoverageProvenance::default(),
         }
     }
 
@@ -971,20 +971,20 @@ mod tests {
         line: u32,
     ) -> RuntimeCoverageReport {
         RuntimeCoverageReport {
-            schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
+            schema_version: plow_output::RuntimeCoverageSchemaVersion::V1,
             verdict: RuntimeCoverageReportVerdict::ColdCodeDetected,
-            signals: vec![fallow_output::RuntimeCoverageSignal::ColdCodeDetected],
+            signals: vec![plow_output::RuntimeCoverageSignal::ColdCodeDetected],
             summary: RuntimeCoverageSummary::default(),
             findings: vec![RuntimeCoverageFinding {
-                id: "fallow:prod:review001".to_owned(),
-                stable_id: Some("fallow:fn:review001".to_owned()),
+                id: "plow:prod:review001".to_owned(),
+                stable_id: Some("plow:fn:review001".to_owned()),
                 source_hash: Some("feedfacefeedface".to_owned()),
                 path: PathBuf::from(path),
                 function: function.to_owned(),
                 line,
                 verdict: RuntimeCoverageVerdict::ReviewRequired,
                 invocations: Some(0),
-                confidence: fallow_output::RuntimeCoverageConfidence::Medium,
+                confidence: plow_output::RuntimeCoverageConfidence::Medium,
                 evidence: RuntimeCoverageEvidence {
                     static_status: "used".to_owned(),
                     test_coverage: "not_covered".to_owned(),
@@ -1004,7 +1004,7 @@ mod tests {
             actionable: true,
             actionability_reason: None,
             actionability_verdict: None,
-            provenance: fallow_output::RuntimeCoverageProvenance::default(),
+            provenance: plow_output::RuntimeCoverageProvenance::default(),
         }
     }
 

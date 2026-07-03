@@ -9,8 +9,8 @@ pub const INJECTION_NOTE: &str = "The digest is built from the deterministic mod
 
 /// One stable per-hunk CHANGE ANCHOR: a changed region the agent may cite as a
 /// judgment anchor IN ADDITION to a `signal_id`. Where a `signal_id` anchors a
-/// graph FINDING ("fallow emitted this exact finding"), a change_anchor anchors
-/// only a changed REGION ("fallow confirms this region changed") , a strictly
+/// graph FINDING ("plow emitted this exact finding"), a change_anchor anchors
+/// only a changed REGION ("plow confirms this region changed") , a strictly
 /// weaker guarantee, surfaced as `anchor_kind` on the accepted judgment so a
 /// consumer can tell the two apart. Graph/diff-derived; NEVER from prose.
 #[derive(Debug, Clone, Serialize)]
@@ -94,26 +94,26 @@ pub struct AgentSchema {
 #[must_use]
 pub const fn agent_schema() -> AgentSchema {
     AgentSchema {
-        judgment_shape: "Return { \"graph_snapshot_hash\": <echoed>, \"judgments\": [ { \"signal_id\": <one fallow emitted, OR omit and use change_anchor>, \"change_anchor\": <one fallow emitted chg: id, for a changed region with no finding>, \"framing\": <free text>, \"concern\": <optional> } ] }.",
+        judgment_shape: "Return { \"graph_snapshot_hash\": <echoed>, \"judgments\": [ { \"signal_id\": <one plow emitted, OR omit and use change_anchor>, \"change_anchor\": <one plow emitted chg: id, for a changed region with no finding>, \"framing\": <free text>, \"concern\": <optional> } ] }.",
         echo_field: "graph_snapshot_hash",
         anchoring_rule: "Every judgment must cite an emitted signal_id OR an emitted change_anchor; an unanchored id is rejected (anti-hallucination). A change_anchor proves only that the region changed (anchor_kind=change), a weaker guarantee than a signal_id finding (anchor_kind=signal).",
     }
 }
 
-/// The `fallow review --walkthrough-guide` envelope: the current digest + schema
+/// The `plow review --walkthrough-guide` envelope: the current digest + schema
 /// the agent fetches. The tool owns this; the skill stays thin (it fetches this
 /// rather than embedding a frozen copy). Always emitted with exit 0.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
     feature = "schema",
-    schemars(title = "fallow review --walkthrough-guide --format json")
+    schemars(title = "plow review --walkthrough-guide --format json")
 )]
 pub struct WalkthroughGuide<Digest> {
     /// Pinned to the brief schema version (the spec versions the guide by
     /// `review_brief_schema_version`).
     pub schema_version: ReviewBriefSchemaVersion,
-    /// Fallow CLI version that produced this guide.
+    /// Plow CLI version that produced this guide.
     pub version: String,
     /// Command discriminator singleton: always `"review-walkthrough-guide"`.
     pub command: String,
@@ -135,7 +135,7 @@ pub struct WalkthroughGuide<Digest> {
     pub injection_note: &'static str,
 }
 
-/// The standard walkthrough guide shape emitted by `fallow review`.
+/// The standard walkthrough guide shape emitted by `plow review`.
 pub type StandardWalkthroughGuide = WalkthroughGuide<crate::audit_brief::StandardReviewBriefOutput>;
 
 /// The agent's returned judgment JSON.
@@ -152,10 +152,10 @@ pub struct AgentWalkthrough {
 /// One agent judgment.
 #[derive(Debug, Clone, Deserialize)]
 pub struct AgentJudgment {
-    /// The fallow-emitted `signal_id` this judgment frames.
+    /// The plow-emitted `signal_id` this judgment frames.
     #[serde(default)]
     pub signal_id: String,
-    /// The fallow-emitted `change_anchor` this judgment frames.
+    /// The plow-emitted `change_anchor` this judgment frames.
     #[serde(default)]
     pub change_anchor: String,
     /// The agent's free-text framing.
@@ -171,10 +171,10 @@ pub struct AgentJudgment {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AcceptedJudgment {
-    /// The fallow-emitted `signal_id` (verified against the allowlist). Empty
+    /// The plow-emitted `signal_id` (verified against the allowlist). Empty
     /// when this judgment was anchored by a `change_anchor` instead.
     pub signal_id: String,
-    /// The fallow-emitted `change_anchor` (verified against the allowlist). Empty
+    /// The plow-emitted `change_anchor` (verified against the allowlist). Empty
     /// when this judgment was anchored by a `signal_id`.
     pub change_anchor: String,
     /// Which anchor resolved: `"signal"` (a graph FINDING, the strong anchor) or
@@ -188,7 +188,7 @@ pub struct AcceptedJudgment {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub concern: Option<String>,
     /// Hard fence: always `false`. The framing is agent prose, never a
-    /// deterministic fallow result, so it never gates or auto-posts.
+    /// deterministic plow result, so it never gates or auto-posts.
     pub deterministic: bool,
 }
 
@@ -196,30 +196,30 @@ pub struct AcceptedJudgment {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RejectedJudgment {
-    /// The `signal_id` the agent cited (fallow never emitted it). Empty when the
+    /// The `signal_id` the agent cited (plow never emitted it). Empty when the
     /// judgment cited a `change_anchor` instead.
     pub signal_id: String,
-    /// The `change_anchor` the agent cited (fallow never emitted it). Empty when
+    /// The `change_anchor` the agent cited (plow never emitted it). Empty when
     /// the judgment cited a `signal_id` instead.
     pub change_anchor: String,
-    /// The rejection reason: `unanchored-signal-id` (cited a signal fallow did
-    /// not emit), `unknown-change-anchor` (cited a region fallow did not emit),
+    /// The rejection reason: `unanchored-signal-id` (cited a signal plow did
+    /// not emit), `unknown-change-anchor` (cited a region plow did not emit),
     /// or `stale-snapshot` (the tree moved).
     pub reason: String,
 }
 
-/// The `fallow review --walkthrough-file` validation envelope: the result of
+/// The `plow review --walkthrough-file` validation envelope: the result of
 /// post-validating the agent's judgment against the live graph. Always exit 0.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
     feature = "schema",
-    schemars(title = "fallow review --walkthrough-file --format json")
+    schemars(title = "plow review --walkthrough-file --format json")
 )]
 pub struct WalkthroughValidation {
     /// Pinned to the brief schema version.
     pub schema_version: ReviewBriefSchemaVersion,
-    /// Fallow CLI version that produced this validation.
+    /// Plow CLI version that produced this validation.
     pub version: String,
     /// Command discriminator singleton: always `"review-walkthrough-validation"`.
     pub command: String,
@@ -228,7 +228,7 @@ pub struct WalkthroughValidation {
     /// `true` when the agent's echoed hash != the current hash (the tree moved):
     /// the WHOLE payload is refused, `accepted` is empty.
     pub stale: bool,
-    /// Judgments that cite a real fallow-emitted signal, framing fenced.
+    /// Judgments that cite a real plow-emitted signal, framing fenced.
     pub accepted: Vec<AcceptedJudgment>,
     /// Judgments rejected (unanchored signal id, or all-rejected when stale).
     pub rejected: Vec<RejectedJudgment>,

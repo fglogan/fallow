@@ -2,16 +2,16 @@
 
 use std::path::PathBuf;
 
-use fallow_config::ResolvedConfig;
-use fallow_output::DiffIndex;
-use fallow_types::workspace::WorkspaceDiagnostic;
+use plow_config::ResolvedConfig;
+use plow_output::DiffIndex;
+use plow_types::workspace::WorkspaceDiagnostic;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Discovery / parse inputs the CLI resolves before calling the engine.
 pub struct HealthPipelineInputs {
     pub config: ResolvedConfig,
-    pub files: Vec<fallow_types::discover::DiscoveredFile>,
-    pub modules: Vec<fallow_types::extract::ModuleInfo>,
+    pub files: Vec<plow_types::discover::DiscoveredFile>,
+    pub modules: Vec<plow_types::extract::ModuleInfo>,
     /// Pre-parse pipeline timings (config / discover / parse milliseconds).
     pub config_ms: f64,
     pub discover_ms: f64,

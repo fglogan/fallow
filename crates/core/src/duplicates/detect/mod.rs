@@ -27,7 +27,7 @@ use super::normalize::HashedToken;
 use super::tokenize::{FileTokens, TokenKind};
 use super::types::{DuplicationReport, DuplicationStats};
 
-const ROLLING_DETECTOR_ENV: &str = "FALLOW_DUPES_ROLLING";
+const ROLLING_DETECTOR_ENV: &str = "PLOW_DUPES_ROLLING";
 const ROLLING_BOUNDARY_FALLBACK_FILE_RATIO: f64 = 0.20;
 
 /// Data for a single file being analyzed.

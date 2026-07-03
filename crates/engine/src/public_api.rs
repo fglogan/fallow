@@ -1,7 +1,7 @@
 //! Public API graph helpers owned by the engine boundary.
 
-use fallow_config::{PackageJson, ResolvedConfig, WorkspaceInfo};
-use fallow_types::discover::FileId;
+use plow_config::{PackageJson, ResolvedConfig, WorkspaceInfo};
+use plow_types::discover::FileId;
 use rustc_hash::FxHashSet;
 
 use crate::module_graph::RetainedModuleGraph;
@@ -14,7 +14,7 @@ pub fn public_api_package_entry_points(
     root_pkg: Option<&PackageJson>,
     workspaces: &[WorkspaceInfo],
 ) -> FxHashSet<FileId> {
-    fallow_core::analyze::public_api_package_entry_points(
+    plow_core::analyze::public_api_package_entry_points(
         graph.as_graph(),
         config,
         root_pkg,

@@ -4,10 +4,10 @@
     reason = "tests and benches use unwrap and expect to keep fixture setup concise"
 )]
 
-//! End-to-end integration tests for `fallow health --runtime-coverage`.
+//! End-to-end integration tests for `plow health --runtime-coverage`.
 //!
 //! Exercises the full CLI → sidecar pipeline with a signed stub sidecar:
-//! discovery via `FALLOW_COV_BIN`, Ed25519 signature verification, Request
+//! discovery via `PLOW_COV_BIN`, Ed25519 signature verification, Request
 //! marshalling over stdin, Response parsing, protocol-version check, and the
 //! 3 / 4 / 5 / 6 exit-code matrix. Pairs with the source-level
 //! network-prohibition assertion in
@@ -21,7 +21,7 @@
 //! deterministic test keypairs, and activates the `stub_sidecar` bin target.
 //! A `compile_error!` in `coverage.rs` blocks the feature from release builds.
 //!
-//! Run: `cargo test -p fallow-cli --features test-sidecar-key runtime_coverage`.
+//! Run: `cargo test -p plow-cli --features test-sidecar-key runtime_coverage`.
 
 #[path = "common/mod.rs"]
 mod common;
@@ -38,7 +38,7 @@ mod gated {
 
     use tempfile::TempDir;
 
-    use super::common::{fallow_bin, fixture_path, parse_json};
+    use super::common::{fixture_path, parse_json, plow_bin};
     use super::sign;
 
     struct Harness {
@@ -69,20 +69,20 @@ mod gated {
             }
         }
 
-        fn fallow(&self) -> Command {
-            let mut cmd = Command::new(fallow_bin());
+        fn plow(&self) -> Command {
+            let mut cmd = Command::new(plow_bin());
             cmd.env("NO_COLOR", "1");
             cmd.env("RUST_LOG", "");
-            cmd.env_remove("FALLOW_LICENSE");
-            cmd.env_remove("FALLOW_LICENSE_PATH");
-            cmd.env_remove("FALLOW_COV_BINARY_PATH");
-            cmd.env_remove("FALLOW_COVERAGE");
-            cmd.env_remove("FALLOW_BIN");
-            cmd.env_remove("FALLOW_FORMAT");
-            cmd.env_remove("FALLOW_QUIET");
+            cmd.env_remove("PLOW_LICENSE");
+            cmd.env_remove("PLOW_LICENSE_PATH");
+            cmd.env_remove("PLOW_COV_BINARY_PATH");
+            cmd.env_remove("PLOW_COVERAGE");
+            cmd.env_remove("PLOW_BIN");
+            cmd.env_remove("PLOW_FORMAT");
+            cmd.env_remove("PLOW_QUIET");
             cmd.env("HOME", &self.home);
             cmd.env("USERPROFILE", &self.home);
-            cmd.env("FALLOW_COV_BIN", &self.stub_bin);
+            cmd.env("PLOW_COV_BIN", &self.stub_bin);
             cmd
         }
 
@@ -136,9 +136,9 @@ mod gated {
     fn copy_and_sign_stub(root: &Path) -> PathBuf {
         let source = PathBuf::from(env!("CARGO_BIN_EXE_stub_sidecar"));
         let target_name = if cfg!(windows) {
-            "fallow-cov.exe"
+            "plow-cov.exe"
         } else {
-            "fallow-cov"
+            "plow-cov"
         };
         let target = root.join(target_name);
         fs::copy(&source, &target).expect("copy stub sidecar");
@@ -156,7 +156,7 @@ mod gated {
     }
 
     fn run_with(mut cmd: Command) -> (String, String, i32) {
-        let output = cmd.output().expect("run fallow binary");
+        let output = cmd.output().expect("run plow binary");
         (
             String::from_utf8_lossy(&output.stdout).into_owned(),
             String::from_utf8_lossy(&output.stderr).into_owned(),
@@ -167,8 +167,8 @@ mod gated {
     #[test]
     fn license_missing_local_single_capture_succeeds() {
         let harness = Harness::new();
-        let mut cmd = harness.fallow();
-        cmd.env("FALLOW_STUB_MODE", "ok");
+        let mut cmd = harness.plow();
+        cmd.env("PLOW_STUB_MODE", "ok");
         for arg in harness.health_args() {
             cmd.arg(arg);
         }
@@ -192,8 +192,8 @@ mod gated {
     #[test]
     fn license_missing_paid_shape_exits_3() {
         let harness = Harness::new();
-        let mut cmd = harness.fallow();
-        cmd.env("FALLOW_STUB_MODE", "enforce-license-gate");
+        let mut cmd = harness.plow();
+        cmd.env("PLOW_STUB_MODE", "enforce-license-gate");
         let coverage_dir = harness.multi_capture_dir();
         for arg in Harness::health_args_for_path_with_format(&coverage_dir, "human") {
             cmd.arg(arg);
@@ -212,8 +212,8 @@ mod gated {
     #[test]
     fn license_expired_hard_fail_exits_3() {
         let harness = Harness::new();
-        let mut cmd = harness.fallow();
-        cmd.env("FALLOW_LICENSE", sign::mint_expired_runtime_coverage_jwt());
+        let mut cmd = harness.plow();
+        cmd.env("PLOW_LICENSE", sign::mint_expired_runtime_coverage_jwt());
         for arg in harness.health_args() {
             cmd.arg(arg);
         }
@@ -227,9 +227,9 @@ mod gated {
     #[test]
     fn happy_path_exits_0_and_renders_runtime_coverage() {
         let harness = Harness::new();
-        let mut cmd = harness.fallow();
-        cmd.env("FALLOW_LICENSE", sign::mint_runtime_coverage_jwt());
-        cmd.env("FALLOW_STUB_MODE", "ok");
+        let mut cmd = harness.plow();
+        cmd.env("PLOW_LICENSE", sign::mint_runtime_coverage_jwt());
+        cmd.env("PLOW_STUB_MODE", "ok");
         for arg in harness.health_args() {
             cmd.arg(arg);
         }
@@ -261,9 +261,9 @@ mod gated {
     #[test]
     fn security_runtime_coverage_marks_hot_sink_candidate() {
         let harness = Harness::new();
-        let mut cmd = harness.fallow();
-        cmd.env("FALLOW_LICENSE", sign::mint_runtime_coverage_jwt());
-        cmd.env("FALLOW_STUB_MODE", "security-hot");
+        let mut cmd = harness.plow();
+        cmd.env("PLOW_LICENSE", sign::mint_runtime_coverage_jwt());
+        cmd.env("PLOW_STUB_MODE", "security-hot");
         for arg in harness.security_args() {
             cmd.arg(arg);
         }
@@ -297,9 +297,9 @@ mod gated {
     #[test]
     fn sidecar_missing_exits_4() {
         let harness = Harness::new();
-        let mut cmd = harness.fallow();
-        cmd.env("FALLOW_LICENSE", sign::mint_runtime_coverage_jwt());
-        cmd.env("FALLOW_COV_BIN", harness.home.join("does-not-exist"));
+        let mut cmd = harness.plow();
+        cmd.env("PLOW_LICENSE", sign::mint_runtime_coverage_jwt());
+        cmd.env("PLOW_COV_BIN", harness.home.join("does-not-exist"));
         for arg in harness.health_args() {
             cmd.arg(arg);
         }
@@ -310,8 +310,8 @@ mod gated {
         );
         let combined = format!("{stdout}{stderr}");
         assert!(
-            combined.contains("FALLOW_COV_BIN"),
-            "error message should mention FALLOW_COV_BIN; got:\n{combined}"
+            combined.contains("PLOW_COV_BIN"),
+            "error message should mention PLOW_COV_BIN; got:\n{combined}"
         );
     }
 
@@ -333,9 +333,9 @@ mod gated {
     #[test]
     fn sidecar_protocol_mismatch_exits_4() {
         let harness = Harness::new();
-        let mut cmd = harness.fallow();
-        cmd.env("FALLOW_LICENSE", sign::mint_runtime_coverage_jwt());
-        cmd.env("FALLOW_STUB_MODE", "protocol-mismatch");
+        let mut cmd = harness.plow();
+        cmd.env("PLOW_LICENSE", sign::mint_runtime_coverage_jwt());
+        cmd.env("PLOW_STUB_MODE", "protocol-mismatch");
         for arg in harness.health_args() {
             cmd.arg(arg);
         }
@@ -349,9 +349,9 @@ mod gated {
     #[test]
     fn malformed_sidecar_stdout_exits_4() {
         let harness = Harness::new();
-        let mut cmd = harness.fallow();
-        cmd.env("FALLOW_LICENSE", sign::mint_runtime_coverage_jwt());
-        cmd.env("FALLOW_STUB_MODE", "malformed-stdout");
+        let mut cmd = harness.plow();
+        cmd.env("PLOW_LICENSE", sign::mint_runtime_coverage_jwt());
+        cmd.env("PLOW_STUB_MODE", "malformed-stdout");
         for arg in harness.health_args() {
             cmd.arg(arg);
         }
@@ -370,9 +370,9 @@ mod gated {
         let sig_path = PathBuf::from(sig_os);
         fs::write(&sig_path, [0u8; 64]).expect("overwrite signature");
 
-        let mut cmd = harness.fallow();
-        cmd.env("FALLOW_LICENSE", sign::mint_runtime_coverage_jwt());
-        cmd.env("FALLOW_STUB_MODE", "ok");
+        let mut cmd = harness.plow();
+        cmd.env("PLOW_LICENSE", sign::mint_runtime_coverage_jwt());
+        cmd.env("PLOW_STUB_MODE", "ok");
         for arg in harness.health_args() {
             cmd.arg(arg);
         }
@@ -386,9 +386,9 @@ mod gated {
     #[test]
     fn happy_path_does_not_set_watermark() {
         let harness = Harness::new();
-        let mut cmd = harness.fallow();
-        cmd.env("FALLOW_LICENSE", sign::mint_runtime_coverage_jwt());
-        cmd.env("FALLOW_STUB_MODE", "ok");
+        let mut cmd = harness.plow();
+        cmd.env("PLOW_LICENSE", sign::mint_runtime_coverage_jwt());
+        cmd.env("PLOW_STUB_MODE", "ok");
         for arg in harness.health_args() {
             cmd.arg(arg);
         }
@@ -412,9 +412,9 @@ mod gated {
     #[test]
     fn capture_quality_short_renders_warning_and_upgrade_prompt_in_human_output() {
         let harness = Harness::new();
-        let mut cmd = harness.fallow();
-        cmd.env("FALLOW_LICENSE", sign::mint_runtime_coverage_jwt());
-        cmd.env("FALLOW_STUB_MODE", "capture-quality-short");
+        let mut cmd = harness.plow();
+        cmd.env("PLOW_LICENSE", sign::mint_runtime_coverage_jwt());
+        cmd.env("PLOW_STUB_MODE", "capture-quality-short");
         for arg in harness.health_args_with_format("human") {
             cmd.arg(arg);
         }
@@ -441,7 +441,7 @@ mod gated {
             "upgrade prompt body missing; combined={combined}"
         );
         assert!(
-            combined.contains("fallow license activate --trial"),
+            combined.contains("plow license activate --trial"),
             "trial CTA command missing; combined={combined}"
         );
     }
@@ -449,9 +449,9 @@ mod gated {
     #[test]
     fn capture_quality_long_shows_neither_warning_nor_upgrade_prompt() {
         let harness = Harness::new();
-        let mut cmd = harness.fallow();
-        cmd.env("FALLOW_LICENSE", sign::mint_runtime_coverage_jwt());
-        cmd.env("FALLOW_STUB_MODE", "capture-quality-long");
+        let mut cmd = harness.plow();
+        cmd.env("PLOW_LICENSE", sign::mint_runtime_coverage_jwt());
+        cmd.env("PLOW_STUB_MODE", "capture-quality-long");
         for arg in harness.health_args_with_format("human") {
             cmd.arg(arg);
         }
@@ -474,9 +474,9 @@ mod gated {
     #[test]
     fn capture_quality_short_does_not_emit_upgrade_prompt_in_json() {
         let harness = Harness::new();
-        let mut cmd = harness.fallow();
-        cmd.env("FALLOW_LICENSE", sign::mint_runtime_coverage_jwt());
-        cmd.env("FALLOW_STUB_MODE", "capture-quality-short");
+        let mut cmd = harness.plow();
+        cmd.env("PLOW_LICENSE", sign::mint_runtime_coverage_jwt());
+        cmd.env("PLOW_STUB_MODE", "capture-quality-short");
         for arg in harness.health_args_with_format("json") {
             cmd.arg(arg);
         }
@@ -507,9 +507,9 @@ mod gated {
 
     fn exit_code_case(mode: &str, expected: i32) {
         let harness = Harness::new();
-        let mut cmd = harness.fallow();
-        cmd.env("FALLOW_LICENSE", sign::mint_runtime_coverage_jwt());
-        cmd.env("FALLOW_STUB_MODE", mode);
+        let mut cmd = harness.plow();
+        cmd.env("PLOW_LICENSE", sign::mint_runtime_coverage_jwt());
+        cmd.env("PLOW_STUB_MODE", mode);
         for arg in harness.health_args() {
             cmd.arg(arg);
         }

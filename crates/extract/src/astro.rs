@@ -21,7 +21,7 @@ use crate::sfc::{SfcScript, SourceRegion};
 use crate::source_map::ExtractionResult;
 use crate::visitor::ModuleInfoExtractor;
 use crate::{ImportInfo, ImportedName, ModuleInfo};
-use fallow_types::discover::FileId;
+use plow_types::discover::FileId;
 
 /// Regex to extract Astro frontmatter (content between `---` delimiters at file start).
 static ASTRO_FRONTMATTER_RE: LazyLock<regex::Regex> =
@@ -432,7 +432,7 @@ pub(crate) fn parse_astro_to_module(
     need_complexity: bool,
 ) -> ModuleInfo {
     let parsed_suppressions = crate::suppress::parse_suppressions_from_source(source);
-    let line_offsets = fallow_types::extract::compute_line_offsets(source);
+    let line_offsets = plow_types::extract::compute_line_offsets(source);
 
     let frontmatter = extract_astro_frontmatter(source);
     let template_offset = frontmatter
@@ -558,10 +558,10 @@ fn compute_astro_frontmatter_complexity(
     body: &str,
     body_byte_offset: usize,
     source_line_offsets: &[u32],
-) -> Vec<fallow_types::extract::FunctionComplexity> {
-    let body_line_offsets = fallow_types::extract::compute_line_offsets(body);
+) -> Vec<plow_types::extract::FunctionComplexity> {
+    let body_line_offsets = plow_types::extract::compute_line_offsets(body);
     let mut complexity = crate::complexity::compute_complexity(program, body, &body_line_offsets);
-    let (body_start_line, body_start_col) = fallow_types::extract::byte_offset_to_line_col(
+    let (body_start_line, body_start_col) = plow_types::extract::byte_offset_to_line_col(
         source_line_offsets,
         u32::try_from(body_byte_offset).unwrap_or(u32::MAX),
     );
@@ -902,7 +902,7 @@ mod tests {
 
     #[test]
     fn parse_astro_to_module_has_suppressions() {
-        let source = "---\n// fallow-ignore-file\nconst x = 1;\n---\n<div />";
+        let source = "---\n// plow-ignore-file\nconst x = 1;\n---\n<div />";
         let info = parse_astro_to_module(FileId(0), source, 0, false);
         assert!(!info.suppressions.is_empty());
         assert_eq!(info.suppressions[0].line, 0);

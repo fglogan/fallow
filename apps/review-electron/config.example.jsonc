@@ -1,9 +1,9 @@
 {
-  // Copy to ~/.fallow-review/config.jsonc to override defaults.
+  // Copy to ~/.plow-review/config.jsonc to override defaults.
   "$schema": "./config.schema.json",
 
-  // Path to the `fallow` binary (default: `fallow` on PATH, or FALLOW_BIN).
-  "fallowBin": null,
+  // Path to the `plow` binary (default: `plow` on PATH, or PLOW_BIN).
+  "plowBin": null,
 
   // Default URL the live-app embed / screenshot tools open.
   "defaultUrl": "http://localhost:5273",

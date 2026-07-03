@@ -1,4 +1,4 @@
-//! `fallow coverage upload-source-maps` - upload build source maps to fallow cloud.
+//! `plow coverage upload-source-maps` - upload build source maps to plow cloud.
 //!
 //! This is a CI-side helper for bundled runtime coverage. The beacon reports
 //! coverage against deployed bundle paths; source maps uploaded here let the
@@ -10,8 +10,8 @@ use std::process::{Command, ExitCode};
 use std::time::SystemTime;
 
 use colored::Colorize as _;
-use fallow_engine::clear_ambient_git_env;
 use globset::{Glob, GlobSet, GlobSetBuilder};
+use plow_engine::clear_ambient_git_env;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -21,8 +21,8 @@ use crate::api::{
     try_api_agent_with_timeout,
 };
 
-const LOG_PREFIX: &str = "fallow coverage upload-source-maps";
-const DEFAULT_ENDPOINT: &str = "https://api.fallow.cloud";
+const LOG_PREFIX: &str = "plow coverage upload-source-maps";
+const DEFAULT_ENDPOINT: &str = "https://api.plow.cloud";
 const CONNECT_TIMEOUT_SECS: u64 = 5;
 const TOTAL_TIMEOUT_SECS: u64 = 60;
 const MAX_ATTEMPTS: u8 = 3;
@@ -403,8 +403,8 @@ fn to_posix_string(path: &Path) -> String {
 }
 
 fn resolve_api_key() -> Result<String, UploadSourceMapsError> {
-    env_non_empty("FALLOW_API_KEY")
-        .ok_or_else(|| UploadSourceMapsError::Validation("FALLOW_API_KEY is required".to_owned()))
+    env_non_empty("PLOW_API_KEY")
+        .ok_or_else(|| UploadSourceMapsError::Validation("PLOW_API_KEY is required".to_owned()))
 }
 
 #[derive(Debug, Clone)]
@@ -744,7 +744,7 @@ fn endpoint_url(override_endpoint: Option<&str>, repo: &str) -> String {
 fn display_endpoint_url(override_endpoint: Option<&str>, repo: &str) -> String {
     let base = override_endpoint.map_or_else(
         || {
-            std::env::var("FALLOW_API_URL")
+            std::env::var("PLOW_API_URL")
                 .ok()
                 .filter(|value| !value.trim().is_empty())
                 .map_or_else(

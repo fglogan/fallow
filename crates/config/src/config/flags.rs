@@ -20,8 +20,8 @@ pub struct SdkPattern {
 
 /// Feature flag detection configuration.
 ///
-/// Controls which patterns fallow uses to detect feature flags in source code.
-/// Configured via the `flags` section in `.fallowrc.json`, `.fallowrc.jsonc`, `fallow.toml`, or `.fallow.toml`.
+/// Controls which patterns plow uses to detect feature flags in source code.
+/// Configured via the `flags` section in `.plowrc.json`, `.plowrc.jsonc`, `plow.toml`, or `.plow.toml`.
 ///
 /// # Examples
 ///

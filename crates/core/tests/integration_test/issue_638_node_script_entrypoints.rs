@@ -5,7 +5,7 @@ use super::common::{create_config, fixture_path};
 
 fn unused_file_paths(
     root: &std::path::Path,
-    results: &fallow_types::results::AnalysisResults,
+    results: &plow_types::results::AnalysisResults,
 ) -> Vec<String> {
     results
         .unused_files
@@ -27,7 +27,7 @@ fn issue_638_node_script_directory_index_and_fork_runner_are_reachable() {
     let root = fixture_path("issue-638-node-script-entrypoints");
     let mut config = create_config(root.clone());
     config.production = true;
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_paths = unused_file_paths(&root, &results);
 

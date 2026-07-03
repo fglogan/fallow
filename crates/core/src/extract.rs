@@ -1,17 +1,17 @@
-//! Re-exports from `fallow-extract`.
+//! Re-exports from `plow-extract`.
 //!
-//! All parsing/extraction logic has been moved to the `fallow-extract` crate.
+//! All parsing/extraction logic has been moved to the `plow-extract` crate.
 //! This module provides backwards-compatible re-exports so that
-//! `fallow_core::extract::*` paths continue to resolve.
+//! `plow_core::extract::*` paths continue to resolve.
 
-pub use fallow_extract::{
+pub use plow_extract::{
     DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName, ImportInfo, ImportedName,
     MemberAccess, MemberInfo, MemberKind, ModuleInfo, ParseResult, ReExportInfo, RequireCallInfo,
     VisibilityTag,
 };
-pub use fallow_types::extract::{SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason};
+pub use plow_types::extract::{SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason};
 
-pub use fallow_extract::{
+pub use plow_extract::{
     MarkupClassScan, MarkupClassToken, TailwindArbitraryUse, ThemeScan, ThemeTokenDef,
     compute_css_analytics, extract_apply_tokens, extract_astro_frontmatter,
     extract_astro_style_regions, extract_astro_template_regions, extract_css_module_exports,
@@ -22,10 +22,10 @@ pub use fallow_extract::{
     sfc_virtual_stylesheet, strip_glimmer_templates,
 };
 
-pub use fallow_extract::astro;
-pub use fallow_extract::css;
-pub use fallow_extract::flags;
-pub use fallow_extract::inventory;
-pub use fallow_extract::mdx;
-pub use fallow_extract::sfc;
-pub use fallow_extract::visitor;
+pub use plow_extract::astro;
+pub use plow_extract::css;
+pub use plow_extract::flags;
+pub use plow_extract::inventory;
+pub use plow_extract::mdx;
+pub use plow_extract::sfc;
+pub use plow_extract::visitor;

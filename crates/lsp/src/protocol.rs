@@ -1,10 +1,10 @@
 use std::path::Path;
 
-use fallow_api::{
+use ls_types::notification;
+use plow_api::{
     EditorAnalysisResults as AnalysisResults, EditorDuplicationReport as DuplicationReport,
 };
-use fallow_types::issue_meta::{IssueKindMeta, diagnostic_issue_metas};
-use ls_types::notification;
+use plow_types::issue_meta::{IssueKindMeta, diagnostic_issue_metas};
 use serde::{Deserialize, Serialize};
 
 /// Custom notification sent to the client after every analysis completes.
@@ -14,7 +14,7 @@ pub enum AnalysisComplete {}
 
 impl notification::Notification for AnalysisComplete {
     type Params = AnalysisCompleteParams;
-    const METHOD: &'static str = "fallow/analysisComplete";
+    const METHOD: &'static str = "plow/analysisComplete";
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -156,7 +156,7 @@ pub fn config_load_error_detail(
 ) -> String {
     match explicit_config_path {
         Some(path) => format!(
-            "fallow.configPath '{}' failed to load for {}: {err} (no diagnostics will be produced)",
+            "plow.configPath '{}' failed to load for {}: {err} (no diagnostics will be produced)",
             path.display(),
             project_root.display()
         ),

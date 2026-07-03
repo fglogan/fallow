@@ -13,7 +13,7 @@ use crate::{
     DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName, ImportInfo, ImportedName,
     MemberAccess, ReExportInfo, RequireCallInfo, VisibilityTag,
 };
-use fallow_types::extract::{
+use plow_types::extract::{
     AngularComponentSelector, CalleeUse, ClassHeritageInfo, DiFramework, DiKeySite, DiRole,
     LocalTypeDeclaration, MisplacedDirectiveSite, PublicSignatureTypeReference,
 };
@@ -719,7 +719,7 @@ impl ModuleInfoExtractor {
             // React props harvest (Feature A): a `type X = { a; b }` whose
             // annotation is a plain object literal with NO type parameters can
             // back a `(props: X) => props.a` component. A generic alias
-            // (`type X<T> = ...`) is left out (fallow cannot substitute T), so
+            // (`type X<T> = ...`) is left out (plow cannot substitute T), so
             // such a typed param abstains.
             if alias.type_parameters.is_none() {
                 self.record_react_object_type_props(&alias.id.name, &type_lit.members);
@@ -740,7 +740,7 @@ impl ModuleInfoExtractor {
         // React props harvest (Feature A): a plain `interface X { a; b }` with no
         // `extends` heritage and no type parameters can back a
         // `(props: X) => props.a` component. An `interface X extends Y` or a
-        // generic `interface X<T>` is excluded (fallow cannot expand the parent
+        // generic `interface X<T>` is excluded (plow cannot expand the parent
         // members / substitute T), so such a typed param abstains.
         if iface.extends.is_empty() && iface.type_parameters.is_none() {
             self.record_react_object_type_props(&iface.id.name, &iface.body.body);
@@ -1990,7 +1990,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             // (anchored at the `customElements.define(...)` call), then keep the
             // class credited as side-effect-used.
             self.registered_custom_elements
-                .push(fallow_types::extract::RegisteredCustomElement {
+                .push(plow_types::extract::RegisteredCustomElement {
                     tag,
                     class_local_name: class_name.clone(),
                     span_start: expr.span.start,
@@ -2694,7 +2694,7 @@ fn tainted_source_path(expr: &Expression<'_>) -> Option<String> {
         Expression::AwaitExpression(await_expr) => tainted_source_path(&await_expr.argument),
         Expression::StaticMemberExpression(member) => {
             if let Some(full) = flatten_member_path(expr)
-                && fallow_types::extract::is_public_env_path(&full)
+                && plow_types::extract::is_public_env_path(&full)
             {
                 return None;
             }

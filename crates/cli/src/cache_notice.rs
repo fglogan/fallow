@@ -2,11 +2,11 @@ use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 
-use fallow_config::OutputFormat;
+use plow_config::OutputFormat;
 
 const DO_NOT_TRACK_ENV: &str = "DO_NOT_TRACK";
-const TELEMETRY_DISABLED_ENV: &str = "FALLOW_TELEMETRY_DISABLED";
-const UPDATE_CHECK_ENV: &str = "FALLOW_UPDATE_CHECK";
+const TELEMETRY_DISABLED_ENV: &str = "PLOW_TELEMETRY_DISABLED";
+const UPDATE_CHECK_ENV: &str = "PLOW_UPDATE_CHECK";
 
 static CACHE_NOTICE: LazyLock<Mutex<Option<CacheNoticeCandidate>>> =
     LazyLock::new(|| Mutex::new(None));
@@ -69,7 +69,7 @@ pub fn maybe_print_created_notice() -> bool {
         return false;
     }
     eprintln!(
-        "note: caching analysis to {} (set FALLOW_CACHE_DIR or cache.dir to relocate, --no-cache to disable)",
+        "note: caching analysis to {} (set PLOW_CACHE_DIR or cache.dir to relocate, --no-cache to disable)",
         display_cache_dir(&candidate.root, &candidate.cache_dir)
     );
     true
@@ -173,13 +173,10 @@ mod tests {
     #[test]
     fn display_cache_dir_prefers_project_relative_path() {
         let root = Path::new("/repo");
+        assert_eq!(display_cache_dir(root, Path::new("/repo/.plow")), ".plow/");
         assert_eq!(
-            display_cache_dir(root, Path::new("/repo/.fallow")),
-            ".fallow/"
-        );
-        assert_eq!(
-            display_cache_dir(root, Path::new("/tmp/fallow-cache")),
-            "/tmp/fallow-cache/"
+            display_cache_dir(root, Path::new("/tmp/plow-cache")),
+            "/tmp/plow-cache/"
         );
     }
 
@@ -197,7 +194,7 @@ mod tests {
         clear_candidate();
 
         let dir = tempfile::tempdir().expect("tempdir");
-        let cache_dir = dir.path().join(".fallow");
+        let cache_dir = dir.path().join(".plow");
         std::fs::create_dir_all(&cache_dir).expect("create cache dir");
         *CACHE_NOTICE.lock().expect("cache notice lock") = Some(CacheNoticeCandidate {
             root: dir.path().to_path_buf(),
@@ -217,7 +214,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         *CACHE_NOTICE.lock().expect("cache notice lock") = Some(CacheNoticeCandidate {
             root: dir.path().to_path_buf(),
-            cache_dir: dir.path().join(".fallow"),
+            cache_dir: dir.path().join(".plow"),
             existed_before: false,
         });
 
@@ -231,7 +228,7 @@ mod tests {
         clear_candidate();
 
         let dir = tempfile::tempdir().expect("tempdir");
-        let cache_dir = dir.path().join(".fallow");
+        let cache_dir = dir.path().join(".plow");
         std::fs::create_dir_all(&cache_dir).expect("create cache dir");
         *CACHE_NOTICE.lock().expect("cache notice lock") = Some(CacheNoticeCandidate {
             root: dir.path().to_path_buf(),

@@ -1,12 +1,12 @@
 use crate::params::ExplainParams;
 
-use fallow_api::{RootEnvelopeMode, serialize_explain_programmatic_json};
+use plow_api::{RootEnvelopeMode, serialize_explain_programmatic_json};
 use rmcp::ErrorData as McpError;
 use rmcp::model::CallToolResult;
 
 use super::api_runtime::{json_success, programmatic_error_body};
 
-/// Run the `fallow_explain` tool through the typed programmatic API.
+/// Run the `plow_explain` tool through the typed programmatic API.
 pub async fn run_explain(_binary: &str, params: ExplainParams) -> Result<CallToolResult, McpError> {
     match serialize_explain_programmatic_json(&params.issue_type, RootEnvelopeMode::Tagged, None) {
         Ok(value) => Ok(json_success(&value)),
@@ -53,7 +53,7 @@ mod tests {
         };
         let json: serde_json::Value = serde_json::from_str(&text.text).expect("json");
         assert_eq!(json["kind"], "explain");
-        assert_eq!(json["id"], "fallow/unused-export");
+        assert_eq!(json["id"], "plow/unused-export");
     }
 
     #[tokio::test]

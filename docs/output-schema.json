@@ -1,10 +1,10 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "Fallow JSON Output Schemas",
-  "description": "Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator (for example `dead-code`, `dead-code-grouped`, `health`, `dupes`, `combined`, `audit`, `explain`, `inspect_target`, `impact`, `security`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `review-envelope`, and `review-reconcile`). Consumers should branch on `kind` instead of probing for unique field presence. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array.",
+  "title": "Plow JSON Output Schemas",
+  "description": "Schemas for the JSON output of plow commands. Object-shaped envelopes covered by the `PlowOutput` contract carry a top-level `kind` discriminator (for example `dead-code`, `dead-code-grouped`, `health`, `dupes`, `combined`, `audit`, `explain`, `inspect_target`, `impact`, `security`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `review-envelope`, and `review-reconcile`). Consumers should branch on `kind` instead of probing for unique field presence. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array.",
   "oneOf": [
     {
-      "$ref": "#/definitions/FallowOutput"
+      "$ref": "#/definitions/PlowOutput"
     },
     {
       "$ref": "#/definitions/CodeClimateOutput"
@@ -76,8 +76,8 @@
         "version",
         "elapsed_ms"
       ],
-      "title": "fallow --format json (bare, combined)",
-      "description": "Bare `fallow --format json` envelope."
+      "title": "plow --format json (bare, combined)",
+      "description": "Bare `plow --format json` envelope."
     },
     "AuditOutput": {
       "type": "object",
@@ -105,7 +105,7 @@
             "string",
             "null"
           ],
-          "description": "Human-readable provenance of `base_ref`, e.g. `merge-base with\norigin/main`, `local main`, or `FALLOW_AUDIT_BASE=upstream/main`.\nPresent when the base was auto-detected or set via `FALLOW_AUDIT_BASE`;\nabsent for an explicit `--base` (the ref the user typed is already\nself-describing)."
+          "description": "Human-readable provenance of `base_ref`, e.g. `merge-base with\norigin/main`, `local main`, or `PLOW_AUDIT_BASE=upstream/main`.\nPresent when the base was auto-detected or set via `PLOW_AUDIT_BASE`;\nabsent for an explicit `--base` (the ref the user typed is already\nself-describing)."
         },
         "head_sha": {
           "type": [
@@ -187,12 +187,12 @@
         "summary",
         "attribution"
       ],
-      "title": "fallow audit --format json",
-      "description": "`fallow audit --format json` envelope."
+      "title": "plow audit --format json",
+      "description": "`plow audit --format json` envelope."
     },
     "AuditIntroduced": {
       "type": "boolean",
-      "description": "Audit-mode marker emitted on each finding when `fallow audit --format json`\nruns with a base ref. `true` means the finding's structural key was not\npresent at the base ref (introduced by the current changeset); `false`\nmeans it was inherited.\n\nOutside of audit sub-results the field is omitted, so call sites typically\nhold `Option<AuditIntroduced>`. Renders to the JSON wire as a bare boolean."
+      "description": "Audit-mode marker emitted on each finding when `plow audit --format json`\nruns with a base ref. `true` means the finding's structural key was not\npresent at the base ref (introduced by the current changeset); `false`\nmeans it was inherited.\n\nOutside of audit sub-results the field is omitted, so call sites typically\nhold `Option<AuditIntroduced>`. Renders to the JSON wire as a bare boolean."
     },
     "ExplainOutput": {
       "type": "object",
@@ -228,8 +228,8 @@
         "how_to_fix",
         "docs"
       ],
-      "title": "fallow explain <issue-type> --format json",
-      "description": "Envelope emitted by `fallow explain <issue-type> --format json`.\n\nStandalone rule explanation. This command does not run project analysis\nand intentionally returns a compact object without `schema_version` /\n`version` metadata; consumers that need those should call any other\nfallow JSON-producing command."
+      "title": "plow explain <issue-type> --format json",
+      "description": "Envelope emitted by `plow explain <issue-type> --format json`.\n\nStandalone rule explanation. This command does not run project analysis\nand intentionally returns a compact object without `schema_version` /\n`version` metadata; consumers that need those should call any other\nplow JSON-producing command."
     },
     "CoverageSetupOutput": {
       "type": "object",
@@ -312,8 +312,8 @@
         "next_steps",
         "warnings"
       ],
-      "title": "fallow coverage setup --json",
-      "description": "`fallow coverage setup --json` envelope."
+      "title": "plow coverage setup --json",
+      "description": "`plow coverage setup --json` envelope."
     },
     "CoverageSetupMember": {
       "type": "object",
@@ -803,7 +803,7 @@
           "items": {
             "$ref": "#/definitions/NextStep"
           },
-          "description": "Read-only follow-up commands computed from this run's findings, emitted\nat the JSON root so an agent acting on the output is pointed at fallow's\nadjacent verification capabilities (trace, complexity breakdown, audit,\nworkspace scoping). Each command is runnable as-is and never mutating;\nsee [`NextStep`] for both contracts. Omitted when empty or when\n`FALLOW_SUGGESTIONS=off`; does NOT contribute to `total_issues`."
+          "description": "Read-only follow-up commands computed from this run's findings, emitted\nat the JSON root so an agent acting on the output is pointed at plow's\nadjacent verification capabilities (trace, complexity breakdown, audit,\nworkspace scoping). Each command is runnable as-is and never mutating;\nsee [`NextStep`] for both contracts. Omitted when empty or when\n`PLOW_SUGGESTIONS=off`; does NOT contribute to `total_issues`."
         }
       },
       "required": [
@@ -827,8 +827,8 @@
         "type_only_dependencies",
         "circular_dependencies"
       ],
-      "description": "Envelope emitted by `fallow dead-code --format json` (plus the `check`\nblock inside the combined and audit envelopes).\n\nThe body is the full `AnalysisResults` flattened into the envelope so\nevery issue array (`unused_files`, `unused_exports`, ...) lives at the\ntop level, matching the existing wire shape. `entry_points` lifts the\notherwise `#[serde(skip)]`'d `AnalysisResults::entry_point_summary` back\ninto the JSON output. `summary` carries the per-category counts the\nJSON layer always emits.",
-      "title": "fallow dead-code --format json"
+      "description": "Envelope emitted by `plow dead-code --format json` (plus the `check`\nblock inside the combined and audit envelopes).\n\nThe body is the full `AnalysisResults` flattened into the envelope so\nevery issue array (`unused_files`, `unused_exports`, ...) lives at the\ntop level, matching the existing wire shape. `entry_points` lifts the\notherwise `#[serde(skip)]`'d `AnalysisResults::entry_point_summary` back\ninto the JSON output. `summary` carries the per-category counts the\nJSON layer always emits.",
+      "title": "plow dead-code --format json"
     },
     "CheckGroupedOutput": {
       "type": "object",
@@ -880,8 +880,8 @@
         "total_issues",
         "groups"
       ],
-      "title": "fallow dead-code --group-by <owner|directory|package|section> --format json",
-      "description": "Envelope emitted by `fallow dead-code --group-by ... --format json`.\n\nIssues are partitioned into resolver buckets (CODEOWNERS team, directory\nprefix, workspace package, or GitLab CODEOWNERS section) instead of flat\narrays. Each bucket carries the same issue-array shape as the ungrouped\n`CheckOutput` body, plus per-group `key` / `owners` / `total_issues`."
+      "title": "plow dead-code --group-by <owner|directory|package|section> --format json",
+      "description": "Envelope emitted by `plow dead-code --group-by ... --format json`.\n\nIssues are partitioned into resolver buckets (CODEOWNERS team, directory\nprefix, workspace package, or GitLab CODEOWNERS section) instead of flat\narrays. Each bucket carries the same issue-array shape as the ungrouped\n`CheckOutput` body, plus per-group `key` / `owners` / `total_issues`."
     },
     "CheckGroupedEntry": {
       "type": "object",
@@ -1429,7 +1429,7 @@
               "type": "null"
             }
           ],
-          "description": "Styling-health score and letter grade: a SECOND health axis derived from\nthe CSS analytics (the design-system axis), orthogonal to the JS/TS code\n`health_score`. Present only with `--css` (the same condition as\n`css_analytics`), so a plain `fallow health` run is byte-unchanged. The\ncode score is never affected by this field."
+          "description": "Styling-health score and letter grade: a SECOND health axis derived from\nthe CSS analytics (the design-system axis), orthogonal to the JS/TS code\n`health_score`. Present only with `--css` (the same condition as\n`css_analytics`), so a plain `plow health` run is byte-unchanged. The\ncode score is never affected by this field."
         },
         "grouped_by": {
           "anyOf": [
@@ -1481,8 +1481,8 @@
         "findings",
         "summary"
       ],
-      "description": "Envelope emitted by `fallow health --format json` (plus the `health` block\ninside the combined and audit envelopes).\n\nThe body is `HealthReport` flattened into the envelope so every report\nfield (`findings`, `summary`, `vital_signs`, `hotspots`, `actions_meta`,\n...) lives at the top level. Grouped runs populate `grouped_by` +\n`groups` with per-bucket recomputed metrics. The `actions_meta`\nbreadcrumb is modeled on `HealthReport` as an `Option<HealthActionsMeta>`\nand is set at construction time by the report builder when the active\n`HealthActionContext` requests suppress-line omission, so the schema\ndocuments the field and serde populates it natively.",
-      "title": "fallow health --format json"
+      "description": "Envelope emitted by `plow health --format json` (plus the `health` block\ninside the combined and audit envelopes).\n\nThe body is `HealthReport` flattened into the envelope so every report\nfield (`findings`, `summary`, `vital_signs`, `hotspots`, `actions_meta`,\n...) lives at the top level. Grouped runs populate `grouped_by` +\n`groups` with per-bucket recomputed metrics. The `actions_meta`\nbreadcrumb is modeled on `HealthReport` as an `Option<HealthActionsMeta>`\nand is set at construction time by the report builder when the active\n`HealthActionContext` requests suppress-line omission, so the schema\ndocuments the field and serde populates it natively.",
+      "title": "plow health --format json"
     },
     "HealthGroup": {
       "type": "object",
@@ -1600,7 +1600,7 @@
       "type": "object",
       "properties": {
         "schema_version": {
-          "description": "Runtime coverage JSON contract version. This is scoped to the\n`runtime_coverage` block and is independent of the top-level fallow\nJSON `schema_version`.",
+          "description": "Runtime coverage JSON contract version. This is scoped to the\n`runtime_coverage` block and is independent of the top-level plow\nJSON `schema_version`.",
           "$ref": "#/definitions/RuntimeCoverageSchemaVersion"
         },
         "verdict": {
@@ -1666,7 +1666,7 @@
         },
         "actionable": {
           "type": "boolean",
-          "description": "Whether an autonomous agent may act on this report (fallow-rs/fallow-cloud#316,\nmirrors the cloud runtime-context contract). `false` when the capture\ncarries no usable runtime evidence (no tracked functions); then\n`actionability_verdict` is `insufficient_evidence` and\n`actionability_reason` explains. F4: a non-action floor, never a gate on a\npositive verdict."
+          "description": "Whether an autonomous agent may act on this report (plow-rs/plow-cloud#316,\nmirrors the cloud runtime-context contract). `false` when the capture\ncarries no usable runtime evidence (no tracked functions); then\n`actionability_verdict` is `insufficient_evidence` and\n`actionability_reason` explains. F4: a non-action floor, never a gate on a\npositive verdict."
         },
         "actionability_reason": {
           "type": [
@@ -1683,7 +1683,7 @@
           "description": "First-class non-action verdict (`insufficient_evidence`) when not\nactionable; `null` otherwise. Mirrors the cloud runtime-context `verdict`;\nnamed distinctly from the report-context `verdict` above to avoid a\ncollision."
         },
         "provenance": {
-          "description": "Provenance an agent reads to self-attenuate confidence (fallow-rs/fallow-cloud#319,\nmirrors the cloud runtime-context `provenance`). F4: context only.",
+          "description": "Provenance an agent reads to self-attenuate confidence (plow-rs/plow-cloud#319,\nmirrors the cloud runtime-context `provenance`). F4: context only.",
           "$ref": "#/definitions/RuntimeCoverageProvenance"
         }
       },
@@ -1696,7 +1696,7 @@
         "actionable",
         "provenance"
       ],
-      "description": "Runtime coverage findings merged into the health report or emitted by\n`fallow coverage analyze`. Present in health output when --runtime-coverage\nis used. Shape mirrors the runtime coverage JSON contract; cloud mode\nfetches runtime facts explicitly and merges them locally with AST/static\nanalysis."
+      "description": "Runtime coverage findings merged into the health report or emitted by\n`plow coverage analyze`. Present in health output when --runtime-coverage\nis used. Shape mirrors the runtime coverage JSON contract; cloud mode\nfetches runtime facts explicitly and merges them locally with AST/static\nanalysis."
     },
     "CoverageAnalyzeOutput": {
       "type": "object",
@@ -1730,13 +1730,13 @@
         "elapsed_ms",
         "runtime_coverage"
       ],
-      "title": "fallow coverage analyze --format json"
+      "title": "plow coverage analyze --format json"
     },
     "RuntimeCoverageSummary": {
       "type": "object",
       "properties": {
         "data_source": {
-          "description": "Runtime evidence source used for this report. Local mode reads a\nsupplied runtime coverage artifact; cloud mode pulls the latest\nfallow.cloud runtime context after explicit opt-in.",
+          "description": "Runtime evidence source used for this report. Local mode reads a\nsupplied runtime coverage artifact; cloud mode pulls the latest\nplow.cloud runtime context after explicit opt-in.",
           "$ref": "#/definitions/RuntimeCoverageDataSource"
         },
         "last_received_at": {
@@ -1801,7 +1801,7 @@
         "period_days",
         "deployments_seen"
       ],
-      "description": "Summary block mirroring `fallow_cov_protocol::Summary` (0.3 shape)."
+      "description": "Summary block mirroring `plow_cov_protocol::Summary` (0.3 shape)."
     },
     "RuntimeCoverageCaptureQuality": {
       "type": "object",
@@ -1840,7 +1840,7 @@
         "license-expired-grace",
         "unknown"
       ],
-      "description": "Top-level verdict for the whole runtime-coverage report. Mirrors\n`fallow_cov_protocol::ReportVerdict`. The verdict is the SINGLE most\nactionable finding; for the full set of findings see\n[`RuntimeCoverageReport::signals`]. The verdict promotes `hot-path-touched`\nabove `cold-code-detected` in PR-review context (when the CLI was\ngiven a change-scope: `--diff-file` or `--changed-since`) because the\ntouched-hot-path is event-tied to the current diff and reviewers need\nit to be the top-line signal. In standalone analysis (no change\nscope), `cold-code-detected` remains primary."
+      "description": "Top-level verdict for the whole runtime-coverage report. Mirrors\n`plow_cov_protocol::ReportVerdict`. The verdict is the SINGLE most\nactionable finding; for the full set of findings see\n[`RuntimeCoverageReport::signals`]. The verdict promotes `hot-path-touched`\nabove `cold-code-detected` in PR-review context (when the CLI was\ngiven a change-scope: `--diff-file` or `--changed-since`) because the\ntouched-hot-path is event-tied to the current diff and reviewers need\nit to be the top-line signal. In standalone analysis (no change\nscope), `cold-code-detected` remains primary."
     },
     "RuntimeCoverageVerdict": {
       "type": "string",
@@ -1852,7 +1852,7 @@
         "active",
         "unknown"
       ],
-      "description": "Protocol-level per-function runtime coverage verdict derived from the\ndecision table in fallow-cov-protocol. The CLI's `runtime_coverage.findings`\narray omits `active` entries even though the underlying enum still includes\nit."
+      "description": "Protocol-level per-function runtime coverage verdict derived from the\ndecision table in plow-cov-protocol. The CLI's `runtime_coverage.findings`\narray omits `active` entries even though the underlying enum still includes\nit."
     },
     "RuntimeCoverageSignal": {
       "type": "string",
@@ -1913,7 +1913,7 @@
         "observation_days",
         "deployments_observed"
       ],
-      "description": "Supporting evidence for a finding (mirrors `fallow_cov_protocol::Evidence`)."
+      "description": "Supporting evidence for a finding (mirrors `plow_cov_protocol::Evidence`)."
     },
     "RuntimeCoverageWatermark": {
       "type": "string",
@@ -1929,14 +1929,14 @@
       "properties": {
         "type": {
           "type": "string",
-          "description": "Action identifier, normalized to `type` in JSON output. Known values\nemitted by `fallow coverage analyze`: `delete-cold-code`\n(verdict=safe_to_delete), `review-runtime` (verdict=review_required).\nThe sidecar may emit additional protocol-specific identifiers;\nconsumers should treat unknown values as forward-compat extensions."
+          "description": "Action identifier, normalized to `type` in JSON output. Known values\nemitted by `plow coverage analyze`: `delete-cold-code`\n(verdict=safe_to_delete), `review-runtime` (verdict=review_required).\nThe sidecar may emit additional protocol-specific identifiers;\nconsumers should treat unknown values as forward-compat extensions."
         },
         "description": {
           "type": "string"
         },
         "auto_fixable": {
           "type": "boolean",
-          "description": "Whether fallow can apply this action automatically."
+          "description": "Whether plow can apply this action automatically."
         }
       },
       "required": [
@@ -1967,21 +1967,21 @@
       "properties": {
         "id": {
           "type": "string",
-          "description": "Per-finding suppression key of the form `fallow:prod:<hash>` (first 8 hex\nof SHA-256(file + function + line + 'prod')). Hashes the current line, so\nit changes when the function moves. Use this to suppress one finding."
+          "description": "Per-finding suppression key of the form `plow:prod:<hash>` (first 8 hex\nof SHA-256(file + function + line + 'prod')). Hashes the current line, so\nit changes when the function moves. Use this to suppress one finding."
         },
         "stable_id": {
           "type": [
             "string",
             "null"
           ],
-          "description": "Cross-surface join key of the form `fallow:fn:<hash>`\n(`fallow_cov_protocol::function_identity_id`, hashes file + name +\nstart_line). The same function shares ONE value across findings, hot\npaths, blast-radius, and importance entries (the per-finding `id` uses a\nper-surface salt, so it differs by surface), and across V8, Istanbul,\nand oxc producers (columns are excluded from the hash). Like `id`, it\nchanges when the function's file, name, or start line changes; it is a\ncross-surface / cross-producer join key, not a line-move-immune one.\n`null` when the producing surface (or an un-migrated cloud) supplied no\n`FunctionIdentity`."
+          "description": "Cross-surface join key of the form `plow:fn:<hash>`\n(`plow_cov_protocol::function_identity_id`, hashes file + name +\nstart_line). The same function shares ONE value across findings, hot\npaths, blast-radius, and importance entries (the per-finding `id` uses a\nper-surface salt, so it differs by surface), and across V8, Istanbul,\nand oxc producers (columns are excluded from the hash). Like `id`, it\nchanges when the function's file, name, or start line changes; it is a\ncross-surface / cross-producer join key, not a line-move-immune one.\n`null` when the producing surface (or an un-migrated cloud) supplied no\n`FunctionIdentity`."
         },
         "source_hash": {
           "type": [
             "string",
             "null"
           ],
-          "description": "Content digest of the function's full-span source slice\n(`fallow_cov_protocol::source_hash_for`: first 8 bytes of SHA-256 as 16\nlowercase hex). Unlike `stable_id`, this is stable across line moves: a\nmoved-but-unedited function keeps the same value, so baselines can\nsuppress it after a pure line shift. `null` when the producing surface\nsupplied no `source_hash`."
+          "description": "Content digest of the function's full-span source slice\n(`plow_cov_protocol::source_hash_for`: first 8 bytes of SHA-256 as 16\nlowercase hex). Unlike `stable_id`, this is stable across line moves: a\nmoved-but-unedited function keeps the same value, so baselines can\nsuppress it after a pure line shift. `null` when the producing surface\nsupplied no `source_hash`."
         },
         "path": {
           "type": "string",
@@ -2045,14 +2045,14 @@
       "properties": {
         "id": {
           "type": "string",
-          "description": "Stable content-hash ID of the form `fallow:hot:<hash>`."
+          "description": "Stable content-hash ID of the form `plow:hot:<hash>`."
         },
         "stable_id": {
           "type": [
             "string",
             "null"
           ],
-          "description": "Cross-surface join key (`fallow:fn:<hash>`) for the hot function. Stable\nacross line moves; shared with the same function's findings / blast /\nimportance entries. `null` when no `FunctionIdentity` was supplied."
+          "description": "Cross-surface join key (`plow:fn:<hash>`) for the hot function. Stable\nacross line moves; shared with the same function's findings / blast /\nimportance entries. `null` when no `FunctionIdentity` was supplied."
         },
         "path": {
           "type": "string",
@@ -2068,7 +2068,7 @@
         },
         "end_line": {
           "type": "integer",
-          "description": "1-indexed line the function ends on (inclusive). Mirrors\n`fallow_cov_protocol::HotPath::end_line` (added in protocol 0.5).\nOlder 0.4-shape sidecars omit the field on the wire; serde defaults\nto `0`, which the line-overlap filter MUST treat as a single-line\nrange (`line..=line`) rather than a span."
+          "description": "1-indexed line the function ends on (inclusive). Mirrors\n`plow_cov_protocol::HotPath::end_line` (added in protocol 0.5).\nOlder 0.4-shape sidecars omit the field on the wire; serde defaults\nto `0`, which the line-overlap filter MUST treat as a single-line\nrange (`line..=line`) rather than a span."
         },
         "invocations": {
           "type": "integer",
@@ -2110,14 +2110,14 @@
       "properties": {
         "id": {
           "type": "string",
-          "description": "Stable content-hash ID of the form `fallow:blast:<hash>`."
+          "description": "Stable content-hash ID of the form `plow:blast:<hash>`."
         },
         "stable_id": {
           "type": [
             "string",
             "null"
           ],
-          "description": "Cross-surface join key (`fallow:fn:<hash>`) for the function. Stable\nacross line moves; shared with the same function's findings / hot-path /\nimportance entries. `null` when no `FunctionIdentity` was supplied."
+          "description": "Cross-surface join key (`plow:fn:<hash>`) for the function. Stable\nacross line moves; shared with the same function's findings / hot-path /\nimportance entries. `null` when no `FunctionIdentity` was supplied."
         },
         "file": {
           "type": "string",
@@ -2165,14 +2165,14 @@
       "properties": {
         "id": {
           "type": "string",
-          "description": "Stable content-hash ID of the form `fallow:importance:<hash>`."
+          "description": "Stable content-hash ID of the form `plow:importance:<hash>`."
         },
         "stable_id": {
           "type": [
             "string",
             "null"
           ],
-          "description": "Cross-surface join key (`fallow:fn:<hash>`) for the function. Stable\nacross line moves; shared with the same function's findings / hot-path /\nblast-radius entries. `null` when no `FunctionIdentity` was supplied."
+          "description": "Cross-surface join key (`plow:fn:<hash>`) for the function. Stable\nacross line moves; shared with the same function's findings / hot-path /\nblast-radius entries. `null` when no `FunctionIdentity` was supplied."
         },
         "file": {
           "type": "string",
@@ -2441,7 +2441,7 @@
               "type": "null"
             }
           ],
-          "description": "Styling-health score and letter grade: a SECOND health axis derived from\nthe CSS analytics (the design-system axis), orthogonal to the JS/TS code\n`health_score`. Present only with `--css` (the same condition as\n`css_analytics`), so a plain `fallow health` run is byte-unchanged. The\ncode score is never affected by this field."
+          "description": "Styling-health score and letter grade: a SECOND health axis derived from\nthe CSS analytics (the design-system axis), orthogonal to the JS/TS code\n`health_score`. Present only with `--css` (the same condition as\n`css_analytics`), so a plain `plow health` run is byte-unchanged. The\ncode score is never affected by this field."
         }
       },
       "required": [
@@ -2546,8 +2546,8 @@
         "clone_families",
         "stats"
       ],
-      "description": "Envelope emitted by `fallow dupes --format json`.\n\n`Report` and `Group` are generic so the envelope can live in\n`fallow-output` while duplication report wrappers and grouped output\ninternals continue to migrate out of CLI/API-specific crates.",
-      "title": "fallow dupes --format json"
+      "description": "Envelope emitted by `plow dupes --format json`.\n\n`Report` and `Group` are generic so the envelope can live in\n`plow-output` while duplication report wrappers and grouped output\ninternals continue to migrate out of CLI/API-specific crates.",
+      "title": "plow dupes --format json"
     },
     "DuplicationGroup": {
       "type": "object",
@@ -2616,11 +2616,11 @@
     },
     "SchemaVersion": {
       "type": "integer",
-      "description": "Schema version for this output format (independent of tool version). Bump\npolicy: ADDITIVE changes (new optional top-level fields, new optional struct\nfields, new array entries, new MCP tools, new CLI flags that map to new\noptional fields) do NOT bump the version; consumers receive new fields\nwithout breaking. BREAKING changes (renamed fields, removed fields, type\nchanges, enum-variant removals, semantic changes to existing fields) DO\nbump. To detect newly-added fields without a bump, check field presence via\nJSON-key existence rather than gating on the version. v4 was introduced\nalongside fallow-cov-protocol 0.2 (per-finding verdict, stable IDs, evidence\nblock, renamed summary fields); v5 introduced health_score formula_version 2\nwith scale-invariant scoring semantics; v6 widened `AddToConfigAction.value`\nfrom a scalar string to `oneOf: [string, array]` so the new `ignoreExports`\naction can carry a paste-ready array of `{ file, exports }` rule objects\n(the legacy `ignoreDependencies` etc. variants still emit strings, so\nconsumers that switch on `config_key` keep working unchanged). The\nruntime-coverage block is extended additively as the protocol evolves\n(currently 0.3, which adds an optional capture_quality summary field). Other\nadditive examples: dupes --group-by adds optional grouped_by, total_issues,\ngroups fields without bumping."
+      "description": "Schema version for this output format (independent of tool version). Bump\npolicy: ADDITIVE changes (new optional top-level fields, new optional struct\nfields, new array entries, new MCP tools, new CLI flags that map to new\noptional fields) do NOT bump the version; consumers receive new fields\nwithout breaking. BREAKING changes (renamed fields, removed fields, type\nchanges, enum-variant removals, semantic changes to existing fields) DO\nbump. To detect newly-added fields without a bump, check field presence via\nJSON-key existence rather than gating on the version. v4 was introduced\nalongside plow-cov-protocol 0.2 (per-finding verdict, stable IDs, evidence\nblock, renamed summary fields); v5 introduced health_score formula_version 2\nwith scale-invariant scoring semantics; v6 widened `AddToConfigAction.value`\nfrom a scalar string to `oneOf: [string, array]` so the new `ignoreExports`\naction can carry a paste-ready array of `{ file, exports }` rule objects\n(the legacy `ignoreDependencies` etc. variants still emit strings, so\nconsumers that switch on `config_key` keep working unchanged). The\nruntime-coverage block is extended additively as the protocol evolves\n(currently 0.3, which adds an optional capture_quality summary field). Other\nadditive examples: dupes --group-by adds optional grouped_by, total_issues,\ngroups fields without bumping."
     },
     "ToolVersion": {
       "type": "string",
-      "description": "Fallow CLI version that produced this envelope. Renders to the JSON wire as\na bare string (e.g. `\"2.74.0\"`)."
+      "description": "Plow CLI version that produced this envelope. Renders to the JSON wire as\na bare string (e.g. `\"2.74.0\"`)."
     },
     "ElapsedMs": {
       "type": "integer",
@@ -3377,7 +3377,7 @@
         },
         "auto_fixable": {
           "type": "boolean",
-          "description": "Whether `fallow fix` can auto-apply this action. Today both\nvariants are manual."
+          "description": "Whether `plow fix` can auto-apply this action. Today both\nvariants are manual."
         },
         "description": {
           "type": "string",
@@ -3395,7 +3395,7 @@
             "string",
             "null"
           ],
-          "description": "The file-level comment to insert. Present on `suppress-file`\n(`// fallow-ignore-file coverage-gaps`). Absent on `add-tests`."
+          "description": "The file-level comment to insert. Present on `suppress-file`\n(`// plow-ignore-file coverage-gaps`). Absent on `add-tests`."
         }
       },
       "required": [
@@ -3403,7 +3403,7 @@
         "auto_fixable",
         "description"
       ],
-      "description": "Suggested action attached to an [`UntestedFile`] coverage-gap finding.\n\n`build_untested_file_actions` emits a two-entry array on every\nuntested-file item: an `add-tests` primary action (scaffold tests for\nthe runtime file) and a `suppress-file` action\n(`// fallow-ignore-file coverage-gaps`). Both variants share the same\nstruct shape; the field that is populated (`note` for `add-tests`,\n`comment` for `suppress-file`) depends on the `kind`.\n\n[`UntestedFile`]: ../../fallow-output/src/health_coverage_gaps.rs"
+      "description": "Suggested action attached to an [`UntestedFile`] coverage-gap finding.\n\n`build_untested_file_actions` emits a two-entry array on every\nuntested-file item: an `add-tests` primary action (scaffold tests for\nthe runtime file) and a `suppress-file` action\n(`// plow-ignore-file coverage-gaps`). Both variants share the same\nstruct shape; the field that is populated (`note` for `add-tests`,\n`comment` for `suppress-file`) depends on the `kind`.\n\n[`UntestedFile`]: ../../plow-output/src/health_coverage_gaps.rs"
     },
     "UntestedExportAction": {
       "type": "object",
@@ -3414,7 +3414,7 @@
         },
         "auto_fixable": {
           "type": "boolean",
-          "description": "Whether `fallow fix` can auto-apply this action. Today both\nvariants are manual."
+          "description": "Whether `plow fix` can auto-apply this action. Today both\nvariants are manual."
         },
         "description": {
           "type": "string",
@@ -3432,7 +3432,7 @@
             "string",
             "null"
           ],
-          "description": "The file-level comment to insert. Present on `suppress-file`\n(`// fallow-ignore-file coverage-gaps`). Absent on\n`add-test-import`."
+          "description": "The file-level comment to insert. Present on `suppress-file`\n(`// plow-ignore-file coverage-gaps`). Absent on\n`add-test-import`."
         }
       },
       "required": [
@@ -3440,7 +3440,7 @@
         "auto_fixable",
         "description"
       ],
-      "description": "Suggested action attached to an [`UntestedExport`] coverage-gap\nfinding.\n\n`build_untested_export_actions` emits a two-entry array on every\nuntested-export item: an `add-test-import` primary action (import the\nexport from a test-reachable module) and a `suppress-file` action\n(`// fallow-ignore-file coverage-gaps`). The export-specific variant\n`add-test-import` reflects that a test-reachable reference chain, not\njust any test coverage, is what closes the gap.\n\n[`UntestedExport`]: ../../fallow-output/src/health_coverage_gaps.rs"
+      "description": "Suggested action attached to an [`UntestedExport`] coverage-gap\nfinding.\n\n`build_untested_export_actions` emits a two-entry array on every\nuntested-export item: an `add-test-import` primary action (import the\nexport from a test-reachable module) and a `suppress-file` action\n(`// plow-ignore-file coverage-gaps`). The export-specific variant\n`add-test-import` reflects that a test-reachable reference chain, not\njust any test coverage, is what closes the gap.\n\n[`UntestedExport`]: ../../plow-output/src/health_coverage_gaps.rs"
     },
     "HealthScore": {
       "type": "object",
@@ -3775,23 +3775,23 @@
     "IssueAction": {
       "anyOf": [
         {
-          "description": "A code-change fix the user can apply (auto-fixable by `fallow fix` for\nsome variants, manual for others).",
+          "description": "A code-change fix the user can apply (auto-fixable by `plow fix` for\nsome variants, manual for others).",
           "$ref": "#/definitions/FixAction"
         },
         {
-          "description": "Place a `// fallow-ignore-next-line ...` comment above the offending\nline. Always manual.",
+          "description": "Place a `// plow-ignore-next-line ...` comment above the offending\nline. Always manual.",
           "$ref": "#/definitions/SuppressLineAction"
         },
         {
-          "description": "Place a `// fallow-ignore-file ...` comment at the top of the file.\nAlways manual.",
+          "description": "Place a `// plow-ignore-file ...` comment at the top of the file.\nAlways manual.",
           "$ref": "#/definitions/SuppressFileAction"
         },
         {
-          "description": "Add the offending finding to the fallow config (e.g.\n`ignoreDependencies: [\"lodash\"]`). Auto-fixable for the array-shaped\n`ignoreExports` variant when `fallow fix` can safely apply the\naction (config file exists, or no config exists and the working\ndirectory is not inside a monorepo subpackage); manual otherwise.",
+          "description": "Add the offending finding to the plow config (e.g.\n`ignoreDependencies: [\"lodash\"]`). Auto-fixable for the array-shaped\n`ignoreExports` variant when `plow fix` can safely apply the\naction (config file exists, or no config exists and the working\ndirectory is not inside a monorepo subpackage); manual otherwise.",
           "$ref": "#/definitions/AddToConfigAction"
         }
       ],
-      "description": "A suggested action attached to a finding in the JSON output. Each finding\ncarries an `actions` array; consumers (agents, IDE clients, CI bots) can\ndispatch on the `type` discriminant to choose the right remediation.\n\nThe discriminator is `type` (snake_case `type` field), the payload uses the\nmatching kebab-case identifier per variant.\n\n## `auto_fixable` is per-finding, not per action type\n\nEvery action variant carries an `auto_fixable: bool` field. The value is\nevaluated PER FINDING, not per action type: the same action type may\nappear with `auto_fixable: true` on one finding and `auto_fixable: false`\non another, depending on per-instance guards in the `fallow fix` applier.\nAgents that filter on `auto_fixable: true` must branch on the bool of\neach individual finding's action, not on the action `type` alone.\n\nCurrent per-instance flips:\n\n- `remove-catalog-entry` (`unused-catalog-entries`): `true` only when the\n  finding's `hardcoded_consumers` array is empty and the source is\n  `pnpm-workspace.yaml`. When a workspace package still pins a hardcoded\n  version of the same package, `fallow fix` skips the entry to avoid\n  breaking `pnpm install`. Bun `package.json` catalog entries are also\n  emitted with `auto_fixable: false` because the current fixer is\n  YAML-only.\n- `remove-dependency` vs `move-dependency` (dependency findings): when the\n  finding's `used_in_workspaces` array is non-empty, the primary action\n  flips to `move-dependency` with `auto_fixable: false` (`fallow fix` will\n  not remove a dependency that another workspace imports). On findings\n  without cross-workspace consumers the action stays `remove-dependency`\n  with `auto_fixable: true`.\n- `add-to-config` for `ignoreExports` (`duplicate-exports`): `true` when\n  `fallow fix` can safely apply the action without further user setup.\n  That is: a fallow config file exists on disk, OR no config exists AND\n  the working directory is NOT inside a monorepo subpackage (in which\n  case the applier creates `.fallowrc.json` from `fallow init`'s\n  framework-aware scaffolding and layers the new rules on top).\n  `false` inside a monorepo subpackage with no workspace-root config\n  (the applier refuses to fragment per-package configs across the\n  monorepo and points at the workspace root instead).\n- `update-catalog-reference` (`unresolved-catalog-references`): always\n  `false` today (the catalog-switching applier is not wired in yet); the\n  field is non-singleton so that future enablement does not require a\n  schema change.\n\nAll `suppress-line` and `suppress-file` actions are uniformly\n`auto_fixable: false`. The field is non-singleton on the wire so that a\nfuture auto-applier (e.g. an LLM-driven suppression writer) can promote\nindividual variants without a schema bump."
+      "description": "A suggested action attached to a finding in the JSON output. Each finding\ncarries an `actions` array; consumers (agents, IDE clients, CI bots) can\ndispatch on the `type` discriminant to choose the right remediation.\n\nThe discriminator is `type` (snake_case `type` field), the payload uses the\nmatching kebab-case identifier per variant.\n\n## `auto_fixable` is per-finding, not per action type\n\nEvery action variant carries an `auto_fixable: bool` field. The value is\nevaluated PER FINDING, not per action type: the same action type may\nappear with `auto_fixable: true` on one finding and `auto_fixable: false`\non another, depending on per-instance guards in the `plow fix` applier.\nAgents that filter on `auto_fixable: true` must branch on the bool of\neach individual finding's action, not on the action `type` alone.\n\nCurrent per-instance flips:\n\n- `remove-catalog-entry` (`unused-catalog-entries`): `true` only when the\n  finding's `hardcoded_consumers` array is empty and the source is\n  `pnpm-workspace.yaml`. When a workspace package still pins a hardcoded\n  version of the same package, `plow fix` skips the entry to avoid\n  breaking `pnpm install`. Bun `package.json` catalog entries are also\n  emitted with `auto_fixable: false` because the current fixer is\n  YAML-only.\n- `remove-dependency` vs `move-dependency` (dependency findings): when the\n  finding's `used_in_workspaces` array is non-empty, the primary action\n  flips to `move-dependency` with `auto_fixable: false` (`plow fix` will\n  not remove a dependency that another workspace imports). On findings\n  without cross-workspace consumers the action stays `remove-dependency`\n  with `auto_fixable: true`.\n- `add-to-config` for `ignoreExports` (`duplicate-exports`): `true` when\n  `plow fix` can safely apply the action without further user setup.\n  That is: a plow config file exists on disk, OR no config exists AND\n  the working directory is NOT inside a monorepo subpackage (in which\n  case the applier creates `.plowrc.json` from `plow init`'s\n  framework-aware scaffolding and layers the new rules on top).\n  `false` inside a monorepo subpackage with no workspace-root config\n  (the applier refuses to fragment per-package configs across the\n  monorepo and points at the workspace root instead).\n- `update-catalog-reference` (`unresolved-catalog-references`): always\n  `false` today (the catalog-switching applier is not wired in yet); the\n  field is non-singleton so that future enablement does not require a\n  schema change.\n\nAll `suppress-line` and `suppress-file` actions are uniformly\n`auto_fixable: false`. The field is non-singleton on the wire so that a\nfuture auto-applier (e.g. an LLM-driven suppression writer) can promote\nindividual variants without a schema bump."
     },
     "FixAction": {
       "type": "object",
@@ -3802,7 +3802,7 @@
         },
         "auto_fixable": {
           "type": "boolean",
-          "description": "Whether `fallow fix` can apply this fix automatically. Evaluated PER\nFINDING, not per action type: the same `type` may carry\n`auto_fixable: true` on one finding and `auto_fixable: false` on\nanother when per-instance guards in the applier discriminate (e.g.\n`remove-catalog-entry` flips on `hardcoded_consumers` and catalog\nsource file, the primary dependency action flips between\n`remove-dependency` / `move-dependency` on `used_in_workspaces`).\nFilter on this bool of each individual action, not on `type`. See the\n[`IssueAction`] enum-level docs for the full list of per-instance\nflips."
+          "description": "Whether `plow fix` can apply this fix automatically. Evaluated PER\nFINDING, not per action type: the same `type` may carry\n`auto_fixable: true` on one finding and `auto_fixable: false` on\nanother when per-instance guards in the applier discriminate (e.g.\n`remove-catalog-entry` flips on `hardcoded_consumers` and catalog\nsource file, the primary dependency action flips between\n`remove-dependency` / `move-dependency` on `used_in_workspaces`).\nFilter on this bool of each individual action, not on `type`. See the\n[`IssueAction`] enum-level docs for the full list of per-instance\nflips."
         },
         "description": {
           "type": "string",
@@ -3857,7 +3857,7 @@
         },
         "comment": {
           "type": "string",
-          "description": "The inline comment to place above the line (e.g.,\n`// fallow-ignore-next-line unused-export`). When multiple\nsuppressible findings share the same path and line, this may contain a\ncomma-separated issue-kind list such as\n`// fallow-ignore-next-line unused-export, complexity`."
+          "description": "The inline comment to place above the line (e.g.,\n`// plow-ignore-next-line unused-export`). When multiple\nsuppressible findings share the same path and line, this may contain a\ncomma-separated issue-kind list such as\n`// plow-ignore-next-line unused-export, complexity`."
         },
         "scope": {
           "anyOf": [
@@ -3896,7 +3896,7 @@
         },
         "comment": {
           "type": "string",
-          "description": "The file-level comment to place at the top of the file (e.g.,\n`// fallow-ignore-file unused-file`)."
+          "description": "The file-level comment to place at the top of the file (e.g.,\n`// plow-ignore-file unused-file`)."
         }
       },
       "required": [
@@ -3916,7 +3916,7 @@
         },
         "auto_fixable": {
           "type": "boolean",
-          "description": "True when `fallow fix` can apply this config action automatically.\nEvaluated PER FINDING, not per action type: `ignoreExports`\nduplicate-export actions are auto-fixable when `fallow fix` can\nsafely write the rule, which today means EITHER a fallow config\nfile already exists OR no config exists and the working directory\nis NOT inside a monorepo subpackage (in which case the applier\ncreates `.fallowrc.json` from `fallow init`'s framework-aware\nscaffolding). The action is `false` inside a monorepo subpackage\nwith no workspace-root config because the applier refuses to\nfragment per-package configs across the monorepo. Older scalar\nconfig-ignore actions (e.g. `ignoreDependencies` on dependency\nfindings) are always manual today. Filter on this bool of each\nindividual action, not on the `type` alone. See the [`IssueAction`]\nenum-level docs for the full list of per-instance flips."
+          "description": "True when `plow fix` can apply this config action automatically.\nEvaluated PER FINDING, not per action type: `ignoreExports`\nduplicate-export actions are auto-fixable when `plow fix` can\nsafely write the rule, which today means EITHER a plow config\nfile already exists OR no config exists and the working directory\nis NOT inside a monorepo subpackage (in which case the applier\ncreates `.plowrc.json` from `plow init`'s framework-aware\nscaffolding). The action is `false` inside a monorepo subpackage\nwith no workspace-root config because the applier refuses to\nfragment per-package configs across the monorepo. Older scalar\nconfig-ignore actions (e.g. `ignoreDependencies` on dependency\nfindings) are always manual today. Filter on this bool of each\nindividual action, not on the `type` alone. See the [`IssueAction`]\nenum-level docs for the full list of per-instance flips."
         },
         "description": {
           "type": "string",
@@ -3924,10 +3924,10 @@
         },
         "config_key": {
           "type": "string",
-          "description": "The fallow config key to add the value to (e.g.,\n`ignoreDependencies`)."
+          "description": "The plow config key to add the value to (e.g.,\n`ignoreDependencies`)."
         },
         "value": {
-          "description": "Value to add to the config key. Shape depends on `config_key`. For\nscalar config keys (`ignoreDependencies`, others) this is a string\nsuch as `\"lodash\"`. For `ignoreExports` this is an array of\n`{ file, exports }` rule objects so the snippet can be merged into\nthe user's config verbatim. For `ignoreCatalogReferences` and\n`ignoreDependencyOverrides` this is an object whose shape matches the\nrule entry users add to their fallow config.",
+          "description": "Value to add to the config key. Shape depends on `config_key`. For\nscalar config keys (`ignoreDependencies`, others) this is a string\nsuch as `\"lodash\"`. For `ignoreExports` this is an array of\n`{ file, exports }` rule objects so the snippet can be merged into\nthe user's config verbatim. For `ignoreCatalogReferences` and\n`ignoreDependencyOverrides` this is an object whose shape matches the\nrule entry users add to their plow config.",
           "$ref": "#/definitions/AddToConfigValue"
         },
         "value_schema": {
@@ -3935,7 +3935,7 @@
             "string",
             "null"
           ],
-          "description": "Optional URL pointing at a stable JSON Schema fragment that describes\nthe shape of `value`. Agents that intend to validate `value` before\nwriting it into a user's config can fetch the linked schema and run\nit against `value`. The URL is a JSON Pointer fragment into fallow's\nmain config schema (e.g.\n`schema.json#/properties/ignoreExports` for the ignoreExports\naction, or `schema.json#/properties/ignoreDependencies/items` for\nthe per-package ignoreDependencies action). Strictly additive:\nconsumers that ignore the field keep working unchanged."
+          "description": "Optional URL pointing at a stable JSON Schema fragment that describes\nthe shape of `value`. Agents that intend to validate `value` before\nwriting it into a user's config can fetch the linked schema and run\nit against `value`. The URL is a JSON Pointer fragment into plow's\nmain config schema (e.g.\n`schema.json#/properties/ignoreExports` for the ignoreExports\naction, or `schema.json#/properties/ignoreDependencies/items` for\nthe per-package ignoreDependencies action). Strictly additive:\nconsumers that ignore the field keep working unchanged."
         }
       },
       "required": [
@@ -3945,18 +3945,18 @@
         "config_key",
         "value"
       ],
-      "description": "Edit a fallow config file (`.fallowrc.json`, `fallow.toml`, etc.) to\nadd the offending value to an `ignore*` rule."
+      "description": "Edit a plow config file (`.plowrc.json`, `plow.toml`, etc.) to\nadd the offending value to an `ignore*` rule."
     },
     "HealthFindingAction": {
       "type": "object",
       "properties": {
         "type": {
-          "description": "Action type identifier. A single finding's `actions` array can carry\nMULTIPLE entries of different types: e.g., a finding that exceeded\nboth cyclomatic and CRAP at `coverage_tier`: partial will get BOTH\n`increase-coverage` AND `refactor-function`, plus `suppress-line`.\nConsumers that select a single action should treat the FIRST\nnon-`suppress-{line,file}` action as primary. `add-tests` is emitted\nwhen CRAP triggered the finding, the function has no test coverage\n(`coverage_tier`: none), and full coverage can bring CRAP below\n`max_crap_threshold` (cyclomatic < threshold, since CRAP bottoms out\nat CC at 100% coverage). `increase-coverage` is emitted when CRAP\ntriggered the finding, some coverage exists (`coverage_tier`: partial\nor high), and full coverage can bring CRAP below `max_crap_threshold`;\nthe description steers toward targeted branch coverage rather than\nscaffolding new tests. `refactor-function` is emitted when\ncyclomatic/cognitive triggered the finding, when full coverage still\ncannot bring CRAP below `max_crap_threshold` (cyclomatic >=\nthreshold), or as a secondary action when cyclomatic is within the\nconfigured `health.crapRefactorBand` of the cyclomatic threshold AND\ncognitive is at or above `max_cognitive_threshold / 2` (the cognitive\nfloor suppresses false positives on flat type-tag dispatchers and JSX\nrender maps where high cyclomatic comes from a single switch with\nnear-zero cognitive load). `suppress-file` is emitted instead of\n`suppress-line` for\nsynthetic Angular `<template>` findings on `.html` files, because\nline-suppression comments cannot be expressed in HTML; the `comment`\nfield carries `<!-- fallow-ignore-file complexity -->` and\n`placement` is `top-of-template`.",
+          "description": "Action type identifier. A single finding's `actions` array can carry\nMULTIPLE entries of different types: e.g., a finding that exceeded\nboth cyclomatic and CRAP at `coverage_tier`: partial will get BOTH\n`increase-coverage` AND `refactor-function`, plus `suppress-line`.\nConsumers that select a single action should treat the FIRST\nnon-`suppress-{line,file}` action as primary. `add-tests` is emitted\nwhen CRAP triggered the finding, the function has no test coverage\n(`coverage_tier`: none), and full coverage can bring CRAP below\n`max_crap_threshold` (cyclomatic < threshold, since CRAP bottoms out\nat CC at 100% coverage). `increase-coverage` is emitted when CRAP\ntriggered the finding, some coverage exists (`coverage_tier`: partial\nor high), and full coverage can bring CRAP below `max_crap_threshold`;\nthe description steers toward targeted branch coverage rather than\nscaffolding new tests. `refactor-function` is emitted when\ncyclomatic/cognitive triggered the finding, when full coverage still\ncannot bring CRAP below `max_crap_threshold` (cyclomatic >=\nthreshold), or as a secondary action when cyclomatic is within the\nconfigured `health.crapRefactorBand` of the cyclomatic threshold AND\ncognitive is at or above `max_cognitive_threshold / 2` (the cognitive\nfloor suppresses false positives on flat type-tag dispatchers and JSX\nrender maps where high cyclomatic comes from a single switch with\nnear-zero cognitive load). `suppress-file` is emitted instead of\n`suppress-line` for\nsynthetic Angular `<template>` findings on `.html` files, because\nline-suppression comments cannot be expressed in HTML; the `comment`\nfield carries `<!-- plow-ignore-file complexity -->` and\n`placement` is `top-of-template`.",
           "$ref": "#/definitions/HealthFindingActionType"
         },
         "auto_fixable": {
           "type": "boolean",
-          "description": "Whether `fallow fix` can auto-apply this action. Today every health\nfinding action is manual, but the field is non-singleton so a future\nauto-applier (e.g., an LLM-driven `refactor-function` worker) does\nnot need a schema change."
+          "description": "Whether `plow fix` can auto-apply this action. Today every health\nfinding action is manual, but the field is non-singleton so a future\nauto-applier (e.g., an LLM-driven `refactor-function` worker) does\nnot need a schema change."
         },
         "description": {
           "type": "string",
@@ -3974,7 +3974,7 @@
             "string",
             "null"
           ],
-          "description": "The inline comment to insert (e.g.,\n`// fallow-ignore-next-line complexity` or\n`<!-- fallow-ignore-file complexity -->`). Present on\n`suppress-line` and `suppress-file` action variants."
+          "description": "The inline comment to insert (e.g.,\n`// plow-ignore-next-line complexity` or\n`<!-- plow-ignore-file complexity -->`). Present on\n`suppress-line` and `suppress-file` action variants."
         },
         "placement": {
           "type": [
@@ -3996,7 +3996,7 @@
         "auto_fixable",
         "description"
       ],
-      "description": "Suggested action attached to a [`ComplexityViolation`].\n\nEach complexity finding carries an array of these on the JSON wire\n(`findings[].actions[]`). The action selector in\n`crates/cli/src/report/json.rs::build_health_finding_actions` picks the\nprimary action based on which thresholds triggered the finding and the\nbucketed coverage tier. See [`HealthFindingActionType`] for the full\ndiscriminant list.\n\n`note`, `comment`, and `placement` are populated per-variant: refactor\nactions carry a `note`, suppress-line / suppress-file actions carry\n`comment` plus `placement`, and the coverage-leaning actions\n(`add-tests`, `increase-coverage`) carry only `note`.\n\n[`ComplexityViolation`]: ../../fallow-output/src/health_scores.rs"
+      "description": "Suggested action attached to a [`ComplexityViolation`].\n\nEach complexity finding carries an array of these on the JSON wire\n(`findings[].actions[]`). The action selector in\n`crates/cli/src/report/json.rs::build_health_finding_actions` picks the\nprimary action based on which thresholds triggered the finding and the\nbucketed coverage tier. See [`HealthFindingActionType`] for the full\ndiscriminant list.\n\n`note`, `comment`, and `placement` are populated per-variant: refactor\nactions carry a `note`, suppress-line / suppress-file actions carry\n`comment` plus `placement`, and the coverage-leaning actions\n(`add-tests`, `increase-coverage`) carry only `note`.\n\n[`ComplexityViolation`]: ../../plow-output/src/health_scores.rs"
     },
     "HotspotAction": {
       "type": "object",
@@ -4007,7 +4007,7 @@
         },
         "auto_fixable": {
           "type": "boolean",
-          "description": "Whether `fallow fix` can auto-apply this action. Today every\nhotspot action is manual."
+          "description": "Whether `plow fix` can auto-apply this action. Today every\nhotspot action is manual."
         },
         "description": {
           "type": "string",
@@ -4044,7 +4044,7 @@
         "auto_fixable",
         "description"
       ],
-      "description": "Suggested action attached to a [`HotspotEntry`].\n\nThe action list always begins with `refactor-file` plus `add-tests`.\nOwnership-derived variants (`low-bus-factor`, `unowned-hotspot`,\n`ownership-drift`) are appended only when `--ownership` is active AND\nthe corresponding signal fires for the hotspot.\n\n[`HotspotEntry`]: ../../fallow-output/src/health_scores.rs"
+      "description": "Suggested action attached to a [`HotspotEntry`].\n\nThe action list always begins with `refactor-file` plus `add-tests`.\nOwnership-derived variants (`low-bus-factor`, `unowned-hotspot`,\n`ownership-drift`) are appended only when `--ownership` is active AND\nthe corresponding signal fires for the hotspot.\n\n[`HotspotEntry`]: ../../plow-output/src/health_scores.rs"
     },
     "RefactoringTargetAction": {
       "type": "object",
@@ -4055,7 +4055,7 @@
         },
         "auto_fixable": {
           "type": "boolean",
-          "description": "Whether `fallow fix` can auto-apply this action. Today both\nvariants are manual."
+          "description": "Whether `plow fix` can auto-apply this action. Today both\nvariants are manual."
         },
         "description": {
           "type": "string",
@@ -4066,7 +4066,7 @@
             "string",
             "null"
           ],
-          "description": "Recommendation category for `apply-refactoring` actions. Mirrors\nthe parent target's\n[`category`](../../fallow-output/src/health_targets.rs.html)\nfield so consumers can route on the action alone."
+          "description": "Recommendation category for `apply-refactoring` actions. Mirrors\nthe parent target's\n[`category`](../../plow-output/src/health_targets.rs.html)\nfield so consumers can route on the action alone."
         },
         "comment": {
           "type": [
@@ -4081,7 +4081,7 @@
         "auto_fixable",
         "description"
       ],
-      "description": "Suggested action attached to a [`RefactoringTarget`].\n\nThe list always begins with `apply-refactoring`. A trailing\n`suppress-line` is appended only when the target carries `evidence`\nlinking to specific functions (e.g., `extract_complex_functions`,\n`add_test_coverage`).\n\nUnlike [`HealthFindingAction`], the `suppress-line` variant emitted\nhere does NOT carry a `placement` field: the parent\n[`RefactoringTarget`] points at a file (not a specific function\ndeclaration site), so a per-line placement hint would have no\nreferent. Consumers that want the placement metadata should follow\nthe target's `evidence.complex_functions` back to the matching\n`ComplexityViolation` and read placement from THAT action instead.\n\n[`RefactoringTarget`]: ../../fallow-output/src/health_targets.rs"
+      "description": "Suggested action attached to a [`RefactoringTarget`].\n\nThe list always begins with `apply-refactoring`. A trailing\n`suppress-line` is appended only when the target carries `evidence`\nlinking to specific functions (e.g., `extract_complex_functions`,\n`add_test_coverage`).\n\nUnlike [`HealthFindingAction`], the `suppress-line` variant emitted\nhere does NOT carry a `placement` field: the parent\n[`RefactoringTarget`] points at a file (not a specific function\ndeclaration site), so a per-line placement hint would have no\nreferent. Consumers that want the placement metadata should follow\nthe target's `evidence.complex_functions` back to the matching\n`ComplexityViolation` and read placement from THAT action instead.\n\n[`RefactoringTarget`]: ../../plow-output/src/health_targets.rs"
     },
     "CloneFamilyAction": {
       "type": "object",
@@ -4092,7 +4092,7 @@
         },
         "auto_fixable": {
           "type": "boolean",
-          "description": "Whether `fallow fix` can auto-apply this action. All three variants\nare manual today."
+          "description": "Whether `plow fix` can auto-apply this action. All three variants\nare manual today."
         },
         "description": {
           "type": "string",
@@ -4110,7 +4110,7 @@
             "string",
             "null"
           ],
-          "description": "The inline comment to insert (e.g.,\n`// fallow-ignore-next-line code-duplication`). Present on\n`suppress-line` only."
+          "description": "The inline comment to insert (e.g.,\n`// plow-ignore-next-line code-duplication`). Present on\n`suppress-line` only."
         }
       },
       "required": [
@@ -4129,7 +4129,7 @@
         },
         "auto_fixable": {
           "type": "boolean",
-          "description": "Whether `fallow fix` can auto-apply this action. Both variants are\nmanual today; the field is non-singleton so a future auto-applier\ndoes not need a schema change."
+          "description": "Whether `plow fix` can auto-apply this action. Both variants are\nmanual today; the field is non-singleton so a future auto-applier\ndoes not need a schema change."
         },
         "description": {
           "type": "string",
@@ -4140,7 +4140,7 @@
             "string",
             "null"
           ],
-          "description": "The inline comment to insert (e.g.,\n`// fallow-ignore-next-line code-duplication`). Present on\n`suppress-line`; absent on `extract-shared`."
+          "description": "The inline comment to insert (e.g.,\n`// plow-ignore-next-line code-duplication`). Present on\n`suppress-line`; absent on `extract-shared`."
         }
       },
       "required": [
@@ -4700,7 +4700,7 @@
         "path",
         "line"
       ],
-      "description": "A workspace package.json reference (`catalog:` or `catalog:<name>`) that points\nat a catalog which does not declare the consumed package.\n\nPackage manager installs error when this happens. fallow surfaces it\nstatically so the failure is caught at `fallow dead-code` time, before any\ninstall.\n\nThe default catalog (bare `catalog:`) uses `catalog_name: \"default\"`.\nNamed catalogs (`catalog:react17`) use the declared catalog name."
+      "description": "A workspace package.json reference (`catalog:` or `catalog:<name>`) that points\nat a catalog which does not declare the consumed package.\n\nPackage manager installs error when this happens. plow surfaces it\nstatically so the failure is caught at `plow dead-code` time, before any\ninstall.\n\nThe default catalog (bare `catalog:`) uses `catalog_name: \"default\"`.\nNamed catalogs (`catalog:react17`) use the declared catalog name."
     },
     "UnusedDependencyOverride": {
       "type": "object",
@@ -5310,8 +5310,8 @@
       "items": {
         "$ref": "#/definitions/CodeClimateIssue"
       },
-      "title": "fallow --format codeclimate / gitlab-codequality",
-      "description": "Envelope emitted by `fallow --format codeclimate` and\n`fallow --format gitlab-codequality`. GitLab Code Quality consumes the\nsame shape. The wire form is a bare JSON array, not an object."
+      "title": "plow --format codeclimate / gitlab-codequality",
+      "description": "Envelope emitted by `plow --format codeclimate` and\n`plow --format gitlab-codequality`. GitLab Code Quality consumes the\nsame shape. The wire form is a bare JSON array, not an object."
     },
     "CodeClimateIssue": {
       "type": "object",
@@ -5406,8 +5406,8 @@
         "comments",
         "meta"
       ],
-      "title": "fallow --format review-github / review-gitlab",
-      "description": "Envelope emitted by `fallow --format review-github` / `review-gitlab`."
+      "title": "plow --format review-github / review-gitlab",
+      "description": "Envelope emitted by `plow --format review-github` / `review-gitlab`."
     },
     "GitHubReviewComment": {
       "type": "object",
@@ -5602,8 +5602,8 @@
         "threads_resolved",
         "apply_errors"
       ],
-      "title": "fallow ci reconcile-review --format json",
-      "description": "Envelope emitted by `fallow ci reconcile-review --format json`. Used by\nCI integrations to drive comment carry-over and stale-comment cleanup\nacross PR / MR revisions."
+      "title": "plow ci reconcile-review --format json",
+      "description": "Envelope emitted by `plow ci reconcile-review --format json`. Used by\nCI integrations to drive comment carry-over and stale-comment cleanup\nacross PR / MR revisions."
     },
     "MirroredDirectory": {
       "type": "object",
@@ -6084,7 +6084,7 @@
         "type_only_dependencies",
         "circular_dependencies"
       ],
-      "description": "Complete analysis results.\n\n# Examples\n\n```\nuse fallow_types::output_dead_code::UnusedFileFinding;\nuse fallow_types::results::{AnalysisResults, UnusedFile};\nuse std::path::PathBuf;\n\nlet mut results = AnalysisResults::default();\nassert_eq!(results.total_issues(), 0);\nassert!(!results.has_issues());\n\nresults\n    .unused_files\n    .push(UnusedFileFinding::with_actions(UnusedFile {\n        path: PathBuf::from(\"src/dead.ts\"),\n    }));\nassert_eq!(results.total_issues(), 1);\nassert!(results.has_issues());\n```"
+      "description": "Complete analysis results.\n\n# Examples\n\n```\nuse plow_types::output_dead_code::UnusedFileFinding;\nuse plow_types::results::{AnalysisResults, UnusedFile};\nuse std::path::PathBuf;\n\nlet mut results = AnalysisResults::default();\nassert_eq!(results.total_issues(), 0);\nassert!(!results.has_issues());\n\nresults\n    .unused_files\n    .push(UnusedFileFinding::with_actions(UnusedFile {\n        path: PathBuf::from(\"src/dead.ts\"),\n    }));\nassert_eq!(results.total_issues(), 1);\nassert!(results.has_issues());\n```"
     },
     "DependencyLocation": {
       "oneOf": [
@@ -6104,7 +6104,7 @@
           "description": "Listed in `optionalDependencies`."
         }
       ],
-      "description": "Where in package.json a dependency is listed.\n\n# Examples\n\n```\nuse fallow_types::results::DependencyLocation;\n\n// All three variants are constructible\nlet loc = DependencyLocation::Dependencies;\nlet dev = DependencyLocation::DevDependencies;\nlet opt = DependencyLocation::OptionalDependencies;\n// Debug output includes the variant name\nassert!(format!(\"{loc:?}\").contains(\"Dependencies\"));\nassert!(format!(\"{dev:?}\").contains(\"DevDependencies\"));\nassert!(format!(\"{opt:?}\").contains(\"OptionalDependencies\"));\n```"
+      "description": "Where in package.json a dependency is listed.\n\n# Examples\n\n```\nuse plow_types::results::DependencyLocation;\n\n// All three variants are constructible\nlet loc = DependencyLocation::Dependencies;\nlet dev = DependencyLocation::DevDependencies;\nlet opt = DependencyLocation::OptionalDependencies;\n// Debug output includes the variant name\nassert!(format!(\"{loc:?}\").contains(\"Dependencies\"));\nassert!(format!(\"{dev:?}\").contains(\"DevDependencies\"));\nassert!(format!(\"{opt:?}\").contains(\"OptionalDependencies\"));\n```"
     },
     "MemberKind": {
       "oneOf": [
@@ -6161,7 +6161,7 @@
             },
             "kind_known": {
               "type": "boolean",
-              "description": "Whether `issue_kind` parses to a known `IssueKind`. False when the\ntoken is a typo or refers to a kind that was renamed or removed in\na newer fallow release. JSON consumers (CI annotations, MCP agents,\nVS Code) branch on this to choose the right next-step text.\nOmitted from the wire when `true` so producers that have not yet\nadopted the field stay byte-compatible. See issue #449."
+              "description": "Whether `issue_kind` parses to a known `IssueKind`. False when the\ntoken is a typo or refers to a kind that was renamed or removed in\na newer plow release. JSON consumers (CI annotations, MCP agents,\nVS Code) branch on this to choose the right next-step text.\nOmitted from the wire when `true` so producers that have not yet\nadopted the field stay byte-compatible. See issue #449."
             },
             "type": {
               "type": "string",
@@ -6172,7 +6172,7 @@
             "type",
             "is_file_level"
           ],
-          "description": "A `// fallow-ignore-next-line` or `// fallow-ignore-file` comment."
+          "description": "A `// plow-ignore-next-line` or `// plow-ignore-file` comment."
         },
         {
           "type": "object",
@@ -6432,7 +6432,7 @@
         "total",
         "by_source"
       ],
-      "description": "Summary of detected entry points, grouped by discovery source.\n\nUsed to surface entry-point detection status in human and JSON output,\nso library authors can verify that fallow found the right entry points."
+      "description": "Summary of detected entry points, grouped by discovery source.\n\nUsed to surface entry-point detection status in human and JSON output,\nso library authors can verify that plow found the right entry points."
     },
     "FixActionType": {
       "oneOf": [
@@ -6624,7 +6624,7 @@
         {
           "type": "string",
           "const": "suppress-line",
-          "description": "`// fallow-ignore-next-line <kind>` directive."
+          "description": "`// plow-ignore-next-line <kind>` directive."
         }
       ],
       "description": "Singleton discriminant for [`SuppressLineAction`]."
@@ -6644,7 +6644,7 @@
         {
           "type": "string",
           "const": "suppress-file",
-          "description": "`// fallow-ignore-file <kind>` directive."
+          "description": "`// plow-ignore-file <kind>` directive."
         }
       ],
       "description": "Singleton discriminant for [`SuppressFileAction`]."
@@ -6654,7 +6654,7 @@
         {
           "type": "string",
           "const": "add-to-config",
-          "description": "Append a value into a fallow config `ignore*` list."
+          "description": "Append a value into a plow config `ignore*` list."
         }
       ],
       "description": "Singleton discriminant for [`AddToConfigAction`]."
@@ -6675,7 +6675,7 @@
         {
           "type": "object",
           "additionalProperties": true,
-          "description": "Free-form object for rule-shaped keys like\n`ignoreCatalogReferences` / `ignoreDependencyOverrides`. The shape\nmatches the rule entry users add to their fallow config; consumers\nvalidate against the per-key schema referenced by `value_schema`."
+          "description": "Free-form object for rule-shaped keys like\n`ignoreCatalogReferences` / `ignoreDependencyOverrides`. The shape\nmatches the rule entry users add to their plow config; consumers\nvalidate against the per-key schema referenced by `value_schema`."
         }
       ],
       "description": "Value payload for [`AddToConfigAction::value`]. The variants line up with\nthe documented per-`config_key` shapes; deserialization is untagged so\ndownstream consumers can switch on the JSON value's type."
@@ -6699,7 +6699,7 @@
         "file",
         "exports"
       ],
-      "description": "Single `ignoreExports` rule entry. The fallow config accepts an array of\nthese under the `ignoreExports` key."
+      "description": "Single `ignoreExports` rule entry. The plow config accepts an array of\nthese under the `ignoreExports` key."
     },
     "CoverageModel": {
       "type": "string",
@@ -7523,12 +7523,12 @@
       "oneOf": [
         {
           "type": "string",
-          "const": "fallow-review-envelope/v1",
+          "const": "plow-review-envelope/v1",
           "description": "Historical first release of the review envelope format."
         },
         {
           "type": "string",
-          "const": "fallow-review-envelope/v2",
+          "const": "plow-review-envelope/v2",
           "description": "Issue #528 review envelope format."
         }
       ],
@@ -7573,7 +7573,7 @@
       "oneOf": [
         {
           "type": "string",
-          "const": "fallow-review-reconcile/v1",
+          "const": "plow-review-reconcile/v1",
           "description": "First release of the review reconcile format."
         }
       ],
@@ -7604,7 +7604,7 @@
         {
           "type": "string",
           "const": "suppress-line",
-          "description": "Suppress with an inline `// fallow-ignore-next-line complexity`\ncomment above the function or Angular decorator."
+          "description": "Suppress with an inline `// plow-ignore-next-line complexity`\ncomment above the function or Angular decorator."
         }
       ],
       "description": "Discriminant for [`HealthFindingAction::kind`]. Mirrors the action types\nemitted by `build_health_finding_actions`. A single finding's `actions`\narray may carry multiple entries of different types: a finding that\nexceeded both cyclomatic and CRAP at `coverage_tier: partial` will get\nBOTH `increase-coverage` AND `refactor-function`, plus the trailing\n`suppress-line`."
@@ -7866,8 +7866,8 @@
       "required": [
         "boundaries"
       ],
-      "title": "fallow list --boundaries --format json",
-      "description": "Envelope emitted by `fallow list --boundaries --format json`. Surfaces\nthe architecture boundary zones, rules, and the user's pre-expansion\n`autoDiscover` logical groups so consumers can render grouping intent that\nexpansion would otherwise flatten out of `zones[]`."
+      "title": "plow list --boundaries --format json",
+      "description": "Envelope emitted by `plow list --boundaries --format json`. Surfaces\nthe architecture boundary zones, rules, and the user's pre-expansion\n`autoDiscover` logical groups so consumers can render grouping intent that\nexpansion would otherwise flatten out of `zones[]`."
     },
     "AuthoredRule": {
       "type": "object",
@@ -7993,10 +7993,10 @@
       ],
       "description": "Discovery outcome for a [`LogicalGroup`]."
     },
-    "FallowOutput": {
+    "PlowOutput": {
       "oneOf": [
         {
-          "description": "`fallow audit --format json`. Required `command: \"audit\"` singleton\nplus `verdict` and `summary`.",
+          "description": "`plow audit --format json`. Required `command: \"audit\"` singleton\nplus `verdict` and `summary`.",
           "allOf": [
             {
               "$ref": "#/definitions/AuditOutput"
@@ -8016,7 +8016,7 @@
           ]
         },
         {
-          "description": "`fallow explain <issue-type> --format json`. Required `id`, `name`,\n`rationale`, `example`, `how_to_fix`, `docs`; no `schema_version`.",
+          "description": "`plow explain <issue-type> --format json`. Required `id`, `name`,\n`rationale`, `example`, `how_to_fix`, `docs`; no `schema_version`.",
           "allOf": [
             {
               "$ref": "#/definitions/ExplainOutput"
@@ -8036,7 +8036,7 @@
           ]
         },
         {
-          "description": "`fallow inspect --format json`. Required `target`, `identity`,\n`evidence`, and `warnings`; no `schema_version`.",
+          "description": "`plow inspect --format json`. Required `target`, `identity`,\n`evidence`, and `warnings`; no `schema_version`.",
           "allOf": [
             {
               "$ref": "#/definitions/InspectOutput"
@@ -8056,7 +8056,7 @@
           ]
         },
         {
-          "description": "`fallow --format review-github` / `--format review-gitlab`. Required\n`body`, `comments`, `meta`; no `schema_version`.",
+          "description": "`plow --format review-github` / `--format review-gitlab`. Required\n`body`, `comments`, `meta`; no `schema_version`.",
           "allOf": [
             {
               "$ref": "#/definitions/ReviewEnvelopeOutput"
@@ -8076,7 +8076,7 @@
           ]
         },
         {
-          "description": "`fallow ci reconcile-review --format json`. Required `schema`\nsingleton plus `provider`, `comments`, and the various\n`*_fingerprints` arrays.",
+          "description": "`plow ci reconcile-review --format json`. Required `schema`\nsingleton plus `provider`, `comments`, and the various\n`*_fingerprints` arrays.",
           "allOf": [
             {
               "$ref": "#/definitions/ReviewReconcileOutput"
@@ -8096,7 +8096,7 @@
           ]
         },
         {
-          "description": "`fallow coverage setup --json`. Required `schema_version` singleton\nplus `framework_detected`, `members`, `commands`, `snippets`.",
+          "description": "`plow coverage setup --json`. Required `schema_version` singleton\nplus `framework_detected`, `members`, `commands`, `snippets`.",
           "allOf": [
             {
               "$ref": "#/definitions/CoverageSetupOutput"
@@ -8116,7 +8116,7 @@
           ]
         },
         {
-          "description": "`fallow coverage analyze --format json`. Required\n`schema_version: \"1\"` singleton plus `version`, `elapsed_ms`,\n`runtime_coverage`.",
+          "description": "`plow coverage analyze --format json`. Required\n`schema_version: \"1\"` singleton plus `version`, `elapsed_ms`,\n`runtime_coverage`.",
           "allOf": [
             {
               "$ref": "#/definitions/CoverageAnalyzeOutput"
@@ -8136,7 +8136,7 @@
           ]
         },
         {
-          "description": "`fallow list --boundaries --format json`. Required `boundaries`\nsub-object; no `schema_version`.",
+          "description": "`plow list --boundaries --format json`. Required `boundaries`\nsub-object; no `schema_version`.",
           "allOf": [
             {
               "$ref": "#/definitions/ListBoundariesOutput"
@@ -8156,7 +8156,7 @@
           ]
         },
         {
-          "description": "`fallow workspaces --format json`. Required `workspace_count`,\n`workspaces`, and `workspace_diagnostics`; no `schema_version`.",
+          "description": "`plow workspaces --format json`. Required `workspace_count`,\n`workspaces`, and `workspace_diagnostics`; no `schema_version`.",
           "allOf": [
             {
               "$ref": "#/definitions/WorkspacesOutput"
@@ -8176,7 +8176,7 @@
           ]
         },
         {
-          "description": "`fallow health --format json`.",
+          "description": "`plow health --format json`.",
           "allOf": [
             {
               "$ref": "#/definitions/HealthOutput"
@@ -8196,7 +8196,7 @@
           ]
         },
         {
-          "description": "`fallow dupes --format json`.",
+          "description": "`plow dupes --format json`.",
           "allOf": [
             {
               "$ref": "#/definitions/DupesOutput"
@@ -8216,7 +8216,7 @@
           ]
         },
         {
-          "description": "`fallow dead-code --format json --group-by <mode>`. Required `grouped_by`\nplus a `groups` array.",
+          "description": "`plow dead-code --format json --group-by <mode>`. Required `grouped_by`\nplus a `groups` array.",
           "allOf": [
             {
               "$ref": "#/definitions/CheckGroupedOutput"
@@ -8236,7 +8236,7 @@
           ]
         },
         {
-          "description": "`fallow impact --format json`. Required `enabled`, `record_count`,\n`containment_count`, `recent_containment`; no global `schema_version`,\n`command`, `total_issues`, or `report`.",
+          "description": "`plow impact --format json`. Required `enabled`, `record_count`,\n`containment_count`, `recent_containment`; no global `schema_version`,\n`command`, `total_issues`, or `report`.",
           "allOf": [
             {
               "$ref": "#/definitions/ImpactReport"
@@ -8256,7 +8256,7 @@
           ]
         },
         {
-          "description": "`fallow impact --all --format json`. Required `project_count`,\n`tracked_count`, `unreadable_count`, `totals`, `projects`; each `projects[]`\nentry embeds a per-project `report`. Independently versioned via\n`CrossRepoImpactSchemaVersion`.",
+          "description": "`plow impact --all --format json`. Required `project_count`,\n`tracked_count`, `unreadable_count`, `totals`, `projects`; each `projects[]`\nentry embeds a per-project `report`. Independently versioned via\n`CrossRepoImpactSchemaVersion`.",
           "allOf": [
             {
               "$ref": "#/definitions/CrossRepoImpactReport"
@@ -8276,7 +8276,7 @@
           ]
         },
         {
-          "description": "`fallow security --format json`. Full mode requires `security_findings`,\n`unresolved_edge_files`, and `unresolved_callee_sites`; summary mode requires\n`summary` and omits per-finding arrays.",
+          "description": "`plow security --format json`. Full mode requires `security_findings`,\n`unresolved_edge_files`, and `unresolved_callee_sites`; summary mode requires\n`summary` and omits per-finding arrays.",
           "allOf": [
             {
               "oneOf": [
@@ -8303,7 +8303,7 @@
           ]
         },
         {
-          "description": "`fallow security survivors --format json`. Required `survivors` and\n`needs_human_review`, keyed by `finding_id`.",
+          "description": "`plow security survivors --format json`. Required `survivors` and\n`needs_human_review`, keyed by `finding_id`.",
           "allOf": [
             {
               "$ref": "#/definitions/SecuritySurvivorsOutput"
@@ -8323,7 +8323,7 @@
           ]
         },
         {
-          "description": "`fallow security blind-spots --format json`. Required `summary` and\ngrouped unresolved-callee diagnostics.",
+          "description": "`plow security blind-spots --format json`. Required `summary` and\ngrouped unresolved-callee diagnostics.",
           "allOf": [
             {
               "$ref": "#/definitions/SecurityBlindSpotsOutput"
@@ -8343,7 +8343,7 @@
           ]
         },
         {
-          "description": "`fallow dead-code --format json`.\nRequired `total_issues` plus `summary: CheckSummary`.",
+          "description": "`plow dead-code --format json`.\nRequired `total_issues` plus `summary: CheckSummary`.",
           "allOf": [
             {
               "$ref": "#/definitions/CheckOutput"
@@ -8363,7 +8363,7 @@
           ]
         },
         {
-          "description": "Bare `fallow --format json` (combined dead-code + dupes + health).\nRequired `schema_version`, `version`, and `elapsed_ms`, with optional\n`check`, `dupes`, and `health` subreports.",
+          "description": "Bare `plow --format json` (combined dead-code + dupes + health).\nRequired `schema_version`, `version`, and `elapsed_ms`, with optional\n`check`, `dupes`, and `health` subreports.",
           "allOf": [
             {
               "$ref": "#/definitions/CombinedOutput"
@@ -8383,7 +8383,7 @@
           ]
         },
         {
-          "description": "`fallow audit --brief --format json` (alias `fallow review`). Required\n`schema_version`, `version`, `command: \"audit-brief\"`, `triage`, and\n`graph_facts`. Independently versioned via `ReviewBriefSchemaVersion`;\nalways emitted with exit 0.",
+          "description": "`plow audit --brief --format json` (alias `plow review`). Required\n`schema_version`, `version`, `command: \"audit-brief\"`, `triage`, and\n`graph_facts`. Independently versioned via `ReviewBriefSchemaVersion`;\nalways emitted with exit 0.",
           "allOf": [
             {
               "$ref": "#/definitions/ReviewBriefOutput"
@@ -8403,7 +8403,7 @@
           ]
         },
         {
-          "description": "`fallow review --walkthrough-guide --format json`. The digest +\nschema the agent fetches: brief + decision surface, review direction, the\ngraph-snapshot pin, and the embedded agent schema. Graph-derived only\n(injection-resistant). Always exit 0.",
+          "description": "`plow review --walkthrough-guide --format json`. The digest +\nschema the agent fetches: brief + decision surface, review direction, the\ngraph-snapshot pin, and the embedded agent schema. Graph-derived only\n(injection-resistant). Always exit 0.",
           "allOf": [
             {
               "$ref": "#/definitions/WalkthroughGuide"
@@ -8423,7 +8423,7 @@
           ]
         },
         {
-          "description": "`fallow review --walkthrough-file --format json`. Post-validation\nof an agent's judgment JSON against the live graph: `accepted` (anchored,\nframing fenced), `rejected` (unanchored), and a `stale` flag. The verifier\nis the graph, not a second model. Always exit 0.",
+          "description": "`plow review --walkthrough-file --format json`. Post-validation\nof an agent's judgment JSON against the live graph: `accepted` (anchored,\nframing fenced), `rejected` (unanchored), and a `stale` flag. The verifier\nis the graph, not a second model. Always exit 0.",
           "allOf": [
             {
               "$ref": "#/definitions/WalkthroughValidation"
@@ -8443,8 +8443,8 @@
           ]
         }
       ],
-      "title": "fallow --format json (typed root)",
-      "description": "Typed root of every fallow JSON envelope shape that serializes as a JSON\nobject and participates in the documented `FallowOutput` contract. The\nschema derived from this enum drives the document-root `oneOf` in\n`docs/output-schema.json`.\n\nThe wire shape carries a top-level `kind` discriminator so agents and\nschema-validating clients can select the variant in O(1) instead of probing\nfor unique field presence.\n\nOne envelope is intentionally NOT in this enum:\n- `CodeClimateOutput` serializes as a bare JSON array\n  (`#[serde(transparent)]`) per the Code Climate / GitLab Code Quality\n  spec; `#[serde(tag = ...)]` cannot internally tag a non-object\n  variant and wrapping the array would break the spec. The root schema\n  carries it as a sibling `oneOf` branch alongside `FallowOutput`."
+      "title": "plow --format json (typed root)",
+      "description": "Typed root of every plow JSON envelope shape that serializes as a JSON\nobject and participates in the documented `PlowOutput` contract. The\nschema derived from this enum drives the document-root `oneOf` in\n`docs/output-schema.json`.\n\nThe wire shape carries a top-level `kind` discriminator so agents and\nschema-validating clients can select the variant in O(1) instead of probing\nfor unique field presence.\n\nOne envelope is intentionally NOT in this enum:\n- `CodeClimateOutput` serializes as a bare JSON array\n  (`#[serde(transparent)]`) per the Code Climate / GitLab Code Quality\n  spec; `#[serde(tag = ...)]` cannot internally tag a non-object\n  variant and wrapping the array would break the spec. The root schema\n  carries it as a sibling `oneOf` branch alongside `PlowOutput`."
     },
     "UntestedExportFinding": {
       "type": "object",
@@ -9347,7 +9347,7 @@
           "description": "First release of the runtime coverage block contract."
         }
       ],
-      "description": "Runtime coverage JSON contract version. This is scoped to the\n`runtime_coverage` block and is independent of the top-level fallow\nJSON `schema_version`."
+      "description": "Runtime coverage JSON contract version. This is scoped to the\n`runtime_coverage` block and is independent of the top-level plow\nJSON `schema_version`."
     },
     "CoverageSource": {
       "type": "string",
@@ -10031,7 +10031,7 @@
         },
         "fingerprint": {
           "type": "string",
-          "description": "Stable content fingerprint, usually `dup:<8hex>` and widened on rare\nreport collisions. Addressable via `fallow dupes --trace dup:<fp>`.\nComputed from the group's instances, so it matches the top-level\n`clone_groups[].fingerprint` for the same clone."
+          "description": "Stable content fingerprint, usually `dup:<8hex>` and widened on rare\nreport collisions. Addressable via `plow dupes --trace dup:<fp>`.\nComputed from the group's instances, so it matches the top-level\n`clone_groups[].fingerprint` for the same clone."
         },
         "actions": {
           "type": "array",
@@ -10049,7 +10049,7 @@
         "fingerprint",
         "actions"
       ],
-      "description": "Wire-shape envelope for an [`AttributedCloneGroup`] finding (per-bucket\nduplication attribution emitted under `fallow dupes --group-by`).\nFlattens the attributed group and carries the same typed\n`CloneGroupAction` array as `CloneGroupFinding`; no `introduced`\nfield because `fallow audit` does not run on grouped output."
+      "description": "Wire-shape envelope for an [`AttributedCloneGroup`] finding (per-bucket\nduplication attribution emitted under `plow dupes --group-by`).\nFlattens the attributed group and carries the same typed\n`CloneGroupAction` array as `CloneGroupFinding`; no `introduced`\nfield because `plow audit` does not run on grouped output."
     },
     "CloneFamilyActionType": {
       "oneOf": [
@@ -10119,7 +10119,7 @@
         "suggestions",
         "actions"
       ],
-      "description": "Wire-shape envelope for a [`CloneFamily`] finding.\n\nUnlike most `*Finding` wrappers this one is NOT `#[serde(flatten)]` over\nthe bare [`CloneFamily`], because the family's nested\n`groups: Vec<CloneGroup>` field needs to carry the typed\n`CloneGroupFinding` wrapper too (so every nested clone group gets its\nown `actions[]` array, matching the legacy post-pass behavior; see issue\n#393 regression test). The wire shape stays byte-identical to the\nprevious post-pass output. No `introduced` field because `fallow audit`\nattributes clone groups (not families) when running against a base ref."
+      "description": "Wire-shape envelope for a [`CloneFamily`] finding.\n\nUnlike most `*Finding` wrappers this one is NOT `#[serde(flatten)]` over\nthe bare [`CloneFamily`], because the family's nested\n`groups: Vec<CloneGroup>` field needs to carry the typed\n`CloneGroupFinding` wrapper too (so every nested clone group gets its\nown `actions[]` array, matching the legacy post-pass behavior; see issue\n#393 regression test). The wire shape stays byte-identical to the\nprevious post-pass output. No `introduced` field because `plow audit`\nattributes clone groups (not families) when running against a base ref."
     },
     "CloneGroupActionType": {
       "oneOf": [
@@ -10156,7 +10156,7 @@
         },
         "fingerprint": {
           "type": "string",
-          "description": "Stable content fingerprint, usually `dup:<8hex>` and widened on rare\nreport collisions. Addressable via `fallow dupes --trace dup:<fp>` (and\nthe `trace_clone` MCP tool) to deep-dive this group; shown alongside\neach group in the human listing."
+          "description": "Stable content fingerprint, usually `dup:<8hex>` and widened on rare\nreport collisions. Addressable via `plow dupes --trace dup:<fp>` (and\nthe `trace_clone` MCP tool) to deep-dive this group; shown alongside\neach group in the human listing."
         },
         "suggested_name": {
           "type": [
@@ -10227,7 +10227,7 @@
         "clone_families",
         "stats"
       ],
-      "description": "Wire-shape payload for `fallow dupes --format json` (the body that\nflattens into the `DupesOutput` envelope and is also\nemitted under the `dupes` / `duplication` key inside the combined and\naudit envelopes).\n\nMirrors [`DuplicationReport`] field-for-field, except `clone_groups`\nand `clone_families` carry the typed wrapper envelopes instead of bare\nfindings, so the schema (and any TS / agent consumer) sees the typed\n`actions[]` natively."
+      "description": "Wire-shape payload for `plow dupes --format json` (the body that\nflattens into the `DupesOutput` envelope and is also\nemitted under the `dupes` / `duplication` key inside the combined and\naudit envelopes).\n\nMirrors [`DuplicationReport`] field-for-field, except `clone_groups`\nand `clone_families` carry the typed wrapper envelopes instead of bare\nfindings, so the schema (and any TS / agent consumer) sees the typed\n`actions[]` natively."
     },
     "CoverageAnalyzeSchemaVersion": {
       "type": "string",
@@ -10348,7 +10348,7 @@
             "kind",
             "size_bytes"
           ],
-          "description": "A source file was skipped at discovery because it exceeds the configured\nper-file size limit (`--max-file-size` / `FALLOW_MAX_FILE_SIZE`, default\n5 MB). The file is never read, parsed, or analyzed, guarding against the\nout-of-memory blowup a single multi-MB generated/vendored/bundled file\ncauses (issue #1086). Surfaced by source discovery, not workspace\ndiscovery, but shares this channel so the skip is visible in\n`workspace_diagnostics[]` on `fallow dead-code / dupes / health` JSON."
+          "description": "A source file was skipped at discovery because it exceeds the configured\nper-file size limit (`--max-file-size` / `PLOW_MAX_FILE_SIZE`, default\n5 MB). The file is never read, parsed, or analyzed, guarding against the\nout-of-memory blowup a single multi-MB generated/vendored/bundled file\ncauses (issue #1086). Surfaced by source discovery, not workspace\ndiscovery, but shares this channel so the skip is visible in\n`workspace_diagnostics[]` on `plow dead-code / dupes / health` JSON."
         },
         {
           "type": "object",
@@ -10425,7 +10425,7 @@
         "kind",
         "actions"
       ],
-      "description": "Wire-shape envelope for a [`ReExportCycle`] finding. Mirrors\n[`CircularDependencyFinding`]: flattens the bare finding and carries a\ntyped `actions` array (`refactor-re-export-cycle` informational primary\nplus `suppress-file` secondary; cycles are file-scoped so a single\nfile-level suppression on the alphabetically-first member breaks the\ncycle, and no `// fallow-ignore-next-line` form makes sense because the\ndiagnostic is anchored at line 1 col 0 of each member)."
+      "description": "Wire-shape envelope for a [`ReExportCycle`] finding. Mirrors\n[`CircularDependencyFinding`]: flattens the bare finding and carries a\ntyped `actions` array (`refactor-re-export-cycle` informational primary\nplus `suppress-file` secondary; cycles are file-scoped so a single\nfile-level suppression on the alphabetically-first member breaks the\ncycle, and no `// plow-ignore-next-line` form makes sense because the\ndiagnostic is anchored at line 1 col 0 of each member)."
     },
     "ReExportCycleKind": {
       "oneOf": [
@@ -10532,7 +10532,7 @@
           "description": "First release of the coverage-intelligence block contract."
         }
       ],
-      "description": "Coverage-intelligence JSON contract version. Scoped to the\n`coverage_intelligence` block and independent of the top-level fallow\nJSON `schema_version`."
+      "description": "Coverage-intelligence JSON contract version. Scoped to the\n`coverage_intelligence` block and independent of the top-level plow\nJSON `schema_version`."
     },
     "CoverageIntelligenceVerdict": {
       "type": "string",
@@ -10583,7 +10583,7 @@
       "properties": {
         "id": {
           "type": "string",
-          "description": "Stable finding ID of the form `fallow:coverage-intel:<hash>`."
+          "description": "Stable finding ID of the form `plow:coverage-intel:<hash>`."
         },
         "path": {
           "type": "string",
@@ -10757,7 +10757,7 @@
         },
         "auto_fixable": {
           "type": "boolean",
-          "description": "Whether fallow can apply this action automatically."
+          "description": "Whether plow can apply this action automatically."
         }
       },
       "required": [
@@ -10791,7 +10791,7 @@
         "cleared_at",
         "blocked_counts"
       ],
-      "description": "A commit-gate containment event recorded by `fallow impact`."
+      "description": "A commit-gate containment event recorded by `plow impact`."
     },
     "ImpactCounts": {
       "type": "object",
@@ -10866,7 +10866,7 @@
               "type": "null"
             }
           ],
-          "description": "Counts from the most recent recorded run. These are CHANGED-FILE scoped\n(each record comes from a `fallow audit` run, whose default `new-only`\ngate counts only findings in the changed files of that run), NOT a\nwhole-project total."
+          "description": "Counts from the most recent recorded run. These are CHANGED-FILE scoped\n(each record comes from a `plow audit` run, whose default `new-only`\ngate counts only findings in the changed files of that run), NOT a\nwhole-project total."
         },
         "trend": {
           "anyOf": [
@@ -10888,7 +10888,7 @@
               "type": "null"
             }
           ],
-          "description": "Counts from the most recent whole-project `fallow` run. WHOLE-PROJECT\nscope (not changed-file), so this is the current issue total across the\nwhole repo, context next to the actionable changed-file `surfacing`\ncount. None until a full `fallow` run has been recorded. v1.6."
+          "description": "Counts from the most recent whole-project `plow` run. WHOLE-PROJECT\nscope (not changed-file), so this is the current issue total across the\nwhole repo, context next to the actionable changed-file `surfacing`\ncount. None until a full `plow` run has been recorded. v1.6."
         },
         "project_trend": {
           "anyOf": [
@@ -10899,7 +10899,7 @@
               "type": "null"
             }
           ],
-          "description": "Trend between the two most recent whole-project records. Comparable over\ntime (same whole-project denominator every run), unlike the changed-file\n`trend`. None until two full `fallow` runs exist. v1.6."
+          "description": "Trend between the two most recent whole-project records. Comparable over\ntime (same whole-project denominator every run), unlike the changed-file\n`trend`. None until two full `plow` runs exist. v1.6."
         },
         "containment_count": {
           "type": "integer"
@@ -10913,11 +10913,11 @@
         },
         "resolved_total": {
           "type": "integer",
-          "description": "Lifetime count of findings fallow credits as genuinely resolved (code\nremoved or refactored, never a `fallow-ignore`). v1.5."
+          "description": "Lifetime count of findings plow credits as genuinely resolved (code\nremoved or refactored, never a `plow-ignore`). v1.5."
         },
         "suppressed_total": {
           "type": "integer",
-          "description": "Lifetime count of findings silenced by a newly-added `fallow-ignore`.\nReported as honest context, never as a win. v1.5."
+          "description": "Lifetime count of findings silenced by a newly-added `plow-ignore`.\nReported as honest context, never as a win. v1.5."
         },
         "recent_resolved": {
           "type": "array",
@@ -10953,7 +10953,7 @@
         "onboarding_declined",
         "explicit_decision"
       ],
-      "title": "fallow impact --format json",
+      "title": "plow impact --format json",
       "description": "The rendered impact report, derived purely from the store."
     },
     "ImpactTrendDirection": {
@@ -11006,7 +11006,7 @@
         {
           "type": "string",
           "const": "1",
-          "description": "First release of the `fallow impact --format json` shape."
+          "description": "First release of the `plow impact --format json` shape."
         }
       ],
       "description": "Wire-version discriminator for [`ImpactReport`]. Independent from the global\n`SchemaVersion` (the impact report versions on its own cadence) and from the\non-disk `STORE_SCHEMA_VERSION` (the persisted store shape versions\nseparately). Serializes as a string `const` so JSON consumers can switch on\nit, matching the other independently-versioned envelopes (e.g.\n`CoverageAnalyzeSchemaVersion`)."
@@ -11059,7 +11059,7 @@
           "$ref": "#/definitions/SecuritySchemaVersion"
         },
         "version": {
-          "description": "Fallow CLI version that produced this output.",
+          "description": "Plow CLI version that produced this output.",
           "$ref": "#/definitions/ToolVersion"
         },
         "elapsed_ms": {
@@ -11138,14 +11138,14 @@
         "unresolved_edge_files",
         "unresolved_callee_sites"
       ],
-      "description": "The `fallow security --format json` envelope. `FallowOutput` discriminates it\nby the `kind: \"security\"` tag; the optional `gate` block is additive and is\nnot part of that discrimination."
+      "description": "The `plow security --format json` envelope. `PlowOutput` discriminates it\nby the `kind: \"security\"` tag; the optional `gate` block is additive and is\nnot part of that discrimination."
     },
     "SecuritySchemaVersion": {
       "oneOf": [
         {
           "type": "string",
           "const": "1",
-          "description": "First release of the `fallow security --format json` shape."
+          "description": "First release of the `plow security --format json` shape."
         },
         {
           "type": "string",
@@ -11178,7 +11178,7 @@
           "description": "Adds the server-only-import category on client-server-leak findings."
         }
       ],
-      "description": "The `fallow security --format json` schema version. Independently versioned\nfrom the main contract, mirroring `ImpactReportSchemaVersion`."
+      "description": "The `plow security --format json` schema version. Independently versioned\nfrom the main contract, mirroring `ImpactReportSchemaVersion`."
     },
     "SecurityFinding": {
       "type": "object",
@@ -11223,7 +11223,7 @@
         },
         "source_backed": {
           "type": "boolean",
-          "description": "Whether the sink argument was associated with a known untrusted source by\nthe intra-module source-to-sink back-trace (issue #859): a local binding\nreferenced in the argument was sourced from a catalogue source path\n(`req.query`, `process.argv`, message-event `data`, etc.). `true` ranks\nthe candidate higher and annotates the evidence; `false` does NOT\nsuppress the finding (the association is conservative, never a proof, and\nfallow prefers false-negatives over false-positives). Always `false` for\n`ClientServerLeak`. Skipped from JSON when `false` for output stability."
+          "description": "Whether the sink argument was associated with a known untrusted source by\nthe intra-module source-to-sink back-trace (issue #859): a local binding\nreferenced in the argument was sourced from a catalogue source path\n(`req.query`, `process.argv`, message-event `data`, etc.). `true` ranks\nthe candidate higher and annotates the evidence; `false` does NOT\nsuppress the finding (the association is conservative, never a proof, and\nplow prefers false-negatives over false-positives). Always `false` for\n`ClientServerLeak`. Skipped from JSON when `false` for output stability."
         },
         "severity": {
           "description": "Verification-priority tier derived from existing reachability, boundary,\nsource-backed, and runtime signals. Candidate-only: this does not prove\nexploitability and does not change gates.",
@@ -11234,14 +11234,14 @@
           "items": {
             "$ref": "#/definitions/TraceHop"
           },
-          "description": "Structural import-hop trace from the client boundary to the secret source.\nThe hop count is the uncalibrated signal; fallow does not prove the path\nis exploitable."
+          "description": "Structural import-hop trace from the client boundary to the secret source.\nThe hop count is the uncalibrated signal; plow does not prove the path\nis exploitable."
         },
         "actions": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/IssueAction"
           },
-          "description": "Machine-actionable next steps. Always emitted (possibly empty for\nforward-compat). For security candidates this is a single file-level\nsuppress hint (`auto_fixable: false`); there is no auto-fix because\nverification is the agent's job, not fallow's."
+          "description": "Machine-actionable next steps. Always emitted (possibly empty for\nforward-compat). For security candidates this is a single file-level\nsuppress hint (`auto_fixable: false`); there is no auto-fix because\nverification is the agent's job, not plow's."
         },
         "dead_code": {
           "anyOf": [
@@ -11252,7 +11252,7 @@
               "type": "null"
             }
           ],
-          "description": "Dead-code cross-link when the same sink candidate sits in code fallow also\nreports as removable. Agents should verify the dead-code finding and delete\nthe code instead of hardening the sink when deletion is safe."
+          "description": "Dead-code cross-link when the same sink candidate sits in code plow also\nreports as removable. Agents should verify the dead-code finding and delete\nthe code instead of hardening the sink when deletion is safe."
         },
         "reachability": {
           "anyOf": [
@@ -11266,7 +11266,7 @@
           "description": "Graph-derived reachability ranking signal (issues #860 and #885). `None`\nuntil the post-detection ranking pass fills it; additive on the wire\n(skipped when absent). Drives the order findings are emitted in:\nruntime-reachable candidates sort first, followed by source-backed and\nsource-reachable candidates, then wider blast radius."
         },
         "candidate": {
-          "description": "Agent-actionable candidate record: the untrusted input kind, the sink,\nand the boundary the flow crosses. fallow fills these three slots; the\nexploitability verdict is the agent's job and is not a field here. Always\npresent.",
+          "description": "Agent-actionable candidate record: the untrusted input kind, the sink,\nand the boundary the flow crosses. plow fills these three slots; the\nexploitability verdict is the agent's job and is not a field here. Always\npresent.",
           "$ref": "#/definitions/SecurityCandidate"
         },
         "taint_flow": {
@@ -11289,7 +11289,7 @@
               "type": "null"
             }
           ],
-          "description": "Production runtime coverage context for the function enclosing this\nsecurity sink. Present only when `fallow security --runtime-coverage`\nruns and the candidate is a `tainted-sink`."
+          "description": "Production runtime coverage context for the function enclosing this\nsecurity sink. Present only when `plow security --runtime-coverage`\nruns and the candidate is a `tainted-sink`."
         },
         "attack_surface": {
           "anyOf": [
@@ -11300,7 +11300,7 @@
               "type": "null"
             }
           ],
-          "description": "Internal projection used by `fallow security --surface`. The CLI strips\nthis from per-finding JSON and promotes it to the top-level\n`attack_surface` field only when requested."
+          "description": "Internal projection used by `plow security --surface`. The CLI strips\nthis from per-finding JSON and promotes it to the top-level\n`attack_surface` field only when requested."
         }
       },
       "required": [
@@ -11315,7 +11315,7 @@
         "actions",
         "candidate"
       ],
-      "description": "A local security CANDIDATE for downstream agent verification, NOT a verified\nvulnerability. Emitted only by `fallow security`, never under bare `fallow`\nor the `audit` gate. There is deliberately no `confidence` or\n`signal_strength` field: fallow does not prove exploitability, so the trace\n(its hops and length) is the only honest signal."
+      "description": "A local security CANDIDATE for downstream agent verification, NOT a verified\nvulnerability. Emitted only by `plow security`, never under bare `plow`\nor the `audit` gate. There is deliberately no `confidence` or\n`signal_strength` field: plow does not prove exploitability, so the trace\n(its hops and length) is the only honest signal."
     },
     "SecurityFindingKind": {
       "oneOf": [
@@ -11445,7 +11445,7 @@
         "blast_radius",
         "crosses_boundary"
       ],
-      "description": "Graph-derived reachability ranking signal for a security candidate. Computed\nfrom the existing module graph after detection, never proven exploitable.\nUsed to surface candidates that sit on a request/runtime-reachable surface,\nreceive same-module source evidence, or are import-reachable from an\nuntrusted-source module above isolated helpers or scripts.\n\nThis is a relative-ordering signal, NOT a `confidence` or `signal_strength`\nscore: fallow does not prove the path is exploitable."
+      "description": "Graph-derived reachability ranking signal for a security candidate. Computed\nfrom the existing module graph after detection, never proven exploitable.\nUsed to surface candidates that sit on a request/runtime-reachable surface,\nreceive same-module source evidence, or are import-reachable from an\nuntrusted-source module above isolated helpers or scripts.\n\nThis is a relative-ordering signal, NOT a `confidence` or `signal_strength`\nscore: plow does not prove the path is exploitable."
     },
     "ComplexityContribution": {
       "type": "object",
@@ -11659,7 +11659,7 @@
         "path",
         "is_internal_dependency"
       ],
-      "description": "One workspace package emitted by `fallow workspaces --format json`."
+      "description": "One workspace package emitted by `plow workspaces --format json`."
     },
     "WorkspacesOutput": {
       "type": "object",
@@ -11688,8 +11688,8 @@
         "workspaces",
         "workspace_diagnostics"
       ],
-      "title": "fallow workspaces --format json",
-      "description": "`fallow workspaces --format json` envelope."
+      "title": "plow workspaces --format json",
+      "description": "`plow workspaces --format json` envelope."
     },
     "SecurityDeadCodeContext": {
       "type": "object",
@@ -11721,7 +11721,7 @@
         "kind",
         "guidance"
       ],
-      "description": "Dead-code cross-link attached to a security candidate when fallow's dead-code\npass reports the same anchor as removable code."
+      "description": "Dead-code cross-link attached to a security candidate when plow's dead-code\npass reports the same anchor as removable code."
     },
     "SecurityDeadCodeKind": {
       "oneOf": [
@@ -11772,7 +11772,7 @@
           "description": "Fail when a candidate becomes runtime-reachable from an entry point in\nhead but the matching candidate was not runtime-reachable in base."
         }
       ],
-      "description": "Gate mode for `fallow security --gate <mode>`."
+      "description": "Gate mode for `plow security --gate <mode>`."
     },
     "SecurityGateVerdict": {
       "oneOf": [
@@ -11823,7 +11823,7 @@
         "sink",
         "boundary"
       ],
-      "description": "An agent-actionable candidate record on a [`SecurityFinding`]. fallow fills\n`source_kind`, `sink`, and `boundary`. The exploitability IMPACT is\ndeliberately NOT a field: `severity` on the parent finding is only a\nreview-priority tier, while deciding exploitability remains the consuming\nagent's job. A perpetually-null `impact` key would only train consumers to\nignore it. The agent reads this record, then writes its own impact verdict\ndownstream."
+      "description": "An agent-actionable candidate record on a [`SecurityFinding`]. plow fills\n`source_kind`, `sink`, and `boundary`. The exploitability IMPACT is\ndeliberately NOT a field: `severity` on the parent finding is only a\nreview-priority tier, while deciding exploitability remains the consuming\nagent's job. A perpetually-null `impact` key would only train consumers to\nignore it. The agent reads this record, then writes its own impact verdict\ndownstream."
     },
     "SecurityCandidateSink": {
       "type": "object",
@@ -11870,7 +11870,7 @@
               "type": "null"
             }
           ],
-          "description": "URL construction shape for SSRF and open-redirect style candidates when\nfallow can classify whether the origin is fixed or dynamic. Absent for\nnon-URL sinks and unclassified URL expressions."
+          "description": "URL construction shape for SSRF and open-redirect style candidates when\nplow can classify whether the origin is fixed or dynamic. Absent for\nnon-URL sinks and unclassified URL expressions."
         }
       },
       "required": [
@@ -11907,7 +11907,7 @@
         "client_server",
         "cross_module"
       ],
-      "description": "The boundary slot of a [`SecurityCandidate`]: which structural boundaries the\ncandidate's flow crosses. A flow that crosses a client/server or module\nboundary is a stronger review target than a self-contained one; the boundary\nis fallow's structural signal over a pure source-sink match.\n\nTwo further boundary kinds are RESERVED for a follow-up and are deliberately\nabsent here rather than emitted as always-false: `export_visibility` (is the\nsink on a publicly-exported symbol?) and a package boundary (does the flow\ncross an npm-package edge?). Both need new graph derivation that does not\nexist today; emitting them as `false` would misreport \"we checked and it does\nnot cross\" when fallow has not checked at all."
+      "description": "The boundary slot of a [`SecurityCandidate`]: which structural boundaries the\ncandidate's flow crosses. A flow that crosses a client/server or module\nboundary is a stronger review target than a self-contained one; the boundary\nis plow's structural signal over a pure source-sink match.\n\nTwo further boundary kinds are RESERVED for a follow-up and are deliberately\nabsent here rather than emitted as always-false: `export_visibility` (is the\nsink on a publicly-exported symbol?) and a package boundary (does the flow\ncross an npm-package edge?). Both need new graph derivation that does not\nexist today; emitting them as `false` would misreport \"we checked and it does\nnot cross\" when plow has not checked at all."
     },
     "SecurityZoneCrossing": {
       "type": "object",
@@ -12068,7 +12068,7 @@
         "function",
         "line"
       ],
-      "description": "Runtime coverage context attached to a security candidate when\n`fallow security --runtime-coverage` is supplied."
+      "description": "Runtime coverage context attached to a security candidate when\n`plow security --runtime-coverage` is supplied."
     },
     "SecurityControlKind": {
       "oneOf": [
@@ -12178,7 +12178,7 @@
         "path",
         "defensive_boundary"
       ],
-      "description": "One untrusted entry to reachable sink path for `fallow security --surface`."
+      "description": "One untrusted entry to reachable sink path for `plow security --surface`."
     },
     "SecurityNetworkContext": {
       "type": "object",
@@ -12274,7 +12274,7 @@
         "categories_include",
         "categories_exclude"
       ],
-      "description": "Allowlisted config context for `fallow security --format json`."
+      "description": "Allowlisted config context for `plow security --format json`."
     },
     "SecurityOutputRulesConfig": {
       "type": "object",
@@ -12336,7 +12336,7 @@
           "$ref": "#/definitions/SecuritySchemaVersion"
         },
         "version": {
-          "description": "Fallow CLI version that produced this output.",
+          "description": "Plow CLI version that produced this output.",
           "$ref": "#/definitions/ToolVersion"
         },
         "elapsed_ms": {
@@ -12381,7 +12381,7 @@
         "config",
         "summary"
       ],
-      "description": "Compact `fallow security --summary --format json` payload. Uses the same\n`kind: \"security\"` discriminator as the full payload, but omits candidate\narrays and exposes only aggregate counts."
+      "description": "Compact `plow security --summary --format json` payload. Uses the same\n`kind: \"security\"` discriminator as the full payload, but omits candidate\narrays and exposes only aggregate counts."
     },
     "SecuritySummary": {
       "type": "object",
@@ -12432,7 +12432,7 @@
         "unresolved_callee_sites",
         "attack_surface_entries"
       ],
-      "description": "Aggregate counts for `fallow security --summary --format json`."
+      "description": "Aggregate counts for `plow security --summary --format json`."
     },
     "SecuritySeverityCounts": {
       "type": "object",
@@ -12494,7 +12494,7 @@
         "sample_limit",
         "top_files_limit"
       ],
-      "description": "Bounded unresolved-callee diagnostics for `fallow security --format json`."
+      "description": "Bounded unresolved-callee diagnostics for `plow security --format json`."
     },
     "SecurityUnresolvedCalleeReasonCount": {
       "type": "object",
@@ -12987,7 +12987,7 @@
         "command",
         "reason"
       ],
-      "description": "A read-only follow-up command fallow surfaces from the current findings,\nemitted as the top-level `next_steps` array on each command's JSON envelope.\n\n`next_steps` exists to point agents and humans sideways to fallow's adjacent\nverification capabilities (trace, complexity breakdown, audit, workspace\nscoping) that telemetry shows agents rarely discover, because they act on the\noutput in front of them rather than on reference docs.\n\n## Two hard contracts\n\n1. **Read-only.** A `next_step` NEVER suggests `fallow fix` or any mutating\n   command. Fallow surfaces evidence and verification paths; deciding and\n   applying the remediation is the agent's job.\n2. **Runnable, placeholder-free.** `command` is always runnable as-is. It\n   never contains an angle-bracket placeholder (`<...>`); finding-derived\n   values are filled in from a real, deterministically-selected finding, and\n   any environment- or user-specific value that cannot be made concrete lives\n   in `reason` instead. An agent can copy `command` and run it without edits.\n\nBoth contracts are enforced by unit tests in\n`crates/cli/src/report/suggestions.rs`.\n\nNote: a SEPARATE, unrelated `next_steps` field exists on the\n`coverage setup` envelope (`CoverageSetupOutput.next_steps`) as a plain\n`Vec<String>` of human onboarding steps. Consumers that read multiple\nenvelope kinds must route on the envelope's `kind` before interpreting a\n`next_steps` field: on analysis envelopes it is `Vec<NextStep>` objects, on\n`coverage setup` it is `Vec<String>`."
+      "description": "A read-only follow-up command plow surfaces from the current findings,\nemitted as the top-level `next_steps` array on each command's JSON envelope.\n\n`next_steps` exists to point agents and humans sideways to plow's adjacent\nverification capabilities (trace, complexity breakdown, audit, workspace\nscoping) that telemetry shows agents rarely discover, because they act on the\noutput in front of them rather than on reference docs.\n\n## Two hard contracts\n\n1. **Read-only.** A `next_step` NEVER suggests `plow fix` or any mutating\n   command. Plow surfaces evidence and verification paths; deciding and\n   applying the remediation is the agent's job.\n2. **Runnable, placeholder-free.** `command` is always runnable as-is. It\n   never contains an angle-bracket placeholder (`<...>`); finding-derived\n   values are filled in from a real, deterministically-selected finding, and\n   any environment- or user-specific value that cannot be made concrete lives\n   in `reason` instead. An agent can copy `command` and run it without edits.\n\nBoth contracts are enforced by unit tests in\n`crates/cli/src/report/suggestions.rs`.\n\nNote: a SEPARATE, unrelated `next_steps` field exists on the\n`coverage setup` envelope (`CoverageSetupOutput.next_steps`) as a plain\n`Vec<String>` of human onboarding steps. Consumers that read multiple\nenvelope kinds must route on the envelope's `kind` before interpreting a\n`next_steps` field: on analysis envelopes it is `Vec<NextStep>` objects, on\n`coverage setup` it is `Vec<String>`."
     },
     "HealthEffectiveThresholds": {
       "type": "object",
@@ -13319,15 +13319,15 @@
         "totals",
         "projects"
       ],
-      "title": "fallow impact --all --format json",
-      "description": "The cross-repo aggregate report, `fallow impact --all --format json`."
+      "title": "plow impact --all --format json",
+      "description": "The cross-repo aggregate report, `plow impact --all --format json`."
     },
     "CrossRepoImpactSchemaVersion": {
       "oneOf": [
         {
           "type": "string",
           "const": "1",
-          "description": "First release of the `fallow impact --all --format json` shape."
+          "description": "First release of the `plow impact --all --format json` shape."
         }
       ],
       "description": "Independent wire-version for the cross-repo report, on its own cadence (it\nversions separately from the per-project `ImpactReportSchemaVersion` and the\non-disk `STORE_SCHEMA_VERSION`)."
@@ -13354,7 +13354,7 @@
           "description": "Timestamp of the project's most recent recorded run (changed-file or\nwhole-project), for the LAST RUN column and the default `recent` sort."
         },
         "report": {
-          "description": "The full per-project report (identical shape to `fallow impact --format\njson`), reused verbatim so the per-project wire contract is the sub-shape.",
+          "description": "The full per-project report (identical shape to `plow impact --format\njson`), reused verbatim so the per-project wire contract is the sub-shape.",
           "$ref": "#/definitions/ImpactReport"
         }
       },
@@ -13378,7 +13378,7 @@
         },
         "project_wide_issues": {
           "type": "integer",
-          "description": "Sum of whole-project issue totals across projects that have a full-run\nbaseline, as of EACH project's last full `fallow` run (not a simultaneous\nsnapshot)."
+          "description": "Sum of whole-project issue totals across projects that have a full-run\nbaseline, as of EACH project's last full `plow` run (not a simultaneous\nsnapshot)."
         },
         "projects_with_baseline": {
           "type": "integer"
@@ -13924,7 +13924,7 @@
           "items": {
             "$ref": "#/definitions/CssDuplicateBlock"
           },
-          "description": "Groups of style rules across the project that share an identical\ndeclaration block (4+ declarations, sorted and `!important`-aware),\ngrouped by content: copy-paste consolidation candidates (fallow's\nduplication signal applied to CSS). Sorted by estimated savings\ndescending."
+          "description": "Groups of style rules across the project that share an identical\ndeclaration block (4+ declarations, sorted and `!important`-aware),\ngrouped by content: copy-paste consolidation candidates (plow's\nduplication signal applied to CSS). Sorted by estimated savings\ndescending."
         },
         "tailwind_arbitrary_values": {
           "type": "array",
@@ -13984,14 +13984,14 @@
               "type": "null"
             }
           ],
-          "description": "The project authors `font-size` values in several units (`px`, `rem`,\n`em`, `%`), with a per-unit distinct-value count: a type-scale\ninconsistency smell (mixing `px` and `rem` for type works against\nuser-zoom accessibility). Present only above a conservative floor.\nAdvisory candidate, never gated: the spread can be intentional (fixed\nchrome in `px`, body type in `rem`).\n\nColor-notation mixing (hex vs rgb vs hsl) is deliberately NOT surfaced:\nthe CSS parser canonicalizes every legacy sRGB notation to hex before\nfallow sees the value, so the authored distinction is already gone and\ncannot be recovered without a separate raw-token pass."
+          "description": "The project authors `font-size` values in several units (`px`, `rem`,\n`em`, `%`), with a per-unit distinct-value count: a type-scale\ninconsistency smell (mixing `px` and `rem` for type works against\nuser-zoom accessibility). Present only above a conservative floor.\nAdvisory candidate, never gated: the spread can be intentional (fixed\nchrome in `px`, body type in `rem`).\n\nColor-notation mixing (hex vs rgb vs hsl) is deliberately NOT surfaced:\nthe CSS parser canonicalizes every legacy sRGB notation to hex before\nplow sees the value, so the authored distinction is already gone and\ncannot be recovered without a separate raw-token pass."
         }
       },
       "required": [
         "files",
         "summary"
       ],
-      "description": "Structural CSS analytics surfaced by `fallow health --css`."
+      "description": "Structural CSS analytics surfaced by `plow health --css`."
     },
     "CssFileAnalytics": {
       "type": "object",
@@ -14175,7 +14175,7 @@
         "defined_font_faces",
         "referenced_font_families"
       ],
-      "description": "Stylesheet-level structural CSS analytics, computed from the parsed CSS\nsyntax tree. Feeds `fallow health` penalty weights and located findings,\nnever a standalone CSS score."
+      "description": "Stylesheet-level structural CSS analytics, computed from the parsed CSS\nsyntax tree. Feeds `plow health` penalty weights and located findings,\nnever a standalone CSS score."
     },
     "CssRuleMetric": {
       "type": "object",
@@ -14228,7 +14228,7 @@
         "important_count",
         "nesting_depth"
       ],
-      "description": "Structural CSS metrics for a single style rule, computed from the parsed CSS\nsyntax tree. A rule is recorded only when it crosses a structural floor (an\nid selector, a complex selector, a `!important` declaration, or deep\nnesting), so the vector stays bounded on normal stylesheets.\n\nNot persisted in the extraction cache: `fallow health` computes these\non demand from the CSS source, so there is no `bitcode` derive."
+      "description": "Structural CSS metrics for a single style rule, computed from the parsed CSS\nsyntax tree. A rule is recorded only when it crosses a structural floor (an\nid selector, a complex selector, a `!important` declaration, or deep\nnesting), so the vector stays bounded on normal stylesheets.\n\nNot persisted in the extraction cache: `plow health` computes these\non demand from the CSS source, so there is no `bitcode` derive."
     },
     "CssAnalyticsSummary": {
       "type": "object",
@@ -14431,7 +14431,7 @@
         },
         "auto_fixable": {
           "type": "boolean",
-          "description": "Always `false`: CSS candidates are never auto-fixed (`fallow fix` does\nnot touch them) because the residual consumer may live outside CSS."
+          "description": "Always `false`: CSS candidates are never auto-fixed (`plow fix` does\nnot touch them) because the residual consumer may live outside CSS."
         },
         "description": {
           "type": "string",
@@ -14571,7 +14571,7 @@
         "occurrences",
         "actions"
       ],
-      "description": "A group of style rules across the project that share an identical declaration\nblock: a copy-paste consolidation candidate (fallow's duplication signal\napplied to CSS). Only blocks of 4+ declarations appearing in 2+ rules are\nreported, so the signal stays a strong copy-paste indicator rather than\nflagging legitimately-repeated small blocks."
+      "description": "A group of style rules across the project that share an identical declaration\nblock: a copy-paste consolidation candidate (plow's duplication signal\napplied to CSS). Only blocks of 4+ declarations appearing in 2+ rules are\nreported, so the signal stays a strong copy-paste indicator rather than\nflagging legitimately-repeated small blocks."
     },
     "CssBlockOccurrence": {
       "type": "object",
@@ -15282,7 +15282,7 @@
           "$ref": "#/definitions/SecuritySurvivorsSchemaVersion"
         },
         "version": {
-          "description": "Fallow CLI version that produced this output.",
+          "description": "Plow CLI version that produced this output.",
           "$ref": "#/definitions/ToolVersion"
         },
         "elapsed_ms": {
@@ -15315,7 +15315,7 @@
         "survivors",
         "needs_human_review"
       ],
-      "description": "The `fallow security survivors --format json` envelope."
+      "description": "The `plow security survivors --format json` envelope."
     },
     "SecuritySurvivorsSchemaVersion": {
       "oneOf": [
@@ -15325,7 +15325,7 @@
           "description": "Adds `summary.unverdicted` for incomplete verdict files."
         }
       ],
-      "description": "The `fallow security survivors --format json` schema version."
+      "description": "The `plow security survivors --format json` schema version."
     },
     "SecuritySurvivorsSummary": {
       "type": "object",
@@ -15403,7 +15403,7 @@
           "description": "Optional verifier-owned remediation direction."
         },
         "candidate": {
-          "description": "Original typed fallow security candidate.",
+          "description": "Original typed plow security candidate.",
           "$ref": "#/definitions/SecurityFinding"
         }
       },
@@ -15419,7 +15419,7 @@
       "properties": {
         "schema_version": {
           "type": "string",
-          "description": "Must be `fallow-security-verdict/v1`."
+          "description": "Must be `plow-security-verdict/v1`."
         },
         "finding_id": {
           "type": "string",
@@ -15487,7 +15487,7 @@
           "description": "The verifier needs human review before dismissal or remediation."
         }
       ],
-      "description": "Verifier verdict status accepted by `fallow security survivors`."
+      "description": "Verifier verdict status accepted by `plow security survivors`."
     },
     "SecurityBlindSpotsOutput": {
       "type": "object",
@@ -15497,7 +15497,7 @@
           "$ref": "#/definitions/SecurityBlindSpotsSchemaVersion"
         },
         "version": {
-          "description": "Fallow CLI version that produced this output.",
+          "description": "Plow CLI version that produced this output.",
           "$ref": "#/definitions/ToolVersion"
         },
         "elapsed_ms": {
@@ -15523,7 +15523,7 @@
         "summary",
         "groups"
       ],
-      "description": "The `fallow security blind-spots --format json` envelope."
+      "description": "The `plow security blind-spots --format json` envelope."
     },
     "SecurityBlindSpotsSchemaVersion": {
       "oneOf": [
@@ -15533,7 +15533,7 @@
           "description": "Initial blind-spot grouping output contract."
         }
       ],
-      "description": "The `fallow security blind-spots --format json` schema version."
+      "description": "The `plow security blind-spots --format json` schema version."
     },
     "SecurityBlindSpotsSummary": {
       "type": "object",
@@ -15636,7 +15636,7 @@
       "properties": {
         "id": {
           "type": "string",
-          "description": "Rule or detector ID, matching fallow's stable rule names where possible."
+          "description": "Rule or detector ID, matching plow's stable rule names where possible."
         },
         "framework": {
           "type": "string",
@@ -15812,8 +15812,8 @@
         "evidence",
         "warnings"
       ],
-      "title": "fallow inspect --format json",
-      "description": "Envelope emitted by `fallow inspect --format json`."
+      "title": "plow inspect --format json",
+      "description": "Envelope emitted by `plow inspect --format json`."
     },
     "InspectSymbolIdentity": {
       "type": "object",
@@ -15898,7 +15898,7 @@
         },
         "version": {
           "type": "string",
-          "description": "Fallow CLI version that produced this output."
+          "description": "Plow CLI version that produced this output."
         },
         "command": {
           "type": "string",
@@ -15957,8 +15957,8 @@
         "routing",
         "decisions"
       ],
-      "title": "fallow audit --brief --format json",
-      "description": "The full `fallow audit --brief --format json` envelope. Carries the\ninformational verdict, the triage and graph-facts orientation stages, plus\nthe reused \"subtract\" section (the same dead-code / duplication / complexity\npayload `fallow audit --format json` emits)."
+      "title": "plow audit --brief --format json",
+      "description": "The full `plow audit --brief --format json` envelope. Carries the\ninformational verdict, the triage and graph-facts orientation stages, plus\nthe reused \"subtract\" section (the same dead-code / duplication / complexity\npayload `plow audit --format json` emits)."
     },
     "ReviewBriefSchemaVersion": {
       "type": "integer",
@@ -16256,7 +16256,7 @@
       "properties": {
         "signal_id": {
           "type": "string",
-          "description": "Deterministic anchor to the fallow-emitted candidate this decision frames.\n`accept_signal_id` rejects any id not in the emitted set."
+          "description": "Deterministic anchor to the plow-emitted candidate this decision frames.\n`accept_signal_id` rejects any id not in the emitted set."
         },
         "category": {
           "description": "One of the SOLID-3 categories.",
@@ -16276,7 +16276,7 @@
         },
         "signal_key": {
           "type": "string",
-          "description": "The raw fallow-emitted candidate key the `signal_id` hashes."
+          "description": "The raw plow-emitted candidate key the `signal_id` hashes."
         },
         "previous_signal_id": {
           "type": [
@@ -16326,7 +16326,7 @@
         "internal_consumer_count",
         "tradeoff"
       ],
-      "description": "One consequential structural decision, framed as a judgment question for a\nhuman with taste, anchored to a fallow-emitted signal."
+      "description": "One consequential structural decision, framed as a judgment question for a\nhuman with taste, anchored to a plow-emitted signal."
     },
     "DecisionAction": {
       "type": "object",
@@ -16348,7 +16348,7 @@
         },
         "auto_fixable": {
           "type": "boolean",
-          "description": "Whether fallow can carry the action out automatically. Always `false`:\na decision is a human judgment, never auto-applied."
+          "description": "Whether plow can carry the action out automatically. Always `false`:\na decision is a human judgment, never auto-applied."
         }
       },
       "required": [
@@ -16356,7 +16356,7 @@
         "description",
         "auto_fixable"
       ],
-      "description": "A structured action attached to a surfaced decision (the agent-actionable\nsurface). Mirrors the typed-action shape the rest of fallow emits."
+      "description": "A structured action attached to a surfaced decision (the agent-actionable\nsurface). Mirrors the typed-action shape the rest of plow emits."
     },
     "DecisionActionType": {
       "oneOf": [
@@ -16368,7 +16368,7 @@
         {
           "type": "string",
           "const": "suppress",
-          "description": "Suppress the decision with a `// fallow-ignore` comment."
+          "description": "Suppress the decision with a `// plow-ignore` comment."
         }
       ],
       "description": "The discriminated action kinds a decision can carry."
@@ -16437,7 +16437,7 @@
         },
         "version": {
           "type": "string",
-          "description": "Fallow CLI version that produced this output."
+          "description": "Plow CLI version that produced this output."
         },
         "command": {
           "type": "string",
@@ -16463,7 +16463,7 @@
         },
         "signal_count": {
           "type": "integer",
-          "description": "Count of fallow-emitted signal_ids (the anti-hallucination allowlist size)."
+          "description": "Count of plow-emitted signal_ids (the anti-hallucination allowlist size)."
         }
       },
       "required": [
@@ -16473,7 +16473,7 @@
         "decisions",
         "signal_count"
       ],
-      "title": "fallow decision-surface --format json",
+      "title": "plow decision-surface --format json",
       "description": "The separable `decision-surface` envelope: the single call that puts taste-\ndecisions in front of a human, callable WITHOUT the full pipeline (the\n`decision_surface` MCP tool's output). Carries `kind`/`schema_version` plus\nstructured `actions[]` per decision."
     },
     "DecisionSurfaceSchemaVersion": {
@@ -16485,7 +16485,7 @@
       "properties": {
         "signal_id": {
           "type": "string",
-          "description": "Deterministic anchor to the fallow-emitted candidate this decision frames.\n`accept_signal_id` rejects any id not in the emitted set."
+          "description": "Deterministic anchor to the plow-emitted candidate this decision frames.\n`accept_signal_id` rejects any id not in the emitted set."
         },
         "category": {
           "description": "One of the SOLID-3 categories.",
@@ -16505,7 +16505,7 @@
         },
         "signal_key": {
           "type": "string",
-          "description": "The raw fallow-emitted candidate key the `signal_id` hashes."
+          "description": "The raw plow-emitted candidate key the `signal_id` hashes."
         },
         "previous_signal_id": {
           "type": [
@@ -16588,11 +16588,11 @@
       "properties": {
         "signal_id": {
           "type": "string",
-          "description": "The fallow-emitted `signal_id` (verified against the allowlist). Empty\nwhen this judgment was anchored by a `change_anchor` instead."
+          "description": "The plow-emitted `signal_id` (verified against the allowlist). Empty\nwhen this judgment was anchored by a `change_anchor` instead."
         },
         "change_anchor": {
           "type": "string",
-          "description": "The fallow-emitted `change_anchor` (verified against the allowlist). Empty\nwhen this judgment was anchored by a `signal_id`."
+          "description": "The plow-emitted `change_anchor` (verified against the allowlist). Empty\nwhen this judgment was anchored by a `signal_id`."
         },
         "anchor_kind": {
           "type": "string",
@@ -16611,7 +16611,7 @@
         },
         "deterministic": {
           "type": "boolean",
-          "description": "Hard fence: always `false`. The framing is agent prose, never a\ndeterministic fallow result, so it never gates or auto-posts."
+          "description": "Hard fence: always `false`. The framing is agent prose, never a\ndeterministic plow result, so it never gates or auto-posts."
         }
       },
       "required": [
@@ -16690,15 +16690,15 @@
       "properties": {
         "signal_id": {
           "type": "string",
-          "description": "The `signal_id` the agent cited (fallow never emitted it). Empty when the\njudgment cited a `change_anchor` instead."
+          "description": "The `signal_id` the agent cited (plow never emitted it). Empty when the\njudgment cited a `change_anchor` instead."
         },
         "change_anchor": {
           "type": "string",
-          "description": "The `change_anchor` the agent cited (fallow never emitted it). Empty when\nthe judgment cited a `signal_id` instead."
+          "description": "The `change_anchor` the agent cited (plow never emitted it). Empty when\nthe judgment cited a `signal_id` instead."
         },
         "reason": {
           "type": "string",
-          "description": "The rejection reason: `unanchored-signal-id` (cited a signal fallow did\nnot emit), `unknown-change-anchor` (cited a region fallow did not emit),\nor `stale-snapshot` (the tree moved)."
+          "description": "The rejection reason: `unanchored-signal-id` (cited a signal plow did\nnot emit), `unknown-change-anchor` (cited a region plow did not emit),\nor `stale-snapshot` (the tree moved)."
         }
       },
       "required": [
@@ -16741,7 +16741,7 @@
         },
         "version": {
           "type": "string",
-          "description": "Fallow CLI version that produced this guide."
+          "description": "Plow CLI version that produced this guide."
         },
         "command": {
           "type": "string",
@@ -16786,8 +16786,8 @@
         "agent_schema",
         "injection_note"
       ],
-      "title": "fallow review --walkthrough-guide --format json",
-      "description": "The `fallow review --walkthrough-guide` envelope: the current digest + schema\nthe agent fetches. The tool owns this; the skill stays thin (it fetches this\nrather than embedding a frozen copy). Always emitted with exit 0."
+      "title": "plow review --walkthrough-guide --format json",
+      "description": "The `plow review --walkthrough-guide` envelope: the current digest + schema\nthe agent fetches. The tool owns this; the skill stays thin (it fetches this\nrather than embedding a frozen copy). Always emitted with exit 0."
     },
     "WalkthroughValidation": {
       "type": "object",
@@ -16798,7 +16798,7 @@
         },
         "version": {
           "type": "string",
-          "description": "Fallow CLI version that produced this validation."
+          "description": "Plow CLI version that produced this validation."
         },
         "command": {
           "type": "string",
@@ -16817,7 +16817,7 @@
           "items": {
             "$ref": "#/definitions/AcceptedJudgment"
           },
-          "description": "Judgments that cite a real fallow-emitted signal, framing fenced."
+          "description": "Judgments that cite a real plow-emitted signal, framing fenced."
         },
         "rejected": {
           "type": "array",
@@ -16851,8 +16851,8 @@
         "rejected_count",
         "unanchored_count"
       ],
-      "title": "fallow review --walkthrough-file --format json",
-      "description": "The `fallow review --walkthrough-file` validation envelope: the result of\npost-validating the agent's judgment against the live graph. Always exit 0."
+      "title": "plow review --walkthrough-file --format json",
+      "description": "The `plow review --walkthrough-file` validation envelope: the result of\npost-validating the agent's judgment against the live graph. Always exit 0."
     },
     "PartitionFacts": {
       "type": "object",
@@ -17197,7 +17197,7 @@
         "start_line",
         "line_count"
       ],
-      "description": "One stable per-hunk CHANGE ANCHOR: a changed region the agent may cite as a\njudgment anchor IN ADDITION to a `signal_id`. Where a `signal_id` anchors a\ngraph FINDING (\"fallow emitted this exact finding\"), a change_anchor anchors\nonly a changed REGION (\"fallow confirms this region changed\") , a strictly\nweaker guarantee, surfaced as `anchor_kind` on the accepted judgment so a\nconsumer can tell the two apart. Graph/diff-derived; NEVER from prose."
+      "description": "One stable per-hunk CHANGE ANCHOR: a changed region the agent may cite as a\njudgment anchor IN ADDITION to a `signal_id`. Where a `signal_id` anchors a\ngraph FINDING (\"plow emitted this exact finding\"), a change_anchor anchors\nonly a changed REGION (\"plow confirms this region changed\") , a strictly\nweaker guarantee, surfaced as `anchor_kind` on the accepted judgment so a\nconsumer can tell the two apart. Graph/diff-derived; NEVER from prose."
     },
     "RuntimeCoverageDiscriminators": {
       "type": "object",
@@ -17237,7 +17237,7 @@
         "min_observation_volume",
         "meets_observation_volume"
       ],
-      "description": "Discriminator inputs that PRODUCED a finding's verdict (fallow-rs/fallow-cloud#321),\nemitted alongside the verdict so an agent can reproduce it and see the\nminimum-observation confidence cap instead of re-deriving them from scratch.\nF4: these make the EXISTING Fallow-owned discriminators legible; they are not\na new or external signal and gate nothing. Pairs with `evidence.static_status`\n(the static half of the discriminator set)."
+      "description": "Discriminator inputs that PRODUCED a finding's verdict (plow-rs/plow-cloud#321),\nemitted alongside the verdict so an agent can reproduce it and see the\nminimum-observation confidence cap instead of re-deriving them from scratch.\nF4: these make the EXISTING Plow-owned discriminators legible; they are not\na new or external signal and gate nothing. Pairs with `evidence.static_status`\n(the static half of the discriminator set)."
     },
     "RuntimeCoverageProvenance": {
       "type": "object",
@@ -17282,7 +17282,7 @@
         "stale",
         "stale_after_days"
       ],
-      "description": "Provenance of a runtime-coverage report (fallow-rs/fallow-cloud#319), mirroring\nthe cloud runtime-context `provenance` block so the local-capture and cloud\nsurfaces present one portable shape. F4: provenance is context only; it never\ngates a verdict or confidence."
+      "description": "Provenance of a runtime-coverage report (plow-rs/plow-cloud#319), mirroring\nthe cloud runtime-context `provenance` block so the local-capture and cloud\nsurfaces present one portable shape. F4: provenance is context only; it never\ngates a verdict or confidence."
     },
     "FeatureFlagFinding": {
       "type": "object",
@@ -17529,8 +17529,8 @@
         "feature_flags",
         "total_flags"
       ],
-      "title": "fallow flags --format json",
-      "description": "Envelope emitted by `fallow flags --format json`."
+      "title": "plow flags --format json",
+      "description": "Envelope emitted by `plow flags --format json`."
     },
     "TokenConsumers": {
       "type": "object",
@@ -17660,7 +17660,7 @@
         "penalties",
         "confidence"
       ],
-      "description": "Project-level styling-health score: a SECOND health axis computed purely from\nthe structural CSS analytics (`CssAnalyticsReport`), orthogonal to the JS/TS\ncode-health [`HealthScore`]. Surfaced only alongside the `--css` analytics, so\na plain `fallow health` run is byte-unchanged. The code score and grade stay\nuntouched: styling health is additive, never folded into the code score.\n\nLike [`HealthScore`], the score starts at 100 and subtracts capped per-category\npenalties; the grade reuses the shared [`letter_grade`] thresholds verbatim\n(A>=85, B>=70, C>=55, D>=40, F<40), so the two axes are read on one scale."
+      "description": "Project-level styling-health score: a SECOND health axis computed purely from\nthe structural CSS analytics (`CssAnalyticsReport`), orthogonal to the JS/TS\ncode-health [`HealthScore`]. Surfaced only alongside the `--css` analytics, so\na plain `plow health` run is byte-unchanged. The code score and grade stay\nuntouched: styling health is additive, never folded into the code score.\n\nLike [`HealthScore`], the score starts at 100 and subtracts capped per-category\npenalties; the grade reuses the shared [`letter_grade`] thresholds verbatim\n(A>=85, B>=70, C>=55, D>=40, F<40), so the two axes are read on one scale."
     },
     "StylingHealthPenalties": {
       "type": "object",
@@ -17705,7 +17705,7 @@
         {
           "type": "string",
           "const": "low",
-          "description": "The grade is indicative rather than authoritative, for one of two reasons\n(named in `confidence_reason`): a thin authored-CSS surface (little to\nmeasure), or predominantly flat compile-time-atomic CSS-in-JS\n(StyleX/Panda) whose structure is not assessable. NOT a signal that\nfallow's analysis failed."
+          "description": "The grade is indicative rather than authoritative, for one of two reasons\n(named in `confidence_reason`): a thin authored-CSS surface (little to\nmeasure), or predominantly flat compile-time-atomic CSS-in-JS\n(StyleX/Panda) whose structure is not assessable. NOT a signal that\nplow's analysis failed."
         }
       ],
       "description": "Trust level for a [`StylingHealth`] grade. TWO variants (not the three-tier\n`high`/`medium`/`low` of [`crate::Confidence`] / `FeatureFlagConfidence`) ON\nPURPOSE: styling confidence is binary (the grade is either reliable for the\nanalyzed surface or it is not), not three distinct evidence tiers, so a\nnever-emitted `Medium` would be dead surface. Serializes lowercase (`\"high\"` /\n`\"low\"`), matching the sibling confidence enums' vocabulary."

@@ -5,13 +5,13 @@ expression: json_str
 [
   {
     "type": "issue",
-    "check_name": "fallow/unused-export",
+    "check_name": "plow/unused-export",
     "description": "Export 'helperFn' is never imported by other modules",
     "categories": [
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "ebe2360218821412",
+    "fingerprint": "6b7fb5f6ae546edb",
     "location": {
       "path": "src/utils.ts",
       "lines": {
@@ -21,13 +21,13 @@ expression: json_str
   },
   {
     "type": "issue",
-    "check_name": "fallow/unused-export",
+    "check_name": "plow/unused-export",
     "description": "Export 'formatDate' is never imported by other modules",
     "categories": [
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "593cb27c843760fb",
+    "fingerprint": "17ea99b7c10a19ea",
     "location": {
       "path": "src/utils.ts",
       "lines": {
@@ -37,13 +37,13 @@ expression: json_str
   },
   {
     "type": "issue",
-    "check_name": "fallow/unused-export",
+    "check_name": "plow/unused-export",
     "description": "Export 'capitalize' is never imported by other modules",
     "categories": [
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "bff99b1c39ccbf9c",
+    "fingerprint": "6d706a9a71d96f77",
     "location": {
       "path": "src/helpers.ts",
       "lines": {

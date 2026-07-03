@@ -1,6 +1,6 @@
 //! Framework detector coverage diagnostics for health output.
 
-use fallow_config::{PackageJson, ResolvedConfig, RulesConfig, Severity};
+use plow_config::{PackageJson, ResolvedConfig, RulesConfig, Severity};
 
 #[derive(Clone, Copy, Default)]
 pub(super) struct FrameworkHealthFacts {
@@ -10,7 +10,7 @@ pub(super) struct FrameworkHealthFacts {
 pub(super) fn build_framework_health_diagnostics(
     config: &ResolvedConfig,
     facts: Option<FrameworkHealthFacts>,
-) -> Option<fallow_output::FrameworkHealthDiagnostics> {
+) -> Option<plow_output::FrameworkHealthDiagnostics> {
     let facts = facts?;
     let detected_frameworks = detect_frameworks(config);
     if detected_frameworks.is_empty() {
@@ -26,7 +26,7 @@ pub(super) fn build_framework_health_diagnostics(
         return None;
     }
 
-    Some(fallow_output::FrameworkHealthDiagnostics {
+    Some(plow_output::FrameworkHealthDiagnostics {
         detected_frameworks,
         detectors,
     })
@@ -37,7 +37,7 @@ fn detect_frameworks(config: &ResolvedConfig) -> Vec<String> {
     if let Ok(pkg) = PackageJson::load(&config.root.join("package.json")) {
         deps.extend(pkg.all_dependency_names());
     }
-    for workspace in fallow_config::discover_workspaces(&config.root) {
+    for workspace in plow_config::discover_workspaces(&config.root) {
         if let Ok(pkg) = PackageJson::load(&workspace.root.join("package.json")) {
             deps.extend(pkg.all_dependency_names());
         }
@@ -71,7 +71,7 @@ fn detect_frameworks(config: &ResolvedConfig) -> Vec<String> {
 }
 
 fn add_framework_detectors(
-    detectors: &mut Vec<fallow_output::FrameworkHealthDetector>,
+    detectors: &mut Vec<plow_output::FrameworkHealthDetector>,
     framework: &str,
     rules: &RulesConfig,
     facts: FrameworkHealthFacts,
@@ -89,7 +89,7 @@ fn add_framework_detectors(
 }
 
 fn add_angular_detectors(
-    detectors: &mut Vec<fallow_output::FrameworkHealthDetector>,
+    detectors: &mut Vec<plow_output::FrameworkHealthDetector>,
     framework: &str,
     rules: &RulesConfig,
 ) {
@@ -120,7 +120,7 @@ fn add_angular_detectors(
 }
 
 fn add_next_detectors(
-    detectors: &mut Vec<fallow_output::FrameworkHealthDetector>,
+    detectors: &mut Vec<plow_output::FrameworkHealthDetector>,
     framework: &str,
     rules: &RulesConfig,
 ) {
@@ -163,7 +163,7 @@ fn add_next_detectors(
 }
 
 fn add_nuxt_detectors(
-    detectors: &mut Vec<fallow_output::FrameworkHealthDetector>,
+    detectors: &mut Vec<plow_output::FrameworkHealthDetector>,
     framework: &str,
     rules: &RulesConfig,
 ) {
@@ -194,7 +194,7 @@ fn add_nuxt_detectors(
 }
 
 fn add_vue_detectors(
-    detectors: &mut Vec<fallow_output::FrameworkHealthDetector>,
+    detectors: &mut Vec<plow_output::FrameworkHealthDetector>,
     framework: &str,
     rules: &RulesConfig,
 ) {
@@ -225,7 +225,7 @@ fn add_vue_detectors(
 }
 
 fn add_react_detectors(
-    detectors: &mut Vec<fallow_output::FrameworkHealthDetector>,
+    detectors: &mut Vec<plow_output::FrameworkHealthDetector>,
     framework: &str,
     rules: &RulesConfig,
 ) {
@@ -246,7 +246,7 @@ fn add_react_detectors(
 }
 
 fn add_svelte_detectors(
-    detectors: &mut Vec<fallow_output::FrameworkHealthDetector>,
+    detectors: &mut Vec<plow_output::FrameworkHealthDetector>,
     framework: &str,
     rules: &RulesConfig,
 ) {
@@ -277,16 +277,16 @@ fn add_svelte_detectors(
 }
 
 fn add_sveltekit_detectors(
-    detectors: &mut Vec<fallow_output::FrameworkHealthDetector>,
+    detectors: &mut Vec<plow_output::FrameworkHealthDetector>,
     framework: &str,
     rules: &RulesConfig,
     facts: FrameworkHealthFacts,
 ) {
     if facts.unused_load_data_keys_global_abstain && rules.unused_load_data_keys != Severity::Off {
-        detectors.push(fallow_output::FrameworkHealthDetector {
+        detectors.push(plow_output::FrameworkHealthDetector {
             id: "unused-load-data-key".to_string(),
             framework: framework.to_string(),
-            status: fallow_output::FrameworkHealthDetectorStatus::Abstained,
+            status: plow_output::FrameworkHealthDetectorStatus::Abstained,
             reason: Some("unused_load_data_keys_global_abstain".to_string()),
         });
     } else {
@@ -300,20 +300,20 @@ fn add_sveltekit_detectors(
 }
 
 fn add_detector(
-    detectors: &mut Vec<fallow_output::FrameworkHealthDetector>,
+    detectors: &mut Vec<plow_output::FrameworkHealthDetector>,
     framework: &str,
     id: &str,
     severity: Severity,
 ) {
     let (status, reason) = if severity == Severity::Off {
         (
-            fallow_output::FrameworkHealthDetectorStatus::DisabledByConfig,
+            plow_output::FrameworkHealthDetectorStatus::DisabledByConfig,
             Some("disabled_by_config".to_string()),
         )
     } else {
-        (fallow_output::FrameworkHealthDetectorStatus::Active, None)
+        (plow_output::FrameworkHealthDetectorStatus::Active, None)
     };
-    detectors.push(fallow_output::FrameworkHealthDetector {
+    detectors.push(plow_output::FrameworkHealthDetector {
         id: id.to_string(),
         framework: framework.to_string(),
         status,
@@ -322,15 +322,15 @@ fn add_detector(
 }
 
 fn add_not_checked_detector(
-    detectors: &mut Vec<fallow_output::FrameworkHealthDetector>,
+    detectors: &mut Vec<plow_output::FrameworkHealthDetector>,
     framework: &str,
     id: &str,
     reason: &str,
 ) {
-    detectors.push(fallow_output::FrameworkHealthDetector {
+    detectors.push(plow_output::FrameworkHealthDetector {
         id: id.to_string(),
         framework: framework.to_string(),
-        status: fallow_output::FrameworkHealthDetectorStatus::NotChecked,
+        status: plow_output::FrameworkHealthDetectorStatus::NotChecked,
         reason: Some(reason.to_string()),
     });
 }

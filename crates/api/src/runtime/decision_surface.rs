@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use fallow_output::ReviewDeltas;
+use plow_output::ReviewDeltas;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
@@ -38,7 +38,7 @@ pub fn run_decision_surface(
     let changed_files = changed_files_for_run(&resolved)?.unwrap_or_default();
     if changed_files.is_empty() {
         return Ok(DecisionSurfaceProgrammaticOutput {
-            surface: fallow_output::DecisionSurface::default(),
+            surface: plow_output::DecisionSurface::default(),
             elapsed: start.elapsed(),
             envelope_mode: root_envelope_mode(),
             telemetry_analysis_run_id: None,
@@ -68,12 +68,12 @@ fn audit_options_for_decision_surface(options: &DecisionSurfaceOptions) -> Audit
 
 struct DecisionAnalysis {
     root: PathBuf,
-    results: fallow_types::results::AnalysisResults,
+    results: plow_types::results::AnalysisResults,
     public_api: FxHashSet<String>,
-    impact_closure: Option<fallow_engine::ImpactClosurePaths>,
+    impact_closure: Option<plow_engine::ImpactClosurePaths>,
     export_lines: Option<FxHashMap<String, Vec<(String, u32)>>>,
     internal_consumers: Option<FxHashMap<String, u64>>,
-    routing: fallow_output::RoutingFacts,
+    routing: plow_output::RoutingFacts,
 }
 
 fn run_decision_analysis(
@@ -85,16 +85,16 @@ fn run_decision_analysis(
         resolved,
     )?;
     let root = session.root().to_path_buf();
-    let workspaces = fallow_config::discover_workspaces(&root);
-    let root_pkg = fallow_config::PackageJson::load(&root.join("package.json")).ok();
+    let workspaces = plow_config::discover_workspaces(&root);
+    let root_pkg = plow_config::PackageJson::load(&root.join("package.json")).ok();
     let artifacts = session
         .analyze_dead_code_with_session_artifacts(false, true, changed_files.cloned())
         .map_err(|err| {
             ProgrammaticError::new(format!("decision-surface analysis failed: {err}"), 2)
-                .with_code("FALLOW_DECISION_SURFACE_FAILED")
+                .with_code("PLOW_DECISION_SURFACE_FAILED")
                 .with_context("decision-surface")
         })?;
-    let fallow_engine::AnalysisSessionArtifacts {
+    let plow_engine::AnalysisSessionArtifacts {
         analysis: mut output,
         changed_files,
         ..
@@ -102,10 +102,10 @@ fn run_decision_analysis(
     let changed_files = changed_files.as_ref();
 
     if let Some(workspace_roots) = resolved.workspace_roots.as_ref() {
-        fallow_engine::filter_to_workspaces(&mut output.results, workspace_roots);
+        plow_engine::filter_to_workspaces(&mut output.results, workspace_roots);
     }
     if let Some(changed_files) = changed_files {
-        fallow_engine::filter_by_changed_files(&mut output.results, changed_files);
+        plow_engine::filter_by_changed_files(&mut output.results, changed_files);
     }
 
     let public_api = output
@@ -122,18 +122,18 @@ fn run_decision_analysis(
         });
     let impact_closure = output.graph.as_ref().and_then(|graph| {
         changed_files
-            .and_then(|files| fallow_engine::impact_closure_for_changed_paths(graph, &root, files))
+            .and_then(|files| plow_engine::impact_closure_for_changed_paths(graph, &root, files))
     });
     let export_lines = output.graph.as_ref().and_then(|graph| {
         changed_files
-            .and_then(|files| fallow_engine::export_lines_for_changed_paths(graph, &root, files))
+            .and_then(|files| plow_engine::export_lines_for_changed_paths(graph, &root, files))
     });
     let internal_consumers = output.graph.as_ref().and_then(|graph| {
         changed_files.and_then(|files| {
-            fallow_engine::internal_consumers_for_changed_paths(graph, &root, files)
+            plow_engine::internal_consumers_for_changed_paths(graph, &root, files)
         })
     });
-    let routing = changed_files.map_or_else(fallow_output::RoutingFacts::default, |files| {
+    let routing = changed_files.map_or_else(plow_output::RoutingFacts::default, |files| {
         crate::routing::compute_routing(&root, session.config(), files)
     });
 
@@ -189,7 +189,7 @@ fn snapshot_from_decision_analysis(analysis: &DecisionAnalysis) -> DecisionSnaps
 
 fn build_decision_deltas(head: &DecisionAnalysis, base: &DecisionSnapshot) -> ReviewDeltas {
     let head_snapshot = snapshot_from_decision_analysis(head);
-    fallow_output::ReviewDeltas {
+    plow_output::ReviewDeltas {
         boundary_introduced: crate::review_deltas::introduced_keys(
             &head_snapshot.boundary_edges,
             &base.boundary_edges,
@@ -209,7 +209,7 @@ fn build_surface(
     options: &DecisionSurfaceOptions,
     head: &DecisionAnalysis,
     deltas: &ReviewDeltas,
-) -> fallow_output::DecisionSurface {
+) -> plow_output::DecisionSurface {
     let boundary_anchors = boundary_anchors(head, deltas);
     let mut coordination = coordination_anchors(head.impact_closure.as_ref());
     let resolve_line = export_line_resolver(head.export_lines.as_ref());
@@ -273,7 +273,7 @@ fn boundary_anchors(head: &DecisionAnalysis, deltas: &ReviewDeltas) -> Vec<Bound
 }
 
 fn coordination_anchors(
-    closure: Option<&fallow_engine::ImpactClosurePaths>,
+    closure: Option<&plow_engine::ImpactClosurePaths>,
 ) -> Vec<CoordinationAnchor> {
     let Some(closure) = closure else {
         return Vec::new();

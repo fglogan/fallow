@@ -92,7 +92,7 @@ expression: redact_version(&json_str)
           "type": "suppress-line",
           "auto_fixable": false,
           "description": "Suppress this stale suppression finding with a comment above the suppression",
-          "comment": "// fallow-ignore-next-line stale-suppression",
+          "comment": "// plow-ignore-next-line stale-suppression",
           "scope": "per-location"
         }
       ]
@@ -116,7 +116,7 @@ expression: redact_version(&json_str)
           "type": "suppress-line",
           "auto_fixable": false,
           "description": "Suppress this stale suppression finding with a comment above the suppression",
-          "comment": "// fallow-ignore-next-line stale-suppression",
+          "comment": "// plow-ignore-next-line stale-suppression",
           "scope": "per-location"
         }
       ]

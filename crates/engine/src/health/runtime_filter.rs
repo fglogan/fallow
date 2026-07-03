@@ -12,7 +12,7 @@ pub(super) struct RuntimeCoverageFilterContext<'a> {
     pub root: &'a Path,
     pub top: Option<usize>,
     pub changed_files: Option<&'a FxHashSet<PathBuf>>,
-    pub diff_index: Option<&'a fallow_output::DiffIndex>,
+    pub diff_index: Option<&'a plow_output::DiffIndex>,
 }
 
 impl<'a> RuntimeCoverageFilterContext<'a> {
@@ -46,7 +46,7 @@ impl<'a> RuntimeCoverageFilterContext<'a> {
 
     pub(super) fn with_diff_index(
         mut self,
-        diff_index: Option<&'a fallow_output::DiffIndex>,
+        diff_index: Option<&'a plow_output::DiffIndex>,
     ) -> Self {
         self.diff_index = diff_index;
         self
@@ -60,7 +60,7 @@ impl<'a> RuntimeCoverageFilterContext<'a> {
 }
 
 pub(super) fn apply_runtime_coverage_filters(
-    report: &mut fallow_output::RuntimeCoverageReport,
+    report: &mut plow_output::RuntimeCoverageReport,
     ctx: &RuntimeCoverageFilterContext<'_>,
 ) {
     if let Some(baseline) = ctx.baseline {
@@ -82,7 +82,7 @@ pub(super) fn apply_runtime_coverage_filters(
 }
 
 fn retain_hot_paths_in_change_scope(
-    report: &mut fallow_output::RuntimeCoverageReport,
+    report: &mut plow_output::RuntimeCoverageReport,
     ctx: &RuntimeCoverageFilterContext<'_>,
 ) -> bool {
     if !ctx.has_change_scope() {
@@ -107,8 +107,7 @@ fn retain_hot_paths_in_change_scope(
         }
 
         if let Some(changed_files) = ctx.changed_files {
-            let absolute = if fallow_types::path_util::is_absolute_path_any_platform(&hot_path.path)
-            {
+            let absolute = if plow_types::path_util::is_absolute_path_any_platform(&hot_path.path) {
                 hot_path.path.clone()
             } else {
                 ctx.root.join(&hot_path.path)
@@ -126,31 +125,31 @@ pub(super) fn relative_to_root(path: &Path, root: &Path) -> Option<String> {
     if let Ok(stripped) = path.strip_prefix(root) {
         return Some(stripped.to_string_lossy().replace('\\', "/"));
     }
-    if fallow_types::path_util::is_absolute_path_any_platform(path) {
+    if plow_types::path_util::is_absolute_path_any_platform(path) {
         return None;
     }
     Some(path.to_string_lossy().replace('\\', "/"))
 }
 
 fn refresh_runtime_coverage_verdict(
-    report: &mut fallow_output::RuntimeCoverageReport,
+    report: &mut plow_output::RuntimeCoverageReport,
     pr_context: bool,
 ) {
     let has_cold_signal = report.findings.iter().any(|finding| {
         matches!(
             finding.verdict,
-            fallow_output::RuntimeCoverageVerdict::SafeToDelete
-                | fallow_output::RuntimeCoverageVerdict::ReviewRequired
-                | fallow_output::RuntimeCoverageVerdict::LowTraffic
+            plow_output::RuntimeCoverageVerdict::SafeToDelete
+                | plow_output::RuntimeCoverageVerdict::ReviewRequired
+                | plow_output::RuntimeCoverageVerdict::LowTraffic
         )
     });
     let has_changed_hot_path = pr_context && !report.hot_paths.is_empty();
     let has_license_grace = matches!(
         report.verdict,
-        fallow_output::RuntimeCoverageReportVerdict::LicenseExpiredGrace
+        plow_output::RuntimeCoverageReportVerdict::LicenseExpiredGrace
     ) || matches!(
         report.watermark,
-        Some(fallow_output::RuntimeCoverageWatermark::LicenseExpiredGrace)
+        Some(plow_output::RuntimeCoverageWatermark::LicenseExpiredGrace)
     );
 
     report.signals =
@@ -168,16 +167,16 @@ fn build_runtime_coverage_signals(
     has_license_grace: bool,
     has_cold_signal: bool,
     has_changed_hot_path: bool,
-) -> Vec<fallow_output::RuntimeCoverageSignal> {
+) -> Vec<plow_output::RuntimeCoverageSignal> {
     let mut signals = Vec::new();
     if has_license_grace {
-        signals.push(fallow_output::RuntimeCoverageSignal::LicenseExpiredGrace);
+        signals.push(plow_output::RuntimeCoverageSignal::LicenseExpiredGrace);
     }
     if has_cold_signal {
-        signals.push(fallow_output::RuntimeCoverageSignal::ColdCodeDetected);
+        signals.push(plow_output::RuntimeCoverageSignal::ColdCodeDetected);
     }
     if has_changed_hot_path {
-        signals.push(fallow_output::RuntimeCoverageSignal::HotPathTouched);
+        signals.push(plow_output::RuntimeCoverageSignal::HotPathTouched);
     }
     signals
 }
@@ -187,24 +186,24 @@ fn pick_primary_verdict(
     has_cold_signal: bool,
     has_changed_hot_path: bool,
     pr_context: bool,
-) -> fallow_output::RuntimeCoverageReportVerdict {
+) -> plow_output::RuntimeCoverageReportVerdict {
     if has_license_grace {
-        return fallow_output::RuntimeCoverageReportVerdict::LicenseExpiredGrace;
+        return plow_output::RuntimeCoverageReportVerdict::LicenseExpiredGrace;
     }
     if pr_context {
         if has_changed_hot_path {
-            return fallow_output::RuntimeCoverageReportVerdict::HotPathTouched;
+            return plow_output::RuntimeCoverageReportVerdict::HotPathTouched;
         }
         if has_cold_signal {
-            return fallow_output::RuntimeCoverageReportVerdict::ColdCodeDetected;
+            return plow_output::RuntimeCoverageReportVerdict::ColdCodeDetected;
         }
     } else {
         if has_cold_signal {
-            return fallow_output::RuntimeCoverageReportVerdict::ColdCodeDetected;
+            return plow_output::RuntimeCoverageReportVerdict::ColdCodeDetected;
         }
         if has_changed_hot_path {
-            return fallow_output::RuntimeCoverageReportVerdict::HotPathTouched;
+            return plow_output::RuntimeCoverageReportVerdict::HotPathTouched;
         }
     }
-    fallow_output::RuntimeCoverageReportVerdict::Clean
+    plow_output::RuntimeCoverageReportVerdict::Clean
 }

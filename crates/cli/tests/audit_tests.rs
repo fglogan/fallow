@@ -7,7 +7,7 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use common::{fallow_bin, parse_json, run_fallow_raw};
+use common::{parse_json, plow_bin, run_plow_raw};
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -147,11 +147,8 @@ fn write_branchy_istanbul_coverage(coverage_path: &std::path::Path, coverage_sou
     fs::write(coverage_path, serde_json::to_string(&coverage).unwrap()).unwrap();
 }
 
-fn run_fallow_raw_with_env(
-    args: &[&str],
-    env: &[(&str, &std::path::Path)],
-) -> common::CommandOutput {
-    let mut cmd = Command::new(fallow_bin());
+fn run_plow_raw_with_env(args: &[&str], env: &[(&str, &std::path::Path)]) -> common::CommandOutput {
+    let mut cmd = Command::new(plow_bin());
     cmd.env("RUST_LOG", "").env("NO_COLOR", "1");
     for (key, value) in env {
         cmd.env(key, value);
@@ -159,7 +156,7 @@ fn run_fallow_raw_with_env(
     for arg in args {
         cmd.arg(arg);
     }
-    let output = cmd.output().expect("failed to run fallow binary");
+    let output = cmd.output().expect("failed to run plow binary");
     common::CommandOutput {
         stdout: String::from_utf8_lossy(&output.stdout).to_string(),
         stderr: String::from_utf8_lossy(&output.stderr).to_string(),
@@ -170,7 +167,7 @@ fn run_fallow_raw_with_env(
 #[test]
 fn audit_json_has_verdict_and_schema() {
     let dir = create_audit_fixture("verdict");
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "audit",
         "--root",
         dir.path().to_str().unwrap(),
@@ -207,7 +204,7 @@ fn audit_json_has_verdict_and_schema() {
 #[test]
 fn audit_pass_verdict_when_no_changes() {
     let dir = create_audit_fixture("nochanges");
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "audit",
         "--root",
         dir.path().to_str().unwrap(),
@@ -288,7 +285,7 @@ fn audit_parallel_output_is_deterministic() {
     }
 
     let mut canonicalized: Vec<String> = std::iter::repeat_with(|| {
-        let output = run_fallow_raw(&[
+        let output = run_plow_raw(&[
             "audit",
             "--root",
             dir.path().to_str().unwrap(),
@@ -347,7 +344,7 @@ fn audit_json_has_summary_with_changes() {
         .output()
         .unwrap();
 
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "audit",
         "--root",
         dir.path().to_str().unwrap(),
@@ -446,7 +443,7 @@ fn create_audit_baseline_fixture() -> TempDir {
 #[test]
 fn audit_default_gate_ignores_inherited_issues() {
     let tmp = create_audit_baseline_fixture();
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "audit",
         "--root",
         tmp.path().to_str().unwrap(),
@@ -521,7 +518,7 @@ fn audit_new_only_inherits_shifted_duplicate_group() {
 
     git(dir, &["init", "-b", "main"]);
     // The clone fingerprint is hashed over the raw fragment text, so CRLF vs LF
-    // shifts it. `fallow audit` spawns its own `git worktree add` for the base
+    // shifts it. `plow audit` spawns its own `git worktree add` for the base
     // snapshot, which inherits the runner's global git config (Windows defaults
     // to `core.autocrlf=true`), so the checked-out base would get CRLF while the
     // head file written via `fs::write` keeps LF, making the inherited clone look
@@ -537,7 +534,7 @@ fn audit_new_only_inherits_shifted_duplicate_group() {
     .unwrap();
     commit_all(dir, "shift unchanged duplicate");
 
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "audit",
         "--root",
         dir.to_str().unwrap(),
@@ -603,15 +600,15 @@ fn audit_new_only_inherits_shifted_duplicate_group() {
 #[test]
 fn audit_gate_all_reports_preexisting_issues() {
     let tmp = create_audit_baseline_fixture();
-    fs::write(tmp.path().join("fallow.toml"), "[audit]\ngate = \"all\"\n").unwrap();
-    let output = run_fallow_raw(&[
+    fs::write(tmp.path().join("plow.toml"), "[audit]\ngate = \"all\"\n").unwrap();
+    let output = run_plow_raw(&[
         "audit",
         "--root",
         tmp.path().to_str().unwrap(),
         "--base",
         "main",
         "--config",
-        tmp.path().join("fallow.toml").to_str().unwrap(),
+        tmp.path().join("plow.toml").to_str().unwrap(),
         "--format",
         "json",
         "--quiet",
@@ -646,7 +643,7 @@ fn audit_gate_all_reports_preexisting_issues() {
 #[test]
 fn audit_gate_cli_flag_overrides_default() {
     let tmp = create_audit_baseline_fixture();
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "audit",
         "--root",
         tmp.path().to_str().unwrap(),
@@ -676,7 +673,7 @@ fn audit_gate_cli_flag_overrides_default() {
 
 #[test]
 fn audit_help_documents_gate() {
-    let output = run_fallow_raw(&["audit", "--help"]);
+    let output = run_plow_raw(&["audit", "--help"]);
     assert_eq!(output.code, 0, "audit --help should succeed");
     assert!(
         output.stdout.contains("--gate <GATE>"),
@@ -695,7 +692,7 @@ fn audit_base_preserves_node_modules_tsconfig_extends_context() {
     let tmp = TempDir::new().expect("failed to create temp dir");
     let dir = tmp.path();
     fs::create_dir_all(dir.join("src")).unwrap();
-    fs::write(dir.join(".gitignore"), "node_modules\n.fallow\n").unwrap();
+    fs::write(dir.join(".gitignore"), "node_modules\n.plow\n").unwrap();
     fs::write(
         dir.join("package.json"),
         r#"{"name":"audit-rn-alias","main":"src/index.ts","dependencies":{"@react-native/typescript-config":"1.0.0"}}"#,
@@ -735,7 +732,7 @@ fn audit_base_preserves_node_modules_tsconfig_extends_context() {
     .unwrap();
     commit_all(dir, "introduce new export");
 
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "audit",
         "--root",
         dir.to_str().unwrap(),
@@ -806,7 +803,7 @@ fn audit_new_unlisted_dependency_import_site_is_introduced() {
     .unwrap();
     commit_all(dir, "add b");
 
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "audit",
         "--root",
         dir.to_str().unwrap(),
@@ -869,7 +866,7 @@ fn audit_empty_catalog_group_changed_manifest_is_introduced() {
     )
     .unwrap();
 
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "audit",
         "--root",
         dir.to_str().unwrap(),
@@ -935,7 +932,7 @@ fn audit_invalid_client_export_is_introduced() {
     )
     .unwrap();
 
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "audit",
         "--root",
         dir.to_str().unwrap(),
@@ -984,7 +981,7 @@ fn audit_dependency_location_change_is_introduced() {
     .unwrap();
     commit_all(dir, "move dependency");
 
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "audit",
         "--root",
         dir.to_str().unwrap(),
@@ -1016,7 +1013,7 @@ fn audit_dependency_location_change_is_introduced() {
 fn audit_with_dead_code_baseline_filters_preexisting_issues() {
     let tmp = create_audit_baseline_fixture();
     let dir = tmp.path();
-    let baseline_path = dir.join(".fallow-dead-code-baseline.json");
+    let baseline_path = dir.join(".plow-dead-code-baseline.json");
 
     let git = |args: &[&str]| {
         Command::new("git")
@@ -1034,7 +1031,7 @@ fn audit_with_dead_code_baseline_filters_preexisting_issues() {
             .expect("git command failed")
     };
     git(&["checkout", "main"]);
-    let save = run_fallow_raw(&[
+    let save = run_plow_raw(&[
         "dead-code",
         "--root",
         dir.to_str().unwrap(),
@@ -1056,7 +1053,7 @@ fn audit_with_dead_code_baseline_filters_preexisting_issues() {
     );
     git(&["checkout", "feature"]);
 
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "audit",
         "--root",
         dir.to_str().unwrap(),
@@ -1090,7 +1087,7 @@ fn audit_with_dead_code_baseline_filters_preexisting_issues() {
 #[test]
 fn audit_rejects_global_baseline_flag() {
     let tmp = create_audit_baseline_fixture();
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "--baseline",
         "anything.json",
         "audit",
@@ -1120,7 +1117,7 @@ fn audit_rejects_global_baseline_flag() {
 #[test]
 fn audit_rejects_global_save_baseline_flag() {
     let tmp = create_audit_baseline_fixture();
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "--save-baseline",
         "anywhere.json",
         "audit",
@@ -1150,7 +1147,7 @@ fn audit_rejects_global_save_baseline_flag() {
 #[test]
 fn audit_badge_format_exits_2() {
     let dir = create_audit_fixture("badge");
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "audit",
         "--root",
         dir.path().to_str().unwrap(),
@@ -1175,7 +1172,7 @@ fn audit_max_crap_flag_fails_when_threshold_crossed() {
 
     write_branchy_change(dir.path());
 
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "audit",
         "--root",
         dir.path().to_str().unwrap(),
@@ -1204,7 +1201,7 @@ fn audit_max_crap_flag_fails_when_threshold_crossed() {
 fn audit_respects_health_threshold_override() {
     let dir = create_audit_fixture("health-threshold-override");
     fs::write(
-        dir.path().join(".fallowrc.json"),
+        dir.path().join(".plowrc.json"),
         r#"{
   "health": {
     "thresholdOverrides": [
@@ -1223,7 +1220,7 @@ fn audit_respects_health_threshold_override() {
     .unwrap();
     write_branchy_change(dir.path());
 
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "audit",
         "--root",
         dir.path().to_str().unwrap(),
@@ -1245,7 +1242,7 @@ fn audit_respects_health_threshold_override() {
 }
 
 fn audit_with_env(root: &Path, env: &[(&str, &str)]) -> common::CommandOutput {
-    let bin = fallow_bin();
+    let bin = plow_bin();
     let mut cmd = Command::new(&bin);
     cmd.args([
         "audit",
@@ -1262,7 +1259,7 @@ fn audit_with_env(root: &Path, env: &[(&str, &str)]) -> common::CommandOutput {
     for (key, value) in env {
         cmd.env(key, value);
     }
-    let output = cmd.output().expect("failed to run fallow binary");
+    let output = cmd.output().expect("failed to run plow binary");
     common::CommandOutput {
         stdout: String::from_utf8_lossy(&output.stdout).to_string(),
         stderr: String::from_utf8_lossy(&output.stderr).to_string(),
@@ -1272,11 +1269,11 @@ fn audit_with_env(root: &Path, env: &[(&str, &str)]) -> common::CommandOutput {
 
 /// Regression test for issue #301. When git invokes hooks (`pre-commit`,
 /// `pre-push`), it sets `GIT_INDEX_FILE=.git/index` (relative path) plus
-/// related repo-state vars. Before the fix in #301, fallow inherited these
+/// related repo-state vars. Before the fix in #301, plow inherited these
 /// into its own git invocations and `git worktree add` failed because the
 /// relative index path no longer resolved from the temporary worktree dir.
 ///
-/// The test runs `fallow audit` under each of the ambient repo-state vars
+/// The test runs `plow audit` under each of the ambient repo-state vars
 /// individually and asserts the audit succeeds, mirroring the leak shapes a
 /// hook subprocess actually sees.
 #[test]
@@ -1315,7 +1312,7 @@ fn audit_coverage_and_coverage_root_feed_crap_scoring() {
     let dir = create_audit_fixture("coverage-root");
     write_branchy_change(dir.path());
 
-    let without_coverage = run_fallow_raw(&[
+    let without_coverage = run_plow_raw(&[
         "audit",
         "--root",
         dir.path().to_str().unwrap(),
@@ -1336,7 +1333,7 @@ fn audit_coverage_and_coverage_root_feed_crap_scoring() {
     let coverage_path = dir.path().join("artifacts/coverage-final.json");
     write_branchy_istanbul_coverage(&coverage_path, "/ci/workspace/src/index.ts");
 
-    let with_coverage = run_fallow_raw(&[
+    let with_coverage = run_plow_raw(&[
         "audit",
         "--root",
         dir.path().to_str().unwrap(),
@@ -1365,7 +1362,7 @@ fn audit_coverage_and_coverage_root_feed_crap_scoring() {
 fn audit_rejects_relative_coverage_root() {
     let dir = create_audit_fixture("coverage-root-relative-rejected");
 
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "audit",
         "--root",
         dir.path().to_str().unwrap(),
@@ -1401,7 +1398,7 @@ fn audit_coverage_relative_path_resolves_against_root_through_base_snapshot() {
     let branchy_source = dir.path().join("src/index.ts");
     write_branchy_istanbul_coverage(&coverage_path, &branchy_source.to_string_lossy());
 
-    let with_relative = run_fallow_raw(&[
+    let with_relative = run_plow_raw(&[
         "audit",
         "--root",
         dir.path().to_str().unwrap(),
@@ -1433,7 +1430,7 @@ fn audit_coverage_env_fallback_feeds_crap_scoring() {
     let branchy_source = dir.path().join("src/index.ts");
     write_branchy_istanbul_coverage(&coverage_path, &branchy_source.to_string_lossy());
 
-    let without_env = run_fallow_raw(&[
+    let without_env = run_plow_raw(&[
         "audit",
         "--root",
         dir.path().to_str().unwrap(),
@@ -1447,11 +1444,11 @@ fn audit_coverage_env_fallback_feeds_crap_scoring() {
     ]);
     assert_eq!(
         without_env.code, 1,
-        "static CRAP estimate should fail before FALLOW_COVERAGE is supplied. stderr: {}",
+        "static CRAP estimate should fail before PLOW_COVERAGE is supplied. stderr: {}",
         without_env.stderr
     );
 
-    let output = run_fallow_raw_with_env(
+    let output = run_plow_raw_with_env(
         &[
             "audit",
             "--root",
@@ -1464,26 +1461,26 @@ fn audit_coverage_env_fallback_feeds_crap_scoring() {
             "json",
             "--quiet",
         ],
-        &[("FALLOW_COVERAGE", coverage_path.as_path())],
+        &[("PLOW_COVERAGE", coverage_path.as_path())],
     );
     assert_eq!(
         output.code, 0,
-        "FALLOW_COVERAGE should feed audit's health sub-analysis. stderr: {}",
+        "PLOW_COVERAGE should feed audit's health sub-analysis. stderr: {}",
         output.stderr
     );
     let json = parse_json(&output);
     assert_eq!(json["verdict"].as_str(), Some("pass"));
 }
 
-/// Run `fallow audit` against `root` with string env vars set on the child
-/// process. The path-typed `run_fallow_raw_with_env` cannot carry a git ref
+/// Run `plow audit` against `root` with string env vars set on the child
+/// process. The path-typed `run_plow_raw_with_env` cannot carry a git ref
 /// value, so this builds the command directly.
 fn run_audit_string_env(
     root: &std::path::Path,
     extra_args: &[&str],
     env: &[(&str, &str)],
 ) -> common::CommandOutput {
-    let mut cmd = Command::new(fallow_bin());
+    let mut cmd = Command::new(plow_bin());
     cmd.env("RUST_LOG", "").env("NO_COLOR", "1");
     for (key, value) in env {
         cmd.env(key, value);
@@ -1492,7 +1489,7 @@ fn run_audit_string_env(
     cmd.arg(root);
     cmd.args(["--format", "json", "--quiet"]);
     cmd.args(extra_args);
-    let output = cmd.output().expect("failed to run fallow binary");
+    let output = cmd.output().expect("failed to run plow binary");
     common::CommandOutput {
         stdout: String::from_utf8_lossy(&output.stdout).to_string(),
         stderr: String::from_utf8_lossy(&output.stderr).to_string(),
@@ -1513,35 +1510,35 @@ fn audit_fixture_with_two_commits() -> TempDir {
 }
 
 #[test]
-fn audit_honors_fallow_audit_base_env_when_no_flag() {
+fn audit_honors_plow_audit_base_env_when_no_flag() {
     let dir = audit_fixture_with_two_commits();
-    let output = run_audit_string_env(dir.path(), &[], &[("FALLOW_AUDIT_BASE", "HEAD~1")]);
+    let output = run_audit_string_env(dir.path(), &[], &[("PLOW_AUDIT_BASE", "HEAD~1")]);
 
     assert_eq!(
         output.code, 0,
-        "audit with FALLOW_AUDIT_BASE should run. stderr: {}",
+        "audit with PLOW_AUDIT_BASE should run. stderr: {}",
         output.stderr
     );
     let json = parse_json(&output);
     assert_eq!(
         json["base_ref"].as_str(),
         Some("HEAD~1"),
-        "FALLOW_AUDIT_BASE should set the base ref"
+        "PLOW_AUDIT_BASE should set the base ref"
     );
     assert_eq!(
         json["base_description"].as_str(),
-        Some("FALLOW_AUDIT_BASE=HEAD~1"),
+        Some("PLOW_AUDIT_BASE=HEAD~1"),
         "env-set base should carry its provenance"
     );
 }
 
 #[test]
-fn audit_base_flag_wins_over_fallow_audit_base_env() {
+fn audit_base_flag_wins_over_plow_audit_base_env() {
     let dir = audit_fixture_with_two_commits();
     let output = run_audit_string_env(
         dir.path(),
         &["--base", "HEAD"],
-        &[("FALLOW_AUDIT_BASE", "HEAD~1")],
+        &[("PLOW_AUDIT_BASE", "HEAD~1")],
     );
 
     assert_eq!(
@@ -1553,7 +1550,7 @@ fn audit_base_flag_wins_over_fallow_audit_base_env() {
     assert_eq!(
         json["base_ref"].as_str(),
         Some("HEAD"),
-        "the --base flag must win over FALLOW_AUDIT_BASE"
+        "the --base flag must win over PLOW_AUDIT_BASE"
     );
     assert!(
         json.get("base_description").is_none() || json["base_description"].is_null(),
@@ -1562,13 +1559,13 @@ fn audit_base_flag_wins_over_fallow_audit_base_env() {
 }
 
 #[test]
-fn audit_rejects_malformed_fallow_audit_base_env() {
+fn audit_rejects_malformed_plow_audit_base_env() {
     let dir = audit_fixture_with_two_commits();
-    let output = run_audit_string_env(dir.path(), &[], &[("FALLOW_AUDIT_BASE", "bad;ref")]);
+    let output = run_audit_string_env(dir.path(), &[], &[("PLOW_AUDIT_BASE", "bad;ref")]);
 
     assert_eq!(
         output.code, 2,
-        "a malformed FALLOW_AUDIT_BASE must exit 2, not be silently ignored. stderr: {}",
+        "a malformed PLOW_AUDIT_BASE must exit 2, not be silently ignored. stderr: {}",
         output.stderr
     );
     let json = parse_json(&output);
@@ -1576,7 +1573,7 @@ fn audit_rejects_malformed_fallow_audit_base_env() {
     assert!(
         json["message"]
             .as_str()
-            .is_some_and(|m| m.contains("FALLOW_AUDIT_BASE")),
+            .is_some_and(|m| m.contains("PLOW_AUDIT_BASE")),
         "the error should name the offending env var, got: {}",
         json["message"]
     );
@@ -1585,7 +1582,7 @@ fn audit_rejects_malformed_fallow_audit_base_env() {
 // Base-reuse predicate characterization tests
 //
 // These tests pin the behavior of `can_reuse_current_as_base` end-to-end
-// through the `fallow audit --gate new-only` path. Each test establishes a
+// through the `plow audit --gate new-only` path. Each test establishes a
 // committed base and a committed head, then asserts on the JSON attribution
 // fields `dead_code_introduced` and `dead_code_inherited` to confirm whether
 // the reuse predicate correctly skipped the base-snapshot rebuild.
@@ -1620,7 +1617,7 @@ fn audit_whitespace_only_change_reports_no_introduced_findings() {
     .unwrap();
     commit_all(root, "reformat utils");
 
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "audit",
         "--root",
         root.to_str().unwrap(),
@@ -1677,7 +1674,7 @@ fn audit_semantic_change_reports_introduced_finding() {
     .unwrap();
     commit_all(root, "add extra unused export");
 
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "audit",
         "--root",
         root.to_str().unwrap(),
@@ -1725,7 +1722,7 @@ fn audit_doc_only_change_reports_no_introduced_findings() {
     fs::write(root.join("README.md"), "# My project\nUpdated docs.\n").unwrap();
     commit_all(root, "update readme");
 
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "audit",
         "--root",
         root.to_str().unwrap(),
@@ -1778,7 +1775,7 @@ fn audit_new_file_is_treated_as_behavioral() {
     .unwrap();
     commit_all(root, "add new file with unused export");
 
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "audit",
         "--root",
         root.to_str().unwrap(),
@@ -1863,7 +1860,7 @@ fn audit_reuse_check_handles_many_equivalent_files() {
     }
     commit_all(root, "whitespace-only edits across modules");
 
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "audit",
         "--root",
         root.to_str().unwrap(),
@@ -1918,7 +1915,7 @@ fn audit_json_only_change_is_behavioral() {
     .unwrap();
     commit_all(root, "remove unused dep from package.json");
 
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "audit",
         "--root",
         root.to_str().unwrap(),
@@ -2028,7 +2025,7 @@ fn create_mixed_barrel_audit_fixture() -> TempDir {
 #[test]
 fn audit_annotates_newly_added_mixed_barrel_as_introduced() {
     let tmp = create_mixed_barrel_audit_fixture();
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "audit",
         "--root",
         tmp.path().to_str().unwrap(),
@@ -2125,7 +2122,7 @@ fn create_misplaced_directive_audit_fixture() -> TempDir {
 #[test]
 fn audit_annotates_newly_added_misplaced_directive_as_introduced() {
     let tmp = create_misplaced_directive_audit_fixture();
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "audit",
         "--root",
         tmp.path().to_str().unwrap(),
@@ -2173,7 +2170,7 @@ fn create_boundary_walkthrough_fixture() -> TempDir {
     // Boundary config: ui may import only itself (so importing db is a
     // disallowed cross-zone edge).
     fs::write(
-        dir.join(".fallowrc.json"),
+        dir.join(".plowrc.json"),
         r#"{
   "entry": ["src/ui/page.ts"],
   "boundaries": {
@@ -2211,7 +2208,7 @@ fn create_boundary_walkthrough_fixture() -> TempDir {
 }
 
 fn run_walkthrough_guide(root: &Path) -> serde_json::Value {
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "review",
         "--root",
         root.to_str().unwrap(),
@@ -2231,7 +2228,7 @@ fn run_walkthrough_guide(root: &Path) -> serde_json::Value {
 }
 
 fn run_walkthrough_file(root: &Path, file: &Path) -> serde_json::Value {
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "review",
         "--root",
         root.to_str().unwrap(),
@@ -2430,12 +2427,12 @@ fn e5_stale_snapshot_hash_is_refused() {
 }
 
 // ---------------------------------------------------------------------------
-// W2 (#347): `fallow review --walkthrough` human/markdown renderer.
+// W2 (#347): `plow review --walkthrough` human/markdown renderer.
 // ---------------------------------------------------------------------------
 
-/// Run `fallow review --walkthrough` (default human) and return the raw output.
+/// Run `plow review --walkthrough` (default human) and return the raw output.
 fn run_walkthrough_human(root: &Path) -> common::CommandOutput {
-    run_fallow_raw(&[
+    run_plow_raw(&[
         "review",
         "--root",
         root.to_str().unwrap(),
@@ -2496,7 +2493,7 @@ fn w2_walkthrough_human_renders_stages_and_badges() {
 #[test]
 fn w2_walkthrough_json_is_byte_identical_to_guide() {
     let tmp = create_boundary_walkthrough_fixture();
-    let walkthrough_json = run_fallow_raw(&[
+    let walkthrough_json = run_plow_raw(&[
         "review",
         "--root",
         tmp.path().to_str().unwrap(),
@@ -2529,7 +2526,7 @@ fn w2_walkthrough_json_is_byte_identical_to_guide() {
 #[test]
 fn w2_walkthrough_markdown_renders_plain_paste_artifact() {
     let tmp = create_boundary_walkthrough_fixture();
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "review",
         "--root",
         tmp.path().to_str().unwrap(),
@@ -2542,7 +2539,7 @@ fn w2_walkthrough_markdown_renders_plain_paste_artifact() {
     ]);
     assert_eq!(output.code, 0, "exits 0. stderr: {}", output.stderr);
     assert!(
-        output.stdout.starts_with("## Fallow Review"),
+        output.stdout.starts_with("## Plow Review"),
         "markdown leads with the H2 header. stdout: {}",
         output.stdout
     );
@@ -2566,11 +2563,11 @@ fn w2_walkthrough_markdown_renders_plain_paste_artifact() {
 #[test]
 fn w2_walkthrough_exits_zero_even_when_verdict_fails() {
     let tmp = create_audit_baseline_fixture();
-    fs::write(tmp.path().join("fallow.toml"), "[audit]\ngate = \"all\"\n").unwrap();
-    let config = tmp.path().join("fallow.toml");
+    fs::write(tmp.path().join("plow.toml"), "[audit]\ngate = \"all\"\n").unwrap();
+    let config = tmp.path().join("plow.toml");
 
     // Sanity: the plain audit on this fixture really does fail.
-    let audit = run_fallow_raw(&[
+    let audit = run_plow_raw(&[
         "audit",
         "--root",
         tmp.path().to_str().unwrap(),
@@ -2586,7 +2583,7 @@ fn w2_walkthrough_exits_zero_even_when_verdict_fails() {
 
     // All three walkthrough render modes stay exit 0 (advisory surface).
     for format in ["human", "markdown", "json"] {
-        let output = run_fallow_raw(&[
+        let output = run_plow_raw(&[
             "review",
             "--root",
             tmp.path().to_str().unwrap(),
@@ -2611,7 +2608,7 @@ fn w2_walkthrough_exits_zero_even_when_verdict_fails() {
 fn w2_walkthrough_cleared_panel_collapses_then_expands() {
     let tmp = create_audit_baseline_fixture();
     // Default human render: the Cleared panel is a single collapsed line.
-    let collapsed = run_fallow_raw(&[
+    let collapsed = run_plow_raw(&[
         "review",
         "--root",
         tmp.path().to_str().unwrap(),
@@ -2629,7 +2626,7 @@ fn w2_walkthrough_cleared_panel_collapses_then_expands() {
             "collapsed Cleared panel points at --show-cleared. stdout: {}",
             collapsed.stdout
         );
-        let expanded = run_fallow_raw(&[
+        let expanded = run_plow_raw(&[
             "review",
             "--root",
             tmp.path().to_str().unwrap(),
@@ -2655,7 +2652,7 @@ fn w2_walkthrough_viewed_state_round_trips() {
     let hash = guide["graph_snapshot_hash"].as_str().unwrap().to_string();
 
     // Write a viewed-state ledger keyed on the changed file.
-    let state_dir = tmp.path().join(".fallow");
+    let state_dir = tmp.path().join(".plow");
     fs::create_dir_all(&state_dir).unwrap();
     let state = serde_json::json!({
         "version": 1,
@@ -2681,7 +2678,7 @@ fn w2_walkthrough_viewed_state_round_trips() {
 #[test]
 fn w2_walkthrough_stale_viewed_state_is_ignored_not_deleted() {
     let tmp = create_boundary_walkthrough_fixture();
-    let state_dir = tmp.path().join(".fallow");
+    let state_dir = tmp.path().join(".plow");
     fs::create_dir_all(&state_dir).unwrap();
     let state_path = state_dir.join("walkthrough-state.json");
     // A deliberately WRONG hash: the marks must be ignored on render.
@@ -2725,7 +2722,7 @@ fn w2_walkthrough_missing_and_garbled_state_still_exit_zero() {
     );
 
     // A garbled state file must not hard-error the render.
-    let state_dir = tmp.path().join(".fallow");
+    let state_dir = tmp.path().join(".plow");
     fs::create_dir_all(&state_dir).unwrap();
     fs::write(state_dir.join("walkthrough-state.json"), b"{ not json").unwrap();
     let garbled = run_walkthrough_human(tmp.path());
@@ -2735,7 +2732,7 @@ fn w2_walkthrough_missing_and_garbled_state_still_exit_zero() {
 #[test]
 fn w2_walkthrough_mark_viewed_writes_local_ledger() {
     let tmp = create_boundary_walkthrough_fixture();
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "review",
         "--root",
         tmp.path().to_str().unwrap(),
@@ -2746,7 +2743,7 @@ fn w2_walkthrough_mark_viewed_writes_local_ledger() {
         "src/ui/page.ts",
     ]);
     assert_eq!(output.code, 0, "exits 0. stderr: {}", output.stderr);
-    let state_path = tmp.path().join(".fallow/walkthrough-state.json");
+    let state_path = tmp.path().join(".plow/walkthrough-state.json");
     assert!(state_path.exists(), "--mark-viewed writes the ledger");
     let state: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&state_path).unwrap()).unwrap();
@@ -2763,7 +2760,7 @@ fn w2_walkthrough_conflicts_with_guide_and_file() {
     let tmp = create_boundary_walkthrough_fixture();
     // --walkthrough + --walkthrough-guide is a clap arg conflict (usage error,
     // distinct from the exit-0 success path).
-    let with_guide = run_fallow_raw(&[
+    let with_guide = run_plow_raw(&[
         "review",
         "--root",
         tmp.path().to_str().unwrap(),
@@ -2777,7 +2774,7 @@ fn w2_walkthrough_conflicts_with_guide_and_file() {
         "--walkthrough + --walkthrough-guide is rejected by clap"
     );
 
-    let with_file = run_fallow_raw(&[
+    let with_file = run_plow_raw(&[
         "review",
         "--root",
         tmp.path().to_str().unwrap(),
@@ -2809,7 +2806,7 @@ fn create_mixed_walkthrough_fixture() -> TempDir {
         r#"{"name": "wt-mixed", "main": "src/app.ts"}"#,
     )
     .unwrap();
-    fs::write(dir.join(".fallowrc.json"), r#"{"entry": ["src/app.ts"]}"#).unwrap();
+    fs::write(dir.join(".plowrc.json"), r#"{"entry": ["src/app.ts"]}"#).unwrap();
 
     // The consumer imports the contract; it is NOT touched by the HEAD diff, so
     // `lib.ts` is consumed out-of-diff -> load-bearing.
@@ -2876,7 +2873,7 @@ fn w2_walkthrough_surfaces_non_source_and_reconciles_counts() {
 fn w2_walkthrough_viewed_file_collapses_into_cleared_only() {
     let tmp = create_mixed_walkthrough_fixture();
     // Mark the load-bearing file viewed, then render with the Cleared panel open.
-    let marked = run_fallow_raw(&[
+    let marked = run_plow_raw(&[
         "review",
         "--root",
         tmp.path().to_str().unwrap(),
@@ -2892,7 +2889,7 @@ fn w2_walkthrough_viewed_file_collapses_into_cleared_only() {
         marked.stderr
     );
 
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "review",
         "--root",
         tmp.path().to_str().unwrap(),

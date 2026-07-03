@@ -8,7 +8,7 @@ use super::common::{create_config, fixture_path};
 fn ember_classic_fixture_recognises_plugin_suppressions() {
     let root = fixture_path("ember-classic");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_deps: Vec<&str> = results
         .unused_dependencies

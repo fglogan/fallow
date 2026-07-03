@@ -1,7 +1,7 @@
 import * as child_process from "node:child_process";
 import * as path from "node:path";
 // VS Code injects this module into the extension host at runtime.
-// fallow-ignore-next-line unlisted-dependency
+// plow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
 import {
   getLspPath,
@@ -57,11 +57,11 @@ import {
 } from "./workspacePicker.js";
 import type {
   AuditOutput,
-  FallowCheckResult,
-  FallowCombinedResult,
-  FallowDupesResult,
-  FallowInspectResult,
-  FallowFixResult,
+  PlowCheckResult,
+  PlowCombinedResult,
+  PlowDupesResult,
+  PlowInspectResult,
+  PlowFixResult,
   FixAction,
   HealthOutput,
   SecurityOutput,
@@ -71,21 +71,21 @@ import type {
 export const findCliBinary = async (context: vscode.ExtensionContext): Promise<string | null> => {
   const lspPath = getLspPath();
   if (lspPath) {
-    // Resolve the `fallow` CLI sibling of the configured `fallow.lspPath`,
+    // Resolve the `plow` CLI sibling of the configured `plow.lspPath`,
     // tolerating a directory or an extensionless Windows path the same way the
     // LSP resolver does, so a manually set lspPath also locates the CLI.
-    const sibling = resolveConfiguredBinaryPath(lspPath, "fallow");
+    const sibling = resolveConfiguredBinaryPath(lspPath, "plow");
     if (sibling) {
       return sibling;
     }
   }
 
-  const local = findLocalBinary("fallow");
+  const local = findLocalBinary("plow");
   if (local) {
     return local;
   }
 
-  const inPath = findBinaryInPath("fallow");
+  const inPath = findBinaryInPath("plow");
   if (inPath) {
     return inPath;
   }
@@ -114,30 +114,30 @@ export const resolveCliBinary = async (
 };
 
 /**
- * Rejection carried by {@link execFallow} on a non-zero exit (other than 1).
+ * Rejection carried by {@link execPlow} on a non-zero exit (other than 1).
  * Preserves the child's `exitCode` and captured `stdout` so a caller can recover
  * the structured `{error:true,message,exit_code}` JSON envelope the CLI writes to
  * stdout under `--format json` (e.g. the coverage license/sidecar gate, exit
  * 3/4/5). Existing callers that only read `.message` keep working unchanged.
  */
-export class FallowExecError extends Error {
+export class PlowExecError extends Error {
   constructor(
     message: string,
     readonly exitCode: number | null,
     readonly stdout: string,
   ) {
     super(message);
-    this.name = "FallowExecError";
+    this.name = "PlowExecError";
   }
 }
 
-interface ExecFallowOptions {
+interface ExecPlowOptions {
   readonly env?: Readonly<Record<string, string>>;
 }
 
 /**
  * Ceiling on captured `stdout` (and, symmetrically, `stderr`) for a single
- * `execFallow` spawn. The `spawn` rewrite dropped the original `maxBuffer`, so
+ * `execPlow` spawn. The `spawn` rewrite dropped the original `maxBuffer`, so
  * without this the strings grow unbounded; a runaway CLI (or `--format json`
  * over a pathological monorepo) would balloon the extension-host heap until the
  * host crashes. 50MB matches the prior `maxBuffer` and comfortably exceeds the
@@ -145,17 +145,17 @@ interface ExecFallowOptions {
  */
 const MAX_STDOUT_BYTES = 50 * 1024 * 1024;
 
-export const execFallow = (
+export const execPlow = (
   binary: string | null,
   args: ReadonlyArray<string>,
   cwd: string,
-  options: ExecFallowOptions = {},
+  options: ExecPlowOptions = {},
 ): Promise<string> =>
   new Promise((resolve, reject) => {
     if (!binary) {
       reject(
         new Error(
-          "fallow CLI binary not found. Checked fallow.lspPath sibling, local node_modules/.bin, PATH, managed extension storage, and auto-download.",
+          "plow CLI binary not found. Checked plow.lspPath sibling, local node_modules/.bin, PATH, managed extension storage, and auto-download.",
         ),
       );
       return;
@@ -182,7 +182,7 @@ export const execFallow = (
       child.kill();
       reject(
         new Error(
-          `fallow output exceeded ${MAX_STDOUT_BYTES / (1024 * 1024)} MB and was aborted. Add large generated files to ignorePatterns, or scope the analysis (e.g. --changed-since), then retry.`,
+          `plow output exceeded ${MAX_STDOUT_BYTES / (1024 * 1024)} MB and was aborted. Add large generated files to ignorePatterns, or scope the analysis (e.g. --changed-since), then retry.`,
         ),
       );
     };
@@ -228,11 +228,11 @@ export const execFallow = (
       }
 
       if (signal) {
-        const sizeLimit = options.env?.FALLOW_MAX_FILE_SIZE;
+        const sizeLimit = options.env?.PLOW_MAX_FILE_SIZE;
         const hint = sizeLimit
-          ? ` The analysis process used FALLOW_MAX_FILE_SIZE=${sizeLimit}; lower it or add large generated files to ignorePatterns if memory pressure persists.`
+          ? ` The analysis process used PLOW_MAX_FILE_SIZE=${sizeLimit}; lower it or add large generated files to ignorePatterns if memory pressure persists.`
           : "";
-        reject(new Error(`fallow exited via signal ${signal}.${hint}`));
+        reject(new Error(`plow exited via signal ${signal}.${hint}`));
         return;
       }
 
@@ -241,7 +241,7 @@ export const execFallow = (
         // envelope (`{error:true,message,exit_code}`) the CLI writes there under
         // `--format json`; stderr remains the message for plain consumers.
         reject(
-          new FallowExecError(stderr.trim() || `fallow exited with code ${code}`, code, stdout),
+          new PlowExecError(stderr.trim() || `plow exited with code ${code}`, code, stdout),
         );
         return;
       }
@@ -271,11 +271,11 @@ const probeCliVersion = (binaryPath: string): Promise<string | null> => {
 };
 
 /**
- * Resolve the fallow CLI to actually run, self-healing when the binary found on
+ * Resolve the plow CLI to actually run, self-healing when the binary found on
  * PATH or in `node_modules` is older than the extension itself.
  *
  * The extension and the CLI are versioned and distributed independently, so a
- * user can have a stale global `fallow` (npm, Homebrew, cargo) on PATH that
+ * user can have a stale global `plow` (npm, Homebrew, cargo) on PATH that
  * predates flags this extension emits, which silently turns settings such as
  * `duplication.minOccurrences` into no-ops. When auto-download is enabled (the
  * default), switch to the managed CLI, which is pinned to the extension version,
@@ -308,7 +308,7 @@ export const resolveCliForRun = async (
     if (managed && managed !== found) {
       const managedVersion = await probeCliVersion(managed);
       outputChannel?.appendLine(
-        `Fallow: resolved CLI v${version} predates the extension (v${required}); switched to the managed CLI v${managedVersion ?? "unknown"} so your settings apply.`,
+        `Plow: resolved CLI v${version} predates the extension (v${required}); switched to the managed CLI v${managedVersion ?? "unknown"} so your settings apply.`,
       );
       return { binary: managed, version: managedVersion };
     }
@@ -327,11 +327,11 @@ const noteBinarySkew = (
   binaryPath: string | null,
   outputChannel?: vscode.OutputChannel,
 ): void => {
-  outputChannel?.appendLine(`Fallow: ${detail}`);
+  outputChannel?.appendLine(`Plow: ${detail}`);
 
   const where = binaryPath ? ` (resolved binary: ${binaryPath})` : "";
   showBinarySkewToastOnce(
-    `Fallow: the resolved CLI is older than the extension, so some options were ignored and results use CLI defaults for them${where}. Update the fallow binary, or remove the older one from PATH to use the managed auto-download. See the Fallow output channel for details.`,
+    `Plow: the resolved CLI is older than the extension, so some options were ignored and results use CLI defaults for them${where}. Update the plow binary, or remove the older one from PATH to use the managed auto-download. See the Plow output channel for details.`,
   );
 };
 
@@ -348,13 +348,13 @@ const execAnalysisTolerant = async (
   cwd: string,
   binaryPath: string | null,
   outputChannel?: vscode.OutputChannel,
-  options: ExecFallowOptions = {},
+  options: ExecPlowOptions = {},
 ): Promise<string> => {
   let args: string[] = [...initialArgs];
 
   for (;;) {
     try {
-      return await execFallow(binaryPath, args, cwd, options);
+      return await execPlow(binaryPath, args, cwd, options);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       const plan = planDegradation(message, args);
@@ -380,7 +380,7 @@ const execInspectWithManagedFallback = async (
   outputChannel?: vscode.OutputChannel,
 ): Promise<string> => {
   try {
-    return await execFallow(initialBinary, args, cwd);
+    return await execPlow(initialBinary, args, cwd);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (!parseUnknownSubcommand(message, "inspect")) {
@@ -392,14 +392,14 @@ const execInspectWithManagedFallback = async (
         (await getInstalledCliPath(context, outputChannel)) ?? (await downloadCliBinary(context));
       if (managed && managed !== initialBinary) {
         outputChannel?.appendLine(
-          "Fallow: resolved CLI does not support inspect; switched to the managed CLI.",
+          "Plow: resolved CLI does not support inspect; switched to the managed CLI.",
         );
-        return execFallow(managed, args, cwd);
+        return execPlow(managed, args, cwd);
       }
     }
 
     throw new Error(
-      "The resolved fallow CLI does not support `fallow inspect`. Update the fallow binary, or enable fallow.autoDownload so the extension can use the managed CLI.",
+      "The resolved plow CLI does not support `plow inspect`. Update the plow binary, or enable plow.autoDownload so the extension can use the managed CLI.",
       { cause: err },
     );
   }
@@ -443,21 +443,21 @@ const showAnalysisPausedMessage = (failures: number, cause: string | null): void
   const suffix = cause ? ` Last failure: ${cause}` : "";
   void vscode.window
     .showErrorMessage(
-      `Fallow analysis paused after ${failures} failed attempts for this workspace input. Automatic retries are stopped until you run analysis manually.${suffix}`,
+      `Plow analysis paused after ${failures} failed attempts for this workspace input. Automatic retries are stopped until you run analysis manually.${suffix}`,
       "Retry now",
     )
     .then((choice) => {
       if (choice === "Retry now") {
-        void vscode.commands.executeCommand("fallow.analyze");
+        void vscode.commands.executeCommand("plow.analyze");
       }
       return undefined;
     });
 };
 
 /** Filter check results based on the user's issueTypes configuration. */
-const filterCheckResult = (result: FallowCheckResult): FallowCheckResult => {
+const filterCheckResult = (result: PlowCheckResult): PlowCheckResult => {
   const types = getIssueTypes();
-  const filtered: FallowCheckResult = {
+  const filtered: PlowCheckResult = {
     ...result,
     unused_files: types["unused-files"] ? result.unused_files : [],
     unused_exports: types["unused-exports"] ? result.unused_exports : [],
@@ -553,7 +553,7 @@ interface FixQuickPickItem extends vscode.QuickPickItem {
 
 const confirmApplyFixes = async (): Promise<boolean> => {
   const confirm = await vscode.window.showWarningMessage(
-    "Fallow: This will unexport unused exports (keeps the code) and remove unused dependencies from package.json. Continue?",
+    "Plow: This will unexport unused exports (keeps the code) and remove unused dependencies from package.json. Continue?",
     "Yes",
     "No",
   );
@@ -576,9 +576,9 @@ const openFixLocation = async (root: string, fix: FixAction | undefined): Promis
   });
 };
 
-const showDryRunPreview = async (root: string, result: FallowFixResult): Promise<void> => {
+const showDryRunPreview = async (root: string, result: PlowFixResult): Promise<void> => {
   if (result.fixes.length === 0) {
-    void vscode.window.showInformationMessage("Fallow: no fixes available.");
+    void vscode.window.showInformationMessage("Plow: no fixes available.");
     return;
   }
 
@@ -608,7 +608,7 @@ const showDryRunPreview = async (root: string, result: FallowFixResult): Promise
   }
 
   const picked = await vscode.window.showQuickPick(quickPickItems, {
-    title: `Fallow: ${result.fixes.length} fix${result.fixes.length === 1 ? "" : "es"} available`,
+    title: `Plow: ${result.fixes.length} fix${result.fixes.length === 1 ? "" : "es"} available`,
     placeHolder: "Review fixes. Select 'Apply all fixes' to apply, or click a fix to navigate",
   });
 
@@ -617,7 +617,7 @@ const showDryRunPreview = async (root: string, result: FallowFixResult): Promise
   }
 
   if (picked.action === "apply-all") {
-    void vscode.commands.executeCommand("fallow.fix");
+    void vscode.commands.executeCommand("plow.fix");
     return;
   }
 
@@ -629,17 +629,17 @@ export const runAnalysis = async (
   outputChannel?: vscode.OutputChannel,
   options: RunAnalysisOptions = {},
 ): Promise<{
-  check: FallowCheckResult | null;
-  dupes: FallowDupesResult | null;
+  check: PlowCheckResult | null;
+  dupes: PlowDupesResult | null;
 }> => {
   const root = getWorkspaceRoot();
   if (!root) {
-    void vscode.window.showWarningMessage("Fallow: no workspace folder open.");
+    void vscode.window.showWarningMessage("Plow: no workspace folder open.");
     return { check: null, dupes: null };
   }
 
-  let check: FallowCheckResult | null = null;
-  let dupes: FallowDupesResult | null = null;
+  let check: PlowCheckResult | null = null;
+  let dupes: PlowDupesResult | null = null;
   let backoffKey: string | null = null;
   const backoff = options.backoff ?? analysisBackoff;
 
@@ -692,14 +692,14 @@ export const runAnalysis = async (
     });
 
     if (output.trim().length === 0) {
-      // execFallow already rejects on non-zero exit codes (other than 0/1);
+      // execPlow already rejects on non-zero exit codes (other than 0/1);
       // an empty stdout on a successful exit means there was nothing to
       // report. Leave check/dupes null and return without raising.
       backoff.recordSuccess(backoffKey);
       return { check, dupes };
     }
 
-    const result = JSON.parse(output) as FallowCombinedResult;
+    const result = JSON.parse(output) as PlowCombinedResult;
     check = result.check ? filterCheckResult(result.check) : null;
     dupes = result.dupes ?? null;
     backoff.recordSuccess(backoffKey);
@@ -715,7 +715,7 @@ export const runAnalysis = async (
         showAnalysisPausedMessage(paused.failures, message);
       }
     } else {
-      void vscode.window.showErrorMessage(`Fallow analysis failed: ${message}`);
+      void vscode.window.showErrorMessage(`Plow analysis failed: ${message}`);
     }
     throw err;
   }
@@ -724,7 +724,7 @@ export const runAnalysis = async (
 };
 
 /**
- * List monorepo workspace packages via `fallow workspaces --format json`,
+ * List monorepo workspace packages via `plow workspaces --format json`,
  * populating the workspace picker. Cached per resolved binary path for the
  * session (the package list is stable within a session); `forceRefresh`
  * busts the cache. On a missing-subcommand failure (an old CLI), shows an
@@ -745,7 +745,7 @@ export const runWorkspaces = async (
   const root = getWorkspaceRoot();
   if (!root) {
     if (!silent) {
-      void vscode.window.showWarningMessage("Fallow: no workspace folder open.");
+      void vscode.window.showWarningMessage("Plow: no workspace folder open.");
     }
     return null;
   }
@@ -754,7 +754,7 @@ export const runWorkspaces = async (
   if (!binary) {
     if (!silent) {
       void vscode.window.showErrorMessage(
-        "Fallow: CLI binary not found. Enable fallow.autoDownload or set fallow.lspPath.",
+        "Plow: CLI binary not found. Enable plow.autoDownload or set plow.lspPath.",
       );
     }
     return null;
@@ -768,11 +768,11 @@ export const runWorkspaces = async (
   }
 
   try {
-    const output = await execFallow(binary, ["workspaces", "--format", "json", "--quiet"], root);
+    const output = await execPlow(binary, ["workspaces", "--format", "json", "--quiet"], root);
     const parsed = parseWorkspacesOutput(output);
     if (!parsed) {
       outputChannel?.appendLine(
-        "Fallow: `fallow workspaces` returned no parseable JSON; workspace scoping unavailable.",
+        "Plow: `plow workspaces` returned no parseable JSON; workspace scoping unavailable.",
       );
       return null;
     }
@@ -780,16 +780,16 @@ export const runWorkspaces = async (
     return parsed;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    outputChannel?.appendLine(`Fallow: failed to list workspaces: ${message}`);
+    outputChannel?.appendLine(`Plow: failed to list workspaces: ${message}`);
     if (silent) {
       return null;
     }
     if (/unrecognized subcommand|unexpected argument|wasn't expected/i.test(message)) {
       void vscode.window.showWarningMessage(
-        "Fallow: this CLI version does not support `fallow workspaces`. Update the fallow binary to scope analysis to a monorepo package.",
+        "Plow: this CLI version does not support `plow workspaces`. Update the plow binary to scope analysis to a monorepo package.",
       );
     } else {
-      void vscode.window.showErrorMessage(`Fallow: failed to list workspaces: ${message}`);
+      void vscode.window.showErrorMessage(`Plow: failed to list workspaces: ${message}`);
     }
     return null;
   }
@@ -803,15 +803,15 @@ export const runWorkspaces = async (
 let auditInFlight = false;
 
 /**
- * Run `fallow audit --format json` against the workspace and parse the verdict
+ * Run `plow audit --format json` against the workspace and parse the verdict
  * envelope. Mirrors `runAnalysis`: resolves the self-healing managed CLI,
  * builds a lean argv (only flags that shipped with the `audit` command, so no
- * version-gated degradation is needed), spawns via `execFallow`, and returns
+ * version-gated degradation is needed), spawns via `execPlow`, and returns
  * the parsed `AuditOutput`.
  *
  * Returns null when there is no workspace, the run is already in flight, or the
  * output is not a parseable audit envelope. Audit exits 1 on a `fail` verdict,
- * which `execFallow` resolves as success, so a failing verdict still returns a
+ * which `execPlow` resolves as success, so a failing verdict still returns a
  * non-null result. On a spawn error the error toast surfaces and the error is
  * rethrown so the caller can flip the status bar to its error state.
  */
@@ -821,7 +821,7 @@ export const runAudit = async (
 ): Promise<AuditOutput | null> => {
   const root = getWorkspaceRoot();
   if (!root) {
-    void vscode.window.showWarningMessage("Fallow: no workspace folder open.");
+    void vscode.window.showWarningMessage("Plow: no workspace folder open.");
     return null;
   }
 
@@ -840,11 +840,11 @@ export const runAudit = async (
       gate: getAuditGate(),
     });
 
-    const output = await execFallow(cliBinary, auditArgs, root);
+    const output = await execPlow(cliBinary, auditArgs, root);
     return parseAuditOutput(output);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    void vscode.window.showErrorMessage(`Fallow audit failed: ${message}`);
+    void vscode.window.showErrorMessage(`Plow audit failed: ${message}`);
     throw err;
   } finally {
     auditInFlight = false;
@@ -858,25 +858,25 @@ const activeEditorInspectTarget = (): {
 } | null => {
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
-    void vscode.window.showWarningMessage("Fallow: no active editor to inspect.");
+    void vscode.window.showWarningMessage("Plow: no active editor to inspect.");
     return null;
   }
 
   if (editor.document.uri.scheme !== "file") {
-    void vscode.window.showWarningMessage("Fallow: active editor is not a file on disk.");
+    void vscode.window.showWarningMessage("Plow: active editor is not a file on disk.");
     return null;
   }
 
   const folder = vscode.workspace.getWorkspaceFolder(editor.document.uri);
   const root = folder?.uri.fsPath ?? getWorkspaceRoot();
   if (!root) {
-    void vscode.window.showWarningMessage("Fallow: no workspace folder open.");
+    void vscode.window.showWarningMessage("Plow: no workspace folder open.");
     return null;
   }
 
   const relative = path.relative(root, editor.document.uri.fsPath);
   if (relative.startsWith("..") || path.isAbsolute(relative)) {
-    void vscode.window.showWarningMessage("Fallow: active editor is outside the workspace.");
+    void vscode.window.showWarningMessage("Plow: active editor is outside the workspace.");
     return null;
   }
 
@@ -890,7 +890,7 @@ const activeEditorInspectTarget = (): {
 export const runInspectActiveFile = async (
   context: vscode.ExtensionContext,
   outputChannel?: vscode.OutputChannel,
-): Promise<FallowInspectResult | null> => {
+): Promise<PlowInspectResult | null> => {
   const target = activeEditorInspectTarget();
   if (!target) {
     return null;
@@ -901,7 +901,7 @@ export const runInspectActiveFile = async (
       const saved = await target.document.save();
       if (!saved) {
         void vscode.window.showWarningMessage(
-          `Fallow inspect cancelled because ${target.filePath} could not be saved.`,
+          `Plow inspect cancelled because ${target.filePath} could not be saved.`,
         );
         return null;
       }
@@ -923,19 +923,19 @@ export const runInspectActiveFile = async (
       outputChannel,
     );
     if (output.trim().length === 0) {
-      void vscode.window.showWarningMessage("Fallow inspect returned no output.");
+      void vscode.window.showWarningMessage("Plow inspect returned no output.");
       return null;
     }
 
-    const result = JSON.parse(output) as FallowInspectResult;
-    outputChannel?.appendLine(`Fallow inspect: ${target.filePath}`);
+    const result = JSON.parse(output) as PlowInspectResult;
+    outputChannel?.appendLine(`Plow inspect: ${target.filePath}`);
     outputChannel?.appendLine(JSON.stringify(result, null, 2));
     outputChannel?.show();
-    void vscode.window.showInformationMessage(`Fallow inspect complete: ${target.filePath}`);
+    void vscode.window.showInformationMessage(`Plow inspect complete: ${target.filePath}`);
     return result;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    void vscode.window.showErrorMessage(`Fallow inspect failed: ${message}`);
+    void vscode.window.showErrorMessage(`Plow inspect failed: ${message}`);
     return null;
   }
 };
@@ -943,10 +943,10 @@ export const runInspectActiveFile = async (
 export const runFix = async (
   context: vscode.ExtensionContext,
   dryRun: boolean,
-): Promise<FallowFixResult | null> => {
+): Promise<PlowFixResult | null> => {
   const root = getWorkspaceRoot();
   if (!root) {
-    void vscode.window.showWarningMessage("Fallow: no workspace folder open.");
+    void vscode.window.showWarningMessage("Plow: no workspace folder open.");
     return null;
   }
 
@@ -962,22 +962,22 @@ export const runFix = async (
     }
 
     const { binary } = await resolveCliForRun(context);
-    const output = await execFallow(binary, fixArgs, root);
-    const result = JSON.parse(output) as FallowFixResult;
+    const output = await execPlow(binary, fixArgs, root);
+    const result = JSON.parse(output) as PlowFixResult;
 
     if (dryRun) {
       await showDryRunPreview(root, result);
     } else {
       const fixCount = result.fixes.length;
       void vscode.window.showInformationMessage(
-        `Fallow: applied ${fixCount} fix${fixCount === 1 ? "" : "es"}.`,
+        `Plow: applied ${fixCount} fix${fixCount === 1 ? "" : "es"}.`,
       );
     }
 
     return result;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    void vscode.window.showErrorMessage(`Fallow fix failed: ${message}`);
+    void vscode.window.showErrorMessage(`Plow fix failed: ${message}`);
     return null;
   }
 };
@@ -996,18 +996,18 @@ export const resetHealthNoWorkspaceWarning = (): void => {
 };
 
 /**
- * Run a standalone `fallow health` analysis for the Health view. This is a
+ * Run a standalone `plow health` analysis for the Health view. This is a
  * separate spawn from {@link runAnalysis}, fired lazily only when the Health
  * view is first revealed, so it never slows the latency-critical combined run
  * (which keeps `--skip health`). Hotspots (a git-churn walk) are requested only
- * when the user opted in via `fallow.health.hotspots`.
+ * when the user opted in via `plow.health.hotspots`.
  *
  * Reuses the same binary resolution and spawn primitive as the combined run.
- * `execFallow` already tolerates exit 0/1 (health exits 1 when findings exist)
+ * `execPlow` already tolerates exit 0/1 (health exits 1 when findings exist)
  * and rejects only on signal or other non-zero codes.
  *
  * Returns null for the non-retryable outcomes (no workspace, empty output, or a
- * resolved CLI that predates `fallow health`), so the caller latches the run as
+ * resolved CLI that predates `plow health`), so the caller latches the run as
  * complete and does not re-spawn or re-toast on the next reveal. A genuine
  * transient failure (spawn/parse error) is rethrown so the caller can reset its
  * latch and retry on a later reveal (#902).
@@ -1022,7 +1022,7 @@ export const runHealthAnalysis = async (
     // quiet rather than repeating the toast on every Health-view visibility.
     if (!healthNoWorkspaceWarned) {
       healthNoWorkspaceWarned = true;
-      void vscode.window.showWarningMessage("Fallow: no workspace folder open.");
+      void vscode.window.showWarningMessage("Plow: no workspace folder open.");
     }
     return null;
   }
@@ -1065,23 +1065,23 @@ export const runHealthAnalysis = async (
     // reveal or surfacing a raw clap stderr blob as an error.
     if (parseUnknownHealthSubcommand(message)) {
       outputChannel?.appendLine(
-        `Fallow: the resolved CLI does not support \`fallow health\`. ${message}`,
+        `Plow: the resolved CLI does not support \`plow health\`. ${message}`,
       );
       void vscode.window.showWarningMessage(
-        "Fallow: update the fallow CLI to analyze project health.",
+        "Plow: update the plow CLI to analyze project health.",
       );
       return null;
     }
 
     // Genuine transient failure: surface it and rethrow so the caller resets
     // its latch and a later reveal retries.
-    void vscode.window.showErrorMessage(`Fallow health analysis failed: ${message}`);
+    void vscode.window.showErrorMessage(`Plow health analysis failed: ${message}`);
     throw err;
   }
 };
 
 /**
- * Outcome of a `fallow security` scan. The discriminant separates a genuinely
+ * Outcome of a `plow security` scan. The discriminant separates a genuinely
  * completed scan (which may legitimately have zero findings) from a scan that
  * never produced a verdict (no workspace, older CLI, or a transient failure).
  * The caller needs that distinction so it only paints the "No security
@@ -1099,15 +1099,15 @@ export type SecurityScanResult =
   | { readonly ok: false; readonly retryable: boolean };
 
 /**
- * Run `fallow security --format json` and parse its `SecurityOutput` envelope.
+ * Run `plow security --format json` and parse its `SecurityOutput` envelope.
  * This is a SEPARATE, independent process from the combined sidebar analysis
  * (security findings are `#[serde(skip)]` on `AnalysisResults` and never appear
- * under bare `fallow`), so the dead-code / duplicates sidebar latency path is
+ * under bare `plow`), so the dead-code / duplicates sidebar latency path is
  * untouched (#902).
  *
  * Findings are UNVERIFIED candidates, not confirmed vulnerabilities; the caller
  * frames them as such in every surface (#903). A resolved CLI that predates the
- * `security` subcommand degrades to a one-line "update fallow" warning and a
+ * `security` subcommand degrades to a one-line "update plow" warning and a
  * non-retryable failure result, rather than surfacing a raw clap stderr blob.
  * Returns a {@link SecurityScanResult} so the caller can tell a clean scan apart
  * from a failed one and avoid painting a false all-clear.
@@ -1118,7 +1118,7 @@ export const runSecurityAnalysis = async (
 ): Promise<SecurityScanResult> => {
   const root = getWorkspaceRoot();
   if (!root) {
-    void vscode.window.showWarningMessage("Fallow: no workspace folder open.");
+    void vscode.window.showWarningMessage("Plow: no workspace folder open.");
     return { ok: false, retryable: false };
   }
 
@@ -1130,7 +1130,7 @@ export const runSecurityAnalysis = async (
       workspace: resolveActiveWorkspaceScope(context),
     });
 
-    const output = await execFallow(binary, args, root);
+    const output = await execPlow(binary, args, root);
     if (output.trim().length === 0) {
       return { ok: true, data: null };
     }
@@ -1145,15 +1145,15 @@ export const runSecurityAnalysis = async (
     // a false "all-clear".
     if (parseUnknownSubcommand(message)) {
       outputChannel?.appendLine(
-        `Fallow: the resolved CLI does not support security candidates. ${message}`,
+        `Plow: the resolved CLI does not support security candidates. ${message}`,
       );
       void vscode.window.showWarningMessage(
-        "Fallow: update the fallow CLI to scan for security candidates.",
+        "Plow: update the plow CLI to scan for security candidates.",
       );
       return { ok: false, retryable: false };
     }
 
-    void vscode.window.showErrorMessage(`Fallow security scan failed: ${message}`);
+    void vscode.window.showErrorMessage(`Plow security scan failed: ${message}`);
     return { ok: false, retryable: true };
   }
 };

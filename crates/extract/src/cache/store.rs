@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use fallow_types::source_fingerprint::SourceFingerprint;
+use plow_types::source_fingerprint::SourceFingerprint;
 use rustc_hash::FxHashMap;
 
 use bitcode::{Decode, Encode};
@@ -202,7 +202,7 @@ impl CacheStore {
     /// Remove cache entries for files that are no longer in the project.
     ///
     /// Returns `true` when any entry was removed.
-    pub fn retain_paths(&mut self, files: &[fallow_types::discover::DiscoveredFile]) -> bool {
+    pub fn retain_paths(&mut self, files: &[plow_types::discover::DiscoveredFile]) -> bool {
         use rustc_hash::FxHashSet;
         let current_paths: FxHashSet<String> = files
             .iter()

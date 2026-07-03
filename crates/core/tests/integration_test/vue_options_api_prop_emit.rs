@@ -11,7 +11,7 @@ use super::common::{create_config, fixture_path};
 fn flags_options_api_dead_prop_and_emit_with_usage_credit_and_abstains() {
     let root = fixture_path("vue-options-api-prop-emit");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let flagged_props: Vec<&str> = results
         .unused_component_props

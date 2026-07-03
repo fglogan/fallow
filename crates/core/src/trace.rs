@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-pub use fallow_types::trace::{
+pub use plow_types::trace::{
     CloneTrace, DependencyTrace, ExportReference, ExportTrace, FileTrace, ImpactClosureGap,
     ImpactClosureTrace, PipelineTimings, ReExportChain, TracedCloneGroup, TracedExport,
     TracedReExport,
@@ -288,7 +288,7 @@ pub fn trace_file(graph: &ModuleGraph, root: &Path, file_path: &str) -> Option<F
 /// through scripts.
 #[expect(
     clippy::implicit_hasher,
-    reason = "fallow standardizes on FxHashSet across the workspace"
+    reason = "plow standardizes on FxHashSet across the workspace"
 )]
 #[must_use]
 pub fn trace_dependency(
@@ -1056,14 +1056,14 @@ mod tests {
     /// Regression for the MCP e2e `trace_export` / `trace_file` Windows
     /// failures: the MCP layer passes forward-slashed user input
     /// (`src/utils.ts`) but `module_path` on Windows uses backslash
-    /// separators (`D:\a\fallow\...\src\utils.ts`). The byte-level
+    /// separators (`D:\a\plow\...\src\utils.ts`). The byte-level
     /// equality check missed every match. The helper now normalises
     /// both sides to forward slashes before comparing.
     #[test]
     fn path_matches_normalises_windows_module_path_against_posix_user_path() {
-        let root = Path::new(r"D:\a\fallow\fallow\tests\fixtures\basic-project");
+        let root = Path::new(r"D:\a\plow\plow\tests\fixtures\basic-project");
         let module_path =
-            PathBuf::from(r"D:\a\fallow\fallow\tests\fixtures\basic-project\src\utils.ts");
+            PathBuf::from(r"D:\a\plow\plow\tests\fixtures\basic-project\src\utils.ts");
         assert!(path_matches(&module_path, root, "src/utils.ts"));
         assert!(path_matches(&module_path, root, r"src\utils.ts"));
     }
@@ -1072,7 +1072,7 @@ mod tests {
     fn path_matches_ends_with_fallback_handles_mixed_separators() {
         let root = Path::new("/some/other/root");
         let module_path =
-            PathBuf::from(r"D:\a\fallow\fallow\tests\fixtures\basic-project\src\utils.ts");
+            PathBuf::from(r"D:\a\plow\plow\tests\fixtures\basic-project\src\utils.ts");
         assert!(path_matches(&module_path, root, "src/utils.ts"));
     }
 

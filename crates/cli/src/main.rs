@@ -25,7 +25,7 @@ mod audit_focus;
 mod audit_walkthrough;
 mod base_worktree;
 mod walkthrough_state;
-use fallow_engine::baseline;
+use plow_engine::baseline;
 mod cache_notice;
 mod check;
 mod ci;
@@ -35,7 +35,7 @@ mod cli_hooks;
 mod cli_impact;
 mod cli_production;
 mod cli_startup;
-use fallow_engine::codeowners;
+use plow_engine::codeowners;
 mod combined;
 mod config;
 mod coverage;
@@ -67,14 +67,14 @@ mod task_matrix;
 mod telemetry;
 mod trace_chain;
 mod update_check;
-use fallow_engine::validate;
-use fallow_engine::vital_signs;
+use plow_engine::validate;
+use plow_engine::vital_signs;
 mod cli_telemetry;
 mod watch;
 
 use check::{CheckOptions, IssueFilters, TraceOptions};
 mod error {
-    pub use fallow_engine::emit_error;
+    pub use plow_engine::emit_error;
 }
 #[cfg(test)]
 use cli_format::parse_format_arg;
@@ -129,20 +129,20 @@ Project inspection:
   inspect        Inspect one file or exported symbol as a bundled evidence query
   workspaces     Show monorepo workspace discovery diagnostics
   explain        Explain one issue type without running analysis
-  impact         Show what fallow has done for you (opt-in, local-only)
+  impact         Show what plow has done for you (opt-in, local-only)
 
 Setup and configuration:
-  init              Create a fallow config, optionally with a Git hook
-  migrate           Migrate knip or jscpd config to fallow
+  init              Create a plow config, optionally with a Git hook
+  migrate           Migrate knip or jscpd config to plow
   config            Show the resolved config and loaded config file
-  config-schema     Print the fallow config JSON Schema
+  config-schema     Print the plow config JSON Schema
   plugin-schema     Print the external plugin JSON Schema
   rule-pack-schema  Print the rule pack JSON Schema
 
 Automation and CI:
   ci             Build PR/MR feedback envelopes
   ci-template    Print or vendor CI integration templates
-  hooks          Install or remove fallow-managed Git and agent hooks
+  hooks          Install or remove plow-managed Git and agent hooks
   setup-hooks    Legacy agent-hook installer
 
 Runtime coverage:
@@ -154,26 +154,26 @@ Reference:
   schema         Dump the CLI interface as machine-readable JSON
   help           Print this message or the help of a command
 
-When no command is given, fallow runs dead-code + dupes + health together.
+When no command is given, plow runs dead-code + dupes + health together.
 Use --only/--skip to select specific analyses.
 
 When the agent is about to...
-  delete an \"unused\" export or file        fallow dead-code --trace <file>:<export>
-  delete an \"unused\" dependency            fallow dead-code --trace-dependency <name>
-  commit or open a PR                      fallow audit --base <ref>
-  prioritize refactoring                   fallow health --hotspots --targets
-  ask who owns code                        fallow health --ownership
-  check untested-but-reachable code        fallow health --coverage-gaps
-  consolidate duplication                  fallow dupes --trace dup:<fingerprint>
-  find feature flags                       fallow flags
-  surface security candidates              fallow security
-  inspect a target before editing          fallow inspect --file <path>
-  understand a finding                     fallow explain <issue-type>
+  delete an \"unused\" export or file        plow dead-code --trace <file>:<export>
+  delete an \"unused\" dependency            plow dead-code --trace-dependency <name>
+  commit or open a PR                      plow audit --base <ref>
+  prioritize refactoring                   plow health --hotspots --targets
+  ask who owns code                        plow health --ownership
+  check untested-but-reachable code        plow health --coverage-gaps
+  consolidate duplication                  plow dupes --trace dup:<fingerprint>
+  find feature flags                       plow flags
+  surface security candidates              plow security
+  inspect a target before editing          plow inspect --file <path>
+  understand a finding                     plow explain <issue-type>
   scope a monorepo                         --workspace <glob> / --changed-workspaces <ref>";
 
 #[derive(Parser)]
 #[command(
-    name = "fallow",
+    name = "plow",
     about = "Codebase analyzer for TypeScript/JavaScript: unused code, circular dependencies, code duplication, complexity hotspots, and architecture boundary violations",
     version,
     disable_version_flag = true,
@@ -199,7 +199,7 @@ struct Cli {
     #[arg(short, long, global = true)]
     root: Option<PathBuf>,
 
-    /// Path to config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml)
+    /// Path to config file (.plowrc.json, .plowrc.jsonc, plow.toml, or .plow.toml)
     #[arg(short, long, global = true)]
     config: Option<PathBuf>,
 
@@ -241,7 +241,7 @@ struct Cli {
     #[arg(long = "diff-stdin", global = true)]
     diff_stdin: bool,
 
-    /// Import change history from a `fallow-churn/v1` JSON file instead of `git
+    /// Import change history from a `plow-churn/v1` JSON file instead of `git
     /// log`, powering hotspots, ownership, and bus-factor on projects with no
     /// git repository (Yandex Arc, Mercurial, Perforce). A small wrapper
     /// translates your VCS log into the contract. Resolved relative to `--root`.
@@ -255,7 +255,7 @@ struct Cli {
     /// multi-MB generated/vendored/bundled file causes on large repos. Use `0`
     /// for no limit. Declaration files (`.d.ts`) are always analyzed. Skipped
     /// files are reported and excluded from every analysis. Also settable via
-    /// `FALLOW_MAX_FILE_SIZE`.
+    /// `PLOW_MAX_FILE_SIZE`.
     #[arg(long = "max-file-size", value_name = "MB", global = true)]
     max_file_size: Option<u32>,
 
@@ -281,7 +281,7 @@ struct Cli {
     production: bool,
 
     /// Force production mode OFF for every analysis, overriding a project
-    /// config's `production: true` (and `FALLOW_PRODUCTION`). Conflicts with
+    /// config's `production: true` (and `PLOW_PRODUCTION`). Conflicts with
     /// `--production`.
     #[arg(long = "no-production", global = true, conflicts_with = "production")]
     no_production: bool,
@@ -426,7 +426,7 @@ struct Cli {
     trend: bool,
 
     /// Save a vital signs snapshot for trend tracking in combined mode.
-    /// Provide a path or omit for the default `.fallow/snapshots/` location.
+    /// Provide a path or omit for the default `.plow/snapshots/` location.
     #[expect(
         clippy::option_option,
         reason = "clap pattern: None=not passed, Some(None)=default path, Some(Some(path))=custom path"
@@ -435,12 +435,12 @@ struct Cli {
     save_snapshot: Option<Option<String>>,
 
     /// Path to Istanbul coverage data for exact CRAP scores in combined mode.
-    /// Also settable via `FALLOW_COVERAGE` or `health.coverage`.
+    /// Also settable via `PLOW_COVERAGE` or `health.coverage`.
     #[arg(long, value_name = "PATH")]
     coverage: Option<PathBuf>,
 
     /// Absolute prefix to strip from Istanbul file paths in combined mode.
-    /// Also settable via `FALLOW_COVERAGE_ROOT` or `health.coverageRoot`.
+    /// Also settable via `PLOW_COVERAGE_ROOT` or `health.coverageRoot`.
     #[arg(long = "coverage-root", value_name = "PATH")]
     coverage_root: Option<PathBuf>,
 
@@ -630,7 +630,7 @@ enum Command {
         symbol: Option<String>,
 
         /// OPT-IN: also attach the best-effort symbol-level call chain
-        /// (`fallow trace`) as the `symbol_chain` evidence section. Only
+        /// (`plow trace`) as the `symbol_chain` evidence section. Only
         /// meaningful for a `--symbol` target. Default off (best-effort,
         /// syntactic, OFF the ranked path).
         #[arg(long)]
@@ -667,16 +667,16 @@ enum Command {
     },
 
     /// Auto-fix issues: remove unused exports, dependencies, and enum
-    /// members; add duplicate-export rules to a fallow config file.
+    /// members; add duplicate-export rules to a plow config file.
     ///
-    /// When no fallow config exists outside a monorepo subpackage, a
-    /// fresh `.fallowrc.json` is created from the same scaffolding
-    /// `fallow init` would emit (framework detection, `$schema`,
+    /// When no plow config exists outside a monorepo subpackage, a
+    /// fresh `.plowrc.json` is created from the same scaffolding
+    /// `plow init` would emit (framework detection, `$schema`,
     /// `entry`, etc.) and the duplicate-export rules are layered on
     /// top. Inside a monorepo subpackage the create-fallback refuses
     /// and points at the workspace root. Pass `--no-create-config` to
     /// opt out of the create-fallback (recommended for pre-commit
-    /// hooks, CI bots, and `fallow watch`).
+    /// hooks, CI bots, and `plow watch`).
     ///
     /// Use `--dry-run` to preview source-file edits and config-file
     /// diffs without writing.
@@ -689,8 +689,8 @@ enum Command {
         #[arg(long, alias = "force")]
         yes: bool,
 
-        /// Refuse to create a new fallow config file when none exists.
-        /// Use this from pre-commit hooks, CI bots, and `fallow watch`
+        /// Refuse to create a new plow config file when none exists.
+        /// Use this from pre-commit hooks, CI bots, and `plow watch`
         /// where silently materialising a new top-level config file would
         /// surprise the user. The duplicate-export config-add path is
         /// skipped with an explanatory message; source-file edits proceed
@@ -699,13 +699,13 @@ enum Command {
         no_create_config: bool,
     },
 
-    /// Initialize a .fallowrc.json configuration file, AGENTS.md guide, or git
-    /// pre-commit hook. Use `.fallowrc.jsonc` for editor-native JSON-with-comments
+    /// Initialize a .plowrc.json configuration file, AGENTS.md guide, or git
+    /// pre-commit hook. Use `.plowrc.jsonc` for editor-native JSON-with-comments
     /// support; both extensions are auto-discovered.
     ///
     /// `--hooks` scaffolds a shell-level Git pre-commit hook under
-    /// `.git/hooks/` that runs fallow on changed files. The clearer hook
-    /// namespace is `fallow hooks install --target git`; `init --hooks`
+    /// `.git/hooks/` that runs plow on changed files. The clearer hook
+    /// namespace is `plow hooks install --target git`; `init --hooks`
     /// remains as a convenience during project initialization.
     Init {
         /// Generate TOML instead of JSONC
@@ -717,8 +717,8 @@ enum Command {
         agents: bool,
 
         /// Scaffold a shell-level pre-commit git hook in `.git/hooks/` that
-        /// runs fallow on changed files. Alias for
-        /// `fallow hooks install --target git`.
+        /// runs plow on changed files. Alias for
+        /// `plow hooks install --target git`.
         #[arg(long)]
         hooks: bool,
 
@@ -733,12 +733,12 @@ enum Command {
         decline: bool,
     },
 
-    /// Install or remove fallow-managed Git and agent hooks.
+    /// Install or remove plow-managed Git and agent hooks.
     ///
-    /// Use `fallow hooks install --target git` for a shell-level Git
-    /// pre-commit hook. Use `fallow hooks install --target agent` for a
+    /// Use `plow hooks install --target git` for a shell-level Git
+    /// pre-commit hook. Use `plow hooks install --target agent` for a
     /// Claude Code / Codex gate that blocks agent `git commit` / `git push`
-    /// commands until `fallow audit` passes.
+    /// commands until `plow audit` passes.
     Hooks {
         #[command(subcommand)]
         subcommand: HooksCli,
@@ -750,7 +750,7 @@ enum Command {
         subcommand: CiCli,
     },
 
-    /// Print the JSON Schema for fallow configuration files
+    /// Print the JSON Schema for plow configuration files
     ConfigSchema,
 
     /// Print the JSON Schema for external plugin files
@@ -761,18 +761,18 @@ enum Command {
 
     /// Show the resolved config and which config file was loaded
     ///
-    /// Walks up from the project root looking for `.fallowrc.json`,
-    /// `.fallowrc.jsonc`, `fallow.toml`, or `.fallow.toml`, resolves `extends`, and prints
+    /// Walks up from the project root looking for `.plowrc.json`,
+    /// `.plowrc.jsonc`, `plow.toml`, or `.plow.toml`, resolves `extends`, and prints
     /// the final config as JSON. Use `--path` to print only the config
     /// file path (useful in shell scripts). Exit code 0 if a config was
     /// found, 3 if only defaults are in effect.
     ///
     /// Precedence is first-match-wins per directory, in the order
-    /// `.fallowrc.json` > `.fallowrc.jsonc` > `fallow.toml` > `.fallow.toml`,
-    /// walking up to the workspace root. `.fallowrc.json` accepts JSONC
-    /// (comments and trailing commas); `.fallowrc.jsonc` is identical in
+    /// `.plowrc.json` > `.plowrc.jsonc` > `plow.toml` > `.plow.toml`,
+    /// walking up to the workspace root. `.plowrc.json` accepts JSONC
+    /// (comments and trailing commas); `.plowrc.jsonc` is identical in
     /// behavior, the extension only signals to editors that comments are
-    /// expected. If two config files coexist in one directory, fallow loads the
+    /// expected. If two config files coexist in one directory, plow loads the
     /// higher-precedence one and warns on stderr naming the file it ignored.
     Config {
         /// Print only the config file path (one line, no JSON)
@@ -807,7 +807,7 @@ enum Command {
 
     /// Show monorepo workspaces and any workspace-discovery diagnostics.
     ///
-    /// Equivalent to `fallow list --workspaces`. Use this dedicated form
+    /// Equivalent to `plow list --workspaces`. Use this dedicated form
     /// when introspecting only the workspace topology (other `list`
     /// sections stay hidden).
     Workspaces,
@@ -815,29 +815,29 @@ enum Command {
     /// Find code duplication / clones across the project
     Dupes {
         /// Detection mode: strict, mild, weak, or semantic
-        /// (defaults to the value in `.fallowrc.jsonc`, or `mild` if unset).
+        /// (defaults to the value in `.plowrc.jsonc`, or `mild` if unset).
         #[arg(long)]
         mode: Option<DupesMode>,
 
         /// Minimum token count for a clone
-        /// (defaults to the value in `.fallowrc.jsonc`, or `50` if unset).
+        /// (defaults to the value in `.plowrc.jsonc`, or `50` if unset).
         #[arg(long)]
         min_tokens: Option<usize>,
 
         /// Minimum line count for a clone
-        /// (defaults to the value in `.fallowrc.jsonc`, or `5` if unset).
+        /// (defaults to the value in `.plowrc.jsonc`, or `5` if unset).
         #[arg(long)]
         min_lines: Option<usize>,
 
         /// Minimum number of occurrences before a clone group is reported.
         /// Raise to focus on widespread copy-paste worth refactoring and skip
         /// pair-only clones.
-        /// (defaults to the value in `.fallowrc.jsonc`, or `2` if unset).
+        /// (defaults to the value in `.plowrc.jsonc`, or `2` if unset).
         #[arg(long, value_parser = parse_min_occurrences)]
         min_occurrences: Option<usize>,
 
         /// Fail if duplication exceeds this percentage (0 = no limit)
-        /// (defaults to the value in `.fallowrc.jsonc`, or `0` if unset).
+        /// (defaults to the value in `.plowrc.jsonc`, or `0` if unset).
         #[arg(long)]
         threshold: Option<f64>,
 
@@ -950,7 +950,7 @@ enum Command {
         /// Add structural CSS analytics: specificity hotspots, !important density,
         /// over-complex selectors, deep nesting, and conservative cleanup
         /// candidates. Standard CSS is parsed structurally; preprocessor sources
-        /// are scanned only where fallow can avoid expanding Sass/Less semantics.
+        /// are scanned only where plow can avoid expanding Sass/Less semantics.
         #[arg(long)]
         css: bool,
 
@@ -969,9 +969,9 @@ enum Command {
         /// complexity findings become informational and the exit code is
         /// driven solely by the score (so --min-score 0 always exits 0).
         /// Composes with --min-severity (fails if either gate trips). Plain
-        /// `fallow health` (no gate flag) stays advisory and exits 1 on any
+        /// `plow health` (no gate flag) stays advisory and exits 1 on any
         /// finding; for a gate on newly-introduced complexity use
-        /// `fallow audit --gate new-only`.
+        /// `plow audit --gate new-only`.
         #[arg(long, value_name = "N")]
         min_score: Option<f64>,
 
@@ -997,7 +997,7 @@ enum Command {
         min_commits: Option<u32>,
 
         /// Save a vital signs snapshot for trend tracking.
-        /// Defaults to `.fallow/snapshots/{timestamp}.json` if no path is given.
+        /// Defaults to `.plow/snapshots/{timestamp}.json` if no path is given.
         /// Forces file-scores, hotspot, and score computation for complete metrics.
         #[expect(
             clippy::option_option,
@@ -1007,7 +1007,7 @@ enum Command {
         save_snapshot: Option<Option<String>>,
 
         /// Compare current metrics against the most recent saved snapshot.
-        /// Reads from `.fallow/snapshots/` and shows per-metric deltas with
+        /// Reads from `.plow/snapshots/` and shows per-metric deltas with
         /// directional indicators. Implies --score.
         #[arg(long)]
         trend: bool,
@@ -1019,7 +1019,7 @@ enum Command {
         /// Istanbul coverage map JSON file or a directory containing
         /// coverage-final.json. Use --coverage-root when the file was generated
         /// in a different environment (CI runner, Docker). Affects CRAP scores
-        /// only, not --coverage-gaps. Also configurable via FALLOW_COVERAGE env var.
+        /// only, not --coverage-gaps. Also configurable via PLOW_COVERAGE env var.
         #[arg(long, value_name = "PATH")]
         coverage: Option<PathBuf>,
 
@@ -1069,11 +1069,11 @@ enum Command {
         top: Option<usize>,
     },
 
-    /// Explain one fallow issue type without running an analysis.
+    /// Explain one plow issue type without running an analysis.
     ///
     /// Prints the rule rationale, a worked example, fix guidance, and the
     /// relevant docs URL. Accepts values like `unused-export`,
-    /// `fallow/unused-export`, `unused exports`, and `code duplication`.
+    /// `plow/unused-export`, `unused exports`, and `code duplication`.
     Explain {
         /// Issue type, issue label, or rule id to explain
         #[arg(required = true, num_args = 1.., value_name = "ISSUE_TYPE")]
@@ -1086,14 +1086,14 @@ enum Command {
     /// Combines dead-code + complexity + duplication scoped to changed files
     /// and returns a verdict (pass/warn/fail).
     ///
-    /// `fallow audit` answers "will CI block this?": it gates (exit 1 on a
+    /// `plow audit` answers "will CI block this?": it gates (exit 1 on a
     /// fail verdict). The `review` alias plus `--brief` answer "where do I
     /// look?": the same analysis rendered as a deterministic orientation brief
     /// that ALWAYS exits 0, so a reviewer or agent can read it regardless of
     /// the verdict. `--format` is orthogonal to `--brief`.
     /// When `--changed-since`/`--base` is unset, the base is the git merge-base
     /// against the branch's upstream or the remote default (`origin/HEAD`,
-    /// `origin/main`, `origin/master`); set `FALLOW_AUDIT_BASE` to pin it.
+    /// `origin/main`, `origin/master`); set `PLOW_AUDIT_BASE` to pin it.
     /// By default, only findings introduced by the changeset affect the verdict;
     /// inherited findings are reported with new-vs-inherited attribution and
     /// individual JSON findings include `introduced: true/false`. Use
@@ -1119,17 +1119,17 @@ enum Command {
         production_dupes: bool,
 
         /// Compare dead-code issues against a saved baseline
-        /// (produced by `fallow dead-code --save-baseline`).
+        /// (produced by `plow dead-code --save-baseline`).
         #[arg(long)]
         dead_code_baseline: Option<PathBuf>,
 
         /// Compare health findings against a saved baseline
-        /// (produced by `fallow health --save-baseline`).
+        /// (produced by `plow health --save-baseline`).
         #[arg(long)]
         health_baseline: Option<PathBuf>,
 
         /// Compare duplication clone groups against a saved baseline
-        /// (produced by `fallow dupes --save-baseline`).
+        /// (produced by `plow dupes --save-baseline`).
         #[arg(long)]
         dupes_baseline: Option<PathBuf>,
 
@@ -1141,7 +1141,7 @@ enum Command {
 
         /// Path to Istanbul-format coverage data (coverage-final.json) for
         /// accurate per-function CRAP scores in the health sub-analysis. Also
-        /// configurable via FALLOW_COVERAGE.
+        /// configurable via PLOW_COVERAGE.
         #[arg(long, value_name = "PATH")]
         coverage: Option<PathBuf>,
 
@@ -1160,9 +1160,9 @@ enum Command {
 
         /// Paid runtime-coverage sidecar input. Accepts a V8 directory, a
         /// single V8 JSON file, or an Istanbul coverage map JSON. Spawns
-        /// the `fallow-cov` sidecar as part of the audit pipeline so the
+        /// the `plow-cov` sidecar as part of the audit pipeline so the
         /// `hot-path-touched` verdict surfaces alongside dead-code and
-        /// complexity findings without requiring a second `fallow health`
+        /// complexity findings without requiring a second `plow health`
         /// invocation in CI. License-gated; the verdict is informational
         /// (no exit code change) until a future `--gate hot-path-touched`
         /// knob lands.
@@ -1175,7 +1175,7 @@ enum Command {
         min_invocations_hot: u64,
 
         /// Internal marker identifying a gate run (e.g. `pre-commit`), set by
-        /// the generated git hook so Fallow Impact can record a containment
+        /// the generated git hook so Plow Impact can record a containment
         /// event when the gate blocks then clears. Hidden; never changes the
         /// verdict, exit code, or output.
         #[arg(long, value_name = "MARKER", hide = true)]
@@ -1184,7 +1184,7 @@ enum Command {
         /// Render the deterministic review brief instead of the gating audit
         /// report. The brief answers "where do I look?" rather than "will CI
         /// block this?", runs the same analysis, and ALWAYS exits 0 (the
-        /// verdict is carried informationally). Implied by `fallow review`.
+        /// verdict is carried informationally). Implied by `plow review`.
         /// Orthogonal to `--format`.
         #[arg(long)]
         brief: bool,
@@ -1211,7 +1211,7 @@ enum Command {
         walkthrough_guide: bool,
 
         /// Ingest an agent's judgment JSON and POST-VALIDATE it against the
-        /// LIVE graph. Rejects any judgment whose `signal_id` fallow did not emit
+        /// LIVE graph. Rejects any judgment whose `signal_id` plow did not emit
         /// (anti-hallucination); refuses the whole payload as stale when the
         /// echoed graph-snapshot hash no longer matches (the tree moved). The
         /// verifier is the graph, not a second model. Implies the brief; always
@@ -1229,7 +1229,7 @@ enum Command {
         walkthrough: bool,
 
         /// Record one or more changed files as VIEWED in the local walkthrough
-        /// viewed-state ledger (`.fallow/walkthrough-state.json`), then render the
+        /// viewed-state ledger (`.plow/walkthrough-state.json`), then render the
         /// tour. Files already viewed (and still current) collapse into the
         /// Cleared panel. Repeatable. Stale marks (the tree moved) are ignored on
         /// render but never deleted. Only consulted on the `--walkthrough` path.
@@ -1258,10 +1258,10 @@ enum Command {
     /// The product's decision surface: a ranked, capped (4 plus or minus 1),
     /// signal_id-anchored set of the SOLID-3 decisions (coupling/boundary,
     /// exports-aware public-API/contract, dependency). Runs the same changed-code
-    /// analysis as `fallow review` but emits ONLY the decisions, separable and
-    /// cheap. Every decision is suppressible with `// fallow-ignore`. Always
+    /// analysis as `plow review` but emits ONLY the decisions, separable and
+    /// cheap. Every decision is suppressible with `// plow-ignore`. Always
     /// exits 0 (advisory, never a gate). Use `--base` / `--changed-since` to pick
-    /// the comparison point, exactly like `fallow audit`.
+    /// the comparison point, exactly like `plow audit`.
     DecisionSurface {
         /// Cap on the number of surfaced decisions (the working-memory limit).
         /// Default 4; clamped to the 3-5 band (4 plus or minus 1).
@@ -1273,20 +1273,20 @@ enum Command {
         max_decisions: usize,
     },
 
-    /// Show what fallow has done for you: how many issues it is surfacing, the
+    /// Show what plow has done for you: how many issues it is surfacing, the
     /// trend since the last recorded run, and how many commits it contained at
     /// the pre-commit gate.
     ///
-    /// Local-only and opt-in: enable per project with `fallow impact enable`, or
-    /// turn it on everywhere with `fallow impact default on`, then let your
-    /// `fallow audit` / pre-commit gate runs build history. History is stored in
+    /// Local-only and opt-in: enable per project with `plow impact enable`, or
+    /// turn it on everywhere with `plow impact default on`, then let your
+    /// `plow audit` / pre-commit gate runs build history. History is stored in
     /// your user config dir (never written into the repo) and forced off in CI.
     /// Impact never uploads anything and never affects exit codes.
     Impact {
         #[command(subcommand)]
         subcommand: Option<ImpactCli>,
         /// Aggregate every tracked project into one cross-repo roll-up
-        /// ("what has fallow done for me across all my repos"). Reads the
+        /// ("what has plow done for me across all my repos"). Reads the
         /// user config dir; ignores `--root`. Cannot combine with a subcommand.
         #[arg(long)]
         all: bool,
@@ -1322,7 +1322,7 @@ enum Command {
     /// to secret-shaped identifiers. It never runs from raw entropy alone. All
     /// findings are CANDIDATES for verification, NOT verified vulnerabilities.
     /// This command is the only
-    /// surface for security findings; they never appear under bare `fallow` or
+    /// surface for security findings; they never appear under bare `plow` or
     /// the `audit` gate. Build-config and test files are excluded, and public
     /// env prefixes such as `NEXT_PUBLIC_` and `VITE_` are treated as public.
     /// Honors
@@ -1334,7 +1334,7 @@ enum Command {
         subcommand: Option<SecuritySubcommand>,
         /// Paid runtime-coverage sidecar input. Accepts a V8 directory, a
         /// single V8 JSON file, or an Istanbul coverage map JSON. When set,
-        /// `fallow security` annotates tainted-sink candidates with production
+        /// `plow security` annotates tainted-sink candidates with production
         /// runtime state and uses that state as an additive ranking signal.
         #[arg(long, value_name = "PATH")]
         runtime_coverage: Option<PathBuf>,
@@ -1359,13 +1359,13 @@ enum Command {
         surface: bool,
     },
 
-    /// Dump fallow's capability manifest (CLI commands and flags, issue types, MCP tools, framework plugins, env vars) as machine-readable JSON for agent introspection. Always JSON, regardless of --format
+    /// Dump plow's capability manifest (CLI commands and flags, issue types, MCP tools, framework plugins, env vars) as machine-readable JSON for agent introspection. Always JSON, regardless of --format
     Schema,
 
     /// Print or vendor CI integration templates.
     ///
-    /// Use `fallow ci-template gitlab` to print the GitLab CI template, or
-    /// `fallow ci-template gitlab --vendor` to write the template plus the
+    /// Use `plow ci-template gitlab` to print the GitLab CI template, or
+    /// `plow ci-template gitlab --vendor` to write the template plus the
     /// bash helper files that enable MR comments without downloading from
     /// raw.githubusercontent.com at pipeline runtime.
     CiTemplate {
@@ -1373,19 +1373,19 @@ enum Command {
         subcommand: CiTemplateCli,
     },
 
-    /// Migrate configuration from knip or jscpd to fallow
+    /// Migrate configuration from knip or jscpd to plow
     Migrate {
-        /// Generate `fallow.toml` instead of JSONC
+        /// Generate `plow.toml` instead of JSONC
         #[arg(long, conflicts_with = "jsonc")]
         toml: bool,
 
-        /// Write JSONC content to `.fallowrc.jsonc` instead of `.fallowrc.json`. The
+        /// Write JSONC content to `.plowrc.jsonc` instead of `.plowrc.json`. The
         /// generated content is the same JSONC (with `//` comments) either way; the
         /// `.jsonc` extension lets editors auto-detect JSON-with-comments syntax
         /// highlighting and silences linters that flag comments in `.json`. Without
-        /// `--jsonc` or `--toml`, fallow auto-mirrors the source extension: a
-        /// `knip.jsonc` migration writes `.fallowrc.jsonc`, a `knip.json` migration
-        /// writes `.fallowrc.json`.
+        /// `--jsonc` or `--toml`, plow auto-mirrors the source extension: a
+        /// `knip.jsonc` migration writes `.plowrc.jsonc`, a `knip.json` migration
+        /// writes `.plowrc.json`.
         #[arg(long)]
         jsonc: bool,
 
@@ -1401,8 +1401,8 @@ enum Command {
     /// Manage the license for continuous/cloud runtime monitoring.
     ///
     /// Verification is offline against an Ed25519 public key compiled into
-    /// the binary. The license file lives at `~/.fallow/license.jwt` (or
-    /// `$FALLOW_LICENSE_PATH`); `$FALLOW_LICENSE` env var takes precedence
+    /// the binary. The license file lives at `~/.plow/license.jwt` (or
+    /// `$PLOW_LICENSE_PATH`); `$PLOW_LICENSE` env var takes precedence
     /// and is the recommended path for shared CI runners.
     License {
         #[command(subcommand)]
@@ -1413,9 +1413,9 @@ enum Command {
     ///
     /// Telemetry is off by default. It never collects repository names, paths,
     /// package names, source code, config values, raw errors, or raw agent
-    /// detection evidence. Use `fallow telemetry inspect --example` to see the
+    /// detection evidence. Use `plow telemetry inspect --example` to see the
     /// documented payload shape, or prefix a real command with
-    /// `FALLOW_TELEMETRY=inspect` to print the exact payload without sending.
+    /// `PLOW_TELEMETRY=inspect` to print the exact payload without sending.
     Telemetry {
         #[command(subcommand)]
         subcommand: TelemetryCli,
@@ -1432,15 +1432,15 @@ enum Command {
     },
 
     /// Install or remove a Claude Code PreToolUse hook that gates
-    /// `git commit` / `git push` on `fallow audit`, so the agent cleans
+    /// `git commit` / `git push` on `plow audit`, so the agent cleans
     /// findings before the command runs.
     ///
     /// This is the legacy AGENT-level enforcement command. Prefer
-    /// `fallow hooks install --target agent` for new setup. It writes into
-    /// `.claude/settings.json` + `.claude/hooks/fallow-gate.sh` (and
+    /// `plow hooks install --target agent` for new setup. It writes into
+    /// `.claude/settings.json` + `.claude/hooks/plow-gate.sh` (and
     /// optionally an `AGENTS.md` managed block for Codex). For a
     /// shell-level Git pre-commit hook in `.git/hooks/`, see
-    /// `fallow hooks install --target git` instead. Both targets can be used
+    /// `plow hooks install --target git` instead. Both targets can be used
     /// together: git hooks catch human commits, agent hooks catch agent
     /// commits.
     ///
@@ -1467,7 +1467,7 @@ enum Command {
         #[arg(long)]
         gitignore_claude: bool,
 
-        /// Remove the fallow-gate handler, hook script, and AGENTS.md
+        /// Remove the plow-gate handler, hook script, and AGENTS.md
         /// managed block instead of installing them. Idempotent: reports
         /// "unchanged" when nothing to remove.
         #[arg(long)]
@@ -1477,9 +1477,9 @@ enum Command {
 
 #[derive(Subcommand)]
 enum SecuritySubcommand {
-    /// Render verifier-retained survivor candidates from fallow output plus verifier verdicts.
+    /// Render verifier-retained survivor candidates from plow output plus verifier verdicts.
     Survivors {
-        /// Raw `fallow security --format json` candidate output.
+        /// Raw `plow security --format json` candidate output.
         #[arg(long, value_name = "PATH")]
         candidates: PathBuf,
         /// Verifier verdict JSON file.
@@ -1521,7 +1521,7 @@ enum LicenseCli {
         ///
         /// The trial endpoint is rate-limited to 5 requests per hour per IP.
         /// In CI or behind a shared NAT, start the trial from a developer
-        /// machine and set FALLOW_LICENSE (or FALLOW_LICENSE_PATH) on the
+        /// machine and set PLOW_LICENSE (or PLOW_LICENSE_PATH) on the
         /// runner instead of re-running `activate --trial` per job.
         #[arg(long, requires = "email")]
         trial: bool,
@@ -1532,7 +1532,7 @@ enum LicenseCli {
     },
     /// Show the active license tier, seats, features, and days remaining.
     Status,
-    /// Fetch a fresh JWT from `api.fallow.cloud` (network-only).
+    /// Fetch a fresh JWT from `api.plow.cloud` (network-only).
     Refresh,
     /// Remove the local license file.
     Deactivate,
@@ -1542,9 +1542,9 @@ enum LicenseCli {
 enum TelemetryCli {
     /// Show effective telemetry state, precedence, and controls.
     Status,
-    /// Enable opt-in telemetry in the user-level fallow config.
+    /// Enable opt-in telemetry in the user-level plow config.
     Enable,
-    /// Disable telemetry in the user-level fallow config.
+    /// Disable telemetry in the user-level plow config.
     Disable,
     /// Explain inspect mode or print example payloads.
     Inspect {
@@ -1588,29 +1588,29 @@ enum CoverageCli {
     },
     /// Analyze runtime coverage from a local artifact or explicit cloud source.
     ///
-    /// Cloud mode is opt-in only. `FALLOW_API_KEY` by itself never selects
+    /// Cloud mode is opt-in only. `PLOW_API_KEY` by itself never selects
     /// cloud mode; pass `--cloud` / `--runtime-coverage-cloud`, or set
-    /// `FALLOW_RUNTIME_COVERAGE_SOURCE=cloud`.
+    /// `PLOW_RUNTIME_COVERAGE_SOURCE=cloud`.
     Analyze {
         /// File or directory containing local runtime coverage input.
         #[arg(long, value_name = "PATH", conflicts_with = "cloud")]
         runtime_coverage: Option<PathBuf>,
 
-        /// Fetch latest runtime facts from fallow cloud for the selected repo.
+        /// Fetch latest runtime facts from plow cloud for the selected repo.
         #[arg(long, visible_alias = "runtime-coverage-cloud")]
         cloud: bool,
 
-        /// Fallow cloud API key. Precedence: this flag > $FALLOW_API_KEY.
+        /// Plow cloud API key. Precedence: this flag > $PLOW_API_KEY.
         #[arg(long, value_name = "KEY")]
         api_key: Option<String>,
 
-        /// Override the fallow cloud base URL.
+        /// Override the plow cloud base URL.
         #[arg(long, value_name = "URL")]
         api_endpoint: Option<String>,
 
         /// Repository identifier, for example `owner/repo`.
         ///
-        /// Defaults to $FALLOW_REPO, then the parsed origin URL from
+        /// Defaults to $PLOW_REPO, then the parsed origin URL from
         /// `git remote get-url origin`. Slashes are percent-encoded as one
         /// URL segment when calling the cloud runtime-context endpoint.
         #[arg(long, value_name = "OWNER/REPO")]
@@ -1660,36 +1660,36 @@ enum CoverageCli {
         #[arg(long)]
         importance: bool,
     },
-    /// Upload a static function inventory to fallow cloud (Production
+    /// Upload a static function inventory to plow cloud (Production
     /// Coverage, paid). Unlocks the `untracked` filter on the dashboard by
     /// pairing runtime coverage data with the AST view of "every function
-    /// that exists". See <https://docs.fallow.tools/analysis/runtime-coverage>.
+    /// that exists". See <https://docs.genesis-plow.dev/analysis/runtime-coverage>.
     ///
-    /// This command makes network calls to fallow cloud. `fallow dead-code`
+    /// This command makes network calls to plow cloud. `plow dead-code`
     /// stays offline.
     ///
     /// Exit codes: 0 ok · 7 network · 10 validation · 11 payload too large
     /// · 12 auth rejected · 13 server error.
     UploadInventory {
-        /// Fallow cloud API key (bearer token).
+        /// Plow cloud API key (bearer token).
         ///
-        /// Precedence: this flag > $FALLOW_API_KEY. Generate at
-        /// <https://fallow.cloud/settings#api-keys>.
+        /// Precedence: this flag > $PLOW_API_KEY. Generate at
+        /// <https://plow.cloud/settings#api-keys>.
         ///
-        /// Security: prefer $FALLOW_API_KEY on shared CI runners. Passing a
+        /// Security: prefer $PLOW_API_KEY on shared CI runners. Passing a
         /// secret on the command line may be visible to other processes via
         /// `ps` and can leak into shell history or process audit logs.
         #[arg(long, value_name = "KEY")]
         api_key: Option<String>,
 
-        /// Override the fallow cloud base URL.
+        /// Override the plow cloud base URL.
         ///
         /// Useful for staging and on-premise deployments. Also respects
-        /// $FALLOW_API_URL when this flag is not set.
+        /// $PLOW_API_URL when this flag is not set.
         #[arg(long, value_name = "URL")]
         api_endpoint: Option<String>,
 
-        /// Project identifier, for example `fallow-cloud-api` or `owner/repo`.
+        /// Project identifier, for example `plow-cloud-api` or `owner/repo`.
         ///
         /// Defaults to $GITHUB_REPOSITORY, then $CI_PROJECT_PATH, then the
         /// parsed origin URL from `git remote get-url origin`.
@@ -1713,7 +1713,7 @@ enum CoverageCli {
 
         /// Additional glob patterns to exclude from the walk.
         ///
-        /// Applied after the existing fallow ignore rules. Repeatable.
+        /// Applied after the existing plow ignore rules. Repeatable.
         #[arg(long, value_name = "GLOB", num_args = 0..)]
         exclude_paths: Vec<String>,
 
@@ -1750,7 +1750,7 @@ enum CoverageCli {
         #[arg(long)]
         ignore_upload_errors: bool,
     },
-    /// Upload JavaScript source maps to fallow cloud for bundled runtime coverage.
+    /// Upload JavaScript source maps to plow cloud for bundled runtime coverage.
     ///
     /// Scans a build output directory for `.map` files and uploads them under
     /// the selected repo + git SHA. The production beacon reports bundled
@@ -1790,7 +1790,7 @@ enum CoverageCli {
         #[arg(long, value_name = "SHA")]
         git_sha: Option<String>,
 
-        /// Override the fallow cloud base URL.
+        /// Override the plow cloud base URL.
         #[arg(long, value_name = "URL")]
         endpoint: Option<String>,
 
@@ -1813,33 +1813,33 @@ enum CoverageCli {
         #[arg(long)]
         fail_fast: bool,
     },
-    /// Upload static dead-code findings to fallow cloud for the source-evidence viewer.
+    /// Upload static dead-code findings to plow cloud for the source-evidence viewer.
     ///
-    /// Runs fallow's static analysis and uploads the `unused_export` and
+    /// Runs plow's static analysis and uploads the `unused_export` and
     /// `dead_file` verdicts under the selected repo + git SHA. The cloud
     /// overlays them on the source view alongside the runtime coverage overlay.
     /// Findings are replace-by-SHA: each run sends the complete set for the SHA.
     UploadStaticFindings {
-        /// Fallow cloud API key (bearer token).
+        /// Plow cloud API key (bearer token).
         ///
-        /// Precedence: this flag > $FALLOW_API_KEY. Generate at
-        /// <https://fallow.cloud/settings#api-keys>. This must be a live API
+        /// Precedence: this flag > $PLOW_API_KEY. Generate at
+        /// <https://plow.cloud/settings#api-keys>. This must be a live API
         /// key, not a publishable ingest key.
         ///
-        /// Security: prefer $FALLOW_API_KEY on shared CI runners. Passing a
+        /// Security: prefer $PLOW_API_KEY on shared CI runners. Passing a
         /// secret on the command line may be visible to other processes via
         /// `ps` and can leak into shell history or process audit logs.
         #[arg(long, value_name = "KEY")]
         api_key: Option<String>,
 
-        /// Override the fallow cloud base URL.
+        /// Override the plow cloud base URL.
         ///
         /// Useful for staging and on-premise deployments. Also respects
-        /// $FALLOW_API_URL when this flag is not set.
+        /// $PLOW_API_URL when this flag is not set.
         #[arg(long, value_name = "URL")]
         api_endpoint: Option<String>,
 
-        /// Project identifier, for example `fallow-cloud-api` or `owner/repo`.
+        /// Project identifier, for example `plow-cloud-api` or `owner/repo`.
         ///
         /// Defaults to $GITHUB_REPOSITORY, then $CI_PROJECT_PATH, then the
         /// parsed origin URL from `git remote get-url origin`.
@@ -1927,11 +1927,11 @@ pub enum EffortFilter {
 
 impl EffortFilter {
     /// Convert to the corresponding `EffortEstimate` for comparison.
-    const fn to_estimate(self) -> fallow_output::EffortEstimate {
+    const fn to_estimate(self) -> plow_output::EffortEstimate {
         match self {
-            Self::Low => fallow_output::EffortEstimate::Low,
-            Self::Medium => fallow_output::EffortEstimate::Medium,
-            Self::High => fallow_output::EffortEstimate::High,
+            Self::Low => plow_output::EffortEstimate::Low,
+            Self::Medium => plow_output::EffortEstimate::Medium,
+            Self::High => plow_output::EffortEstimate::High,
         }
     }
 }
@@ -1946,18 +1946,18 @@ pub enum HealthSeverityCli {
 
 impl HealthSeverityCli {
     /// Convert to the typed health output severity.
-    const fn to_health_severity(self) -> fallow_output::FindingSeverity {
+    const fn to_health_severity(self) -> plow_output::FindingSeverity {
         match self {
-            Self::Moderate => fallow_output::FindingSeverity::Moderate,
-            Self::High => fallow_output::FindingSeverity::High,
-            Self::Critical => fallow_output::FindingSeverity::Critical,
+            Self::Moderate => plow_output::FindingSeverity::Moderate,
+            Self::High => plow_output::FindingSeverity::High,
+            Self::Critical => plow_output::FindingSeverity::Critical,
         }
     }
 }
 
 /// Privacy mode for author emails emitted by `--ownership`.
 ///
-/// CLI mirror of [`fallow_config::EmailMode`]. Kept as a separate enum so
+/// CLI mirror of [`plow_config::EmailMode`]. Kept as a separate enum so
 /// the help text controls rendering and we don't leak config-internal
 /// schema details into clap.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
@@ -1975,17 +1975,17 @@ pub enum EmailModeArg {
 
 impl EmailModeArg {
     /// Convert to the equivalent config-level mode.
-    const fn to_config(self) -> fallow_config::EmailMode {
+    const fn to_config(self) -> plow_config::EmailMode {
         match self {
-            Self::Raw => fallow_config::EmailMode::Raw,
-            Self::Handle => fallow_config::EmailMode::Handle,
-            Self::Anonymized => fallow_config::EmailMode::Anonymized,
-            Self::Hash => fallow_config::EmailMode::Hash,
+            Self::Raw => plow_config::EmailMode::Raw,
+            Self::Handle => plow_config::EmailMode::Handle,
+            Self::Anonymized => plow_config::EmailMode::Anonymized,
+            Self::Hash => plow_config::EmailMode::Hash,
         }
     }
 }
 
-/// CLI mirror of [`fallow_config::AuditGate`].
+/// CLI mirror of [`plow_config::AuditGate`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
 pub enum AuditGateArg {
     /// Only findings introduced by the current changeset affect the verdict.
@@ -1994,7 +1994,7 @@ pub enum AuditGateArg {
     All,
 }
 
-impl From<AuditGateArg> for fallow_config::AuditGate {
+impl From<AuditGateArg> for plow_config::AuditGate {
     fn from(value: AuditGateArg) -> Self {
         match value {
             AuditGateArg::NewOnly => Self::NewOnly,
@@ -2048,7 +2048,7 @@ fn resolve_audit_baseline_path(
 fn emit_known_failure(
     message: &str,
     exit_code: u8,
-    output: fallow_config::OutputFormat,
+    output: plow_config::OutputFormat,
     reason: telemetry::FailureReason,
 ) -> ExitCode {
     telemetry::note_failure_reason(reason);
@@ -2104,7 +2104,7 @@ fn unsupported_security_global(cli: &Cli) -> Option<&'static str> {
 struct DispatchContext<'a> {
     cli: &'a Cli,
     root: &'a std::path::Path,
-    output: fallow_config::OutputFormat,
+    output: plow_config::OutputFormat,
     quiet: bool,
     cli_format_was_explicit: bool,
     threads: usize,
@@ -2114,7 +2114,7 @@ struct DispatchContext<'a> {
 }
 
 impl DispatchContext<'_> {
-    fn ci_defaults(&self) -> (fallow_config::OutputFormat, bool, bool) {
+    fn ci_defaults(&self) -> (plow_config::OutputFormat, bool, bool) {
         apply_ci_defaults(
             self.cli.ci,
             self.cli.fail_on_issues,
@@ -2133,10 +2133,7 @@ impl DispatchContext<'_> {
         resolve_production_modes(self.cli, self.root, self.output, dead_code, health, dupes)
     }
 
-    fn production_for(
-        &self,
-        analysis: fallow_config::ProductionAnalysis,
-    ) -> Result<bool, ExitCode> {
+    fn production_for(&self, analysis: plow_config::ProductionAnalysis) -> Result<bool, ExitCode> {
         self.production_modes(false, false, false)
             .map(|modes| modes.for_analysis(analysis))
     }
@@ -2160,13 +2157,13 @@ impl DispatchContext<'_> {
     }
 }
 
-/// Test-only helper invoked when `FALLOW_TEST_SIGNAL_HELPER=1` is set.
+/// Test-only helper invoked when `PLOW_TEST_SIGNAL_HELPER=1` is set.
 /// Spawns `sleep 30` via the `ScopedChild` registry so the child is
 /// tracked by the signal handler, prints the child PID to stdout, then
 /// busy-waits so a SIGINT/SIGTERM delivered to the parent fires the
 /// signal handler (which kills the child and exits 128+signum).
 ///
-/// When `FALLOW_TEST_SIGNAL_HELPER_GRACEFUL=1` is also set, graceful
+/// When `PLOW_TEST_SIGNAL_HELPER_GRACEFUL=1` is also set, graceful
 /// mode is activated BEFORE spawning the child. In graceful mode the
 /// signal handler kills the child (proving drain runs unconditionally)
 /// but does NOT call `std::process::exit`, so the helper itself sees
@@ -2179,7 +2176,7 @@ fn signal_test_helper() -> ExitCode {
     use std::io::Write as _;
     use std::process::Command;
 
-    if std::env::var_os("FALLOW_TEST_SIGNAL_HELPER_GRACEFUL").is_some() {
+    if std::env::var_os("PLOW_TEST_SIGNAL_HELPER_GRACEFUL").is_some() {
         signal::set_graceful_mode();
     }
 
@@ -2199,7 +2196,7 @@ fn signal_test_helper() -> ExitCode {
     let _ = lock.flush();
     drop(lock);
     let _ = child.wait_with_output();
-    if std::env::var_os("FALLOW_TEST_SIGNAL_HELPER_GRACEFUL").is_some() {
+    if std::env::var_os("PLOW_TEST_SIGNAL_HELPER_GRACEFUL").is_some() {
         return ExitCode::SUCCESS;
     }
     std::thread::sleep(std::time::Duration::from_secs(5));
@@ -2212,8 +2209,8 @@ fn signal_test_helper() -> ExitCode {
 }
 
 fn install_spawn_hooks() {
-    fallow_engine::set_churn_spawn_hook(signal::scoped_child::output);
-    fallow_engine::set_spawn_hook(signal::scoped_child::output);
+    plow_engine::set_churn_spawn_hook(signal::scoped_child::output);
+    plow_engine::set_spawn_hook(signal::scoped_child::output);
 }
 
 fn install_signal_handlers() {
@@ -2221,7 +2218,7 @@ fn install_signal_handlers() {
         use std::io::Write as _;
         let stderr = std::io::stderr();
         let mut lock = stderr.lock();
-        let _ = writeln!(lock, "fallow: failed to install signal handlers: {err}");
+        let _ = writeln!(lock, "plow: failed to install signal handlers: {err}");
     }
 }
 
@@ -2231,7 +2228,7 @@ fn install_signal_handlers() {
 /// cannot be created. Backs `--output-file`.
 fn redirect_report_to_file(
     path: &std::path::Path,
-    output: fallow_config::OutputFormat,
+    output: plow_config::OutputFormat,
 ) -> Result<(), ExitCode> {
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
@@ -2265,7 +2262,7 @@ fn redirect_report_to_file(
 fn finalize_report_file(
     path: &std::path::Path,
     quiet: bool,
-    output: fallow_config::OutputFormat,
+    output: plow_config::OutputFormat,
 ) -> Result<(), ExitCode> {
     if let Err(e) = report::sink::flush() {
         return Err(emit_error(
@@ -2287,7 +2284,7 @@ fn main() -> ExitCode {
     install_signal_handlers();
     install_spawn_hooks();
 
-    if std::env::var_os("FALLOW_TEST_SIGNAL_HELPER").is_some() {
+    if std::env::var_os("PLOW_TEST_SIGNAL_HELPER").is_some() {
         return signal_test_helper();
     }
 
@@ -2382,7 +2379,7 @@ fn dispatch_and_finalize(
 
 fn run_telemetry_command_if_requested(
     cli: &mut Cli,
-    output: fallow_config::OutputFormat,
+    output: plow_config::OutputFormat,
 ) -> Option<ExitCode> {
     if matches!(cli.command, Some(Command::Telemetry { .. }))
         && let Some(Command::Telemetry { subcommand }) = cli.command.take()
@@ -2443,7 +2440,7 @@ fn dispatch_bare_command(dispatch: &DispatchContext<'_>) -> ExitCode {
     )
 }
 
-/// Which analyses the bare `fallow` run executes (resolved from `--only`/`--skip`).
+/// Which analyses the bare `plow` run executes (resolved from `--only`/`--skip`).
 #[derive(Clone, Copy)]
 struct BareAnalyses {
     run_check: bool,
@@ -2451,7 +2448,7 @@ struct BareAnalyses {
     run_health: bool,
 }
 
-/// Build `CombinedOptions` for a bare `fallow` invocation and run the combined
+/// Build `CombinedOptions` for a bare `plow` invocation and run the combined
 /// pipeline.
 fn run_bare_combined(
     dispatch: &DispatchContext<'_>,
@@ -2779,7 +2776,7 @@ fn dispatch_trace_command(
         target: symbol,
         callers,
         callees,
-        depth: depth.unwrap_or(fallow_types::trace_chain::DEFAULT_TRACE_DEPTH),
+        depth: depth.unwrap_or(plow_types::trace_chain::DEFAULT_TRACE_DEPTH),
     })
 }
 
@@ -2884,7 +2881,7 @@ fn run_security_blind_spots_or_default(
     }
 }
 
-/// Handle `fallow security survivors` as an early return. Returns `Some(code)`
+/// Handle `plow security survivors` as an early return. Returns `Some(code)`
 /// when the subcommand is `survivors` (validated then run); `None` otherwise.
 fn try_run_security_survivors(
     subcommand: Option<&SecuritySubcommand>,
@@ -2927,7 +2924,7 @@ fn scoped_security_files(
 }
 
 struct SecurityDerivedFlagState<'a> {
-    output: fallow_config::OutputFormat,
+    output: plow_config::OutputFormat,
     ci: bool,
     fail_on_issues: bool,
     sarif_file: Option<&'a Path>,
@@ -2965,7 +2962,7 @@ fn validate_security_survivors_flags(flags: &SecurityDerivedFlagState<'_>) -> Op
         None
     }?;
     Some(emit_error(
-        &format!("{flag} is not valid with `fallow security survivors`."),
+        &format!("{flag} is not valid with `plow security survivors`."),
         2,
         flags.output,
     ))
@@ -2994,7 +2991,7 @@ fn validate_security_blind_spots_flags(flags: &SecurityDerivedFlagState<'_>) -> 
         None
     }?;
     Some(emit_error(
-        &format!("{flag} is not valid with `fallow security blind-spots`."),
+        &format!("{flag} is not valid with `plow security blind-spots`."),
         2,
         flags.output,
     ))
@@ -3116,10 +3113,7 @@ fn dispatch_migrate_command(command: Command, root: &Path) -> ExitCode {
     migrate::run_migrate(root, toml, jsonc, dry_run, from.as_deref())
 }
 
-fn dispatch_license_command(
-    subcommand: LicenseCli,
-    output: fallow_config::OutputFormat,
-) -> ExitCode {
+fn dispatch_license_command(subcommand: LicenseCli, output: plow_config::OutputFormat) -> ExitCode {
     license::run(&map_license_subcommand(subcommand), output)
 }
 
@@ -3313,7 +3307,7 @@ fn dispatch_flags_command(dispatch: &DispatchContext<'_>, top: Option<usize>) ->
     let quiet = dispatch.quiet;
     let threads = dispatch.threads;
     let production = match resolve_production_modes(cli, root, output, false, false, false) {
-        Ok(modes) => modes.for_analysis(fallow_config::ProductionAnalysis::DeadCode),
+        Ok(modes) => modes.for_analysis(plow_config::ProductionAnalysis::DeadCode),
         Err(code) => return code,
     };
     flags::run_flags(&flags::FlagsOptions {
@@ -3573,7 +3567,7 @@ impl ListDispatchArgs {
 
 fn dispatch_watch(dispatch: &DispatchContext<'_>, no_clear: bool) -> ExitCode {
     let cli = dispatch.cli;
-    let production = match dispatch.production_for(fallow_config::ProductionAnalysis::DeadCode) {
+    let production = match dispatch.production_for(plow_config::ProductionAnalysis::DeadCode) {
         Ok(production) => production,
         Err(code) => return code,
     };
@@ -3600,7 +3594,7 @@ struct FixDispatchArgs {
 
 fn dispatch_fix(dispatch: &DispatchContext<'_>, args: FixDispatchArgs) -> ExitCode {
     let cli = dispatch.cli;
-    let production = match dispatch.production_for(fallow_config::ProductionAnalysis::DeadCode) {
+    let production = match dispatch.production_for(plow_config::ProductionAnalysis::DeadCode) {
         Ok(production) => production,
         Err(code) => return code,
     };
@@ -3620,7 +3614,7 @@ fn dispatch_fix(dispatch: &DispatchContext<'_>, args: FixDispatchArgs) -> ExitCo
 
 fn dispatch_list(dispatch: &DispatchContext<'_>, args: ListDispatchArgs) -> ExitCode {
     let cli = dispatch.cli;
-    let production = match dispatch.production_for(fallow_config::ProductionAnalysis::DeadCode) {
+    let production = match dispatch.production_for(plow_config::ProductionAnalysis::DeadCode) {
         Ok(production) => production,
         Err(code) => return code,
     };
@@ -3642,7 +3636,7 @@ fn dispatch_list(dispatch: &DispatchContext<'_>, args: ListDispatchArgs) -> Exit
 fn dispatch_check(dispatch: &DispatchContext<'_>, args: &CheckDispatchArgs) -> ExitCode {
     let cli = dispatch.cli;
     let (output, quiet, fail_on_issues) = dispatch.ci_defaults();
-    let production = match dispatch.production_for(fallow_config::ProductionAnalysis::DeadCode) {
+    let production = match dispatch.production_for(plow_config::ProductionAnalysis::DeadCode) {
         Ok(production) => production,
         Err(code) => return code,
     };
@@ -3716,7 +3710,7 @@ struct DupesDispatchArgs {
 fn dispatch_dupes(dispatch: &DispatchContext<'_>, args: &DupesDispatchArgs) -> ExitCode {
     let cli = dispatch.cli;
     let (output, quiet, _fail_on_issues) = dispatch.ci_defaults();
-    let production = match dispatch.production_for(fallow_config::ProductionAnalysis::Dupes) {
+    let production = match dispatch.production_for(plow_config::ProductionAnalysis::Dupes) {
         Ok(production) => production,
         Err(code) => return code,
     };
@@ -3787,7 +3781,7 @@ struct AuditDispatchArgs {
 }
 
 struct ResolvedAuditInputs {
-    audit_cfg: fallow_config::AuditConfig,
+    audit_cfg: plow_config::AuditConfig,
     cache_dir: PathBuf,
     production: ProductionModes,
     dead_code_baseline: Option<PathBuf>,
@@ -3802,7 +3796,7 @@ fn dispatch_audit(dispatch: &DispatchContext<'_>, args: &AuditDispatchArgs) -> E
 
     if cli.baseline.is_some() || cli.save_baseline.is_some() {
         return emit_error(
-            "audit uses per-analysis baselines. Use --dead-code-baseline, --health-baseline, or --dupes-baseline (or save them with `fallow dead-code|health|dupes --save-baseline <file>`)",
+            "audit uses per-analysis baselines. Use --dead-code-baseline, --health-baseline, or --dupes-baseline (or save them with `plow dead-code|health|dupes --save-baseline <file>`)",
             2,
             output,
         );
@@ -3862,7 +3856,7 @@ fn resolve_audit_inputs(
     let coverage = args
         .coverage
         .clone()
-        .or_else(|| std::env::var("FALLOW_COVERAGE").ok().map(PathBuf::from));
+        .or_else(|| std::env::var("PLOW_COVERAGE").ok().map(PathBuf::from));
 
     Ok(ResolvedAuditInputs {
         audit_cfg,
@@ -3924,7 +3918,7 @@ fn run_resolved_audit(
     )
 }
 
-/// Dispatch `fallow decision-surface`: the separable apex. Reuses the audit
+/// Dispatch `plow decision-surface`: the separable apex. Reuses the audit
 /// input resolution in brief mode (changed-code scope) with all gating /
 /// coverage / baseline knobs defaulted, then renders ONLY the decision surface.
 fn dispatch_decision_surface(dispatch: &DispatchContext<'_>, max_decisions: usize) -> ExitCode {
@@ -4010,13 +4004,13 @@ struct HealthDispatchArgs<'a> {
     coverage_gaps: bool,
     hotspots: bool,
     ownership: bool,
-    ownership_emails: Option<fallow_config::EmailMode>,
+    ownership_emails: Option<plow_config::EmailMode>,
     targets: bool,
     css: bool,
     effort: Option<EffortFilter>,
     score: bool,
     min_score: Option<f64>,
-    min_severity: Option<fallow_output::FindingSeverity>,
+    min_severity: Option<plow_output::FindingSeverity>,
     report_only: bool,
     since: Option<&'a str>,
     min_commits: Option<u32>,
@@ -4040,8 +4034,8 @@ fn resolve_health_coverage_inputs(
     cli_coverage: Option<&std::path::Path>,
     cli_coverage_root: Option<&std::path::Path>,
 ) -> Result<ResolvedHealthCoverageInputs, ExitCode> {
-    let env_coverage = path_from_env("FALLOW_COVERAGE");
-    let env_coverage_root = path_from_env("FALLOW_COVERAGE_ROOT");
+    let env_coverage = path_from_env("PLOW_COVERAGE");
+    let env_coverage_root = path_from_env("PLOW_COVERAGE_ROOT");
     let needs_config_coverage = cli_coverage.is_none() && env_coverage.is_none();
     let needs_config_coverage_root = cli_coverage_root.is_none() && env_coverage_root.is_none();
     let config_health = if needs_config_coverage || needs_config_coverage_root {
@@ -4092,8 +4086,8 @@ fn path_from_env(name: &str) -> Option<PathBuf> {
 fn validate_health_report_only_gate(
     report_only: bool,
     min_score: Option<f64>,
-    min_severity: Option<fallow_output::FindingSeverity>,
-    output: fallow_config::OutputFormat,
+    min_severity: Option<plow_output::FindingSeverity>,
+    output: plow_config::OutputFormat,
 ) -> Result<(), ExitCode> {
     if report_only && (min_score.is_some() || min_severity.is_some()) {
         return Err(emit_error(
@@ -4113,8 +4107,8 @@ fn resolve_runtime_coverage_options(
     min_invocations_hot: u64,
     min_observation_volume: Option<u32>,
     low_traffic_threshold: Option<f64>,
-    output: fallow_config::OutputFormat,
-) -> Result<Option<fallow_engine::RuntimeCoverageOptions>, ExitCode> {
+    output: plow_config::OutputFormat,
+) -> Result<Option<plow_engine::RuntimeCoverageOptions>, ExitCode> {
     let Some(path) = runtime_coverage else {
         return Ok(None);
     };
@@ -4152,7 +4146,7 @@ fn dispatch_health(dispatch: &DispatchContext<'_>, args: &HealthDispatchArgs<'_>
         Err(code) => return code,
     };
     let production = match resolve_production_modes(cli, root, output, false, false, false) {
-        Ok(modes) => modes.for_analysis(fallow_config::ProductionAnalysis::Health),
+        Ok(modes) => modes.for_analysis(plow_config::ProductionAnalysis::Health),
         Err(code) => return code,
     };
     let coverage_inputs =
@@ -4160,9 +4154,9 @@ fn dispatch_health(dispatch: &DispatchContext<'_>, args: &HealthDispatchArgs<'_>
             Ok(inputs) => inputs,
             Err(code) => return code,
         };
-    let run = fallow_engine::derive_health_run_options(fallow_engine::HealthRunOptionsInput {
+    let run = plow_engine::derive_health_run_options(plow_engine::HealthRunOptionsInput {
         output,
-        thresholds: fallow_engine::HealthThresholdOverrides {
+        thresholds: plow_engine::HealthThresholdOverrides {
             max_cyclomatic: args.max_cyclomatic,
             max_cognitive: args.max_cognitive,
             max_crap: args.max_crap,
@@ -4179,7 +4173,7 @@ fn dispatch_health(dispatch: &DispatchContext<'_>, args: &HealthDispatchArgs<'_>
         css: args.css,
         effort: args.effort.map(EffortFilter::to_estimate),
         score: args.score,
-        gates: fallow_engine::HealthGateOptions {
+        gates: plow_engine::HealthGateOptions {
             min_score: args.min_score,
             min_severity: args.min_severity,
             report_only: args.report_only,
@@ -4188,7 +4182,7 @@ fn dispatch_health(dispatch: &DispatchContext<'_>, args: &HealthDispatchArgs<'_>
         trend: args.trend,
         since: args.since,
         min_commits: args.min_commits,
-        coverage_inputs: fallow_engine::HealthCoverageInputs {
+        coverage_inputs: plow_engine::HealthCoverageInputs {
             coverage: coverage_inputs.coverage.as_deref(),
             coverage_root: coverage_inputs.coverage_root.as_deref(),
         },
@@ -4201,7 +4195,7 @@ fn dispatch_health(dispatch: &DispatchContext<'_>, args: &HealthDispatchArgs<'_>
 /// builder. Owns the normalized engine run contract and resolved production
 /// mode.
 struct ResolvedHealthDispatch<'a> {
-    run: fallow_engine::HealthRunOptions<'a>,
+    run: plow_engine::HealthRunOptions<'a>,
     production: bool,
 }
 
@@ -4302,56 +4296,50 @@ mod tests {
     #[test]
     fn high_value_commands_route_to_distinct_workflows() {
         use clap::Parser;
-        use fallow_config::OutputFormat;
+        use plow_config::OutputFormat;
 
         let distinct = [
-            (vec!["fallow", "impact"], telemetry::Workflow::Impact),
-            (vec!["fallow", "security"], telemetry::Workflow::Security),
-            (vec!["fallow", "fix"], telemetry::Workflow::Fix),
+            (vec!["plow", "impact"], telemetry::Workflow::Impact),
+            (vec!["plow", "security"], telemetry::Workflow::Security),
+            (vec!["plow", "fix"], telemetry::Workflow::Fix),
             (
-                vec!["fallow", "explain", "unused-exports"],
+                vec!["plow", "explain", "unused-exports"],
                 telemetry::Workflow::Explain,
             ),
             (
-                vec!["fallow", "watch"],
+                vec!["plow", "watch"],
                 telemetry::Workflow::CodeQualityReview,
             ),
+            (vec!["plow", "list"], telemetry::Workflow::ProjectInventory),
             (
-                vec!["fallow", "list"],
+                vec!["plow", "workspaces"],
                 telemetry::Workflow::ProjectInventory,
             ),
             (
-                vec!["fallow", "workspaces"],
+                vec!["plow", "schema"],
                 telemetry::Workflow::ProjectInventory,
             ),
+            (vec!["plow", "init"], telemetry::Workflow::Setup),
             (
-                vec!["fallow", "schema"],
-                telemetry::Workflow::ProjectInventory,
-            ),
-            (vec!["fallow", "init"], telemetry::Workflow::Setup),
-            (
-                vec!["fallow", "hooks", "install", "--target", "git"],
+                vec!["plow", "hooks", "install", "--target", "git"],
                 telemetry::Workflow::Setup,
             ),
-            (vec!["fallow", "config-schema"], telemetry::Workflow::Setup),
-            (vec!["fallow", "plugin-schema"], telemetry::Workflow::Setup),
+            (vec!["plow", "config-schema"], telemetry::Workflow::Setup),
+            (vec!["plow", "plugin-schema"], telemetry::Workflow::Setup),
+            (vec!["plow", "rule-pack-schema"], telemetry::Workflow::Setup),
+            (vec!["plow", "config"], telemetry::Workflow::Setup),
             (
-                vec!["fallow", "rule-pack-schema"],
+                vec!["plow", "ci-template", "gitlab"],
                 telemetry::Workflow::Setup,
             ),
-            (vec!["fallow", "config"], telemetry::Workflow::Setup),
+            (vec!["plow", "migrate"], telemetry::Workflow::Setup),
             (
-                vec!["fallow", "ci-template", "gitlab"],
+                vec!["plow", "telemetry", "status"],
                 telemetry::Workflow::Setup,
             ),
-            (vec!["fallow", "migrate"], telemetry::Workflow::Setup),
+            (vec!["plow", "setup-hooks"], telemetry::Workflow::Setup),
             (
-                vec!["fallow", "telemetry", "status"],
-                telemetry::Workflow::Setup,
-            ),
-            (vec!["fallow", "setup-hooks"], telemetry::Workflow::Setup),
-            (
-                vec!["fallow", "license", "status"],
+                vec!["plow", "license", "status"],
                 telemetry::Workflow::License,
             ),
         ];
@@ -4372,7 +4360,7 @@ mod tests {
     #[test]
     fn version_flag_accepts_lower_v_upper_v_and_long() {
         use clap::CommandFactory;
-        for argv in [["fallow", "-v"], ["fallow", "-V"], ["fallow", "--version"]] {
+        for argv in [["plow", "-v"], ["plow", "-V"], ["plow", "--version"]] {
             let err = Cli::command()
                 .try_get_matches_from(argv)
                 .expect_err("version flag should short-circuit parsing");
@@ -4393,7 +4381,7 @@ mod tests {
         use clap::CommandFactory;
         let mut root = Cli::command();
         let mut violations: Vec<(String, String)> = Vec::new();
-        visit_help(&mut root, "fallow", &mut violations);
+        visit_help(&mut root, "plow", &mut violations);
         assert!(
             violations.is_empty(),
             "found implementation-status wording in --help output:\n{}",
@@ -4538,13 +4526,13 @@ mod tests {
     #[test]
     fn security_unsupported_global_validator_matches_hidden_help_contract() {
         for (argv, expected) in [
-            (vec!["fallow", "security", "--performance"], "--performance"),
+            (vec!["plow", "security", "--performance"], "--performance"),
             (
-                vec!["fallow", "security", "--baseline", "base.json"],
+                vec!["plow", "security", "--baseline", "base.json"],
                 "--baseline",
             ),
             (
-                vec!["fallow", "security", "--dupes-mode", "weak"],
+                vec!["plow", "security", "--dupes-mode", "weak"],
                 "--dupes-mode",
             ),
         ] {
@@ -4552,7 +4540,7 @@ mod tests {
             assert_eq!(unsupported_security_global(&cli), Some(expected));
         }
 
-        let explain = Cli::try_parse_from(["fallow", "security", "--explain"])
+        let explain = Cli::try_parse_from(["plow", "security", "--explain"])
             .expect("security --explain parses");
         assert_eq!(unsupported_security_global(&explain), None);
     }
@@ -4582,7 +4570,7 @@ mod tests {
             })
             .collect();
         let programmatic_flags: std::collections::BTreeSet<String> =
-            fallow_api::COMMON_ANALYSIS_OPTION_FLAGS
+            plow_api::COMMON_ANALYSIS_OPTION_FLAGS
                 .iter()
                 .map(|flag| (*flag).to_owned())
                 .collect();
@@ -4654,14 +4642,14 @@ mod tests {
 
     #[test]
     fn emit_error_returns_given_exit_code() {
-        let code = emit_error("test error", 2, fallow_config::OutputFormat::Human);
+        let code = emit_error("test error", 2, plow_config::OutputFormat::Human);
         assert_eq!(code, ExitCode::from(2));
     }
 
     fn telemetry_run_for_mode(mode: telemetry::AnalysisMode) -> TelemetryRun {
         TelemetryRun {
             workflow: telemetry::Workflow::Health,
-            output: fallow_config::OutputFormat::Json,
+            output: plow_config::OutputFormat::Json,
             quiet: true,
             start: std::time::Instant::now(),
             context: telemetry::WorkflowContext {
@@ -4707,7 +4695,7 @@ mod tests {
     #[test]
     fn bare_coverage_flags_parse_without_subcommand() {
         let cli = Cli::try_parse_from([
-            "fallow",
+            "plow",
             "--coverage",
             "coverage/coverage-final.json",
             "--coverage-root",
@@ -4728,7 +4716,7 @@ mod tests {
     #[test]
     fn bare_coverage_before_subcommand_is_detectable() {
         let cli = Cli::try_parse_from([
-            "fallow",
+            "plow",
             "--coverage",
             "coverage/coverage-final.json",
             "dead-code",
@@ -4738,12 +4726,12 @@ mod tests {
         assert!(cli_has_bare_coverage_input(&cli));
         let message = bare_coverage_subcommand_error_message();
         assert!(message.contains("bare combined-mode flags"));
-        assert!(message.contains("fallow health --coverage <coverage-final.json>"));
+        assert!(message.contains("plow health --coverage <coverage-final.json>"));
     }
 
     #[test]
     fn subcommand_coverage_flag_keeps_regular_clap_error() {
-        let Err(err) = Cli::try_parse_from(["fallow", "dead-code", "--coverage"]) else {
+        let Err(err) = Cli::try_parse_from(["plow", "dead-code", "--coverage"]) else {
             panic!("dead-code --coverage should fail to parse");
         };
         assert_eq!(err.kind(), clap::error::ErrorKind::UnknownArgument);

@@ -13,8 +13,8 @@ use super::common::{create_config, fixture_path};
 fn detects_real_three_hop_chain() {
     let root = fixture_path("prop-drilling");
     let mut config = create_config(root);
-    config.rules.prop_drilling = fallow_config::Severity::Warn;
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    config.rules.prop_drilling = plow_config::Severity::Warn;
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let chains = &results.prop_drilling_chains;
     assert_eq!(
@@ -62,8 +62,8 @@ fn detects_real_three_hop_chain() {
 fn abstains_on_every_ladder_case() {
     let root = fixture_path("prop-drilling-abstain");
     let mut config = create_config(root);
-    config.rules.prop_drilling = fallow_config::Severity::Warn;
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    config.rules.prop_drilling = plow_config::Severity::Warn;
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.prop_drilling_chains.is_empty(),
@@ -91,7 +91,7 @@ fn abstains_on_every_ladder_case() {
 fn dormant_when_rule_off() {
     let root = fixture_path("prop-drilling");
     let config = create_config(root); // rule defaults to off
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     assert!(
         results.prop_drilling_chains.is_empty(),
         "the prop-drilling rule is off by default: {:?}",
@@ -106,8 +106,8 @@ fn dep_gated_to_react() {
     // The Vue fixture declares only `vue` (no react/react-dom/next/preact).
     let root = fixture_path("unused-component-prop");
     let mut config = create_config(root);
-    config.rules.prop_drilling = fallow_config::Severity::Warn;
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    config.rules.prop_drilling = plow_config::Severity::Warn;
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     assert!(
         results.prop_drilling_chains.is_empty(),
         "prop-drilling must not fire on a non-React project"

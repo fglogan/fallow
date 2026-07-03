@@ -30,7 +30,7 @@ expression: redact_version(&json_str)
           "type": "suppress-line",
           "auto_fixable": false,
           "description": "Suppress with an inline comment above the function declaration",
-          "comment": "// fallow-ignore-next-line complexity",
+          "comment": "// plow-ignore-next-line complexity",
           "placement": "above-function-declaration"
         }
       ]
@@ -70,7 +70,7 @@ expression: redact_version(&json_str)
             "type": "suppress-file",
             "auto_fixable": false,
             "description": "Suppress coverage gap reporting for `src/untested-one.ts`",
-            "comment": "// fallow-ignore-file coverage-gaps"
+            "comment": "// plow-ignore-file coverage-gaps"
           }
         ]
       },
@@ -88,7 +88,7 @@ expression: redact_version(&json_str)
             "type": "suppress-file",
             "auto_fixable": false,
             "description": "Suppress coverage gap reporting for `src/untested-two.ts`",
-            "comment": "// fallow-ignore-file coverage-gaps"
+            "comment": "// plow-ignore-file coverage-gaps"
           }
         ]
       }
@@ -110,7 +110,7 @@ expression: redact_version(&json_str)
             "type": "suppress-file",
             "auto_fixable": false,
             "description": "Suppress coverage gap reporting for `src/partial.ts`",
-            "comment": "// fallow-ignore-file coverage-gaps"
+            "comment": "// plow-ignore-file coverage-gaps"
           }
         ]
       }
@@ -119,7 +119,7 @@ expression: redact_version(&json_str)
   "next_steps": [
     {
       "id": "complexity-breakdown",
-      "command": "fallow health --complexity-breakdown",
+      "command": "plow health --complexity-breakdown",
       "reason": "see per-decision-point contributions for a hotspot"
     }
   ]

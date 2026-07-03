@@ -6,7 +6,7 @@
 )]
 use oxc_ast::ast::*;
 
-use fallow_types::extract::DispatchedEvent;
+use plow_types::extract::DispatchedEvent;
 
 use super::ModuleInfoExtractor;
 

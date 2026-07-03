@@ -1,9 +1,9 @@
-//! `fallow coverage upload-static-findings` - push static dead-code verdicts
-//! to fallow cloud.
+//! `plow coverage upload-static-findings` - push static dead-code verdicts
+//! to plow cloud.
 //!
 //! These are the **static side** of the source-evidence viewer (ADR 024). The
 //! runtime coverage pipeline ships function hit-counts; this command ships
-//! fallow's own static analysis verdicts (`unused_export`, `dead_file`) so the
+//! plow's own static analysis verdicts (`unused_export`, `dead_file`) so the
 //! cloud can overlay them onto the source view alongside the runtime overlay.
 //!
 //! The cloud join key is `filePath`, matched against the source-map
@@ -21,13 +21,13 @@
 //! from a transient server failure.
 //!
 //! This subcommand is a paid-tier workflow. It runs only when the user invokes
-//! it explicitly; no other fallow command touches the network.
+//! it explicitly; no other plow command touches the network.
 
 use std::fmt::{self, Write as _};
 use std::path::Path;
 use std::process::ExitCode;
 
-use fallow_config::ResolvedConfig;
+use plow_config::ResolvedConfig;
 use serde::{Deserialize, Serialize};
 
 use colored::Colorize as _;
@@ -42,10 +42,10 @@ use crate::coverage::upload_common;
 /// Log prefix used on every human-facing line from this subcommand.
 /// Matches the pattern established by sibling commands so CI log parsers can
 /// anchor on it.
-const LOG_PREFIX: &str = "fallow coverage upload-static-findings";
+const LOG_PREFIX: &str = "plow coverage upload-static-findings";
 
 /// Server-enforced cap on the finding count. Mirrors `STATIC_FINDINGS_MAX` in
-/// `fallow-cloud/src/routes/coverage.ts`. Validated client-side so users see a
+/// `plow-cloud/src/routes/coverage.ts`. Validated client-side so users see a
 /// specific error before a 413 round-trip.
 const STATIC_FINDINGS_MAX: usize = 200_000;
 
@@ -59,7 +59,7 @@ const KIND_UNUSED_EXPORT: &str = "unused_export";
 /// Stable wire-format kind for a dead file finding.
 const KIND_DEAD_FILE: &str = "dead_file";
 
-/// Exit codes. Documented in `fallow coverage upload-static-findings --help`.
+/// Exit codes. Documented in `plow coverage upload-static-findings --help`.
 /// User-fixable errors are separated from transient server errors so CI
 /// pipelines can distinguish retry vs fail-the-build.
 const EXIT_VALIDATION: u8 = 10;
@@ -67,15 +67,15 @@ const EXIT_PAYLOAD_TOO_LARGE: u8 = 11;
 const EXIT_AUTH_REJECTED: u8 = 12;
 const EXIT_SERVER_ERROR: u8 = 13;
 
-/// Arguments for `fallow coverage upload-static-findings`.
+/// Arguments for `plow coverage upload-static-findings`.
 #[derive(Clone, Default)]
 pub struct UploadStaticFindingsArgs {
-    /// Explicit API key. Overrides `$FALLOW_API_KEY`.
+    /// Explicit API key. Overrides `$PLOW_API_KEY`.
     pub api_key: Option<String>,
     /// Explicit API endpoint base (e.g. staging, on-prem). Overrides
-    /// `$FALLOW_API_URL` and the compiled-in default.
+    /// `$PLOW_API_URL` and the compiled-in default.
     pub api_endpoint: Option<String>,
-    /// Explicit project identifier (`fallow-cloud-api` or `owner/repo`).
+    /// Explicit project identifier (`plow-cloud-api` or `owner/repo`).
     /// Overrides the auto-detected git remote + `$GITHUB_REPOSITORY` /
     /// `$CI_PROJECT_PATH` heuristics.
     pub project_id: Option<String>,
@@ -107,7 +107,7 @@ impl fmt::Debug for UploadStaticFindingsArgs {
     }
 }
 
-/// Dispatch `fallow coverage upload-static-findings`.
+/// Dispatch `plow coverage upload-static-findings`.
 pub fn run(args: &UploadStaticFindingsArgs, root: &Path) -> ExitCode {
     match run_inner(args, root) {
         Ok(()) => ExitCode::SUCCESS,
@@ -164,7 +164,7 @@ fn run_inner(args: &UploadStaticFindingsArgs, root: &Path) -> Result<(), UploadE
     enforce_clean_worktree(args, root)?;
 
     let config = load_resolved_config(root)?;
-    let results = fallow_engine::analyze(&config)
+    let results = plow_engine::analyze(&config)
         .map(|analysis| analysis.results)
         .map_err(|err| UploadError::Validation(format!("analysis failed: {err}")))?;
     let findings = collect_findings(&config, &results);
@@ -172,7 +172,7 @@ fn run_inner(args: &UploadStaticFindingsArgs, root: &Path) -> Result<(), UploadE
     if findings.len() > STATIC_FINDINGS_MAX {
         return Err(UploadError::PayloadTooLarge(format!(
             "static analysis produced {} findings, exceeds the server limit of {}. \
-             Scope the analysis with your fallow ignore rules, or open an issue if \
+             Scope the analysis with your plow ignore rules, or open an issue if \
              your repo is legitimately larger.",
             findings.len(),
             STATIC_FINDINGS_MAX
@@ -332,15 +332,15 @@ fn resolve_api_key(args: &UploadStaticFindingsArgs) -> Result<String, UploadErro
             return Ok(trimmed.to_owned());
         }
     }
-    if let Ok(from_env) = std::env::var("FALLOW_API_KEY") {
+    if let Ok(from_env) = std::env::var("PLOW_API_KEY") {
         let trimmed = from_env.trim();
         if !trimmed.is_empty() {
             return Ok(trimmed.to_owned());
         }
     }
     Err(UploadError::Validation(
-        "no API key. Set $FALLOW_API_KEY or pass --api-key <KEY>. Generate at \
-         https://fallow.cloud/settings#api-keys."
+        "no API key. Set $PLOW_API_KEY or pass --api-key <KEY>. Generate at \
+         https://plow.cloud/settings#api-keys."
             .to_owned(),
     ))
 }
@@ -358,7 +358,7 @@ fn endpoint_url(override_endpoint: Option<&str>, project_id: &str) -> String {
 
 /// URL-encode the `{repo}` path segment.
 ///
-/// Project IDs can be bare (`fallow-cloud-api`) or slash-scoped
+/// Project IDs can be bare (`plow-cloud-api`) or slash-scoped
 /// (`acme/widgets`), but the server receives them as a single percent-encoded
 /// segment under `/v1/coverage/{repo}/static-findings`, so `/` must be encoded
 /// too.
@@ -417,7 +417,7 @@ fn upload(
             data.data.git_sha,
         );
         println!(
-            "  -> Static findings stored. View them on the source-evidence viewer: https://fallow.cloud/{project_id}"
+            "  -> Static findings stored. View them on the source-evidence viewer: https://plow.cloud/{project_id}"
         );
         return Ok(());
     }
@@ -515,11 +515,11 @@ fn print_dry_run_summary(
 fn display_endpoint_url(override_endpoint: Option<&str>, project_id: &str) -> String {
     let base = override_endpoint.map_or_else(
         || {
-            std::env::var("FALLOW_API_URL")
+            std::env::var("PLOW_API_URL")
                 .ok()
                 .filter(|v| !v.trim().is_empty())
                 .map_or_else(
-                    || "https://api.fallow.cloud".to_owned(),
+                    || "https://api.plow.cloud".to_owned(),
                     |v| v.trim().trim_end_matches('/').to_owned(),
                 )
         },
@@ -528,7 +528,7 @@ fn display_endpoint_url(override_endpoint: Option<&str>, project_id: &str) -> St
     format!("{base}/v1/coverage/{project_id}/static-findings")
 }
 
-/// A minimal view over [`fallow_types::results::AnalysisResults`] that exposes
+/// A minimal view over [`plow_types::results::AnalysisResults`] that exposes
 /// only the two finding categories this command maps. Defined as a trait so
 /// the mapping in [`collect_findings`] can be unit-tested against an in-memory
 /// stub without constructing a full `AnalysisResults`.
@@ -540,7 +540,7 @@ trait AnalysisLike {
     fn unused_exports(&self) -> Vec<(&Path, String, u32)>;
 }
 
-impl AnalysisLike for fallow_types::results::AnalysisResults {
+impl AnalysisLike for plow_types::results::AnalysisResults {
     fn unused_files(&self) -> Vec<&Path> {
         self.unused_files
             .iter()
@@ -568,7 +568,7 @@ mod tests {
     use crate::coverage::upload_common::{
         GIT_SHA_MAX_LEN, parse_git_remote_to_project_id, validate_project_id,
     };
-    use fallow_config::FallowConfig;
+    use plow_config::PlowConfig;
     use std::path::PathBuf;
     use std::process::Command;
     use tempfile::TempDir;
@@ -593,9 +593,9 @@ mod tests {
     }
 
     fn stub_config(root: &Path) -> ResolvedConfig {
-        FallowConfig::default().resolve(
+        PlowConfig::default().resolve(
             root.to_path_buf(),
-            fallow_config::OutputFormat::Human,
+            plow_config::OutputFormat::Human,
             1,
             true,
             true,
@@ -606,14 +606,14 @@ mod tests {
     #[test]
     fn upload_static_findings_args_debug_masks_api_key() {
         let args = UploadStaticFindingsArgs {
-            api_key: Some("fallow_live_secret_token_value".to_owned()),
-            api_endpoint: Some("https://api.fallow.cloud".to_owned()),
+            api_key: Some("plow_live_secret_token_value".to_owned()),
+            api_endpoint: Some("https://api.plow.cloud".to_owned()),
             project_id: Some("acme/web".to_owned()),
             ..UploadStaticFindingsArgs::default()
         };
         let formatted = format!("{args:?}");
         assert!(
-            !formatted.contains("fallow_live_secret_token_value"),
+            !formatted.contains("plow_live_secret_token_value"),
             "api_key leaked through Debug: {formatted}"
         );
         assert!(
@@ -631,32 +631,32 @@ mod tests {
     #[test]
     fn parse_git_remote_https_with_dot_git() {
         assert_eq!(
-            parse_git_remote_to_project_id("https://github.com/fallow-rs/fallow.git"),
-            Some("fallow-rs/fallow".to_owned())
+            parse_git_remote_to_project_id("https://github.com/fglogan/genesis-plow.git"),
+            Some("fglogan/genesis-plow".to_owned())
         );
     }
 
     #[test]
     fn parse_git_remote_ssh_colon_shape() {
         assert_eq!(
-            parse_git_remote_to_project_id("git@github.com:fallow-rs/fallow.git"),
-            Some("fallow-rs/fallow".to_owned())
+            parse_git_remote_to_project_id("git@github.com:fglogan/genesis-plow.git"),
+            Some("fglogan/genesis-plow".to_owned())
         );
     }
 
     #[test]
     fn parse_git_remote_protocol_shape() {
         assert_eq!(
-            parse_git_remote_to_project_id("ssh://git@gitlab.com/fallow-rs/fallow.git"),
-            Some("fallow-rs/fallow".to_owned())
+            parse_git_remote_to_project_id("ssh://git@gitlab.com/fglogan/genesis-plow.git"),
+            Some("fglogan/genesis-plow".to_owned())
         );
         assert_eq!(parse_git_remote_to_project_id("not-a-remote"), None);
     }
 
     #[test]
     fn validate_project_id_accepts_owner_repo_and_bare() {
-        assert!(validate_project_id("fallow-rs/fallow").is_ok());
-        assert!(validate_project_id("fallow-cloud-api").is_ok());
+        assert!(validate_project_id("fglogan/genesis-plow").is_ok());
+        assert!(validate_project_id("plow-cloud-api").is_ok());
     }
 
     #[test]
@@ -669,8 +669,8 @@ mod tests {
     #[test]
     fn url_encode_path_segment_encodes_slash() {
         assert_eq!(
-            url_encode_path_segment("fallow-rs/fallow"),
-            "fallow-rs%2Ffallow"
+            url_encode_path_segment("fglogan/genesis-plow"),
+            "fglogan%2Fgenesis-plow"
         );
         assert_eq!(url_encode_path_segment("a b"), "a%20b");
     }

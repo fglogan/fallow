@@ -7,16 +7,16 @@
 
 use std::process::ExitCode;
 
-use fallow_types::output_format::OutputFormat;
+use plow_types::output_format::OutputFormat;
 
 use crate::baseline::{HealthBaselineData, filter_new_health_findings};
 use crate::error::emit_error;
 
 pub(super) struct HealthBaselineSaveInput<'a> {
     pub(super) save_path: &'a std::path::Path,
-    pub(super) findings: &'a [fallow_output::ComplexityViolation],
-    pub(super) runtime_coverage_findings: &'a [fallow_output::RuntimeCoverageFinding],
-    pub(super) targets: &'a [fallow_output::RefactoringTarget],
+    pub(super) findings: &'a [plow_output::ComplexityViolation],
+    pub(super) runtime_coverage_findings: &'a [plow_output::RuntimeCoverageFinding],
+    pub(super) targets: &'a [plow_output::RefactoringTarget],
     pub(super) config_root: &'a std::path::Path,
     pub(super) quiet: bool,
     pub(super) output: OutputFormat,
@@ -74,7 +74,7 @@ pub(super) fn save_health_baseline(input: &HealthBaselineSaveInput<'_>) -> Resul
 /// Load and apply a health baseline, filtering findings to show only new ones.
 pub(super) fn load_health_baseline(
     baseline_path: &std::path::Path,
-    findings: &mut Vec<fallow_output::ComplexityViolation>,
+    findings: &mut Vec<plow_output::ComplexityViolation>,
     root: &std::path::Path,
     quiet: bool,
     output: OutputFormat,

@@ -31,7 +31,7 @@ const spawnAgent = (cmd: string, args: string[], input: string, cwd: string): Pr
 
 /**
  * The trade-off elicitation run: spawn the chosen agent CLI on the deterministic
- * guide digest, with NO post-validation step. fallow cannot validate these broader anchors the
+ * guide digest, with NO post-validation step. plow cannot validate these broader anchors the
  * way it validates a structural `signal_id`, so the discipline is the prompt's
  * (anchor-to-diff, fence everything `deterministic:false`), not graph-grade. The
  * adapter still drops anchorless items and pins `deterministic:false` defensively.

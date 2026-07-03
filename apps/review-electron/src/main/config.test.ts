@@ -18,10 +18,10 @@ describe("parseConfig", () => {
     const cfg = parseConfig(`{
       // override only the port
       "inspectPort": 8000,
-      "fallowBin": "/usr/local/bin/fallow",
+      "plowBin": "/usr/local/bin/plow",
     }`);
     expect(cfg.inspectPort).toBe(8000);
-    expect(cfg.fallowBin).toBe("/usr/local/bin/fallow");
+    expect(cfg.plowBin).toBe("/usr/local/bin/plow");
     expect(cfg.defaultUrl).toBe(DEFAULT_CONFIG.defaultUrl);
     expect(cfg.agentBackend).toBe(DEFAULT_CONFIG.agentBackend);
   });

@@ -25,14 +25,14 @@ use std::process::ExitCode;
 use schemars::generate::SchemaSettings;
 use serde_json::{Map, Value};
 
-use fallow_api::{
+use plow_api::{
     AttributedCloneGroup, AttributedCloneGroupFinding, AttributedInstance, AuditOutput,
     BoundariesListLogicalGroup, BoundariesListing, CloneFamilyFinding, CloneGroupFinding,
-    CombinedOutput, DupesReportPayload, DuplicationGroup, FallowOutput, ListBoundariesOutput,
+    CombinedOutput, DupesReportPayload, DuplicationGroup, ListBoundariesOutput, PlowOutput,
     SecurityGate, SecurityGateMode, SecurityOutput, SecuritySummaryOutput, WorkspacesOutput,
 };
-use fallow_config::{AuthoredRule, LogicalGroup, LogicalGroupStatus};
-use fallow_output::{
+use plow_config::{AuthoredRule, LogicalGroup, LogicalGroupStatus};
+use plow_output::{
     AcceptedJudgment, AgentSchema, AuditCommand, BoundariesListRule, BoundariesListZone,
     ChangeAnchor, CheckGroupedEntry, CheckGroupedOutput, CheckOutput, ComplexityViolation,
     ConfidenceFlag, ContainmentEvent, ContributorEntry, ContributorIdentifierFormat,
@@ -68,42 +68,42 @@ use fallow_output::{
     UntestedExportFinding, UntestedFile, UntestedFileFinding, VitalSigns, VitalSignsCounts,
     WalkthroughValidation, WorkspaceInfo,
 };
-use fallow_output::{
+use plow_output::{
     CloneFamilyAction, CloneFamilyActionType, CloneGroupAction, CloneGroupActionType,
     CodeClimateIssue, CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation,
     CodeClimateOutput, CodeClimateSeverity,
 };
-use fallow_types::duplicates::{
+use plow_types::duplicates::{
     CloneFamily, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats, MirroredDirectory,
     RefactoringKind, RefactoringSuggestion,
 };
-use fallow_types::envelope::{
+use plow_types::envelope::{
     AuditIntroduced, BaselineCategoryDelta, BaselineDeltas, BaselineMatch, CheckSummary, ElapsedMs,
     EntryPoints, Meta, MetaMetric, MetaRule, RegressionResult, RegressionStatus,
     RegressionToleranceKind, SchemaVersion, TelemetryMeta, ToolVersion,
 };
-use fallow_types::extract::{
+use plow_types::extract::{
     MemberKind, SecurityControlKind, SkippedSecurityCalleeExpressionKind,
     SkippedSecurityCalleeReason,
 };
-use fallow_types::output::{
+use plow_types::output::{
     AddToConfigAction, AddToConfigKind, AddToConfigValue, FixAction, FixActionType,
     IgnoreExportsRule, IssueAction, NextStep, SuppressFileAction, SuppressFileKind,
     SuppressLineAction, SuppressLineKind, SuppressLineScope,
 };
-use fallow_types::output_dead_code::{
+use plow_types::output_dead_code::{
     BoundaryViolationFinding, CircularDependencyFinding, PrivateTypeLeakFinding,
     TestOnlyDependencyFinding, TypeOnlyDependencyFinding, UnlistedDependencyFinding,
     UnresolvedImportFinding, UnusedClassMemberFinding, UnusedDependencyFinding,
     UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
     UnusedOptionalDependencyFinding, UnusedTypeFinding,
 };
-use fallow_types::output_health::{
+use plow_types::output_health::{
     HealthFindingAction, HealthFindingActionType, HotspotAction, HotspotActionHeuristic,
     HotspotActionType, RefactoringTargetAction, RefactoringTargetActionType, UntestedExportAction,
     UntestedExportActionType, UntestedFileAction, UntestedFileActionType,
 };
-use fallow_types::results::{
+use plow_types::results::{
     AnalysisResults, BoundaryViolation, CircularDependency, DependencyLocation,
     DependencyOverrideMisconfigReason, DependencyOverrideSource, DuplicateExport,
     DuplicateLocation, EmptyCatalogGroup, EntryPointSummary, ExportUsage, FeatureFlag,
@@ -165,7 +165,7 @@ fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
-            eprintln!("fallow-schema-emit: {err}");
+            eprintln!("plow-schema-emit: {err}");
             ExitCode::from(2)
         }
     }
@@ -350,7 +350,7 @@ const DERIVED_DEFINITION_NAMES: &[&str] = &[
     "ReviewReconcileOutput",
     "InspectEvidenceScope",
     "InspectSectionStatus",
-    "FallowOutput",
+    "PlowOutput",
     "BoundariesListLogicalGroup",
     "BoundariesListRule",
     "BoundariesListZone",
@@ -486,7 +486,7 @@ fn derived_definitions() -> Map<String, Value> {
     register_walkthrough_definitions(&mut generator);
     register_impact_definitions(&mut generator);
     register_security_definitions(&mut generator);
-    let _ = generator.subschema_for::<FallowOutput>();
+    let _ = generator.subschema_for::<PlowOutput>();
     register_list_boundaries_definitions(&mut generator);
     register_health_action_definitions(&mut generator);
 
@@ -641,7 +641,7 @@ fn register_meta_definitions(generator: &mut schemars::SchemaGenerator) {
     let _ = generator.subschema_for::<TelemetryMeta>();
 }
 
-/// Register the `fallow audit --brief --format json` envelope.
+/// Register the `plow audit --brief --format json` envelope.
 fn register_audit_brief_definitions(generator: &mut schemars::SchemaGenerator) {
     let _ = generator.subschema_for::<ReviewBriefSchemaVersion>();
     let _ = generator.subschema_for::<RiskClass>();
@@ -665,7 +665,7 @@ fn register_audit_brief_definitions(generator: &mut schemars::SchemaGenerator) {
     let _ = generator.subschema_for::<DecisionSurfaceOutput>();
 }
 
-/// Register the `fallow review --walkthrough-guide` /
+/// Register the `plow review --walkthrough-guide` /
 /// `--walkthrough-file` envelopes (the agent-contract loop).
 fn register_walkthrough_definitions(generator: &mut schemars::SchemaGenerator) {
     let _ = generator.subschema_for::<DirectionUnit>();
@@ -792,11 +792,11 @@ fn register_per_command_envelope_definitions(generator: &mut schemars::SchemaGen
     let _ = generator.subschema_for::<InspectEvidenceSection>();
     let _ = generator.subschema_for::<InspectSectionStatus>();
     let _ = generator.subschema_for::<InspectEvidenceScope>();
-    // Symbol-level call chain (`fallow trace`, `FallowOutput::Trace`).
-    let _ = generator.subschema_for::<fallow_types::trace_chain::SymbolChainTrace>();
-    let _ = generator.subschema_for::<fallow_types::trace_chain::ChainHop>();
-    let _ = generator.subschema_for::<fallow_types::trace_chain::UnresolvedCallee>();
-    let _ = generator.subschema_for::<fallow_types::trace_chain::UnresolvedReason>();
+    // Symbol-level call chain (`plow trace`, `PlowOutput::Trace`).
+    let _ = generator.subschema_for::<plow_types::trace_chain::SymbolChainTrace>();
+    let _ = generator.subschema_for::<plow_types::trace_chain::ChainHop>();
+    let _ = generator.subschema_for::<plow_types::trace_chain::UnresolvedCallee>();
+    let _ = generator.subschema_for::<plow_types::trace_chain::UnresolvedReason>();
     let _ = generator.subschema_for::<CodeClimateOutput>();
     let _ = generator.subschema_for::<CodeClimateIssue>();
     let _ = generator.subschema_for::<CodeClimateIssueKind>();
@@ -820,7 +820,7 @@ fn register_per_command_envelope_definitions(generator: &mut schemars::SchemaGen
     let _ = generator.subschema_for::<ReviewReconcileSchema>();
 }
 
-/// Register the `fallow list --boundaries --format json` envelope.
+/// Register the `plow list --boundaries --format json` envelope.
 fn register_list_boundaries_definitions(generator: &mut schemars::SchemaGenerator) {
     let _ = generator.subschema_for::<ListBoundariesOutput>();
     let _ = generator.subschema_for::<WorkspacesOutput>();
@@ -875,7 +875,7 @@ fn merge_with_committed(derived: &Map<String, Value>) -> Result<Value, String> {
         definitions.insert(name.clone(), value);
     }
 
-    rewrite_fallow_output_definition(definitions)?;
+    rewrite_plow_output_definition(definitions)?;
     rewrite_document_root_one_of(&mut document)?;
 
     Ok(document)
@@ -883,112 +883,108 @@ fn merge_with_committed(derived: &Map<String, Value>) -> Result<Value, String> {
 
 /// Hand-maintained root envelopes that still need top-level `oneOf` entries.
 const HAND_MAINTAINED_ROOT_ENVELOPES: &[&str] = &[];
-const FALLOW_OUTPUT_VARIANTS: &[(&str, &[&str], &str)] = &[
+const PLOW_OUTPUT_VARIANTS: &[(&str, &[&str], &str)] = &[
     (
         "audit",
         &["AuditOutput"],
-        "`fallow audit --format json`. Required `command: \"audit\"` singleton\nplus `verdict` and `summary`.",
+        "`plow audit --format json`. Required `command: \"audit\"` singleton\nplus `verdict` and `summary`.",
     ),
     (
         "explain",
         &["ExplainOutput"],
-        "`fallow explain <issue-type> --format json`. Required `id`, `name`,\n`rationale`, `example`, `how_to_fix`, `docs`; no `schema_version`.",
+        "`plow explain <issue-type> --format json`. Required `id`, `name`,\n`rationale`, `example`, `how_to_fix`, `docs`; no `schema_version`.",
     ),
     (
         "inspect_target",
         &["InspectOutput"],
-        "`fallow inspect --format json`. Required `target`, `identity`,\n`evidence`, and `warnings`; no `schema_version`.",
+        "`plow inspect --format json`. Required `target`, `identity`,\n`evidence`, and `warnings`; no `schema_version`.",
     ),
     (
         "review-envelope",
         &["ReviewEnvelopeOutput"],
-        "`fallow --format review-github` / `--format review-gitlab`. Required\n`body`, `comments`, `meta`; no `schema_version`.",
+        "`plow --format review-github` / `--format review-gitlab`. Required\n`body`, `comments`, `meta`; no `schema_version`.",
     ),
     (
         "review-reconcile",
         &["ReviewReconcileOutput"],
-        "`fallow ci reconcile-review --format json`. Required `schema`\nsingleton plus `provider`, `comments`, and the various\n`*_fingerprints` arrays.",
+        "`plow ci reconcile-review --format json`. Required `schema`\nsingleton plus `provider`, `comments`, and the various\n`*_fingerprints` arrays.",
     ),
     (
         "coverage-setup",
         &["CoverageSetupOutput"],
-        "`fallow coverage setup --json`. Required `schema_version` singleton\nplus `framework_detected`, `members`, `commands`, `snippets`.",
+        "`plow coverage setup --json`. Required `schema_version` singleton\nplus `framework_detected`, `members`, `commands`, `snippets`.",
     ),
     (
         "coverage-analyze",
         &["CoverageAnalyzeOutput"],
-        "`fallow coverage analyze --format json`. Required\n`schema_version: \"1\"` singleton plus `version`, `elapsed_ms`,\n`runtime_coverage`.",
+        "`plow coverage analyze --format json`. Required\n`schema_version: \"1\"` singleton plus `version`, `elapsed_ms`,\n`runtime_coverage`.",
     ),
     (
         "list-boundaries",
         &["ListBoundariesOutput"],
-        "`fallow list --boundaries --format json`. Required `boundaries`\nsub-object; no `schema_version`.",
+        "`plow list --boundaries --format json`. Required `boundaries`\nsub-object; no `schema_version`.",
     ),
     (
         "list-workspaces",
         &["WorkspacesOutput"],
-        "`fallow workspaces --format json`. Required `workspace_count`,\n`workspaces`, and `workspace_diagnostics`; no `schema_version`.",
+        "`plow workspaces --format json`. Required `workspace_count`,\n`workspaces`, and `workspace_diagnostics`; no `schema_version`.",
     ),
-    (
-        "health",
-        &["HealthOutput"],
-        "`fallow health --format json`.",
-    ),
-    ("dupes", &["DupesOutput"], "`fallow dupes --format json`."),
+    ("health", &["HealthOutput"], "`plow health --format json`."),
+    ("dupes", &["DupesOutput"], "`plow dupes --format json`."),
     (
         "dead-code-grouped",
         &["CheckGroupedOutput"],
-        "`fallow dead-code --format json --group-by <mode>`. Required `grouped_by`\nplus a `groups` array.",
+        "`plow dead-code --format json --group-by <mode>`. Required `grouped_by`\nplus a `groups` array.",
     ),
     (
         "impact",
         &["ImpactReport"],
-        "`fallow impact --format json`. Required `enabled`, `record_count`,\n`containment_count`, `recent_containment`; no global `schema_version`,\n`command`, `total_issues`, or `report`.",
+        "`plow impact --format json`. Required `enabled`, `record_count`,\n`containment_count`, `recent_containment`; no global `schema_version`,\n`command`, `total_issues`, or `report`.",
     ),
     (
         "impact-cross-repo",
         &["CrossRepoImpactReport"],
-        "`fallow impact --all --format json`. Required `project_count`,\n`tracked_count`, `unreadable_count`, `totals`, `projects`; each `projects[]`\nentry embeds a per-project `report`. Independently versioned via\n`CrossRepoImpactSchemaVersion`.",
+        "`plow impact --all --format json`. Required `project_count`,\n`tracked_count`, `unreadable_count`, `totals`, `projects`; each `projects[]`\nentry embeds a per-project `report`. Independently versioned via\n`CrossRepoImpactSchemaVersion`.",
     ),
     (
         "security",
         &["SecurityOutput", "SecuritySummaryOutput"],
-        "`fallow security --format json`. Full mode requires `security_findings`,\n`unresolved_edge_files`, and `unresolved_callee_sites`; summary mode requires\n`summary` and omits per-finding arrays.",
+        "`plow security --format json`. Full mode requires `security_findings`,\n`unresolved_edge_files`, and `unresolved_callee_sites`; summary mode requires\n`summary` and omits per-finding arrays.",
     ),
     (
         "security-survivors",
         &["SecuritySurvivorsOutput"],
-        "`fallow security survivors --format json`. Required `survivors` and\n`needs_human_review`, keyed by `finding_id`.",
+        "`plow security survivors --format json`. Required `survivors` and\n`needs_human_review`, keyed by `finding_id`.",
     ),
     (
         "security-blind-spots",
         &["SecurityBlindSpotsOutput"],
-        "`fallow security blind-spots --format json`. Required `summary` and\ngrouped unresolved-callee diagnostics.",
+        "`plow security blind-spots --format json`. Required `summary` and\ngrouped unresolved-callee diagnostics.",
     ),
     (
         "dead-code",
         &["CheckOutput"],
-        "`fallow dead-code --format json`.\nRequired `total_issues` plus `summary: CheckSummary`.",
+        "`plow dead-code --format json`.\nRequired `total_issues` plus `summary: CheckSummary`.",
     ),
     (
         "combined",
         &["CombinedOutput"],
-        "Bare `fallow --format json` (combined dead-code + dupes + health).\nRequired `schema_version`, `version`, and `elapsed_ms`, with optional\n`check`, `dupes`, and `health` subreports.",
+        "Bare `plow --format json` (combined dead-code + dupes + health).\nRequired `schema_version`, `version`, and `elapsed_ms`, with optional\n`check`, `dupes`, and `health` subreports.",
     ),
     (
         "audit-brief",
         &["ReviewBriefOutput"],
-        "`fallow audit --brief --format json` (alias `fallow review`). Required\n`schema_version`, `version`, `command: \"audit-brief\"`, `triage`, and\n`graph_facts`. Independently versioned via `ReviewBriefSchemaVersion`;\nalways emitted with exit 0.",
+        "`plow audit --brief --format json` (alias `plow review`). Required\n`schema_version`, `version`, `command: \"audit-brief\"`, `triage`, and\n`graph_facts`. Independently versioned via `ReviewBriefSchemaVersion`;\nalways emitted with exit 0.",
     ),
     (
         "review-walkthrough-guide",
         &["WalkthroughGuide"],
-        "`fallow review --walkthrough-guide --format json`. The digest +\nschema the agent fetches: brief + decision surface, review direction, the\ngraph-snapshot pin, and the embedded agent schema. Graph-derived only\n(injection-resistant). Always exit 0.",
+        "`plow review --walkthrough-guide --format json`. The digest +\nschema the agent fetches: brief + decision surface, review direction, the\ngraph-snapshot pin, and the embedded agent schema. Graph-derived only\n(injection-resistant). Always exit 0.",
     ),
     (
         "review-walkthrough-validation",
         &["WalkthroughValidation"],
-        "`fallow review --walkthrough-file --format json`. Post-validation\nof an agent's judgment JSON against the live graph: `accepted` (anchored,\nframing fenced), `rejected` (unanchored), and a `stale` flag. The verifier\nis the graph, not a second model. Always exit 0.",
+        "`plow review --walkthrough-file --format json`. Post-validation\nof an agent's judgment JSON against the live graph: `accepted` (anchored,\nframing fenced), `rejected` (unanchored), and a `stale` flag. The verifier\nis the graph, not a second model. Always exit 0.",
     ),
 ];
 
@@ -996,16 +992,16 @@ const FALLOW_OUTPUT_VARIANTS: &[(&str, &[&str], &str)] = &[
 /// constraints. The schema declares draft-07, where `$ref` siblings are ignored
 /// by many validators and code generators. Rewrite the root union into explicit
 /// intersections so the `kind` discriminator is part of the public contract.
-fn rewrite_fallow_output_definition(definitions: &mut Map<String, Value>) -> Result<(), String> {
+fn rewrite_plow_output_definition(definitions: &mut Map<String, Value>) -> Result<(), String> {
     let output = definitions
-        .get_mut("FallowOutput")
+        .get_mut("PlowOutput")
         .and_then(Value::as_object_mut)
-        .ok_or_else(|| "derived schema has no object definition for `FallowOutput`".to_string())?;
+        .ok_or_else(|| "derived schema has no object definition for `PlowOutput`".to_string())?;
 
-    let one_of = FALLOW_OUTPUT_VARIANTS
+    let one_of = PLOW_OUTPUT_VARIANTS
         .iter()
         .map(|(kind, definitions, description)| {
-            fallow_output_variant_schema(kind, definitions, description)
+            plow_output_variant_schema(kind, definitions, description)
         })
         .collect();
 
@@ -1014,11 +1010,11 @@ fn rewrite_fallow_output_definition(definitions: &mut Map<String, Value>) -> Res
     Ok(())
 }
 
-fn fallow_output_variant_schema(kind: &str, definitions: &[&str], description: &str) -> Value {
+fn plow_output_variant_schema(kind: &str, definitions: &[&str], description: &str) -> Value {
     serde_json::json!({
         "description": description,
         "allOf": [
-            fallow_output_payload_schema(definitions),
+            plow_output_payload_schema(definitions),
             {
                 "type": "object",
                 "properties": {
@@ -1033,7 +1029,7 @@ fn fallow_output_variant_schema(kind: &str, definitions: &[&str], description: &
     })
 }
 
-fn fallow_output_payload_schema(definitions: &[&str]) -> Value {
+fn plow_output_payload_schema(definitions: &[&str]) -> Value {
     if definitions.len() == 1 {
         serde_json::json!({ "$ref": format!("#/definitions/{}", definitions[0]) })
     } else {
@@ -1046,14 +1042,14 @@ fn fallow_output_payload_schema(definitions: &[&str]) -> Value {
     }
 }
 
-/// Drive the document-root `oneOf` from the typed `FallowOutput` enum.
+/// Drive the document-root `oneOf` from the typed `PlowOutput` enum.
 fn rewrite_document_root_one_of(document: &mut Value) -> Result<(), String> {
     let root = document
         .as_object_mut()
         .ok_or_else(|| "schema document root is not a JSON object".to_string())?;
 
     let mut one_of: Vec<Value> = Vec::with_capacity(2 + HAND_MAINTAINED_ROOT_ENVELOPES.len());
-    one_of.push(serde_json::json!({ "$ref": "#/definitions/FallowOutput" }));
+    one_of.push(serde_json::json!({ "$ref": "#/definitions/PlowOutput" }));
     one_of.push(serde_json::json!({ "$ref": "#/definitions/CodeClimateOutput" }));
     for name in HAND_MAINTAINED_ROOT_ENVELOPES {
         one_of.push(serde_json::json!({ "$ref": format!("#/definitions/{name}") }));
@@ -1063,8 +1059,8 @@ fn rewrite_document_root_one_of(document: &mut Value) -> Result<(), String> {
     root.insert(
         "description".to_string(),
         Value::String(
-            "Schemas for the JSON output of fallow commands. Object-shaped \
-             envelopes covered by the `FallowOutput` contract carry a top-level \
+            "Schemas for the JSON output of plow commands. Object-shaped \
+             envelopes covered by the `PlowOutput` contract carry a top-level \
              `kind` discriminator (for example `dead-code`, `dead-code-grouped`, \
              `health`, `dupes`, `combined`, `audit`, `explain`, `inspect_target`, \
              `impact`, `security`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, \
@@ -1282,8 +1278,8 @@ mod drift_tests {
             }
             out.insert(name.clone(), value);
         }
-        rewrite_fallow_output_definition(&mut out)
-            .expect("FallowOutput postprocess must succeed in drift checks");
+        rewrite_plow_output_definition(&mut out)
+            .expect("PlowOutput postprocess must succeed in drift checks");
         out
     }
 
@@ -1299,9 +1295,9 @@ mod drift_tests {
         }
     }
 
-    /// Ensure every `FallowOutput` variant stays registered.
+    /// Ensure every `PlowOutput` variant stays registered.
     #[test]
-    fn every_fallow_output_variant_is_registered_in_derived_definitions() {
+    fn every_plow_output_variant_is_registered_in_derived_definitions() {
         const VARIANTS: &[(&str, &str)] = &[
             ("Audit", "AuditOutput"),
             ("Explain", "ExplainOutput"),
@@ -1333,34 +1329,34 @@ mod drift_tests {
             dead_code,
             reason = "compile-time exhaustiveness guard for the VARIANTS list above; never called at runtime"
         )]
-        fn variant_count_is_locked(value: &FallowOutput) -> &'static str {
+        fn variant_count_is_locked(value: &PlowOutput) -> &'static str {
             match value {
-                FallowOutput::Audit(_) => "Audit",
-                FallowOutput::Explain(_) => "Explain",
-                FallowOutput::Inspect(_) => "Inspect",
-                FallowOutput::Trace(_) => "Trace",
-                FallowOutput::ReviewEnvelope(_) => "ReviewEnvelope",
-                FallowOutput::ReviewReconcile(_) => "ReviewReconcile",
-                FallowOutput::CoverageSetup(_) => "CoverageSetup",
-                FallowOutput::CoverageAnalyze(_) => "CoverageAnalyze",
-                FallowOutput::ListBoundaries(_) => "ListBoundaries",
-                FallowOutput::Workspaces(_) => "Workspaces",
-                FallowOutput::Health(_) => "Health",
-                FallowOutput::Dupes(_) => "Dupes",
-                FallowOutput::CheckGrouped(_) => "CheckGrouped",
-                FallowOutput::Impact(_) => "Impact",
-                FallowOutput::ImpactCrossRepo(_) => "ImpactCrossRepo",
-                FallowOutput::SecuritySummary(_) => "SecuritySummary",
-                FallowOutput::Security(_) => "Security",
-                FallowOutput::SecuritySurvivors(_) => "SecuritySurvivors",
-                FallowOutput::SecurityBlindSpots(_) => "SecurityBlindSpots",
-                FallowOutput::Check(_) => "Check",
-                FallowOutput::Combined(_) => "Combined",
-                FallowOutput::FeatureFlags(_) => "FeatureFlags",
-                FallowOutput::AuditBrief(_) => "AuditBrief",
-                FallowOutput::DecisionSurface(_) => "DecisionSurface",
-                FallowOutput::WalkthroughGuide(_) => "WalkthroughGuide",
-                FallowOutput::WalkthroughValidation(_) => "WalkthroughValidation",
+                PlowOutput::Audit(_) => "Audit",
+                PlowOutput::Explain(_) => "Explain",
+                PlowOutput::Inspect(_) => "Inspect",
+                PlowOutput::Trace(_) => "Trace",
+                PlowOutput::ReviewEnvelope(_) => "ReviewEnvelope",
+                PlowOutput::ReviewReconcile(_) => "ReviewReconcile",
+                PlowOutput::CoverageSetup(_) => "CoverageSetup",
+                PlowOutput::CoverageAnalyze(_) => "CoverageAnalyze",
+                PlowOutput::ListBoundaries(_) => "ListBoundaries",
+                PlowOutput::Workspaces(_) => "Workspaces",
+                PlowOutput::Health(_) => "Health",
+                PlowOutput::Dupes(_) => "Dupes",
+                PlowOutput::CheckGrouped(_) => "CheckGrouped",
+                PlowOutput::Impact(_) => "Impact",
+                PlowOutput::ImpactCrossRepo(_) => "ImpactCrossRepo",
+                PlowOutput::SecuritySummary(_) => "SecuritySummary",
+                PlowOutput::Security(_) => "Security",
+                PlowOutput::SecuritySurvivors(_) => "SecuritySurvivors",
+                PlowOutput::SecurityBlindSpots(_) => "SecurityBlindSpots",
+                PlowOutput::Check(_) => "Check",
+                PlowOutput::Combined(_) => "Combined",
+                PlowOutput::FeatureFlags(_) => "FeatureFlags",
+                PlowOutput::AuditBrief(_) => "AuditBrief",
+                PlowOutput::DecisionSurface(_) => "DecisionSurface",
+                PlowOutput::WalkthroughGuide(_) => "WalkthroughGuide",
+                PlowOutput::WalkthroughValidation(_) => "WalkthroughValidation",
             }
         }
 
@@ -1369,13 +1365,13 @@ mod drift_tests {
         for (variant, inner) in VARIANTS {
             if !derived.contains_key(*inner) {
                 missing.push(format!(
-                    "variant `FallowOutput::{variant}({inner})` produces an inline schema in the root `oneOf` because `{inner}` is not registered in `derived_definitions()`. Add `let _ = generator.subschema_for::<{inner}>();` (or include it via `register_per_command_envelope_definitions` / `register_list_boundaries_definitions`)."
+                    "variant `PlowOutput::{variant}({inner})` produces an inline schema in the root `oneOf` because `{inner}` is not registered in `derived_definitions()`. Add `let _ = generator.subschema_for::<{inner}>();` (or include it via `register_per_command_envelope_definitions` / `register_list_boundaries_definitions`)."
                 ));
             }
         }
         assert!(
             missing.is_empty(),
-            "{} `FallowOutput` variant(s) missing registration:\n\n{}",
+            "{} `PlowOutput` variant(s) missing registration:\n\n{}",
             missing.len(),
             missing.join("\n\n"),
         );
@@ -1501,7 +1497,7 @@ mod drift_tests {
         }
         assert!(
             failures.is_empty(),
-            "schema drift detected ({} issue{}):\n\n  - {}\n\nRegenerate the in-scope `definitions` blocks with:\n    cargo run -p fallow-cli --features schema-emit --bin fallow-schema-emit > /tmp/emitted-schema.json\nthen reconcile the relevant entries in `docs/output-schema.json` against the derived shape, or update the Rust source if the schema change was the intended source of truth.",
+            "schema drift detected ({} issue{}):\n\n  - {}\n\nRegenerate the in-scope `definitions` blocks with:\n    cargo run -p plow-cli --features schema-emit --bin plow-schema-emit > /tmp/emitted-schema.json\nthen reconcile the relevant entries in `docs/output-schema.json` against the derived shape, or update the Rust source if the schema change was the intended source of truth.",
             failures.len(),
             if failures.len() == 1 { "" } else { "s" },
             failures.join("\n  - "),
@@ -1771,16 +1767,16 @@ mod drift_tests {
                  the document-root `oneOf`. Either (a) re-add the entry to \
                  the rewritten `oneOf` in `rewrite_document_root_one_of`, \
                  or (b) remove it from `HAND_MAINTAINED_ROOT_ENVELOPES` \
-                 because the migration to a typed `FallowOutput` variant \
+                 because the migration to a typed `PlowOutput` variant \
                  has landed. Root `oneOf` refs today: {:?}",
                 refs.iter().collect::<Vec<_>>(),
             );
         }
     }
 
-    /// Ensure the root union keeps `FallowOutput` and `CodeClimateOutput`.
+    /// Ensure the root union keeps `PlowOutput` and `CodeClimateOutput`.
     #[test]
-    fn root_one_of_carries_fallow_output_and_codeclimate() {
+    fn root_one_of_carries_plow_output_and_codeclimate() {
         let document: Value = serde_json::from_str(COMMITTED_SCHEMA)
             .expect("committed docs/output-schema.json must parse");
         let one_of = document
@@ -1798,8 +1794,8 @@ mod drift_tests {
         }
 
         assert!(
-            refs.contains("FallowOutput"),
-            "document-root `oneOf` must reference `#/definitions/FallowOutput`; \
+            refs.contains("PlowOutput"),
+            "document-root `oneOf` must reference `#/definitions/PlowOutput`; \
              found refs: {:?}",
             refs.iter().collect::<Vec<_>>(),
         );
@@ -1812,28 +1808,28 @@ mod drift_tests {
     }
 
     #[test]
-    fn fallow_output_kind_variants_use_draft07_all_of_refs() {
+    fn plow_output_kind_variants_use_draft07_all_of_refs() {
         let document: Value = serde_json::from_str(COMMITTED_SCHEMA)
             .expect("committed docs/output-schema.json must parse");
         let variants = document
-            .pointer("/definitions/FallowOutput/oneOf")
+            .pointer("/definitions/PlowOutput/oneOf")
             .and_then(Value::as_array)
-            .expect("FallowOutput must expose oneOf variants");
+            .expect("PlowOutput must expose oneOf variants");
 
         for variant in variants {
             assert!(
                 variant.get("$ref").is_none(),
-                "FallowOutput variant must not use `$ref` siblings; draft-07 validators ignore sibling constraints: {variant}"
+                "PlowOutput variant must not use `$ref` siblings; draft-07 validators ignore sibling constraints: {variant}"
             );
 
             let all_of = variant
                 .get("allOf")
                 .and_then(Value::as_array)
-                .expect("FallowOutput variant must use allOf to combine the payload ref with the root kind discriminator");
+                .expect("PlowOutput variant must use allOf to combine the payload ref with the root kind discriminator");
             assert_eq!(
                 all_of.len(),
                 2,
-                "FallowOutput variant allOf should contain exactly payload ref + kind discriminator"
+                "PlowOutput variant allOf should contain exactly payload ref + kind discriminator"
             );
             let payload_branch = &all_of[0];
             let has_payload_ref = payload_branch.get("$ref").is_some()
@@ -1863,9 +1859,9 @@ mod drift_tests {
         let document: Value = serde_json::from_str(COMMITTED_SCHEMA)
             .expect("committed docs/output-schema.json must parse");
         let variants = document
-            .pointer("/definitions/FallowOutput/oneOf")
+            .pointer("/definitions/PlowOutput/oneOf")
             .and_then(Value::as_array)
-            .expect("FallowOutput must expose oneOf variants");
+            .expect("PlowOutput must expose oneOf variants");
         let security_variant = variants
             .iter()
             .find(|variant| {
@@ -1874,7 +1870,7 @@ mod drift_tests {
                     .and_then(Value::as_str)
                     == Some("security")
             })
-            .expect("FallowOutput must include the security kind variant");
+            .expect("PlowOutput must include the security kind variant");
         let payload_refs: Vec<&str> = security_variant
             .pointer("/allOf/0/oneOf")
             .and_then(Value::as_array)

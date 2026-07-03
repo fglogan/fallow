@@ -1,5 +1,5 @@
 use super::*;
-use fallow_output::{CssAnalyticsReport, CssAnalyticsSummary};
+use plow_output::{CssAnalyticsReport, CssAnalyticsSummary};
 
 /// A `@theme`-token population large enough that any incidental
 /// `unused_theme_tokens` set by a test for an UNRELATED category contributes a
@@ -108,7 +108,7 @@ fn dead_surface_token_death_term_is_per_population() {
     let styling = compute_styling_health(&report, 400);
     approx(styling.penalties.dead_surface, 0.3);
 
-    // The fallow-tools regression: 4 unused tokens over 24 declarations. Under v1
+    // The plow-tools regression: 4 unused tokens over 24 declarations. Under v1
     // (declaration-share) this capped dead_surface at 20; with the population
     // denominator it is a 4/N ratio. With 32 defined tokens: 4/32*15 = 1.875 -> 1.9pt.
     report.summary.unused_theme_tokens = 4;
@@ -384,7 +384,7 @@ fn clean_report_is_high_confidence() {
 
 #[test]
 fn sparse_report_is_low_confidence_with_reason() {
-    // The fallow-tools shape: 24 declarations across 2 stylesheets is below the
+    // The plow-tools shape: 24 declarations across 2 stylesheets is below the
     // floor, so the grade is marked low-confidence and the reason names both counts.
     let mut report = clean_report();
     report.summary.total_declarations = 24;

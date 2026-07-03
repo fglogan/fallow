@@ -14,7 +14,7 @@
 use oxc_ast::ast::*;
 use rustc_hash::FxHashSet;
 
-use fallow_types::extract::{
+use plow_types::extract::{
     ComponentFunction, ComponentFunctionKind, ComponentProp, ForwardAttr, HookUse, HookUseKind,
     RenderEdge,
 };
@@ -669,7 +669,7 @@ impl<'a> oxc_ast_visit::Visit<'a> for BodyIdentVisitor<'_, '_> {
 }
 
 /// The bare single-identifier name of a props type annotation, or `None` for any
-/// shape fallow cannot resolve to a same-file object-type declaration in v1: a
+/// shape plow cannot resolve to a same-file object-type declaration in v1: a
 /// generic-with-args (`Props<T>`), a qualified name (`NS.Props`,
 /// `React.PropsWithChildren`), an intersection (`A & B`), a union, an inline
 /// object literal (handled by the destructure path, not here), or a mapped /

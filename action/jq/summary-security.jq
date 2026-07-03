@@ -20,7 +20,7 @@ def finding_rows:
 
 finding_count as $count |
 (.elapsed_ms // 0) as $elapsed |
-"## Fallow Security\n\n" +
+"## Plow Security\n\n" +
 (if $count == 0 then
   "> [!NOTE]\n> **No security candidates matched** · \($elapsed)ms"
 else

@@ -13,7 +13,7 @@ use super::common::{create_config, fixture_path};
 fn dead_styled_bindings_report_as_unused_export_and_libs_are_credited() {
     let root = fixture_path("css-in-js-styled");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports

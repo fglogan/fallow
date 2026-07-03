@@ -9,7 +9,7 @@ use super::common::{create_config, fixture_path};
 fn flags_missing_template_asset_but_not_existing_or_dynamic() {
     let root = fixture_path("sfc-template-asset");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let specifiers: Vec<&str> = results
         .unresolved_imports
         .iter()

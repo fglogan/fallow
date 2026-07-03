@@ -1,0 +1,18 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fglogan/genesis-plow/main/schema.json",
+  "ignorePatterns": [
+    "tests/fixtures/**",
+    "tests/conformance/fixtures/**",
+    "editors/vscode/test/integration/fixtures/**"
+  ],
+  "health": {
+    "ignore": [
+      "npm/plow/scripts/**"
+    ]
+  },
+  "duplicates": {
+    "ignore": [
+      "npm/plow/scripts/**"
+    ]
+  }
+}

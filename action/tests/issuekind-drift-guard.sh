@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Shared drift guard: every canonical dead-code IssueKind must surface in the
 # jq summary / annotation / filter tables that are supposed to carry the full
-# dead-code set. A new fallow IssueKind that is not wired into one of those
+# dead-code set. A new plow IssueKind that is not wired into one of those
 # surfaces would otherwise vanish silently from PR/MR output (the class of gap
 # this guard exists to catch). It gates ALL such surfaces, not just
 # summary-check.jq:
@@ -20,7 +20,7 @@
 # (the directory containing this script) being set by the caller.
 #
 # Canonical set: the dead-code issue-type ids, result keys, and count policy
-# from `fallow schema` (issue_types[].command == "dead-code"). When the binary
+# from `plow schema` (issue_types[].command == "dead-code"). When the binary
 # is unavailable or too old to expose result metadata, the fallback derives the
 # same row contract from crates/types/src/issue_meta.rs `ISSUE_RESULT_META`.
 #
@@ -37,9 +37,9 @@
 # fails to reach a subset surface STILL fails the guard; only the explicitly
 # enumerated, documented omissions are tolerated.
 
-FALLOW_DEAD_CODE_SCHEMA_ROWS_CACHE="__unset__"
+PLOW_DEAD_CODE_SCHEMA_ROWS_CACHE="__unset__"
 
-fallow_dead_code_source_rows() {
+plow_dead_code_source_rows() {
   local repo_root source_file
   repo_root="$(cd "$GUARD_DIR/../.." && pwd)"
   source_file="$repo_root/crates/types/src/issue_meta.rs"
@@ -86,18 +86,18 @@ fallow_dead_code_source_rows() {
   ' "$source_file"
 }
 
-fallow_dead_code_schema_rows() {
-  if [ "$FALLOW_DEAD_CODE_SCHEMA_ROWS_CACHE" != "__unset__" ]; then
-    printf '%s\n' "$FALLOW_DEAD_CODE_SCHEMA_ROWS_CACHE"
-    [ -n "$FALLOW_DEAD_CODE_SCHEMA_ROWS_CACHE" ]
+plow_dead_code_schema_rows() {
+  if [ "$PLOW_DEAD_CODE_SCHEMA_ROWS_CACHE" != "__unset__" ]; then
+    printf '%s\n' "$PLOW_DEAD_CODE_SCHEMA_ROWS_CACHE"
+    [ -n "$PLOW_DEAD_CODE_SCHEMA_ROWS_CACHE" ]
     return
   fi
 
   local repo_root bin rows
   repo_root="$(cd "$GUARD_DIR/../.." && pwd)"
-  bin="${FALLOW_BIN:-}"
+  bin="${PLOW_BIN:-}"
   if [ -z "$bin" ]; then
-    for cand in "$repo_root/target/debug/fallow" "$repo_root/target/release/fallow"; do
+    for cand in "$repo_root/target/debug/plow" "$repo_root/target/release/plow"; do
       if [ -x "$cand" ]; then bin="$cand"; break; fi
     done
   fi
@@ -122,17 +122,17 @@ fallow_dead_code_schema_rows() {
   fi
 
   if [ -z "$rows" ]; then
-    rows="$(fallow_dead_code_source_rows 2>/dev/null)"
+    rows="$(plow_dead_code_source_rows 2>/dev/null)"
   fi
 
-  FALLOW_DEAD_CODE_SCHEMA_ROWS_CACHE="$rows"
+  PLOW_DEAD_CODE_SCHEMA_ROWS_CACHE="$rows"
   printf '%s\n' "$rows"
   [ -n "$rows" ]
 }
 
 issuekind_schema_field() {
   local id="$1" field="$2" rows row_id row_key row_counts row_label row_anchor
-  rows="$(fallow_dead_code_schema_rows)" || return 1
+  rows="$(plow_dead_code_schema_rows)" || return 1
   while IFS=$'\t' read -r row_id row_key row_counts row_label row_anchor; do
     [ -z "$row_id" ] && continue
     if [ "$row_id" != "$id" ]; then
@@ -151,7 +151,7 @@ issuekind_schema_field() {
 }
 
 # Legacy kebab-id -> summary-check.jq JSON key fallback used only when
-# `fallow schema` is unavailable. Irregular pluralisation makes mechanical
+# `plow schema` is unavailable. Irregular pluralisation makes mechanical
 # conversion unsafe, so this remains explicit for the fallback path.
 issuekind_json_key_fallback() {
   case "$1" in
@@ -233,13 +233,13 @@ issuekind_diagnostic_code() {
   esac
 }
 
-# Resolve the canonical dead-code id list. Prefer `fallow schema` so the set is
+# Resolve the canonical dead-code id list. Prefer `plow schema` so the set is
 # command-tagged; fall back to the checked-in result metadata table so shell-only
 # guard runs still gate every counted serialized result key.
-fallow_dead_code_ids() {
+plow_dead_code_ids() {
   local rows row_id _row_key _row_counts _row_label _row_anchor
-  if rows="$(fallow_dead_code_schema_rows)" && [ -n "$rows" ]; then
-    echo "__SOURCE__ fallow schema or issue_meta.rs result metadata" >&2
+  if rows="$(plow_dead_code_schema_rows)" && [ -n "$rows" ]; then
+    echo "__SOURCE__ plow schema or issue_meta.rs result metadata" >&2
     while IFS=$'\t' read -r row_id _row_key _row_counts _row_label _row_anchor; do
       [ -n "$row_id" ] && printf '%s\n' "$row_id"
     done <<< "$rows"
@@ -340,7 +340,7 @@ assert_issuekind_summary_coverage() {
     return
   fi
   jq_src="$(cat "$jq_file")"
-  ids="$(fallow_dead_code_ids 2>/dev/null)"
+  ids="$(plow_dead_code_ids 2>/dev/null)"
 
   if [ -z "$ids" ]; then
     fail "$label: canonical IssueKind set resolved" "no dead-code ids derived"
@@ -416,12 +416,12 @@ assert_issuekind_summary_table_contract() {
     return
   fi
   jq_src="$(cat "$jq_file")"
-  rows="$(fallow_dead_code_schema_rows 2>/dev/null || true)"
+  rows="$(plow_dead_code_schema_rows 2>/dev/null || true)"
   if ! grep -q $'\t.*\t.*\t' <<< "$rows"; then
     echo "    (skipped summary label contract: schema metadata unavailable)"
     return
   fi
-  ids="$(fallow_dead_code_ids 2>/dev/null)"
+  ids="$(plow_dead_code_ids 2>/dev/null)"
 
   if [ -z "$ids" ]; then
     fail "$label: canonical IssueKind set resolved" "no dead-code ids derived"
@@ -466,7 +466,7 @@ assert_issuekind_summary_table_contract() {
 # Assert the VS Code extension's DIAGNOSTIC_CATEGORIES (the diagnostic-code
 # catalog that drives the mute filter and seeds the counted / rendered surfaces)
 # carries every canonical dead-code IssueKind. DIAGNOSTIC_CATEGORIES keys on the
-# singular kebab rule-id (e.g. `code: "unused-file"`), which equals the `fallow
+# singular kebab rule-id (e.g. `code: "unused-file"`), which equals the `plow
 # schema` issue-type id, so the canonical set is checked directly with no key
 # mapping. Same single source as the jq surfaces. This closes the last surface a
 # new kind could silently miss: once a kind is in DIAGNOSTIC_CATEGORIES,
@@ -488,7 +488,7 @@ assert_issuekind_vscode_category_coverage() {
     return
   fi
   wiring_src="$(cat "$wiring_file")"
-  ids="$(fallow_dead_code_ids 2>/dev/null)"
+  ids="$(plow_dead_code_ids 2>/dev/null)"
 
   if [ -z "$ids" ]; then
     fail "$label: canonical IssueKind set resolved" "no dead-code ids derived"

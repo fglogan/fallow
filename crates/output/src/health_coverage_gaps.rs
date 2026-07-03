@@ -1,9 +1,9 @@
 use std::path::{Path, PathBuf};
 
-use fallow_types::output_health::{
+use plow_types::output_health::{
     UntestedExportAction, UntestedExportActionType, UntestedFileAction, UntestedFileActionType,
 };
-use fallow_types::serde_path;
+use plow_types::serde_path;
 
 /// Runtime code that no test dependency path reaches.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -66,7 +66,7 @@ impl UntestedFileFinding {
                 auto_fixable: false,
                 description: format!("Suppress coverage gap reporting for `{display_path}`"),
                 note: None,
-                comment: Some("// fallow-ignore-file coverage-gaps".to_string()),
+                comment: Some("// plow-ignore-file coverage-gaps".to_string()),
             },
         ];
         Self { file, actions }
@@ -109,7 +109,7 @@ impl UntestedExportFinding {
                 auto_fixable: false,
                 description: format!("Suppress coverage gap reporting for `{display_path}`"),
                 note: None,
-                comment: Some("// fallow-ignore-file coverage-gaps".to_string()),
+                comment: Some("// plow-ignore-file coverage-gaps".to_string()),
             },
         ];
         Self { export, actions }

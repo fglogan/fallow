@@ -1,35 +1,35 @@
 //! Runtime fact adapters for `next_steps[]` builders.
 //!
 //! The stable command strings, ordering, caps, and read-only contract live in
-//! `fallow-output`. This module keeps the CLI-specific probes: environment
+//! `plow-output`. This module keeps the CLI-specific probes: environment
 //! toggles, project setup state, git refs, and changed-branch applicability.
 
 use std::path::Path;
 use std::process::Command;
 
-use fallow_api::DupesReportPayload;
-use fallow_output::{
+use plow_api::DupesReportPayload;
+use plow_output::{
     CombinedNextStepsInput, DeadCodeNextStepsInput, DupesNextStepsInput, HealthNextStepsInput,
     ImpactDigestCounts, build_combined_next_steps as build_combined_next_steps_contract,
     build_dead_code_next_steps as build_dead_code_next_steps_contract,
     build_dupes_next_steps as build_dupes_next_steps_contract, impact_digest_summary,
     trace_unused_export_input,
 };
-use fallow_types::output::NextStep;
-use fallow_types::results::AnalysisResults;
+use plow_types::output::NextStep;
+use plow_types::results::AnalysisResults;
 
-use fallow_output::HealthReport;
+use plow_output::HealthReport;
 
-/// `FALLOW_SUGGESTIONS=off` (or `0`/`false`/`no`/`disabled`) disables next-steps
+/// `PLOW_SUGGESTIONS=off` (or `0`/`false`/`no`/`disabled`) disables next-steps
 /// entirely. Default on. This is the documented escape hatch for CI consumers
 /// that snapshot-diff raw `--format json` output; it reaches the spawned-CLI and
 /// MCP surfaces without a CLI flag.
 #[must_use]
 pub fn suggestions_enabled() -> bool {
-    suggestions_enabled_from(std::env::var("FALLOW_SUGGESTIONS").ok().as_deref())
+    suggestions_enabled_from(std::env::var("PLOW_SUGGESTIONS").ok().as_deref())
 }
 
-/// Pure parse of the `FALLOW_SUGGESTIONS` value (kept separate so it is testable
+/// Pure parse of the `PLOW_SUGGESTIONS` value (kept separate so it is testable
 /// without mutating process env, which is `unsafe` under edition 2024).
 #[must_use]
 fn suggestions_enabled_from(value: Option<&str>) -> bool {
@@ -43,21 +43,21 @@ fn suggestions_enabled_from(value: Option<&str>) -> bool {
 }
 
 /// Shared first-contact gate for the `setup` next-step and the human setup hint
-/// on bare `fallow`: the project has no fallow config (searched up to the repo
+/// on bare `plow`: the project has no plow config (searched up to the repo
 /// root, same as config loading), the run is not in CI, and onboarding has not
-/// been declined for this project (`fallow init --decline`).
+/// been declined for this project (`plow init --decline`).
 #[must_use]
 pub fn setup_pointer_applicable(root: &Path) -> bool {
     root.exists()
-        && fallow_config::FallowConfig::find_config_path(root).is_none()
+        && plow_config::PlowConfig::find_config_path(root).is_none()
         && !crate::telemetry::is_ci()
         && !crate::impact::load(root).onboarding_declined
 }
 
-/// One-line human setup hint for bare `fallow` output: the prose counterpart of
+/// One-line human setup hint for bare `plow` output: the prose counterpart of
 /// the `setup` next-step (agents get the JSON form, humans get this line).
 /// Worded as an offer, not a deficiency: zero-config is a supported happy path.
-pub const SETUP_HINT: &str = "Setup: `fallow init --agents` writes an agent guide; `fallow hooks install --target agent` adds a commit gate (hide this hint: `fallow init --decline`).";
+pub const SETUP_HINT: &str = "Setup: `plow init --agents` writes an agent guide; `plow hooks install --target agent` adds a commit gate (hide this hint: `plow init --decline`).";
 
 /// Real-counter summary fragment shared by the next-step reason and the human
 /// one-liner. The output crate owns the `impact-report` command contract.
@@ -73,11 +73,11 @@ fn digest_summary(digest: crate::impact::ImpactDigest) -> String {
 }
 
 /// One-line human counterpart of the `impact-report` next-step, printed with
-/// the run summary on bare `fallow`.
+/// the run summary on bare `plow`.
 #[must_use]
 pub fn impact_digest_line(digest: crate::impact::ImpactDigest) -> String {
     format!(
-        "Impact: {} (details: `fallow impact`).",
+        "Impact: {} (details: `plow impact`).",
         digest_summary(digest)
     )
 }
@@ -95,16 +95,16 @@ pub fn due_impact_digest(root: &Path) -> Option<crate::impact::ImpactDigest> {
 }
 
 fn default_workspace_ref_for_next_step(root: &Path) -> Option<String> {
-    if fallow_config::discover_workspaces(root).is_empty() {
+    if plow_config::discover_workspaces(root).is_empty() {
         return None;
     }
     resolve_default_workspace_ref(root)
 }
 
-/// `audit-changed`: gate only the files the current branch changed. `fallow
+/// `audit-changed`: gate only the files the current branch changed. `plow
 /// audit` auto-detects its base, so no ref needs embedding.
 pub fn audit_changed_applicable(root: &Path) -> bool {
-    fallow_engine::is_git_repo(root)
+    plow_engine::is_git_repo(root)
 }
 
 // ---------------------------------------------------------------------------
@@ -164,7 +164,7 @@ fn run_git(root: &Path, args: &[&str]) -> Option<String> {
 // documented exception: a due `impact-report` digest may ride a clean run.
 // ---------------------------------------------------------------------------
 
-/// Next-steps for standalone `fallow dead-code`. `offer_setup` is the caller's
+/// Next-steps for standalone `plow dead-code`. `offer_setup` is the caller's
 /// [`setup_pointer_applicable`] result (threaded as a parameter so the builders
 /// stay free of env/filesystem probes and deterministic under test).
 #[must_use]
@@ -186,7 +186,7 @@ pub fn build_dead_code_next_steps(
     })
 }
 
-/// Next-steps for standalone `fallow health`. See [`build_dead_code_next_steps`]
+/// Next-steps for standalone `plow health`. See [`build_dead_code_next_steps`]
 /// for the `offer_setup` parameter contract.
 #[must_use]
 pub fn health_next_steps_input(
@@ -195,7 +195,7 @@ pub fn health_next_steps_input(
     offer_setup: bool,
     digest: Option<crate::impact::ImpactDigest>,
 ) -> HealthNextStepsInput {
-    fallow_output::build_health_next_steps_input(
+    plow_output::build_health_next_steps_input(
         report,
         suggestions_enabled(),
         offer_setup,
@@ -204,7 +204,7 @@ pub fn health_next_steps_input(
     )
 }
 
-/// Next-steps for standalone `fallow dupes`. See [`build_dead_code_next_steps`]
+/// Next-steps for standalone `plow dupes`. See [`build_dead_code_next_steps`]
 /// for the `offer_setup` parameter contract.
 #[must_use]
 pub fn build_dupes_next_steps(
@@ -227,7 +227,7 @@ pub fn build_dupes_next_steps(
     })
 }
 
-/// Aggregated next-steps for bare `fallow` (combined). Candidates are pushed in
+/// Aggregated next-steps for bare `plow` (combined). Candidates are pushed in
 /// priority order, then capped. `trace-unused-export` leads because it is the
 /// highest-value verification path; `scope-workspaces` is boosted above the
 /// trace-clone / complexity tier so big-repo runs that trigger everything still
@@ -265,7 +265,7 @@ pub fn build_combined_next_steps(
     })
 }
 
-/// Next-steps for `fallow audit`. No `audit-changed` (audit IS the changed
+/// Next-steps for `plow audit`. No `audit-changed` (audit IS the changed
 /// scope) and no `scope-workspaces` (audit already gates the change). The
 /// `check` tuple carries the changed-file analysis results plus the project root
 /// so the trace anchor is made root-relative the same way every other surface
@@ -276,7 +276,7 @@ pub fn build_audit_next_steps(
     check: Option<(&AnalysisResults, &Path)>,
     complexity: Option<&HealthReport>,
 ) -> Vec<NextStep> {
-    fallow_output::build_audit_next_steps(&fallow_output::build_audit_next_steps_input(
+    plow_output::build_audit_next_steps(&plow_output::build_audit_next_steps_input(
         check,
         complexity,
         suggestions_enabled(),
@@ -305,15 +305,13 @@ pub fn top_combined_next_step(
 mod tests {
     use std::path::PathBuf;
 
-    use fallow_output::build_health_next_steps as build_health_next_steps_contract;
-    use fallow_output::{
+    use plow_output::build_health_next_steps as build_health_next_steps_contract;
+    use plow_output::{
         ComplexityViolation, ExceededThreshold, FindingSeverity, HealthFinding, HealthReport,
     };
-    use fallow_types::duplicates::{
-        CloneGroup, CloneInstance, DuplicationReport, DuplicationStats,
-    };
-    use fallow_types::output_dead_code::UnusedExportFinding;
-    use fallow_types::results::{AnalysisResults, UnusedExport};
+    use plow_types::duplicates::{CloneGroup, CloneInstance, DuplicationReport, DuplicationStats};
+    use plow_types::output_dead_code::UnusedExportFinding;
+    use plow_types::results::{AnalysisResults, UnusedExport};
 
     use super::*;
 
@@ -421,7 +419,7 @@ mod tests {
 
         assert_eq!(steps.len(), 1);
         assert_eq!(steps[0].id, "trace-unused-export");
-        assert_eq!(steps[0].command, "fallow dead-code --trace src/util.ts:foo");
+        assert_eq!(steps[0].command, "plow dead-code --trace src/util.ts:foo");
         assert_valid(&steps[0]);
     }
 
@@ -439,7 +437,7 @@ mod tests {
         let a = build_audit_next_steps(Some((&forward, &root)), None);
         let b = build_audit_next_steps(Some((&reverse, &root)), None);
         assert_eq!(a[0].command, b[0].command);
-        assert_eq!(a[0].command, "fallow dead-code --trace src/a.ts:alpha");
+        assert_eq!(a[0].command, "plow dead-code --trace src/a.ts:alpha");
     }
 
     #[test]
@@ -452,7 +450,7 @@ mod tests {
     #[test]
     fn setup_pointer_gate_ignores_nonexistent_roots() {
         assert!(!setup_pointer_applicable(Path::new(
-            "/fallow-test-project-does-not-exist"
+            "/plow-test-project-does-not-exist"
         )));
     }
 
@@ -546,7 +544,7 @@ mod tests {
 
         assert_eq!(steps.len(), 1);
         assert_eq!(steps[0].id, "trace-clone");
-        assert!(steps[0].command.starts_with("fallow dupes --trace dup:"));
+        assert!(steps[0].command.starts_with("plow dupes --trace dup:"));
         assert_valid(&steps[0]);
     }
 
@@ -571,7 +569,7 @@ mod tests {
         let ids: Vec<&str> = steps.iter().map(|s| s.id.as_str()).collect();
 
         assert_eq!(ids, ["setup", "impact-report", "trace-unused-export"]);
-        assert_eq!(steps[2].command, "fallow dead-code --trace src/a.ts:alpha");
+        assert_eq!(steps[2].command, "plow dead-code --trace src/a.ts:alpha");
         for step in &steps {
             assert_valid(step);
         }
@@ -590,7 +588,7 @@ mod tests {
         let ids: Vec<&str> = steps.iter().map(|s| s.id.as_str()).collect();
 
         assert_eq!(ids, ["trace-unused-export", "complexity-breakdown"]);
-        assert_eq!(steps[0].command, "fallow dead-code --trace src/a.ts:alpha");
+        assert_eq!(steps[0].command, "plow dead-code --trace src/a.ts:alpha");
         for step in &steps {
             assert_valid(step);
         }
@@ -601,7 +599,7 @@ mod tests {
         let line = impact_digest_line(digest(2, 1));
         assert_eq!(
             line,
-            "Impact: 2 commits contained at the gate, 1 finding resolved (details: `fallow impact`)."
+            "Impact: 2 commits contained at the gate, 1 finding resolved (details: `plow impact`)."
         );
     }
 

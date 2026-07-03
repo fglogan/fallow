@@ -13,7 +13,7 @@
 
 use std::sync::LazyLock;
 
-use fallow_types::extract::FunctionComplexity;
+use plow_types::extract::FunctionComplexity;
 
 use super::build_template_complexity;
 use super::engine::{ScanError, TemplateComplexity, find_matching_delimiter};

@@ -34,7 +34,7 @@ use std::path::Path;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_types::extract::{ModuleInfo, SemanticFactView};
+use plow_types::extract::{ModuleInfo, SemanticFactView};
 
 use crate::discover::FileId;
 use crate::graph::{ModuleGraph, ModuleNode};
@@ -218,7 +218,7 @@ fn component_name_for(path: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use fallow_types::extract::{
+    use plow_types::extract::{
         AngularOutputMember, AngularTemplateMemberAccessFact, ClassHeritageInfo, MemberAccess,
         SemanticFact,
     };

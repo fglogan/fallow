@@ -1,12 +1,12 @@
 use std::time::Instant;
 
-use fallow_config::{DetectionMode, DuplicatesConfig};
-use fallow_engine::{AnalysisSession, ProjectConfig};
-use fallow_output::{
+use plow_config::{DetectionMode, DuplicatesConfig};
+use plow_engine::{AnalysisSession, ProjectConfig};
+use plow_output::{
     DupesNextStepsInput, DupesOutput, DupesOutputInput, build_dupes_next_steps, build_dupes_output,
     dupes_meta,
 };
-use fallow_types::output_format::OutputFormat;
+use plow_types::output_format::OutputFormat;
 use rustc_hash::FxHashSet;
 
 use crate::{
@@ -93,7 +93,7 @@ pub(super) fn run_duplication_with_session(
         clone_fingerprints: &clone_fingerprints,
         offer_setup: setup_pointer_applicable(root),
         impact_digest: None,
-        audit_changed: fallow_engine::is_git_repo(root),
+        audit_changed: plow_engine::is_git_repo(root),
     });
     let output: DupesOutput<DupesReportPayload, DuplicationGroup> =
         build_dupes_output(DupesOutputInput {
@@ -122,12 +122,13 @@ pub(super) fn load_duplication_session(
     resolved: &ProgrammaticAnalysisContext,
 ) -> ProgrammaticResult<AnalysisSession> {
     let project_config =
-        fallow_engine::config_for_project(&resolved.root, resolved.config_path.as_deref())
-            .map_err(|err| {
+        plow_engine::config_for_project(&resolved.root, resolved.config_path.as_deref()).map_err(
+            |err| {
                 ProgrammaticError::new(format!("failed to load config: {err}"), 2)
-                    .with_code("FALLOW_CONFIG_LOAD_FAILED")
+                    .with_code("PLOW_CONFIG_LOAD_FAILED")
                     .with_context("analysis.configPath")
-            })?;
+            },
+        )?;
     let project_config = configure_project_for_duplication(project_config, options, resolved);
     Ok(AnalysisSession::from_config(project_config))
 }

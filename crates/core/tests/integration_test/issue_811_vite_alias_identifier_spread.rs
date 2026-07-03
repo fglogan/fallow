@@ -74,7 +74,7 @@ fn imported_shared_alias_resolves_entry_chain() {
     );
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unresolved: Vec<&str> = results
         .unresolved_imports
@@ -164,7 +164,7 @@ fn spread_of_imported_aliases_resolves() {
     );
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unresolved: Vec<&str> = results
         .unresolved_imports

@@ -40,7 +40,7 @@ interface ExtensionPackage {
       readonly properties: Record<string, ConfigProperty>;
     };
     readonly views: {
-      readonly fallow: readonly ViewContribution[];
+      readonly plow: readonly ViewContribution[];
     };
     readonly menus: {
       readonly "view/title": readonly MenuContribution[];
@@ -71,15 +71,15 @@ const commandPaletteEntry = (id: string): MenuContribution | undefined =>
 
 describe("package.json command contributions", () => {
   it("uses search only for the initial analysis action", () => {
-    expect(command("fallow.analyze")).toMatchObject({
-      title: "Fallow: Run Analysis",
+    expect(command("plow.analyze")).toMatchObject({
+      title: "Plow: Run Analysis",
       icon: "$(search)",
     });
   });
 
   it("uses a refresh icon for the post-analysis reload action", () => {
-    expect(command("fallow.reloadAnalysis")).toMatchObject({
-      title: "Fallow: Reload Analysis",
+    expect(command("plow.reloadAnalysis")).toMatchObject({
+      title: "Plow: Reload Analysis",
       icon: "$(refresh)",
     });
   });
@@ -87,78 +87,78 @@ describe("package.json command contributions", () => {
 
 describe("package.json view title menus", () => {
   it("shows run analysis before results are loaded", () => {
-    expect(viewTitleCommand("fallow.analyze")).toMatchObject({
-      when: "(view == fallow.deadCode || view == fallow.duplicates) && !fallow.hasAnalyzed",
+    expect(viewTitleCommand("plow.analyze")).toMatchObject({
+      when: "(view == plow.deadCode || view == plow.duplicates) && !plow.hasAnalyzed",
       group: "navigation",
     });
   });
 
   it("shows reload analysis after results are loaded", () => {
-    expect(viewTitleCommand("fallow.reloadAnalysis")).toMatchObject({
-      when: "(view == fallow.deadCode || view == fallow.duplicates) && fallow.hasAnalyzed",
+    expect(viewTitleCommand("plow.reloadAnalysis")).toMatchObject({
+      when: "(view == plow.deadCode || view == plow.duplicates) && plow.hasAnalyzed",
       group: "navigation",
     });
   });
 
   it("keeps the reload command out of the command palette", () => {
-    expect(commandPaletteEntry("fallow.reloadAnalysis")).toMatchObject({
+    expect(commandPaletteEntry("plow.reloadAnalysis")).toMatchObject({
       when: "false",
     });
-    expect(commandPaletteEntry("fallow.analyze")).toBeUndefined();
+    expect(commandPaletteEntry("plow.analyze")).toBeUndefined();
   });
 
   it("surfaces diagnostic mute management in the analysis view title bars", () => {
-    expect(viewTitleCommand("fallow.manageDiagnosticMutes")).toMatchObject({
-      when: "view == fallow.deadCode || view == fallow.duplicates",
+    expect(viewTitleCommand("plow.manageDiagnosticMutes")).toMatchObject({
+      when: "view == plow.deadCode || view == plow.duplicates",
       group: "navigation@10",
     });
   });
 
   it("contributes team-shareable muted diagnostic categories as resource settings", () => {
     const setting = pkg.contributes.configuration.properties[
-      "fallow.diagnostics.mutedCategories"
+      "plow.diagnostics.mutedCategories"
     ];
 
     expect(setting?.default).toEqual([]);
     expect(setting?.scope).toBe("resource");
     expect(setting?.markdownDescription).toContain(".vscode/settings.json");
-    expect(setting?.markdownDescription).toContain("CI and `fallow check` still report");
+    expect(setting?.markdownDescription).toContain("CI and `plow check` still report");
   });
 });
 
 describe("package.json binary download settings", () => {
   it("documents that auto-download manages both binaries", () => {
     const description =
-      pkg.contributes.configuration.properties["fallow.autoDownload"]?.description ?? "";
+      pkg.contributes.configuration.properties["plow.autoDownload"]?.description ?? "";
 
-    expect(description).toContain("fallow-lsp");
-    expect(description).toContain("fallow CLI");
+    expect(description).toContain("plow-lsp");
+    expect(description).toContain("plow CLI");
   });
 
   it("restarts binary resolution when auto-download changes", () => {
-    expect(configKeysSource).toContain('"fallow.autoDownload"');
+    expect(configKeysSource).toContain('"plow.autoDownload"');
   });
 });
 
 describe("package.json workspace picker contributions", () => {
   it("contributes the select and clear workspace commands", () => {
-    expect(command("fallow.selectWorkspace")).toMatchObject({
-      title: "Fallow: Select Workspace Scope...",
+    expect(command("plow.selectWorkspace")).toMatchObject({
+      title: "Plow: Select Workspace Scope...",
       icon: "$(layers)",
     });
-    expect(command("fallow.clearWorkspace")).toMatchObject({
-      title: "Fallow: Clear Workspace Scope (Analyze All)",
+    expect(command("plow.clearWorkspace")).toMatchObject({
+      title: "Plow: Clear Workspace Scope (Analyze All)",
     });
   });
 
-  it("contributes the fallow.workspace setting with an empty default", () => {
-    const property = pkg.contributes.configuration.properties["fallow.workspace"];
+  it("contributes the plow.workspace setting with an empty default", () => {
+    const property = pkg.contributes.configuration.properties["plow.workspace"];
     expect(property).toBeDefined();
   });
 
   it("surfaces the workspace picker in both view title bars", () => {
-    expect(viewTitleCommand("fallow.selectWorkspace")).toMatchObject({
-      when: "view == fallow.deadCode || view == fallow.duplicates",
+    expect(viewTitleCommand("plow.selectWorkspace")).toMatchObject({
+      when: "view == plow.deadCode || view == plow.duplicates",
       group: "navigation@9",
     });
   });
@@ -166,81 +166,81 @@ describe("package.json workspace picker contributions", () => {
   it("keeps both workspace commands available in the command palette", () => {
     // Not gated to "false", so they show in the palette (no-op gracefully
     // outside a monorepo).
-    expect(commandPaletteEntry("fallow.selectWorkspace")).toBeUndefined();
-    expect(commandPaletteEntry("fallow.clearWorkspace")).toBeUndefined();
+    expect(commandPaletteEntry("plow.selectWorkspace")).toBeUndefined();
+    expect(commandPaletteEntry("plow.clearWorkspace")).toBeUndefined();
   });
 });
 
 describe("package.json runtime coverage contributions", () => {
   it("contributes the load/reload/clear commands with distinct icons", () => {
-    expect(command("fallow.loadCoverage")).toMatchObject({
-      title: "Fallow: Load Runtime Coverage",
+    expect(command("plow.loadCoverage")).toMatchObject({
+      title: "Plow: Load Runtime Coverage",
       icon: "$(graph)",
     });
-    expect(command("fallow.reloadCoverage")).toMatchObject({ icon: "$(refresh)" });
-    expect(command("fallow.clearCoverage")).toMatchObject({ icon: "$(clear-all)" });
+    expect(command("plow.reloadCoverage")).toMatchObject({ icon: "$(refresh)" });
+    expect(command("plow.clearCoverage")).toMatchObject({ icon: "$(clear-all)" });
   });
 
-  it("adds the Runtime Coverage view to the fallow container", () => {
-    expect(pkg.contributes.views.fallow).toContainEqual({
-      id: "fallow.runtimeCoverage",
+  it("adds the Runtime Coverage view to the plow container", () => {
+    expect(pkg.contributes.views.plow).toContainEqual({
+      id: "plow.runtimeCoverage",
       name: "Runtime Coverage",
     });
   });
 
   it("gates load before a capture is loaded and reload/clear after", () => {
-    expect(viewTitleCommand("fallow.loadCoverage")).toMatchObject({
-      when: "view == fallow.runtimeCoverage && !fallow.hasCoverage",
+    expect(viewTitleCommand("plow.loadCoverage")).toMatchObject({
+      when: "view == plow.runtimeCoverage && !plow.hasCoverage",
       group: "navigation",
     });
-    expect(viewTitleCommand("fallow.reloadCoverage")).toMatchObject({
-      when: "view == fallow.runtimeCoverage && fallow.hasCoverage",
+    expect(viewTitleCommand("plow.reloadCoverage")).toMatchObject({
+      when: "view == plow.runtimeCoverage && plow.hasCoverage",
       group: "navigation",
     });
-    expect(viewTitleCommand("fallow.clearCoverage")).toMatchObject({
-      when: "view == fallow.runtimeCoverage && fallow.hasCoverage",
+    expect(viewTitleCommand("plow.clearCoverage")).toMatchObject({
+      when: "view == plow.runtimeCoverage && plow.hasCoverage",
       group: "navigation",
     });
   });
 
   it("gates reload/clear in the command palette on a loaded capture", () => {
-    expect(commandPaletteEntry("fallow.reloadCoverage")).toMatchObject({
-      when: "fallow.hasCoverage",
+    expect(commandPaletteEntry("plow.reloadCoverage")).toMatchObject({
+      when: "plow.hasCoverage",
     });
-    expect(commandPaletteEntry("fallow.clearCoverage")).toMatchObject({
-      when: "fallow.hasCoverage",
+    expect(commandPaletteEntry("plow.clearCoverage")).toMatchObject({
+      when: "plow.hasCoverage",
     });
   });
 
   it("documents the capture-path setting as local-only and resource-scoped", () => {
-    const setting = pkg.contributes.configuration.properties["fallow.coverage.capturePath"];
+    const setting = pkg.contributes.configuration.properties["plow.coverage.capturePath"];
     expect(setting?.scope).toBe("resource");
     expect(setting?.markdownDescription).toContain("local-only");
   });
 
   it("discloses the sidecar/setup prerequisite on the capture-path setting", () => {
-    const setting = pkg.contributes.configuration.properties["fallow.coverage.capturePath"];
-    expect(setting?.markdownDescription).toContain("fallow coverage setup");
+    const setting = pkg.contributes.configuration.properties["plow.coverage.capturePath"];
+    expect(setting?.markdownDescription).toContain("plow coverage setup");
     expect(setting?.markdownDescription).toContain("sidecar");
   });
 
   it("discloses the sidecar/setup prerequisite in the welcome state", () => {
     const welcome = pkg.contributes.viewsWelcome.find(
-      (entry) => entry.view === "fallow.runtimeCoverage" && entry.when === "!fallow.hasCoverage",
+      (entry) => entry.view === "plow.runtimeCoverage" && entry.when === "!plow.hasCoverage",
     );
-    expect(welcome?.contents).toContain("fallow coverage setup");
+    expect(welcome?.contents).toContain("plow coverage setup");
     expect(welcome?.contents).toContain("sidecar");
   });
 
   it("contributes the top setting", () => {
     expect(
-      pkg.contributes.configuration.properties["fallow.coverage.top"]?.markdownDescription,
+      pkg.contributes.configuration.properties["plow.coverage.top"]?.markdownDescription,
     ).toBeTruthy();
   });
 
   it("frames the welcome state as candidates, not vulnerabilities", () => {
     const welcome = pkg.contributes.viewsWelcome.find(
-      (entry) => entry.view === "fallow.runtimeCoverage" && entry.when === "!fallow.hasCoverage",
+      (entry) => entry.view === "plow.runtimeCoverage" && entry.when === "!plow.hasCoverage",
     );
     expect(welcome?.contents).toContain("candidates");
     expect(welcome?.contents.toLowerCase()).not.toContain("vulnerability");
@@ -250,23 +250,23 @@ describe("package.json runtime coverage contributions", () => {
 
 describe("package.json audit verdict surface", () => {
   it("contributes the on-demand audit command with a shield icon", () => {
-    expect(command("fallow.audit")).toMatchObject({
-      title: "Fallow: Audit Changed Files",
+    expect(command("plow.audit")).toMatchObject({
+      title: "Plow: Audit Changed Files",
       icon: "$(shield)",
     });
   });
 
   it("keeps the audit command palette-discoverable (no when:false hide)", () => {
-    const entry = commandPaletteEntry("fallow.audit");
+    const entry = commandPaletteEntry("plow.audit");
     expect(entry?.when).not.toBe("false");
   });
 
   it("contributes the audit gate, status-bar toggle, and run-on-save settings", () => {
     const properties = pkg.contributes.configuration.properties;
     for (const key of [
-      "fallow.audit.gate",
-      "fallow.audit.statusBar.enabled",
-      "fallow.audit.runOnSave",
+      "plow.audit.gate",
+      "plow.audit.statusBar.enabled",
+      "plow.audit.runOnSave",
     ]) {
       const prop = properties[key];
       expect(prop?.description ?? prop?.markdownDescription).toBeTruthy();
@@ -279,14 +279,14 @@ describe("package.json duplication settings", () => {
     const properties = pkg.contributes.configuration.properties;
 
     for (const key of [
-      "fallow.duplication.mode",
-      "fallow.duplication.threshold",
-      "fallow.duplication.minTokens",
-      "fallow.duplication.minLines",
-      "fallow.duplication.minOccurrences",
-      "fallow.duplication.skipLocal",
-      "fallow.duplication.crossLanguage",
-      "fallow.duplication.ignoreImports",
+      "plow.duplication.mode",
+      "plow.duplication.threshold",
+      "plow.duplication.minTokens",
+      "plow.duplication.minLines",
+      "plow.duplication.minOccurrences",
+      "plow.duplication.skipLocal",
+      "plow.duplication.crossLanguage",
+      "plow.duplication.ignoreImports",
     ]) {
       expect(properties[key]?.description).toBeTruthy();
     }
@@ -297,57 +297,57 @@ describe("package.json duplication settings", () => {
   it("contributes the sidebar duplication filter settings", () => {
     const properties = pkg.contributes.configuration.properties;
 
-    expect(properties["fallow.duplication.mode"]).toBeDefined();
-    expect(properties["fallow.duplication.threshold"]).toBeDefined();
-    expect(properties["fallow.duplication.minLines"]).toBeDefined();
-    expect(properties["fallow.duplication.minOccurrences"]).toBeDefined();
+    expect(properties["plow.duplication.mode"]).toBeDefined();
+    expect(properties["plow.duplication.threshold"]).toBeDefined();
+    expect(properties["plow.duplication.minLines"]).toBeDefined();
+    expect(properties["plow.duplication.minOccurrences"]).toBeDefined();
   });
 
   it("restarts and reruns analysis when duplication settings change", () => {
-    expect(configKeysSource).toContain('"fallow.duplication"');
+    expect(configKeysSource).toContain('"plow.duplication"');
   });
 });
 
 describe("package.json security candidates contributions", () => {
-  const securityView = pkg.contributes.views.fallow.find((view) => view.id === "fallow.security");
+  const securityView = pkg.contributes.views.plow.find((view) => view.id === "plow.security");
   const securityWelcome = pkg.contributes.viewsWelcome.filter(
-    (entry) => entry.view === "fallow.security",
+    (entry) => entry.view === "plow.security",
   );
-  const securitySetting = pkg.contributes.configuration.properties["fallow.security.enabled"];
+  const securitySetting = pkg.contributes.configuration.properties["plow.security.enabled"];
 
   it("contributes the Security Candidates view", () => {
     expect(securityView).toMatchObject({ name: "Security Candidates" });
   });
 
   it("contributes the scan command with a shield icon", () => {
-    expect(command("fallow.analyzeSecurity")).toMatchObject({
-      title: "Fallow: Scan for Security Candidates",
+    expect(command("plow.analyzeSecurity")).toMatchObject({
+      title: "Plow: Scan for Security Candidates",
       icon: "$(shield)",
     });
   });
 
   it("contributes both view/title menu states for the scan command, gated on the opt-in", () => {
     const entries = pkg.contributes.menus["view/title"].filter(
-      (entry) => entry.command === "fallow.analyzeSecurity",
+      (entry) => entry.command === "plow.analyzeSecurity",
     );
     expect(entries.map((entry) => entry.when)).toEqual([
-      "view == fallow.security && fallow.security.enabled && !fallow.hasAnalyzedSecurity",
-      "view == fallow.security && fallow.security.enabled && fallow.hasAnalyzedSecurity",
+      "view == plow.security && plow.security.enabled && !plow.hasAnalyzedSecurity",
+      "view == plow.security && plow.security.enabled && plow.hasAnalyzedSecurity",
     ]);
     // The scan button is hidden while the feature is disabled rather than
     // nagging the user to enable it on click.
     for (const entry of entries) {
-      expect(entry.when).toContain("fallow.security.enabled");
+      expect(entry.when).toContain("plow.security.enabled");
     }
   });
 
   it("splits the welcome into a disabled state and an enabled-not-yet-scanned state", () => {
-    const disabled = securityWelcome.find((entry) => entry.when === "!fallow.security.enabled");
+    const disabled = securityWelcome.find((entry) => entry.when === "!plow.security.enabled");
     const enabledPending = securityWelcome.find(
-      (entry) => entry.when === "fallow.security.enabled && !fallow.hasAnalyzedSecurity",
+      (entry) => entry.when === "plow.security.enabled && !plow.hasAnalyzedSecurity",
     );
     const enabledClean = securityWelcome.find(
-      (entry) => entry.when === "fallow.security.enabled && fallow.hasAnalyzedSecurity",
+      (entry) => entry.when === "plow.security.enabled && plow.hasAnalyzedSecurity",
     );
     expect(disabled).toBeDefined();
     expect(enabledPending).toBeDefined();
@@ -365,7 +365,7 @@ describe("package.json security candidates contributions", () => {
   it("frames every security string as a candidate, never a confirmed vulnerability", () => {
     const strings = [
       securityView?.name ?? "",
-      command("fallow.analyzeSecurity")?.title ?? "",
+      command("plow.analyzeSecurity")?.title ?? "",
       securitySetting?.markdownDescription ?? "",
       ...securityWelcome.map((entry) => entry.contents),
     ].filter((value) => value.length > 0);
@@ -419,38 +419,38 @@ describe("package.json security candidates contributions", () => {
 describe("package.json license commands", () => {
   it("contributes the four license commands and registers each in extension.ts", () => {
     for (const id of [
-      "fallow.license.activate",
-      "fallow.license.status",
-      "fallow.license.refresh",
-      "fallow.license.deactivate",
+      "plow.license.activate",
+      "plow.license.status",
+      "plow.license.refresh",
+      "plow.license.deactivate",
     ]) {
-      expect(command(id)?.title).toMatch(/^Fallow: /);
+      expect(command(id)?.title).toMatch(/^Plow: /);
       expect(extensionSource).toContain(`registerCommand("${id}"`);
     }
   });
 
   it("exposes every license command in the dead-code view-title menu (not just the palette)", () => {
     for (const id of [
-      "fallow.license.activate",
-      "fallow.license.status",
-      "fallow.license.refresh",
-      "fallow.license.deactivate",
+      "plow.license.activate",
+      "plow.license.status",
+      "plow.license.refresh",
+      "plow.license.deactivate",
     ]) {
       const entry = viewTitleCommand(id);
       expect(entry, `${id} missing from view/title menu`).toBeDefined();
-      expect(entry?.when).toBe("view == fallow.deadCode");
+      expect(entry?.when).toBe("view == plow.deadCode");
       expect(entry?.group).toMatch(/^license@/);
     }
   });
 
   it("documents both opt-out / opt-in license settings", () => {
     const properties = pkg.contributes.configuration.properties;
-    expect(properties["fallow.license.showStatusBar"]?.description).toBeTruthy();
-    expect(properties["fallow.license.refreshOnStartup"]?.description).toBeTruthy();
+    expect(properties["plow.license.showStatusBar"]?.description).toBeTruthy();
+    expect(properties["plow.license.refreshOnStartup"]?.description).toBeTruthy();
   });
 
   it("documents the global diagnostics severity posture setting", () => {
-    const setting = pkg.contributes.configuration.properties["fallow.diagnostics.severity"];
+    const setting = pkg.contributes.configuration.properties["plow.diagnostics.severity"];
     expect(setting?.default).toBe("warning");
     expect(setting?.scope).toBe("application");
     expect(setting?.enum).toEqual(["warning", "information", "hint"]);
@@ -462,7 +462,7 @@ describe("package.json license commands", () => {
       string,
       { readonly default?: unknown }
     >;
-    expect(properties["fallow.license.refreshOnStartup"]?.default).toBe(false);
-    expect(properties["fallow.license.showStatusBar"]?.default).toBe(true);
+    expect(properties["plow.license.refreshOnStartup"]?.default).toBe(false);
+    expect(properties["plow.license.showStatusBar"]?.default).toBe(true);
   });
 });

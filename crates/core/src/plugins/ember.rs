@@ -16,7 +16,7 @@
 //! they predate strict-mode `.gts` / `.gjs`, so the plugin's value-adds
 //! (template scanner, virtual `@ember/*` prefixes, `.gts` parsing) don't
 //! apply. v1-addon maintainers can list those paths via `entry` in their
-//! fallow config; v2 addons follow the standard `package.json#main` /
+//! plow config; v2 addons follow the standard `package.json#main` /
 //! `exports` entry shape and don't need framework-specific globs.
 //!
 //! Template-block import tracking (`<template>...</template>`, `.gjs`/`.gts`
@@ -35,7 +35,7 @@
 //! re-implemented here. This plugin only handles the lifecycle and convention
 //! members that the framework calls reflectively at runtime.
 
-use fallow_config::{ScopedUsedClassMemberRule, UsedClassMemberRule};
+use plow_config::{ScopedUsedClassMemberRule, UsedClassMemberRule};
 
 use super::Plugin;
 
@@ -208,7 +208,7 @@ const ROUTER_MEMBERS: &[&str] = &[
 /// the prefix-match already covers).
 ///
 /// Known gaps NOT covered (documented; users can `ignoreDependencies` or
-/// add an inline `fallow-ignore-next-line unresolved-import`):
+/// add an inline `plow-ignore-next-line unresolved-import`):
 ///
 /// - Bare `import Ember from 'ember'`: a legacy Embroider-rewritten
 ///   specifier. A `"ember"` prefix would also catch `ember-cli`,

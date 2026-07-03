@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use rustc_hash::FxHashSet;
 
-use fallow_config::ResolvedConfig;
+use plow_config::ResolvedConfig;
 
 use crate::{
     AnalysisResults, DeadCodeAnalysis, DeadCodeAnalysisArtifacts, DeadCodeAnalysisOutput,
@@ -119,7 +119,7 @@ pub fn filter_to_workspaces(results: &mut AnalysisResults, ws_roots: &[PathBuf])
 /// Scope dead-code results to findings affected by changed files.
 #[expect(
     clippy::implicit_hasher,
-    reason = "fallow standardizes on FxHashSet across the workspace"
+    reason = "plow standardizes on FxHashSet across the workspace"
 )]
 pub fn filter_by_changed_files(results: &mut AnalysisResults, changed_files: &FxHashSet<PathBuf>) {
     core_backend::filter_results_by_changed_files(results, changed_files);
@@ -297,8 +297,8 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use fallow_types::output_dead_code::UnusedFileFinding;
-    use fallow_types::results::UnusedFile;
+    use plow_types::output_dead_code::UnusedFileFinding;
+    use plow_types::results::UnusedFile;
 
     #[test]
     fn workspace_filter_keeps_findings_under_workspace_root() {

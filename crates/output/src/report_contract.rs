@@ -1,24 +1,25 @@
 use std::collections::BTreeMap;
 
-use fallow_types::envelope::{Meta, MetaMetric, MetaRule};
+use plow_types::envelope::{Meta, MetaMetric, MetaRule};
 use serde_json::{Value, json};
 
 use crate::{ACTIONS_AUTO_FIXABLE_FIELD_DEFINITION, ACTIONS_FIELD_DEFINITION};
 
 /// Docs URL for the duplication command.
-pub const DUPES_DOCS: &str = "https://docs.fallow.tools/cli/dupes";
+pub const DUPES_DOCS: &str = "https://docs.genesis-plow.dev/cli/dupes";
 
 /// Docs URL for the runtime coverage setup command's agent-readable JSON.
-pub const COVERAGE_SETUP_DOCS: &str = "https://docs.fallow.tools/cli/coverage#agent-readable-json";
+pub const COVERAGE_SETUP_DOCS: &str =
+    "https://docs.genesis-plow.dev/cli/coverage#agent-readable-json";
 
-/// Docs URL for `fallow coverage analyze --format json --explain`.
-pub const COVERAGE_ANALYZE_DOCS: &str = "https://docs.fallow.tools/cli/coverage#analyze";
+/// Docs URL for `plow coverage analyze --format json --explain`.
+pub const COVERAGE_ANALYZE_DOCS: &str = "https://docs.genesis-plow.dev/cli/coverage#analyze";
 
 /// Docs URL for the health command.
-pub const HEALTH_DOCS: &str = "https://docs.fallow.tools/cli/health";
+pub const HEALTH_DOCS: &str = "https://docs.genesis-plow.dev/cli/health";
 
 /// Docs URL for the security command.
-pub const SECURITY_DOCS: &str = "https://docs.fallow.tools/cli/security";
+pub const SECURITY_DOCS: &str = "https://docs.genesis-plow.dev/cli/security";
 
 /// Output-facing metadata for one security rule.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,7 +30,7 @@ pub struct SecurityRuleMeta<'a> {
     pub docs_path: &'a str,
 }
 
-/// Build the `_meta` object for `fallow health --format json --explain`.
+/// Build the `_meta` object for `plow health --format json --explain`.
 #[must_use]
 pub fn health_meta() -> Meta {
     Meta {
@@ -40,7 +41,7 @@ pub fn health_meta() -> Meta {
     }
 }
 
-/// Build the `_meta` object for `fallow security --format json --explain`.
+/// Build the `_meta` object for `plow security --format json --explain`.
 #[must_use]
 pub fn security_meta<'a>(rules: impl IntoIterator<Item = SecurityRuleMeta<'a>>) -> Meta {
     Meta {
@@ -64,7 +65,7 @@ pub fn security_meta<'a>(rules: impl IntoIterator<Item = SecurityRuleMeta<'a>>) 
     }
 }
 
-/// Build the `_meta` object for `fallow dupes --format json --explain`.
+/// Build the `_meta` object for `plow dupes --format json --explain`.
 #[must_use]
 pub fn dupes_meta() -> Meta {
     Meta {
@@ -130,7 +131,7 @@ pub fn dupes_meta() -> Meta {
     }
 }
 
-/// Build the `_meta` object for `fallow coverage setup --json --explain`.
+/// Build the `_meta` object for `plow coverage setup --json --explain`.
 #[must_use]
 pub fn coverage_setup_meta() -> Value {
     json!({
@@ -172,28 +173,28 @@ pub fn coverage_setup_meta() -> Value {
     })
 }
 
-/// Build the `_meta` object for `fallow coverage analyze --format json --explain`.
+/// Build the `_meta` object for `plow coverage analyze --format json --explain`.
 #[must_use]
 pub fn coverage_analyze_meta() -> Value {
     json!({
         "docs_url": COVERAGE_ANALYZE_DOCS,
         "field_definitions": {
             "schema_version": "Standalone coverage analyze envelope version. \"1\" for the current shape.",
-            "version": "fallow CLI version that produced this output.",
+            "version": "plow CLI version that produced this output.",
             "elapsed_ms": "Wall-clock milliseconds spent producing the report.",
-            "runtime_coverage": "Same RuntimeCoverageReport block emitted by `fallow health --runtime-coverage`.",
-            "runtime_coverage.summary.data_source": "Which evidence source produced the report. local = on-disk artifact via --runtime-coverage <path>; cloud = explicit pull via --cloud / --runtime-coverage-cloud / FALLOW_RUNTIME_COVERAGE_SOURCE=cloud.",
+            "runtime_coverage": "Same RuntimeCoverageReport block emitted by `plow health --runtime-coverage`.",
+            "runtime_coverage.summary.data_source": "Which evidence source produced the report. local = on-disk artifact via --runtime-coverage <path>; cloud = explicit pull via --cloud / --runtime-coverage-cloud / PLOW_RUNTIME_COVERAGE_SOURCE=cloud.",
             "runtime_coverage.summary.last_received_at": "ISO-8601 timestamp of the newest runtime payload included in the report. Null for local artifacts that do not carry receipt metadata.",
             "runtime_coverage.summary.capture_quality": "Capture-window telemetry derived from the runtime evidence. lazy_parse_warning trips when more than 30% of tracked functions are V8-untracked, which usually indicates a short observation window.",
-            "runtime_coverage.findings[].id": "Per-finding SUPPRESSION key (fallow:prod:<hash>). Hashes file + function + the current line, so it changes when the function moves. Use it to suppress one finding at its current location.",
-            "runtime_coverage.findings[].stable_id": "Cross-surface JOIN key (fallow:fn:<hash>) from fallow_cov_protocol::function_identity_id, hashing file + name + start_line. The same function shares ONE value across findings, hot paths, blast-radius, and importance entries (the per-finding id uses a per-surface salt and differs), and across V8/Istanbul/oxc producers (columns are excluded from the hash). Like id, it changes when the function's file, name, or start line changes: it is a cross-surface/cross-producer join key, NOT a line-move-immune one. Omitted from the JSON entirely (not emitted as null) when the producing surface or an un-migrated cloud supplied no FunctionIdentity. New baselines key on this when present to align with the cross-surface join key; the grace-window reader accepts the legacy id too.",
-            "runtime_coverage._matching": "Function-identity fallback order when joining runtime evidence to local static analysis: (1) exact stable_id match (fallow:fn:<hash>) when both sides carry one; (2) exact (path, name, start_line); (3) fuzzy nearest candidate within a line tolerance. Baseline suppression accepts BOTH the stable_id and the legacy fallow:prod: id during the grace window, so baselines written before this version keep suppressing.",
+            "runtime_coverage.findings[].id": "Per-finding SUPPRESSION key (plow:prod:<hash>). Hashes file + function + the current line, so it changes when the function moves. Use it to suppress one finding at its current location.",
+            "runtime_coverage.findings[].stable_id": "Cross-surface JOIN key (plow:fn:<hash>) from plow_cov_protocol::function_identity_id, hashing file + name + start_line. The same function shares ONE value across findings, hot paths, blast-radius, and importance entries (the per-finding id uses a per-surface salt and differs), and across V8/Istanbul/oxc producers (columns are excluded from the hash). Like id, it changes when the function's file, name, or start line changes: it is a cross-surface/cross-producer join key, NOT a line-move-immune one. Omitted from the JSON entirely (not emitted as null) when the producing surface or an un-migrated cloud supplied no FunctionIdentity. New baselines key on this when present to align with the cross-surface join key; the grace-window reader accepts the legacy id too.",
+            "runtime_coverage._matching": "Function-identity fallback order when joining runtime evidence to local static analysis: (1) exact stable_id match (plow:fn:<hash>) when both sides carry one; (2) exact (path, name, start_line); (3) fuzzy nearest candidate within a line tolerance. Baseline suppression accepts BOTH the stable_id and the legacy plow:prod: id during the grace window, so baselines written before this version keep suppressing.",
             "runtime_coverage.findings[].evidence.static_status": "used = the function is reachable in the AST module graph; unused = it is dead by static analysis.",
             "runtime_coverage.findings[].evidence.test_coverage": "covered = the local test suite hits the function; not_covered otherwise.",
             "runtime_coverage.findings[].evidence.v8_tracking": "tracked = V8 observed the function during the capture window; untracked otherwise.",
             "runtime_coverage.findings[].actions[].type": "Suggested follow-up identifier. delete-cold-code is emitted on safe_to_delete; review-runtime on review_required.",
-            "runtime_coverage.blast_radius[]": "First-class blast-radius entries with stable fallow:blast IDs, static caller count, traffic-weighted caller reach, optional cloud deploy touch count, and low/medium/high risk band.",
-            "runtime_coverage.importance[]": "First-class production-importance entries with stable fallow:importance IDs, invocations, cyclomatic complexity, owner count, 0-100 importance score, and templated reason.",
+            "runtime_coverage.blast_radius[]": "First-class blast-radius entries with stable plow:blast IDs, static caller count, traffic-weighted caller reach, optional cloud deploy touch count, and low/medium/high risk band.",
+            "runtime_coverage.importance[]": "First-class production-importance entries with stable plow:importance IDs, invocations, cyclomatic complexity, owner count, 0-100 importance score, and templated reason.",
             "runtime_coverage.warnings[].code": "Stable warning identifier. cloud_functions_unmatched flags entries dropped because no AST/static counterpart was found locally."
         },
         "enums": {
@@ -229,7 +230,7 @@ fn security_field_definitions() -> BTreeMap<String, String> {
     BTreeMap::from([
         (
             "version".to_string(),
-            "fallow CLI version that produced this output.".to_string(),
+            "plow CLI version that produced this output.".to_string(),
         ),
         (
             "elapsed_ms".to_string(),
@@ -616,7 +617,7 @@ fn metric(
 }
 
 fn report_rule_docs_url(docs_path: &str) -> String {
-    format!("https://docs.fallow.tools/{docs_path}")
+    format!("https://docs.genesis-plow.dev/{docs_path}")
 }
 
 #[cfg(test)]
@@ -668,7 +669,7 @@ mod tests {
         assert!(meta.metrics.is_empty());
         assert_eq!(
             meta.rules["security/example"].docs.as_deref(),
-            Some("https://docs.fallow.tools/cli/security")
+            Some("https://docs.genesis-plow.dev/cli/security")
         );
     }
 

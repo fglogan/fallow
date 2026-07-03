@@ -23,7 +23,7 @@ const projectFilter = projectsArg
     )
   : null;
 
-console.log("Building fallow (release)...");
+console.log("Building plow (release)...");
 const buildResult = spawnSync("cargo", ["build", "--release"], {
   cwd: rootDir,
   stdio: "pipe",
@@ -33,23 +33,23 @@ if (buildResult.status !== 0) {
   console.error("Build failed:", buildResult.stderr?.toString());
   process.exit(1);
 }
-const fallowBin = join(rootDir, "target", "release", "fallow");
+const plowBin = join(rootDir, "target", "release", "plow");
 const knipBin = join(__dirname, "node_modules", ".bin", "knip");
 if (!existsSync(knipBin)) {
   console.error("knip not found. Run: cd benchmarks && npm install");
   process.exit(1);
 }
 
-const fallowVersion = spawnSync(fallowBin, ["--version"], { stdio: "pipe" })
+const plowVersion = spawnSync(plowBin, ["--version"], { stdio: "pipe" })
   .stdout?.toString()
   .trim();
 const knipVersion = spawnSync(knipBin, ["--version"], { stdio: "pipe" }).stdout?.toString().trim();
 const rustVersion = spawnSync("rustc", ["--version"], { stdio: "pipe" }).stdout?.toString().trim();
 
-console.log(`\n=== Fallow vs Knip Benchmark Suite ===\n`);
+console.log(`\n=== Plow vs Knip Benchmark Suite ===\n`);
 printEnvironment();
 console.log(
-  `Tools:\n  fallow   ${fallowVersion}\n  knip     ${knipVersion}\nConfig: ${RUNS} runs, ${WARMUP} warmup\n`,
+  `Tools:\n  plow   ${plowVersion}\n  knip     ${knipVersion}\nConfig: ${RUNS} runs, ${WARMUP} warmup\n`,
 );
 
 function printEnvironment() {
@@ -126,7 +126,7 @@ function timeRunWithMemory(cmd, cmdArgs, cwd) {
     if (match) peakRssBytes = parseInt(match[1]);
   }
 
-  // stdout for fallow comes from the time wrapper child process.
+  // stdout for plow comes from the time wrapper child process.
   const stdout = result.stdout?.toString() ?? "";
 
   return { elapsed, status: result.status, signal: result.signal, stdout, stderr, peakRssBytes };
@@ -211,16 +211,16 @@ function formatMultiplier(value) {
   return `${value.toFixed(1)}x`;
 }
 
-function relativeSpeed(fallowMedian, comparisonMedian, comparisonName) {
-  if (fallowMedian <= comparisonMedian) {
-    return `fallow ${formatMultiplier(comparisonMedian / fallowMedian)}`;
+function relativeSpeed(plowMedian, comparisonMedian, comparisonName) {
+  if (plowMedian <= comparisonMedian) {
+    return `plow ${formatMultiplier(comparisonMedian / plowMedian)}`;
   }
 
-  return `${comparisonName} ${formatMultiplier(fallowMedian / comparisonMedian)}`;
+  return `${comparisonName} ${formatMultiplier(plowMedian / comparisonMedian)}`;
 }
 
-function clearFallowCache(dir) {
-  const cacheDir = join(dir, ".fallow");
+function clearPlowCache(dir) {
+  const cacheDir = join(dir, ".plow");
   if (existsSync(cacheDir)) rmSync(cacheDir, { recursive: true });
 }
 
@@ -228,11 +228,11 @@ function benchmarkProject(name, dir) {
   const files = countSourceFiles(dir);
   console.log(`### ${name} (${files} source files)\n`);
 
-  // Cold cache, no persisted fallow cache.
+  // Cold cache, no persisted plow cache.
   const fArgsCold = ["dead-code", "--quiet", "--format", "json", "--no-cache"];
   const kArgs = ["--reporter", "json"];
   for (let i = 0; i < WARMUP; i++) {
-    timeRun(fallowBin, fArgsCold, dir);
+    timeRun(plowBin, fArgsCold, dir);
     timeRun(knipBin, kArgs, dir);
   }
 
@@ -245,9 +245,9 @@ function benchmarkProject(name, dir) {
   let kErrorReason = null;
 
   for (let i = 0; i < RUNS; i++) {
-    const fr = timeRunWithMemory(fallowBin, fArgsCold, dir);
+    const fr = timeRunWithMemory(plowBin, fArgsCold, dir);
     const fSummary = summarizeBenchmarkRun(fr);
-    if (!fSummary.valid) throw new Error(`[${name}] fallow cold run failed: ${fSummary.error}`);
+    if (!fSummary.valid) throw new Error(`[${name}] plow cold run failed: ${fSummary.error}`);
     fTimesCold.push(fr.elapsed);
     if (i === 0) {
       fIssues = fSummary.issues;
@@ -268,26 +268,26 @@ function benchmarkProject(name, dir) {
 
   // Warmup runs below settle the OS file cache + Spotlight indexing of cache.bin
   // so the first measured warm run is comparable to the cold loop warmups.
-  clearFallowCache(dir);
+  clearPlowCache(dir);
   const fArgsWarm = ["dead-code", "--quiet", "--format", "json"];
   // Populate cache
-  const populate = timeRun(fallowBin, fArgsWarm, dir);
+  const populate = timeRun(plowBin, fArgsWarm, dir);
   const populateSummary = summarizeBenchmarkRun(populate);
   if (!populateSummary.valid)
-    throw new Error(`[${name}] fallow cache warm-up failed: ${populateSummary.error}`);
+    throw new Error(`[${name}] plow cache warm-up failed: ${populateSummary.error}`);
   // Warmup runs (same shape as cold path) to settle OS / Spotlight noise
   for (let i = 0; i < WARMUP; i++) {
-    timeRun(fallowBin, fArgsWarm, dir);
+    timeRun(plowBin, fArgsWarm, dir);
   }
   // Benchmark warm runs
   const fTimesWarm = [];
   for (let i = 0; i < RUNS; i++) {
-    const fr = timeRun(fallowBin, fArgsWarm, dir);
+    const fr = timeRun(plowBin, fArgsWarm, dir);
     const fSummary = summarizeBenchmarkRun(fr);
-    if (!fSummary.valid) throw new Error(`[${name}] fallow warm run failed: ${fSummary.error}`);
+    if (!fSummary.valid) throw new Error(`[${name}] plow warm run failed: ${fSummary.error}`);
     fTimesWarm.push(fr.elapsed);
   }
-  clearFallowCache(dir);
+  clearPlowCache(dir);
 
   const fsCold = stats(fTimesCold),
     fsWarm = stats(fTimesWarm);
@@ -299,7 +299,7 @@ function benchmarkProject(name, dir) {
 
   const rows = [
     {
-      Tool: "fallow (cold)",
+      Tool: "plow (cold)",
       Min: fmt(fsCold.min),
       Mean: fmt(fsCold.mean),
       Median: fmt(fsCold.median),
@@ -309,7 +309,7 @@ function benchmarkProject(name, dir) {
       Issues: fIssues,
     },
     {
-      Tool: "fallow (warm)",
+      Tool: "plow (warm)",
       Min: fmt(fsWarm.min),
       Mean: fmt(fsWarm.mean),
       Median: fmt(fsWarm.median),
@@ -344,8 +344,8 @@ function benchmarkProject(name, dir) {
   }
   console.table(rows);
   console.log(`  Cache speedup: ${cacheSpeedup.toFixed(2)}x (warm vs cold)`);
-  console.log(`  fallow cold: [${fTimesCold.map((t) => t.toFixed(0)).join(", ")}]`);
-  console.log(`  fallow warm: [${fTimesWarm.map((t) => t.toFixed(0)).join(", ")}]`);
+  console.log(`  plow cold: [${fTimesCold.map((t) => t.toFixed(0)).join(", ")}]`);
+  console.log(`  plow warm: [${fTimesWarm.map((t) => t.toFixed(0)).join(", ")}]`);
   console.log(
     `  knip:        ${kTimes.length > 0 ? `[${kTimes.map((t) => t.toFixed(0)).join(", ")}]` : `[error: ${kErrorReason ?? kIssues}]`}`,
   );
@@ -354,8 +354,8 @@ function benchmarkProject(name, dir) {
   return {
     name,
     files,
-    fallowCold: fsCold,
-    fallowWarm: fsWarm,
+    plowCold: fsCold,
+    plowWarm: fsWarm,
     knip: ks,
     relative,
     speedupCold,
@@ -406,12 +406,12 @@ if (results.length > 0) {
     results.map((r) => ({
       Project: r.name,
       Files: r.files,
-      "Fallow cold (median)": fmt(r.fallowCold.median),
-      "Fallow warm (median)": fmt(r.fallowWarm.median),
+      "Plow cold (median)": fmt(r.plowCold.median),
+      "Plow warm (median)": fmt(r.plowWarm.median),
       "knip (median)": r.knip ? fmt(r.knip.median) : "error",
       "Faster tool": r.relative,
       "Cache effect": `${r.cacheSpeedup.toFixed(2)}x`,
-      "Fallow RSS": fmtMem(r.fPeakRss),
+      "Plow RSS": fmtMem(r.fPeakRss),
       "knip RSS": r.kError ? "--" : fmtMem(r.kPeakRss),
     })),
   );

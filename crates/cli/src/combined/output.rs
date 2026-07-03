@@ -4,9 +4,9 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use colored::Colorize;
-use fallow_api::{CombinedCheckJsonSection, CombinedJsonOutputInput, DupesReportPayload};
-use fallow_config::OutputFormat;
-use fallow_output::{CodeClimateIssue, codeclimate_issues_to_value};
+use plow_api::{CombinedCheckJsonSection, CombinedJsonOutputInput, DupesReportPayload};
+use plow_config::OutputFormat;
+use plow_output::{CodeClimateIssue, codeclimate_issues_to_value};
 
 use crate::check::CheckResult;
 use crate::dupes::DupesResult;
@@ -71,7 +71,7 @@ fn print_machine_combined_report(
                 elapsed: total_elapsed,
                 explain: opts.explain,
                 config_fixable: opts.config_path.is_some()
-                    || fallow_config::FallowConfig::find_config_path(opts.root).is_some(),
+                    || plow_config::PlowConfig::find_config_path(opts.root).is_some(),
             });
             combined_machine_success(code)
         }
@@ -205,7 +205,7 @@ fn print_combined_hints(
 
     println!(
         "{}",
-        "Tip: run `fallow explain <issue label>`; spaces and hyphens both work, e.g. `fallow explain unused files`."
+        "Tip: run `plow explain <issue label>`; spaces and hyphens both work, e.g. `plow explain unused files`."
             .dimmed()
     );
     println!();
@@ -297,7 +297,7 @@ fn print_health_section(
         crate::health::HealthPrintOptions {
             quiet: opts.quiet,
             explain: opts.explain,
-            gates: fallow_engine::HealthGateOptions::default(),
+            gates: plow_engine::HealthGateOptions::default(),
             summary: opts.summary,
             summary_heading: !show_headers,
             show_explain_tip: false,
@@ -425,7 +425,7 @@ fn print_failure_followups(root: &Path) {
     // with the header. Deliberately not TTY-gated (agents reading piped
     // human output are a primary audience); quiet is gated by the caller,
     // and CI, configured projects, suggestions off, and a recorded
-    // decline (`fallow init --decline`) suppress it here.
+    // decline (`plow init --decline`) suppress it here.
     if crate::report::suggestions::suggestions_enabled()
         && crate::report::suggestions::setup_pointer_applicable(root)
     {
@@ -466,7 +466,7 @@ fn build_combined_json_output(
         input.root,
     );
 
-    fallow_api::serialize_combined_json(CombinedJsonOutputInput {
+    plow_api::serialize_combined_json(CombinedJsonOutputInput {
         check: input.check_result.map(|result| CombinedCheckJsonSection {
             results: &result.results,
             root: &result.config.root,
@@ -491,7 +491,7 @@ fn combined_next_steps(
     dupes_payload: Option<&DupesReportPayload>,
     health: Option<&HealthResult>,
     root: &std::path::Path,
-) -> Vec<fallow_types::output::NextStep> {
+) -> Vec<plow_types::output::NextStep> {
     crate::report::suggestions::build_combined_next_steps(
         check.map(|result| &result.results),
         dupes_payload,
@@ -516,7 +516,7 @@ fn emit_combined_json_output(output: &serde_json::Value) -> ExitCode {
     }
 }
 
-fn check_json_extras_for_combined(result: &CheckResult) -> fallow_api::CheckJsonExtraOutputs {
+fn check_json_extras_for_combined(result: &CheckResult) -> plow_api::CheckJsonExtraOutputs {
     let baseline_deltas = result.baseline_deltas.as_ref().map(|deltas| {
         report::build_baseline_deltas_output(
             deltas.total_delta,
@@ -561,15 +561,15 @@ fn print_combined_sarif(
         let run = serde_json::json!({
             "tool": {
                 "driver": {
-                    "name": "fallow",
+                    "name": "plow",
                     "version": env!("CARGO_PKG_VERSION"),
-                    "informationUri": "https://github.com/fallow-rs/fallow",
+                    "informationUri": "https://github.com/fglogan/genesis-plow",
                 }
             },
-            "automationDetails": { "id": "fallow/dupes" },
+            "automationDetails": { "id": "plow/dupes" },
             "results": result.report.clone_groups.iter().enumerate().map(|(i, g)| {
                 serde_json::json!({
-                    "ruleId": "fallow/code-duplication",
+                    "ruleId": "plow/code-duplication",
                     "level": "warning",
                     "message": { "text": format!("Clone group {} ({} lines, {} instances)", i + 1, g.line_count, g.instances.len()) },
                 })
@@ -640,7 +640,7 @@ fn build_combined_codeclimate_issues(
 ) -> Vec<CodeClimateIssue> {
     let mut all_issues: Vec<CodeClimateIssue> = Vec::new();
     if let Some(result) = check {
-        all_issues.extend(fallow_api::build_codeclimate(
+        all_issues.extend(plow_api::build_codeclimate(
             &result.results,
             &result.config.root,
             &result.config.rules,
@@ -648,14 +648,14 @@ fn build_combined_codeclimate_issues(
     }
 
     if let Some(result) = dupes {
-        all_issues.extend(fallow_api::build_duplication_codeclimate(
+        all_issues.extend(plow_api::build_duplication_codeclimate(
             &result.report,
             &result.config.root,
         ));
     }
 
     if let Some(result) = health {
-        all_issues.extend(fallow_api::build_health_codeclimate(
+        all_issues.extend(plow_api::build_health_codeclimate(
             &result.report,
             &result.config.root,
         ));
@@ -717,9 +717,9 @@ mod tests {
 
     #[test]
     fn insert_empty_optional_sections_leaves_combined_map_unchanged() {
-        let dupes = fallow_api::serialize_combined_dupes_json(None, std::path::Path::new("."))
+        let dupes = plow_api::serialize_combined_dupes_json(None, std::path::Path::new("."))
             .expect("empty dupes section should serialize");
-        let health = fallow_api::serialize_combined_health_json(None, std::path::Path::new("."))
+        let health = plow_api::serialize_combined_health_json(None, std::path::Path::new("."))
             .expect("empty health section should serialize");
 
         assert!(dupes.is_none());

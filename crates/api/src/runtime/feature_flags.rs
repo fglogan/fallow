@@ -1,13 +1,13 @@
 use std::path::Path;
 use std::time::Instant;
 
-use fallow_engine::{AnalysisSession, ProjectConfig};
-use fallow_output::{
+use plow_engine::{AnalysisSession, ProjectConfig};
+use plow_output::{
     CHECK_SCHEMA_VERSION, FeatureFlagsOutputInput, build_feature_flags_output, feature_flags_meta,
     relative_to_diff_path,
 };
-use fallow_types::output_format::OutputFormat;
-use fallow_types::results::FeatureFlag;
+use plow_types::output_format::OutputFormat;
+use plow_types::results::FeatureFlag;
 
 use crate::{
     FeatureFlagsOptions, FeatureFlagsProgrammaticOutput, ProgrammaticError,
@@ -37,10 +37,10 @@ fn run_feature_flags_inner(
 ) -> ProgrammaticResult<FeatureFlagsProgrammaticOutput> {
     let start = Instant::now();
     let session = load_feature_flags_session(resolved)?;
-    let analysis = fallow_engine::analyze_feature_flags(session.config());
+    let analysis = plow_engine::analyze_feature_flags(session.config());
     if analysis.files_scanned == 0 {
         return Err(ProgrammaticError::new("no files discovered", 2)
-            .with_code("FALLOW_NO_FILES_DISCOVERED")
+            .with_code("PLOW_NO_FILES_DISCOVERED")
             .with_context("feature-flags"));
     }
 
@@ -68,12 +68,13 @@ fn load_feature_flags_session(
     resolved: &ProgrammaticAnalysisContext,
 ) -> ProgrammaticResult<AnalysisSession> {
     let project_config =
-        fallow_engine::config_for_project(&resolved.root, resolved.config_path.as_deref())
-            .map_err(|err| {
+        plow_engine::config_for_project(&resolved.root, resolved.config_path.as_deref()).map_err(
+            |err| {
                 ProgrammaticError::new(format!("failed to load config: {err}"), 2)
-                    .with_code("FALLOW_CONFIG_LOAD_FAILED")
+                    .with_code("PLOW_CONFIG_LOAD_FAILED")
                     .with_context("analysis.configPath")
-            })?;
+            },
+        )?;
     Ok(AnalysisSession::from_config(
         configure_project_for_feature_flags(project_config, resolved),
     ))

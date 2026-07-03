@@ -7,9 +7,9 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use colored::Colorize;
-use fallow_config::ResolvedConfig;
-use fallow_output::FileHealthScore;
-use fallow_types::output_format::OutputFormat;
+use plow_config::ResolvedConfig;
+use plow_output::FileHealthScore;
+use plow_types::output_format::OutputFormat;
 
 use crate::error::emit_error;
 

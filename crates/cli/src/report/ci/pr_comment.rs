@@ -1,15 +1,15 @@
 use crate::report::sink::outln;
-use fallow_output::CodeClimateIssue;
+use plow_output::CodeClimateIssue;
 use std::process::ExitCode;
 use std::sync::OnceLock;
 
 use serde_json::Value;
 
-pub use fallow_output::{
+pub use plow_output::{
     CiIssue, CiProvider as Provider, issues_from_codeclimate, issues_from_codeclimate_issues,
 };
 #[cfg(test)]
-use fallow_output::{escape_md, is_project_level_rule};
+use plow_output::{escape_md, is_project_level_rule};
 
 /// Workspace name, set once by `main()` when the binary is invoked with
 /// `--workspace <name>`. Read by `sticky_marker_id` to auto-suffix the
@@ -66,7 +66,7 @@ fn short_hex_hash(value: &str) -> String {
 
 #[must_use]
 pub fn render_pr_comment(command: &str, provider: Provider, issues: &[CiIssue]) -> String {
-    fallow_output::render_pr_comment(&fallow_output::PrCommentRenderInput {
+    plow_output::render_pr_comment(&plow_output::PrCommentRenderInput {
         command,
         provider,
         issues,
@@ -76,7 +76,7 @@ pub fn render_pr_comment(command: &str, provider: Provider, issues: &[CiIssue]) 
     })
 }
 
-/// Map a fallow rule id to its category for sticky-comment grouping.
+/// Map a plow rule id to its category for sticky-comment grouping.
 ///
 /// Single source of truth lives on `RuleDef::category` in `explain.rs`. This
 /// helper does the lookup so callers don't need to know about the registry;
@@ -89,7 +89,7 @@ pub fn category_for_rule(rule_id: &str) -> &'static str {
 }
 
 fn max_comments() -> usize {
-    std::env::var("FALLOW_MAX_COMMENTS")
+    std::env::var("PLOW_MAX_COMMENTS")
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(50)
@@ -97,18 +97,18 @@ fn max_comments() -> usize {
 
 /// Compute the sticky-comment marker id. Precedence (highest first):
 ///
-/// 1. `FALLOW_COMMENT_ID` set by the user explicitly: use as-is.
+/// 1. `PLOW_COMMENT_ID` set by the user explicitly: use as-is.
 /// 2. `WORKSPACE_MARKER` populated by `main()` from `--workspace <name>`:
 ///    suffix the default to avoid colliding with a sibling per-workspace
 ///    job's sticky on the same PR/MR.
-/// 3. Plain `fallow-results`.
+/// 3. Plain `plow-results`.
 ///
 /// The collision case (2) is the common monorepo shape: parallel jobs each
-/// run fallow scoped to one workspace package and post their own sticky.
+/// run plow scoped to one workspace package and post their own sticky.
 /// Without a per-workspace suffix every job edits the same marker, racing
 /// each other's bodies on every CI re-run.
 fn sticky_marker_id() -> String {
-    if let Ok(value) = std::env::var("FALLOW_COMMENT_ID")
+    if let Ok(value) = std::env::var("PLOW_COMMENT_ID")
         && !value.trim().is_empty()
     {
         return value;
@@ -119,13 +119,13 @@ fn sticky_marker_id() -> String {
         .filter(|value| !value.is_empty())
         .map(sanitize_marker_segment);
     match suffix {
-        Some(workspace) => format!("fallow-results-{workspace}"),
-        None => "fallow-results".to_owned(),
+        Some(workspace) => format!("plow-results-{workspace}"),
+        None => "plow-results".to_owned(),
     }
 }
 
 /// Strip characters that would break the HTML-comment marker. The marker
-/// shape is `<!-- fallow-id: <id> -->`; `<`, `>`, and `--` are reserved by
+/// shape is `<!-- plow-id: <id> -->`; `<`, `>`, and `--` are reserved by
 /// the HTML comment grammar, and whitespace would split the id when the
 /// reader scans for it.
 fn sanitize_marker_segment(value: &str) -> String {
@@ -174,14 +174,14 @@ fn print_pr_comment_from_ci_issues(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_output::{
+    use plow_output::{
         CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation, CodeClimateSeverity,
     };
 
     #[test]
     fn extracts_issues_from_codeclimate() {
         let value = serde_json::json!([{
-            "check_name": "fallow/unused-export",
+            "check_name": "plow/unused-export",
             "description": "Export x is never imported",
             "severity": "minor",
             "fingerprint": "abc",
@@ -207,7 +207,7 @@ mod tests {
             .enumerate()
             .map(|(index, (severity, _))| CodeClimateIssue {
                 kind: CodeClimateIssueKind::Issue,
-                check_name: format!("fallow/rule-{index}"),
+                check_name: format!("plow/rule-{index}"),
                 description: format!("Finding {index}"),
                 categories: vec!["Complexity".to_owned()],
                 severity: *severity,
@@ -242,7 +242,7 @@ mod tests {
     #[test]
     fn sticky_marker_id_default_when_nothing_set() {
         let body = render_pr_comment("check", Provider::Github, &[]);
-        assert!(body.contains("<!-- fallow-id: fallow-results"));
+        assert!(body.contains("<!-- plow-id: plow-results"));
         assert!(body.contains("No GitHub PR/MR findings."));
     }
 
@@ -256,7 +256,7 @@ mod tests {
 
     #[test]
     fn sanitize_marker_segment_collapses_unsafe_chars_to_dashes() {
-        assert_eq!(sanitize_marker_segment("@fallow/runtime"), "fallow-runtime");
+        assert_eq!(sanitize_marker_segment("@plow/runtime"), "plow-runtime");
         assert_eq!(
             sanitize_marker_segment("packages/web ui"),
             "packages-web-ui"
@@ -296,22 +296,19 @@ mod tests {
     #[test]
     fn summary_label_foreshadows_truncation() {
         assert_eq!(
-            fallow_output::summary_label("Duplication", 160, 50),
+            plow_output::summary_label("Duplication", 160, 50),
             "Duplication (160, showing 50)"
         );
+        assert_eq!(plow_output::summary_label("Health", 12, 50), "Health (12)");
         assert_eq!(
-            fallow_output::summary_label("Health", 12, 50),
-            "Health (12)"
-        );
-        assert_eq!(
-            fallow_output::summary_label("Dependencies", 50, 50),
+            plow_output::summary_label("Dependencies", 50, 50),
             "Dependencies (50)"
         );
     }
 
     #[test]
     fn escape_md_does_not_escape_block_only_markers() {
-        let raw = "fallow/test-only-dependency package.json:12";
+        let raw = "plow/test-only-dependency package.json:12";
         let escaped = escape_md(raw);
         assert!(!escaped.contains("\\-"), "should not escape `-`");
         assert!(!escaped.contains("\\."), "should not escape `.`");
@@ -335,29 +332,29 @@ mod tests {
 
     #[test]
     fn is_project_level_rule_covers_config_anchored_dependency_findings() {
-        for rule_id in fallow_output::PROJECT_LEVEL_RULE_IDS {
+        for rule_id in plow_output::PROJECT_LEVEL_RULE_IDS {
             assert!(
                 is_project_level_rule(rule_id),
                 "{rule_id} must be project-level"
             );
         }
         for rule_id in [
-            "fallow/unused-file",
-            "fallow/unused-export",
-            "fallow/unused-type",
-            "fallow/unused-enum-member",
-            "fallow/unused-class-member",
-            "fallow/unused-store-member",
-            "fallow/unresolved-import",
-            "fallow/unlisted-dependency",
-            "fallow/duplicate-export",
-            "fallow/circular-dependency",
-            "fallow/re-export-cycle",
-            "fallow/boundary-violation",
-            "fallow/stale-suppression",
-            "fallow/private-type-leak",
-            "fallow/high-complexity",
-            "fallow/high-crap-score",
+            "plow/unused-file",
+            "plow/unused-export",
+            "plow/unused-type",
+            "plow/unused-enum-member",
+            "plow/unused-class-member",
+            "plow/unused-store-member",
+            "plow/unresolved-import",
+            "plow/unlisted-dependency",
+            "plow/duplicate-export",
+            "plow/circular-dependency",
+            "plow/re-export-cycle",
+            "plow/boundary-violation",
+            "plow/stale-suppression",
+            "plow/private-type-leak",
+            "plow/high-complexity",
+            "plow/high-crap-score",
         ] {
             assert!(
                 !is_project_level_rule(rule_id),
@@ -368,7 +365,7 @@ mod tests {
 
     #[test]
     fn project_level_rule_ids_each_register_in_explain_registry() {
-        for rule_id in fallow_output::PROJECT_LEVEL_RULE_IDS {
+        for rule_id in plow_output::PROJECT_LEVEL_RULE_IDS {
             assert!(
                 crate::explain::rule_by_id(rule_id).is_some(),
                 "{rule_id} listed in PROJECT_LEVEL_RULE_IDS but not in explain registry"

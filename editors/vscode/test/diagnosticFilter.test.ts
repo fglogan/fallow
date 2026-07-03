@@ -38,7 +38,7 @@ import {
   DiagnosticFilter,
   diagnosticCode,
   getDiagnosticCategories,
-  isFallowDiagnostic,
+  isPlowDiagnostic,
   parseDiagnosticCategories,
   resetDiagnosticCategories,
   severityToDiagnosticSeverity,
@@ -53,7 +53,7 @@ interface FakeDiag {
 }
 
 const diag = (overrides: Partial<FakeDiag>): FakeDiag => ({
-  source: "fallow",
+  source: "plow",
   message: "test",
   severity: 1,
   ...overrides,
@@ -62,7 +62,7 @@ const diag = (overrides: Partial<FakeDiag>): FakeDiag => ({
 const memento = (initial?: unknown) => {
   const store = new Map<string, unknown>();
   if (initial !== undefined) {
-    store.set("fallow.diagnosticFilter.v1", initial);
+    store.set("plow.diagnosticFilter.v1", initial);
   }
   return {
     get: <T>(key: string): T | undefined => store.get(key) as T | undefined,
@@ -118,11 +118,11 @@ describe("diagnosticCode", () => {
   });
 });
 
-describe("isFallowDiagnostic", () => {
-  it("returns true only for source === fallow", () => {
-    expect(isFallowDiagnostic(diag({ source: "fallow" }) as never)).toBe(true);
-    expect(isFallowDiagnostic(diag({ source: "ts" }) as never)).toBe(false);
-    expect(isFallowDiagnostic(diag({ source: undefined }) as never)).toBe(
+describe("isPlowDiagnostic", () => {
+  it("returns true only for source === plow", () => {
+    expect(isPlowDiagnostic(diag({ source: "plow" }) as never)).toBe(true);
+    expect(isPlowDiagnostic(diag({ source: "ts" }) as never)).toBe(false);
+    expect(isPlowDiagnostic(diag({ source: undefined }) as never)).toBe(
       false
     );
   });
@@ -145,7 +145,7 @@ describe("DiagnosticFilter.applyFilter", () => {
     expect(f.applyFilter(input as never)).toEqual(input);
   });
 
-  it("renders only fallow diagnostics as information", () => {
+  it("renders only plow diagnostics as information", () => {
     const f = new DiagnosticFilter(memento() as never, () => "information");
     const input = [
       diag({ code: "code-duplication" }),
@@ -156,7 +156,7 @@ describe("DiagnosticFilter.applyFilter", () => {
     expect(out[1]?.severity).toBe(1);
   });
 
-  it("renders fallow diagnostics as hints after mute filtering", () => {
+  it("renders plow diagnostics as hints after mute filtering", () => {
     const f = new DiagnosticFilter(memento() as never, () => "hint");
     f.setCategoryMuted("code-duplication", true);
     const input = [
@@ -169,7 +169,7 @@ describe("DiagnosticFilter.applyFilter", () => {
     expect(out[0]?.severity).toBe(3);
   });
 
-  it("drops only fallow diagnostics with the muted code", () => {
+  it("drops only plow diagnostics with the muted code", () => {
     const f = new DiagnosticFilter(memento() as never);
     f.setCategoryMuted("code-duplication", true);
     const input = [
@@ -236,7 +236,7 @@ describe("DiagnosticFilter.applyFilter", () => {
     expect(out.map((d) => d.code)).toEqual(["code-duplication", "unused-export"]);
   });
 
-  it("drops every fallow diagnostic when mutedAll is set, but never others", () => {
+  it("drops every plow diagnostic when mutedAll is set, but never others", () => {
     const f = new DiagnosticFilter(memento() as never);
     f.setMutedAll(true);
     const input = [
@@ -249,7 +249,7 @@ describe("DiagnosticFilter.applyFilter", () => {
     expect(out[0]?.source).toBe("ts");
   });
 
-  it("keeps fallow diagnostics whose code is absent or unrecognized", () => {
+  it("keeps plow diagnostics whose code is absent or unrecognized", () => {
     const f = new DiagnosticFilter(memento() as never);
     f.setCategoryMuted("code-duplication", true);
     const input = [
@@ -293,13 +293,13 @@ describe("DiagnosticFilter persistence", () => {
     f.setCategoryMuted("code-duplication", true);
     await flushPersistence();
     expect(m.update).toHaveBeenCalledWith(
-      "fallow.diagnosticFilter.v1",
+      "plow.diagnosticFilter.v1",
       expect.objectContaining({ mutedCategories: ["code-duplication"] })
     );
     f.setMutedAll(true);
     await flushPersistence();
     expect(m.update).toHaveBeenLastCalledWith(
-      "fallow.diagnosticFilter.v1",
+      "plow.diagnosticFilter.v1",
       expect.objectContaining({ mutedAll: true })
     );
   });
@@ -316,7 +316,7 @@ describe("DiagnosticFilter persistence", () => {
     await flushPersistence();
 
     expect(m.update).toHaveBeenLastCalledWith(
-      "fallow.diagnosticFilter.v1",
+      "plow.diagnosticFilter.v1",
       expect.objectContaining({
         localVisibleCategories: ["code-duplication"],
         mutedCategories: [],
@@ -337,7 +337,7 @@ describe("DiagnosticFilter persistence", () => {
 
     expect(f.isCategoryMuted("code-duplication")).toBe(false);
     expect(m.update).toHaveBeenLastCalledWith(
-      "fallow.diagnosticFilter.v1",
+      "plow.diagnosticFilter.v1",
       expect.objectContaining({
         localVisibleCategories: ["code-duplication"],
         mutedCategories: [],
@@ -352,7 +352,7 @@ describe("DiagnosticFilter persistence", () => {
     await flushPersistence();
     expect(m.update).toHaveBeenCalledTimes(1);
     expect(m.update).toHaveBeenLastCalledWith(
-      "fallow.diagnosticFilter.v1",
+      "plow.diagnosticFilter.v1",
       expect.objectContaining({
         mutedCategories: ["code-duplication", "unused-export"],
       })
@@ -416,7 +416,7 @@ describe("DiagnosticFilter.applyMuteSelection", () => {
     // setMutedCategories pair fired two).
     expect(m.update).toHaveBeenCalledTimes(1);
     expect(m.update).toHaveBeenLastCalledWith(
-      "fallow.diagnosticFilter.v1",
+      "plow.diagnosticFilter.v1",
       expect.objectContaining({
         mutedAll: false,
         mutedCategories: ["unused-export"],
@@ -443,7 +443,7 @@ describe("DiagnosticFilter.flushPersist", () => {
     // raw microtask helper.
     await f.flushPersist();
     expect(m.update).toHaveBeenCalledWith(
-      "fallow.diagnosticFilter.v1",
+      "plow.diagnosticFilter.v1",
       expect.objectContaining({ mutedCategories: ["code-duplication"] })
     );
   });
@@ -500,7 +500,7 @@ describe("DiagnosticFilter.handleDiagnostics + refresh", () => {
     const f = new DiagnosticFilter(memento() as never, () => severity);
     severity = "hint";
     const d = {
-      source: "fallow",
+      source: "plow",
       code: "unused-export",
       message: "unused export",
       severity: 1,
@@ -785,9 +785,9 @@ describe("DIAGNOSTIC_CATEGORIES", () => {
     expect(DIAGNOSTIC_CATEGORIES[0]?.code).toBe("code-duplication");
   });
 
-  it("includes every diagnostic code emitted by fallow-lsp", () => {
+  it("includes every diagnostic code emitted by plow-lsp", () => {
     // Fallback list for older LSPs. Keep it in sync with
-    // `DIAGNOSTIC_ISSUE_TYPES` / `fallow/issueTypes` in `crates/lsp/src/main.rs`
+    // `DIAGNOSTIC_ISSUE_TYPES` / `plow/issueTypes` in `crates/lsp/src/main.rs`
     // plus any diagnostics emitted outside the issue-type catalog.
     const expected = [
       "unused-file",
@@ -830,7 +830,7 @@ describe("DIAGNOSTIC_CATEGORIES", () => {
 });
 
 describe("dynamic diagnostic categories", () => {
-  it("parses the fallow/issueTypes response shape", () => {
+  it("parses the plow/issueTypes response shape", () => {
     const parsed = parseDiagnosticCategories([
       { code: "future-rule", label: "Future Rule" },
       { code: "unused-export", label: "Unused Exports" },
@@ -841,7 +841,7 @@ describe("dynamic diagnostic categories", () => {
     ]);
   });
 
-  it("rejects malformed fallow/issueTypes responses", () => {
+  it("rejects malformed plow/issueTypes responses", () => {
     expect(parseDiagnosticCategories(null)).toBeNull();
     expect(parseDiagnosticCategories([])).toBeNull();
     expect(parseDiagnosticCategories([{ code: "missing-label" }])).toBeNull();

@@ -1,7 +1,7 @@
 use std::path::Path;
 
-use fallow_types::discover::FileId;
-use fallow_types::extract::ModuleInfo;
+use plow_types::discover::FileId;
+use plow_types::extract::ModuleInfo;
 
 use crate::parse::parse_source_to_module;
 
@@ -52,9 +52,9 @@ export const value = helper();
         .find(|e| matches!(&e.name, crate::ExportName::Named(name) if name == "value"))
         .expect("script export extracted");
     let (import_line, _) =
-        fallow_types::extract::byte_offset_to_line_col(&info.line_offsets, import.span.start);
+        plow_types::extract::byte_offset_to_line_col(&info.line_offsets, import.span.start);
     let (export_line, _) =
-        fallow_types::extract::byte_offset_to_line_col(&info.line_offsets, export.span.start);
+        plow_types::extract::byte_offset_to_line_col(&info.line_offsets, export.span.start);
     assert_eq!(import_line, 4);
     assert_eq!(export_line, 5);
     assert_eq!(
@@ -77,7 +77,7 @@ const load = async (url: string) => {
     assert_eq!(info.security_sinks.len(), 1);
     let sink = &info.security_sinks[0];
     let (line, _) =
-        fallow_types::extract::byte_offset_to_line_col(&info.line_offsets, sink.span_start);
+        plow_types::extract::byte_offset_to_line_col(&info.line_offsets, sink.span_start);
     assert_eq!(line, 5);
     assert!(
         source[sink.span_start as usize..].starts_with("fetch(url)"),

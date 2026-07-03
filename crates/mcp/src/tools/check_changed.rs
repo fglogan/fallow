@@ -1,4 +1,4 @@
-use fallow_api::{
+use plow_api::{
     AnalysisOptions, DeadCodeFilters, DeadCodeOptions, run_dead_code,
     serialize_dead_code_programmatic_json,
 };

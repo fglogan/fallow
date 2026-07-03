@@ -24,7 +24,7 @@
 //! 2. **`unresolved-catalog-references`**: the inverse. A `package.json`
 //!    references a `catalog:` or `catalog:<name>` that does not declare the
 //!    consumed package. `pnpm install` errors with
-//!    the package manager install; fallow surfaces this statically before any
+//!    the package manager install; plow surfaces this statically before any
 //!    install runs. Each finding carries
 //!    `available_in_catalogs`: other catalogs in the same workspace that DO
 //!    declare the package, so consumers can flip the reference instead of
@@ -37,11 +37,11 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_config::{
+use plow_config::{
     CompiledIgnoreCatalogReferenceRule, PackageJson, PnpmCatalogData, ResolvedConfig,
     WorkspaceInfo, parse_package_json_catalog_data, parse_pnpm_catalog_data,
 };
-use fallow_types::results::{EmptyCatalogGroup, UnresolvedCatalogReference, UnusedCatalogEntry};
+use plow_types::results::{EmptyCatalogGroup, UnresolvedCatalogReference, UnusedCatalogEntry};
 use rustc_hash::FxHashSet;
 
 const PNPM_WORKSPACE_FILE: &str = "pnpm-workspace.yaml";
@@ -92,7 +92,7 @@ pub fn gather_pnpm_catalog_state(
 /// workspace `package.json` via the `catalog:` protocol.
 #[deprecated(
     since = "2.76.0",
-    note = "fallow_core is internal; use fallow_api::run_dead_code for typed output; serialize with fallow_api::serialize_dead_code_programmatic_json for JSON output. See docs/fallow-core-migration.md and ADR-008."
+    note = "plow_core is internal; use plow_api::run_dead_code for typed output; serialize with plow_api::serialize_dead_code_programmatic_json for JSON output. See docs/plow-core-migration.md and ADR-008."
 )]
 pub fn find_unused_catalog_entries(state: &PnpmCatalogState) -> Vec<UnusedCatalogEntry> {
     if state.data.catalogs.is_empty() {
@@ -136,7 +136,7 @@ pub fn find_unused_catalog_entries(state: &PnpmCatalogState) -> Vec<UnusedCatalo
 /// intentionally ignored.
 #[deprecated(
     since = "2.76.0",
-    note = "fallow_core is internal; use fallow_api::run_dead_code for typed output; serialize with fallow_api::serialize_dead_code_programmatic_json for JSON output. See docs/fallow-core-migration.md and ADR-008."
+    note = "plow_core is internal; use plow_api::run_dead_code for typed output; serialize with plow_api::serialize_dead_code_programmatic_json for JSON output. See docs/plow-core-migration.md and ADR-008."
 )]
 pub fn find_empty_catalog_groups(state: &PnpmCatalogState) -> Vec<EmptyCatalogGroup> {
     state
@@ -162,7 +162,7 @@ pub fn find_empty_catalog_groups(state: &PnpmCatalogState) -> Vec<EmptyCatalogGr
 /// Findings matching any rule in `ignore_rules` are suppressed.
 #[deprecated(
     since = "2.76.0",
-    note = "fallow_core is internal; use fallow_api::run_dead_code for typed output; serialize with fallow_api::serialize_dead_code_programmatic_json for JSON output. See docs/fallow-core-migration.md and ADR-008."
+    note = "plow_core is internal; use plow_api::run_dead_code for typed output; serialize with plow_api::serialize_dead_code_programmatic_json for JSON output. See docs/plow-core-migration.md and ADR-008."
 )]
 pub fn find_unresolved_catalog_references(
     state: &PnpmCatalogState,

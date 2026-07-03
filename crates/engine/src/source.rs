@@ -1,11 +1,11 @@
 //! Source parsing contracts owned by the engine boundary.
 
-use fallow_types::discover::DiscoveredFile;
+use plow_types::discover::DiscoveredFile;
 #[cfg(test)]
-pub use fallow_types::extract::{ExportName, MemberKind, VisibilityTag};
-pub use fallow_types::extract::{ModuleInfo, ParseResult};
+pub use plow_types::extract::{ExportName, MemberKind, VisibilityTag};
+pub use plow_types::extract::{ModuleInfo, ParseResult};
 
-type CacheStore = fallow_extract::cache::CacheStore;
+type CacheStore = plow_extract::cache::CacheStore;
 
 /// Source inventory walking for coverage and upload surfaces.
 pub mod inventory {
@@ -34,8 +34,8 @@ pub mod inventory {
         pub source_hash: String,
     }
 
-    impl From<fallow_extract::inventory::InventoryEntry> for InventoryEntry {
-        fn from(entry: fallow_extract::inventory::InventoryEntry) -> Self {
+    impl From<plow_extract::inventory::InventoryEntry> for InventoryEntry {
+        fn from(entry: plow_extract::inventory::InventoryEntry) -> Self {
             Self {
                 name: entry.name,
                 line: entry.line,
@@ -56,8 +56,8 @@ pub mod inventory {
         pub cognitive: u16,
     }
 
-    impl From<fallow_extract::inventory::InventoryComplexity> for InventoryComplexity {
-        fn from(complexity: fallow_extract::inventory::InventoryComplexity) -> Self {
+    impl From<plow_extract::inventory::InventoryComplexity> for InventoryComplexity {
+        fn from(complexity: plow_extract::inventory::InventoryComplexity) -> Self {
             Self {
                 cyclomatic: complexity.cyclomatic,
                 cognitive: complexity.cognitive,
@@ -68,7 +68,7 @@ pub mod inventory {
     /// Walk source and emit engine-owned function inventory entries.
     #[must_use]
     pub fn walk_source(path: &Path, source: &str) -> Vec<InventoryEntry> {
-        fallow_extract::inventory::walk_source(path, source)
+        plow_extract::inventory::walk_source(path, source)
             .into_iter()
             .map(InventoryEntry::from)
             .collect()
@@ -81,7 +81,7 @@ pub mod inventory {
         source: &str,
     ) -> (Vec<InventoryEntry>, FxHashMap<String, InventoryComplexity>) {
         let (entries, complexity) =
-            fallow_extract::inventory::walk_source_with_complexity(path, source);
+            plow_extract::inventory::walk_source_with_complexity(path, source);
         let entries = entries.into_iter().map(InventoryEntry::from).collect();
         let complexity = complexity
             .into_iter()
@@ -102,5 +102,5 @@ pub fn parse_all_files(
     cache: Option<&CacheStore>,
     need_complexity: bool,
 ) -> ParseResult {
-    fallow_extract::parse_all_files(files, cache, need_complexity)
+    plow_extract::parse_all_files(files, cache, need_complexity)
 }

@@ -30,7 +30,7 @@ use std::path::Path;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_types::extract::{ComponentFunction, ComponentProp, ModuleInfo, RenderEdge};
+use plow_types::extract::{ComponentFunction, ComponentProp, ModuleInfo, RenderEdge};
 
 use crate::discover::FileId;
 use crate::graph::ModuleGraph;

@@ -55,8 +55,8 @@ fn vscode_provider_interface_methods_are_framework_used() {
     );
 
     let mut config = create_config(root.to_path_buf());
-    config.rules.unused_class_members = fallow_config::Severity::Error;
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    config.rules.unused_class_members = plow_config::Severity::Error;
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused: Vec<String> = results
         .unused_class_members
         .iter()

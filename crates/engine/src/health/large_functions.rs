@@ -5,7 +5,7 @@
 /// Only populated when `very_high_risk >= 3%` in the unit size profile. Sorted
 /// by line count descending.
 pub(super) struct LargeFunctionInput<'a> {
-    pub(super) vital_signs: &'a fallow_output::VitalSigns,
+    pub(super) vital_signs: &'a plow_output::VitalSigns,
     pub(super) modules: &'a [crate::source::ModuleInfo],
     pub(super) file_paths:
         &'a rustc_hash::FxHashMap<crate::discover::FileId, &'a std::path::PathBuf>,
@@ -17,7 +17,7 @@ pub(super) struct LargeFunctionInput<'a> {
 
 pub(super) fn collect_large_functions(
     input: &LargeFunctionInput<'_>,
-) -> Vec<fallow_output::LargeFunctionEntry> {
+) -> Vec<plow_output::LargeFunctionEntry> {
     let dominated = input
         .vital_signs
         .unit_size_profile
@@ -48,7 +48,7 @@ pub(super) fn collect_large_functions(
         }
         for func in &module.complexity {
             if func.line_count > 60 {
-                entries.push(fallow_output::LargeFunctionEntry {
+                entries.push(plow_output::LargeFunctionEntry {
                     path: path.clone(),
                     name: func.name.clone(),
                     line: func.line,

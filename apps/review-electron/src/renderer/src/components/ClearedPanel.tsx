@@ -15,9 +15,9 @@ export const ClearedPanel = ({ cleared }: { cleared: ClearedItem[] }) => {
         className="flex w-full items-center gap-1.5 rounded-md border border-border bg-muted/30 px-2.5 py-2 text-xs text-muted-foreground outline-none transition-colors hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring/60"
       >
         {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
-        <CheckCircle2 className="size-3.5 text-fallow-green" />
+        <CheckCircle2 className="size-3.5 text-plow-green" />
         <span>
-          fallow handled <span className="font-mono tabular-nums text-foreground">{total}</span>{" "}
+          plow handled <span className="font-mono tabular-nums text-foreground">{total}</span>{" "}
           technical items
         </span>
       </button>

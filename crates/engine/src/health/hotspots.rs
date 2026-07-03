@@ -4,7 +4,7 @@
 )]
 
 use crate::error::emit_error;
-use fallow_output::{FileHealthScore, HotspotEntry, HotspotSummary};
+use plow_output::{FileHealthScore, HotspotEntry, HotspotSummary};
 
 use super::HealthOptions;
 use super::ownership::{OwnershipContext, compile_bot_globs, compute_ownership};
@@ -183,7 +183,7 @@ pub(super) fn compute_hotspot_score(
 /// Compute hotspot entries by combining pre-fetched churn data with file health scores.
 pub(super) fn compute_hotspots(
     opts: &HealthOptions<'_>,
-    config: &fallow_config::ResolvedConfig,
+    config: &plow_config::ResolvedConfig,
     file_scores: &[FileHealthScore],
     ignore_set: &globset::GlobSet,
     ws_roots: Option<&[std::path::PathBuf]>,
@@ -267,7 +267,7 @@ fn warn_shallow_clone(opts: &HealthOptions<'_>, shallow_clone: bool) {
 /// Compile the bot-author glob set for ownership analysis, warning on a bad pattern.
 fn load_ownership_bot_globs(
     opts: &HealthOptions<'_>,
-    ownership_cfg: &fallow_config::OwnershipConfig,
+    ownership_cfg: &plow_config::OwnershipConfig,
 ) -> Option<globset::GlobSet> {
     opts.ownership.then(|| {
         compile_bot_globs(&ownership_cfg.bot_patterns).unwrap_or_else(|e| {

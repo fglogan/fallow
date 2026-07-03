@@ -5,13 +5,13 @@ import { cn } from "@/lib/utils";
 
 const verdictTone = (v: string): string =>
   v === "fail"
-    ? "border-fallow-red/30 bg-fallow-red/10 text-fallow-red"
+    ? "border-plow-red/30 bg-plow-red/10 text-plow-red"
     : v === "pass"
-      ? "border-fallow-green/30 bg-fallow-green/10 text-fallow-green"
+      ? "border-plow-green/30 bg-plow-green/10 text-plow-green"
       : "border-border bg-muted text-muted-foreground";
 
 const riskTone = (r: string): string =>
-  r === "high" ? "text-fallow-red" : r === "medium" ? "text-fallow-amber" : "text-fallow-green";
+  r === "high" ? "text-plow-red" : r === "medium" ? "text-plow-amber" : "text-plow-green";
 
 const Stat = ({
   label,

@@ -5,7 +5,7 @@
 use oxc_ast::ast::*;
 use oxc_span::GetSpan;
 
-use fallow_types::extract::TaintedBinding;
+use plow_types::extract::TaintedBinding;
 
 use super::super::{ModuleInfoExtractor, extract_destructured_names};
 use super::{

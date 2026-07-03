@@ -1,4 +1,4 @@
-//! Git-aware "changed files" filtering shared between fallow-cli and fallow-lsp.
+//! Git-aware "changed files" filtering shared between plow-cli and plow-lsp.
 //!
 //! Provides:
 //! - [`validate_git_ref`] for input validation at trust boundaries.
@@ -24,7 +24,7 @@ use crate::results::{
     AnalysisResults, CircularDependencyFinding, DuplicateExportFinding, DuplicatePropShapeFinding,
     ReExportCycleFinding, SecurityFinding, UnlistedDependencyFinding,
 };
-use fallow_types::output_dead_code::PropDrillingChainFinding;
+use plow_types::output_dead_code::PropDrillingChainFinding;
 
 /// Function pointer signature used by `set_spawn_hook` to intercept the
 /// short-running `git rev-parse` / `git diff` / `git ls-files` subprocesses
@@ -322,7 +322,7 @@ pub fn try_get_changed_files_with_toplevel(
 /// emitting a green gate: a diff it could not compute must NEVER read as "no new
 /// sinks". `--relative` emits paths relative to `root` (rewriting the prefix to
 /// match the keys `DiffIndex` is queried with, `relative_to_diff_path(finding,
-/// root)`) and, when fallow runs in a monorepo subpackage, omits changes outside
+/// root)`) and, when plow runs in a monorepo subpackage, omits changes outside
 /// `root` from the output entirely; a sibling-package edit `git diff --relative`
 /// did emit would carry a `../...` path that `relative_to_diff_path` cannot strip
 /// (returns `None`), which is harmless because no findings exist for files
@@ -397,7 +397,7 @@ pub fn get_changed_files(root: &Path, git_ref: &str) -> Option<FxHashSet<PathBuf
 /// or graph-global (bind with underscore and document why).
 #[expect(
     clippy::implicit_hasher,
-    reason = "fallow standardizes on FxHashSet across the workspace"
+    reason = "plow standardizes on FxHashSet across the workspace"
 )]
 pub fn filter_results_by_changed_files(
     results: &mut AnalysisResults,
@@ -855,7 +855,7 @@ fn recompute_duplication_stats(report: &DuplicationReport) -> DuplicationStats {
 /// correctly-scoped numbers.
 #[expect(
     clippy::implicit_hasher,
-    reason = "fallow standardizes on FxHashSet across the workspace"
+    reason = "plow standardizes on FxHashSet across the workspace"
 )]
 pub fn filter_duplication_by_changed_files(
     report: &mut DuplicationReport,
@@ -883,12 +883,12 @@ mod tests {
         SecurityFindingKind, SecurityUnresolvedCalleeDiagnostic, TraceHop, TraceHopRole,
         UnusedExport, UnusedFile,
     };
-    use fallow_types::extract::{SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason};
-    use fallow_types::output_dead_code::{
+    use plow_types::extract::{SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason};
+    use plow_types::output_dead_code::{
         BoundaryViolationFinding, CircularDependencyFinding, EmptyCatalogGroupFinding,
         UnusedExportFinding, UnusedFileFinding,
     };
-    use fallow_types::results::{SecurityReachability, SecuritySeverity};
+    use plow_types::results::{SecurityReachability, SecuritySeverity};
 
     #[test]
     fn changed_files_error_describe_variants() {
@@ -915,7 +915,7 @@ mod tests {
 
     #[test]
     fn augment_git_failed_appends_shallow_clone_hint_for_unknown_revision() {
-        let stderr = "fatal: ambiguous argument 'fallow-baseline...HEAD': unknown revision or path not in the working tree.";
+        let stderr = "fatal: ambiguous argument 'plow-baseline...HEAD': unknown revision or path not in the working tree.";
         let described = ChangedFilesError::GitFailed(stderr.to_owned()).describe();
         assert!(described.contains(stderr), "original stderr preserved");
         assert!(
@@ -943,10 +943,7 @@ mod tests {
 
     #[test]
     fn validate_git_ref_accepts_baseline_tag() {
-        assert_eq!(
-            validate_git_ref("fallow-baseline").unwrap(),
-            "fallow-baseline"
-        );
+        assert_eq!(validate_git_ref("plow-baseline").unwrap(), "plow-baseline");
     }
 
     #[test]
@@ -993,7 +990,7 @@ mod tests {
 
     #[test]
     fn validate_git_ref_rejects_option_like_ref() {
-        assert!(validate_git_ref("--output=/tmp/fallow-proof").is_err());
+        assert!(validate_git_ref("--output=/tmp/plow-proof").is_err());
     }
 
     #[test]
@@ -1072,7 +1069,7 @@ mod tests {
     fn filter_results_preserves_dependency_level_issues() {
         let mut results = AnalysisResults::default();
         results.unused_dependencies.push(
-            fallow_types::output_dead_code::UnusedDependencyFinding::with_actions(
+            plow_types::output_dead_code::UnusedDependencyFinding::with_actions(
                 crate::results::UnusedDependency {
                     package_name: "lodash".into(),
                     location: crate::results::DependencyLocation::Dependencies,
@@ -1160,7 +1157,7 @@ mod tests {
         let mut results = AnalysisResults::default();
         results.security_findings.push(SecurityFinding {
             finding_id: String::new(),
-            candidate: fallow_types::results::SecurityCandidate::default(),
+            candidate: plow_types::results::SecurityCandidate::default(),
             taint_flow: None,
             attack_surface: None,
             kind: SecurityFindingKind::ClientServerLeak,
@@ -1206,7 +1203,7 @@ mod tests {
         let mut results = AnalysisResults::default();
         results.security_findings.push(SecurityFinding {
             finding_id: String::new(),
-            candidate: fallow_types::results::SecurityCandidate::default(),
+            candidate: plow_types::results::SecurityCandidate::default(),
             taint_flow: None,
             attack_surface: None,
             kind: SecurityFindingKind::TaintedSink,
@@ -1225,7 +1222,7 @@ mod tests {
             reachability: Some(SecurityReachability {
                 reachable_from_entry: false,
                 reachable_from_untrusted_source: true,
-                taint_confidence: Some(fallow_types::results::TaintConfidence::ModuleLevel),
+                taint_confidence: Some(plow_types::results::TaintConfidence::ModuleLevel),
                 untrusted_source_hop_count: Some(1),
                 untrusted_source_trace: vec![
                     TraceHop {
@@ -1431,7 +1428,7 @@ mod tests {
         std::fs::write(repo.join("seed.txt"), "seed\n").unwrap();
         run_git(repo, &["add", "seed.txt"]);
         run_git(repo, &["commit", "--quiet", "-m", "initial"]);
-        run_git(repo, &["tag", "fallow-baseline"]);
+        run_git(repo, &["tag", "plow-baseline"]);
         dunce::canonicalize(repo).unwrap()
     }
 
@@ -1457,7 +1454,7 @@ mod tests {
         std::fs::create_dir_all(repo.join("src")).unwrap();
         std::fs::write(repo.join("src/new.ts"), "export const x = 1;\n").unwrap();
 
-        let changed = try_get_changed_files(&repo, "fallow-baseline").unwrap();
+        let changed = try_get_changed_files(&repo, "plow-baseline").unwrap();
 
         let expected = repo.join("src/new.ts");
         assert!(
@@ -1481,7 +1478,7 @@ mod tests {
         std::fs::create_dir_all(frontend.join("src")).unwrap();
         std::fs::write(frontend.join("src/new.ts"), "export const x = 1;\n").unwrap();
 
-        let changed = try_get_changed_files(&frontend, "fallow-baseline").unwrap();
+        let changed = try_get_changed_files(&frontend, "plow-baseline").unwrap();
 
         let expected = repo.join("frontend/src/new.ts");
         assert!(
@@ -1522,7 +1519,7 @@ mod tests {
         let frontend = repo.join("frontend");
         std::fs::create_dir_all(&frontend).unwrap();
 
-        let changed = try_get_changed_files(&frontend, "fallow-baseline").unwrap();
+        let changed = try_get_changed_files(&frontend, "plow-baseline").unwrap();
 
         let expected = repo.join("backend/server.py");
         assert!(
@@ -1543,10 +1540,10 @@ mod tests {
         std::fs::write(frontend.join("src/old.ts"), "export const x = 1;\n").unwrap();
         run_git(&repo, &["add", "."]);
         run_git(&repo, &["commit", "--quiet", "-m", "add old"]);
-        run_git(&repo, &["tag", "fallow-baseline-v2"]);
+        run_git(&repo, &["tag", "plow-baseline-v2"]);
         std::fs::write(frontend.join("src/old.ts"), "export const x = 2;\n").unwrap();
 
-        let changed = try_get_changed_files(&frontend, "fallow-baseline-v2").unwrap();
+        let changed = try_get_changed_files(&frontend, "plow-baseline-v2").unwrap();
 
         let expected = repo.join("frontend/src/old.ts");
         assert!(

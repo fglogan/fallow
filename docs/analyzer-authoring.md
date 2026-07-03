@@ -7,14 +7,14 @@ framework-specific rule.
 
 Pick the public identity before writing detection code:
 
-- `rule_id`: the stable output rule id, usually `fallow/<code>`.
+- `rule_id`: the stable output rule id, usually `plow/<code>`.
 - `code`: the stable issue code in JSON, SARIF, LSP diagnostics, and suppressions.
 - `rules` key: the config key users set to `error`, `warn`, or `off`.
-- suppression token: the token after `// fallow-ignore-next-line` or `// fallow-ignore-file`.
-- filter flag: only when `fallow dead-code` needs a dedicated selector.
+- suppression token: the token after `// plow-ignore-next-line` or `// plow-ignore-file`.
+- filter flag: only when `plow dead-code` needs a dedicated selector.
 - result key: the `AnalysisResults` array that carries the finding in JSON, if any.
 - count policy: whether that result key contributes to `total_issues()`.
-- docs anchor: where `fallow explain` and output formats should point users.
+- docs anchor: where `plow explain` and output formats should point users.
 
 Common contract facts live in `crates/types/src/issue_meta.rs`. Add the row
 there first when the finding has a stable issue code, LSP diagnostic code,
@@ -39,7 +39,7 @@ Use this as the default map for a new finding:
 - `crates/types/src/suppress.rs`: add an `IssueKind` only when the finding is suppressible or must persist in cache-facing data.
 - `crates/types/src/issue_meta.rs`: add shared code, aliases, labels, config key, filter flag, result key, count policy, MCP selector, suppression token, and LSP exposure.
 - `crates/config/src/config/rules.rs`: add the rule severity field, aliases, defaults, and unknown-key suggestions.
-- `crates/cli/src/explain.rs`: add the `RuleDef`, docs path, guide text, and aliases for `fallow explain`.
+- `crates/cli/src/explain.rs`: add the `RuleDef`, docs path, guide text, and aliases for `plow explain`.
 - Analyzer code: keep extraction, graph facts, and reporting changes in the narrowest crate that already owns that stage.
 - Output formats: verify human, JSON, SARIF, Code Climate, compact, markdown, GitHub, and GitLab consumers when the finding is user visible.
 - Total counts: if a new serialized `AnalysisResults` array contributes to `total_issues()`, add it to `TOTAL_ISSUE_RESULT_KEYS` and set the metadata row's `counts_in_total`. If the array is advisory, keep `counts_in_total` false so schema consumers know not to gate PR summary surfaces on it.

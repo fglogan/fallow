@@ -2,10 +2,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Instant, SystemTime};
 
-use fallow_config::AuditGate;
-use fallow_engine::clear_ambient_git_env;
-use fallow_output::build_audit_next_steps;
-use fallow_types::output::NextStep;
+use plow_config::AuditGate;
+use plow_engine::clear_ambient_git_env;
+use plow_output::build_audit_next_steps;
+use plow_types::output::NextStep;
 use rustc_hash::FxHashSet;
 
 use crate::{
@@ -85,11 +85,10 @@ pub fn run_audit(options: &AuditOptions) -> ProgrammaticResult<AuditProgrammatic
 }
 
 fn validate_audit_api_options(options: &AuditOptions) -> ProgrammaticResult<()> {
-    if let Err(err) =
-        fallow_engine::validate_coverage_root_absolute(options.coverage_root.as_deref())
+    if let Err(err) = plow_engine::validate_coverage_root_absolute(options.coverage_root.as_deref())
     {
         return Err(ProgrammaticError::new(err, 2)
-            .with_code("FALLOW_INVALID_COVERAGE_ROOT")
+            .with_code("PLOW_INVALID_COVERAGE_ROOT")
             .with_context("audit.coverageRoot"));
     }
     if options.runtime_coverage.is_some() {
@@ -97,7 +96,7 @@ fn validate_audit_api_options(options: &AuditOptions) -> ProgrammaticResult<()> 
             "programmatic audit does not yet support runtime coverage; use the CLI path",
             2,
         )
-        .with_code("FALLOW_AUDIT_RUNTIME_COVERAGE_UNSUPPORTED")
+        .with_code("PLOW_AUDIT_RUNTIME_COVERAGE_UNSUPPORTED")
         .with_context("audit.runtimeCoverage"));
     }
     Ok(())
@@ -124,9 +123,9 @@ pub(super) fn resolve_audit_base_ref(
         });
     }
     if let Some(env_ref) = audit_base_env_override() {
-        validate_git_ref(&env_ref, "FALLOW_AUDIT_BASE")?;
+        validate_git_ref(&env_ref, "PLOW_AUDIT_BASE")?;
         return Ok(ResolvedAuditBase {
-            description: Some(format!("FALLOW_AUDIT_BASE={env_ref}")),
+            description: Some(format!("PLOW_AUDIT_BASE={env_ref}")),
             git_ref: env_ref,
         });
     }
@@ -140,7 +139,7 @@ pub(super) fn resolve_audit_base_ref(
             "could not detect base branch. Set audit.base to specify the comparison target",
             2,
         )
-        .with_code("FALLOW_AUDIT_BASE_NOT_FOUND")
+        .with_code("PLOW_AUDIT_BASE_NOT_FOUND")
         .with_context("audit.base")
     })
 }
@@ -398,7 +397,7 @@ fn compute_base_snapshot(
         .analysis
         .config_path
         .clone()
-        .or_else(|| fallow_config::FallowConfig::find_config_path(&current_root));
+        .or_else(|| plow_config::PlowConfig::find_config_path(&current_root));
     let base_analysis = AnalysisOptions {
         root: Some(base_root),
         config_path: current_config_path,
@@ -418,7 +417,7 @@ fn analysis_root_from_options(options: &AuditOptions) -> ProgrammaticResult<Path
                 format!("failed to resolve current working directory: {err}"),
                 2,
             )
-            .with_code("FALLOW_CWD_UNAVAILABLE")
+            .with_code("PLOW_CWD_UNAVAILABLE")
             .with_context("analysis.root")
         }),
     }
@@ -449,7 +448,7 @@ impl BaseWorktree {
                 format!("could not create a temporary worktree for base ref `{base_ref}`: {err}"),
                 2,
             )
-            .with_code("FALLOW_AUDIT_BASE_WORKTREE_FAILED")
+            .with_code("PLOW_AUDIT_BASE_WORKTREE_FAILED")
             .with_context("audit.base")
         })?;
         if !output.status.success() {
@@ -460,7 +459,7 @@ impl BaseWorktree {
                 ),
                 2,
             )
-            .with_code("FALLOW_AUDIT_BASE_WORKTREE_FAILED")
+            .with_code("PLOW_AUDIT_BASE_WORKTREE_FAILED")
             .with_context("audit.base"));
         }
         Ok(Self {
@@ -496,12 +495,12 @@ fn base_worktree_path() -> ProgrammaticResult<PathBuf> {
         .duration_since(SystemTime::UNIX_EPOCH)
         .map_err(|err| {
             ProgrammaticError::new(format!("system clock before unix epoch: {err}"), 2)
-                .with_code("FALLOW_CLOCK_ERROR")
+                .with_code("PLOW_CLOCK_ERROR")
                 .with_context("audit.base")
         })?
         .as_nanos();
     Ok(std::env::temp_dir().join(format!(
-        "fallow-api-audit-base-{}-{nanos}",
+        "plow-api-audit-base-{}-{nanos}",
         std::process::id()
     )))
 }
@@ -526,7 +525,7 @@ fn audit_next_steps(
     dead_code: &crate::DeadCodeProgrammaticOutput,
     complexity: &crate::HealthProgrammaticOutput,
 ) -> Vec<NextStep> {
-    let input = fallow_output::build_audit_next_steps_input(
+    let input = plow_output::build_audit_next_steps_input(
         Some((&dead_code.output.results, dead_code.root.as_path())),
         Some(&complexity.report),
         crate::next_steps::suggestions_enabled(),
@@ -535,17 +534,17 @@ fn audit_next_steps(
 }
 
 fn validate_git_ref(value: &str, context: &'static str) -> ProgrammaticResult<()> {
-    fallow_engine::validate::validate_git_ref(value)
+    plow_engine::validate::validate_git_ref(value)
         .map(|_| ())
         .map_err(|err| {
             ProgrammaticError::new(format!("invalid git ref `{value}`: {err}"), 2)
-                .with_code("FALLOW_INVALID_GIT_REF")
+                .with_code("PLOW_INVALID_GIT_REF")
                 .with_context(context)
         })
 }
 
 fn audit_base_env_override() -> Option<String> {
-    std::env::var("FALLOW_AUDIT_BASE")
+    std::env::var("PLOW_AUDIT_BASE")
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
@@ -642,7 +641,7 @@ fn get_head_sha(root: &Path) -> Option<String> {
 mod tests {
     use std::process::Command;
 
-    use fallow_config::AuditGate;
+    use plow_config::AuditGate;
 
     use super::*;
 

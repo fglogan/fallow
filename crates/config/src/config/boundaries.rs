@@ -71,7 +71,7 @@ pub struct InvalidForbiddenCallee {
     pub reason: String,
 }
 
-/// Validation error from `FallowConfig::validate_resolved_boundaries`.
+/// Validation error from `PlowConfig::validate_resolved_boundaries`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ZoneValidationError {
     /// A rule references an undefined zone.
@@ -106,7 +106,7 @@ impl fmt::Display for ZoneValidationError {
             ),
             Self::RedundantRootPrefix(err) => write!(
                 f,
-                "FALLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX: zone '{}': pattern '{}' starts with the zone root '{}'. Patterns are now resolved relative to root; remove the redundant prefix from the pattern.",
+                "PLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX: zone '{}': pattern '{}' starts with the zone root '{}'. Patterns are now resolved relative to root; remove the redundant prefix from the pattern.",
                 err.zone_name, err.pattern, err.root,
             ),
         }
@@ -2805,7 +2805,7 @@ callee = ["console.*"]
         assert_eq!(errors[0].root, "packages/app/");
         let rendered = ZoneValidationError::RedundantRootPrefix(errors[0].clone()).to_string();
         assert!(
-            rendered.contains("FALLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX"),
+            rendered.contains("PLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX"),
             "Display should carry legacy tag: {rendered}"
         );
         assert!(

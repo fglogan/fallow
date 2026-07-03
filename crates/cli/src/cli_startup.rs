@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::Parser;
-use fallow_engine::validate;
+use plow_engine::validate;
 
 use crate::cli_format::{Format, FormatConfig, format_from_env, parse_format_arg, resolve_format};
 use crate::cli_telemetry::{TelemetryRun, record_run_epilogue};
@@ -48,7 +48,7 @@ pub fn setup_tracing() {
 
 pub fn validate_inputs(
     cli: &Cli,
-    output: fallow_config::OutputFormat,
+    output: plow_config::OutputFormat,
 ) -> Result<(PathBuf, usize), ExitCode> {
     validate_input_flags(cli, output)?;
     let root = resolve_validated_root(cli, output)?;
@@ -65,7 +65,7 @@ pub fn validate_inputs(
 
 /// Reject unsupported security globals, control characters in path-shaped flags,
 /// and the `--workspace`/`--changed-workspaces` mutual exclusion.
-fn validate_input_flags(cli: &Cli, output: fallow_config::OutputFormat) -> Result<(), ExitCode> {
+fn validate_input_flags(cli: &Cli, output: plow_config::OutputFormat) -> Result<(), ExitCode> {
     let validation_failure = |message: &str| {
         emit_known_failure(message, 2, output, telemetry::FailureReason::Validation)
     };
@@ -74,7 +74,7 @@ fn validate_input_flags(cli: &Cli, output: fallow_config::OutputFormat) -> Resul
         && let Some(flag) = crate::unsupported_security_global(cli)
     {
         return Err(validation_failure(&format!(
-            "{flag} is not valid with `fallow security`."
+            "{flag} is not valid with `plow security`."
         )));
     }
 
@@ -116,7 +116,7 @@ fn validate_input_flags(cli: &Cli, output: fallow_config::OutputFormat) -> Resul
 /// Resolve `--root` (or cwd), then validate it as an analysis root.
 fn resolve_validated_root(
     cli: &Cli,
-    output: fallow_config::OutputFormat,
+    output: plow_config::OutputFormat,
 ) -> Result<PathBuf, ExitCode> {
     let raw_root = if let Some(root) = cli.root.clone() {
         root
@@ -135,7 +135,7 @@ fn resolve_validated_root(
 }
 
 /// Validate `--changed-since` / `--changed-workspaces` as well-formed git refs.
-fn validate_input_git_refs(cli: &Cli, output: fallow_config::OutputFormat) -> Result<(), ExitCode> {
+fn validate_input_git_refs(cli: &Cli, output: plow_config::OutputFormat) -> Result<(), ExitCode> {
     let validation_failure = |message: &str| {
         emit_known_failure(message, 2, output, telemetry::FailureReason::Validation)
     };
@@ -158,9 +158,9 @@ fn validate_input_git_refs(cli: &Cli, output: fallow_config::OutputFormat) -> Re
 }
 
 /// Find the first positional (non-flag) token in argv, which is the invoked
-/// subcommand name. Skips global flags and their values so `fallow --root /p
+/// subcommand name. Skips global flags and their values so `plow --root /p
 /// review` still resolves to `review`. Returns `None` when there is no
-/// positional token (bare `fallow`, or only flags).
+/// positional token (bare `plow`, or only flags).
 fn first_subcommand_token<I>(args: I) -> Option<String>
 where
     I: IntoIterator<Item = String>,
@@ -250,7 +250,7 @@ fn raw_args_invoked_review_alias() -> bool {
 
 fn warn_legacy_check_alias_if_needed(used_legacy_check_alias: bool, quiet: bool) {
     if used_legacy_check_alias && !quiet {
-        eprintln!("fallow: `check` is deprecated; use `dead-code` instead.");
+        eprintln!("plow: `check` is deprecated; use `dead-code` instead.");
     }
 }
 
@@ -284,7 +284,7 @@ pub fn parse_cli_args() -> Result<(Cli, FormatConfig), ExitCode> {
 pub fn run_pre_dispatch_checks(
     cli: &Cli,
     root: &Path,
-    output: fallow_config::OutputFormat,
+    output: plow_config::OutputFormat,
     quiet: bool,
     telemetry_run: TelemetryRun,
 ) -> Result<regression::Tolerance, ExitCode> {
@@ -328,12 +328,12 @@ fn handle_cli_parse_error(err: &clap::Error) -> ExitCode {
 
     if matches!(
         parse_error_output_format(std::env::args_os().skip(1)),
-        fallow_config::OutputFormat::Json
+        plow_config::OutputFormat::Json
     ) {
         return crate::error::emit_error(
             err.to_string().trim(),
             exit_code,
-            fallow_config::OutputFormat::Json,
+            plow_config::OutputFormat::Json,
         );
     }
 
@@ -341,7 +341,7 @@ fn handle_cli_parse_error(err: &clap::Error) -> ExitCode {
     ExitCode::from(exit_code)
 }
 
-fn parse_error_output_format<I, S>(args: I) -> fallow_config::OutputFormat
+fn parse_error_output_format<I, S>(args: I) -> plow_config::OutputFormat
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
@@ -381,7 +381,7 @@ pub fn cli_has_bare_coverage_input(cli: &Cli) -> bool {
 }
 
 pub fn bare_coverage_subcommand_error_message() -> &'static str {
-    "`--coverage` and `--coverage-root` are bare combined-mode flags. Use `fallow health --coverage <coverage-final.json>` for standalone health analysis, or omit the subcommand to run combined mode."
+    "`--coverage` and `--coverage-root` are bare combined-mode flags. Use `plow health --coverage <coverage-final.json>` for standalone health analysis, or omit the subcommand to run combined mode."
 }
 
 fn command_rejects_output_gate(command: Option<&Command>) -> bool {
@@ -429,7 +429,7 @@ fn global_filter_error(cli: &Cli) -> Option<&'static str> {
 
 fn parse_cli_tolerance(
     cli: &Cli,
-    output: fallow_config::OutputFormat,
+    output: plow_config::OutputFormat,
 ) -> Result<regression::Tolerance, ExitCode> {
     regression::Tolerance::parse(&cli.tolerance).map_err(|e| {
         emit_known_failure(
@@ -444,7 +444,7 @@ fn parse_cli_tolerance(
 fn init_cli_diff_filter(
     cli: &Cli,
     root: &Path,
-    output: fallow_config::OutputFormat,
+    output: plow_config::OutputFormat,
     quiet: bool,
 ) -> Result<(), ExitCode> {
     let diff_source = report::ci::diff_filter::resolve_diff_source(
@@ -455,7 +455,7 @@ fn init_cli_diff_filter(
     .map_err(|msg| emit_known_failure(&msg, 2, output, telemetry::FailureReason::Diff))?;
     if diff_source.is_some() && cli.changed_since.is_some() && !quiet {
         eprintln!(
-            "fallow: --diff-file precedes --changed-since for line-level \
+            "plow: --diff-file precedes --changed-since for line-level \
              filtering; --changed-since still scopes file discovery. Drop \
              one of them to disable this combination."
         );
@@ -476,18 +476,18 @@ mod tests {
     #[test]
     fn legacy_check_alias_detection_ignores_option_values() {
         assert!(args_use_legacy_check_alias(vec![
-            "fallow".to_string(),
+            "plow".to_string(),
             "check".to_string(),
             "--summary".to_string(),
         ]));
         assert!(!args_use_legacy_check_alias(vec![
-            "fallow".to_string(),
+            "plow".to_string(),
             "--root".to_string(),
             "check".to_string(),
             "dead-code".to_string(),
         ]));
         assert!(!args_use_legacy_check_alias(vec![
-            "fallow".to_string(),
+            "plow".to_string(),
             "dead-code".to_string(),
             "--file".to_string(),
             "check".to_string(),

@@ -1,7 +1,7 @@
 /**
  * W1 render model: a surface-agnostic, structured walkthrough document derived
- * from `fallow review --format json` (kind: audit-brief). Renderable by any
- * surface (Electron renderer, CLI, web). Every element traces to a Fallow signal.
+ * from `plow review --format json` (kind: audit-brief). Renderable by any
+ * surface (Electron renderer, CLI, web). Every element traces to a Plow signal.
  */
 
 export type AttentionScore = {
@@ -27,7 +27,7 @@ export type WalkthroughStage = {
   files: WalkthroughFile[];
 };
 
-/** A consequential structural decision, anchored to a Fallow `signal_id`. */
+/** A consequential structural decision, anchored to a Plow `signal_id`. */
 export type Decision = {
   signalId: string;
   /** One of the SOLID-3 categories (coupling-boundary, public-api-contract, dependency). */
@@ -56,7 +56,7 @@ export type Decision = {
   raw: Record<string, unknown>;
 };
 
-/** One line in the "Fallow already did the technical pass" cleared panel. */
+/** One line in the "Plow already did the technical pass" cleared panel. */
 export type ClearedItem = {
   kind: string;
   label: string;

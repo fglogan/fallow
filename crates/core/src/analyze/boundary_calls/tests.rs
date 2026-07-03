@@ -1,11 +1,11 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::PathBuf;
 
-use fallow_config::{
-    BoundaryCallsConfig, BoundaryConfig, BoundaryCoverageConfig, BoundaryZone, FallowConfig,
-    ForbiddenCallRule, ForbiddenCallee, OutputFormat, ResolvedConfig, RulesConfig, Severity,
+use plow_config::{
+    BoundaryCallsConfig, BoundaryConfig, BoundaryCoverageConfig, BoundaryZone, ForbiddenCallRule,
+    ForbiddenCallee, OutputFormat, PlowConfig, ResolvedConfig, RulesConfig, Severity,
 };
-use fallow_types::extract::{CalleeUse, ImportInfo, ImportedName, ModuleInfo};
+use plow_types::extract::{CalleeUse, ImportInfo, ImportedName, ModuleInfo};
 
 use crate::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
 use crate::graph::ModuleGraph;
@@ -15,7 +15,7 @@ use crate::suppress::{Suppression, SuppressionContext};
 use super::find_boundary_call_violations;
 
 fn make_config(root: PathBuf, forbidden: Vec<ForbiddenCallRule>) -> ResolvedConfig {
-    FallowConfig {
+    PlowConfig {
         rules: RulesConfig {
             boundary_violation: Severity::Error,
             ..RulesConfig::default()

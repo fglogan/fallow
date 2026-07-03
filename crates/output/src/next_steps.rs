@@ -4,8 +4,8 @@
 //! ordering, capping, and read-only contracts once a caller has already decided
 //! which signals apply.
 
-use fallow_types::output::NextStep;
-use fallow_types::results::AnalysisResults;
+use plow_types::output::NextStep;
+use plow_types::results::AnalysisResults;
 use std::path::Path;
 
 use crate::HealthReport;
@@ -49,7 +49,7 @@ pub struct TraceUnusedExportInput {
     pub export_name: String,
 }
 
-/// Runtime-independent inputs for bare `fallow` combined next steps.
+/// Runtime-independent inputs for bare `plow` combined next steps.
 #[derive(Debug, Clone)]
 pub struct CombinedNextStepsInput<'a> {
     pub suggestions_enabled: bool,
@@ -126,7 +126,7 @@ pub fn impact_digest_summary(digest: ImpactDigestCounts) -> String {
     parts.join(", ")
 }
 
-/// Next-steps for standalone `fallow health`.
+/// Next-steps for standalone `plow health`.
 #[must_use]
 pub fn build_health_next_steps(input: HealthNextStepsInput) -> Vec<NextStep> {
     if !input.suggestions_enabled {
@@ -151,7 +151,7 @@ pub fn build_health_next_steps(input: HealthNextStepsInput) -> Vec<NextStep> {
     steps
 }
 
-/// Next-steps for standalone `fallow dead-code`.
+/// Next-steps for standalone `plow dead-code`.
 #[must_use]
 pub fn build_dead_code_next_steps(input: DeadCodeNextStepsInput<'_>) -> Vec<NextStep> {
     if !input.suggestions_enabled {
@@ -177,7 +177,7 @@ pub fn build_dead_code_next_steps(input: DeadCodeNextStepsInput<'_>) -> Vec<Next
     steps
 }
 
-/// Next-steps for standalone `fallow dupes`.
+/// Next-steps for standalone `plow dupes`.
 #[must_use]
 pub fn build_dupes_next_steps(input: DupesNextStepsInput<'_>) -> Vec<NextStep> {
     if !input.suggestions_enabled {
@@ -202,7 +202,7 @@ pub fn build_dupes_next_steps(input: DupesNextStepsInput<'_>) -> Vec<NextStep> {
     steps
 }
 
-/// Aggregated next-steps for bare `fallow` combined output.
+/// Aggregated next-steps for bare `plow` combined output.
 #[must_use]
 pub fn build_combined_next_steps(input: &CombinedNextStepsInput<'_>) -> Vec<NextStep> {
     if !input.suggestions_enabled {
@@ -233,7 +233,7 @@ pub fn build_combined_next_steps(input: &CombinedNextStepsInput<'_>) -> Vec<Next
     steps
 }
 
-/// Next-steps for `fallow audit`.
+/// Next-steps for `plow audit`.
 #[must_use]
 pub fn build_audit_next_steps(input: &AuditNextStepsInput) -> Vec<NextStep> {
     if !input.suggestions_enabled {
@@ -306,7 +306,7 @@ fn trace_unused_export_from_input(target: Option<&TraceUnusedExportInput>) -> Op
     Some(next_step(
         "trace-unused-export",
         format!(
-            "fallow dead-code --trace {}:{}",
+            "plow dead-code --trace {}:{}",
             target.path, target.export_name
         ),
         "verify an export is truly unused before deleting",
@@ -317,7 +317,7 @@ fn trace_clone(fingerprints: &[&str]) -> Option<NextStep> {
     let fingerprint = fingerprints.iter().copied().min()?;
     Some(next_step(
         "trace-clone",
-        format!("fallow dupes --trace {fingerprint}"),
+        format!("plow dupes --trace {fingerprint}"),
         "see sibling locations and an extract-function suggestion",
     ))
 }
@@ -346,8 +346,8 @@ fn setup_pointer(offer_setup: bool) -> Option<NextStep> {
     }
     Some(next_step(
         "setup",
-        "fallow schema".to_string(),
-        "fallow has no config here; the manifest lists guided-setup commands (agent guide, commit gate) to offer the user",
+        "plow schema".to_string(),
+        "plow has no config here; the manifest lists guided-setup commands (agent guide, commit gate) to offer the user",
     ))
 }
 
@@ -355,7 +355,7 @@ fn impact_digest_step(digest: Option<ImpactDigestCounts>) -> Option<NextStep> {
     let digest = digest?;
     Some(next_step(
         "impact-report",
-        "fallow impact".to_string(),
+        "plow impact".to_string(),
         &format!(
             "local value report: {}; share the non-zero numbers with the user",
             impact_digest_summary(digest)
@@ -369,7 +369,7 @@ fn complexity_breakdown(has_findings: bool) -> Option<NextStep> {
     }
     Some(next_step(
         "complexity-breakdown",
-        "fallow health --complexity-breakdown".to_string(),
+        "plow health --complexity-breakdown".to_string(),
         "see per-decision-point contributions for a hotspot",
     ))
 }
@@ -380,7 +380,7 @@ fn audit_changed(applicable: bool) -> Option<NextStep> {
     }
     Some(next_step(
         "audit-changed",
-        "fallow audit".to_string(),
+        "plow audit".to_string(),
         "gate only the files your branch changed (auto-detects the base)",
     ))
 }
@@ -389,7 +389,7 @@ fn scope_workspaces(workspace_ref: Option<&str>) -> Option<NextStep> {
     let reference = workspace_ref?;
     Some(next_step(
         "scope-workspaces",
-        format!("fallow dead-code --changed-workspaces {reference}"),
+        format!("plow dead-code --changed-workspaces {reference}"),
         "scope a monorepo run to the packages your branch touched",
     ))
 }
@@ -398,8 +398,8 @@ fn scope_workspaces(workspace_ref: Option<&str>) -> Option<NextStep> {
 mod tests {
     use super::*;
     use crate::{ComplexityViolation, ExceededThreshold, FindingSeverity, HealthFinding};
-    use fallow_types::output_dead_code::UnusedExportFinding;
-    use fallow_types::results::UnusedExport;
+    use plow_types::output_dead_code::UnusedExportFinding;
+    use plow_types::results::UnusedExport;
 
     fn digest(containment_count: usize, resolved_total: usize) -> ImpactDigestCounts {
         ImpactDigestCounts {
@@ -579,7 +579,7 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(ids, ["trace-unused-export", "complexity-breakdown"]);
-        assert_eq!(steps[0].command, "fallow dead-code --trace src/a.ts:alpha");
+        assert_eq!(steps[0].command, "plow dead-code --trace src/a.ts:alpha");
         for step in &steps {
             assert_valid(step);
         }
@@ -646,7 +646,7 @@ mod tests {
         let steps = build_dead_code_next_steps(dead_code_input(&results));
 
         assert_eq!(steps[0].id, "trace-unused-export");
-        assert_eq!(steps[0].command, "fallow dead-code --trace src/a.ts:alpha");
+        assert_eq!(steps[0].command, "plow dead-code --trace src/a.ts:alpha");
         assert_valid(&steps[0]);
     }
 
@@ -694,7 +694,7 @@ mod tests {
         let steps = build_dupes_next_steps(dupes_input(&fingerprints));
 
         assert_eq!(steps[0].id, "trace-clone");
-        assert_eq!(steps[0].command, "fallow dupes --trace dup:aaaaaaaa");
+        assert_eq!(steps[0].command, "plow dupes --trace dup:aaaaaaaa");
         assert_valid(&steps[0]);
     }
 

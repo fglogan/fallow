@@ -1,7 +1,7 @@
 //! Integration tests for framework entry-point sources (#879).
 
-use fallow_config::Severity;
-use fallow_core::results::{AnalysisResults, SecurityFinding, SecurityFindingKind};
+use plow_config::Severity;
+use plow_core::results::{AnalysisResults, SecurityFinding, SecurityFindingKind};
 
 use super::common::{create_config_with_rules, fixture_path};
 
@@ -10,7 +10,7 @@ fn analyze_fixture(name: &str) -> AnalysisResults {
     let config = create_config_with_rules(root, |rules| {
         rules.security_sink = Severity::Warn;
     });
-    fallow_core::analyze(&config).expect("analysis should succeed")
+    plow_core::analyze(&config).expect("analysis should succeed")
 }
 
 fn tainted_sink_at_line(results: &AnalysisResults, line: u32) -> &SecurityFinding {

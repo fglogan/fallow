@@ -1,6 +1,6 @@
 use crate::params::{TraceCloneParams, TraceDependencyParams, TraceExportParams, TraceFileParams};
 
-use fallow_api::{
+use plow_api::{
     AnalysisOptions, DuplicationMode, DuplicationOptions, TraceCloneOptions, TraceCloneTarget,
     TraceDependencyOptions, TraceExportOptions, TraceFileOptions, run_trace_clone,
     run_trace_dependency, run_trace_export, run_trace_file,

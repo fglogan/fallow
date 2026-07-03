@@ -4,7 +4,7 @@ use super::common::{create_config, fixture_path};
 fn angular_external_template_credits_inherited_and_di_injected_members() {
     let root = fixture_path("angular-template-inherited-members");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused: Vec<(&str, &str)> = results
         .unused_class_members
@@ -53,7 +53,7 @@ fn angular_external_template_credits_inherited_and_di_injected_members() {
 fn angular_at_if_alias_credits_condition_member() {
     let root = fixture_path("issue-308-at-if-alias");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused: Vec<(&str, &str)> = results
         .unused_class_members
@@ -95,7 +95,7 @@ fn angular_inject_injection_token_credits_interface_implementer_members() {
     // token is re-exported through a barrel, exercising export_key_with_origins.
     let root = fixture_path("angular-inject-token-members");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused: Vec<(&str, &str)> = results
         .unused_class_members

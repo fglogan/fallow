@@ -1,7 +1,7 @@
 {
-  "name": "@fallow-cli/fallow-node",
+  "name": "@plow-cli/plow-node",
   "version": "2.103.0",
-  "description": "Native Node.js bindings for fallow, codebase intelligence for TypeScript and JavaScript. Finds unused code, duplication, circular dependencies, complexity hotspots, and architecture drift. Optional runtime intelligence layer (Fallow Runtime) adds production execution evidence.",
+  "description": "Native Node.js bindings for plow, codebase intelligence for TypeScript and JavaScript. Finds unused code, duplication, circular dependencies, complexity hotspots, and architecture drift. Optional runtime intelligence layer (Plow Runtime) adds production execution evidence.",
   "main": "index.js",
   "types": "index.d.ts",
   "exports": {
@@ -16,7 +16,7 @@
     "README.md"
   ],
   "keywords": [
-    "fallow",
+    "plow",
     "typescript",
     "javascript",
     "dead-code",
@@ -27,19 +27,19 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/fallow-rs/fallow.git",
+    "url": "git+https://github.com/fglogan/genesis-plow.git",
     "directory": "crates/napi"
   },
-  "homepage": "https://docs.fallow.tools",
+  "homepage": "https://docs.genesis-plow.dev",
   "bugs": {
-    "url": "https://github.com/fallow-rs/fallow/issues"
+    "url": "https://github.com/fglogan/genesis-plow/issues"
   },
   "engines": {
     "node": ">=18"
   },
   "napi": {
-    "binaryName": "fallow-node",
-    "packageName": "@fallow-cli/fallow-node",
+    "binaryName": "plow-node",
+    "packageName": "@plow-cli/plow-node",
     "targets": [
       "aarch64-apple-darwin",
       "x86_64-apple-darwin",
@@ -64,13 +64,13 @@
     "@napi-rs/cli": "3.6.0"
   },
   "optionalDependencies": {
-    "@fallow-cli/fallow-node-darwin-arm64": "2.103.0",
-    "@fallow-cli/fallow-node-darwin-x64": "2.103.0",
-    "@fallow-cli/fallow-node-linux-arm64-gnu": "2.103.0",
-    "@fallow-cli/fallow-node-linux-arm64-musl": "2.103.0",
-    "@fallow-cli/fallow-node-linux-x64-gnu": "2.103.0",
-    "@fallow-cli/fallow-node-linux-x64-musl": "2.103.0",
-    "@fallow-cli/fallow-node-win32-arm64-msvc": "2.103.0",
-    "@fallow-cli/fallow-node-win32-x64-msvc": "2.103.0"
+    "@plow-cli/plow-node-darwin-arm64": "2.103.0",
+    "@plow-cli/plow-node-darwin-x64": "2.103.0",
+    "@plow-cli/plow-node-linux-arm64-gnu": "2.103.0",
+    "@plow-cli/plow-node-linux-arm64-musl": "2.103.0",
+    "@plow-cli/plow-node-linux-x64-gnu": "2.103.0",
+    "@plow-cli/plow-node-linux-x64-musl": "2.103.0",
+    "@plow-cli/plow-node-win32-arm64-msvc": "2.103.0",
+    "@plow-cli/plow-node-win32-x64-msvc": "2.103.0"
   }
 }

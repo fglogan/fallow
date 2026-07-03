@@ -1,4 +1,4 @@
-//! End-to-end exit-code contract for the `fallow security --gate new` regression
+//! End-to-end exit-code contract for the `plow security --gate new` regression
 //! gate (issue #886): a new security-sink candidate on a changed LINE exits 8; a
 //! diff that touches the file but not the sink line exits 0; a gate with no diff
 //! source hard-errors (exit 2), never a green gate.
@@ -12,12 +12,12 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use common::{fallow_bin, fixture_path};
+use common::{fixture_path, plow_bin};
 use std::io::Write as _;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-/// Run `fallow security --gate <gate>` against `root`, optionally piping
+/// Run `plow security --gate <gate>` against `root`, optionally piping
 /// `stdin` (a unified diff for `--diff-stdin`). Returns `(exit_code, stdout)`.
 fn run_security_gate(
     root: &Path,
@@ -25,7 +25,7 @@ fn run_security_gate(
     extra: &[&str],
     stdin: Option<&str>,
 ) -> (i32, String) {
-    let mut cmd = Command::new(fallow_bin());
+    let mut cmd = Command::new(plow_bin());
     cmd.args(["security", "--gate", gate, "--format", "json", "--quiet"])
         .arg("--root")
         .arg(root)
@@ -112,9 +112,9 @@ fn commit(root: &Path, message: &str) {
         root,
         &[
             "-c",
-            "user.name=Fallow Test",
+            "user.name=Plow Test",
             "-c",
-            "user.email=fallow-test@example.com",
+            "user.email=plow-test@example.com",
             "commit",
             "-m",
             message,

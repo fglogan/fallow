@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use fallow_output::{
+use plow_output::{
     CodeClimateIssue, CodeClimateIssueInput, CodeClimateSeverity, ComplexityViolation,
     CoverageIntelligenceFinding, CoverageIntelligenceRecommendation, CoverageIntelligenceVerdict,
     ExceededThreshold, FindingSeverity, HealthReport, RuntimeCoverageFinding,
@@ -136,9 +136,9 @@ impl HealthCodeClimateContext<'_> {
                 "s"
             },
         );
-        let fp = codeclimate_fingerprint_hash(&["fallow/untested-file", &path]);
+        let fp = codeclimate_fingerprint_hash(&["plow/untested-file", &path]);
         build_codeclimate_issue(CodeClimateIssueInput {
-            check_name: "fallow/untested-file",
+            check_name: "plow/untested-file",
             description: &description,
             severity: CodeClimateSeverity::Minor,
             category: "Coverage",
@@ -156,13 +156,13 @@ impl HealthCodeClimateContext<'_> {
         );
         let line_str = item.export.line.to_string();
         let fp = codeclimate_fingerprint_hash(&[
-            "fallow/untested-export",
+            "plow/untested-export",
             &path,
             &line_str,
             &item.export.export_name,
         ]);
         build_codeclimate_issue(CodeClimateIssueInput {
-            check_name: "fallow/untested-export",
+            check_name: "plow/untested-export",
             description: &description,
             severity: CodeClimateSeverity::Minor,
             category: "Coverage",
@@ -230,29 +230,29 @@ const fn coverage_intelligence_check_name(
 ) -> &'static str {
     match recommendation {
         CoverageIntelligenceRecommendation::AddTestOrSplitBeforeMerge => {
-            "fallow/coverage-intelligence-risky-change"
+            "plow/coverage-intelligence-risky-change"
         }
         CoverageIntelligenceRecommendation::DeleteAfterConfirmingOwner => {
-            "fallow/coverage-intelligence-delete"
+            "plow/coverage-intelligence-delete"
         }
         CoverageIntelligenceRecommendation::ReviewBeforeChanging => {
-            "fallow/coverage-intelligence-review"
+            "plow/coverage-intelligence-review"
         }
         CoverageIntelligenceRecommendation::RefactorCarefullyKeepBehavior => {
-            "fallow/coverage-intelligence-refactor"
+            "plow/coverage-intelligence-refactor"
         }
     }
 }
 
 const fn complexity_check_name(finding: &ComplexityViolation) -> &'static str {
     match finding.exceeded {
-        ExceededThreshold::Both => "fallow/high-complexity",
-        ExceededThreshold::Cyclomatic => "fallow/high-cyclomatic-complexity",
-        ExceededThreshold::Cognitive => "fallow/high-cognitive-complexity",
+        ExceededThreshold::Both => "plow/high-complexity",
+        ExceededThreshold::Cyclomatic => "plow/high-cyclomatic-complexity",
+        ExceededThreshold::Cognitive => "plow/high-cognitive-complexity",
         ExceededThreshold::Crap
         | ExceededThreshold::CyclomaticCrap
         | ExceededThreshold::CognitiveCrap
-        | ExceededThreshold::All => "fallow/high-crap-score",
+        | ExceededThreshold::All => "plow/high-crap-score",
     }
 }
 
@@ -266,13 +266,11 @@ const fn health_finding_severity(severity: FindingSeverity) -> CodeClimateSeveri
 
 const fn runtime_coverage_check_name(verdict: RuntimeCoverageVerdict) -> &'static str {
     match verdict {
-        RuntimeCoverageVerdict::SafeToDelete => "fallow/runtime-safe-to-delete",
-        RuntimeCoverageVerdict::ReviewRequired => "fallow/runtime-review-required",
-        RuntimeCoverageVerdict::LowTraffic => "fallow/runtime-low-traffic",
-        RuntimeCoverageVerdict::CoverageUnavailable => "fallow/runtime-coverage-unavailable",
-        RuntimeCoverageVerdict::Active | RuntimeCoverageVerdict::Unknown => {
-            "fallow/runtime-coverage"
-        }
+        RuntimeCoverageVerdict::SafeToDelete => "plow/runtime-safe-to-delete",
+        RuntimeCoverageVerdict::ReviewRequired => "plow/runtime-review-required",
+        RuntimeCoverageVerdict::LowTraffic => "plow/runtime-low-traffic",
+        RuntimeCoverageVerdict::CoverageUnavailable => "plow/runtime-coverage-unavailable",
+        RuntimeCoverageVerdict::Active | RuntimeCoverageVerdict::Unknown => "plow/runtime-coverage",
     }
 }
 
@@ -300,7 +298,7 @@ const fn coverage_intelligence_severity(
 mod tests {
     use std::path::{Path, PathBuf};
 
-    use fallow_output::{
+    use plow_output::{
         ComplexityViolation, ExceededThreshold, FindingSeverity, HealthReport, HealthSummary,
     };
 
@@ -350,7 +348,7 @@ mod tests {
 
         assert_eq!(issues.len(), 1);
         let issue = &issues[0];
-        assert_eq!(issue.check_name, "fallow/high-complexity");
+        assert_eq!(issue.check_name, "plow/high-complexity");
         assert_eq!(issue.location.path, "app/%5Bid%5D/page.tsx");
         assert_eq!(issue.location.lines.begin, 7);
         assert_eq!(issue.severity, CodeClimateSeverity::Major);

@@ -1,6 +1,6 @@
 /**
  * Translate raw `child_process` and Chromium `loadURL` failures into clean,
- * native-quality messages. Raw errors like `spawn fallow ENOENT` or
+ * native-quality messages. Raw errors like `spawn plow ENOENT` or
  * `ERR_CONNECTION_REFUSED (-102) loading 'http://...'` should never reach the UI.
  */
 
@@ -22,8 +22,8 @@ export const describeExecError = (e: unknown, bin: string): Error => {
   const name = bin.split("/").pop() || bin;
   if (err?.code === "ENOENT") {
     const hint =
-      name === "fallow"
-        ? " Set FALLOW_BIN or add fallow to your PATH."
+      name === "plow"
+        ? " Set PLOW_BIN or add plow to your PATH."
         : ` Make sure "${name}" is installed and on your PATH.`;
     return new Error(`Couldn't find the "${name}" binary.${hint}`);
   }

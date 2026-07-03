@@ -10,7 +10,7 @@ use super::common::{create_config, fixture_path};
 fn flags_unused_props_but_credits_alias_and_abstains_on_forward() {
     let root = fixture_path("unused-component-prop");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let flagged: Vec<&str> = results
         .unused_component_props
         .iter()
@@ -49,7 +49,7 @@ fn flags_unused_props_but_credits_alias_and_abstains_on_forward() {
 fn flags_unused_svelte_props_but_credits_usage_and_abstains_on_opaque_shapes() {
     let root = fixture_path("unused-svelte-component-prop");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let flagged: Vec<(&str, &str)> = results
         .unused_component_props
         .iter()
@@ -82,7 +82,7 @@ fn flags_unused_svelte_props_but_credits_usage_and_abstains_on_opaque_shapes() {
 fn svelte_props_are_gated_on_svelte_dependency() {
     let root = fixture_path("unused-svelte-component-prop-no-dep");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.unused_component_props.is_empty(),

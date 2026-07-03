@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use fallow_config::{OutputFormat, ProductionAnalysis, ProductionConfig};
+use plow_config::{OutputFormat, ProductionAnalysis, ProductionConfig};
 
 use super::Cli;
 use crate::cli_format::bool_from_env;
@@ -30,17 +30,15 @@ fn load_config_production(
     output: OutputFormat,
 ) -> Result<ProductionConfig, ExitCode> {
     let loaded = if let Some(path) = config_path {
-        fallow_config::FallowConfig::load(path)
-            .map(Some)
-            .map_err(|e| {
-                emit_error(
-                    &format!("failed to load config '{}': {e}", path.display()),
-                    2,
-                    output,
-                )
-            })?
+        plow_config::PlowConfig::load(path).map(Some).map_err(|e| {
+            emit_error(
+                &format!("failed to load config '{}': {e}", path.display()),
+                2,
+                output,
+            )
+        })?
     } else {
-        fallow_config::FallowConfig::find_and_load(root)
+        plow_config::PlowConfig::find_and_load(root)
             .map(|found| found.map(|(config, _)| config))
             .map_err(|e| emit_error(&e, 2, output))?
     };
@@ -60,7 +58,7 @@ pub fn resolve_production_modes(
     production_dupes: bool,
 ) -> Result<ProductionModes, ExitCode> {
     let config = load_config_production(root, cli.config.as_ref(), output)?;
-    let env_global = bool_from_env("FALLOW_PRODUCTION");
+    let env_global = bool_from_env("PLOW_PRODUCTION");
 
     let resolve_one = |analysis: ProductionAnalysis, cli_specific: bool, env_name: &str| {
         if cli.production || cli_specific {
@@ -80,17 +78,17 @@ pub fn resolve_production_modes(
         dead_code: resolve_one(
             ProductionAnalysis::DeadCode,
             production_dead_code,
-            "FALLOW_PRODUCTION_DEAD_CODE",
+            "PLOW_PRODUCTION_DEAD_CODE",
         ),
         health: resolve_one(
             ProductionAnalysis::Health,
             production_health,
-            "FALLOW_PRODUCTION_HEALTH",
+            "PLOW_PRODUCTION_HEALTH",
         ),
         dupes: resolve_one(
             ProductionAnalysis::Dupes,
             production_dupes,
-            "FALLOW_PRODUCTION_DUPES",
+            "PLOW_PRODUCTION_DUPES",
         ),
     })
 }

@@ -5,13 +5,13 @@ expression: json_str
 [
   {
     "type": "issue",
-    "check_name": "fallow/unused-class-member",
+    "check_name": "plow/unused-class-member",
     "description": "Class member 'UserService.legacyMethod' is never referenced",
     "categories": [
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "25579ea7b6940453",
+    "fingerprint": "dd4d62478ebd0dea",
     "location": {
       "path": "src/service.ts",
       "lines": {

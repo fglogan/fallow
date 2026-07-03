@@ -2,7 +2,7 @@
 
 use std::process::ExitCode;
 
-use fallow_config::ResolvedConfig;
+use plow_config::ResolvedConfig;
 
 use crate::error::emit_error;
 
@@ -11,7 +11,7 @@ use super::{FileScoresAndChurnInput, HealthOptions, HealthSeams, RuntimeCoverage
 use super::{compute_file_scores_and_churn, hotspots, print_slow_churn_note, scoring};
 
 pub(super) struct HealthAnalysisData {
-    pub(super) runtime_coverage: Option<fallow_output::RuntimeCoverageReport>,
+    pub(super) runtime_coverage: Option<plow_output::RuntimeCoverageReport>,
     pub(super) score_output: Option<scoring::FileScoreOutput>,
     pub(super) files_scored: Option<usize>,
     pub(super) average_maintainability: Option<f64>,
@@ -131,7 +131,7 @@ struct RuntimeCoverageAnalysisScope<'a> {
 fn analyze_runtime_coverage(
     input: RuntimeCoverageAnalysisScope<'_>,
     seams: &HealthSeams<'_>,
-) -> Result<Option<fallow_output::RuntimeCoverageReport>, ExitCode> {
+) -> Result<Option<plow_output::RuntimeCoverageReport>, ExitCode> {
     let Some(production_options) = input.opts.runtime_coverage.as_ref() else {
         return Ok(None);
     };

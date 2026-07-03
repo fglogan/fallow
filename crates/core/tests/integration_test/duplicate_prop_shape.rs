@@ -19,8 +19,8 @@ use super::common::{create_config, fixture_path};
 fn detects_genuine_group_and_excludes_noise() {
     let root = fixture_path("duplicate-prop-shape");
     let mut config = create_config(root);
-    config.rules.duplicate_prop_shape = fallow_config::Severity::Warn;
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    config.rules.duplicate_prop_shape = plow_config::Severity::Warn;
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let shapes = &results.duplicate_prop_shapes;
     let names: Vec<&str> = shapes.iter().map(|d| d.shape.component.as_str()).collect();
@@ -101,7 +101,7 @@ fn detects_genuine_group_and_excludes_noise() {
 fn dormant_when_rule_off() {
     let root = fixture_path("duplicate-prop-shape");
     let config = create_config(root); // rule defaults to off
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     assert!(
         results.duplicate_prop_shapes.is_empty(),
         "the duplicate-prop-shape rule is off by default: {}",
@@ -116,8 +116,8 @@ fn dep_gated_to_react() {
     // The Vue fixture declares only `vue` (no react/react-dom/next/preact).
     let root = fixture_path("unused-component-prop");
     let mut config = create_config(root);
-    config.rules.duplicate_prop_shape = fallow_config::Severity::Warn;
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    config.rules.duplicate_prop_shape = plow_config::Severity::Warn;
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     assert!(
         results.duplicate_prop_shapes.is_empty(),
         "duplicate-prop-shape must not fire on a non-React project"

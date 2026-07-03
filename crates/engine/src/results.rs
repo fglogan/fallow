@@ -3,16 +3,16 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use fallow_config::ResolvedConfig;
-use fallow_output::{HealthGrouping, HealthReport, HealthTimings};
-use fallow_types::discover::DiscoveredFile;
-use fallow_types::extract::ModuleInfo;
-use fallow_types::workspace::WorkspaceDiagnostic;
+use plow_config::ResolvedConfig;
+use plow_output::{HealthGrouping, HealthReport, HealthTimings};
+use plow_types::discover::DiscoveredFile;
+use plow_types::extract::ModuleInfo;
+use plow_types::workspace::WorkspaceDiagnostic;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{duplicates, module_graph, trace};
 
-pub use fallow_types::output_dead_code::{
+pub use plow_types::output_dead_code::{
     BoundaryCallViolationFinding, BoundaryCoverageViolationFinding, BoundaryViolationFinding,
     CircularDependencyFinding, DuplicateExportFinding, DuplicatePropShapeFinding,
     DynamicSegmentNameConflictFinding, EmptyCatalogGroupFinding, InvalidClientExportFinding,
@@ -29,7 +29,7 @@ pub use fallow_types::output_dead_code::{
     UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
     UnusedSvelteEventFinding, UnusedTypeFinding,
 };
-pub use fallow_types::results::{
+pub use plow_types::results::{
     ActiveSuppression, AnalysisResults, BoundaryCallViolation, BoundaryCoverageViolation,
     BoundaryViolation, CircularDependency, CircularDependencyEdge, DependencyLocation,
     DependencyOverrideMisconfigReason, DependencyOverrideSource, DuplicateExport,
@@ -145,8 +145,8 @@ impl<GroupResolver> HealthAnalysisResult<GroupResolver> {
 
 #[cfg(test)]
 mod tests {
-    use fallow_config::ProductionAnalysis;
-    use fallow_types::output_format::OutputFormat;
+    use plow_config::ProductionAnalysis;
+    use plow_types::output_format::OutputFormat;
 
     use super::*;
 
@@ -189,8 +189,8 @@ mod tests {
     #[test]
     fn engine_result_surface_uses_explicit_reexports() {
         let source = include_str!("results.rs");
-        let output_dead_code_wildcard = concat!("pub use fallow_types::output_dead_code::", "*");
-        let results_wildcard = concat!("pub use fallow_types::results::", "*");
+        let output_dead_code_wildcard = concat!("pub use plow_types::output_dead_code::", "*");
+        let results_wildcard = concat!("pub use plow_types::results::", "*");
 
         assert!(!source.contains(output_dead_code_wildcard));
         assert!(!source.contains(results_wildcard));

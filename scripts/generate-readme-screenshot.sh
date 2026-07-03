@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUTPUT_DIR="$ROOT_DIR/assets/screenshots"
-OUTPUT_FILE="$OUTPUT_DIR/fallow-check-output.png"
+OUTPUT_FILE="$OUTPUT_DIR/plow-check-output.png"
 
 if ! command -v freeze >/dev/null 2>&1; then
   echo "freeze is required. Install with: brew install charmbracelet/tap/freeze" >&2
@@ -19,7 +19,7 @@ cat >"$tmp_script" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 
-printf '\$ fallow\n\n'
+printf '\$ plow\n\n'
 
 printf '\033[33m●\033[0m \033[1;33mUnused files (3)\033[0m\n'
 printf '  src/legacy/oldUtils.ts\n'

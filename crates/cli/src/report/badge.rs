@@ -5,7 +5,7 @@
 use crate::report::sink::outln;
 use std::process::ExitCode;
 
-use fallow_output::HealthReport;
+use plow_output::HealthReport;
 
 /// Escape a string for safe interpolation in XML attributes and element content.
 fn xml_escape(s: &str) -> String {
@@ -136,7 +136,7 @@ fn text_width(s: &str) -> u32 {
 /// Simple hash for generating unique SVG element IDs.
 ///
 /// Prevents ID collisions when multiple badges are inlined on the same page
-/// (e.g., a GitHub profile README with several fallow badges).
+/// (e.g., a GitHub profile README with several plow badges).
 fn svg_id_suffix(label: &str, message: &str) -> String {
     let mut h: u32 = 0;
     for b in label.bytes().chain(message.bytes()) {
@@ -212,14 +212,14 @@ fn render_badge(label: &str, message: &str, color: &str) -> String {
 )]
 pub fn print_health_badge(report: &HealthReport) -> ExitCode {
     let Some(ref score) = report.health_score else {
-        eprintln!("Error: badge format requires --score (run `fallow health --format badge`)");
+        eprintln!("Error: badge format requires --score (run `plow health --format badge`)");
         return ExitCode::from(2);
     };
 
     let rounded = score.score as u32;
     let message = format!("{} ({rounded})", score.grade);
     let color = grade_color(score.grade);
-    let svg = render_badge("fallow", &message, color);
+    let svg = render_badge("plow", &message, color);
 
     outln!("{svg}");
     ExitCode::SUCCESS
@@ -261,15 +261,15 @@ mod tests {
 
     #[test]
     fn render_badge_has_accessibility() {
-        let svg = render_badge("fallow", "A (87)", "#4c1");
-        assert!(svg.contains(r#"aria-label="fallow: A (87)""#));
-        assert!(svg.contains("<title>fallow: A (87)</title>"));
+        let svg = render_badge("plow", "A (87)", "#4c1");
+        assert!(svg.contains(r#"aria-label="plow: A (87)""#));
+        assert!(svg.contains("<title>plow: A (87)</title>"));
     }
 
     #[test]
     fn render_badge_unique_ids() {
-        let a = render_badge("fallow", "A (90)", "#4c1");
-        let b = render_badge("fallow", "B (76)", "#97ca00");
+        let a = render_badge("plow", "A (90)", "#4c1");
+        let b = render_badge("plow", "B (76)", "#97ca00");
         let extract_id = |svg: &str| -> String {
             let start = svg.find("id=\"s-").unwrap() + 4;
             let end = svg[start..].find('"').unwrap() + start;
@@ -281,7 +281,7 @@ mod tests {
     #[test]
     fn render_badge_width_increases_with_longer_text() {
         let short = render_badge("a", "b", "#4c1");
-        let long = render_badge("fallow health", "100 A", "#4c1");
+        let long = render_badge("plow health", "100 A", "#4c1");
 
         let extract_width = |svg: &str| -> u32 {
             let start = svg.find("width=\"").unwrap() + 7;
@@ -293,7 +293,7 @@ mod tests {
     }
 
     fn empty_report() -> HealthReport {
-        use fallow_output::HealthSummary;
+        use plow_output::HealthSummary;
 
         HealthReport {
             summary: HealthSummary {
@@ -313,7 +313,7 @@ mod tests {
 
     #[test]
     fn print_health_badge_with_score() {
-        use fallow_output::{HEALTH_SCORE_FORMULA_VERSION, HealthScore, HealthScorePenalties};
+        use plow_output::{HEALTH_SCORE_FORMULA_VERSION, HealthScore, HealthScorePenalties};
 
         let mut report = empty_report();
         report.health_score = Some(HealthScore {

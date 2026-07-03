@@ -1,13 +1,13 @@
-//! `fallow coverage analyze` implementation.
+//! `plow coverage analyze` implementation.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 use std::time::Instant;
 
-use fallow_config::OutputFormat;
-use fallow_cov_protocol::function_identity_id;
-use fallow_engine::clear_ambient_git_env;
+use plow_config::OutputFormat;
+use plow_cov_protocol::function_identity_id as protocol_function_identity_id;
+use plow_engine::clear_ambient_git_env;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::coverage::RunContext;
@@ -17,7 +17,7 @@ use crate::coverage::cloud_client::{
 };
 use crate::error::emit_error;
 use crate::health::HealthOptions;
-use fallow_output::{
+use plow_output::{
     RUNTIME_STALE_AFTER_DAYS, RuntimeCoverageAction, RuntimeCoverageCaptureQuality,
     RuntimeCoverageConfidence, RuntimeCoverageDataSource, RuntimeCoverageEvidence,
     RuntimeCoverageFinding, RuntimeCoverageHotPath, RuntimeCoverageMessage,
@@ -27,6 +27,17 @@ use fallow_output::{
 };
 
 const RUNTIME_COVERAGE_SCHEMA_VERSION: &str = "1";
+
+fn function_identity_id(file: &str, name: &str, start_line: u32) -> String {
+    rebrand_protocol_id(protocol_function_identity_id(file, name, start_line))
+}
+
+fn rebrand_protocol_id(stable_id: String) -> String {
+    match stable_id.strip_prefix("fallow:") {
+        Some(rest) => format!("plow:{rest}"),
+        None => stable_id,
+    }
+}
 
 #[derive(Clone, Default)]
 pub struct AnalyzeArgs {
@@ -92,7 +103,7 @@ pub fn run(args: &AnalyzeArgs, ctx: &RunContext<'_>) -> ExitCode {
 
     let Some(path) = args.runtime_coverage.as_deref() else {
         return emit_error(
-            "No runtime coverage source selected. Pass --runtime-coverage <path>, --cloud, or set FALLOW_RUNTIME_COVERAGE_SOURCE=cloud.",
+            "No runtime coverage source selected. Pass --runtime-coverage <path>, --cloud, or set PLOW_RUNTIME_COVERAGE_SOURCE=cloud.",
             2,
             ctx.output,
         );
@@ -100,7 +111,7 @@ pub fn run(args: &AnalyzeArgs, ctx: &RunContext<'_>) -> ExitCode {
     run_local(path, args, ctx)
 }
 
-/// `fallow coverage analyze` only emits two output formats: structured JSON
+/// `plow coverage analyze` only emits two output formats: structured JSON
 /// (the canonical agent-readable shape, used by every non-`Human` `--format`
 /// today) and the terse human renderer. Other formats (`compact`, `markdown`,
 /// `sarif`, `codeclimate`, `badge`) require shape conversion that this
@@ -119,7 +130,7 @@ fn validate_output_format(output: OutputFormat) -> Result<(), String> {
         | OutputFormat::ReviewGithub
         | OutputFormat::ReviewGitlab
         | OutputFormat::Badge => Err(format!(
-            "fallow coverage analyze only supports --format json or --format human (got {output:?}). Use `fallow coverage analyze --format json` and pipe to your own converter for {output:?}."
+            "plow coverage analyze only supports --format json or --format human (got {output:?}). Use `plow coverage analyze --format json` and pipe to your own converter for {output:?}."
         )),
     }
 }
@@ -152,7 +163,7 @@ fn run_local(path: &Path, args: &AnalyzeArgs, ctx: &RunContext<'_>) -> ExitCode 
 fn local_health_options<'a>(
     args: &AnalyzeArgs,
     ctx: &RunContext<'a>,
-    runtime_coverage: fallow_engine::RuntimeCoverageOptions,
+    runtime_coverage: plow_engine::RuntimeCoverageOptions,
 ) -> HealthOptions<'a> {
     HealthOptions {
         root: ctx.root,
@@ -161,9 +172,9 @@ fn local_health_options<'a>(
         no_cache: ctx.no_cache,
         threads: ctx.threads,
         quiet: ctx.quiet,
-        thresholds: fallow_engine::HealthThresholdOverrides::default(),
+        thresholds: plow_engine::HealthThresholdOverrides::default(),
         top: args.top,
-        sort: fallow_engine::HealthSort::Cyclomatic,
+        sort: plow_engine::HealthSort::Cyclomatic,
         production: args.production,
         production_override: Some(args.production),
         changed_since: None,
@@ -187,14 +198,14 @@ fn local_health_options<'a>(
         enforce_coverage_gap_gate: false,
         effort: None,
         score: false,
-        gates: fallow_engine::HealthGateOptions::default(),
+        gates: plow_engine::HealthGateOptions::default(),
         since: None,
         min_commits: None,
         explain: ctx.explain,
         summary: false,
         save_snapshot: None,
         trend: false,
-        coverage_inputs: fallow_engine::HealthCoverageInputs::default(),
+        coverage_inputs: plow_engine::HealthCoverageInputs::default(),
         performance: false,
         runtime_coverage: Some(runtime_coverage),
         churn_file: None,
@@ -237,7 +248,7 @@ fn run_cloud(args: &AnalyzeArgs, ctx: &RunContext<'_>) -> ExitCode {
 }
 
 fn runtime_coverage_source_env_is_cloud() -> bool {
-    std::env::var("FALLOW_RUNTIME_COVERAGE_SOURCE")
+    std::env::var("PLOW_RUNTIME_COVERAGE_SOURCE")
         .is_ok_and(|value| value.trim().eq_ignore_ascii_case("cloud"))
 }
 
@@ -245,14 +256,14 @@ fn resolve_api_key(explicit: Option<&str>) -> Result<String, CloudError> {
     if let Some(value) = explicit.map(str::trim).filter(|value| !value.is_empty()) {
         return Ok(value.to_owned());
     }
-    if let Ok(value) = std::env::var("FALLOW_API_KEY") {
+    if let Ok(value) = std::env::var("PLOW_API_KEY") {
         let trimmed = value.trim();
         if !trimmed.is_empty() {
             return Ok(trimmed.to_owned());
         }
     }
     Err(CloudError::Auth(
-        "Cloud runtime coverage requires an API key.\n\nSet FALLOW_API_KEY or pass --api-key:\n\n  FALLOW_API_KEY=fallow_live_... fallow coverage analyze --cloud --repo owner/repo".to_owned(),
+        "Cloud runtime coverage requires an API key.\n\nSet PLOW_API_KEY or pass --api-key:\n\n  PLOW_API_KEY=plow_live_... plow coverage analyze --cloud --repo owner/repo".to_owned(),
     ))
 }
 
@@ -260,7 +271,7 @@ fn resolve_repo(explicit: Option<&str>, root: &Path) -> Result<String, CloudErro
     if let Some(value) = explicit.map(str::trim).filter(|value| !value.is_empty()) {
         return Ok(value.to_owned());
     }
-    if let Ok(value) = std::env::var("FALLOW_REPO") {
+    if let Ok(value) = std::env::var("PLOW_REPO") {
         let trimmed = value.trim();
         if !trimmed.is_empty() {
             return Ok(trimmed.to_owned());
@@ -270,7 +281,7 @@ fn resolve_repo(explicit: Option<&str>, root: &Path) -> Result<String, CloudErro
         return Ok(from_remote);
     }
     Err(CloudError::Validation(
-        "Could not infer repository for cloud runtime coverage.\n\nPass it explicitly:\n\n  fallow coverage analyze --cloud --repo owner/repo\n\nor set:\n\n  FALLOW_REPO=owner/repo".to_owned(),
+        "Could not infer repository for cloud runtime coverage.\n\nPass it explicitly:\n\n  plow coverage analyze --cloud --repo owner/repo\n\nor set:\n\n  PLOW_REPO=owner/repo".to_owned(),
     ))
 }
 
@@ -342,7 +353,7 @@ struct StaticFunctionInfo {
     cyclomatic: u32,
     caller_count: u32,
     owner_count: Option<u32>,
-    /// Cross-surface join key (`fallow:fn:<hash>`) computed over the
+    /// Cross-surface join key (`plow:fn:<hash>`) computed over the
     /// repo-relative `path`. Agrees with the static-inventory producer's
     /// `stable_id` for the same function, so a cloud function carrying a
     /// `stable_id` joins here directly.
@@ -378,9 +389,9 @@ fn build_static_index(ctx: &RunContext<'_>, production: bool) -> Result<StaticIn
             production_override: Some(production),
             quiet: ctx.quiet,
         },
-        fallow_config::ProductionAnalysis::Health,
+        plow_config::ProductionAnalysis::Health,
     )?;
-    let session = fallow_engine::AnalysisSession::from_resolved_config(config);
+    let session = plow_engine::AnalysisSession::from_resolved_config(config);
     let analysis_output = session
         .analyze_dead_code_with_artifacts(true, true)
         .map_err(|err| emit_error(&format!("analysis failed: {err}"), 2, ctx.output))?;
@@ -413,9 +424,9 @@ fn build_static_index(ctx: &RunContext<'_>, production: bool) -> Result<StaticIn
 
 fn build_index_from_analysis(
     root: &Path,
-    modules: &[fallow_types::extract::ModuleInfo],
-    analysis_output: &fallow_engine::DeadCodeAnalysisArtifacts,
-    file_paths: &FxHashMap<fallow_types::discover::FileId, &PathBuf>,
+    modules: &[plow_types::extract::ModuleInfo],
+    analysis_output: &plow_engine::DeadCodeAnalysisArtifacts,
+    file_paths: &FxHashMap<plow_types::discover::FileId, &PathBuf>,
     codeowners: Option<&crate::codeowners::CodeOwners>,
 ) -> StaticIndex {
     let unused = UnusedStaticSets::from_analysis(analysis_output);
@@ -453,7 +464,7 @@ struct UnusedStaticSets {
 }
 
 impl UnusedStaticSets {
-    fn from_analysis(analysis_output: &fallow_engine::DeadCodeAnalysisArtifacts) -> Self {
+    fn from_analysis(analysis_output: &plow_engine::DeadCodeAnalysisArtifacts) -> Self {
         let files: FxHashSet<PathBuf> = analysis_output
             .results
             .unused_files
@@ -495,7 +506,7 @@ impl UnusedStaticSets {
 
 /// Build a `StaticFunctionInfo` for one extracted function.
 fn static_function_info(
-    function: &fallow_types::extract::FunctionComplexity,
+    function: &plow_types::extract::FunctionComplexity,
     path: &Path,
     rel: &str,
     unused: &UnusedStaticSets,
@@ -631,8 +642,8 @@ fn merge_cloud_snapshot(
 struct CloudMergeEntries {
     findings: Vec<RuntimeCoverageFinding>,
     hot_paths: Vec<RuntimeCoverageHotPath>,
-    synthesized_blast_radius: Vec<fallow_output::RuntimeCoverageBlastRadiusEntry>,
-    synthesized_importance: Vec<(fallow_output::RuntimeCoverageImportanceEntry, Option<u32>)>,
+    synthesized_blast_radius: Vec<plow_output::RuntimeCoverageBlastRadiusEntry>,
+    synthesized_importance: Vec<(plow_output::RuntimeCoverageImportanceEntry, Option<u32>)>,
     unmatched_cloud_functions: usize,
 }
 
@@ -687,15 +698,15 @@ fn collect_called_cloud_function(
 
 fn cloud_blast_radius_entries(
     snapshot: &CloudRuntimeContext,
-    synthesized: Vec<fallow_output::RuntimeCoverageBlastRadiusEntry>,
-) -> Vec<fallow_output::RuntimeCoverageBlastRadiusEntry> {
+    synthesized: Vec<plow_output::RuntimeCoverageBlastRadiusEntry>,
+) -> Vec<plow_output::RuntimeCoverageBlastRadiusEntry> {
     if snapshot.blast_radius.is_empty() {
         return synthesized;
     }
     snapshot
         .blast_radius
         .iter()
-        .map(|entry| fallow_output::RuntimeCoverageBlastRadiusEntry {
+        .map(|entry| plow_output::RuntimeCoverageBlastRadiusEntry {
             id: entry.id.clone(),
             stable_id: entry.stable_id.clone(),
             file: PathBuf::from(&entry.file),
@@ -711,15 +722,15 @@ fn cloud_blast_radius_entries(
 
 fn cloud_importance_entries(
     snapshot: &CloudRuntimeContext,
-    synthesized: Vec<(fallow_output::RuntimeCoverageImportanceEntry, Option<u32>)>,
-) -> Vec<fallow_output::RuntimeCoverageImportanceEntry> {
+    synthesized: Vec<(plow_output::RuntimeCoverageImportanceEntry, Option<u32>)>,
+) -> Vec<plow_output::RuntimeCoverageImportanceEntry> {
     if snapshot.importance.is_empty() {
         return rank_importance(synthesized);
     }
     snapshot
         .importance
         .iter()
-        .map(|entry| fallow_output::RuntimeCoverageImportanceEntry {
+        .map(|entry| plow_output::RuntimeCoverageImportanceEntry {
             id: entry.id.clone(),
             stable_id: entry.stable_id.clone(),
             file: PathBuf::from(&entry.file),
@@ -752,9 +763,9 @@ fn cloud_blast_radius(
     local: &StaticFunctionInfo,
     invocations: u64,
     function: &CloudRuntimeFunction,
-) -> fallow_output::RuntimeCoverageBlastRadiusEntry {
+) -> plow_output::RuntimeCoverageBlastRadiusEntry {
     let weighted = invocations.saturating_mul(u64::from(local.caller_count));
-    fallow_output::RuntimeCoverageBlastRadiusEntry {
+    plow_output::RuntimeCoverageBlastRadiusEntry {
         id: stable_runtime_id("blast", &local.path, &local.name, local.start_line),
         stable_id: Some(local.stable_id.clone()),
         file: local.path.clone(),
@@ -770,10 +781,10 @@ fn cloud_blast_radius(
 fn cloud_importance(
     local: &StaticFunctionInfo,
     invocations: u64,
-) -> (fallow_output::RuntimeCoverageImportanceEntry, Option<u32>) {
+) -> (plow_output::RuntimeCoverageImportanceEntry, Option<u32>) {
     let owner_count = local.owner_count.unwrap_or(0);
     (
-        fallow_output::RuntimeCoverageImportanceEntry {
+        plow_output::RuntimeCoverageImportanceEntry {
             id: stable_runtime_id("importance", &local.path, &local.name, local.start_line),
             stable_id: Some(local.stable_id.clone()),
             file: local.path.clone(),
@@ -827,8 +838,8 @@ fn cloud_finding(
 }
 
 fn rank_importance(
-    entries: Vec<(fallow_output::RuntimeCoverageImportanceEntry, Option<u32>)>,
-) -> Vec<fallow_output::RuntimeCoverageImportanceEntry> {
+    entries: Vec<(plow_output::RuntimeCoverageImportanceEntry, Option<u32>)>,
+) -> Vec<plow_output::RuntimeCoverageImportanceEntry> {
     let max_log = entries
         .iter()
         .map(|(entry, _)| (entry.invocations as f64).ln_1p())
@@ -1161,12 +1172,13 @@ const fn runtime_verdict_rank(verdict: RuntimeCoverageVerdict) -> u8 {
 
 fn stable_runtime_id(prefix: &str, path: &Path, function: &str, line: u32) -> String {
     let file = normalize_runtime_path(path);
-    match prefix {
-        "hot" => fallow_cov_protocol::hot_path_id(&file, function, line),
-        "blast" => fallow_cov_protocol::blast_radius_id(&file, function, line),
-        "importance" => fallow_cov_protocol::importance_id(&file, function, line),
-        _ => fallow_cov_protocol::finding_id(&file, function, line),
-    }
+    let id = match prefix {
+        "hot" => plow_cov_protocol::hot_path_id(&file, function, line),
+        "blast" => plow_cov_protocol::blast_radius_id(&file, function, line),
+        "importance" => plow_cov_protocol::importance_id(&file, function, line),
+        _ => plow_cov_protocol::finding_id(&file, function, line),
+    };
+    rebrand_protocol_id(id)
 }
 
 fn print_runtime_report(
@@ -1202,8 +1214,8 @@ fn print_runtime_json(
     );
 
     let envelope =
-        fallow_output::build_coverage_analyze_output(report, elapsed, env!("CARGO_PKG_VERSION"));
-    let output = match fallow_output::serialize_coverage_analyze_json_output(
+        plow_output::build_coverage_analyze_output(report, elapsed, env!("CARGO_PKG_VERSION"));
+    let output = match plow_output::serialize_coverage_analyze_json_output(
         envelope,
         crate::output_runtime::current_root_envelope_mode(),
         explain.then(crate::explain::coverage_analyze_meta),
@@ -1282,7 +1294,7 @@ fn source_map_upload_hint(warnings: &[RuntimeCoverageMessage], root: &Path) -> O
     }
     let dir = find_local_source_map_dir(root)?;
     Some(format!(
-        "Hint: found source maps under {dir}/ that may not be uploaded for this commit.\n  Run `fallow coverage upload-source-maps --dir {dir}` so runtime coverage attributes to your source files."
+        "Hint: found source maps under {dir}/ that may not be uploaded for this commit.\n  Run `plow coverage upload-source-maps --dir {dir}` so runtime coverage attributes to your source files."
     ))
 }
 
@@ -1378,7 +1390,7 @@ fn print_runtime_importance(report: &RuntimeCoverageReport, display_limit: usize
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_output::{RuntimeCoverageBlastRadiusEntry, RuntimeCoverageImportanceEntry};
+    use plow_output::{RuntimeCoverageBlastRadiusEntry, RuntimeCoverageImportanceEntry};
 
     #[test]
     fn api_key_alone_does_not_enable_cloud_source() {
@@ -1391,14 +1403,14 @@ mod tests {
     fn analyze_args_debug_masks_api_key() {
         let args = AnalyzeArgs {
             cloud: true,
-            api_key: Some("fallow_live_secret_token_value".to_owned()),
-            api_endpoint: Some("https://api.fallow.cloud".to_owned()),
+            api_key: Some("plow_live_secret_token_value".to_owned()),
+            api_endpoint: Some("https://api.plow.cloud".to_owned()),
             repo: Some("acme/web".to_owned()),
             ..AnalyzeArgs::default()
         };
         let formatted = format!("{args:?}");
         assert!(
-            !formatted.contains("fallow_live_secret_token_value"),
+            !formatted.contains("plow_live_secret_token_value"),
             "api_key leaked through Debug: {formatted}"
         );
         assert!(
@@ -1414,7 +1426,7 @@ mod tests {
         let args = AnalyzeArgs {
             runtime_coverage: Some(PathBuf::from("coverage-final.json")),
             cloud: true,
-            api_key: Some("fallow_live_secret_token_value".to_owned()),
+            api_key: Some("plow_live_secret_token_value".to_owned()),
             api_endpoint: Some("https://api.example.test".to_owned()),
             repo: Some("acme/web".to_owned()),
             project_id: Some("apps/web".to_owned()),
@@ -1432,7 +1444,7 @@ mod tests {
 
         let formatted = format!("{args:?}");
 
-        assert!(!formatted.contains("fallow_live_secret_token_value"));
+        assert!(!formatted.contains("plow_live_secret_token_value"));
         for expected in [
             "runtime_coverage: Some(\"coverage-final.json\")",
             "cloud: true",
@@ -1471,8 +1483,8 @@ mod tests {
     #[test]
     fn resolve_api_key_prefers_trimmed_explicit_value() {
         assert_eq!(
-            resolve_api_key(Some("  fallow_live_token  ")).expect("explicit key should resolve"),
-            "fallow_live_token"
+            resolve_api_key(Some("  plow_live_token  ")).expect("explicit key should resolve"),
+            "plow_live_token"
         );
     }
 
@@ -1481,25 +1493,25 @@ mod tests {
         let dir = tempfile::TempDir::new().expect("temp dir should be created");
 
         assert_eq!(
-            resolve_repo(Some("  fallow-rs/fallow  "), dir.path())
+            resolve_repo(Some("  fglogan/genesis-plow  "), dir.path())
                 .expect("explicit repo should resolve"),
-            "fallow-rs/fallow"
+            "fglogan/genesis-plow"
         );
     }
 
     #[test]
     fn parse_git_remote_https() {
         assert_eq!(
-            parse_git_remote_to_project_id("https://github.com/fallow-rs/fallow.git"),
-            Some("fallow-rs/fallow".to_owned())
+            parse_git_remote_to_project_id("https://github.com/fglogan/genesis-plow.git"),
+            Some("fglogan/genesis-plow".to_owned())
         );
     }
 
     #[test]
     fn parse_git_remote_ssh_and_nested_paths() {
         assert_eq!(
-            parse_git_remote_to_project_id("git@github.com:fallow-rs/fallow.git"),
-            Some("fallow-rs/fallow".to_owned())
+            parse_git_remote_to_project_id("git@github.com:fglogan/genesis-plow.git"),
+            Some("fglogan/genesis-plow".to_owned())
         );
         assert_eq!(
             parse_git_remote_to_project_id("ssh://git@gitlab.com/group/subgroup/repo.git"),
@@ -1528,7 +1540,7 @@ mod tests {
                 "remote",
                 "add",
                 "origin",
-                "git@github.com:fallow-rs/fallow.git",
+                "git@github.com:fglogan/genesis-plow.git",
             ])
             .current_dir(dir.path())
             .output()
@@ -1537,7 +1549,7 @@ mod tests {
 
         assert_eq!(
             resolve_repo(None, dir.path()).expect("repo should resolve from origin"),
-            "fallow-rs/fallow"
+            "fglogan/genesis-plow"
         );
     }
 
@@ -1832,7 +1844,7 @@ mod tests {
     #[test]
     fn cloud_warnings_dedupe_when_server_message_includes_project_id() {
         let snapshot = CloudRuntimeContext {
-            repo: "fallow-cloud".to_owned(),
+            repo: "plow-cloud".to_owned(),
             window: crate::coverage::cloud_client::CloudRuntimeWindow { period_days: 30 },
             summary: crate::coverage::cloud_client::CloudRuntimeSummary {
                 trace_count: 0,
@@ -1850,7 +1862,7 @@ mod tests {
             warnings: vec![CloudRuntimeWarning::Object {
                 code: Some("no_runtime_data".to_owned()),
                 message: Some(
-                    "No runtime coverage data received for apps/dashboard in fallow-cloud in the last 30 days.".to_owned(),
+                    "No runtime coverage data received for apps/dashboard in plow-cloud in the last 30 days.".to_owned(),
                 ),
             }],
         };
@@ -1912,27 +1924,27 @@ mod tests {
             signals: Vec::new(),
             summary: RuntimeCoverageSummary::default(),
             findings: vec![
-                runtime_finding("fallow:prod:00000001"),
-                runtime_finding("fallow:prod:00000002"),
+                runtime_finding("plow:prod:00000001"),
+                runtime_finding("plow:prod:00000002"),
             ],
             hot_paths: vec![
-                runtime_hot_path("fallow:hot:00000001"),
-                runtime_hot_path("fallow:hot:00000002"),
+                runtime_hot_path("plow:hot:00000001"),
+                runtime_hot_path("plow:hot:00000002"),
             ],
             blast_radius: vec![
-                runtime_blast_radius("fallow:blast:00000001"),
-                runtime_blast_radius("fallow:blast:00000002"),
+                runtime_blast_radius("plow:blast:00000001"),
+                runtime_blast_radius("plow:blast:00000002"),
             ],
             importance: vec![
-                runtime_importance("fallow:importance:00000001"),
-                runtime_importance("fallow:importance:00000002"),
+                runtime_importance("plow:importance:00000001"),
+                runtime_importance("plow:importance:00000002"),
             ],
             watermark: None,
             warnings: vec![],
             actionable: true,
             actionability_reason: None,
             actionability_verdict: None,
-            provenance: fallow_output::RuntimeCoverageProvenance::default(),
+            provenance: plow_output::RuntimeCoverageProvenance::default(),
         };
         apply_top_limit(&mut report, Some(1));
         assert_eq!(report.findings.len(), 1);
@@ -1943,16 +1955,16 @@ mod tests {
 
     #[test]
     fn cloud_importance_scores_missing_codeowners_lower_than_unowned() {
-        let no_codeowners = runtime_importance("fallow:importance:00000001");
+        let no_codeowners = runtime_importance("plow:importance:00000001");
         let unowned = RuntimeCoverageImportanceEntry {
-            id: "fallow:importance:00000002".to_owned(),
+            id: "plow:importance:00000002".to_owned(),
             owner_count: 0,
             reason: "High traffic, low complexity, unowned".to_owned(),
-            ..runtime_importance("fallow:importance:00000002")
+            ..runtime_importance("plow:importance:00000002")
         };
 
         let ranked = rank_importance(vec![(no_codeowners, None), (unowned, Some(0))]);
-        assert_eq!(ranked[0].id, "fallow:importance:00000002");
+        assert_eq!(ranked[0].id, "plow:importance:00000002");
         assert!((ranked[0].importance_score - 78.8).abs() < f64::EPSILON);
         assert!((ranked[1].importance_score - 63.0).abs() < f64::EPSILON);
     }
@@ -1962,8 +1974,8 @@ mod tests {
         let path = PathBuf::from("src/foo.ts");
         let id = stable_runtime_id("prod", &path, "doThing", 42);
         let suffix = id
-            .strip_prefix("fallow:prod:")
-            .expect("id has fallow:prod: prefix");
+            .strip_prefix("plow:prod:")
+            .expect("id has plow:prod: prefix");
         assert_eq!(suffix.len(), 8, "expected 8 hex chars, got {suffix:?}");
         assert!(
             suffix
@@ -2185,7 +2197,7 @@ mod tests {
         std::fs::write(chunks.join("main.js.map"), "{}").unwrap();
         let hint = source_map_upload_hint(&unresolved_warning(), dir.path()).expect("hint");
         assert!(
-            hint.contains("fallow coverage upload-source-maps --dir .next"),
+            hint.contains("plow coverage upload-source-maps --dir .next"),
             "{hint}"
         );
     }

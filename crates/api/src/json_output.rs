@@ -3,24 +3,24 @@
 use std::path::Path;
 use std::time::Duration;
 
-use fallow_output::{
+use plow_output::{
     CHECK_SCHEMA_VERSION, CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CheckOutputInput,
     DupesOutput, DupesOutputInput, GroupByMode, RootEnvelopeMode,
     apply_config_fixable_to_duplicate_exports, build_check_output, build_dupes_output,
     harmonize_multi_kind_suppress_line_actions as harmonize_typed_suppress_line_actions,
     strip_root_prefix,
 };
-use fallow_types::duplicates::DuplicationReport;
-use fallow_types::envelope::{
+use plow_types::duplicates::DuplicationReport;
+use plow_types::envelope::{
     BaselineDeltas, BaselineMatch, ElapsedMs, Meta, RegressionResult, SchemaVersion, ToolVersion,
 };
-use fallow_types::output::NextStep;
-use fallow_types::results::AnalysisResults;
-use fallow_types::workspace::WorkspaceDiagnostic;
+use plow_types::output::NextStep;
+use plow_types::results::AnalysisResults;
+use plow_types::workspace::WorkspaceDiagnostic;
 
 use crate::{DupesReportPayload, DuplicationGroup, DuplicationGrouping, ResultGroup};
 
-/// Inputs for `fallow dead-code --format json` output assembly.
+/// Inputs for `plow dead-code --format json` output assembly.
 pub struct CheckJsonOutputInput<'a> {
     pub results: &'a AnalysisResults,
     pub root: &'a Path,
@@ -79,7 +79,7 @@ pub struct GroupedCheckJsonOutputInput<'a> {
     pub telemetry_analysis_run_id: Option<&'a str>,
 }
 
-/// Inputs for `fallow dupes --format json` output assembly.
+/// Inputs for `plow dupes --format json` output assembly.
 pub struct DuplicationJsonOutputInput<'a> {
     pub report: &'a DuplicationReport,
     pub root: &'a Path,
@@ -121,7 +121,7 @@ pub fn serialize_check_json(
         workspace_diagnostics: input.workspace_diagnostics,
         next_steps: input.next_steps,
     });
-    let mut output = fallow_output::serialize_check_json_output(
+    let mut output = plow_output::serialize_check_json_output(
         envelope,
         input.envelope_mode,
         input.telemetry_analysis_run_id,
@@ -187,7 +187,7 @@ pub fn serialize_grouped_check_json(
         next_steps: input.next_steps,
     };
 
-    let mut output = fallow_output::serialize_check_grouped_json_output(
+    let mut output = plow_output::serialize_check_grouped_json_output(
         envelope,
         input.envelope_mode,
         input.telemetry_analysis_run_id,
@@ -226,7 +226,7 @@ pub fn serialize_duplication_json(
             workspace_diagnostics: input.workspace_diagnostics,
             next_steps: input.next_steps,
         });
-    let mut output = fallow_output::serialize_dupes_json_output(
+    let mut output = plow_output::serialize_dupes_json_output(
         envelope,
         input.envelope_mode,
         input.telemetry_analysis_run_id,
@@ -259,7 +259,7 @@ pub fn serialize_grouped_duplication_json(
             workspace_diagnostics: input.workspace_diagnostics,
             next_steps: input.next_steps,
         });
-    let mut output = fallow_output::serialize_dupes_json_output(
+    let mut output = plow_output::serialize_dupes_json_output(
         envelope,
         input.envelope_mode,
         input.telemetry_analysis_run_id,

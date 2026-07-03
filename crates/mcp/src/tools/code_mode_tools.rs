@@ -5,7 +5,7 @@ use crate::params::{
     TraceExportParams, TraceFileParams,
 };
 
-use fallow_api::{RootEnvelopeMode, serialize_explain_programmatic_json};
+use plow_api::{RootEnvelopeMode, serialize_explain_programmatic_json};
 
 use super::super::{
     analyze::run_analyze_api_value,
@@ -42,7 +42,7 @@ pub(super) enum CodeModeTool {
     TraceClone,
     CheckHealth,
     Audit,
-    FallowExplain,
+    PlowExplain,
     ListBoundaries,
     FeatureFlags,
     Impact,
@@ -67,7 +67,7 @@ impl CodeModeTool {
             "trace_clone" => Ok(Self::TraceClone),
             "check_health" => Ok(Self::CheckHealth),
             "audit" => Ok(Self::Audit),
-            "fallow_explain" => Ok(Self::FallowExplain),
+            "plow_explain" => Ok(Self::PlowExplain),
             "list_boundaries" => Ok(Self::ListBoundaries),
             "feature_flags" => Ok(Self::FeatureFlags),
             "impact" => Ok(Self::Impact),
@@ -80,7 +80,7 @@ impl CodeModeTool {
                 "code mode does not expose fix tools; use standalone MCP tools for previews"
                     .to_string(),
             ),
-            _ => Err(format!("unsupported code mode fallow tool '{name}'")),
+            _ => Err(format!("unsupported code mode plow tool '{name}'")),
         }
     }
 
@@ -97,7 +97,7 @@ impl CodeModeTool {
             Self::TraceClone => "trace_clone",
             Self::CheckHealth => "check_health",
             Self::Audit => "audit",
-            Self::FallowExplain => "fallow_explain",
+            Self::PlowExplain => "plow_explain",
             Self::ListBoundaries => "list_boundaries",
             Self::FeatureFlags => "feature_flags",
             Self::Impact => "impact",
@@ -126,7 +126,7 @@ pub(super) const CODE_MODE_ALIASES: &[(&str, &str)] = &[
     ("traceClone", "trace_clone"),
     ("checkHealth", "check_health"),
     ("audit", "audit"),
-    ("explain", "fallow_explain"),
+    ("explain", "plow_explain"),
     ("listBoundaries", "list_boundaries"),
     ("featureFlags", "feature_flags"),
     ("impact", "impact"),
@@ -148,7 +148,7 @@ pub(super) const API_BACKED_CODE_MODE_TOOLS: &[CodeModeTool] = &[
     CodeModeTool::TraceClone,
     CodeModeTool::CheckHealth,
     CodeModeTool::Audit,
-    CodeModeTool::FallowExplain,
+    CodeModeTool::PlowExplain,
     CodeModeTool::ListBoundaries,
     CodeModeTool::FeatureFlags,
 ];
@@ -160,7 +160,7 @@ pub(super) fn merge_default_root(
     let mut params: serde_json::Value =
         serde_json::from_str(params_json).map_err(|err| format!("invalid params JSON: {err}"))?;
     if !params.is_object() {
-        return Err("fallow host call params must be an object".to_string());
+        return Err("plow host call params must be an object".to_string());
     }
     if let Some(root) = default_root
         && params.get("root").is_none()
@@ -223,7 +223,7 @@ pub(super) fn run_api_tool(
             let params: AuditParams = parse_params(params)?;
             run_audit_api_value(&params)
         }
-        CodeModeTool::FallowExplain => {
+        CodeModeTool::PlowExplain => {
             let params: ExplainParams = parse_params(params)?;
             serialize_explain_programmatic_json(&params.issue_type, RootEnvelopeMode::Tagged, None)
                 .map(Some)
@@ -266,7 +266,7 @@ pub(super) fn build_tool_args(
         | CodeModeTool::TraceClone => build_trace_tool_args(tool, params),
         CodeModeTool::CheckHealth
         | CodeModeTool::Audit
-        | CodeModeTool::FallowExplain
+        | CodeModeTool::PlowExplain
         | CodeModeTool::ListBoundaries
         | CodeModeTool::FeatureFlags
         | CodeModeTool::Impact => build_health_and_config_tool_args(tool, params),
@@ -345,7 +345,7 @@ fn build_health_and_config_tool_args(
             let params: AuditParams = parse_params(params)?;
             build_audit_args(&params)
         }
-        CodeModeTool::FallowExplain => {
+        CodeModeTool::PlowExplain => {
             let params: ExplainParams = parse_params(params)?;
             Ok(build_explain_args(&params))
         }
@@ -425,18 +425,14 @@ mod tests {
                 "trace_clone",
                 "check_health",
                 "audit",
-                "fallow_explain",
+                "plow_explain",
                 "list_boundaries",
                 "feature_flags",
             ]
         );
 
         for tool in API_BACKED_CODE_MODE_TOOLS {
-            assert!(
-                tool.is_api_backed(),
-                "{} should use fallow-api",
-                tool.name()
-            );
+            assert!(tool.is_api_backed(), "{} should use plow-api", tool.name());
         }
     }
 

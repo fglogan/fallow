@@ -1,6 +1,6 @@
 use std::process::ExitCode;
 
-use fallow_types::output_format::OutputFormat;
+use plow_types::output_format::OutputFormat;
 
 /// Emit an error as structured JSON on stdout when `--format json` is active,
 /// then return the given exit code. For non-JSON formats, emit to stderr as usual.

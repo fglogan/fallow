@@ -1,4 +1,4 @@
-//! Programmatic API contract types for fallow.
+//! Programmatic API contract types for plow.
 //!
 //! Runtime execution for dead-code and duplication lives here. Health output
 //! assembly is also API-owned, with the concrete runner injected while the
@@ -16,8 +16,8 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_config::EmailMode;
-use fallow_output::EffortEstimate;
+use plow_config::EmailMode;
+use plow_output::EffortEstimate;
 use serde::Serialize;
 
 mod analysis_context;
@@ -49,9 +49,9 @@ pub mod sarif_output;
 pub mod security_output;
 pub mod ci_output {
     //! Compatibility re-exports for CI output builders now owned by
-    //! `fallow-output`.
+    //! `plow-output`.
 
-    pub use fallow_output::{
+    pub use plow_output::{
         CiIssue, CiProvider, GroupedReviewIssues, MARKER_PREFIX_V2, MARKER_SUFFIX_V2,
         MAX_COMMENT_BODY_BYTES, PROJECT_LEVEL_RULE_IDS, PrCommentRenderInput,
         ReviewCommentRenderInput, ReviewEnvelopeRenderInput, ReviewEnvelopeRenderResult,
@@ -110,12 +110,6 @@ pub use explain::{
     rule_docs_url, rule_guide, security_meta, serialize_explain_programmatic_json,
     unknown_explain_error,
 };
-pub use fallow_config::AuditGate;
-pub use fallow_output::RootEnvelopeMode;
-pub use fallow_types::trace::{
-    CloneTrace, DependencyTrace, ExportReference, ExportTrace, FileTrace, ReExportChain,
-    TracedCloneGroup, TracedExport, TracedReExport,
-};
 pub use grouped_output::{
     ResultGroup, UNOWNED_GROUP_LABEL, build_duplication_grouping_with, group_analysis_results_with,
     largest_clone_group_owner_with,
@@ -142,9 +136,15 @@ pub use markdown_output::{
 };
 pub use output_contracts::{
     AuditOutput, BoundariesListLogicalGroup, BoundariesListRule, BoundariesListZone,
-    BoundariesListing, CombinedOutput, FallowOutput, ListBoundariesOutput, ListEntryPointOutput,
-    ListOutput, ListPluginOutput, SecurityGate, SecurityOutput, SecurityOutputConfig,
+    BoundariesListing, CombinedOutput, ListBoundariesOutput, ListEntryPointOutput, ListOutput,
+    ListPluginOutput, PlowOutput, SecurityGate, SecurityOutput, SecurityOutputConfig,
     SecuritySummaryOutput, WorkspacesOutput,
+};
+pub use plow_config::AuditGate;
+pub use plow_output::RootEnvelopeMode;
+pub use plow_types::trace::{
+    CloneTrace, DependencyTrace, ExportReference, ExportTrace, FileTrace, ReExportChain,
+    TracedCloneGroup, TracedExport, TracedReExport,
 };
 pub use runtime::{
     AuditProgrammaticKeySnapshot, AuditProgrammaticOutput, BoundaryViolationsOutput,
@@ -310,7 +310,7 @@ pub struct AuditOptions {
     pub production_dead_code: Option<bool>,
     pub production_health: Option<bool>,
     pub production_dupes: Option<bool>,
-    pub gate: fallow_config::AuditGate,
+    pub gate: plow_config::AuditGate,
     pub max_crap: Option<f64>,
     pub coverage: Option<PathBuf>,
     pub coverage_root: Option<PathBuf>,
@@ -472,7 +472,7 @@ pub struct ComplexityCoverageInputs<'a> {
 /// Input for deriving effective health sections from API-owned flags.
 #[derive(Debug, Clone)]
 pub struct HealthSectionOptions {
-    pub output: fallow_types::output_format::OutputFormat,
+    pub output: plow_types::output_format::OutputFormat,
     pub complexity: bool,
     pub file_scores: bool,
     pub coverage_gaps: bool,
@@ -528,7 +528,7 @@ pub struct DerivedComplexityOptions {
     pub score: bool,
 }
 
-/// Normalized programmatic complexity / health inputs owned by `fallow-api`.
+/// Normalized programmatic complexity / health inputs owned by `plow-api`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComplexityRunOptions<'a> {
     pub thresholds: ComplexityThresholdOverrides,
@@ -552,7 +552,7 @@ pub fn derive_health_sections(options: &HealthSectionOptions) -> DerivedHealthSe
         || options.trend
         || matches!(
             options.output,
-            fallow_types::output_format::OutputFormat::Badge
+            plow_types::output_format::OutputFormat::Badge
         );
     let any_section = options.complexity
         || options.file_scores
@@ -596,7 +596,7 @@ pub fn derive_health_sections(options: &HealthSectionOptions) -> DerivedHealthSe
 pub fn derive_complexity_sections(options: &ComplexitySectionOptions) -> DerivedComplexityOptions {
     let requested_hotspots = options.hotspots || options.ownership;
     let sections = derive_health_sections(&HealthSectionOptions {
-        output: fallow_types::output_format::OutputFormat::Human,
+        output: plow_types::output_format::OutputFormat::Human,
         complexity: options.complexity,
         file_scores: options.file_scores,
         coverage_gaps: options.coverage_gaps,
@@ -672,14 +672,14 @@ pub fn validate_complexity_options(options: &ComplexityOptions) -> Result<(), Pr
             format!("coverage path does not exist: {}", path.display()),
             2,
         )
-        .with_code("FALLOW_INVALID_COVERAGE_PATH")
+        .with_code("PLOW_INVALID_COVERAGE_PATH")
         .with_context("health.coverage"));
     }
     if let Err(message) =
-        fallow_engine::validate_coverage_root_absolute(options.coverage_root.as_deref())
+        plow_engine::validate_coverage_root_absolute(options.coverage_root.as_deref())
     {
         return Err(ProgrammaticError::new(message, 2)
-            .with_code("FALLOW_INVALID_COVERAGE_ROOT")
+            .with_code("PLOW_INVALID_COVERAGE_ROOT")
             .with_context("health.coverage_root"));
     }
 
@@ -713,27 +713,27 @@ fn is_health_score_only_output(options: &HealthSectionOptions, score: bool) -> b
 
 const fn thresholds_to_engine(
     thresholds: ComplexityThresholdOverrides,
-) -> fallow_engine::HealthThresholdOverrides {
-    fallow_engine::HealthThresholdOverrides {
+) -> plow_engine::HealthThresholdOverrides {
+    plow_engine::HealthThresholdOverrides {
         max_cyclomatic: thresholds.max_cyclomatic,
         max_cognitive: thresholds.max_cognitive,
         max_crap: thresholds.max_crap,
     }
 }
 
-const fn complexity_sort_to_engine(sort: ComplexitySort) -> fallow_engine::HealthSort {
+const fn complexity_sort_to_engine(sort: ComplexitySort) -> plow_engine::HealthSort {
     match sort {
-        ComplexitySort::Severity => fallow_engine::HealthSort::Severity,
-        ComplexitySort::Cyclomatic => fallow_engine::HealthSort::Cyclomatic,
-        ComplexitySort::Cognitive => fallow_engine::HealthSort::Cognitive,
-        ComplexitySort::Lines => fallow_engine::HealthSort::Lines,
+        ComplexitySort::Severity => plow_engine::HealthSort::Severity,
+        ComplexitySort::Cyclomatic => plow_engine::HealthSort::Cyclomatic,
+        ComplexitySort::Cognitive => plow_engine::HealthSort::Cognitive,
+        ComplexitySort::Lines => plow_engine::HealthSort::Lines,
     }
 }
 
 const fn coverage_inputs_to_engine(
     coverage_inputs: ComplexityCoverageInputs<'_>,
-) -> fallow_engine::HealthCoverageInputs<'_> {
-    fallow_engine::HealthCoverageInputs {
+) -> plow_engine::HealthCoverageInputs<'_> {
+    plow_engine::HealthCoverageInputs {
         coverage: coverage_inputs.coverage,
         coverage_root: coverage_inputs.coverage_root,
     }
@@ -772,13 +772,13 @@ mod tests {
     #[test]
     fn programmatic_error_builder_keeps_optional_fields() {
         let error = ProgrammaticError::new("boom", 2)
-            .with_code("FALLOW_TEST")
+            .with_code("PLOW_TEST")
             .with_help("Try again")
             .with_context("analysis.root");
 
         assert_eq!(error.message, "boom");
         assert_eq!(error.exit_code, 2);
-        assert_eq!(error.code.as_deref(), Some("FALLOW_TEST"));
+        assert_eq!(error.code.as_deref(), Some("PLOW_TEST"));
         assert_eq!(error.help.as_deref(), Some("Try again"));
         assert_eq!(error.context.as_deref(), Some("analysis.root"));
     }
@@ -896,7 +896,7 @@ mod tests {
         .expect_err("missing coverage path should fail");
 
         assert_eq!(err.exit_code, 2);
-        assert_eq!(err.code.as_deref(), Some("FALLOW_INVALID_COVERAGE_PATH"));
+        assert_eq!(err.code.as_deref(), Some("PLOW_INVALID_COVERAGE_PATH"));
         assert_eq!(err.context.as_deref(), Some("health.coverage"));
     }
 
@@ -909,14 +909,14 @@ mod tests {
         .expect_err("relative coverage root should fail");
 
         assert_eq!(err.exit_code, 2);
-        assert_eq!(err.code.as_deref(), Some("FALLOW_INVALID_COVERAGE_ROOT"));
+        assert_eq!(err.code.as_deref(), Some("PLOW_INVALID_COVERAGE_ROOT"));
         assert_eq!(err.context.as_deref(), Some("health.coverage_root"));
     }
 
     #[test]
     fn default_health_sections_match_full_health_output() {
         let derived = derive_health_sections(&HealthSectionOptions {
-            output: fallow_types::output_format::OutputFormat::Human,
+            output: plow_types::output_format::OutputFormat::Human,
             complexity: false,
             file_scores: false,
             coverage_gaps: false,
@@ -943,7 +943,7 @@ mod tests {
     #[test]
     fn health_score_gate_requests_score_only_output() {
         let derived = derive_health_sections(&HealthSectionOptions {
-            output: fallow_types::output_format::OutputFormat::Human,
+            output: plow_types::output_format::OutputFormat::Human,
             complexity: false,
             file_scores: false,
             coverage_gaps: false,
@@ -969,7 +969,7 @@ mod tests {
     #[test]
     fn health_snapshot_keeps_full_hidden_inputs_without_section_request() {
         let derived = derive_health_sections(&HealthSectionOptions {
-            output: fallow_types::output_format::OutputFormat::Human,
+            output: plow_types::output_format::OutputFormat::Human,
             complexity: false,
             file_scores: false,
             coverage_gaps: false,

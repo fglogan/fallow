@@ -1,4 +1,4 @@
-use fallow_config::ResolvedConfig;
+use plow_config::ResolvedConfig;
 
 use super::HealthOptions;
 use super::ignore::build_ignore_set;
@@ -7,7 +7,7 @@ use super::pipeline::{HealthScope, HealthScopeInputs};
 pub(super) fn prepare_health_scope<'a, R>(
     opts: &HealthOptions<'a>,
     config: &ResolvedConfig,
-    files: &'a [fallow_types::discover::DiscoveredFile],
+    files: &'a [plow_types::discover::DiscoveredFile],
     scope_inputs: HealthScopeInputs<'a, R>,
 ) -> HealthScope<'a, R> {
     let max_cyclomatic = opts

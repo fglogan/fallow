@@ -1,4 +1,4 @@
-//! `fallow trace <symbol> --callers --callees [--depth N]`: symbol-level
+//! `plow trace <symbol> --callers --callees [--depth N]`: symbol-level
 //! call chains.
 //!
 //! Best-effort, syntactic (ADR-001), EXPLICITLY OFF the ranked path. The result
@@ -10,15 +10,15 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use fallow_config::{OutputFormat, ProductionAnalysis};
-use fallow_types::trace_chain::{SymbolChainQuery, SymbolChainTrace, TraceDirections};
+use plow_config::{OutputFormat, ProductionAnalysis};
+use plow_types::trace_chain::{SymbolChainQuery, SymbolChainTrace, TraceDirections};
 
 use crate::error::emit_error;
 use crate::report;
 use crate::report::sink::outln;
 use crate::{ConfigLoadOptions, load_config_for_analysis};
 
-/// Options for `fallow trace`.
+/// Options for `plow trace`.
 pub struct TraceChainOptions<'a> {
     pub root: &'a Path,
     pub config_path: &'a Option<PathBuf>,
@@ -47,7 +47,7 @@ pub fn run_trace(opts: &TraceChainOptions<'_>) -> ExitCode {
     };
 
     // Default to walking BOTH directions when neither flag is set, so a bare
-    // `fallow trace <symbol>` is useful without remembering the flags.
+    // `plow trace <symbol>` is useful without remembering the flags.
     let directions = if !opts.callers && !opts.callees {
         TraceDirections {
             callers: true,
@@ -76,7 +76,7 @@ pub fn run_trace(opts: &TraceChainOptions<'_>) -> ExitCode {
         Err(code) => return code,
     };
 
-    let trace = match fallow_engine::trace_symbol_chain(
+    let trace = match plow_engine::trace_symbol_chain(
         &config,
         SymbolChainQuery {
             file: &file,
@@ -112,7 +112,7 @@ fn parse_target(target: &str) -> Option<(String, String)> {
 fn emit_trace(trace: SymbolChainTrace, opts: &TraceChainOptions<'_>) -> ExitCode {
     match opts.output {
         OutputFormat::Json => {
-            let value = match fallow_output::serialize_trace_json_output(
+            let value = match plow_output::serialize_trace_json_output(
                 trace,
                 crate::output_runtime::current_root_envelope_mode(),
                 crate::output_runtime::telemetry_analysis_run_id().as_deref(),

@@ -12,8 +12,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use oxc_span::Span;
 
 use crate::ExportName;
-use fallow_types::extract::{NamespaceObjectAlias, VisibilityTag};
-use fallow_types::suppress::{PolicyRuleSuppression, SuppressionTarget};
+use plow_types::extract::{NamespaceObjectAlias, VisibilityTag};
+use plow_types::suppress::{PolicyRuleSuppression, SuppressionTarget};
 
 /// Seconds-since-Unix-epoch from the wall clock, saturating to 0 if the
 /// system clock is set before the epoch. Used as the LRU bookkeeping
@@ -39,7 +39,7 @@ use super::types::{
 #[must_use]
 pub fn cached_to_module(
     cached: &CachedModule,
-    file_id: fallow_types::discover::FileId,
+    file_id: plow_types::discover::FileId,
 ) -> crate::ModuleInfo {
     cached_to_module_opts(cached, file_id, true)
 }
@@ -193,10 +193,10 @@ fn cached_suppressions_to_module(
 
 fn cached_unknown_suppressions_to_module(
     unknown_suppression_kinds: &[CachedUnknownSuppressionKind],
-) -> Vec<fallow_types::suppress::UnknownSuppressionKind> {
+) -> Vec<plow_types::suppress::UnknownSuppressionKind> {
     unknown_suppression_kinds
         .iter()
-        .map(|unknown| fallow_types::suppress::UnknownSuppressionKind {
+        .map(|unknown| plow_types::suppress::UnknownSuppressionKind {
             comment_line: unknown.comment_line,
             is_file_level: unknown.is_file_level,
             token: unknown.token.clone(),
@@ -395,7 +395,7 @@ fn module_suppressions_to_cached(
 }
 
 fn module_unknown_suppressions_to_cached(
-    unknown_suppression_kinds: &[fallow_types::suppress::UnknownSuppressionKind],
+    unknown_suppression_kinds: &[plow_types::suppress::UnknownSuppressionKind],
 ) -> Vec<CachedUnknownSuppressionKind> {
     unknown_suppression_kinds
         .iter()
@@ -450,12 +450,12 @@ fn module_namespace_aliases_to_cached(
 
 /// Reconstruct a [`ModuleInfo`](crate::ModuleInfo) from a [`CachedModule`], skipping
 /// the per-function complexity vec when `need_complexity` is `false`. Avoids the
-/// `Vec<FunctionComplexity>` clone on warm runs of commands (e.g. `fallow dead-code`)
+/// `Vec<FunctionComplexity>` clone on warm runs of commands (e.g. `plow dead-code`)
 /// that don't consume complexity, which adds up across tens of thousands of files.
 #[must_use]
 pub fn cached_to_module_opts(
     cached: &CachedModule,
-    file_id: fallow_types::discover::FileId,
+    file_id: plow_types::discover::FileId,
     need_complexity: bool,
 ) -> crate::ModuleInfo {
     crate::ModuleInfo {
@@ -550,13 +550,13 @@ pub fn cached_to_module_opts(
 
 /// Convert a [`ModuleInfo`](crate::ModuleInfo) to a [`CachedModule`] for storage.
 ///
-/// The [`SourceFingerprint`](fallow_types::source_fingerprint::SourceFingerprint)
+/// The [`SourceFingerprint`](plow_types::source_fingerprint::SourceFingerprint)
 /// comes from `std::fs::metadata()` at parse time and enables fast cache
 /// validation on subsequent runs.
 #[must_use]
 pub fn module_to_cached(
     module: &crate::ModuleInfo,
-    fingerprint: fallow_types::source_fingerprint::SourceFingerprint,
+    fingerprint: plow_types::source_fingerprint::SourceFingerprint,
 ) -> CachedModule {
     CachedModule {
         content_hash: module.content_hash,
@@ -655,6 +655,6 @@ pub fn module_to_cached_from_parts(
 ) -> CachedModule {
     module_to_cached(
         module,
-        fallow_types::source_fingerprint::SourceFingerprint::new(mtime_ns, file_size),
+        plow_types::source_fingerprint::SourceFingerprint::new(mtime_ns, file_size),
     )
 }

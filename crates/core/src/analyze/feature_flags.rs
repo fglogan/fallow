@@ -6,8 +6,8 @@
 
 use std::path::PathBuf;
 
-use fallow_types::extract::{FlagUse, FlagUseKind, ModuleInfo, byte_offset_to_line_col};
-use fallow_types::results::{AnalysisResults, FeatureFlag, FlagConfidence, FlagKind};
+use plow_types::extract::{FlagUse, FlagUseKind, ModuleInfo, byte_offset_to_line_col};
+use plow_types::results::{AnalysisResults, FeatureFlag, FlagConfidence, FlagKind};
 
 use crate::graph::ModuleGraph;
 
@@ -18,7 +18,7 @@ use crate::graph::ModuleGraph;
 /// offsets to line numbers using per-file line offset tables.
 #[deprecated(
     since = "2.76.0",
-    note = "fallow_core is internal; use fallow_api::run_feature_flags for typed output; serialize with fallow_api::serialize_feature_flags_programmatic_json for JSON output. See docs/fallow-core-migration.md and ADR-008."
+    note = "plow_core is internal; use plow_api::run_feature_flags for typed output; serialize with plow_api::serialize_feature_flags_programmatic_json for JSON output. See docs/plow-core-migration.md and ADR-008."
 )]
 pub fn collect_feature_flags(modules: &[ModuleInfo], graph: &ModuleGraph) -> Vec<FeatureFlag> {
     let mut flags = Vec::new();
@@ -59,7 +59,7 @@ pub fn collect_feature_flags(modules: &[ModuleInfo], graph: &ModuleGraph) -> Vec
 /// on each flag.
 #[deprecated(
     since = "2.76.0",
-    note = "fallow_core is internal; use fallow_api::run_feature_flags for typed output; serialize with fallow_api::serialize_feature_flags_programmatic_json for JSON output. The `guarded_dead_exports` field carries the same correlation. See docs/fallow-core-migration.md and ADR-008."
+    note = "plow_core is internal; use plow_api::run_feature_flags for typed output; serialize with plow_api::serialize_feature_flags_programmatic_json for JSON output. The `guarded_dead_exports` field carries the same correlation. See docs/plow-core-migration.md and ADR-008."
 )]
 pub fn correlate_with_dead_code(flags: &mut [FeatureFlag], results: &AnalysisResults) {
     if results.unused_exports.is_empty() && results.unused_types.is_empty() {
@@ -120,10 +120,10 @@ fn flag_use_to_feature_flag(flag_use: &FlagUse, path: PathBuf) -> FeatureFlag {
 
 #[cfg(test)]
 mod tests {
-    use fallow_types::discover::{DiscoveredFile, EntryPoint, FileId};
-    use fallow_types::extract::compute_line_offsets;
-    use fallow_types::output_dead_code::UnusedExportFinding;
-    use fallow_types::results::{AnalysisResults, UnusedExport};
+    use plow_types::discover::{DiscoveredFile, EntryPoint, FileId};
+    use plow_types::extract::compute_line_offsets;
+    use plow_types::output_dead_code::UnusedExportFinding;
+    use plow_types::results::{AnalysisResults, UnusedExport};
 
     use crate::graph::ModuleGraph;
     use crate::resolve::ResolvedModule;
@@ -636,7 +636,7 @@ mod tests {
     #[test]
     #[expect(deprecated, reason = "testing the deprecated public API")]
     fn correlate_with_dead_code_unused_type_within_guard_span_is_credited() {
-        use fallow_types::output_dead_code::UnusedTypeFinding;
+        use plow_types::output_dead_code::UnusedTypeFinding;
 
         let path = PathBuf::from("/project/src/types.ts");
         let mut flags = vec![FeatureFlag {
@@ -673,7 +673,7 @@ mod tests {
     #[test]
     #[expect(deprecated, reason = "testing the deprecated public API")]
     fn correlate_with_dead_code_combines_exports_and_types() {
-        use fallow_types::output_dead_code::UnusedTypeFinding;
+        use plow_types::output_dead_code::UnusedTypeFinding;
 
         let path = PathBuf::from("/project/src/combined.ts");
         let mut flags = vec![FeatureFlag {

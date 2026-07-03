@@ -1,7 +1,7 @@
 /// Build a glob set from health ignore patterns.
 ///
 /// User patterns were validated at config load time
-/// (see `FallowConfig::validate_user_globs`).
+/// (see `PlowConfig::validate_user_globs`).
 #[expect(
     clippy::expect_used,
     reason = "health ignore globs are validated before health analysis"

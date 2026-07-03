@@ -1,11 +1,11 @@
-use fallow_output::{FileHealthScore, HotspotEntry};
+use plow_output::{FileHealthScore, HotspotEntry};
 
 use crate::vital_signs;
 
 /// Apply duplication metrics to a vital-signs result.
 pub fn apply_duplication_metrics(
-    vital_signs: &mut fallow_output::VitalSigns,
-    counts: &mut fallow_output::VitalSignsCounts,
+    vital_signs: &mut plow_output::VitalSigns,
+    counts: &mut plow_output::VitalSignsCounts,
     dupes_report: &crate::duplicates::DuplicationReport,
 ) {
     let pct = dupes_report.stats.duplication_percentage;
@@ -64,7 +64,7 @@ pub struct VitalSignsAndCountsInput<'a> {
 
 pub fn compute_vital_signs_and_counts(
     input: &VitalSignsAndCountsInput<'_>,
-) -> (fallow_output::VitalSigns, fallow_output::VitalSignsCounts) {
+) -> (plow_output::VitalSigns, plow_output::VitalSignsCounts) {
     let analysis_counts = input.score_output.map(|o| {
         o.analysis_snapshot
             .counts_for(input.subset, &o.analysis_counts)

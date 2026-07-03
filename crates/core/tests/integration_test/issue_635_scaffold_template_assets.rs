@@ -5,7 +5,7 @@ fn package_files_template_roots_are_support_entry_points_for_workspace_package()
     let root = fixture_path("issue-635-scaffold-template-assets");
     let config = create_config(root.clone());
 
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused_files = results
         .unused_files
         .iter()

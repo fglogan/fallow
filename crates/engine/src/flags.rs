@@ -2,10 +2,10 @@
 
 use std::path::Path;
 
-use fallow_config::ResolvedConfig;
-use fallow_types::discover::DiscoveredFile;
-use fallow_types::extract::{FlagUse, FlagUseKind, ModuleInfo, ParseResult};
-use fallow_types::results::{AnalysisResults, FeatureFlag, FlagConfidence, FlagKind};
+use plow_config::ResolvedConfig;
+use plow_types::discover::DiscoveredFile;
+use plow_types::extract::{FlagUse, FlagUseKind, ModuleInfo, ParseResult};
+use plow_types::results::{AnalysisResults, FeatureFlag, FlagConfidence, FlagKind};
 use rustc_hash::FxHashMap;
 
 use crate::dead_code::analyze_with_parse_result;
@@ -185,9 +185,8 @@ fn flag_use_to_feature_flag(flag_use: &FlagUse, module: &ModuleInfo, path: &Path
         && !module.line_offsets.is_empty()
     {
         let (start_line, _) =
-            fallow_types::extract::byte_offset_to_line_col(&module.line_offsets, start);
-        let (end_line, _) =
-            fallow_types::extract::byte_offset_to_line_col(&module.line_offsets, end);
+            plow_types::extract::byte_offset_to_line_col(&module.line_offsets, start);
+        let (end_line, _) = plow_types::extract::byte_offset_to_line_col(&module.line_offsets, end);
         (Some(start_line), Some(end_line))
     } else {
         (None, None)

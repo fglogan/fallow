@@ -5,11 +5,11 @@ import type { ChangeAnchor, Judgment, ValidationEnvelope } from "../model/agent"
 const ANCHOR_CROSS_CUTTING = "cross-cutting";
 
 /**
- * Per-trade-off fallow-validation status:
- *  - `anchored`: fallow accepted the trade-off's `change_anchor` , it cites a real
- *    changed region the graph emitted (fallow-grade, not just agent-self-checked).
+ * Per-trade-off plow-validation status:
+ *  - `anchored`: plow accepted the trade-off's `change_anchor` , it cites a real
+ *    changed region the graph emitted (plow-grade, not just agent-self-checked).
  *  - `unanchored`: the anchor maps to no changed region in the current diff, or
- *    fallow rejected it (`unknown-change-anchor`).
+ *    plow rejected it (`unknown-change-anchor`).
  *  - `not-anchorable`: a cross-cutting trade-off (no single changed line; it cannot
  *    be graph-validated and stays a model inference).
  */
@@ -17,7 +17,7 @@ export type TradeOffAnchorStatus = "anchored" | "unanchored" | "not-anchorable";
 
 export type TradeOffValidation = {
   /** True when the trade-off envelope's snapshot hash no longer matches the live
-   * graph: fallow refuses the whole payload as stale (the tree moved). */
+   * graph: plow refuses the whole payload as stale (the tree moved). */
   stale: boolean;
   /** Per-trade-off status, keyed by the trade-off `id`. */
   statusById: Record<string, TradeOffAnchorStatus>;
@@ -39,9 +39,9 @@ const resolveChangeAnchor = (anchor: string, anchors: ChangeAnchor[]): string | 
 
 /**
  * Close the loop: validate the persisted trade-off surface against the LIVE graph
- * through the SAME `fallow review --walkthrough-file` machinery that validates
+ * through the SAME `plow review --walkthrough-file` machinery that validates
  * signal_ids. Each trade-off's `file:line` anchor is mapped to a guide-emitted
- * change_anchor and cited as a judgment; fallow refuses the whole payload as stale
+ * change_anchor and cited as a judgment; plow refuses the whole payload as stale
  * on snapshot drift and rejects any anchor it never emitted. Cross-cutting
  * trade-offs are not anchorable and stay model-inferred. A null envelope (no run)
  * or empty/abstained surface yields `null` (nothing to validate).

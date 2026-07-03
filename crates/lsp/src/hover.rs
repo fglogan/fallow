@@ -3,8 +3,8 @@ use std::path::Path;
 
 use ls_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position, Range};
 
-use fallow_api::editor_results::SecurityFindingKind;
-use fallow_api::{
+use plow_api::editor_results::SecurityFindingKind;
+use plow_api::{
     EditorAnalysisResults as AnalysisResults, EditorDuplicationReport as DuplicationReport,
 };
 
@@ -139,7 +139,7 @@ fn build_hover_for_test(
 /// vertical report: it leads with the candidate kind + the honest confidence
 /// signals (`source_backed`, `reachable_from_entry`), then evidence, then a
 /// one-line blast-radius summary, the kind-appropriate next step, and a pointer
-/// to the full trace (`fallow security --file`). The multi-hop traces stay out
+/// to the full trace (`plow security --file`). The multi-hop traces stay out
 /// of the hover. Every user-controlled string goes through `format_inline_code`
 /// (never backslash-escaped) so a crafted evidence/path string cannot leak
 /// markdown or a `command:` URI.
@@ -183,12 +183,12 @@ fn check_security(
 
 /// Build the confidence-first triage markdown body for a security candidate.
 fn security_hover_markdown(
-    finding: &fallow_api::editor_results::SecurityFinding,
+    finding: &plow_api::editor_results::SecurityFinding,
     file_path: &Path,
 ) -> String {
     let label = security_label(finding);
     let mut value = format!(
-        "**fallow** security candidate: {} (unverified, verify before acting)",
+        "**plow** security candidate: {} (unverified, verify before acting)",
         format_inline_code(&label),
     );
 
@@ -231,14 +231,14 @@ fn security_hover_markdown(
     let _ = write!(
         value,
         "\n\nFull trace: run {} or see the security docs.",
-        format_inline_code(&format!("fallow security --file {basename}")),
+        format_inline_code(&format!("plow security --file {basename}")),
     );
 
     value
 }
 
 /// Kind-appropriate "Next:" guidance line for a security candidate.
-fn security_next_step(finding: &fallow_api::editor_results::SecurityFinding) -> &'static str {
+fn security_next_step(finding: &plow_api::editor_results::SecurityFinding) -> &'static str {
     match finding.kind {
         SecurityFindingKind::ClientServerLeak => {
             "Next: check whether the import is type-only, server-only, or behind a build-time \
@@ -269,7 +269,7 @@ fn check_unused_file(results: &AnalysisResults, file_path: &Path) -> Option<Hove
     Some(Hover {
         contents: HoverContents::Markup(MarkupContent {
             kind: MarkupKind::Markdown,
-            value: "**fallow**: This file is not imported by any other file and is not reachable \
+            value: "**plow**: This file is not imported by any other file and is not reachable \
                     from any entry point."
                 .to_string(),
         }),
@@ -292,12 +292,12 @@ fn check_unused_export(
     for (exports, kind_label) in [
         (
             Box::new(unused_exports_iter)
-                as Box<dyn Iterator<Item = &fallow_api::editor_results::UnusedExport>>,
+                as Box<dyn Iterator<Item = &plow_api::editor_results::UnusedExport>>,
             "Export",
         ),
         (
             Box::new(unused_types_iter)
-                as Box<dyn Iterator<Item = &fallow_api::editor_results::UnusedExport>>,
+                as Box<dyn Iterator<Item = &plow_api::editor_results::UnusedExport>>,
             "Type export",
         ),
     ] {
@@ -315,7 +315,7 @@ fn check_unused_export(
             }
 
             let value = format!(
-                "**fallow**: {kind_label} {} is not imported by any other file.",
+                "**plow**: {kind_label} {} is not imported by any other file.",
                 format_inline_code(&export.export_name),
             );
 
@@ -391,7 +391,7 @@ fn check_used_export(
 
 /// Build the reference-count markdown body for a used export, listing up to
 /// ten reference locations and a "... and N more" overflow line.
-fn used_export_hover_markdown(usage: &fallow_api::editor_results::ExportUsage) -> String {
+fn used_export_hover_markdown(usage: &plow_api::editor_results::ExportUsage) -> String {
     let ref_word = if usage.reference_count == 1 {
         "file"
     } else {
@@ -399,7 +399,7 @@ fn used_export_hover_markdown(usage: &fallow_api::editor_results::ExportUsage) -
     };
 
     let mut value = format!(
-        "**fallow**: Export {} is used by {} {ref_word}",
+        "**plow**: Export {} is used by {} {ref_word}",
         format_inline_code(&usage.export_name),
         usage.reference_count,
     );
@@ -447,17 +447,17 @@ fn check_unused_member(
     for (members, kind_label) in [
         (
             Box::new(enum_iter)
-                as Box<dyn Iterator<Item = &fallow_api::editor_results::UnusedMember>>,
+                as Box<dyn Iterator<Item = &plow_api::editor_results::UnusedMember>>,
             "Enum member",
         ),
         (
             Box::new(class_iter)
-                as Box<dyn Iterator<Item = &fallow_api::editor_results::UnusedMember>>,
+                as Box<dyn Iterator<Item = &plow_api::editor_results::UnusedMember>>,
             "Class member",
         ),
         (
             Box::new(store_iter)
-                as Box<dyn Iterator<Item = &fallow_api::editor_results::UnusedMember>>,
+                as Box<dyn Iterator<Item = &plow_api::editor_results::UnusedMember>>,
             "Store member",
         ),
     ] {
@@ -476,7 +476,7 @@ fn check_unused_member(
 
             let qualified = format!("{}.{}", member.parent_name, member.member_name);
             let value = format!(
-                "**fallow**: {kind_label} {} is never used outside its declaration.",
+                "**plow**: {kind_label} {} is never used outside its declaration.",
                 format_inline_code(&qualified),
             );
 
@@ -530,12 +530,12 @@ fn check_unrendered_component(
         // element to match the CLI human / markdown formatters.
         let value = if c.framework == "lit" {
             format!(
-                "**fallow**: Custom element {} is registered but rendered in no template.",
+                "**plow**: Custom element {} is registered but rendered in no template.",
                 format_inline_code(&format!("<{}>", c.component_name)),
             )
         } else {
             format!(
-                "**fallow**: Component {} is reachable but rendered nowhere in this project.",
+                "**plow**: Component {} is reachable but rendered nowhere in this project.",
                 format_inline_code(&c.component_name),
             )
         };
@@ -586,7 +586,7 @@ fn check_unused_component_prop(
         }
 
         let value = format!(
-            "**fallow**: Prop {} is declared but referenced nowhere in this component.",
+            "**plow**: Prop {} is declared but referenced nowhere in this component.",
             format_inline_code(&p.prop_name),
         );
 
@@ -636,7 +636,7 @@ fn check_unused_component_emit(
         }
 
         let value = format!(
-            "**fallow**: Emit {} is declared but emitted nowhere in this component.",
+            "**plow**: Emit {} is declared but emitted nowhere in this component.",
             format_inline_code(&e.emit_name),
         );
 
@@ -686,7 +686,7 @@ fn check_unused_component_input(
         }
 
         let value = format!(
-            "**fallow**: Input {} is declared but read nowhere in this component.",
+            "**plow**: Input {} is declared but read nowhere in this component.",
             format_inline_code(&i.input_name),
         );
 
@@ -736,7 +736,7 @@ fn check_unused_component_output(
         }
 
         let value = format!(
-            "**fallow**: Output {} is declared but emitted nowhere in this component.",
+            "**plow**: Output {} is declared but emitted nowhere in this component.",
             format_inline_code(&o.output_name),
         );
 
@@ -786,7 +786,7 @@ fn check_unused_svelte_event(
         }
 
         let value = format!(
-            "**fallow**: Event {} is dispatched but listened to nowhere in this project.",
+            "**plow**: Event {} is dispatched but listened to nowhere in this project.",
             format_inline_code(&e.event_name),
         );
 
@@ -836,7 +836,7 @@ fn check_unused_server_action(
         }
 
         let value = format!(
-            "**fallow**: Server action {} is exported from a \"use server\" file but no code in this project references it.",
+            "**plow**: Server action {} is exported from a \"use server\" file but no code in this project references it.",
             format_inline_code(&a.action_name),
         );
 
@@ -886,7 +886,7 @@ fn check_unused_load_data_key(
         }
 
         let value = format!(
-            "**fallow**: load() return key {} is read by no consumer (sibling +page.svelte data.<key> or project-wide page.data.<key>).",
+            "**plow**: load() return key {} is read by no consumer (sibling +page.svelte data.<key> or project-wide page.data.<key>).",
             format_inline_code(&k.key_name),
         );
 
@@ -950,7 +950,7 @@ fn check_react_prop_intel(
                 format!("{} call sites", prop.passed_from_sites)
             };
             let mut value = format!(
-                "**fallow**: prop {}: {read} · passed from {sites}",
+                "**plow**: prop {}: {read} · passed from {sites}",
                 format_inline_code(&prop.name),
             );
             // When the prop is the root of a forwarding chain, append the ambient
@@ -1016,7 +1016,7 @@ fn check_react_component_intel(
         }
 
         let value = format!(
-            "**fallow**: component {}: {}",
+            "**plow**: component {}: {}",
             format_inline_code(&intel.component_name),
             react_component_summary(intel),
         );
@@ -1045,7 +1045,7 @@ fn check_react_component_intel(
 /// Build the component summary line for the hover, matching the code-lens
 /// title format: `rendered 12x (8 parents) · 5 props · 9 hooks (4 state, ...)`.
 /// Zero segments are omitted; singular/plural is honored.
-fn react_component_summary(intel: &fallow_api::editor_results::ReactComponentIntel) -> String {
+fn react_component_summary(intel: &plow_api::editor_results::ReactComponentIntel) -> String {
     let mut segments: Vec<String> = Vec::new();
     if intel.render_sites > 0 {
         let parents = intel_pluralize(intel.distinct_parents, "parent");
@@ -1065,7 +1065,7 @@ fn react_component_summary(intel: &fallow_api::editor_results::ReactComponentInt
 
 /// `N hooks (a state, b effect, ...)` or `None` when the component uses no
 /// hooks (kind sub-counts omitted when zero).
-fn intel_hook_segment(hooks: &fallow_api::editor_results::ReactHookSummary) -> Option<String> {
+fn intel_hook_segment(hooks: &plow_api::editor_results::ReactHookSummary) -> Option<String> {
     let total = u32::from(hooks.state)
         + u32::from(hooks.effect)
         + u32::from(hooks.memo)
@@ -1127,7 +1127,7 @@ fn check_unresolved_import(
         }
 
         let value = format!(
-            "**fallow**: Cannot resolve import {}. The module may be missing, misspelled, \
+            "**plow**: Cannot resolve import {}. The module may be missing, misspelled, \
              or not installed.",
             format_inline_code(&import.import.specifier),
         );
@@ -1201,8 +1201,8 @@ fn check_duplication(
 /// Build the markdown body for a duplication hover: the block size plus up to
 /// ten other instance locations and a "... and N more" overflow line.
 fn duplication_hover_markdown(
-    group: &fallow_api::editor_duplicates::CloneGroup,
-    instance: &fallow_api::editor_duplicates::CloneInstance,
+    group: &plow_api::editor_duplicates::CloneGroup,
+    instance: &plow_api::editor_duplicates::CloneInstance,
 ) -> String {
     let other_count = group.instances.len() - 1;
     let instance_word = if other_count == 1 {
@@ -1212,7 +1212,7 @@ fn duplication_hover_markdown(
     };
 
     let mut value = format!(
-        "**fallow**: Duplicated code block ({} lines, {} tokens). \
+        "**plow**: Duplicated code block ({} lines, {} tokens). \
          {other_count} other {instance_word}",
         group.line_count, group.token_count,
     );
@@ -1255,9 +1255,9 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    use fallow_api::editor_duplicates::{CloneGroup, CloneInstance, DuplicationStats};
-    use fallow_api::editor_extract::MemberKind;
-    use fallow_api::editor_results::{
+    use plow_api::editor_duplicates::{CloneGroup, CloneInstance, DuplicationStats};
+    use plow_api::editor_extract::MemberKind;
+    use plow_api::editor_results::{
         ExportUsage, ReactComponentIntel, ReactHookSummary, ReactPropDrill, ReactPropIntel,
         ReferenceLocation, SecuritySeverity, UnresolvedImport, UnresolvedImportFinding,
         UnusedClassMemberFinding, UnusedEnumMemberFinding, UnusedExport, UnusedExportFinding,
@@ -2244,13 +2244,13 @@ mod tests {
         assert!(build_hover_for_test(&results, &duplication, &path_b, pos).is_none());
     }
 
-    fn tainted_sink_finding(path: PathBuf) -> fallow_api::editor_results::SecurityFinding {
-        fallow_api::editor_results::SecurityFinding {
+    fn tainted_sink_finding(path: PathBuf) -> plow_api::editor_results::SecurityFinding {
+        plow_api::editor_results::SecurityFinding {
             finding_id: String::new(),
-            candidate: fallow_api::editor_results::SecurityCandidate::default(),
+            candidate: plow_api::editor_results::SecurityCandidate::default(),
             taint_flow: None,
             attack_surface: None,
-            kind: fallow_api::editor_results::SecurityFindingKind::TaintedSink,
+            kind: plow_api::editor_results::SecurityFindingKind::TaintedSink,
             category: Some("dangerous-html".to_string()),
             cwe: Some(79),
             path,
@@ -2263,7 +2263,7 @@ mod tests {
             trace: vec![],
             actions: vec![],
             dead_code: None,
-            reachability: Some(fallow_api::editor_results::SecurityReachability {
+            reachability: Some(plow_api::editor_results::SecurityReachability {
                 reachable_from_entry: true,
                 reachable_from_untrusted_source: false,
                 taint_confidence: None,
@@ -2300,7 +2300,7 @@ mod tests {
         assert!(value.contains("dangerouslySetInnerHTML"));
         assert!(value.contains("blast radius 4"));
         assert!(value.contains("Next:"));
-        assert!(value.contains("fallow security --file render.ts"));
+        assert!(value.contains("plow security --file render.ts"));
         let range = hover.range.unwrap();
         assert_eq!(range.start.line, 7);
         assert_eq!(range.start.character, 6);
@@ -2364,8 +2364,8 @@ mod tests {
         let path = root.join("src/components/MyCard.vue");
         let mut results = AnalysisResults::default();
         results.unrendered_components.push(
-            fallow_api::editor_results::UnrenderedComponentFinding::with_actions(
-                fallow_api::editor_results::UnrenderedComponent {
+            plow_api::editor_results::UnrenderedComponentFinding::with_actions(
+                plow_api::editor_results::UnrenderedComponent {
                     path: path.clone(),
                     component_name: "MyCard".to_string(),
                     framework: "vue".to_string(),
@@ -2397,8 +2397,8 @@ mod tests {
         let path = root.join("src/components/MyCard.vue");
         let mut results = AnalysisResults::default();
         results.unrendered_components.push(
-            fallow_api::editor_results::UnrenderedComponentFinding::with_actions(
-                fallow_api::editor_results::UnrenderedComponent {
+            plow_api::editor_results::UnrenderedComponentFinding::with_actions(
+                plow_api::editor_results::UnrenderedComponent {
                     path: path.clone(),
                     component_name: "MyCard".to_string(),
                     framework: "vue".to_string(),
@@ -2422,8 +2422,8 @@ mod tests {
         let path = root.join("src/components/MyCard.vue");
         let mut results = AnalysisResults::default();
         results.unrendered_components.push(
-            fallow_api::editor_results::UnrenderedComponentFinding::with_actions(
-                fallow_api::editor_results::UnrenderedComponent {
+            plow_api::editor_results::UnrenderedComponentFinding::with_actions(
+                plow_api::editor_results::UnrenderedComponent {
                     path: path.clone(),
                     component_name: "MyCard".to_string(),
                     framework: "vue".to_string(),
@@ -2455,8 +2455,8 @@ mod tests {
         let path = root.join("src/components/Button.vue");
         let mut results = AnalysisResults::default();
         results.unused_component_props.push(
-            fallow_api::editor_results::UnusedComponentPropFinding::with_actions(
-                fallow_api::editor_results::UnusedComponentProp {
+            plow_api::editor_results::UnusedComponentPropFinding::with_actions(
+                plow_api::editor_results::UnusedComponentProp {
                     path: path.clone(),
                     component_name: "Button".to_string(),
                     prop_name: "variant".to_string(),
@@ -2487,8 +2487,8 @@ mod tests {
         let path = root.join("src/components/Button.vue");
         let mut results = AnalysisResults::default();
         results.unused_component_props.push(
-            fallow_api::editor_results::UnusedComponentPropFinding::with_actions(
-                fallow_api::editor_results::UnusedComponentProp {
+            plow_api::editor_results::UnusedComponentPropFinding::with_actions(
+                plow_api::editor_results::UnusedComponentProp {
                     path: path.clone(),
                     component_name: "Button".to_string(),
                     prop_name: "variant".to_string(),
@@ -2519,8 +2519,8 @@ mod tests {
         let path = root.join("src/components/Form.vue");
         let mut results = AnalysisResults::default();
         results.unused_component_emits.push(
-            fallow_api::editor_results::UnusedComponentEmitFinding::with_actions(
-                fallow_api::editor_results::UnusedComponentEmit {
+            plow_api::editor_results::UnusedComponentEmitFinding::with_actions(
+                plow_api::editor_results::UnusedComponentEmit {
                     path: path.clone(),
                     component_name: "Form".to_string(),
                     emit_name: "submit".to_string(),
@@ -2551,8 +2551,8 @@ mod tests {
         let path = root.join("src/components/Form.vue");
         let mut results = AnalysisResults::default();
         results.unused_component_emits.push(
-            fallow_api::editor_results::UnusedComponentEmitFinding::with_actions(
-                fallow_api::editor_results::UnusedComponentEmit {
+            plow_api::editor_results::UnusedComponentEmitFinding::with_actions(
+                plow_api::editor_results::UnusedComponentEmit {
                     path: path.clone(),
                     component_name: "Form".to_string(),
                     emit_name: "submit".to_string(),
@@ -2583,8 +2583,8 @@ mod tests {
         let path = root.join("src/app/card/card.component.ts");
         let mut results = AnalysisResults::default();
         results.unused_component_inputs.push(
-            fallow_api::editor_results::UnusedComponentInputFinding::with_actions(
-                fallow_api::editor_results::UnusedComponentInput {
+            plow_api::editor_results::UnusedComponentInputFinding::with_actions(
+                plow_api::editor_results::UnusedComponentInput {
                     path: path.clone(),
                     component_name: "CardComponent".to_string(),
                     input_name: "title".to_string(),
@@ -2615,8 +2615,8 @@ mod tests {
         let path = root.join("src/app/card/card.component.ts");
         let mut results = AnalysisResults::default();
         results.unused_component_inputs.push(
-            fallow_api::editor_results::UnusedComponentInputFinding::with_actions(
-                fallow_api::editor_results::UnusedComponentInput {
+            plow_api::editor_results::UnusedComponentInputFinding::with_actions(
+                plow_api::editor_results::UnusedComponentInput {
                     path: path.clone(),
                     component_name: "CardComponent".to_string(),
                     input_name: "title".to_string(),
@@ -2647,8 +2647,8 @@ mod tests {
         let path = root.join("src/app/counter/counter.component.ts");
         let mut results = AnalysisResults::default();
         results.unused_component_outputs.push(
-            fallow_api::editor_results::UnusedComponentOutputFinding::with_actions(
-                fallow_api::editor_results::UnusedComponentOutput {
+            plow_api::editor_results::UnusedComponentOutputFinding::with_actions(
+                plow_api::editor_results::UnusedComponentOutput {
                     path: path.clone(),
                     component_name: "CounterComponent".to_string(),
                     output_name: "changed".to_string(),
@@ -2679,8 +2679,8 @@ mod tests {
         let path = root.join("src/app/counter/counter.component.ts");
         let mut results = AnalysisResults::default();
         results.unused_component_outputs.push(
-            fallow_api::editor_results::UnusedComponentOutputFinding::with_actions(
-                fallow_api::editor_results::UnusedComponentOutput {
+            plow_api::editor_results::UnusedComponentOutputFinding::with_actions(
+                plow_api::editor_results::UnusedComponentOutput {
                     path: path.clone(),
                     component_name: "CounterComponent".to_string(),
                     output_name: "changed".to_string(),
@@ -2711,8 +2711,8 @@ mod tests {
         let path = root.join("src/lib/Notification.svelte");
         let mut results = AnalysisResults::default();
         results.unused_svelte_events.push(
-            fallow_api::editor_results::UnusedSvelteEventFinding::with_actions(
-                fallow_api::editor_results::UnusedSvelteEvent {
+            plow_api::editor_results::UnusedSvelteEventFinding::with_actions(
+                plow_api::editor_results::UnusedSvelteEvent {
                     path: path.clone(),
                     component_name: "Notification".to_string(),
                     event_name: "close".to_string(),
@@ -2743,8 +2743,8 @@ mod tests {
         let path = root.join("src/lib/Notification.svelte");
         let mut results = AnalysisResults::default();
         results.unused_svelte_events.push(
-            fallow_api::editor_results::UnusedSvelteEventFinding::with_actions(
-                fallow_api::editor_results::UnusedSvelteEvent {
+            plow_api::editor_results::UnusedSvelteEventFinding::with_actions(
+                plow_api::editor_results::UnusedSvelteEvent {
                     path: path.clone(),
                     component_name: "Notification".to_string(),
                     event_name: "close".to_string(),
@@ -2775,8 +2775,8 @@ mod tests {
         let path = root.join("src/app/actions.ts");
         let mut results = AnalysisResults::default();
         results.unused_server_actions.push(
-            fallow_api::editor_results::UnusedServerActionFinding::with_actions(
-                fallow_api::editor_results::UnusedServerAction {
+            plow_api::editor_results::UnusedServerActionFinding::with_actions(
+                plow_api::editor_results::UnusedServerAction {
                     path: path.clone(),
                     action_name: "deleteUser".to_string(),
                     line: 8,
@@ -2807,8 +2807,8 @@ mod tests {
         let path = root.join("src/app/actions.ts");
         let mut results = AnalysisResults::default();
         results.unused_server_actions.push(
-            fallow_api::editor_results::UnusedServerActionFinding::with_actions(
-                fallow_api::editor_results::UnusedServerAction {
+            plow_api::editor_results::UnusedServerActionFinding::with_actions(
+                plow_api::editor_results::UnusedServerAction {
                     path: path.clone(),
                     action_name: "deleteUser".to_string(),
                     line: 8,
@@ -2838,8 +2838,8 @@ mod tests {
         let path = root.join("src/routes/blog/+page.server.ts");
         let mut results = AnalysisResults::default();
         results.unused_load_data_keys.push(
-            fallow_api::editor_results::UnusedLoadDataKeyFinding::with_actions(
-                fallow_api::editor_results::UnusedLoadDataKey {
+            plow_api::editor_results::UnusedLoadDataKeyFinding::with_actions(
+                plow_api::editor_results::UnusedLoadDataKey {
                     path: path.clone(),
                     key_name: "posts".to_string(),
                     line: 12,
@@ -2871,8 +2871,8 @@ mod tests {
         let path = root.join("src/routes/blog/+page.server.ts");
         let mut results = AnalysisResults::default();
         results.unused_load_data_keys.push(
-            fallow_api::editor_results::UnusedLoadDataKeyFinding::with_actions(
-                fallow_api::editor_results::UnusedLoadDataKey {
+            plow_api::editor_results::UnusedLoadDataKeyFinding::with_actions(
+                plow_api::editor_results::UnusedLoadDataKey {
                     path: path.clone(),
                     key_name: "posts".to_string(),
                     line: 12,
@@ -2895,8 +2895,8 @@ mod tests {
         let path = root.join("src/routes/blog/+page.server.ts");
         let mut results = AnalysisResults::default();
         results.unused_load_data_keys.push(
-            fallow_api::editor_results::UnusedLoadDataKeyFinding::with_actions(
-                fallow_api::editor_results::UnusedLoadDataKey {
+            plow_api::editor_results::UnusedLoadDataKeyFinding::with_actions(
+                plow_api::editor_results::UnusedLoadDataKey {
                     path: path.clone(),
                     key_name: "posts".to_string(),
                     line: 12,
@@ -2921,12 +2921,12 @@ mod tests {
     fn hover_on_client_server_leak_security_candidate() {
         let root = test_root();
         let path = root.join("src/client/Secrets.tsx");
-        let finding = fallow_api::editor_results::SecurityFinding {
+        let finding = plow_api::editor_results::SecurityFinding {
             finding_id: String::new(),
-            candidate: fallow_api::editor_results::SecurityCandidate::default(),
+            candidate: plow_api::editor_results::SecurityCandidate::default(),
             taint_flow: None,
             attack_surface: None,
-            kind: fallow_api::editor_results::SecurityFindingKind::ClientServerLeak,
+            kind: plow_api::editor_results::SecurityFindingKind::ClientServerLeak,
             category: None,
             cwe: None,
             path: path.clone(),
@@ -2935,7 +2935,7 @@ mod tests {
             evidence: "process.env.SECRET_KEY imported into client bundle".to_string(),
             source_backed: false,
             source_read: None,
-            severity: fallow_api::editor_results::SecuritySeverity::High,
+            severity: plow_api::editor_results::SecuritySeverity::High,
             trace: vec![],
             actions: vec![],
             dead_code: None,
@@ -2964,8 +2964,8 @@ mod tests {
         let root = test_root();
         let path = root.join("src/utils/xss.ts");
         let mut finding = tainted_sink_finding(path.clone());
-        finding.dead_code = Some(fallow_api::editor_results::SecurityDeadCodeContext {
-            kind: fallow_api::editor_results::SecurityDeadCodeKind::UnusedExport,
+        finding.dead_code = Some(plow_api::editor_results::SecurityDeadCodeContext {
+            kind: plow_api::editor_results::SecurityDeadCodeKind::UnusedExport,
             export_name: Some("renderHtml".to_string()),
             line: Some(8),
             guidance: "Verify the dead-code finding and delete the code if safe before hardening."
@@ -3046,8 +3046,8 @@ mod tests {
                 path: path.clone(),
             }));
         results.unrendered_components.push(
-            fallow_api::editor_results::UnrenderedComponentFinding::with_actions(
-                fallow_api::editor_results::UnrenderedComponent {
+            plow_api::editor_results::UnrenderedComponentFinding::with_actions(
+                plow_api::editor_results::UnrenderedComponent {
                     path: path.clone(),
                     component_name: "Dead".to_string(),
                     framework: "vue".to_string(),
@@ -3459,8 +3459,8 @@ mod tests {
         let path = root.join("src/Card.tsx");
         let mut results = AnalysisResults::default();
         results.unused_component_props.push(
-            fallow_api::editor_results::UnusedComponentPropFinding::with_actions(
-                fallow_api::editor_results::UnusedComponentProp {
+            plow_api::editor_results::UnusedComponentPropFinding::with_actions(
+                plow_api::editor_results::UnusedComponentProp {
                     path: path.clone(),
                     component_name: "Card".to_string(),
                     prop_name: "subtitle".to_string(),

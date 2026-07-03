@@ -15,7 +15,7 @@
 
 use std::path::Path;
 
-use fallow_cli::codeowners::CodeOwners;
+use plow_cli::codeowners::CodeOwners;
 
 fn write(path: &Path, contents: &str) {
     if let Some(parent) = path.parent() {

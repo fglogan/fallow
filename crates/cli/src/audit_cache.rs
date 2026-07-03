@@ -2,10 +2,10 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use fallow_types::audit_cache::{
+use plow_types::audit_cache::{
     AuditCacheKeyBuilder, AuditConfigFingerprint, AuditCoverageFingerprint,
 };
-use fallow_types::source_fingerprint::SourceFingerprint;
+use plow_types::source_fingerprint::SourceFingerprint;
 use rustc_hash::FxHashSet;
 use xxhash_rust::xxh3::xxh3_64;
 
@@ -152,7 +152,7 @@ pub(super) fn config_file_fingerprint(
     opts: &AuditOptions<'_>,
 ) -> Result<AuditConfigFingerprint, ExitCode> {
     let loaded = if let Some(path) = opts.config_path {
-        let config = fallow_config::FallowConfig::load(path).map_err(|e| {
+        let config = plow_config::PlowConfig::load(path).map_err(|e| {
             emit_error(
                 &format!("failed to load config '{}': {e}", path.display()),
                 2,
@@ -161,7 +161,7 @@ pub(super) fn config_file_fingerprint(
         })?;
         Some((config, path.clone()))
     } else {
-        fallow_config::FallowConfig::find_and_load(opts.root)
+        plow_config::PlowConfig::find_and_load(opts.root)
             .map_err(|e| emit_error(&e, 2, opts.output))?
     };
 

@@ -50,7 +50,7 @@ assert beta["keys"] == ["entry", "dynamicallyLoaded", "ignorePatterns"]
 
 bad = next(entry for entry in entries if entry.get("repo") == "bad/invalid")
 assert bad["parse_status"].startswith("parse-error:")
-assert bad["comment_hits"][0]["phrase"] == "fallow misses"
+assert bad["comment_hits"][0]["phrase"] == "plow misses"
 
 missing = next(entry for entry in entries if entry.get("repo") == "missing/cache")
 assert missing["parse_status"] == "not-fetched"

@@ -1,6 +1,6 @@
 //! Complexity finding collection and CRAP merge helpers.
 
-use fallow_output::{
+use plow_output::{
     ComplexityViolation, DEFAULT_COGNITIVE_CRITICAL, DEFAULT_COGNITIVE_HIGH,
     DEFAULT_CYCLOMATIC_CRITICAL, DEFAULT_CYCLOMATIC_HIGH, ExceededThreshold,
     compute_finding_severity,
@@ -133,8 +133,8 @@ fn collect_complexity_finding(
     input: &mut CollectFindingsInput<'_>,
     path: &std::path::Path,
     relative: &std::path::Path,
-    fc: &fallow_types::extract::FunctionComplexity,
-    react_hook_profile: Option<fallow_output::ReactHookProfile>,
+    fc: &plow_types::extract::FunctionComplexity,
+    react_hook_profile: Option<plow_output::ReactHookProfile>,
 ) -> Option<ComplexityViolation> {
     let (applied_thresholds, matched_overrides) =
         input.threshold_resolver.resolve(relative, &fc.name);
@@ -189,7 +189,7 @@ fn collect_complexity_finding(
             .map(|_| applied_thresholds.effective),
         threshold_source: applied_thresholds
             .override_index
-            .map(|_| fallow_output::ThresholdSource::Override),
+            .map(|_| plow_output::ThresholdSource::Override),
     })
 }
 
@@ -198,8 +198,8 @@ fn collect_complexity_finding(
 /// is omitted from JSON.
 fn contributions_for(
     complexity_breakdown: bool,
-    fc: &fallow_types::extract::FunctionComplexity,
-) -> Vec<fallow_types::extract::ComplexityContribution> {
+    fc: &plow_types::extract::FunctionComplexity,
+) -> Vec<plow_types::extract::ComplexityContribution> {
     if complexity_breakdown {
         fc.contributions.clone()
     } else {
@@ -233,7 +233,7 @@ pub(super) struct CrapFindingMergeInput<'a> {
 
 type ComplexityByPosition<'a> = rustc_hash::FxHashMap<
     &'a std::path::Path,
-    rustc_hash::FxHashMap<(u32, u32), &'a fallow_types::extract::FunctionComplexity>,
+    rustc_hash::FxHashMap<(u32, u32), &'a plow_types::extract::FunctionComplexity>,
 >;
 
 /// The precomputed position-keyed lookup maps shared across the CRAP merge pass:
@@ -244,7 +244,7 @@ struct CrapMergeMaps<'a> {
     complexity_by_pos: ComplexityByPosition<'a>,
     hook_profiles_by_pos: rustc_hash::FxHashMap<
         &'a std::path::Path,
-        rustc_hash::FxHashMap<(u32, u32), fallow_output::ReactHookProfile>,
+        rustc_hash::FxHashMap<(u32, u32), plow_output::ReactHookProfile>,
     >,
     suppressions_by_path:
         rustc_hash::FxHashMap<&'a std::path::Path, &'a Vec<crate::suppress::Suppression>>,
@@ -375,11 +375,11 @@ fn build_hook_profiles_by_position<'a>(
     file_paths: &'a rustc_hash::FxHashMap<crate::discover::FileId, &'a std::path::PathBuf>,
 ) -> rustc_hash::FxHashMap<
     &'a std::path::Path,
-    rustc_hash::FxHashMap<(u32, u32), fallow_output::ReactHookProfile>,
+    rustc_hash::FxHashMap<(u32, u32), plow_output::ReactHookProfile>,
 > {
     let mut by_pos: rustc_hash::FxHashMap<
         &'a std::path::Path,
-        rustc_hash::FxHashMap<(u32, u32), fallow_output::ReactHookProfile>,
+        rustc_hash::FxHashMap<(u32, u32), plow_output::ReactHookProfile>,
     > = rustc_hash::FxHashMap::default();
     for module in modules {
         let Some(&path) = file_paths.get(&module.file_id) else {
@@ -462,7 +462,7 @@ fn merge_existing_crap_finding(
     finding.exceeded = ExceededThreshold::from_bools(exceeds_cyclomatic, exceeds_cognitive, true);
     if applied_thresholds.override_index.is_some() {
         finding.effective_thresholds = Some(applied_thresholds.effective);
-        finding.threshold_source = Some(fallow_output::ThresholdSource::Override);
+        finding.threshold_source = Some(plow_output::ThresholdSource::Override);
     }
     finding.severity = compute_finding_severity(
         finding.cognitive,
@@ -478,8 +478,8 @@ fn merge_existing_crap_finding(
 fn new_crap_finding(
     path: &std::path::Path,
     pf: &scoring::PerFunctionCrap,
-    fc: &fallow_types::extract::FunctionComplexity,
-    hook_profile: Option<fallow_output::ReactHookProfile>,
+    fc: &plow_types::extract::FunctionComplexity,
+    hook_profile: Option<plow_output::ReactHookProfile>,
     input: &CrapFindingMergeInput<'_>,
     applied_thresholds: AppliedHealthThresholds,
 ) -> ComplexityViolation {
@@ -524,7 +524,7 @@ fn new_crap_finding(
             .map(|_| applied_thresholds.effective),
         threshold_source: applied_thresholds
             .override_index
-            .map(|_| fallow_output::ThresholdSource::Override),
+            .map(|_| plow_output::ThresholdSource::Override),
     }
 }
 
@@ -537,13 +537,13 @@ fn new_crap_finding(
 /// `estimated_component_inherited` also carries `inherited_from`, and vice
 /// versa.
 fn inherited_from_for(
-    source: fallow_output::CoverageSource,
+    source: plow_output::CoverageSource,
     template_path: &std::path::Path,
     template_inherit_provenance: &rustc_hash::FxHashMap<std::path::PathBuf, std::path::PathBuf>,
 ) -> Option<std::path::PathBuf> {
     if matches!(
         source,
-        fallow_output::CoverageSource::EstimatedComponentInherited
+        plow_output::CoverageSource::EstimatedComponentInherited
     ) {
         template_inherit_provenance.get(template_path).cloned()
     } else {

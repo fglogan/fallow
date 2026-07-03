@@ -45,6 +45,6 @@ describe("factsForFile", () => {
   });
 
   it("falls back when the file is not in the review", () => {
-    expect(factsForFile(doc(), "src/unknown.ts")[0]).toMatch(/no Fallow signal/);
+    expect(factsForFile(doc(), "src/unknown.ts")[0]).toMatch(/no Plow signal/);
   });
 });

@@ -1,20 +1,20 @@
 [package]
-name = "fallow-lsp"
+name = "plow-lsp"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "LSP server for fallow codebase intelligence (diagnostics, code actions, hover, code lens)"
+description = "LSP server for plow codebase intelligence (diagnostics, code actions, hover, code lens)"
 publish = false
 
 [[bin]]
-name = "fallow-lsp"
+name = "plow-lsp"
 path = "src/main.rs"
 
 [dependencies]
-fallow-api = { workspace = true }
-fallow-config = { workspace = true }
-fallow-types = { workspace = true }
+plow-api = { workspace = true }
+plow-config = { workspace = true }
+plow-types = { workspace = true }
 ls-types = { workspace = true }
 tower-lsp-server = { workspace = true }
 serde = { workspace = true }

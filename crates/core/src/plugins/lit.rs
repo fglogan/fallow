@@ -13,7 +13,7 @@
 //! That detection is independent of this plugin; this plugin only handles the
 //! lifecycle members that the framework calls reflectively.
 
-use fallow_config::{ScopedUsedClassMemberRule, UsedClassMemberRule};
+use plow_config::{ScopedUsedClassMemberRule, UsedClassMemberRule};
 
 use super::Plugin;
 

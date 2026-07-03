@@ -1,5 +1,5 @@
-pub use fallow_config::{DetectionMode, DuplicatesConfig};
-pub use fallow_types::duplicates::{
+pub use plow_config::{DetectionMode, DuplicatesConfig};
+pub use plow_types::duplicates::{
     CloneFamily, CloneGroup, CloneInstance, DefaultIgnoreSkipCount, DefaultIgnoreSkips,
     DuplicationReport, DuplicationStats, MirroredDirectory, RefactoringKind, RefactoringSuggestion,
 };

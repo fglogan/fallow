@@ -2,8 +2,8 @@
 
 use std::process::ExitCode;
 
-use fallow_config::ResolvedConfig;
-use fallow_output::{ComplexityViolation, FileHealthScore, RefactoringTarget};
+use plow_config::ResolvedConfig;
+use plow_output::{ComplexityViolation, FileHealthScore, RefactoringTarget};
 
 use crate::baseline::HealthBaselineData;
 
@@ -18,14 +18,14 @@ use super::{
 
 pub(super) struct HealthRuntimeSectionsInput<'a> {
     pub(super) config: &'a ResolvedConfig,
-    pub(super) files: &'a [fallow_types::discover::DiscoveredFile],
+    pub(super) files: &'a [plow_types::discover::DiscoveredFile],
     pub(super) modules: &'a [crate::source::ModuleInfo],
     pub(super) file_paths:
         &'a rustc_hash::FxHashMap<crate::discover::FileId, &'a std::path::PathBuf>,
     pub(super) ignore_set: &'a globset::GlobSet,
     pub(super) changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
     pub(super) ws_roots: Option<&'a [std::path::PathBuf]>,
-    pub(super) diff_index: Option<&'a fallow_output::DiffIndex>,
+    pub(super) diff_index: Option<&'a plow_output::DiffIndex>,
     pub(super) loaded_baseline: Option<&'a HealthBaselineData>,
     pub(super) findings: &'a [ComplexityViolation],
     pub(super) analysis_data: HealthAnalysisData,
@@ -117,10 +117,10 @@ fn prepare_health_vital_data_from_sections(
 fn filter_runtime_coverage_report(
     opts: &HealthOptions<'_>,
     config: &ResolvedConfig,
-    report: Option<&mut fallow_output::RuntimeCoverageReport>,
+    report: Option<&mut plow_output::RuntimeCoverageReport>,
     loaded_baseline: Option<&HealthBaselineData>,
     changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
-    diff_index: Option<&fallow_output::DiffIndex>,
+    diff_index: Option<&plow_output::DiffIndex>,
 ) {
     if let Some(report) = report {
         let ctx = RuntimeCoverageFilterContext::new(&config.root)
@@ -134,12 +134,12 @@ fn filter_runtime_coverage_report(
 
 struct HealthRuntimeFinalizeInput<'a> {
     config: &'a ResolvedConfig,
-    runtime_coverage: &'a mut Option<fallow_output::RuntimeCoverageReport>,
+    runtime_coverage: &'a mut Option<plow_output::RuntimeCoverageReport>,
     findings: &'a [ComplexityViolation],
     targets: &'a [RefactoringTarget],
     loaded_baseline: Option<&'a HealthBaselineData>,
     changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
-    diff_index: Option<&'a fallow_output::DiffIndex>,
+    diff_index: Option<&'a plow_output::DiffIndex>,
 }
 
 fn finalize_health_runtime_outputs(

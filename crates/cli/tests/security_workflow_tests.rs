@@ -6,7 +6,7 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use common::{parse_json, run_fallow, run_fallow_raw};
+use common::{parse_json, run_plow, run_plow_raw};
 
 fn security_finding_json(
     finding_id: &str,
@@ -73,14 +73,14 @@ fn security_survivors_renders_verifier_filtered_candidates() {
         &verdicts,
         r#"[
   {
-    "schema_version": "fallow-security-verdict/v1",
+    "schema_version": "plow-security-verdict/v1",
     "finding_id": "sec-a",
     "verdict": "survivor",
     "reason": "attacker input reaches the sink",
     "fix_direction": "restrict-url"
   },
   {
-    "schema_version": "fallow-security-verdict/v1",
+    "schema_version": "plow-security-verdict/v1",
     "finding_id": "sec-b",
     "verdict": "dismissed"
   }
@@ -90,7 +90,7 @@ fn security_survivors_renders_verifier_filtered_candidates() {
 
     let candidates = candidates.to_string_lossy().to_string();
     let verdicts = verdicts.to_string_lossy().to_string();
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "security",
         "survivors",
         "--candidates",
@@ -128,13 +128,13 @@ fn security_survivors_reports_unreviewed_candidates() {
     .expect("write candidates");
     std::fs::write(
         &verdicts,
-        r#"[{"schema_version":"fallow-security-verdict/v1","finding_id":"sec-a","verdict":"survivor"}]"#,
+        r#"[{"schema_version":"plow-security-verdict/v1","finding_id":"sec-a","verdict":"survivor"}]"#,
     )
     .expect("write verdicts");
 
     let candidates = candidates.to_string_lossy().to_string();
     let verdicts = verdicts.to_string_lossy().to_string();
-    let json_output = run_fallow_raw(&[
+    let json_output = run_plow_raw(&[
         "security",
         "survivors",
         "--candidates",
@@ -149,7 +149,7 @@ fn security_survivors_reports_unreviewed_candidates() {
     let json = parse_json(&json_output);
     assert_eq!(json["summary"]["unverdicted"], 1);
 
-    let human_output = run_fallow_raw(&[
+    let human_output = run_plow_raw(&[
         "security",
         "survivors",
         "--candidates",
@@ -184,13 +184,13 @@ fn security_survivors_strict_gate_rejects_unreviewed_candidates() {
     .expect("write candidates");
     std::fs::write(
         &verdicts,
-        r#"[{"schema_version":"fallow-security-verdict/v1","finding_id":"sec-a","verdict":"dismissed"}]"#,
+        r#"[{"schema_version":"plow-security-verdict/v1","finding_id":"sec-a","verdict":"dismissed"}]"#,
     )
     .expect("write verdicts");
 
     let candidates = candidates.to_string_lossy().to_string();
     let verdicts = verdicts.to_string_lossy().to_string();
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "security",
         "survivors",
         "--candidates",
@@ -230,13 +230,13 @@ fn security_survivors_human_leads_with_path() {
     .expect("write candidates");
     std::fs::write(
         &verdicts,
-        r#"[{"schema_version":"fallow-security-verdict/v1","finding_id":"sec-a","verdict":"survivor"}]"#,
+        r#"[{"schema_version":"plow-security-verdict/v1","finding_id":"sec-a","verdict":"survivor"}]"#,
     )
     .expect("write verdicts");
 
     let candidates = candidates.to_string_lossy().to_string();
     let verdicts = verdicts.to_string_lossy().to_string();
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "security",
         "survivors",
         "--candidates",
@@ -251,7 +251,7 @@ fn security_survivors_human_leads_with_path() {
 
 #[test]
 fn security_blind_spots_renders_grouped_json() {
-    let output = run_fallow(
+    let output = run_plow(
         "security",
         "security-tls-validation-disabled-895",
         &["blind-spots", "--format", "json", "--quiet", "--no-cache"],
@@ -266,7 +266,7 @@ fn security_blind_spots_renders_grouped_json() {
 
 #[test]
 fn security_blind_spots_accepts_subcommand_file_scope() {
-    let output = run_fallow(
+    let output = run_plow(
         "security",
         "security-tls-validation-disabled-895",
         &[
@@ -287,7 +287,7 @@ fn security_blind_spots_accepts_subcommand_file_scope() {
 
 #[test]
 fn security_blind_spots_merges_parent_and_subcommand_file_scope() {
-    let output = run_fallow(
+    let output = run_plow(
         "security",
         "security-tls-validation-disabled-895",
         &[
@@ -310,7 +310,7 @@ fn security_blind_spots_merges_parent_and_subcommand_file_scope() {
 
 #[test]
 fn security_subcommand_help_reaches_subcommands() {
-    let survivors = run_fallow_raw(&["security", "survivors", "--help"]);
+    let survivors = run_plow_raw(&["security", "survivors", "--help"]);
     assert_eq!(survivors.code, 0);
     assert!(survivors.stdout.contains("--candidates"));
     assert!(survivors.stdout.contains("--verdicts"));
@@ -319,7 +319,7 @@ fn security_subcommand_help_reaches_subcommands() {
             .stdout
             .contains("--require-verdict-for-each-candidate")
     );
-    assert!(survivors.stdout.contains("fallow-security-verdict/v1"));
+    assert!(survivors.stdout.contains("plow-security-verdict/v1"));
     assert!(
         survivors
             .stdout
@@ -329,7 +329,7 @@ fn security_subcommand_help_reaches_subcommands() {
     assert!(!survivors.stdout.contains("markdown"));
     assert!(!survivors.stdout.contains("--baseline"));
 
-    let blind_spots = run_fallow_raw(&["security", "blind-spots", "--help"]);
+    let blind_spots = run_plow_raw(&["security", "blind-spots", "--help"]);
     assert_eq!(blind_spots.code, 0);
     assert!(blind_spots.stdout.contains("blind-spots"));
     assert!(!blind_spots.stdout.contains("survivors"));
@@ -344,7 +344,7 @@ fn security_subcommand_help_reaches_subcommands() {
 fn security_survivors_rejects_candidate_generation_flags() {
     let dir = tempfile::tempdir().expect("temp dir");
     let (candidates, verdicts) = write_empty_survivor_inputs(&dir);
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "security",
         "--surface",
         "survivors",
@@ -363,7 +363,7 @@ fn security_survivors_rejects_hidden_parent_flags() {
     let dir = tempfile::tempdir().expect("temp dir");
     let (candidates, verdicts) = write_empty_survivor_inputs(&dir);
     let sarif = dir.path().join("out.sarif").to_string_lossy().to_string();
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "security",
         "survivors",
         "--candidates",
@@ -380,10 +380,10 @@ fn security_survivors_rejects_hidden_parent_flags() {
     let json = parse_json(&output);
     assert_eq!(
         json["message"],
-        "--sarif-file is not valid with `fallow security survivors`."
+        "--sarif-file is not valid with `plow security survivors`."
     );
 
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "security",
         "survivors",
         "--candidates",
@@ -397,7 +397,7 @@ fn security_survivors_rejects_hidden_parent_flags() {
     assert!(
         output
             .stderr
-            .contains("--fail-on-issues is not valid with `fallow security survivors`.")
+            .contains("--fail-on-issues is not valid with `plow security survivors`.")
     );
 }
 
@@ -413,7 +413,7 @@ fn security_survivors_rejects_unsupported_parent_flags() {
         (vec!["--summary"], "--summary"),
         (vec!["--explain"], "--explain"),
         (
-            vec!["--runtime-coverage", "/tmp/fallow-missing-runtime.json"],
+            vec!["--runtime-coverage", "/tmp/plow-missing-runtime.json"],
             "--runtime-coverage",
         ),
         (vec!["--min-invocations-hot", "1"], "--min-invocations-hot"),
@@ -434,13 +434,13 @@ fn security_survivors_rejects_unsupported_parent_flags() {
             "--format",
             "json",
         ]);
-        let output = run_fallow_raw(&args);
+        let output = run_plow_raw(&args);
 
         assert_eq!(output.code, 2, "flag {expected_flag}");
         let json = parse_json(&output);
         assert_eq!(
             json["message"],
-            format!("{expected_flag} is not valid with `fallow security survivors`.")
+            format!("{expected_flag} is not valid with `plow security survivors`.")
         );
     }
 }
@@ -453,13 +453,13 @@ fn security_survivors_rejects_non_array_verdict_wrapper() {
     std::fs::write(&candidates, r#"{"security_findings":[]}"#).expect("write candidates");
     std::fs::write(
         &verdicts,
-        r#"{"schema_version":"fallow-security-verdicts/v1","verdicts":{}}"#,
+        r#"{"schema_version":"plow-security-verdicts/v1","verdicts":{}}"#,
     )
     .expect("write verdicts");
 
     let candidates = candidates.to_string_lossy().to_string();
     let verdicts = verdicts.to_string_lossy().to_string();
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "security",
         "survivors",
         "--candidates",
@@ -481,11 +481,11 @@ fn security_survivors_rejects_non_array_verdict_wrapper() {
 
 #[test]
 fn security_survivors_parse_errors_honor_json_format() {
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "security",
         "survivors",
         "--candidates",
-        "/tmp/fallow-missing-candidates.json",
+        "/tmp/plow-missing-candidates.json",
         "--format",
         "json",
     ]);
@@ -504,7 +504,7 @@ fn security_survivors_parse_errors_honor_json_format() {
 
 #[test]
 fn security_blind_spots_rejects_gate_flags() {
-    let output = run_fallow(
+    let output = run_plow(
         "security",
         "security-tls-validation-disabled-895",
         &["--gate", "new", "blind-spots", "--format", "json"],
@@ -514,18 +514,18 @@ fn security_blind_spots_rejects_gate_flags() {
     let json = parse_json(&output);
     assert_eq!(
         json["message"],
-        "--gate is not valid with `fallow security blind-spots`."
+        "--gate is not valid with `plow security blind-spots`."
     );
 }
 
 #[test]
 fn security_blind_spots_rejects_hidden_parent_flags() {
-    let output = run_fallow(
+    let output = run_plow(
         "security",
         "security-tls-validation-disabled-895",
         &[
             "--runtime-coverage",
-            "/tmp/fallow-missing-runtime.json",
+            "/tmp/plow-missing-runtime.json",
             "blind-spots",
             "--format",
             "json",
@@ -536,15 +536,15 @@ fn security_blind_spots_rejects_hidden_parent_flags() {
     let json = parse_json(&output);
     assert_eq!(
         json["message"],
-        "--runtime-coverage is not valid with `fallow security blind-spots`."
+        "--runtime-coverage is not valid with `plow security blind-spots`."
     );
 
-    let output = run_fallow(
+    let output = run_plow(
         "security",
         "security-tls-validation-disabled-895",
         &[
             "--sarif-file",
-            "/tmp/fallow-blind-spots.sarif",
+            "/tmp/plow-blind-spots.sarif",
             "blind-spots",
             "--format",
             "json",
@@ -555,7 +555,7 @@ fn security_blind_spots_rejects_hidden_parent_flags() {
     let json = parse_json(&output);
     assert_eq!(
         json["message"],
-        "--sarif-file is not valid with `fallow security blind-spots`."
+        "--sarif-file is not valid with `plow security blind-spots`."
     );
 }
 
@@ -565,13 +565,13 @@ fn security_blind_spots_rejects_unsupported_parent_flags() {
         (vec!["--ci"], "--ci"),
         (vec!["--fail-on-issues"], "--fail-on-issues"),
         (
-            vec!["--sarif-file", "/tmp/fallow-blind-spots.sarif"],
+            vec!["--sarif-file", "/tmp/plow-blind-spots.sarif"],
             "--sarif-file",
         ),
         (vec!["--summary"], "--summary"),
         (vec!["--explain"], "--explain"),
         (
-            vec!["--runtime-coverage", "/tmp/fallow-missing-runtime.json"],
+            vec!["--runtime-coverage", "/tmp/plow-missing-runtime.json"],
             "--runtime-coverage",
         ),
         (vec!["--min-invocations-hot", "1"], "--min-invocations-hot"),
@@ -582,13 +582,13 @@ fn security_blind_spots_rejects_unsupported_parent_flags() {
     for (flag_args, expected_flag) in cases {
         let mut args = flag_args;
         args.extend(["blind-spots", "--format", "json"]);
-        let output = run_fallow("security", "security-tls-validation-disabled-895", &args);
+        let output = run_plow("security", "security-tls-validation-disabled-895", &args);
 
         assert_eq!(output.code, 2, "flag {expected_flag}");
         let json = parse_json(&output);
         assert_eq!(
             json["message"],
-            format!("{expected_flag} is not valid with `fallow security blind-spots`.")
+            format!("{expected_flag} is not valid with `plow security blind-spots`.")
         );
     }
 }

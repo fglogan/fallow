@@ -5,7 +5,7 @@
   <rect x="80" y="40" width="640" height="340" rx="8" stroke="#3c3c3c" stroke-width="1" fill="none"/>
   <!-- Search bar -->
   <rect x="100" y="60" width="600" height="32" rx="4" fill="#3c3c3c"/>
-  <text fill="#858585" x="116" y="82" font-size="13">fallow</text>
+  <text fill="#858585" x="116" y="82" font-size="13">plow</text>
   <!-- Settings items -->
   <text fill="#d4d4d4" x="120" y="130" font-size="13" font-weight="600">Issue Types</text>
   <text fill="#858585" x="120" y="150" font-size="12">Toggle individual issue types on or off</text>

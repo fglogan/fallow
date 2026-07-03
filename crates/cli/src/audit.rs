@@ -3,12 +3,12 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 use std::time::{Duration, Instant};
 
-use fallow_config::{AuditGate, OutputFormat};
-use fallow_engine::clear_ambient_git_env;
+use plow_config::{AuditGate, OutputFormat};
+use plow_engine::clear_ambient_git_env;
 use rustc_hash::{FxHashMap, FxHashSet};
 use xxhash_rust::xxh3::xxh3_64;
 
-pub use fallow_api::{AuditAttribution, AuditSummary, AuditVerdict};
+pub use plow_api::{AuditAttribution, AuditSummary, AuditVerdict};
 
 #[cfg(test)]
 use crate::base_worktree::git_rev_parse;
@@ -33,7 +33,7 @@ pub struct AuditResult {
     pub base_snapshot_skipped: bool,
     pub changed_files_count: usize,
     /// Absolute paths of the files this run re-analyzed. Threaded into the
-    /// Fallow Impact per-finding attribution so the frontier diff knows which
+    /// Plow Impact per-finding attribution so the frontier diff knows which
     /// files were authoritative this run.
     pub changed_files: Vec<PathBuf>,
     pub base_ref: String,
@@ -93,11 +93,11 @@ pub struct AuditOptions<'a> {
     pub explain_skipped: bool,
     pub performance: bool,
     pub group_by: Option<crate::GroupBy>,
-    /// Baseline file for dead-code analysis (as produced by `fallow dead-code --save-baseline`).
+    /// Baseline file for dead-code analysis (as produced by `plow dead-code --save-baseline`).
     pub dead_code_baseline: Option<&'a std::path::Path>,
-    /// Baseline file for health analysis (as produced by `fallow health --save-baseline`).
+    /// Baseline file for health analysis (as produced by `plow health --save-baseline`).
     pub health_baseline: Option<&'a std::path::Path>,
-    /// Baseline file for duplication analysis (as produced by `fallow dupes --save-baseline`).
+    /// Baseline file for duplication analysis (as produced by `plow dupes --save-baseline`).
     pub dupes_baseline: Option<&'a std::path::Path>,
     /// Maximum CRAP score threshold (overrides `health.maxCrap` from config).
     /// Functions meeting or exceeding this score cause audit to fail.
@@ -112,13 +112,13 @@ pub struct AuditOptions<'a> {
     /// Paid runtime-coverage sidecar input (V8 directory, V8 JSON, or
     /// Istanbul coverage map). Forwarded into the embedded health pass so
     /// audit surfaces the `hot-path-touched` verdict alongside dead-code
-    /// and complexity findings without requiring a second `fallow health`
+    /// and complexity findings without requiring a second `plow health`
     /// invocation in CI.
     pub runtime_coverage: Option<&'a std::path::Path>,
     /// Threshold for hot-path classification, forwarded to the sidecar.
     pub min_invocations_hot: u64,
-    /// Render the deterministic, always-exit-0 review brief (`fallow audit
-    /// --brief` / `fallow review`) instead of the gating audit report. The
+    /// Render the deterministic, always-exit-0 review brief (`plow audit
+    /// --brief` / `plow review`) instead of the gating audit report. The
     /// audit analysis still runs and the verdict is still computed and carried
     /// informationally; it just never drives the exit code on this path.
     pub brief: bool,
@@ -385,20 +385,20 @@ fn count_introduced(keys: &FxHashSet<String>, base: Option<&FxHashSet<String>>) 
     })
 }
 
-/// If fallow's process inherited any ambient git repo-state env vars (typical
+/// If plow's process inherited any ambient git repo-state env vars (typical
 /// when invoked from a `pre-commit` / `pre-push` hook or a tool wrapping git),
 /// surface the most likely culprit so a user hitting an unexpected worktree
 /// failure can short-circuit the diagnosis. Returns `None` otherwise.
 fn ambient_git_env_hint() -> Option<String> {
-    use fallow_engine::AMBIENT_GIT_ENV_VARS;
+    use plow_engine::AMBIENT_GIT_ENV_VARS;
     for var in AMBIENT_GIT_ENV_VARS {
         if let Ok(value) = std::env::var(var)
             && !value.is_empty()
         {
             return Some(format!(
-                "{var}={value} is set in the environment; if fallow is being \
+                "{var}={value} is set in the environment; if plow is being \
 invoked from a git hook this can interfere with worktree operations. Re-run \
-with `env -u {var} fallow audit` to confirm."
+with `env -u {var} plow audit` to confirm."
             ));
         }
     }
@@ -425,7 +425,7 @@ fn compute_base_snapshot(
     let current_config_path = opts
         .config_path
         .clone()
-        .or_else(|| fallow_config::FallowConfig::find_config_path(opts.root));
+        .or_else(|| plow_config::PlowConfig::find_config_path(opts.root));
     let base_opts =
         build_base_audit_options(opts, &base_root, &current_config_path, &base_cache_dir);
 
@@ -518,8 +518,8 @@ fn public_api_keys_from_check(check: Option<&CheckResult>, root: &Path) -> FxHas
     else {
         return FxHashSet::default();
     };
-    let root_pkg = fallow_config::PackageJson::load(&check.config.root.join("package.json")).ok();
-    let workspaces = fallow_config::discover_workspaces(&check.config.root);
+    let root_pkg = plow_config::PackageJson::load(&check.config.root.join("package.json")).ok();
+    let workspaces = plow_config::discover_workspaces(&check.config.root);
     review_deltas::public_export_keys_for(
         graph,
         &check.config,
@@ -629,7 +629,7 @@ fn can_reuse_current_as_base(
     // artifacts or docs never touches git, so it spawns zero processes.
     let mut reader: Option<BaseFileReader> = None;
     for path in changed_files {
-        if is_fallow_cache_artifact(path, &cache_dir, canonical_cache_dir.as_deref()) {
+        if is_plow_cache_artifact(path, &cache_dir, canonical_cache_dir.as_deref()) {
             continue;
         }
         if !is_analysis_input(path) {
@@ -768,7 +768,7 @@ impl Drop for BaseFileReader {
     }
 }
 
-fn is_fallow_cache_artifact(
+fn is_plow_cache_artifact(
     path: &Path,
     cache_dir: &Path,
     canonical_cache_dir: Option<&Path>,
@@ -819,7 +819,7 @@ fn is_non_behavioral_doc(path: &Path) -> bool {
 }
 
 fn js_ts_tokens_equivalent(path: &Path, current: &str, base: &str) -> bool {
-    if current.contains("fallow-ignore") || base.contains("fallow-ignore") {
+    if current.contains("plow-ignore") || base.contains("plow-ignore") {
         return false;
     }
     if !matches!(
@@ -828,7 +828,7 @@ fn js_ts_tokens_equivalent(path: &Path, current: &str, base: &str) -> bool {
     ) {
         return false;
     }
-    fallow_engine::source_token_kinds_equivalent(path, current, base, false)
+    plow_engine::source_token_kinds_equivalent(path, current, base, false)
 }
 
 fn remap_focus_files(
@@ -854,13 +854,13 @@ use std::time::SystemTime;
 #[cfg(test)]
 use crate::base_worktree::{
     ReusableWorktreeLock, WorktreeCleanupGuard, audit_worktree_pid, days_to_duration,
-    is_fallow_audit_worktree_path, is_reusable_audit_worktree_path, list_audit_worktrees,
+    is_plow_audit_worktree_path, is_reusable_audit_worktree_path, list_audit_worktrees,
     materialize_base_dependency_context, parse_worktree_list, paths_equal, process_is_alive,
     remove_audit_worktree, reusable_worktree_last_used_path, reusable_worktree_lock_path,
     sweep_orphan_audit_worktrees, touch_last_used,
 };
 
-pub use fallow_api::audit_keys as keys;
+pub use plow_api::audit_keys as keys;
 
 #[path = "audit_review_deltas.rs"]
 pub mod review_deltas;
@@ -1005,14 +1005,14 @@ fn compute_brief_impact_closure(
     root: &std::path::Path,
     check: &CheckResult,
     changed_files: &FxHashSet<PathBuf>,
-) -> Option<fallow_engine::ImpactClosurePaths> {
+) -> Option<plow_engine::ImpactClosurePaths> {
     let graph = check
         .shared_parse
         .as_ref()
         .and_then(|sp| sp.analysis_output.as_ref())
         .and_then(|out| out.graph.as_ref())?;
 
-    fallow_engine::impact_closure_for_changed_paths(graph, root, changed_files)
+    plow_engine::impact_closure_for_changed_paths(graph, root, changed_files)
 }
 
 /// Compute the partition + order for the review brief's stage 2 from the
@@ -1026,14 +1026,14 @@ fn compute_brief_partition_order(
     root: &std::path::Path,
     check: &CheckResult,
     changed_files: &FxHashSet<PathBuf>,
-) -> Option<fallow_engine::PartitionOrderPaths> {
+) -> Option<plow_engine::PartitionOrderPaths> {
     let graph = check
         .shared_parse
         .as_ref()
         .and_then(|sp| sp.analysis_output.as_ref())
         .and_then(|out| out.graph.as_ref())?;
 
-    fallow_engine::partition_order_for_changed_paths(graph, root, changed_files)
+    plow_engine::partition_order_for_changed_paths(graph, root, changed_files)
 }
 
 /// Precompute the per-changed-file `rel_path -> [(export-name, 1-based line)]` map
@@ -1051,7 +1051,7 @@ fn compute_brief_export_lines(
         .and_then(|sp| sp.analysis_output.as_ref())
         .and_then(|out| out.graph.as_ref())?;
 
-    fallow_engine::export_lines_for_changed_paths(graph, root, changed_files)
+    plow_engine::export_lines_for_changed_paths(graph, root, changed_files)
 }
 
 /// Precompute the per-anchor honest consumer count for the decision surface:
@@ -1073,7 +1073,7 @@ fn compute_brief_internal_consumers(
         .and_then(|sp| sp.analysis_output.as_ref())
         .and_then(|out| out.graph.as_ref())?;
 
-    fallow_engine::internal_consumers_for_changed_paths(graph, root, changed_files)
+    plow_engine::internal_consumers_for_changed_paths(graph, root, changed_files)
 }
 
 /// Compute the per-file focus graph facts (fan-in/out + the dynamic-dispatch /
@@ -1089,14 +1089,14 @@ fn compute_brief_focus_facts(
     root: &std::path::Path,
     check: &CheckResult,
     changed_files: &FxHashSet<PathBuf>,
-) -> Option<Vec<fallow_engine::FocusFileFactsPaths>> {
+) -> Option<Vec<plow_engine::FocusFileFactsPaths>> {
     let graph = check
         .shared_parse
         .as_ref()
         .and_then(|sp| sp.analysis_output.as_ref())
         .and_then(|out| out.graph.as_ref())?;
 
-    fallow_engine::focus_facts_for_changed_paths(graph, root, changed_files)
+    plow_engine::focus_facts_for_changed_paths(graph, root, changed_files)
 }
 
 /// Run the audit pipeline: resolve base ref, run analyses, compute verdict.
@@ -1372,7 +1372,7 @@ fn compute_change_anchors(
     if let Some(raw) = crate::report::ci::diff_filter::shared_diff_raw() {
         return crate::audit_walkthrough::parse_change_anchors(raw);
     }
-    fallow_engine::try_get_changed_diff(root, base_ref)
+    plow_engine::try_get_changed_diff(root, base_ref)
         .map(|diff| crate::audit_walkthrough::parse_change_anchors(&diff))
         .unwrap_or_default()
 }
@@ -1497,7 +1497,7 @@ fn compute_decision_surface(
 /// the blast and the union of consumed symbols as the contract. Sorted by changed
 /// file for deterministic output.
 fn aggregate_coordination_gaps(
-    gaps: &[fallow_engine::CoordinationGapPaths],
+    gaps: &[plow_engine::CoordinationGapPaths],
 ) -> Vec<crate::audit_decision_surface::CoordinationAnchor> {
     use crate::audit_decision_surface::CoordinationAnchor;
     let mut by_file: FxHashMap<String, (u64, FxHashSet<String>)> = FxHashMap::default();
@@ -1882,7 +1882,7 @@ fn run_audit_dupes<'a>(
     opts: &'a AuditOptions<'a>,
     changed_since: Option<&'a str>,
     changed_files: Option<&'a FxHashSet<PathBuf>>,
-    pre_discovered: Option<Vec<fallow_types::discover::DiscoveredFile>>,
+    pre_discovered: Option<Vec<plow_types::discover::DiscoveredFile>>,
 ) -> Result<Option<DupesResult>, ExitCode> {
     let dupes_cfg = match crate::load_config_for_analysis(
         opts.root,
@@ -1896,7 +1896,7 @@ fn run_audit_dupes<'a>(
                 .or_else(|| opts.production.then_some(true)),
             quiet: opts.quiet,
         },
-        fallow_config::ProductionAnalysis::Dupes,
+        plow_config::ProductionAnalysis::Dupes,
     ) {
         Ok(c) => c.duplicates,
         Err(code) => return Err(code),
@@ -1918,7 +1918,7 @@ fn build_audit_dupes_options<'a>(
     opts: &'a AuditOptions<'a>,
     changed_since: Option<&'a str>,
     changed_files: Option<&'a FxHashSet<PathBuf>>,
-    dupes_cfg: &fallow_config::DuplicatesConfig,
+    dupes_cfg: &plow_config::DuplicatesConfig,
 ) -> DupesOptions<'a> {
     DupesOptions {
         root: opts.root,
@@ -1959,7 +1959,7 @@ fn build_audit_dupes_options<'a>(
 fn run_audit_health<'a>(
     opts: &'a AuditOptions<'a>,
     changed_since: Option<&'a str>,
-    shared_parse: Option<fallow_engine::HealthSharedParseData>,
+    shared_parse: Option<plow_engine::HealthSharedParseData>,
 ) -> Result<Option<HealthResult>, ExitCode> {
     let runtime_coverage = match opts.runtime_coverage {
         Some(path) => match crate::health::coverage::prepare_options(
@@ -1992,7 +1992,7 @@ fn run_audit_health<'a>(
 fn build_audit_health_options<'a>(
     opts: &'a AuditOptions<'a>,
     changed_since: Option<&'a str>,
-    runtime_coverage: Option<fallow_engine::RuntimeCoverageOptions>,
+    runtime_coverage: Option<plow_engine::RuntimeCoverageOptions>,
 ) -> HealthOptions<'a> {
     HealthOptions {
         root: opts.root,
@@ -2001,13 +2001,13 @@ fn build_audit_health_options<'a>(
         no_cache: opts.no_cache,
         threads: opts.threads,
         quiet: opts.quiet,
-        thresholds: fallow_engine::HealthThresholdOverrides {
+        thresholds: plow_engine::HealthThresholdOverrides {
             max_cyclomatic: None,
             max_cognitive: None,
             max_crap: opts.max_crap,
         },
         top: None,
-        sort: fallow_engine::HealthSort::Cyclomatic,
+        sort: plow_engine::HealthSort::Cyclomatic,
         production: opts.production_health.unwrap_or(opts.production),
         production_override: opts.production_health,
         changed_since,
@@ -2031,14 +2031,14 @@ fn build_audit_health_options<'a>(
         enforce_coverage_gap_gate: false,
         effort: None,
         score: false,
-        gates: fallow_engine::HealthGateOptions::default(),
+        gates: plow_engine::HealthGateOptions::default(),
         since: None,
         min_commits: None,
         explain: opts.explain,
         summary: false,
         save_snapshot: None,
         trend: false,
-        coverage_inputs: fallow_engine::HealthCoverageInputs {
+        coverage_inputs: plow_engine::HealthCoverageInputs {
             coverage: opts.coverage,
             coverage_root: opts.coverage_root,
         },
@@ -2061,11 +2061,11 @@ pub use output::{
 
 /// Run the full audit command: execute analyses, print results, return exit code.
 /// Run audit, optionally tagged with a gate marker (e.g. `"pre-commit"`) so
-/// Fallow Impact can record a containment event when the gate blocks then
+/// Plow Impact can record a containment event when the gate blocks then
 /// clears. The marker only affects the local Impact store; it never changes
 /// the verdict, exit code, or output.
 pub fn run_audit(opts: &AuditOptions<'_>, gate_marker: Option<&str>) -> ExitCode {
-    if let Err(e) = fallow_engine::validate_coverage_root_absolute(opts.coverage_root) {
+    if let Err(e) = plow_engine::validate_coverage_root_absolute(opts.coverage_root) {
         return emit_error(&e, 2, opts.output);
     }
     let coverage_resolved = opts
@@ -2094,7 +2094,7 @@ pub fn run_audit(opts: &AuditOptions<'_>, gate_marker: Option<&str>) -> ExitCode
                 .as_ref()
                 .map(|d| crate::impact::collect_clone_findings(&d.report))
                 .unwrap_or_default();
-            let empty_supps: Vec<fallow_types::results::ActiveSuppression> = Vec::new();
+            let empty_supps: Vec<plow_types::results::ActiveSuppression> = Vec::new();
             let suppressions = result.check.as_ref().map_or(empty_supps.as_slice(), |c| {
                 c.results.active_suppressions.as_slice()
             });
@@ -2150,14 +2150,14 @@ pub fn run_audit(opts: &AuditOptions<'_>, gate_marker: Option<&str>) -> ExitCode
     }
 }
 
-/// Run the standalone `fallow decision-surface` command: the separable, cheap
+/// Run the standalone `plow decision-surface` command: the separable, cheap
 /// apex. Executes the SAME changed-code analysis the review brief runs (it is
 /// the brief path, NOT the full project pipeline), then emits ONLY the decision
 /// surface envelope. Always exit 0 (the surface is advisory, never a gate).
 ///
 /// The MCP `decision_surface` tool wraps this command. It is callable without the
 /// full pipeline because it reuses `execute_audit` in brief mode (changed-code
-/// scope), not bare `fallow`.
+/// scope), not bare `plow`.
 #[must_use]
 pub fn run_decision_surface(opts: &AuditOptions<'_>) -> ExitCode {
     // Force brief mode: the decision surface is only computed on the brief path.

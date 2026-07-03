@@ -37,7 +37,7 @@ use std::path::Path;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_types::extract::{ModuleInfo, SemanticFactView};
+use plow_types::extract::{ModuleInfo, SemanticFactView};
 
 use crate::discover::FileId;
 use crate::graph::{ModuleGraph, ModuleNode};
@@ -228,7 +228,7 @@ fn component_name_for(path: &Path) -> String {
         .to_string()
 }
 
-/// Whether `name` is a JavaScript reserved word that fallow's JS-based template
+/// Whether `name` is a JavaScript reserved word that plow's JS-based template
 /// expression scanner would read as an operator/keyword rather than an
 /// identifier (so a template read of an input/output named this is invisible).
 /// Angular's template grammar permits these as property names, so a member named
@@ -276,8 +276,8 @@ pub(super) fn is_js_reserved_word(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use fallow_types::discover::FileId;
-    use fallow_types::extract::{
+    use plow_types::discover::FileId;
+    use plow_types::extract::{
         AngularInputMember, AngularTemplateMemberAccessFact, AngularThisSpreadFact,
         ClassHeritageInfo, MemberAccess, SemanticFact,
     };

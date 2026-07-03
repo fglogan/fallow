@@ -1,9 +1,9 @@
-use fallow_types::extract::{ExportName, FactoryCallMemberAccessFact, MemberKind, SemanticFact};
+use plow_types::extract::{ExportName, FactoryCallMemberAccessFact, MemberKind, SemanticFact};
 
 use crate::tests::parse_ts as parse_source;
 
 fn factory_call_member_facts(
-    info: &fallow_types::extract::ModuleInfo,
+    info: &plow_types::extract::ModuleInfo,
 ) -> Vec<&FactoryCallMemberAccessFact> {
     info.semantic_facts
         .iter()

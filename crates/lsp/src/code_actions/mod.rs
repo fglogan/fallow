@@ -3,9 +3,9 @@ mod suppress;
 
 use std::path::Path;
 
-use fallow_api::EditorAnalysisResults as AnalysisResults;
 #[allow(clippy::wildcard_imports, reason = "many LSP types used")]
 use ls_types::*;
+use plow_api::EditorAnalysisResults as AnalysisResults;
 
 pub use quick_fix::*;
 pub use suppress::*;

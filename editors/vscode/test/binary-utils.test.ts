@@ -95,19 +95,19 @@ describe("getExecutableExtension", () => {
 
 describe("platformPackageNames", () => {
   it("maps win32 x64/arm64 to the msvc packages", () => {
-    expect(platformPackageNames("win32", "x64")).toEqual(["@fallow-cli/win32-x64-msvc"]);
-    expect(platformPackageNames("win32", "arm64")).toEqual(["@fallow-cli/win32-arm64-msvc"]);
+    expect(platformPackageNames("win32", "x64")).toEqual(["@plow-cli/win32-x64-msvc"]);
+    expect(platformPackageNames("win32", "arm64")).toEqual(["@plow-cli/win32-arm64-msvc"]);
   });
 
   it("returns both gnu and musl on linux (libc not detected here)", () => {
     expect(platformPackageNames("linux", "x64")).toEqual([
-      "@fallow-cli/linux-x64-gnu",
-      "@fallow-cli/linux-x64-musl",
+      "@plow-cli/linux-x64-gnu",
+      "@plow-cli/linux-x64-musl",
     ]);
   });
 
   it("maps darwin arches", () => {
-    expect(platformPackageNames("darwin", "arm64")).toEqual(["@fallow-cli/darwin-arm64"]);
+    expect(platformPackageNames("darwin", "arm64")).toEqual(["@plow-cli/darwin-arm64"]);
   });
 
   it("returns empty for unsupported platform/arch", () => {
@@ -123,14 +123,14 @@ describe("findLocalBinary - win32 (issue #1359)", () => {
     setWorkspace("C:\\project");
   });
 
-  it("resolves the real .exe in the @fallow-cli platform package, not the .bin shim", () => {
-    // The .bin entry npm creates on Windows is fallow-lsp.cmd (a launcher shim),
+  it("resolves the real .exe in the @plow-cli platform package, not the .bin shim", () => {
+    // The .bin entry npm creates on Windows is plow-lsp.cmd (a launcher shim),
     // which child_process/the LSP client cannot spawn directly. The native exe
     // lives in the platform package and must be the resolved target.
-    const expected = nativePath("C:\\project", "@fallow-cli/win32-x64-msvc", "fallow-lsp", ".exe");
+    const expected = nativePath("C:\\project", "@plow-cli/win32-x64-msvc", "plow-lsp", ".exe");
     mockExistsSync = (p) => p === expected;
 
-    expect(findLocalBinary("fallow-lsp")).toBe(expected);
+    expect(findLocalBinary("plow-lsp")).toBe(expected);
   });
 
   it("does NOT return a node_modules/.bin shim on Windows (it is not spawnable)", () => {
@@ -139,10 +139,10 @@ describe("findLocalBinary - win32 (issue #1359)", () => {
     // than an unspawnable .cmd under .bin. npm creates `<name>.cmd` (plus a
     // `.ps1`) under .bin on Windows, never a bare `.exe`, so probe the real
     // artifact name to guard against findBinShim ever returning a .cmd path.
-    const binCmd = path().join("C:\\project", "node_modules", ".bin", "fallow-lsp.cmd");
+    const binCmd = path().join("C:\\project", "node_modules", ".bin", "plow-lsp.cmd");
     mockExistsSync = (p) => p === binCmd;
 
-    expect(findLocalBinary("fallow-lsp")).toBeNull();
+    expect(findLocalBinary("plow-lsp")).toBeNull();
   });
 });
 
@@ -151,20 +151,20 @@ describe("findNativeInNodeModules (direct, isolated from workspace lookup)", () 
     mockPlatform = "win32";
     mockArch = "x64";
     const nodeModules = path().join("C:\\npm-prefix", "node_modules");
-    const native = path().join(nodeModules, "@fallow-cli", "win32-x64-msvc", "fallow-lsp.exe");
+    const native = path().join(nodeModules, "@plow-cli", "win32-x64-msvc", "plow-lsp.exe");
     mockExistsSync = (p) => p === native;
 
-    expect(findNativeInNodeModules(nodeModules, "fallow-lsp")).toBe(native);
+    expect(findNativeInNodeModules(nodeModules, "plow-lsp")).toBe(native);
   });
 
   it("probes both gnu and musl, returning the musl exe when only it exists", () => {
     mockPlatform = "linux";
     mockArch = "arm64";
     const nodeModules = path().join("/opt", "node_modules");
-    const musl = path().join(nodeModules, "@fallow-cli", "linux-arm64-musl", "fallow");
+    const musl = path().join(nodeModules, "@plow-cli", "linux-arm64-musl", "plow");
     mockExistsSync = (p) => p === musl;
 
-    expect(findNativeInNodeModules(nodeModules, "fallow")).toBe(musl);
+    expect(findNativeInNodeModules(nodeModules, "plow")).toBe(musl);
   });
 
   it("returns null when no platform package holds the binary", () => {
@@ -172,7 +172,7 @@ describe("findNativeInNodeModules (direct, isolated from workspace lookup)", () 
     mockArch = "x64";
     mockExistsSync = () => false;
 
-    expect(findNativeInNodeModules(path().join("/opt", "node_modules"), "fallow")).toBeNull();
+    expect(findNativeInNodeModules(path().join("/opt", "node_modules"), "plow")).toBeNull();
   });
 });
 
@@ -186,33 +186,33 @@ describe("findLocalBinary - unix", () => {
   it("prefers the native platform-package binary when present", () => {
     const expected = nativePath(
       "/workspace/project",
-      "@fallow-cli/linux-x64-gnu",
-      "fallow-lsp",
+      "@plow-cli/linux-x64-gnu",
+      "plow-lsp",
       "",
     );
     mockExistsSync = (p) => p === expected;
 
-    expect(findLocalBinary("fallow-lsp")).toBe(expected);
+    expect(findLocalBinary("plow-lsp")).toBe(expected);
   });
 
   it("falls back to the extensionless node_modules/.bin shim (it is spawnable on unix)", () => {
-    const shim = path().join("/workspace/project", "node_modules", ".bin", "fallow-lsp");
+    const shim = path().join("/workspace/project", "node_modules", ".bin", "plow-lsp");
     mockExistsSync = (p) => p === shim;
 
-    expect(findLocalBinary("fallow-lsp")).toBe(shim);
+    expect(findLocalBinary("plow-lsp")).toBe(shim);
   });
 
   it("returns null when no workspace folder is open", () => {
     setWorkspace(null);
     mockExistsSync = () => true;
-    expect(findLocalBinary("fallow-lsp")).toBeNull();
+    expect(findLocalBinary("plow-lsp")).toBeNull();
   });
 
   it("resolves the musl package when gnu is absent", () => {
-    const musl = nativePath("/workspace/project", "@fallow-cli/linux-x64-musl", "fallow", "");
+    const musl = nativePath("/workspace/project", "@plow-cli/linux-x64-musl", "plow", "");
     mockExistsSync = (p) => p === musl;
 
-    expect(findLocalBinary("fallow")).toBe(musl);
+    expect(findLocalBinary("plow")).toBe(musl);
   });
 });
 
@@ -223,68 +223,68 @@ describe("findBinaryInPath - win32", () => {
   });
 
   it("returns a bare .exe on PATH directly (real native binary)", () => {
-    const exe = path().join("C:\\tools", "fallow-lsp.exe");
+    const exe = path().join("C:\\tools", "plow-lsp.exe");
     mockExistsSync = (p) => p === exe;
     const original = process.env["PATH"];
     process.env["PATH"] = `C:\\tools${path().delimiter}C:\\other`;
     try {
-      expect(findBinaryInPath("fallow-lsp")).toBe(exe);
+      expect(findBinaryInPath("plow-lsp")).toBe(exe);
     } finally {
       process.env["PATH"] = original;
     }
   });
 
   it("resolves a .cmd launcher shim on PATH to the sibling platform-package exe", () => {
-    // npm i -g leaves fallow-lsp.cmd in the prefix bin dir; the real exe is in
-    // the adjacent node_modules/@fallow-cli/<target>/.
-    const cmd = path().join("C:\\npm-prefix", "fallow-lsp.cmd");
+    // npm i -g leaves plow-lsp.cmd in the prefix bin dir; the real exe is in
+    // the adjacent node_modules/@plow-cli/<target>/.
+    const cmd = path().join("C:\\npm-prefix", "plow-lsp.cmd");
     const native = path().join(
       "C:\\npm-prefix",
       "node_modules",
-      "@fallow-cli",
+      "@plow-cli",
       "win32-x64-msvc",
-      "fallow-lsp.exe",
+      "plow-lsp.exe",
     );
     mockExistsSync = (p) => p === cmd || p === native;
     const original = process.env["PATH"];
     process.env["PATH"] = "C:\\npm-prefix";
     try {
-      expect(findBinaryInPath("fallow-lsp")).toBe(native);
+      expect(findBinaryInPath("plow-lsp")).toBe(native);
     } finally {
       process.env["PATH"] = original;
     }
   });
 
   it("resolves a .cmd shim via the parent <dir>/../node_modules layout (npm prefix bin)", () => {
-    // Standard `npm i -g fallow` on Windows: %APPDATA%\npm\fallow-lsp.cmd is the
+    // Standard `npm i -g plow` on Windows: %APPDATA%\npm\plow-lsp.cmd is the
     // shim and the package sits under %APPDATA%\npm\node_modules (a SIBLING of
     // the bin dir, not a child), so the second probe <shimDir>/../node_modules
     // must hit it. Putting bin in a `bin` subdir makes the two probes distinct.
-    const cmd = path().join("C:\\npm-prefix", "bin", "fallow-lsp.cmd");
+    const cmd = path().join("C:\\npm-prefix", "bin", "plow-lsp.cmd");
     const native = path().join(
       "C:\\npm-prefix",
       "node_modules",
-      "@fallow-cli",
+      "@plow-cli",
       "win32-x64-msvc",
-      "fallow-lsp.exe",
+      "plow-lsp.exe",
     );
     mockExistsSync = (p) => p === cmd || p === native;
     const original = process.env["PATH"];
     process.env["PATH"] = "C:\\npm-prefix\\bin";
     try {
-      expect(findBinaryInPath("fallow-lsp")).toBe(native);
+      expect(findBinaryInPath("plow-lsp")).toBe(native);
     } finally {
       process.env["PATH"] = original;
     }
   });
 
   it("skips a .cmd shim whose native exe cannot be found rather than returning the shim", () => {
-    const cmd = path().join("C:\\npm-prefix", "fallow-lsp.cmd");
+    const cmd = path().join("C:\\npm-prefix", "plow-lsp.cmd");
     mockExistsSync = (p) => p === cmd;
     const original = process.env["PATH"];
     process.env["PATH"] = "C:\\npm-prefix";
     try {
-      expect(findBinaryInPath("fallow-lsp")).toBeNull();
+      expect(findBinaryInPath("plow-lsp")).toBeNull();
     } finally {
       process.env["PATH"] = original;
     }
@@ -302,7 +302,7 @@ describe("findBinaryInPath - unix", () => {
     const original = process.env["PATH"];
     process.env["PATH"] = `/usr/bin${path().delimiter}/usr/local/bin`;
     try {
-      expect(findBinaryInPath("fallow")).toBe(path().join("/usr/local/bin", "fallow"));
+      expect(findBinaryInPath("plow")).toBe(path().join("/usr/local/bin", "plow"));
     } finally {
       process.env["PATH"] = original;
     }
@@ -312,54 +312,54 @@ describe("findBinaryInPath - unix", () => {
     const original = process.env["PATH"];
     process.env["PATH"] = "/usr/bin";
     try {
-      expect(findBinaryInPath("fallow")).toBeNull();
+      expect(findBinaryInPath("plow")).toBeNull();
     } finally {
       process.env["PATH"] = original;
     }
   });
 });
 
-describe("resolveConfiguredBinaryPath (fallow.lspPath honoring)", () => {
+describe("resolveConfiguredBinaryPath (plow.lspPath honoring)", () => {
   it("uses an exact file path as given", () => {
-    const p = "/opt/fallow/fallow-lsp";
+    const p = "/opt/plow/plow-lsp";
     mockExistsSync = (x) => x === p;
-    expect(resolveConfiguredBinaryPath(p, "fallow-lsp")).toBe(p);
+    expect(resolveConfiguredBinaryPath(p, "plow-lsp")).toBe(p);
   });
 
   it("retries a missing Windows extension (lspPath without .exe)", () => {
     mockPlatform = "win32";
-    const configured = "C:\\fallow\\fallow-lsp";
-    const withExe = "C:\\fallow\\fallow-lsp.exe";
+    const configured = "C:\\plow\\plow-lsp";
+    const withExe = "C:\\plow\\plow-lsp.exe";
     mockExistsSync = (x) => x === withExe;
-    expect(resolveConfiguredBinaryPath(configured, "fallow-lsp")).toBe(withExe);
+    expect(resolveConfiguredBinaryPath(configured, "plow-lsp")).toBe(withExe);
   });
 
   it("resolves the binary inside a directory lspPath", () => {
-    const dir = "/opt/fallow/bin";
-    const inDir = path().join(dir, "fallow-lsp");
+    const dir = "/opt/plow/bin";
+    const inDir = path().join(dir, "plow-lsp");
     mockDirs = new Set([dir]);
     mockExistsSync = (x) => x === inDir;
-    expect(resolveConfiguredBinaryPath(dir, "fallow-lsp")).toBe(inDir);
+    expect(resolveConfiguredBinaryPath(dir, "plow-lsp")).toBe(inDir);
   });
 
-  it("resolves the CLI sibling of a configured fallow-lsp path", () => {
-    const configured = "/opt/fallow/fallow-lsp";
-    const sibling = "/opt/fallow/fallow";
+  it("resolves the CLI sibling of a configured plow-lsp path", () => {
+    const configured = "/opt/plow/plow-lsp";
+    const sibling = "/opt/plow/plow";
     mockExistsSync = (x) => x === sibling;
-    expect(resolveConfiguredBinaryPath(configured, "fallow")).toBe(sibling);
+    expect(resolveConfiguredBinaryPath(configured, "plow")).toBe(sibling);
   });
 
   it("resolves the CLI inside a directory lspPath", () => {
-    const dir = "/opt/fallow/bin";
-    const cli = path().join(dir, "fallow");
+    const dir = "/opt/plow/bin";
+    const cli = path().join(dir, "plow");
     mockDirs = new Set([dir]);
     mockExistsSync = (x) => x === cli;
-    expect(resolveConfiguredBinaryPath(dir, "fallow")).toBe(cli);
+    expect(resolveConfiguredBinaryPath(dir, "plow")).toBe(cli);
   });
 
   it("returns null when nothing exists at any interpretation", () => {
     mockExistsSync = () => false;
-    expect(resolveConfiguredBinaryPath("/nope/fallow-lsp", "fallow-lsp")).toBeNull();
+    expect(resolveConfiguredBinaryPath("/nope/plow-lsp", "plow-lsp")).toBeNull();
   });
 
   it("re-resolves a configured .cmd launcher shim to the sibling native exe on Windows", () => {
@@ -369,39 +369,39 @@ describe("resolveConfiguredBinaryPath (fallow.lspPath honoring)", () => {
     // verbatim (which would still fail to spawn).
     mockPlatform = "win32";
     mockArch = "x64";
-    const configured = "C:\\npm-prefix\\fallow-lsp.cmd";
+    const configured = "C:\\npm-prefix\\plow-lsp.cmd";
     const native = path().join(
       "C:\\npm-prefix",
       "node_modules",
-      "@fallow-cli",
+      "@plow-cli",
       "win32-x64-msvc",
-      "fallow-lsp.exe",
+      "plow-lsp.exe",
     );
     mockExistsSync = (x) => x === configured || x === native;
-    expect(resolveConfiguredBinaryPath(configured, "fallow-lsp")).toBe(native);
+    expect(resolveConfiguredBinaryPath(configured, "plow-lsp")).toBe(native);
   });
 
   it("re-resolves a configured .ps1 launcher shim to the sibling native exe on Windows", () => {
     mockPlatform = "win32";
     mockArch = "x64";
-    const configured = "C:\\npm-prefix\\fallow-lsp.ps1";
+    const configured = "C:\\npm-prefix\\plow-lsp.ps1";
     const native = path().join(
       "C:\\npm-prefix",
       "node_modules",
-      "@fallow-cli",
+      "@plow-cli",
       "win32-x64-msvc",
-      "fallow-lsp.exe",
+      "plow-lsp.exe",
     );
     mockExistsSync = (x) => x === configured || x === native;
-    expect(resolveConfiguredBinaryPath(configured, "fallow-lsp")).toBe(native);
+    expect(resolveConfiguredBinaryPath(configured, "plow-lsp")).toBe(native);
   });
 
   it("falls back to the bare sibling exe when a configured .cmd shim has no platform package", () => {
     mockPlatform = "win32";
     mockArch = "x64";
-    const configured = "C:\\tools\\fallow-lsp.cmd";
-    const sibling = path().join("C:\\tools", "fallow-lsp.exe");
+    const configured = "C:\\tools\\plow-lsp.cmd";
+    const sibling = path().join("C:\\tools", "plow-lsp.exe");
     mockExistsSync = (x) => x === configured || x === sibling;
-    expect(resolveConfiguredBinaryPath(configured, "fallow-lsp")).toBe(sibling);
+    expect(resolveConfiguredBinaryPath(configured, "plow-lsp")).toBe(sibling);
   });
 });

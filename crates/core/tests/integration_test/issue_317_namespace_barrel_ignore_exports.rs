@@ -1,7 +1,7 @@
 //! Issue #317: ignoreExports must also gate namespace-barrel duplicate exports.
 
-use fallow_config::{
-    FallowConfig, IgnoreExportRule, IgnoreExportsUsedInFileConfig, OutputFormat, RulesConfig,
+use plow_config::{
+    IgnoreExportRule, IgnoreExportsUsedInFileConfig, OutputFormat, PlowConfig, RulesConfig,
 };
 
 use crate::common::fixture_path;
@@ -9,8 +9,8 @@ use crate::common::fixture_path;
 fn make_config(
     root: std::path::PathBuf,
     ignore_exports: Vec<IgnoreExportRule>,
-) -> fallow_config::ResolvedConfig {
-    FallowConfig {
+) -> plow_config::ResolvedConfig {
+    PlowConfig {
         schema: None,
         extends: vec![],
         entry: vec![],
@@ -25,28 +25,28 @@ fn make_config(
         ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
-        unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
-        duplicates: fallow_config::DuplicatesConfig::default(),
-        health: fallow_config::HealthConfig::default(),
+        unused_component_props: plow_config::UnusedComponentPropsConfig::default(),
+        duplicates: plow_config::DuplicatesConfig::default(),
+        health: plow_config::HealthConfig::default(),
         rules: RulesConfig::default(),
-        boundaries: fallow_config::BoundaryConfig::default(),
+        boundaries: plow_config::BoundaryConfig::default(),
         production: false.into(),
         plugins: vec![],
         rule_packs: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
-        audit: fallow_config::AuditConfig::default(),
+        audit: plow_config::AuditConfig::default(),
         codeowners: None,
         public_packages: vec![],
-        flags: fallow_config::FlagsConfig::default(),
-        security: fallow_config::SecurityConfig::default(),
-        fix: fallow_config::FixConfig::default(),
-        resolve: fallow_config::ResolveConfig::default(),
+        flags: plow_config::FlagsConfig::default(),
+        security: plow_config::SecurityConfig::default(),
+        fix: plow_config::FixConfig::default(),
+        resolve: plow_config::ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
         auto_imports: false,
-        cache: fallow_config::CacheConfig::default(),
+        cache: plow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None)
 }
@@ -55,7 +55,7 @@ fn make_config(
 fn duplicate_exports_flagged_without_ignore_exports() {
     let root = fixture_path("issue-317-namespace-barrel-ignore-exports");
     let config = make_config(root, vec![]);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let dupe_names: Vec<&str> = results
         .duplicate_exports
@@ -86,7 +86,7 @@ fn ignore_exports_wildcard_clears_duplicate_exports() {
             exports: vec!["*".to_owned()],
         }],
     );
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.duplicate_exports.is_empty(),
@@ -109,7 +109,7 @@ fn ignore_exports_named_clears_only_listed_names() {
             exports: vec!["Root".to_owned()],
         }],
     );
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let dupe_names: Vec<&str> = results
         .duplicate_exports

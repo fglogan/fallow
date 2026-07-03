@@ -25,7 +25,7 @@ const ELEVATED = 2;
 export const fanInTone = (fanIn: number): SignalTone =>
   fanIn >= HUB ? "hub" : fanIn >= ELEVATED ? "elevated" : "muted";
 
-/** Deterministic per-file signal derived purely from the Fallow focus entry. */
+/** Deterministic per-file signal derived purely from the Plow focus entry. */
 export const deriveFileSignal = (file: WalkthroughFile): FileSignal => {
   const { fanIn, fanOut } = parseFanInOut(file.reason);
   return {

@@ -2,15 +2,15 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 // VS Code injects this module into the extension host at runtime.
-// fallow-ignore-next-line unlisted-dependency
+// plow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
 
 export const getExecutableExtension = (): string => (os.platform() === "win32" ? ".exe" : "");
 
 /**
- * Map the current platform + arch to the `@fallow-cli/<target>` package name(s)
+ * Map the current platform + arch to the `@plow-cli/<target>` package name(s)
  * that ship the real native executable, mirroring
- * `npm/fallow/scripts/platform-package.js`.
+ * `npm/plow/scripts/platform-package.js`.
  *
  * On Linux the extension has no `detect-libc`, so both the gnu and musl package
  * names are returned (most-likely first) and the caller probes each on disk; the
@@ -22,19 +22,19 @@ export const platformPackageNames = (
   arch: string = os.arch(),
 ): ReadonlyArray<string> => {
   if (platform === "win32") {
-    if (arch === "x64") return ["@fallow-cli/win32-x64-msvc"];
-    if (arch === "arm64") return ["@fallow-cli/win32-arm64-msvc"];
+    if (arch === "x64") return ["@plow-cli/win32-x64-msvc"];
+    if (arch === "arm64") return ["@plow-cli/win32-arm64-msvc"];
     return [];
   }
   if (platform === "darwin") {
-    if (arch === "x64" || arch === "arm64") return [`@fallow-cli/darwin-${arch}`];
+    if (arch === "x64" || arch === "arm64") return [`@plow-cli/darwin-${arch}`];
     return [];
   }
   if (platform === "linux") {
     if (arch === "x64" || arch === "arm64") {
       // gnu is by far the common case; musl is the fallback for Alpine and
       // other musl distros. Probe both since libc is not detected here.
-      return [`@fallow-cli/linux-${arch}-gnu`, `@fallow-cli/linux-${arch}-musl`];
+      return [`@plow-cli/linux-${arch}-gnu`, `@plow-cli/linux-${arch}-musl`];
     }
     return [];
   }
@@ -44,13 +44,13 @@ export const platformPackageNames = (
 /**
  * Resolve the real, directly-spawnable native executable for `name` from a npm
  * platform package under `nodeModulesDir`, e.g.
- * `node_modules/@fallow-cli/win32-x64-msvc/fallow-lsp.exe`.
+ * `node_modules/@plow-cli/win32-x64-msvc/plow-lsp.exe`.
  *
  * The `node_modules/.bin/<name>` entry npm creates is a launcher shim, not the
  * binary: on Windows it is `<name>.cmd` / `<name>.ps1` (which `child_process`
  * and the LSP client cannot `spawn` directly without a shell), and on Unix it is
  * an extensionless Node shebang script. The actual binary lives in the
- * `@fallow-cli/<target>` platform package the shim execs into, so resolving it
+ * `@plow-cli/<target>` platform package the shim execs into, so resolving it
  * directly yields a path that spawns cleanly on every platform.
  */
 export const findNativeInNodeModules = (nodeModulesDir: string, name: string): string | null => {
@@ -82,10 +82,10 @@ const findBinShim = (binDir: string, name: string): string | null => {
 
 /**
  * Look for a locally installed binary in the workspace's node_modules.
- * This allows teams to pin fallow as a devDependency for consistent versions.
+ * This allows teams to pin plow as a devDependency for consistent versions.
  *
  * Resolution order, returning the first spawnable hit:
- *  1. the real native executable inside the `@fallow-cli/<target>` platform
+ *  1. the real native executable inside the `@plow-cli/<target>` platform
  *     package (works on every OS, including Windows where the `.bin` entry is a
  *     non-spawnable `.cmd`/`.ps1` shim);
  *  2. the `node_modules/.bin/<name>` shim on Unix (extensionless, spawnable).
@@ -108,7 +108,7 @@ export const findLocalBinary = (name: string): string | null => {
 
 /**
  * Candidate file names to probe for `name` on a PATH directory, most-specific
- * first. On Windows a global `npm i -g fallow` puts `<name>.exe` (rare) or the
+ * first. On Windows a global `npm i -g plow` puts `<name>.exe` (rare) or the
  * `<name>.cmd` / `<name>.ps1` launcher shims on PATH; a Cargo/Homebrew/manual
  * install puts a bare `<name>.exe`. On Unix the install is always the bare
  * `<name>`.
@@ -122,7 +122,7 @@ const pathCandidateNames = (name: string): ReadonlyArray<string> => {
 
 /**
  * Resolve a directory holding a Windows launcher shim (`<dir>/<name>.cmd`) to
- * the real native executable in the sibling `@fallow-cli/<target>` platform
+ * the real native executable in the sibling `@plow-cli/<target>` platform
  * package. npm global installs place the shim in the prefix `bin` dir and the
  * package under the adjacent `node_modules`, so probe `<dir>/node_modules` and
  * `<dir>/../node_modules`. Returns null when neither holds the native binary.
@@ -151,19 +151,19 @@ const isWindowsLauncherShim = (configured: string): boolean => {
 };
 
 /**
- * Resolve a user-configured `fallow.lspPath` to a concrete, spawnable binary for
- * `name` (`fallow-lsp` for the LSP, `fallow` for the CLI sibling).
+ * Resolve a user-configured `plow.lspPath` to a concrete, spawnable binary for
+ * `name` (`plow-lsp` for the LSP, `plow` for the CLI sibling).
  *
  * `configured` is honored as the user typed it, tolerating the common shapes
  * that used to silently fail:
  *  - a file path that points straight at the binary (used as-is);
- *  - a file path missing the Windows extension (`...\fallow-lsp`), retried with
+ *  - a file path missing the Windows extension (`...\plow-lsp`), retried with
  *    `.exe`;
  *  - a directory holding the binaries, in which case `<dir>/<name>(.exe)` is
- *    resolved (so `fallow.lspPath` set to an install folder works), including
+ *    resolved (so `plow.lspPath` set to an install folder works), including
  *    the sibling CLI when `name` differs from the configured file's stem;
- *  - a non-spawnable Windows launcher shim (`...\fallow-lsp.cmd` / `.ps1`), which
- *    is re-resolved to the native exe in the sibling `@fallow-cli/<target>`
+ *  - a non-spawnable Windows launcher shim (`...\plow-lsp.cmd` / `.ps1`), which
+ *    is re-resolved to the native exe in the sibling `@plow-cli/<target>`
  *    package so a directly-configured shim path still spawns.
  *
  * Returns the resolved path, or null when nothing exists at any interpretation
@@ -202,8 +202,8 @@ export const resolveConfiguredBinaryPath = (configured: string, name: string): s
     return fs.existsSync(sibling) ? sibling : null;
   }
 
-  // Different binary (e.g. the `fallow` CLI sibling of a configured
-  // `fallow-lsp`): look for it next to the configured file.
+  // Different binary (e.g. the `plow` CLI sibling of a configured
+  // `plow-lsp`): look for it next to the configured file.
   return fs.existsSync(sibling) ? sibling : null;
 };
 

@@ -12,7 +12,7 @@ use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use common::{fallow_bin, parse_json};
+use common::{parse_json, plow_bin};
 
 #[derive(Clone)]
 struct MockResponse {
@@ -131,7 +131,7 @@ fn run_reconcile(
     api_url: &str,
     envelope_dir: &tempfile::TempDir,
 ) -> common::CommandOutput {
-    let output = Command::new(fallow_bin())
+    let output = Command::new(plow_bin())
         .args(["--format", "json", "--quiet", "ci", "reconcile-review"])
         .args(provider_args)
         .args(["--api-url", api_url])
@@ -139,14 +139,14 @@ fn run_reconcile(
         .arg(envelope_dir.path().join("review.json"))
         .env("NO_COLOR", "1")
         .env("RUST_LOG", "")
-        .env("FALLOW_API_RETRIES", "1")
-        .env("FALLOW_API_RETRY_DELAY", "0")
+        .env("PLOW_API_RETRIES", "1")
+        .env("PLOW_API_RETRY_DELAY", "0")
         .env("GH_TOKEN", "test-token")
         .env("GITHUB_SHA", "abcdef1234567890")
         .env("GITLAB_TOKEN", "test-token")
         .env("CI_COMMIT_SHA", "abcdef1234567890")
         .output()
-        .expect("run fallow");
+        .expect("run plow");
     common::CommandOutput {
         stdout: String::from_utf8_lossy(&output.stdout).to_string(),
         stderr: String::from_utf8_lossy(&output.stderr).to_string(),
@@ -177,7 +177,7 @@ fn github_threads_with_old() -> MockResponse {
         method: "POST",
         path_contains: "/graphql",
         status: 200,
-        body: r#"{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"id":"T1","isResolved":false,"comments":{"nodes":[{"body":"<!-- fallow-fingerprint: old -->"}]}}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}"#,
+        body: r#"{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"id":"T1","isResolved":false,"comments":{"nodes":[{"body":"<!-- plow-fingerprint: old -->"}]}}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}"#,
     }
 }
 
@@ -186,7 +186,7 @@ fn github_deletion_race_stops_before_mutation_and_reports_unapplied_fingerprint(
     let envelope = write_envelope(&[]);
     let (api_url, server) = serve(vec![
         github_comments(
-            r#"[{"id":101,"body":"finding\n<!-- fallow-fingerprint: old -->","user":{"type":"Bot","login":"github-actions[bot]"}}]"#,
+            r#"[{"id":101,"body":"finding\n<!-- plow-fingerprint: old -->","user":{"type":"Bot","login":"github-actions[bot]"}}]"#,
         ),
         github_threads_empty(),
         MockResponse {
@@ -230,7 +230,7 @@ fn github_mutation_failure_is_fail_fast_and_counts_only_completed_writes() {
     let envelope = write_envelope(&[]);
     let (api_url, server) = serve(vec![
         github_comments(
-            r#"[{"id":1,"body":"<!-- fallow-fingerprint: a -->","user":{"type":"Bot","login":"github-actions[bot]"}},{"id":2,"body":"<!-- fallow-fingerprint: b -->","user":{"type":"Bot","login":"github-actions[bot]"}}]"#,
+            r#"[{"id":1,"body":"<!-- plow-fingerprint: a -->","user":{"type":"Bot","login":"github-actions[bot]"}},{"id":2,"body":"<!-- plow-fingerprint: b -->","user":{"type":"Bot","login":"github-actions[bot]"}}]"#,
         ),
         github_threads_empty(),
         MockResponse {
@@ -285,7 +285,7 @@ fn github_existing_sha_marker_skips_duplicate_resolution_reply() {
     let envelope = write_envelope(&[]);
     let (api_url, server) = serve(vec![
         github_comments(
-            r#"[{"id":1,"body":"<!-- fallow-fingerprint: old -->","user":{"type":"Bot","login":"github-actions[bot]"}},{"id":9,"body":"Resolved.\n\n<!-- fallow-resolved-fingerprint: old@abcdef1 -->","user":{"type":"Bot","login":"github-actions[bot]"}}]"#,
+            r#"[{"id":1,"body":"<!-- plow-fingerprint: old -->","user":{"type":"Bot","login":"github-actions[bot]"}},{"id":9,"body":"Resolved.\n\n<!-- plow-resolved-fingerprint: old@abcdef1 -->","user":{"type":"Bot","login":"github-actions[bot]"}}]"#,
         ),
         github_threads_empty(),
     ]);
@@ -308,7 +308,7 @@ fn github_force_push_sha_marker_mismatch_posts_fresh_resolution_reply() {
     let envelope = write_envelope(&[]);
     let (api_url, server) = serve(vec![
         github_comments(
-            r#"[{"id":1,"body":"<!-- fallow-fingerprint: old -->","user":{"type":"Bot","login":"github-actions[bot]"}},{"id":9,"body":"Resolved.\n\n<!-- fallow-resolved-fingerprint: old@1111111 -->","user":{"type":"Bot","login":"github-actions[bot]"}}]"#,
+            r#"[{"id":1,"body":"<!-- plow-fingerprint: old -->","user":{"type":"Bot","login":"github-actions[bot]"}},{"id":9,"body":"Resolved.\n\n<!-- plow-resolved-fingerprint: old@1111111 -->","user":{"type":"Bot","login":"github-actions[bot]"}}]"#,
         ),
         github_threads_empty(),
         MockResponse {
@@ -392,7 +392,7 @@ fn gitlab_deletion_race_stops_before_note_or_resolve() {
     let envelope = write_envelope(&[]);
     let (api_url, server) = serve(vec![
         gitlab_discussions(
-            r#"[{"id":"d1","notes":[{"body":"<!-- fallow-fingerprint: old -->","author":{"bot":true,"username":"project-bot"}}]}]"#,
+            r#"[{"id":"d1","notes":[{"body":"<!-- plow-fingerprint: old -->","author":{"bot":true,"username":"project-bot"}}]}]"#,
         ),
         MockResponse {
             method: "GET",
@@ -431,7 +431,7 @@ fn gitlab_existing_legacy_marker_skips_duplicate_resolution_note() {
     let envelope = write_envelope(&[]);
     let (api_url, server) = serve(vec![
         gitlab_discussions(
-            r#"[{"id":"d1","notes":[{"body":"<!-- fallow-fingerprint: old -->","author":{"bot":true,"username":"project-bot"}},{"body":"<!-- fallow-resolved-fingerprint: old -->","author":{"bot":true,"username":"project-bot"}}]}]"#,
+            r#"[{"id":"d1","notes":[{"body":"<!-- plow-fingerprint: old -->","author":{"bot":true,"username":"project-bot"}},{"body":"<!-- plow-resolved-fingerprint: old -->","author":{"bot":true,"username":"project-bot"}}]}]"#,
         ),
         MockResponse {
             method: "GET",

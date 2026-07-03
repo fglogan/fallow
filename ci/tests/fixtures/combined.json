@@ -129,7 +129,7 @@
             "kind": "suppress-file",
             "auto_fixable": false,
             "description": "Suppress with a file-level comment at the top of this file.",
-            "comment": "// fallow-ignore-file re-export-cycle"
+            "comment": "// plow-ignore-file re-export-cycle"
           }
         ]
       }

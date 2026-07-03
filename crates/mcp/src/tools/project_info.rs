@@ -1,6 +1,6 @@
 use crate::params::ProjectInfoParams;
 
-use fallow_api::{
+use plow_api::{
     AnalysisOptions, ProjectInfoOptions, run_project_info as run_api_project_info,
     serialize_project_info_programmatic_json,
 };

@@ -1,9 +1,9 @@
 use std::path::Path;
 
-use fallow_engine::CloneFingerprintSet;
-use fallow_output::normalize_uri;
-use fallow_types::duplicates::DuplicationReport;
-use fallow_types::results::{AnalysisResults, UnusedExport, UnusedMember};
+use plow_engine::CloneFingerprintSet;
+use plow_output::normalize_uri;
+use plow_types::duplicates::DuplicationReport;
+use plow_types::results::{AnalysisResults, UnusedExport, UnusedMember};
 
 use crate::ResultGroup;
 
@@ -16,7 +16,7 @@ fn compact_path(path: &Path, root: &Path) -> String {
 }
 
 fn compact_circular_dependency_line(
-    cycle: &fallow_types::output_dead_code::CircularDependencyFinding,
+    cycle: &plow_types::output_dead_code::CircularDependencyFinding,
     root: &Path,
 ) -> String {
     let chain: Vec<String> = cycle
@@ -45,7 +45,7 @@ fn compact_circular_dependency_line(
 }
 
 fn compact_re_export_cycle_line(
-    cycle: &fallow_types::output_dead_code::ReExportCycleFinding,
+    cycle: &plow_types::output_dead_code::ReExportCycleFinding,
     root: &Path,
 ) -> String {
     let chain: Vec<String> = cycle
@@ -56,8 +56,8 @@ fn compact_re_export_cycle_line(
         .collect();
     let first_file = chain.first().map_or_else(String::new, Clone::clone);
     let kind_tag = match cycle.cycle.kind {
-        fallow_types::results::ReExportCycleKind::SelfLoop => " (self-loop)",
-        fallow_types::results::ReExportCycleKind::MultiNode => "",
+        plow_types::results::ReExportCycleKind::SelfLoop => " (self-loop)",
+        plow_types::results::ReExportCycleKind::MultiNode => "",
     };
     format!(
         "re-export-cycle:{}:{}{}",
@@ -68,7 +68,7 @@ fn compact_re_export_cycle_line(
 }
 
 fn compact_boundary_violation_line(
-    item: &fallow_types::output_dead_code::BoundaryViolationFinding,
+    item: &plow_types::output_dead_code::BoundaryViolationFinding,
     root: &Path,
 ) -> String {
     format!(
@@ -83,7 +83,7 @@ fn compact_boundary_violation_line(
 }
 
 fn compact_boundary_coverage_line(
-    item: &fallow_types::output_dead_code::BoundaryCoverageViolationFinding,
+    item: &plow_types::output_dead_code::BoundaryCoverageViolationFinding,
     root: &Path,
 ) -> String {
     format!(
@@ -94,7 +94,7 @@ fn compact_boundary_coverage_line(
 }
 
 fn compact_boundary_call_line(
-    item: &fallow_types::output_dead_code::BoundaryCallViolationFinding,
+    item: &plow_types::output_dead_code::BoundaryCallViolationFinding,
     root: &Path,
 ) -> String {
     format!(
@@ -108,7 +108,7 @@ fn compact_boundary_call_line(
 }
 
 fn compact_stale_suppression_line(
-    item: &fallow_types::results::StaleSuppression,
+    item: &plow_types::results::StaleSuppression,
     root: &Path,
 ) -> String {
     format!(
@@ -120,7 +120,7 @@ fn compact_stale_suppression_line(
 }
 
 fn compact_catalog_reference_line(
-    item: &fallow_types::output_dead_code::UnresolvedCatalogReferenceFinding,
+    item: &plow_types::output_dead_code::UnresolvedCatalogReferenceFinding,
     root: &Path,
 ) -> String {
     format!(
@@ -133,7 +133,7 @@ fn compact_catalog_reference_line(
 }
 
 fn compact_unused_override_line(
-    item: &fallow_types::output_dead_code::UnusedDependencyOverrideFinding,
+    item: &plow_types::output_dead_code::UnusedDependencyOverrideFinding,
     root: &Path,
 ) -> String {
     format!(
@@ -146,7 +146,7 @@ fn compact_unused_override_line(
 }
 
 fn compact_misconfigured_override_line(
-    item: &fallow_types::output_dead_code::MisconfiguredDependencyOverrideFinding,
+    item: &plow_types::output_dead_code::MisconfiguredDependencyOverrideFinding,
     root: &Path,
 ) -> String {
     format!(
@@ -545,10 +545,7 @@ pub fn build_grouped_compact_lines(groups: &[ResultGroup], root: &Path) -> Vec<S
 
 /// Build compact output lines for health results.
 #[must_use]
-pub fn build_health_compact_lines(
-    report: &fallow_output::HealthReport,
-    root: &Path,
-) -> Vec<String> {
+pub fn build_health_compact_lines(report: &plow_output::HealthReport, root: &Path) -> Vec<String> {
     let mut lines = Vec::new();
     push_health_score_compact(&mut lines, report);
     push_vital_signs_compact(&mut lines, report);
@@ -565,14 +562,14 @@ pub fn build_health_compact_lines(
 
 fn push_threshold_overrides_compact(
     lines: &mut Vec<String>,
-    entries: &[fallow_output::ThresholdOverrideState],
+    entries: &[plow_output::ThresholdOverrideState],
     root: &Path,
 ) {
     for entry in entries {
         let status = match entry.status {
-            fallow_output::ThresholdOverrideStatus::Active => "active",
-            fallow_output::ThresholdOverrideStatus::Stale => "stale",
-            fallow_output::ThresholdOverrideStatus::NoMatch => "no_match",
+            plow_output::ThresholdOverrideStatus::Active => "active",
+            plow_output::ThresholdOverrideStatus::Stale => "stale",
+            plow_output::ThresholdOverrideStatus::NoMatch => "no_match",
         };
         let target = entry.path.as_ref().map_or_else(
             || "no-match".to_string(),
@@ -600,13 +597,13 @@ fn push_threshold_overrides_compact(
     }
 }
 
-fn push_health_score_compact(lines: &mut Vec<String>, report: &fallow_output::HealthReport) {
+fn push_health_score_compact(lines: &mut Vec<String>, report: &plow_output::HealthReport) {
     if let Some(ref hs) = report.health_score {
         lines.push(format!("health-score:{:.1}:{}", hs.score, hs.grade));
     }
 }
 
-fn push_vital_signs_compact(lines: &mut Vec<String>, report: &fallow_output::HealthReport) {
+fn push_vital_signs_compact(lines: &mut Vec<String>, report: &plow_output::HealthReport) {
     if let Some(ref vs) = report.vital_signs {
         let mut parts = Vec::new();
         if vs.total_loc > 0 {
@@ -642,15 +639,15 @@ fn health_compact_path(path: &Path, root: &Path) -> String {
 
 fn push_health_findings_compact(
     lines: &mut Vec<String>,
-    findings: &[fallow_output::HealthFinding],
+    findings: &[plow_output::HealthFinding],
     root: &Path,
 ) {
     for finding in findings {
         let relative = health_compact_path(&finding.path, root);
         let severity = match finding.severity {
-            fallow_output::FindingSeverity::Critical => "critical",
-            fallow_output::FindingSeverity::High => "high",
-            fallow_output::FindingSeverity::Moderate => "moderate",
+            plow_output::FindingSeverity::Critical => "critical",
+            plow_output::FindingSeverity::High => "high",
+            plow_output::FindingSeverity::Moderate => "moderate",
         };
         let crap_suffix = match finding.crap {
             Some(crap) => {
@@ -677,7 +674,7 @@ fn push_health_findings_compact(
 
 fn push_file_scores_compact(
     lines: &mut Vec<String>,
-    scores: &[fallow_output::FileHealthScore],
+    scores: &[plow_output::FileHealthScore],
     root: &Path,
 ) {
     for score in scores {
@@ -698,7 +695,7 @@ fn push_file_scores_compact(
 
 fn push_coverage_gaps_compact(
     lines: &mut Vec<String>,
-    report: &fallow_output::HealthReport,
+    report: &plow_output::HealthReport,
     root: &Path,
 ) {
     if let Some(ref gaps) = report.coverage_gaps {
@@ -729,7 +726,7 @@ fn push_coverage_gaps_compact(
 
 fn push_runtime_sections_compact(
     lines: &mut Vec<String>,
-    report: &fallow_output::HealthReport,
+    report: &plow_output::HealthReport,
     root: &Path,
 ) {
     if let Some(ref production) = report.runtime_coverage {
@@ -743,7 +740,7 @@ fn push_runtime_sections_compact(
     }
 }
 
-fn compact_ownership_suffix(ownership: Option<&fallow_output::OwnershipMetrics>) -> String {
+fn compact_ownership_suffix(ownership: Option<&plow_output::OwnershipMetrics>) -> String {
     ownership.map_or_else(String::new, |o| {
         let mut parts = vec![
             format!("bus={}", o.bus_factor),
@@ -758,10 +755,10 @@ fn compact_ownership_suffix(ownership: Option<&fallow_output::OwnershipMetrics>)
             parts.push(format!("unowned={unowned}"));
         }
         let state = match o.ownership_state {
-            fallow_output::OwnershipState::Active => "active",
-            fallow_output::OwnershipState::Unowned => "unowned",
-            fallow_output::OwnershipState::DeclaredInactive => "declared_inactive",
-            fallow_output::OwnershipState::Drifting => "drifting",
+            plow_output::OwnershipState::Active => "active",
+            plow_output::OwnershipState::Unowned => "unowned",
+            plow_output::OwnershipState::DeclaredInactive => "declared_inactive",
+            plow_output::OwnershipState::Drifting => "drifting",
         };
         parts.push(format!("ownership_state={state}"));
         if o.drift {
@@ -773,7 +770,7 @@ fn compact_ownership_suffix(ownership: Option<&fallow_output::OwnershipMetrics>)
 
 fn push_hotspots_compact(
     lines: &mut Vec<String>,
-    hotspots: &[fallow_output::HotspotFinding],
+    hotspots: &[plow_output::HotspotFinding],
     root: &Path,
 ) {
     for entry in hotspots {
@@ -793,7 +790,7 @@ fn push_hotspots_compact(
     }
 }
 
-fn push_health_trend_compact(lines: &mut Vec<String>, report: &fallow_output::HealthReport) {
+fn push_health_trend_compact(lines: &mut Vec<String>, report: &plow_output::HealthReport) {
     if let Some(ref trend) = report.health_trend {
         lines.push(format!(
             "trend:overall:direction={}",
@@ -814,7 +811,7 @@ fn push_health_trend_compact(lines: &mut Vec<String>, report: &fallow_output::He
 
 fn push_refactoring_targets_compact(
     lines: &mut Vec<String>,
-    targets: &[fallow_output::RefactoringTargetFinding],
+    targets: &[plow_output::RefactoringTargetFinding],
     root: &Path,
 ) {
     for target in targets {
@@ -836,7 +833,7 @@ fn push_refactoring_targets_compact(
 }
 
 fn build_runtime_coverage_compact_lines(
-    production: &fallow_output::RuntimeCoverageReport,
+    production: &plow_output::RuntimeCoverageReport,
     root: &Path,
 ) -> Vec<String> {
     let mut lines = vec![format!(
@@ -877,7 +874,7 @@ fn build_runtime_coverage_compact_lines(
 }
 
 fn build_coverage_intelligence_compact_lines(
-    intelligence: &fallow_output::CoverageIntelligenceReport,
+    intelligence: &plow_output::CoverageIntelligenceReport,
     root: &Path,
 ) -> Vec<String> {
     let mut lines = vec![format!(
@@ -942,9 +939,9 @@ pub fn build_duplication_compact_lines(report: &DuplicationReport, root: &Path) 
 mod tests {
     use std::path::PathBuf;
 
-    use fallow_types::duplicates::{CloneGroup, CloneInstance, DuplicationStats};
-    use fallow_types::output_dead_code::UnusedFileFinding;
-    use fallow_types::results::{AnalysisResults, UnusedFile};
+    use plow_types::duplicates::{CloneGroup, CloneInstance, DuplicationStats};
+    use plow_types::output_dead_code::UnusedFileFinding;
+    use plow_types::results::{AnalysisResults, UnusedFile};
 
     use super::*;
 
@@ -1014,12 +1011,12 @@ mod tests {
     #[test]
     fn health_compact_lines_include_score_and_vital_signs() {
         let root = PathBuf::from("/project");
-        let report = fallow_output::HealthReport {
-            health_score: Some(fallow_output::HealthScore {
+        let report = plow_output::HealthReport {
+            health_score: Some(plow_output::HealthScore {
                 formula_version: 1,
                 score: 91.2,
                 grade: "A",
-                penalties: fallow_output::HealthScorePenalties {
+                penalties: plow_output::HealthScorePenalties {
                     dead_files: None,
                     dead_exports: None,
                     complexity: 0.0,
@@ -1034,7 +1031,7 @@ mod tests {
                     prop_drilling: None,
                 },
             }),
-            vital_signs: Some(fallow_output::VitalSigns {
+            vital_signs: Some(plow_output::VitalSigns {
                 total_loc: 120,
                 avg_cyclomatic: 3.4,
                 p90_cyclomatic: 8,

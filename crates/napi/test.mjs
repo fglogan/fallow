@@ -15,7 +15,7 @@ import {
 } from "./index.js";
 
 function makeFixture() {
-  const root = mkdtempSync(join(tmpdir(), "fallow-node-"));
+  const root = mkdtempSync(join(tmpdir(), "plow-node-"));
   mkdirSync(join(root, "src", "application"), { recursive: true });
   mkdirSync(join(root, "src", "domain"), { recursive: true });
 
@@ -23,7 +23,7 @@ function makeFixture() {
     join(root, "package.json"),
     JSON.stringify(
       {
-        name: "fallow-node-fixture",
+        name: "plow-node-fixture",
         version: "1.0.0",
         main: "src/main.ts",
       },
@@ -33,7 +33,7 @@ function makeFixture() {
   );
 
   writeFileSync(
-    join(root, ".fallowrc.json"),
+    join(root, ".plowrc.json"),
     JSON.stringify(
       {
         boundaries: {
@@ -154,8 +154,8 @@ export function duplicatedTwo(items: number[]) {
   );
 
   execFileSync("git", ["init"], { cwd: root, stdio: "ignore" });
-  execFileSync("git", ["config", "user.name", "Fallow Node Test"], { cwd: root, stdio: "ignore" });
-  execFileSync("git", ["config", "user.email", "fallow-node@example.com"], {
+  execFileSync("git", ["config", "user.name", "Plow Node Test"], { cwd: root, stdio: "ignore" });
+  execFileSync("git", ["config", "user.email", "plow-node@example.com"], {
     cwd: root,
     stdio: "ignore",
   });
@@ -166,7 +166,7 @@ export function duplicatedTwo(items: number[]) {
   return root;
 }
 
-console.log("Testing @fallow-cli/fallow-node...\n");
+console.log("Testing @plow-cli/plow-node...\n");
 
 const root = makeFixture();
 const serviceDiff = join(root, "service.diff");
@@ -279,9 +279,9 @@ writeFileSync(
     error = caught;
   }
   assert.ok(error);
-  assert.equal(error.name, "FallowNodeError");
+  assert.equal(error.name, "PlowNodeError");
   assert.equal(error.exitCode, 2);
-  assert.equal(error.code, "FALLOW_INVALID_ROOT");
+  assert.equal(error.code, "PLOW_INVALID_ROOT");
   assert.equal(error.context, "analysis.root");
   assert.match(error.message, /invalid root path/);
   console.log("  [PASS] structured errors");

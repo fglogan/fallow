@@ -2,9 +2,9 @@
 
 use std::path::Path;
 
-use fallow_config::{AuthoredRule, LogicalGroup, LogicalGroupStatus, ResolvedBoundaryConfig};
-use fallow_output::{ListEntryPointOutput, RootEnvelopeMode, WorkspaceInfo, WorkspacesOutput};
-use fallow_types::discover::{DiscoveredFile, EntryPoint};
+use plow_config::{AuthoredRule, LogicalGroup, LogicalGroupStatus, ResolvedBoundaryConfig};
+use plow_output::{ListEntryPointOutput, RootEnvelopeMode, WorkspaceInfo, WorkspacesOutput};
+use plow_types::discover::{DiscoveredFile, EntryPoint};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
@@ -25,7 +25,7 @@ pub struct ProjectInfoOptions {
     pub boundaries: bool,
 }
 
-/// Options for `fallow list --boundaries` through the programmatic API.
+/// Options for `plow list --boundaries` through the programmatic API.
 #[derive(Debug, Clone, Default)]
 pub struct ListBoundariesOptions {
     pub analysis: AnalysisOptions,
@@ -38,7 +38,7 @@ pub struct ProjectInfoProgrammaticOutput {
     pub files: Option<Vec<String>>,
     pub entry_points: Option<Vec<ListEntryPointOutput>>,
     pub boundaries: Option<BoundariesListing>,
-    pub workspaces: Option<WorkspacesOutput<fallow_config::WorkspaceDiagnostic>>,
+    pub workspaces: Option<WorkspacesOutput<plow_config::WorkspaceDiagnostic>>,
     pub envelope: ListJsonEnvelope,
     pub envelope_mode: RootEnvelopeMode,
 }
@@ -64,12 +64,12 @@ pub fn serialize_project_info_programmatic_json(
     )
     .map_err(|err| {
         ProgrammaticError::new(format!("failed to serialize project info output: {err}"), 2)
-            .with_code("FALLOW_PROJECT_INFO_SERIALIZE_FAILED")
+            .with_code("PLOW_PROJECT_INFO_SERIALIZE_FAILED")
             .with_context("project_info")
     })
 }
 
-/// Typed output for `fallow list --boundaries` before JSON serialization.
+/// Typed output for `plow list --boundaries` before JSON serialization.
 #[derive(Debug, Clone)]
 pub struct ListBoundariesProgrammaticOutput {
     pub boundaries: BoundariesListing,
@@ -100,7 +100,7 @@ pub fn serialize_list_boundaries_programmatic_json(
             format!("failed to serialize list boundaries output: {err}"),
             2,
         )
-        .with_code("FALLOW_LIST_BOUNDARIES_SERIALIZE_FAILED")
+        .with_code("PLOW_LIST_BOUNDARIES_SERIALIZE_FAILED")
         .with_context("list_boundaries")
     })
 }
@@ -158,7 +158,7 @@ pub fn run_list_boundaries(
     resolved.install(|| {
         let project_config = load_list_project_config(&resolved)?;
 
-        let files = fallow_engine::discover_files_with_plugin_scopes(&project_config.config);
+        let files = plow_engine::discover_files_with_plugin_scopes(&project_config.config);
         let data = compute_boundary_data(&project_config.config, Some(&files));
 
         Ok(ListBoundariesProgrammaticOutput {
@@ -185,7 +185,7 @@ pub fn run_project_info(
         let need_plugin_result = options.plugins || options.entry_points || show_all;
         let need_files = options.files || options.entry_points || options.boundaries || show_all;
         let discovered = if need_files || need_plugin_result {
-            Some(fallow_engine::discover_files_with_plugin_scopes(config))
+            Some(plow_engine::discover_files_with_plugin_scopes(config))
         } else {
             None
         };
@@ -234,22 +234,22 @@ pub fn run_project_info(
 
 fn load_list_project_config(
     resolved: &crate::ProgrammaticAnalysisContext,
-) -> ProgrammaticResult<fallow_engine::ProjectConfig> {
-    fallow_engine::config_for_project_analysis(
+) -> ProgrammaticResult<plow_engine::ProjectConfig> {
+    plow_engine::config_for_project_analysis(
         resolved.root(),
         resolved.config_path().as_deref(),
-        fallow_engine::ProjectConfigOptions {
-            output: fallow_types::output_format::OutputFormat::Json,
+        plow_engine::ProjectConfigOptions {
+            output: plow_types::output_format::OutputFormat::Json,
             no_cache: resolved.no_cache(),
             threads: resolved.threads(),
             production_override: resolved.production_override(),
             quiet: true,
-            analysis: fallow_config::ProductionAnalysis::DeadCode,
+            analysis: plow_config::ProductionAnalysis::DeadCode,
         },
     )
     .map_err(|err| {
         ProgrammaticError::new(format!("failed to load config: {err}"), 2)
-            .with_code("FALLOW_CONFIG_LOAD_FAILED")
+            .with_code("PLOW_CONFIG_LOAD_FAILED")
             .with_context("analysis.configPath")
     })
 }
@@ -261,7 +261,7 @@ const fn project_info_should_show_all(options: &ProjectInfoOptions) -> bool {
 fn collect_plugins(
     options: &ProjectInfoOptions,
     show_all: bool,
-    plugin_result: Option<&fallow_engine::AggregatedPluginResult>,
+    plugin_result: Option<&plow_engine::AggregatedPluginResult>,
 ) -> Option<Vec<String>> {
     if options.plugins || show_all {
         plugin_result.map(|plugin_result| plugin_result.active_plugins().to_vec())
@@ -290,11 +290,11 @@ fn collect_files(
 
 fn collect_plugin_result(
     root: &Path,
-    config: &fallow_config::ResolvedConfig,
+    config: &plow_config::ResolvedConfig,
     options: &ProjectInfoOptions,
     show_all: bool,
     discovered: Option<&[DiscoveredFile]>,
-) -> ProgrammaticResult<Option<fallow_engine::AggregatedPluginResult>> {
+) -> ProgrammaticResult<Option<plow_engine::AggregatedPluginResult>> {
     if !(options.plugins || options.entry_points || show_all) {
         return Ok(None);
     }
@@ -302,12 +302,12 @@ fn collect_plugin_result(
     let files = match discovered {
         Some(discovered) => discovered,
         None => {
-            fallback_discovered = fallow_engine::discover_files_with_plugin_scopes(config);
+            fallback_discovered = plow_engine::discover_files_with_plugin_scopes(config);
             &fallback_discovered
         }
     };
     let file_paths: Vec<std::path::PathBuf> = files.iter().map(|file| file.path.clone()).collect();
-    let registry = fallow_engine::PluginRegistry::new(config.external_plugins.clone());
+    let registry = plow_engine::PluginRegistry::new(config.external_plugins.clone());
     let mut result = run_package_plugins(&registry, &root.join("package.json"), root, &file_paths)?
         .unwrap_or_default();
     merge_workspace_plugins(root, &registry, &file_paths, &mut result)?;
@@ -315,31 +315,31 @@ fn collect_plugin_result(
 }
 
 fn run_package_plugins(
-    registry: &fallow_engine::PluginRegistry,
+    registry: &plow_engine::PluginRegistry,
     package_path: &Path,
     root: &Path,
     file_paths: &[std::path::PathBuf],
-) -> ProgrammaticResult<Option<fallow_engine::AggregatedPluginResult>> {
-    let Ok(package) = fallow_config::PackageJson::load(package_path) else {
+) -> ProgrammaticResult<Option<plow_engine::AggregatedPluginResult>> {
+    let Ok(package) = plow_config::PackageJson::load(package_path) else {
         return Ok(None);
     };
     registry
         .try_run(&package, root, file_paths)
         .map(Some)
         .map_err(|errors| {
-            ProgrammaticError::new(fallow_engine::format_plugin_regex_errors(&errors), 2)
-                .with_code("FALLOW_PLUGIN_REGEX_FAILED")
+            ProgrammaticError::new(plow_engine::format_plugin_regex_errors(&errors), 2)
+                .with_code("PLOW_PLUGIN_REGEX_FAILED")
                 .with_context("project_info.plugins")
         })
 }
 
 fn merge_workspace_plugins(
     root: &Path,
-    registry: &fallow_engine::PluginRegistry,
+    registry: &plow_engine::PluginRegistry,
     file_paths: &[std::path::PathBuf],
-    result: &mut fallow_engine::AggregatedPluginResult,
+    result: &mut plow_engine::AggregatedPluginResult,
 ) -> ProgrammaticResult<()> {
-    for workspace in &fallow_config::discover_workspaces(root) {
+    for workspace in &plow_config::discover_workspaces(root) {
         let Some(workspace_result) = run_package_plugins(
             registry,
             &workspace.root.join("package.json"),
@@ -356,26 +356,26 @@ fn merge_workspace_plugins(
 
 fn collect_entry_points(
     root: &Path,
-    config: &fallow_config::ResolvedConfig,
+    config: &plow_config::ResolvedConfig,
     options: &ProjectInfoOptions,
     show_all: bool,
     discovered: Option<&[DiscoveredFile]>,
-    plugin_result: Option<&fallow_engine::AggregatedPluginResult>,
+    plugin_result: Option<&plow_engine::AggregatedPluginResult>,
 ) -> Option<Vec<EntryPoint>> {
     if !(options.entry_points || show_all) {
         return None;
     }
     let discovered = discovered?;
-    let mut entries = fallow_engine::discover_entry_points(config, discovered);
-    for workspace in &fallow_config::discover_workspaces(root) {
-        entries.extend(fallow_engine::discover_workspace_entry_points(
+    let mut entries = plow_engine::discover_entry_points(config, discovered);
+    for workspace in &plow_config::discover_workspaces(root) {
+        entries.extend(plow_engine::discover_workspace_entry_points(
             &workspace.root,
             config,
             discovered,
         ));
     }
     if let Some(plugin_result) = plugin_result {
-        entries.extend(fallow_engine::discover_plugin_entry_points(
+        entries.extend(plow_engine::discover_plugin_entry_points(
             plugin_result,
             config,
             discovered,
@@ -396,15 +396,16 @@ fn entry_points_to_output(entries: &[EntryPoint], root: &Path) -> Vec<ListEntryP
 
 fn collect_workspace_output(
     root: &Path,
-    config: &fallow_config::ResolvedConfig,
-) -> ProgrammaticResult<WorkspacesOutput<fallow_config::WorkspaceDiagnostic>> {
+    config: &plow_config::ResolvedConfig,
+) -> ProgrammaticResult<WorkspacesOutput<plow_config::WorkspaceDiagnostic>> {
     let (workspaces, mut diagnostics) =
-        fallow_config::discover_workspaces_with_diagnostics(root, &config.ignore_patterns)
-            .map_err(|err| {
+        plow_config::discover_workspaces_with_diagnostics(root, &config.ignore_patterns).map_err(
+            |err| {
                 ProgrammaticError::new(err.to_string(), 2)
-                    .with_code("FALLOW_WORKSPACE_DISCOVERY_FAILED")
+                    .with_code("PLOW_WORKSPACE_DISCOVERY_FAILED")
                     .with_context("project_info.workspaces")
-            })?;
+            },
+        )?;
     append_undeclared_workspace_diagnostics(root, config, &workspaces, &mut diagnostics);
     let workspaces = workspaces
         .iter()
@@ -426,11 +427,11 @@ fn collect_workspace_output(
 
 fn append_undeclared_workspace_diagnostics(
     root: &Path,
-    config: &fallow_config::ResolvedConfig,
-    workspaces: &[fallow_config::WorkspaceInfo],
-    diagnostics: &mut Vec<fallow_config::WorkspaceDiagnostic>,
+    config: &plow_config::ResolvedConfig,
+    workspaces: &[plow_config::WorkspaceInfo],
+    diagnostics: &mut Vec<plow_config::WorkspaceDiagnostic>,
 ) {
-    let undeclared = fallow_config::find_undeclared_workspaces_with_ignores(
+    let undeclared = plow_config::find_undeclared_workspaces_with_ignores(
         root,
         workspaces,
         &config.ignore_patterns,
@@ -461,7 +462,7 @@ fn format_display_path(path: &Path, root: &Path) -> String {
 /// Compute boundary listing data from resolved config and optional discovery.
 #[must_use]
 pub fn compute_boundary_data(
-    config: &fallow_config::ResolvedConfig,
+    config: &plow_config::ResolvedConfig,
     discovered: Option<&[DiscoveredFile]>,
 ) -> BoundaryData {
     let boundaries = &config.boundaries;
@@ -488,7 +489,7 @@ pub fn compute_boundary_data(
 }
 
 fn build_boundary_zones(
-    config: &fallow_config::ResolvedConfig,
+    config: &plow_config::ResolvedConfig,
     discovered: Option<&[DiscoveredFile]>,
 ) -> Vec<ZoneInfo> {
     config
@@ -504,7 +505,7 @@ fn build_boundary_zones(
 }
 
 fn count_boundary_zone_files(
-    config: &fallow_config::ResolvedConfig,
+    config: &plow_config::ResolvedConfig,
     discovered: Option<&[DiscoveredFile]>,
     zone_name: &str,
 ) -> usize {

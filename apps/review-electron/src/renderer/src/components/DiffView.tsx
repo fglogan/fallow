@@ -24,8 +24,8 @@ const gutter =
 
 const TOKEN_CLASS: Record<TokenType, string> = {
   keyword: "text-chart-5",
-  string: "text-fallow-green",
-  number: "text-fallow-amber",
+  string: "text-plow-green",
+  number: "text-plow-amber",
   comment: "text-muted-foreground/70 italic",
   plain: "",
 };
@@ -74,8 +74,8 @@ const Row = ({
     <div
       className={cn(
         "group/row flex border-l-2 border-transparent hover:bg-muted/30",
-        row.kind === "add" && "border-fallow-green/70 bg-fallow-green/10",
-        row.kind === "del" && "border-fallow-red/70 bg-fallow-red/10",
+        row.kind === "add" && "border-plow-green/70 bg-plow-green/10",
+        row.kind === "del" && "border-plow-red/70 bg-plow-red/10",
         selected && "bg-primary/10",
       )}
     >
@@ -95,8 +95,8 @@ const Row = ({
       <span
         className={cn(
           "w-4 shrink-0 select-none text-center",
-          row.kind === "add" && "text-fallow-green",
-          row.kind === "del" && "text-fallow-red",
+          row.kind === "add" && "text-plow-green",
+          row.kind === "del" && "text-plow-red",
           row.kind === "context" && "text-transparent",
         )}
       >
@@ -191,8 +191,8 @@ const FileSection = ({
       <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-border bg-muted px-3 py-1.5">
         <span className="truncate text-foreground">{file}</span>
         <span className="ml-2 shrink-0 tabular-nums">
-          <span className="text-fallow-green">+{stats.added}</span>{" "}
-          <span className="text-fallow-red">-{stats.removed}</span>
+          <span className="text-plow-green">+{stats.added}</span>{" "}
+          <span className="text-plow-red">-{stats.removed}</span>
         </span>
       </div>
       {section.binary || section.hunks.length === 0 ? (
@@ -205,7 +205,7 @@ const FileSection = ({
           return (
             <div key={i}>
               <div className="flex items-center gap-2 bg-muted/40 px-3 py-1 font-mono text-[11px] text-muted-foreground">
-                <span className="shrink-0 text-fallow-blue/70 tabular-nums">
+                <span className="shrink-0 text-plow-blue/70 tabular-nums">
                   @@ {hunk.range} @@
                 </span>
                 {hunk.header && (
@@ -307,12 +307,12 @@ export const DiffView = ({ file, base, onComment }: Props) => {
     setSections(null);
     setError(null);
     const load: Promise<FileDiffSection[]> = file
-      ? window.fallow
+      ? window.plow
           .getDiff(base, file)
           .then((d) => [
             { file, binary: d.binary, hunks: d.binary ? [] : parseUnifiedDiff(d.patch) },
           ])
-      : window.fallow.getAllDiffs(base).then((d) => parseMultiFileDiff(d.patch));
+      : window.plow.getAllDiffs(base).then((d) => parseMultiFileDiff(d.patch));
     load.then((s) => active && setSections(s)).catch((e) => active && setError(errorMessage(e)));
     return () => {
       active = false;
@@ -322,8 +322,8 @@ export const DiffView = ({ file, base, onComment }: Props) => {
   if (error) {
     return (
       <Centered>
-        <div className="flex size-11 items-center justify-center rounded-full border border-fallow-red/30 bg-fallow-red/10">
-          <TriangleAlert className="size-5 text-fallow-red" />
+        <div className="flex size-11 items-center justify-center rounded-full border border-plow-red/30 bg-plow-red/10">
+          <TriangleAlert className="size-5 text-plow-red" />
         </div>
         <div className="space-y-1">
           <p className="text-sm font-medium text-foreground">couldn't load the diff</p>

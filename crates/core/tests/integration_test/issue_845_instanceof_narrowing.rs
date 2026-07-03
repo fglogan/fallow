@@ -8,7 +8,7 @@ use crate::common::{create_config, fixture_path};
 fn instanceof_narrowed_method_call_credits_class_member() {
     let root = fixture_path("issue-845-instanceof-narrowing");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_members: Vec<String> = results
         .unused_class_members

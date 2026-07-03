@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use oxc_span::Span;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_types::discover::{DiscoveredFile, FileId};
-use fallow_types::extract::{
+use plow_types::discover::{DiscoveredFile, FileId};
+use plow_types::extract::{
     DynamicImportInfo, DynamicImportPattern, ImportInfo, ImportedName, ReExportInfo,
     RequireCallInfo,
 };

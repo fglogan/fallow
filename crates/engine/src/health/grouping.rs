@@ -17,7 +17,7 @@ use super::{
 };
 use crate::vital_signs;
 use crate::{discover::FileId, duplicates, source::ModuleInfo};
-use fallow_output::{
+use plow_output::{
     ComplexityViolation, FileHealthScore, HealthActionsMeta, HealthFinding, HealthGroup,
     HealthGrouping, HotspotEntry, HotspotFinding, LargeFunctionEntry, RefactoringTarget,
     RefactoringTargetFinding, VitalSigns, VitalSignsCounts, summarize_coverage_source_consistency,
@@ -31,7 +31,7 @@ struct GroupBucket {
 }
 
 pub(super) struct HealthGroupingInput<'a> {
-    pub files: &'a [fallow_types::discover::DiscoveredFile],
+    pub files: &'a [plow_types::discover::DiscoveredFile],
     pub modules: &'a [ModuleInfo],
     pub file_paths: &'a FxHashMap<FileId, &'a PathBuf>,
     pub score_output: Option<&'a FileScoreOutput>,
@@ -41,11 +41,11 @@ pub(super) struct HealthGroupingInput<'a> {
     pub large_functions: &'a [LargeFunctionEntry],
     pub targets: &'a [RefactoringTarget],
     pub score_requested: bool,
-    pub duplicates_config: Option<&'a fallow_config::DuplicatesConfig>,
+    pub duplicates_config: Option<&'a plow_config::DuplicatesConfig>,
     pub needs_file_scores: bool,
     pub needs_hotspots: bool,
     pub show_vital_signs: bool,
-    pub action_ctx: &'a fallow_output::HealthActionContext,
+    pub action_ctx: &'a plow_output::HealthActionContext,
 }
 
 /// Build [`HealthGrouping`] for the resolved `--group-by` mode.

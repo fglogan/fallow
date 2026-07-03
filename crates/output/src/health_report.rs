@@ -6,7 +6,7 @@ use crate::{
     HealthTrend, HotspotFinding, HotspotSummary, LargeFunctionEntry, RefactoringTargetFinding,
     RuntimeCoverageReport, StylingHealth, TargetThresholds, ThresholdOverrideState, VitalSigns,
 };
-use fallow_types::output_dead_code::PropDrillingChainFinding;
+use plow_types::output_dead_code::PropDrillingChainFinding;
 
 /// Result of complexity analysis for reporting.
 #[derive(Debug, Clone, Default, serde::Serialize)]
@@ -101,7 +101,7 @@ pub struct HealthReport {
     /// Styling-health score and letter grade: a SECOND health axis derived from
     /// the CSS analytics (the design-system axis), orthogonal to the JS/TS code
     /// `health_score`. Present only with `--css` (the same condition as
-    /// `css_analytics`), so a plain `fallow health` run is byte-unchanged. The
+    /// `css_analytics`), so a plain `plow health` run is byte-unchanged. The
     /// code score is never affected by this field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub styling_health: Option<StylingHealth>,

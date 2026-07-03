@@ -5,8 +5,8 @@
 
 use std::process::ExitCode;
 
-use fallow_config::ResolvedConfig;
-use fallow_output::{FileHealthScore, HealthScore, HotspotEntry, HotspotSummary};
+use plow_config::ResolvedConfig;
+use plow_output::{FileHealthScore, HealthScore, HotspotEntry, HotspotSummary};
 
 use crate::error::emit_error;
 use crate::vital_signs;
@@ -21,10 +21,10 @@ use super::{
 };
 
 pub struct HealthVitalData {
-    pub(crate) vital_signs: fallow_output::VitalSigns,
+    pub(crate) vital_signs: plow_output::VitalSigns,
     pub(crate) health_score: Option<HealthScore>,
-    pub(crate) health_trend: Option<fallow_output::HealthTrend>,
-    pub(crate) large_functions: Vec<fallow_output::LargeFunctionEntry>,
+    pub(crate) health_trend: Option<plow_output::HealthTrend>,
+    pub(crate) large_functions: Vec<plow_output::LargeFunctionEntry>,
 }
 
 pub struct HealthVitalDataInput<'a> {
@@ -42,7 +42,7 @@ pub struct HealthVitalDataInput<'a> {
     pub(crate) ignore_set: &'a globset::GlobSet,
     pub(crate) changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
     pub(crate) ws_roots: Option<&'a [std::path::PathBuf]>,
-    pub(crate) diff_index: Option<&'a fallow_output::DiffIndex>,
+    pub(crate) diff_index: Option<&'a plow_output::DiffIndex>,
     pub(crate) hotspot_summary: Option<&'a HotspotSummary>,
     pub(crate) has_istanbul_coverage: bool,
     pub(crate) needs_file_scores: bool,
@@ -53,7 +53,7 @@ pub struct HealthVitalDataInput<'a> {
 /// surfaced via FileScoreOutput); only populated when the opt-in `prop-drilling`
 /// rule emitted chains, so the small capped penalty stays dormant by default.
 fn apply_prop_drilling_metrics(
-    vital_signs: &mut fallow_output::VitalSigns,
+    vital_signs: &mut plow_output::VitalSigns,
     score_output: &scoring::FileScoreOutput,
 ) {
     if score_output.prop_drilling_chains.is_empty() {
@@ -73,7 +73,7 @@ fn apply_prop_drilling_metrics(
 /// are precomputed in core and ride on FileScoreOutput; non-React runs leave the
 /// fields `None` (skip_serializing_if), so the JSON contract is unchanged.
 fn apply_render_fan_in_metrics(
-    vital_signs: &mut fallow_output::VitalSigns,
+    vital_signs: &mut plow_output::VitalSigns,
     score_output: &scoring::FileScoreOutput,
     config: &ResolvedConfig,
 ) {
@@ -96,7 +96,7 @@ fn apply_render_fan_in_metrics(
     // tie-break on (path, component) so the cap is deterministic. Cap at a
     // small N.
     const MAX_TOP_RENDER_FAN_IN: usize = 20;
-    let mut top: Vec<&fallow_types::results::RenderFanInComponent> = metric
+    let mut top: Vec<&plow_types::results::RenderFanInComponent> = metric
         .per_component
         .iter()
         .filter(|c| c.distinct_parents > 0)
@@ -111,7 +111,7 @@ fn apply_render_fan_in_metrics(
     vital_signs.top_render_fan_in = top
         .into_iter()
         .take(MAX_TOP_RENDER_FAN_IN)
-        .map(|c| fallow_output::RenderFanInTopComponent {
+        .map(|c| plow_output::RenderFanInTopComponent {
             component: c.component.clone(),
             path: c
                 .file
@@ -130,7 +130,7 @@ fn compute_scoped_vital_signs(
     input: &HealthVitalDataInput<'_>,
     total_files_scoped: usize,
     project_subset: &SubsetFilter<'_>,
-) -> (fallow_output::VitalSigns, fallow_output::VitalSignsCounts) {
+) -> (plow_output::VitalSigns, plow_output::VitalSignsCounts) {
     let vital_signs_input = VitalSignsAndCountsInput {
         score_output: input.score_output,
         modules: input.modules,
@@ -154,8 +154,8 @@ fn compute_scoped_vital_signs(
 /// Persist the health snapshot when `--save-snapshot` was requested.
 fn maybe_save_health_snapshot(
     input: &HealthVitalDataInput<'_>,
-    vital_signs: &fallow_output::VitalSigns,
-    counts: &fallow_output::VitalSignsCounts,
+    vital_signs: &plow_output::VitalSigns,
+    counts: &plow_output::VitalSignsCounts,
     health_score: Option<&HealthScore>,
 ) -> Result<(), ExitCode> {
     if let Some(ref snapshot_path) = input.opts.save_snapshot {
@@ -216,8 +216,8 @@ pub fn prepare_health_vital_data(
 fn compute_health_score_metrics(
     opts: &HealthExecutionOptions<'_>,
     dupes_report: Option<&crate::duplicates::DuplicationReport>,
-    vital_signs: &mut fallow_output::VitalSigns,
-    counts: &mut fallow_output::VitalSignsCounts,
+    vital_signs: &mut plow_output::VitalSigns,
+    counts: &mut plow_output::VitalSignsCounts,
     total_files_scoped: usize,
 ) -> Option<HealthScore> {
     if opts.score
@@ -231,19 +231,19 @@ fn compute_health_score_metrics(
 
 #[derive(Clone, Copy)]
 struct FilteredLargeFunctionInput<'a> {
-    vital_signs: &'a fallow_output::VitalSigns,
+    vital_signs: &'a plow_output::VitalSigns,
     modules: &'a [crate::source::ModuleInfo],
     file_paths: &'a rustc_hash::FxHashMap<crate::discover::FileId, &'a std::path::PathBuf>,
     config: &'a ResolvedConfig,
     ignore_set: &'a globset::GlobSet,
     changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
     ws_roots: Option<&'a [std::path::PathBuf]>,
-    diff_index: Option<&'a fallow_output::DiffIndex>,
+    diff_index: Option<&'a plow_output::DiffIndex>,
 }
 
 fn collect_filtered_large_functions(
     input: FilteredLargeFunctionInput<'_>,
-) -> Vec<fallow_output::LargeFunctionEntry> {
+) -> Vec<plow_output::LargeFunctionEntry> {
     let large_input = LargeFunctionInput {
         vital_signs: input.vital_signs,
         modules: input.modules,
@@ -264,11 +264,11 @@ fn collect_filtered_large_functions(
 struct SnapshotInput<'a> {
     opts: &'a HealthExecutionOptions<'a>,
     snapshot_path: &'a std::path::Path,
-    vital_signs: &'a fallow_output::VitalSigns,
-    counts: &'a fallow_output::VitalSignsCounts,
-    hotspot_summary: Option<&'a fallow_output::HotspotSummary>,
-    health_score: Option<&'a fallow_output::HealthScore>,
-    coverage_model: Option<fallow_output::CoverageModel>,
+    vital_signs: &'a plow_output::VitalSigns,
+    counts: &'a plow_output::VitalSignsCounts,
+    hotspot_summary: Option<&'a plow_output::HotspotSummary>,
+    health_score: Option<&'a plow_output::HealthScore>,
+    coverage_model: Option<plow_output::CoverageModel>,
 }
 
 fn save_snapshot(input: SnapshotInput<'_>) -> Result<(), ExitCode> {
@@ -300,10 +300,10 @@ fn save_snapshot(input: SnapshotInput<'_>) -> Result<(), ExitCode> {
 /// Compute health trend from historical snapshots if requested.
 fn compute_health_trend(
     opts: &HealthExecutionOptions<'_>,
-    vital_signs: &fallow_output::VitalSigns,
-    counts: &fallow_output::VitalSignsCounts,
-    health_score: Option<&fallow_output::HealthScore>,
-) -> Option<fallow_output::HealthTrend> {
+    vital_signs: &plow_output::VitalSigns,
+    counts: &plow_output::VitalSignsCounts,
+    health_score: Option<&plow_output::HealthScore>,
+) -> Option<plow_output::HealthTrend> {
     if !opts.trend {
         return None;
     }
@@ -316,7 +316,7 @@ fn compute_health_trend(
     let snapshots = vital_signs::load_snapshots(opts.root);
     if snapshots.is_empty() && !opts.quiet {
         eprintln!(
-            "No snapshots found. Run `fallow health --save-snapshot` to save a \
+            "No snapshots found. Run `plow health --save-snapshot` to save a \
              baseline, then use --trend on subsequent runs to track progress."
         );
     }

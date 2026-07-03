@@ -36,7 +36,7 @@ export const toInlineFraming = (
 };
 
 /**
- * Extract the accepted judgments from a fallow validation envelope as
+ * Extract the accepted judgments from a plow validation envelope as
  * reconstructed inline framing. Rejected (unanchored/stale) judgments are dropped
  * here: only graph-accepted framing is allowed inline next to a decision.
  */

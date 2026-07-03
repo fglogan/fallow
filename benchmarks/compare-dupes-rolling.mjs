@@ -33,7 +33,7 @@ const projectFilter = projectsArg
     )
   : null;
 
-const fallowBin = join(rootDir, "target", "release", "fallow");
+const plowBin = join(rootDir, "target", "release", "plow");
 
 if (!SKIP_BUILD) {
   const build = spawnSync("cargo", ["build", "--release"], {
@@ -47,7 +47,7 @@ if (!SKIP_BUILD) {
   }
 }
 
-if (!existsSync(fallowBin)) {
+if (!existsSync(plowBin)) {
   console.error("release binary not found. Run without --skip-build first.");
   process.exit(1);
 }
@@ -98,8 +98,8 @@ function compareProject(project, dir) {
   const rollingRuns = [];
 
   for (let index = 0; index < RUNS; index++) {
-    defaultRuns.push(runFallow(dir, false));
-    rollingRuns.push(runFallow(dir, true));
+    defaultRuns.push(runPlow(dir, false));
+    rollingRuns.push(runPlow(dir, true));
   }
 
   const defaultLines = parseCompact(defaultRuns.at(-1).stdout);
@@ -120,11 +120,11 @@ function compareProject(project, dir) {
   };
 }
 
-function runFallow(dir, rolling) {
-  const env = rolling ? { ...process.env, FALLOW_DUPES_ROLLING: "1" } : process.env;
+function runPlow(dir, rolling) {
+  const env = rolling ? { ...process.env, PLOW_DUPES_ROLLING: "1" } : process.env;
   const start = performance.now();
   const result = spawnSync(
-    fallowBin,
+    plowBin,
     ["dupes", "--format", "compact", "--quiet", "--no-cache", "--root", dir],
     {
       cwd: rootDir,
@@ -136,7 +136,7 @@ function runFallow(dir, rolling) {
   );
   const elapsed = performance.now() - start;
   if (result.status !== 0) {
-    console.error(result.stderr?.toString() ?? "fallow dupes failed");
+    console.error(result.stderr?.toString() ?? "plow dupes failed");
     process.exit(result.status ?? 1);
   }
   return { elapsed, stdout: result.stdout?.toString() ?? "" };

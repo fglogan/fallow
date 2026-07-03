@@ -12,7 +12,7 @@ use crate::{
     DynamicImportInfo, ExportInfo, ExportName, MemberInfo, MemberKind, RequireCallInfo,
     VisibilityTag,
 };
-use fallow_types::extract::ClassHeritageInfo;
+use plow_types::extract::ClassHeritageInfo;
 
 use super::helpers::{
     extract_class_instance_bindings, extract_class_members, extract_implemented_interface_names,

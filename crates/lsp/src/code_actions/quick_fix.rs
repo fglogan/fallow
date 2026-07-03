@@ -8,7 +8,7 @@ use std::path::Path;
 #[allow(clippy::wildcard_imports, reason = "many LSP types used")]
 use ls_types::*;
 
-use fallow_api::EditorAnalysisResults as AnalysisResults;
+use plow_api::EditorAnalysisResults as AnalysisResults;
 
 use crate::diagnostics::FIRST_LINE_RANGE;
 
@@ -44,7 +44,7 @@ fn leading_identifier(s: &str) -> &str {
 /// with the declared identifier in well-formed source.
 ///
 /// The set of keywords stripped covers the prefix shape of every named
-/// `export <decl>` form fallow's analyzer reports as an unused export:
+/// `export <decl>` form plow's analyzer reports as an unused export:
 /// `const`, `let`, `var`, `function`, `function*`, `class`, `type`,
 /// `interface`, `enum`, `namespace`, plus the modifier keywords `async`,
 /// `abstract`, and `declare`. Anything beyond this prefix is the identifier
@@ -160,12 +160,12 @@ pub fn build_remove_export_actions(input: RemoveExportActionInput<'_>) -> Vec<Co
     for (exports, msg_prefix) in [
         (
             Box::new(exports_iter)
-                as Box<dyn Iterator<Item = &fallow_api::editor_results::UnusedExport>>,
+                as Box<dyn Iterator<Item = &plow_api::editor_results::UnusedExport>>,
             "Export",
         ),
         (
             Box::new(types_iter)
-                as Box<dyn Iterator<Item = &fallow_api::editor_results::UnusedExport>>,
+                as Box<dyn Iterator<Item = &plow_api::editor_results::UnusedExport>>,
             "Type export",
         ),
     ] {
@@ -207,7 +207,7 @@ fn build_remove_export_actions_for_test(
     reason = "identifier/indent lengths are bounded by source size"
 )]
 fn remove_export_action(
-    export: &fallow_api::editor_results::UnusedExport,
+    export: &plow_api::editor_results::UnusedExport,
     msg_prefix: &str,
     file_path: &Path,
     uri: &Uri,
@@ -251,7 +251,7 @@ fn remove_export_action(
 }
 
 fn remove_export_span(
-    export: &fallow_api::editor_results::UnusedExport,
+    export: &plow_api::editor_results::UnusedExport,
     file_path: &Path,
     cursor_range: &Range,
     file_lines: &[&str],
@@ -291,7 +291,7 @@ fn export_prefix_to_remove(trimmed: &str) -> Option<&'static str> {
     reason = "identifier lengths are bounded by source size"
 )]
 fn remove_export_diagnostic(
-    export: &fallow_api::editor_results::UnusedExport,
+    export: &plow_api::editor_results::UnusedExport,
     msg_prefix: &str,
     export_line: u32,
 ) -> Diagnostic {
@@ -307,7 +307,7 @@ fn remove_export_diagnostic(
             },
         },
         severity: Some(DiagnosticSeverity::HINT),
-        source: Some("fallow".to_string()),
+        source: Some("plow".to_string()),
         message: format!("{msg_prefix} '{}' is unused", export.export_name),
         tags: Some(vec![DiagnosticTag::UNNECESSARY]),
         ..Default::default()
@@ -415,7 +415,7 @@ fn build_remove_catalog_entry_actions_for_test(
 }
 
 fn catalog_entry_delete_span(
-    entry: &fallow_api::editor_results::UnusedCatalogEntry,
+    entry: &plow_api::editor_results::UnusedCatalogEntry,
     root: &Path,
     uri: &Uri,
     cursor_range: &Range,
@@ -458,7 +458,7 @@ fn catalog_entry_delete_span(
     reason = "WorkspaceEdit.changes is typed as std::collections::HashMap by ls-types"
 )]
 fn remove_catalog_entry_action(
-    entry: &fallow_api::editor_results::UnusedCatalogEntry,
+    entry: &plow_api::editor_results::UnusedCatalogEntry,
     uri: &Uri,
     file_lines: &[&str],
     entry_line: u32,
@@ -506,7 +506,7 @@ fn remove_catalog_entry_action(
 
 /// Build the `unused-catalog-entry` diagnostic linked to the removal action.
 fn catalog_entry_diagnostic(
-    entry: &fallow_api::editor_results::UnusedCatalogEntry,
+    entry: &plow_api::editor_results::UnusedCatalogEntry,
     entry_line: u32,
 ) -> Diagnostic {
     Diagnostic {
@@ -521,7 +521,7 @@ fn catalog_entry_diagnostic(
             },
         },
         severity: Some(DiagnosticSeverity::WARNING),
-        source: Some("fallow".to_string()),
+        source: Some("plow".to_string()),
         code: Some(NumberOrString::String("unused-catalog-entry".to_string())),
         message: catalog_entry_diagnostic_message(entry),
         tags: Some(vec![DiagnosticTag::UNNECESSARY]),
@@ -529,7 +529,7 @@ fn catalog_entry_diagnostic(
     }
 }
 
-fn catalog_entry_action_title(entry: &fallow_api::editor_results::UnusedCatalogEntry) -> String {
+fn catalog_entry_action_title(entry: &plow_api::editor_results::UnusedCatalogEntry) -> String {
     if entry.catalog_name == "default" {
         format!("Remove unused catalog entry `{}`", entry.entry_name)
     } else {
@@ -541,7 +541,7 @@ fn catalog_entry_action_title(entry: &fallow_api::editor_results::UnusedCatalogE
 }
 
 fn catalog_entry_diagnostic_message(
-    entry: &fallow_api::editor_results::UnusedCatalogEntry,
+    entry: &plow_api::editor_results::UnusedCatalogEntry,
 ) -> String {
     if entry.catalog_name == "default" {
         format!(
@@ -565,7 +565,7 @@ fn catalog_entry_diagnostic_message(
 /// needed (the parent `catalogs:` map keeps its other named-catalog
 /// siblings, or, if this was the only one, the user can remove the
 /// remaining `catalogs:` header by hand). Same conservative policy as the
-/// CLI `fallow fix` path in `crates/cli/src/fix/catalog.rs`.
+/// CLI `plow fix` path in `crates/cli/src/fix/catalog.rs`.
 ///
 /// The default catalog (top-level `catalog:`) is intentionally never
 /// flagged by the detector, so this function never offers to delete it.
@@ -651,7 +651,7 @@ fn build_remove_empty_catalog_group_actions_for_test(
 /// Validate that an empty-catalog-group finding still anchors to a matching
 /// header line within the cursor range, returning the 0-based line to delete.
 fn empty_catalog_group_delete_line(
-    group: &fallow_api::editor_results::EmptyCatalogGroup,
+    group: &plow_api::editor_results::EmptyCatalogGroup,
     root: &Path,
     uri: &Uri,
     cursor_range: &Range,
@@ -687,7 +687,7 @@ fn empty_catalog_group_delete_line(
     reason = "WorkspaceEdit.changes is typed as std::collections::HashMap by ls-types"
 )]
 fn remove_empty_catalog_group_action(
-    group: &fallow_api::editor_results::EmptyCatalogGroup,
+    group: &plow_api::editor_results::EmptyCatalogGroup,
     uri: &Uri,
     group_line: u32,
 ) -> CodeActionOrCommand {
@@ -733,7 +733,7 @@ fn remove_empty_catalog_group_action(
                 },
             },
             severity: Some(DiagnosticSeverity::WARNING),
-            source: Some("fallow".to_string()),
+            source: Some("plow".to_string()),
             code: Some(NumberOrString::String("empty-catalog-group".to_string())),
             message: diagnostic_message,
             tags: Some(vec![DiagnosticTag::UNNECESSARY]),
@@ -778,7 +778,7 @@ fn line_matches_catalog_key(line: &str, entry_name: &str) -> bool {
 /// Compute the end line index (exclusive) for a catalog entry whose key
 /// sits on `start_idx`. This mirrors the CLI's forward object-form entry
 /// scan, but intentionally does not delete leading comments; LSP quick fixes
-/// stay conservative even when `fallow fix` uses the default
+/// stay conservative even when `plow fix` uses the default
 /// `fix.catalog.deletePrecedingComments = "auto"` policy.
 fn compute_catalog_deletion_end(lines: &[&str], start_idx: usize) -> usize {
     let entry_indent = lines[start_idx].bytes().take_while(|&b| b == b' ').count();
@@ -967,7 +967,7 @@ pub fn build_delete_file_actions(input: DeleteFileActionInput<'_>) -> Vec<CodeAc
             diagnostics: Some(vec![Diagnostic {
                 range: FIRST_LINE_RANGE,
                 severity: Some(DiagnosticSeverity::WARNING),
-                source: Some("fallow".to_string()),
+                source: Some("plow".to_string()),
                 code: Some(NumberOrString::String("unused-file".to_string())),
                 message: "File is not reachable from any entry point".to_string(),
                 tags: Some(vec![DiagnosticTag::UNNECESSARY]),
@@ -1000,7 +1000,7 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    use fallow_api::editor_results::{
+    use plow_api::editor_results::{
         UnusedExport, UnusedFile, UnusedFileFinding, UnusedTypeFinding,
     };
 
@@ -1030,8 +1030,8 @@ mod tests {
         name: &str,
         line: u32,
         col: u32,
-    ) -> fallow_api::editor_results::UnusedExportFinding {
-        fallow_api::editor_results::UnusedExportFinding::with_actions(UnusedExport {
+    ) -> plow_api::editor_results::UnusedExportFinding {
+        plow_api::editor_results::UnusedExportFinding::with_actions(UnusedExport {
             path: path.to_path_buf(),
             export_name: name.to_string(),
             is_type_only: false,
@@ -1217,7 +1217,7 @@ mod tests {
         assert_eq!(diags.len(), 1);
         assert_eq!(diags[0].message, "Type export 'MyType' is unused");
         assert_eq!(diags[0].severity, Some(DiagnosticSeverity::HINT));
-        assert_eq!(diags[0].source, Some("fallow".to_string()));
+        assert_eq!(diags[0].source, Some("plow".to_string()));
         assert_eq!(diags[0].tags, Some(vec![DiagnosticTag::UNNECESSARY]));
     }
 
@@ -1552,7 +1552,7 @@ mod tests {
 
         assert_eq!(diag.range, FIRST_LINE_RANGE);
         assert_eq!(diag.severity, Some(DiagnosticSeverity::WARNING));
-        assert_eq!(diag.source, Some("fallow".to_string()));
+        assert_eq!(diag.source, Some("plow".to_string()));
         assert_eq!(
             diag.code,
             Some(NumberOrString::String("unused-file".to_string()))
@@ -1632,7 +1632,7 @@ mod tests {
         assert!(delete_ca.title.contains("Delete"));
     }
 
-    use fallow_api::editor_results::{UnusedCatalogEntry, UnusedCatalogEntryFinding};
+    use plow_api::editor_results::{UnusedCatalogEntry, UnusedCatalogEntryFinding};
 
     fn make_catalog_entry(
         name: &str,
@@ -2091,7 +2091,7 @@ mod tests {
         assert_eq!(compute_catalog_deletion_end(&lines, 1), 4);
     }
 
-    use fallow_api::editor_results::{EmptyCatalogGroup, EmptyCatalogGroupFinding};
+    use plow_api::editor_results::{EmptyCatalogGroup, EmptyCatalogGroupFinding};
 
     fn make_empty_group(name: &str, line: u32) -> EmptyCatalogGroupFinding {
         make_empty_group_in_file(name, PathBuf::from("pnpm-workspace.yaml"), line)
@@ -2141,7 +2141,7 @@ mod tests {
 
         let diag = &ca.diagnostics.as_ref().unwrap()[0];
         assert_eq!(diag.severity, Some(DiagnosticSeverity::WARNING));
-        assert_eq!(diag.source, Some("fallow".to_string()));
+        assert_eq!(diag.source, Some("plow".to_string()));
         assert_eq!(
             diag.code,
             Some(NumberOrString::String("empty-catalog-group".to_string()))

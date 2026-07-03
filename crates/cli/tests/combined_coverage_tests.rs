@@ -10,7 +10,7 @@ mod common;
 use std::fs;
 use std::path::Path;
 
-use common::{parse_json, run_fallow_raw, run_fallow_raw_with_env};
+use common::{parse_json, run_plow_raw, run_plow_raw_with_env};
 use tempfile::{TempDir, tempdir};
 
 fn write_file(path: &Path, contents: &str) {
@@ -43,7 +43,7 @@ fn create_branchy_project(name: &str) -> TempDir {
 }
 
 fn write_config(root: &Path, body: &str) {
-    write_file(&root.join(".fallowrc.json"), body);
+    write_file(&root.join(".plowrc.json"), body);
 }
 
 fn write_branchy_istanbul_coverage(coverage_path: &Path, coverage_source_path: &str) {
@@ -104,7 +104,7 @@ fn combined_cli_coverage_and_root_feed_health_crap_scoring() {
     let dir = create_branchy_project("combined-cli-coverage");
     write_config(dir.path(), r#"{"health":{"maxCrap":10}}"#);
 
-    let without_coverage = run_fallow_raw(&combined_health_args(dir.path()));
+    let without_coverage = run_plow_raw(&combined_health_args(dir.path()));
     assert_eq!(
         without_coverage.code, 0,
         "static health run should still complete before Istanbul coverage is supplied. stderr: {}",
@@ -123,7 +123,7 @@ fn combined_cli_coverage_and_root_feed_health_crap_scoring() {
         "--coverage-root",
         "/ci/workspace",
     ]);
-    let with_coverage = run_fallow_raw(&args);
+    let with_coverage = run_plow_raw(&args);
     assert_eq!(
         with_coverage.code, 0,
         "Istanbul coverage should lower CRAP below the combined health threshold. stderr: {}",
@@ -141,13 +141,13 @@ fn combined_env_coverage_fallback_feeds_health_crap_scoring() {
     let source_path = dir.path().join("src/index.ts");
     write_branchy_istanbul_coverage(&coverage_path, &source_path.to_string_lossy());
 
-    let output = run_fallow_raw_with_env(
+    let output = run_plow_raw_with_env(
         &combined_health_args(dir.path()),
-        &[("FALLOW_COVERAGE", coverage_path.to_str().unwrap())],
+        &[("PLOW_COVERAGE", coverage_path.to_str().unwrap())],
     );
     assert_eq!(
         output.code, 0,
-        "FALLOW_COVERAGE should feed combined health. stderr: {}",
+        "PLOW_COVERAGE should feed combined health. stderr: {}",
         output.stderr
     );
     let json = parse_json(&output);
@@ -164,7 +164,7 @@ fn combined_config_coverage_fallback_feeds_health_crap_scoring() {
         r#"{"health":{"maxCrap":10,"coverage":"artifacts/coverage-final.json","coverageRoot":"/ci/workspace"}}"#,
     );
 
-    let output = run_fallow_raw(&combined_health_args(dir.path()));
+    let output = run_plow_raw(&combined_health_args(dir.path()));
     assert_eq!(
         output.code, 0,
         "health.coverage should feed combined health. stderr: {}",
@@ -187,7 +187,7 @@ fn mixed_precedence_resolves_coverage_and_root_independently() {
     let mut args = combined_health_args(dir.path());
     args.extend(["--coverage", coverage_path.to_str().unwrap()]);
     let cli_coverage_env_root =
-        run_fallow_raw_with_env(&args, &[("FALLOW_COVERAGE_ROOT", "/ci/workspace")]);
+        run_plow_raw_with_env(&args, &[("PLOW_COVERAGE_ROOT", "/ci/workspace")]);
     assert_eq!(
         cli_coverage_env_root.code, 0,
         "env coverage root should pair with CLI coverage. stderr: {}",
@@ -201,9 +201,9 @@ fn mixed_precedence_resolves_coverage_and_root_independently() {
             dir.path(),
             r#"{"health":{"maxCrap":10,"coverageRoot":"/ci/workspace"}}"#,
         );
-        run_fallow_raw_with_env(
+        run_plow_raw_with_env(
             &combined_health_args(dir.path()),
-            &[("FALLOW_COVERAGE", coverage_path.to_str().unwrap())],
+            &[("PLOW_COVERAGE", coverage_path.to_str().unwrap())],
         )
     };
     assert_eq!(
@@ -225,7 +225,7 @@ fn mixed_precedence_resolves_coverage_and_root_independently() {
         "--coverage-root",
         "/ci/workspace",
     ]);
-    let cli_root_overrides_config = run_fallow_raw(&args);
+    let cli_root_overrides_config = run_plow_raw(&args);
     assert_eq!(
         cli_root_overrides_config.code, 0,
         "CLI coverage root should override config coverage root. stderr: {}",
@@ -245,7 +245,7 @@ fn health_config_coverage_fallback_feeds_standalone_health() {
         r#"{"health":{"maxCrap":10,"coverage":"artifacts/coverage-final.json","coverageRoot":"/ci/workspace"}}"#,
     );
 
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "health",
         "--root",
         dir.path().to_str().unwrap(),
@@ -267,7 +267,7 @@ fn relative_config_coverage_root_is_structured_exit_two() {
     let dir = create_branchy_project("relative-config-coverage-root");
     write_config(dir.path(), r#"{"health":{"coverageRoot":"src"}}"#);
 
-    let output = run_fallow_raw(&combined_health_args(dir.path()));
+    let output = run_plow_raw(&combined_health_args(dir.path()));
     assert_eq!(
         output.code, 2,
         "relative health.coverageRoot should be rejected before analysis. stderr: {}",
@@ -285,7 +285,7 @@ fn relative_config_coverage_root_is_structured_exit_two() {
 
 #[test]
 fn bare_coverage_flags_before_subcommand_are_rejected() {
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "--coverage",
         "coverage/coverage-final.json",
         "dead-code",

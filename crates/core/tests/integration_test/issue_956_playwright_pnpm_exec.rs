@@ -6,7 +6,7 @@ use super::common::{create_config, fixture_path};
 fn playwright_web_server_template_command_credits_pnpm_exec_cli() {
     let root = fixture_path("issue-956-playwright-pnpm-exec");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_dev_deps: Vec<&str> = results
         .unused_dev_dependencies

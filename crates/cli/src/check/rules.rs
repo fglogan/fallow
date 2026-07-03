@@ -1,4 +1,4 @@
-use fallow_config::{ResolvedConfig, RulesConfig, Severity};
+use plow_config::{ResolvedConfig, RulesConfig, Severity};
 
 /// Remove issues whose effective severity is `Off` from the results.
 ///
@@ -6,7 +6,7 @@ use fallow_config::{ResolvedConfig, RulesConfig, Severity};
 /// file-scoped issue types. Circular dependencies resolve against every file in
 /// the cycle. Non-file-scoped issues (unused deps, unlisted deps, duplicate
 /// exports) use the base rules only.
-pub fn apply_rules(results: &mut fallow_types::results::AnalysisResults, config: &ResolvedConfig) {
+pub fn apply_rules(results: &mut plow_types::results::AnalysisResults, config: &ResolvedConfig) {
     let rules = &config.rules;
     let has_overrides = !config.overrides.is_empty();
 
@@ -21,7 +21,7 @@ pub fn apply_rules(results: &mut fallow_types::results::AnalysisResults, config:
 }
 
 fn apply_base_collection_rules(
-    results: &mut fallow_types::results::AnalysisResults,
+    results: &mut plow_types::results::AnalysisResults,
     rules: &RulesConfig,
 ) {
     if rules.unused_dependencies == Severity::Off {
@@ -77,7 +77,7 @@ fn apply_base_collection_rules(
 }
 
 fn apply_file_override_rules(
-    results: &mut fallow_types::results::AnalysisResults,
+    results: &mut plow_types::results::AnalysisResults,
     config: &ResolvedConfig,
 ) {
     apply_dead_code_override_rules(results, config);
@@ -87,7 +87,7 @@ fn apply_file_override_rules(
 }
 
 fn apply_dead_code_override_rules(
-    results: &mut fallow_types::results::AnalysisResults,
+    results: &mut plow_types::results::AnalysisResults,
     config: &ResolvedConfig,
 ) {
     apply_core_dead_code_override_rules(results, config);
@@ -96,7 +96,7 @@ fn apply_dead_code_override_rules(
 
 /// Retain core (non-component) dead-code findings whose per-file rule is not Off.
 fn apply_core_dead_code_override_rules(
-    results: &mut fallow_types::results::AnalysisResults,
+    results: &mut plow_types::results::AnalysisResults,
     config: &ResolvedConfig,
 ) {
     results
@@ -148,7 +148,7 @@ fn apply_core_dead_code_override_rules(
 
 /// Retain component-shaped dead-code findings whose per-file rule is not Off.
 fn apply_component_dead_code_override_rules(
-    results: &mut fallow_types::results::AnalysisResults,
+    results: &mut plow_types::results::AnalysisResults,
     config: &ResolvedConfig,
 ) {
     results.unrendered_components.retain(|c| {
@@ -202,7 +202,7 @@ fn apply_component_dead_code_override_rules(
 }
 
 fn apply_catalog_override_rules(
-    results: &mut fallow_types::results::AnalysisResults,
+    results: &mut plow_types::results::AnalysisResults,
     config: &ResolvedConfig,
 ) {
     results.stale_suppressions.retain(|s| {
@@ -240,7 +240,7 @@ fn apply_catalog_override_rules(
 }
 
 fn apply_framework_override_rules(
-    results: &mut fallow_types::results::AnalysisResults,
+    results: &mut plow_types::results::AnalysisResults,
     config: &ResolvedConfig,
 ) {
     results.invalid_client_exports.retain(|e| {
@@ -276,7 +276,7 @@ fn apply_framework_override_rules(
 }
 
 fn apply_circular_override_rules(
-    results: &mut fallow_types::results::AnalysisResults,
+    results: &mut plow_types::results::AnalysisResults,
     config: &ResolvedConfig,
 ) {
     results.circular_dependencies.retain(|c| {
@@ -287,10 +287,7 @@ fn apply_circular_override_rules(
     });
 }
 
-fn apply_base_file_rules(
-    results: &mut fallow_types::results::AnalysisResults,
-    rules: &RulesConfig,
-) {
+fn apply_base_file_rules(results: &mut plow_types::results::AnalysisResults, rules: &RulesConfig) {
     clear_base_core_dead_code(results, rules);
     clear_base_component_dead_code(results, rules);
     clear_base_suppression_and_framework(results, rules);
@@ -298,7 +295,7 @@ fn apply_base_file_rules(
 
 /// Clear core (non-component) dead-code findings whose base rule is Off.
 fn clear_base_core_dead_code(
-    results: &mut fallow_types::results::AnalysisResults,
+    results: &mut plow_types::results::AnalysisResults,
     rules: &RulesConfig,
 ) {
     if rules.unused_files == Severity::Off {
@@ -332,7 +329,7 @@ fn clear_base_core_dead_code(
 
 /// Clear component-shaped dead-code findings whose base rule is Off.
 fn clear_base_component_dead_code(
-    results: &mut fallow_types::results::AnalysisResults,
+    results: &mut plow_types::results::AnalysisResults,
     rules: &RulesConfig,
 ) {
     if rules.unrendered_components == Severity::Off {
@@ -364,7 +361,7 @@ fn clear_base_component_dead_code(
 /// Apply base stale-suppression retention and clear framework findings whose
 /// base rule is Off.
 fn clear_base_suppression_and_framework(
-    results: &mut fallow_types::results::AnalysisResults,
+    results: &mut plow_types::results::AnalysisResults,
     rules: &RulesConfig,
 ) {
     results.stale_suppressions.retain(|s| {
@@ -392,7 +389,7 @@ fn clear_base_suppression_and_framework(
 }
 
 fn apply_boundary_override_rules(
-    results: &mut fallow_types::results::AnalysisResults,
+    results: &mut plow_types::results::AnalysisResults,
     config: &ResolvedConfig,
 ) {
     results.boundary_violations.retain(|v| {
@@ -427,7 +424,7 @@ fn apply_boundary_override_rules(
 /// file-scoped issue types to determine if any individual issue has Error
 /// severity. Circular dependencies resolve against every file in the cycle.
 pub fn has_error_severity_issues(
-    results: &fallow_types::results::AnalysisResults,
+    results: &plow_types::results::AnalysisResults,
     rules: &RulesConfig,
     config: Option<&ResolvedConfig>,
 ) -> bool {
@@ -443,7 +440,7 @@ pub fn has_error_severity_issues(
 }
 
 fn has_override_file_scoped_error(
-    results: &fallow_types::results::AnalysisResults,
+    results: &plow_types::results::AnalysisResults,
     config: &ResolvedConfig,
 ) -> bool {
     has_override_dead_code_error(results, config)
@@ -452,7 +449,7 @@ fn has_override_file_scoped_error(
 }
 
 fn has_override_dead_code_error(
-    results: &fallow_types::results::AnalysisResults,
+    results: &plow_types::results::AnalysisResults,
     config: &ResolvedConfig,
 ) -> bool {
     has_override_core_dead_code_error(results, config)
@@ -461,7 +458,7 @@ fn has_override_dead_code_error(
 
 /// Per-file Error check for the core (non-component) dead-code issue types.
 fn has_override_core_dead_code_error(
-    results: &fallow_types::results::AnalysisResults,
+    results: &plow_types::results::AnalysisResults,
     config: &ResolvedConfig,
 ) -> bool {
     results
@@ -515,7 +512,7 @@ fn has_override_core_dead_code_error(
 
 /// Per-file Error check for the component-shaped dead-code issue types.
 fn has_override_component_dead_code_error(
-    results: &fallow_types::results::AnalysisResults,
+    results: &plow_types::results::AnalysisResults,
     config: &ResolvedConfig,
 ) -> bool {
     results.unrendered_components.iter().any(|c| {
@@ -562,7 +559,7 @@ fn has_override_component_dead_code_error(
 }
 
 fn has_override_catalog_boundary_error(
-    results: &fallow_types::results::AnalysisResults,
+    results: &plow_types::results::AnalysisResults,
     config: &ResolvedConfig,
 ) -> bool {
     results.stale_suppressions.iter().any(|s| {
@@ -600,7 +597,7 @@ fn has_override_catalog_boundary_error(
 }
 
 fn has_override_framework_error(
-    results: &fallow_types::results::AnalysisResults,
+    results: &plow_types::results::AnalysisResults,
     config: &ResolvedConfig,
 ) -> bool {
     results.invalid_client_exports.iter().any(|e| {
@@ -632,7 +629,7 @@ fn has_override_framework_error(
 }
 
 fn has_default_file_scoped_error(
-    results: &fallow_types::results::AnalysisResults,
+    results: &plow_types::results::AnalysisResults,
     rules: &RulesConfig,
 ) -> bool {
     (rules.unused_files == Severity::Error && !results.unused_files.is_empty())
@@ -685,7 +682,7 @@ fn has_default_file_scoped_error(
 }
 
 fn has_project_level_error(
-    results: &fallow_types::results::AnalysisResults,
+    results: &plow_types::results::AnalysisResults,
     rules: &RulesConfig,
     has_overrides: bool,
 ) -> bool {
@@ -729,7 +726,7 @@ fn has_project_level_error(
         || results
             .policy_violations
             .iter()
-            .any(|v| v.violation.severity == fallow_types::results::PolicyViolationSeverity::Error)
+            .any(|v| v.violation.severity == plow_types::results::PolicyViolationSeverity::Error)
 }
 
 /// Promote all `Warn` severities to `Error` for a single run.
@@ -792,8 +789,8 @@ fn promote_warn_to_error(rule: &mut Severity) {
 /// severity baked by the evaluator, so the rule-level promotion in
 /// [`promote_warns_to_errors`] alone would not flip findings whose rule
 /// explicitly opted down to `warn`; under strict mode every warning fails.
-pub fn promote_policy_finding_warns(results: &mut fallow_types::results::AnalysisResults) {
-    use fallow_types::results::PolicyViolationSeverity;
+pub fn promote_policy_finding_warns(results: &mut plow_types::results::AnalysisResults) {
+    use plow_types::results::PolicyViolationSeverity;
     for finding in &mut results.policy_violations {
         if finding.violation.severity == PolicyViolationSeverity::Warn {
             finding.violation.severity = PolicyViolationSeverity::Error;
@@ -807,9 +804,9 @@ mod tests {
 
     type RuleFieldSetter = fn(&mut RulesConfig);
     type ResultFieldCheck = fn(&AnalysisResults) -> bool;
-    use fallow_types::extract::MemberKind;
-    use fallow_types::output_dead_code::*;
-    use fallow_types::results::*;
+    use plow_types::extract::MemberKind;
+    use plow_types::output_dead_code::*;
+    use plow_types::results::*;
     use std::path::PathBuf;
 
     #[expect(
@@ -925,7 +922,7 @@ mod tests {
 
     /// Build a minimal ResolvedConfig from a RulesConfig for testing.
     fn config_with_rules(rules: RulesConfig) -> ResolvedConfig {
-        fallow_config::FallowConfig {
+        plow_config::PlowConfig {
             schema: None,
             extends: vec![],
             entry: vec![],
@@ -937,35 +934,35 @@ mod tests {
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
             ignore_dependency_overrides: vec![],
-            ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+            ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             ignore_decorators: vec![],
-            unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
-            duplicates: fallow_config::DuplicatesConfig::default(),
-            health: fallow_config::HealthConfig::default(),
+            unused_component_props: plow_config::UnusedComponentPropsConfig::default(),
+            duplicates: plow_config::DuplicatesConfig::default(),
+            health: plow_config::HealthConfig::default(),
             rules,
-            boundaries: fallow_config::BoundaryConfig::default(),
+            boundaries: plow_config::BoundaryConfig::default(),
             production: false.into(),
             plugins: vec![],
             rule_packs: vec![],
             dynamically_loaded: vec![],
             overrides: vec![],
             regression: None,
-            audit: fallow_config::AuditConfig::default(),
+            audit: plow_config::AuditConfig::default(),
             codeowners: None,
             public_packages: vec![],
-            flags: fallow_config::FlagsConfig::default(),
-            security: fallow_config::SecurityConfig::default(),
-            fix: fallow_config::FixConfig::default(),
-            resolve: fallow_config::ResolveConfig::default(),
+            flags: plow_config::FlagsConfig::default(),
+            security: plow_config::SecurityConfig::default(),
+            fix: plow_config::FixConfig::default(),
+            resolve: plow_config::ResolveConfig::default(),
             sealed: false,
             include_entry_exports: false,
             auto_imports: false,
-            cache: fallow_config::CacheConfig::default(),
+            cache: plow_config::CacheConfig::default(),
         }
         .resolve(
             PathBuf::from("/project"),
-            fallow_config::OutputFormat::Human,
+            plow_config::OutputFormat::Human,
             1,
             true,
             true,
@@ -1283,7 +1280,7 @@ mod tests {
 
     /// Build a ResolvedConfig with overrides that turn off unused_exports for test files.
     fn config_with_test_override() -> ResolvedConfig {
-        fallow_config::FallowConfig {
+        plow_config::PlowConfig {
             schema: None,
             extends: vec![],
             entry: vec![],
@@ -1295,33 +1292,33 @@ mod tests {
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
             ignore_dependency_overrides: vec![],
-            ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+            ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             ignore_decorators: vec![],
-            unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
-            duplicates: fallow_config::DuplicatesConfig::default(),
-            health: fallow_config::HealthConfig::default(),
+            unused_component_props: plow_config::UnusedComponentPropsConfig::default(),
+            duplicates: plow_config::DuplicatesConfig::default(),
+            health: plow_config::HealthConfig::default(),
             rules: RulesConfig::default(), // all Error
-            boundaries: fallow_config::BoundaryConfig::default(),
+            boundaries: plow_config::BoundaryConfig::default(),
             production: false.into(),
             plugins: vec![],
             rule_packs: vec![],
             dynamically_loaded: vec![],
             regression: None,
-            audit: fallow_config::AuditConfig::default(),
+            audit: plow_config::AuditConfig::default(),
             codeowners: None,
             public_packages: vec![],
-            flags: fallow_config::FlagsConfig::default(),
-            security: fallow_config::SecurityConfig::default(),
-            fix: fallow_config::FixConfig::default(),
-            resolve: fallow_config::ResolveConfig::default(),
+            flags: plow_config::FlagsConfig::default(),
+            security: plow_config::SecurityConfig::default(),
+            fix: plow_config::FixConfig::default(),
+            resolve: plow_config::ResolveConfig::default(),
             sealed: false,
             include_entry_exports: false,
             auto_imports: false,
-            cache: fallow_config::CacheConfig::default(),
-            overrides: vec![fallow_config::ConfigOverride {
+            cache: plow_config::CacheConfig::default(),
+            overrides: vec![plow_config::ConfigOverride {
                 files: vec!["**/*.test.ts".to_string()],
-                rules: fallow_config::PartialRulesConfig {
+                rules: plow_config::PartialRulesConfig {
                     unused_exports: Some(Severity::Off),
                     ..Default::default()
                 },
@@ -1329,7 +1326,7 @@ mod tests {
         }
         .resolve(
             PathBuf::from("/project"),
-            fallow_config::OutputFormat::Human,
+            plow_config::OutputFormat::Human,
             1,
             true,
             true,
@@ -1338,7 +1335,7 @@ mod tests {
     }
 
     fn config_with_circular_override(pattern: &str, severity: Severity) -> ResolvedConfig {
-        fallow_config::FallowConfig {
+        plow_config::PlowConfig {
             schema: None,
             extends: vec![],
             entry: vec![],
@@ -1350,33 +1347,33 @@ mod tests {
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
             ignore_dependency_overrides: vec![],
-            ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+            ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             ignore_decorators: vec![],
-            unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
-            duplicates: fallow_config::DuplicatesConfig::default(),
-            health: fallow_config::HealthConfig::default(),
+            unused_component_props: plow_config::UnusedComponentPropsConfig::default(),
+            duplicates: plow_config::DuplicatesConfig::default(),
+            health: plow_config::HealthConfig::default(),
             rules: RulesConfig::default(),
-            boundaries: fallow_config::BoundaryConfig::default(),
+            boundaries: plow_config::BoundaryConfig::default(),
             production: false.into(),
             plugins: vec![],
             rule_packs: vec![],
             dynamically_loaded: vec![],
             regression: None,
-            audit: fallow_config::AuditConfig::default(),
+            audit: plow_config::AuditConfig::default(),
             codeowners: None,
             public_packages: vec![],
-            flags: fallow_config::FlagsConfig::default(),
-            security: fallow_config::SecurityConfig::default(),
-            fix: fallow_config::FixConfig::default(),
-            resolve: fallow_config::ResolveConfig::default(),
+            flags: plow_config::FlagsConfig::default(),
+            security: plow_config::SecurityConfig::default(),
+            fix: plow_config::FixConfig::default(),
+            resolve: plow_config::ResolveConfig::default(),
             sealed: false,
             include_entry_exports: false,
             auto_imports: false,
-            cache: fallow_config::CacheConfig::default(),
-            overrides: vec![fallow_config::ConfigOverride {
+            cache: plow_config::CacheConfig::default(),
+            overrides: vec![plow_config::ConfigOverride {
                 files: vec![pattern.to_string()],
-                rules: fallow_config::PartialRulesConfig {
+                rules: plow_config::PartialRulesConfig {
                     circular_dependencies: Some(severity),
                     ..Default::default()
                 },
@@ -1384,7 +1381,7 @@ mod tests {
         }
         .resolve(
             PathBuf::from("/project"),
-            fallow_config::OutputFormat::Human,
+            plow_config::OutputFormat::Human,
             1,
             true,
             true,
@@ -1393,7 +1390,7 @@ mod tests {
     }
 
     fn config_with_boundary_override(pattern: &str, severity: Severity) -> ResolvedConfig {
-        fallow_config::FallowConfig {
+        plow_config::PlowConfig {
             schema: None,
             extends: vec![],
             entry: vec![],
@@ -1405,33 +1402,33 @@ mod tests {
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
             ignore_dependency_overrides: vec![],
-            ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+            ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             ignore_decorators: vec![],
-            unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
-            duplicates: fallow_config::DuplicatesConfig::default(),
-            health: fallow_config::HealthConfig::default(),
+            unused_component_props: plow_config::UnusedComponentPropsConfig::default(),
+            duplicates: plow_config::DuplicatesConfig::default(),
+            health: plow_config::HealthConfig::default(),
             rules: RulesConfig::default(),
-            boundaries: fallow_config::BoundaryConfig::default(),
+            boundaries: plow_config::BoundaryConfig::default(),
             production: false.into(),
             plugins: vec![],
             rule_packs: vec![],
             dynamically_loaded: vec![],
             regression: None,
-            audit: fallow_config::AuditConfig::default(),
+            audit: plow_config::AuditConfig::default(),
             codeowners: None,
             public_packages: vec![],
-            flags: fallow_config::FlagsConfig::default(),
-            security: fallow_config::SecurityConfig::default(),
-            fix: fallow_config::FixConfig::default(),
-            resolve: fallow_config::ResolveConfig::default(),
+            flags: plow_config::FlagsConfig::default(),
+            security: plow_config::SecurityConfig::default(),
+            fix: plow_config::FixConfig::default(),
+            resolve: plow_config::ResolveConfig::default(),
             sealed: false,
             include_entry_exports: false,
             auto_imports: false,
-            cache: fallow_config::CacheConfig::default(),
-            overrides: vec![fallow_config::ConfigOverride {
+            cache: plow_config::CacheConfig::default(),
+            overrides: vec![plow_config::ConfigOverride {
                 files: vec![pattern.to_string()],
-                rules: fallow_config::PartialRulesConfig {
+                rules: plow_config::PartialRulesConfig {
                     boundary_violation: Some(severity),
                     ..Default::default()
                 },
@@ -1439,7 +1436,7 @@ mod tests {
         }
         .resolve(
             PathBuf::from("/project"),
-            fallow_config::OutputFormat::Human,
+            plow_config::OutputFormat::Human,
             1,
             true,
             true,
@@ -1975,11 +1972,11 @@ mod tests {
 
     fn config_with_override_for_rule(
         pattern: &str,
-        configure: impl FnOnce(&mut fallow_config::PartialRulesConfig),
+        configure: impl FnOnce(&mut plow_config::PartialRulesConfig),
     ) -> ResolvedConfig {
-        let mut partial = fallow_config::PartialRulesConfig::default();
+        let mut partial = plow_config::PartialRulesConfig::default();
         configure(&mut partial);
-        fallow_config::FallowConfig {
+        plow_config::PlowConfig {
             schema: None,
             extends: vec![],
             entry: vec![],
@@ -1991,38 +1988,38 @@ mod tests {
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
             ignore_dependency_overrides: vec![],
-            ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+            ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             ignore_decorators: vec![],
-            unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
-            duplicates: fallow_config::DuplicatesConfig::default(),
-            health: fallow_config::HealthConfig::default(),
+            unused_component_props: plow_config::UnusedComponentPropsConfig::default(),
+            duplicates: plow_config::DuplicatesConfig::default(),
+            health: plow_config::HealthConfig::default(),
             rules: RulesConfig::default(),
-            boundaries: fallow_config::BoundaryConfig::default(),
+            boundaries: plow_config::BoundaryConfig::default(),
             production: false.into(),
             plugins: vec![],
             rule_packs: vec![],
             dynamically_loaded: vec![],
             regression: None,
-            audit: fallow_config::AuditConfig::default(),
+            audit: plow_config::AuditConfig::default(),
             codeowners: None,
             public_packages: vec![],
-            flags: fallow_config::FlagsConfig::default(),
-            security: fallow_config::SecurityConfig::default(),
-            fix: fallow_config::FixConfig::default(),
-            resolve: fallow_config::ResolveConfig::default(),
+            flags: plow_config::FlagsConfig::default(),
+            security: plow_config::SecurityConfig::default(),
+            fix: plow_config::FixConfig::default(),
+            resolve: plow_config::ResolveConfig::default(),
             sealed: false,
             include_entry_exports: false,
             auto_imports: false,
-            cache: fallow_config::CacheConfig::default(),
-            overrides: vec![fallow_config::ConfigOverride {
+            cache: plow_config::CacheConfig::default(),
+            overrides: vec![plow_config::ConfigOverride {
                 files: vec![pattern.to_string()],
                 rules: partial,
             }],
         }
         .resolve(
             PathBuf::from("/project"),
-            fallow_config::OutputFormat::Human,
+            plow_config::OutputFormat::Human,
             1,
             true,
             true,

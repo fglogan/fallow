@@ -5,13 +5,13 @@ expression: json_str
 [
   {
     "type": "issue",
-    "check_name": "fallow/type-only-dependency",
+    "check_name": "plow/type-only-dependency",
     "description": "Package 'zod' is only imported via type-only imports (consider moving to devDependencies)",
     "categories": [
       "Bug Risk"
     ],
     "severity": "minor",
-    "fingerprint": "34d2064787c07f45",
+    "fingerprint": "3d74179acf41bda0",
     "location": {
       "path": "package.json",
       "lines": {

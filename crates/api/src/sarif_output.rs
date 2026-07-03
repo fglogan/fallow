@@ -2,13 +2,13 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_output::{
+use plow_output::{
     CoverageIntelligenceRecommendation, CoverageIntelligenceReport, CoverageIntelligenceVerdict,
     ExceededThreshold, FindingSeverity, HealthReport, RuntimeCoverageReport,
     RuntimeCoverageVerdict, SarifDocumentInput, SarifResultInput, build_sarif_document,
     build_sarif_result, normalize_uri,
 };
-use fallow_types::duplicates::{CloneGroup, DuplicationReport};
+use plow_types::duplicates::{CloneGroup, DuplicationReport};
 use rustc_hash::FxHashMap;
 
 type SarifRuleBuilder<'a> = dyn Fn(&str, &str, &str) -> serde_json::Value + 'a;
@@ -79,7 +79,7 @@ fn build_duplication_sarif_with_group(
             let uri = relative_uri(&instance.file, root);
             let source_snippet = snippets.line(&instance.file, instance.start_line as u32);
             let mut result = sarif_result_with_snippet(
-                "fallow/code-duplication",
+                "plow/code-duplication",
                 "warning",
                 &format!(
                     "Code clone group {} ({} lines, {} instances)",
@@ -99,7 +99,7 @@ fn build_duplication_sarif_with_group(
     }
 
     let rules = vec![rule_builder(
-        "fallow/code-duplication",
+        "plow/code-duplication",
         "Duplicated code block",
         "warning",
     )];
@@ -191,27 +191,27 @@ fn health_sarif_rules(rule_builder: &SarifRuleBuilder<'_>) -> Vec<serde_json::Va
 fn health_complexity_sarif_rules(rule_builder: &SarifRuleBuilder<'_>) -> Vec<serde_json::Value> {
     vec![
         rule_builder(
-            "fallow/high-cyclomatic-complexity",
+            "plow/high-cyclomatic-complexity",
             "Function has high cyclomatic complexity",
             "note",
         ),
         rule_builder(
-            "fallow/high-cognitive-complexity",
+            "plow/high-cognitive-complexity",
             "Function has high cognitive complexity",
             "note",
         ),
         rule_builder(
-            "fallow/high-complexity",
+            "plow/high-complexity",
             "Function exceeds both complexity thresholds",
             "note",
         ),
         rule_builder(
-            "fallow/high-crap-score",
+            "plow/high-crap-score",
             "Function has a high CRAP score (high complexity combined with low coverage)",
             "warning",
         ),
         rule_builder(
-            "fallow/refactoring-target",
+            "plow/refactoring-target",
             "File identified as a high-priority refactoring candidate",
             "warning",
         ),
@@ -221,40 +221,36 @@ fn health_complexity_sarif_rules(rule_builder: &SarifRuleBuilder<'_>) -> Vec<ser
 fn health_runtime_sarif_rules(rule_builder: &SarifRuleBuilder<'_>) -> Vec<serde_json::Value> {
     vec![
         rule_builder(
-            "fallow/untested-file",
+            "plow/untested-file",
             "Runtime-reachable file has no test dependency path",
             "warning",
         ),
         rule_builder(
-            "fallow/untested-export",
+            "plow/untested-export",
             "Runtime-reachable export has no test dependency path",
             "warning",
         ),
         rule_builder(
-            "fallow/runtime-safe-to-delete",
+            "plow/runtime-safe-to-delete",
             "Function is statically unused and was never invoked in production",
             "warning",
         ),
         rule_builder(
-            "fallow/runtime-review-required",
+            "plow/runtime-review-required",
             "Function is statically used but was never invoked in production",
             "warning",
         ),
         rule_builder(
-            "fallow/runtime-low-traffic",
+            "plow/runtime-low-traffic",
             "Function was invoked below the low-traffic threshold relative to total trace count",
             "note",
         ),
         rule_builder(
-            "fallow/runtime-coverage-unavailable",
+            "plow/runtime-coverage-unavailable",
             "Runtime coverage could not be resolved for this function",
             "note",
         ),
-        rule_builder(
-            "fallow/runtime-coverage",
-            "Runtime coverage finding",
-            "note",
-        ),
+        rule_builder("plow/runtime-coverage", "Runtime coverage finding", "note"),
     ]
 }
 
@@ -263,22 +259,22 @@ fn health_coverage_intelligence_sarif_rules(
 ) -> Vec<serde_json::Value> {
     vec![
         rule_builder(
-            "fallow/coverage-intelligence-risky-change",
+            "plow/coverage-intelligence-risky-change",
             "Changed hot path combines high CRAP and low test coverage",
             "warning",
         ),
         rule_builder(
-            "fallow/coverage-intelligence-delete",
+            "plow/coverage-intelligence-delete",
             "Static and runtime evidence indicate code can be deleted",
             "warning",
         ),
         rule_builder(
-            "fallow/coverage-intelligence-review",
+            "plow/coverage-intelligence-review",
             "Cold reachable uncovered code needs owner review",
             "warning",
         ),
         rule_builder(
-            "fallow/coverage-intelligence-refactor",
+            "plow/coverage-intelligence-refactor",
             "Hot covered code has high CRAP and should be refactored carefully",
             "warning",
         ),
@@ -312,26 +308,26 @@ fn append_complexity_sarif_results(
 }
 
 fn health_complexity_sarif_message(
-    finding: &fallow_output::ComplexityViolation,
+    finding: &plow_output::ComplexityViolation,
     report: &HealthReport,
 ) -> (&'static str, String) {
     match finding.exceeded {
         ExceededThreshold::Cyclomatic => (
-            "fallow/high-cyclomatic-complexity",
+            "plow/high-cyclomatic-complexity",
             format!(
                 "'{}' has cyclomatic complexity {} (threshold: {})",
                 finding.name, finding.cyclomatic, report.summary.max_cyclomatic_threshold,
             ),
         ),
         ExceededThreshold::Cognitive => (
-            "fallow/high-cognitive-complexity",
+            "plow/high-cognitive-complexity",
             format!(
                 "'{}' has cognitive complexity {} (threshold: {})",
                 finding.name, finding.cognitive, report.summary.max_cognitive_threshold,
             ),
         ),
         ExceededThreshold::Both => (
-            "fallow/high-complexity",
+            "plow/high-complexity",
             format!(
                 "'{}' has cyclomatic complexity {} (threshold: {}) and cognitive complexity {} (threshold: {})",
                 finding.name,
@@ -351,7 +347,7 @@ fn health_complexity_sarif_message(
                 .map(|pct| format!(", coverage {pct:.0}%"))
                 .unwrap_or_default();
             (
-                "fallow/high-crap-score",
+                "plow/high-crap-score",
                 format!(
                     "'{}' has CRAP score {:.1} (threshold: {:.1}, cyclomatic {}{})",
                     finding.name,
@@ -382,7 +378,7 @@ fn append_refactoring_target_sarif_results(
             target.confidence.label(),
         );
         sarif_results.push(sarif_result(
-            "fallow/refactoring-target",
+            "plow/refactoring-target",
             "warning",
             &message,
             &uri,
@@ -412,7 +408,7 @@ fn append_coverage_gap_sarif_results(
             },
         );
         sarif_results.push(sarif_result(
-            "fallow/untested-file",
+            "plow/untested-file",
             "warning",
             &message,
             &uri,
@@ -428,7 +424,7 @@ fn append_coverage_gap_sarif_results(
         );
         let source_snippet = snippets.line(&item.export.path, item.export.line);
         sarif_results.push(sarif_result_with_snippet(
-            "fallow/untested-export",
+            "plow/untested-export",
             "warning",
             &message,
             &uri,
@@ -447,12 +443,12 @@ fn append_runtime_coverage_sarif_results(
     for finding in &production.findings {
         let uri = relative_uri(&finding.path, root);
         let rule_id = match finding.verdict {
-            RuntimeCoverageVerdict::SafeToDelete => "fallow/runtime-safe-to-delete",
-            RuntimeCoverageVerdict::ReviewRequired => "fallow/runtime-review-required",
-            RuntimeCoverageVerdict::LowTraffic => "fallow/runtime-low-traffic",
-            RuntimeCoverageVerdict::CoverageUnavailable => "fallow/runtime-coverage-unavailable",
+            RuntimeCoverageVerdict::SafeToDelete => "plow/runtime-safe-to-delete",
+            RuntimeCoverageVerdict::ReviewRequired => "plow/runtime-review-required",
+            RuntimeCoverageVerdict::LowTraffic => "plow/runtime-low-traffic",
+            RuntimeCoverageVerdict::CoverageUnavailable => "plow/runtime-coverage-unavailable",
             RuntimeCoverageVerdict::Active | RuntimeCoverageVerdict::Unknown => {
-                "fallow/runtime-coverage"
+                "plow/runtime-coverage"
             }
         };
         let level = match finding.verdict {
@@ -533,16 +529,16 @@ fn coverage_intelligence_rule_id(
 ) -> &'static str {
     match recommendation {
         CoverageIntelligenceRecommendation::AddTestOrSplitBeforeMerge => {
-            "fallow/coverage-intelligence-risky-change"
+            "plow/coverage-intelligence-risky-change"
         }
         CoverageIntelligenceRecommendation::DeleteAfterConfirmingOwner => {
-            "fallow/coverage-intelligence-delete"
+            "plow/coverage-intelligence-delete"
         }
         CoverageIntelligenceRecommendation::ReviewBeforeChanging => {
-            "fallow/coverage-intelligence-review"
+            "plow/coverage-intelligence-review"
         }
         CoverageIntelligenceRecommendation::RefactorCarefullyKeepBehavior => {
-            "fallow/coverage-intelligence-refactor"
+            "plow/coverage-intelligence-refactor"
         }
     }
 }
@@ -600,8 +596,8 @@ fn relative_uri(path: &Path, root: &Path) -> String {
 mod tests {
     use std::path::PathBuf;
 
-    use fallow_output::{SarifRuleInput, build_sarif_rule};
-    use fallow_types::duplicates::{CloneGroup, CloneInstance, DuplicationStats};
+    use plow_output::{SarifRuleInput, build_sarif_rule};
+    use plow_types::duplicates::{CloneGroup, CloneInstance, DuplicationStats};
 
     use super::*;
 

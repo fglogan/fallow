@@ -4,7 +4,7 @@ use crate::root_envelopes::{RootEnvelopeMode, attach_telemetry_meta, serialize_n
 use serde::Serialize;
 use serde_json::{Map, Value};
 
-/// Wire version for the `fallow audit --brief --format json` envelope.
+/// Wire version for the `plow audit --brief --format json` envelope.
 pub const REVIEW_BRIEF_SCHEMA_VERSION: u32 = 5;
 
 /// Independently-versioned wire-version newtype for the brief envelope.
@@ -181,20 +181,20 @@ pub struct ReviewDeltas {
     pub public_api_added: Vec<String>,
 }
 
-/// The full `fallow audit --brief --format json` envelope. Carries the
+/// The full `plow audit --brief --format json` envelope. Carries the
 /// informational verdict, the triage and graph-facts orientation stages, plus
 /// the reused "subtract" section (the same dead-code / duplication / complexity
-/// payload `fallow audit --format json` emits).
+/// payload `plow audit --format json` emits).
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
     feature = "schema",
-    schemars(title = "fallow audit --brief --format json")
+    schemars(title = "plow audit --brief --format json")
 )]
 pub struct ReviewBriefOutput<Focus, Weakening, Routing, Decisions> {
     /// Independently-versioned brief schema version.
     pub schema_version: ReviewBriefSchemaVersion,
-    /// Fallow CLI version that produced this output.
+    /// Plow CLI version that produced this output.
     pub version: String,
     /// Command discriminator singleton: always `"audit-brief"`.
     pub command: String,
@@ -240,7 +240,7 @@ pub type StandardReviewBriefOutput = ReviewBriefOutput<
 
 /// CLI-built audit subreports that are embedded in the audit brief envelope.
 ///
-/// The brief envelope and field ordering belong to `fallow-output`; the
+/// The brief envelope and field ordering belong to `plow-output`; the
 /// underlying subreport payloads are still supplied by the CLI until their
 /// builders are fully command-neutral.
 #[derive(Debug, Clone, Default)]
@@ -259,7 +259,7 @@ fn insert_serialized<T: Serialize>(
     Ok(())
 }
 
-/// Build the complete `fallow audit --brief --format json` value.
+/// Build the complete `plow audit --brief --format json` value.
 ///
 /// `audit_header` carries informational audit scope fields such as verdict,
 /// base ref, summary, and attribution. This function restamps the independent
@@ -323,7 +323,7 @@ fn serialize_agent_contract_json_output<T: Serialize>(
     Ok(value)
 }
 
-/// Serialize the `fallow audit --brief --format json` envelope.
+/// Serialize the `plow audit --brief --format json` envelope.
 ///
 /// # Errors
 ///

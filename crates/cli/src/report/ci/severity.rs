@@ -1,5 +1,5 @@
 #[cfg(test)]
-use fallow_config::Severity;
+use plow_config::Severity;
 
 #[must_use]
 #[cfg(test)]

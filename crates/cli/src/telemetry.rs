@@ -11,8 +11,8 @@ use std::process::ExitCode;
 use std::sync::atomic::{AtomicU8, AtomicU16, AtomicU64, Ordering};
 use std::time::Duration;
 
-use fallow_config::OutputFormat;
-use fallow_engine::RetainedModuleGraph;
+use plow_config::OutputFormat;
+use plow_engine::RetainedModuleGraph;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -23,12 +23,12 @@ const TELEMETRY_SCHEMA_VERSION: u8 = 2;
 const CONNECT_TIMEOUT_SECS: u64 = 1;
 const TOTAL_TIMEOUT_SECS: u64 = 1;
 const TELEMETRY_PATH: &str = "/v1/telemetry/events";
-const PARENT_RUN_HEADER: &str = "X-Fallow-Parent-Run";
+const PARENT_RUN_HEADER: &str = "X-Plow-Parent-Run";
 /// Private transport header carrying the anonymous, random, install-scoped
 /// grouping token. Sent like [`PARENT_RUN_HEADER`]: a header for server-side
 /// `distinct_id` grouping, never an event-payload property, so the events the
 /// CLI serializes and spools still carry no identifiers.
-const INSTALL_HEADER: &str = "X-Fallow-Install";
+const INSTALL_HEADER: &str = "X-Plow-Install";
 /// Prefix marking the anonymous install grouping token in `telemetry.json`.
 const INSTALL_ID_PREFIX: &str = "inst_";
 static ANALYSIS_RUN_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -55,18 +55,18 @@ const SPOOL_FILE_NAME: &str = "telemetry-spool.jsonl";
 const SPOOL_LOCK_NAME: &str = "telemetry-spool.lock";
 
 const DO_NOT_TRACK: &str = "DO_NOT_TRACK";
-const DISABLED_ENV: &str = "FALLOW_TELEMETRY_DISABLED";
-const MODE_ENV: &str = "FALLOW_TELEMETRY";
-const DEBUG_ENV: &str = "FALLOW_TELEMETRY_DEBUG";
-const AGENT_SOURCE_ENV: &str = "FALLOW_AGENT_SOURCE";
-const INTEGRATION_SURFACE_ENV: &str = "FALLOW_INTEGRATION_SURFACE";
-const MCP_TOOL_ENV: &str = "FALLOW_MCP_TOOL";
+const DISABLED_ENV: &str = "PLOW_TELEMETRY_DISABLED";
+const MODE_ENV: &str = "PLOW_TELEMETRY";
+const DEBUG_ENV: &str = "PLOW_TELEMETRY_DEBUG";
+const AGENT_SOURCE_ENV: &str = "PLOW_AGENT_SOURCE";
+const INTEGRATION_SURFACE_ENV: &str = "PLOW_INTEGRATION_SURFACE";
+const MCP_TOOL_ENV: &str = "PLOW_MCP_TOOL";
 
 /// Process-wide accumulator for whether the analysis that ran this invocation
 /// actually surfaced any findings, independent of the exit-code gate.
 ///
 /// `outcome` is derived purely from the exit code, but several analyses are
-/// informational (non-gating) under their default config: `fallow dupes`
+/// informational (non-gating) under their default config: `plow dupes`
 /// exits 0 even at 100% duplication because the default duplication threshold
 /// is `0.0` ("never gate"). So the exit-code-derived `outcome` cannot tell a
 /// genuinely-clean dupes run from one that surfaced clones. This accumulator
@@ -74,7 +74,7 @@ const MCP_TOOL_ENV: &str = "FALLOW_MCP_TOOL";
 ///
 /// States: `0` = unset (no analysis reported), `1` = ran and found nothing,
 /// `2` = ran and found something. `fetch_max` gives OR semantics for free in
-/// combined mode (bare `fallow` runs check + dupes + health), where "found
+/// combined mode (bare `plow` runs check + dupes + health), where "found
 /// something" wins. The accumulator assumes one analysis batch per process
 /// (the CLI one-shot model); an in-process embedder running several batches
 /// would see the bit stick at the max across all of them.
@@ -868,7 +868,7 @@ struct TelemetryConfig {
     #[serde(default)]
     explicit_decision: bool,
     /// Anonymous, random, install-scoped grouping token. Minted only after
-    /// explicit opt-in (or an explicit `FALLOW_TELEMETRY=on` first send), never
+    /// explicit opt-in (or an explicit `PLOW_TELEMETRY=on` first send), never
     /// derived from machine, user, repository, path, environment, or cloud data,
     /// and cleared on `telemetry disable`. `#[serde(default)]` keeps older
     /// `telemetry.json` files (written before this field existed) parsing as
@@ -910,7 +910,7 @@ struct TelemetryStatus {
 struct TelemetryEvent {
     schema_version: u8,
     event: &'static str,
-    fallow_version: &'static str,
+    plow_version: &'static str,
     workflow: Workflow,
     integration_surface: IntegrationSurface,
     invocation_context: InvocationContext,
@@ -1126,10 +1126,10 @@ pub fn maybe_print_opt_in_note(output: OutputFormat, quiet: bool) -> bool {
     config.prompt_shown = true;
     let _ = write_config_to(&path, &config);
     eprintln!(
-        "Help improve Fallow's agent and CI workflows with minimal, allowlisted opt-in telemetry.\n\
+        "Help improve Plow's agent and CI workflows with minimal, allowlisted opt-in telemetry.\n\
          No repository names, paths, package names, source code, config values, or raw errors are collected.\n\
-         Inspect the exact payload: FALLOW_TELEMETRY=inspect fallow audit --format json --quiet\n\
-         Enable it: fallow telemetry enable\n\
+         Inspect the exact payload: PLOW_TELEMETRY=inspect plow audit --format json --quiet\n\
+         Enable it: plow telemetry enable\n\
          This notice is shown once; your preference (still off) is stored at {}",
         path.display()
     );
@@ -1178,10 +1178,10 @@ fn print_status_json(status: &TelemetryStatus) -> ExitCode {
             "explicit_decision": status.explicit_decision,
             "install_grouping_token": status.install_grouping_token,
             "commands": {
-                "enable": "fallow telemetry enable",
-                "disable": "fallow telemetry disable",
-                "inspect_example": "fallow telemetry inspect --example",
-                "inspect_command": "FALLOW_TELEMETRY=inspect fallow audit --format json --quiet"
+                "enable": "plow telemetry enable",
+                "disable": "plow telemetry disable",
+                "inspect_example": "plow telemetry inspect --example",
+                "inspect_command": "PLOW_TELEMETRY=inspect plow audit --format json --quiet"
             },
             "docs": "docs/telemetry.md"
         }
@@ -1210,10 +1210,10 @@ fn print_status_human(status: TelemetryStatus) -> ExitCode {
             "no"
         }
     );
-    println!("Enable:  fallow telemetry enable");
-    println!("Disable: fallow telemetry disable");
-    println!("Inspect an example: fallow telemetry inspect --example");
-    println!("Inspect a real command: FALLOW_TELEMETRY=inspect fallow audit --format json --quiet");
+    println!("Enable:  plow telemetry enable");
+    println!("Disable: plow telemetry disable");
+    println!("Inspect an example: plow telemetry inspect --example");
+    println!("Inspect a real command: PLOW_TELEMETRY=inspect plow audit --format json --quiet");
     println!("Docs: docs/telemetry.md");
     ExitCode::SUCCESS
 }
@@ -1221,7 +1221,7 @@ fn print_status_human(status: TelemetryStatus) -> ExitCode {
 fn set_enabled(enabled: bool, output: OutputFormat) -> ExitCode {
     if admin_disabled() && enabled {
         return crate::error::emit_error(
-            "telemetry is disabled by DO_NOT_TRACK or FALLOW_TELEMETRY_DISABLED",
+            "telemetry is disabled by DO_NOT_TRACK or PLOW_TELEMETRY_DISABLED",
             2,
             output,
         );
@@ -1285,20 +1285,20 @@ fn inspect(example: bool, output: OutputFormat) -> ExitCode {
                 let value = serde_json::json!({
                     "telemetry": {
                         "state": mode_label(effective_config().mode),
-                        "inspect_real_command": "FALLOW_TELEMETRY=inspect fallow audit --format json --quiet",
-                        "example_command": "fallow telemetry inspect --example"
+                        "inspect_real_command": "PLOW_TELEMETRY=inspect plow audit --format json --quiet",
+                        "example_command": "plow telemetry inspect --example"
                     }
                 });
                 return crate::report::emit_json(&value, "telemetry inspect");
             }
             _ => {
                 println!(
-                    "To inspect the exact payload for a real command, prefix it with FALLOW_TELEMETRY=inspect:"
+                    "To inspect the exact payload for a real command, prefix it with PLOW_TELEMETRY=inspect:"
                 );
-                println!("  FALLOW_TELEMETRY=inspect fallow audit --format json --quiet");
+                println!("  PLOW_TELEMETRY=inspect plow audit --format json --quiet");
                 println!();
                 println!("To print documented example payloads:");
-                println!("  fallow telemetry inspect --example");
+                println!("  plow telemetry inspect --example");
                 return ExitCode::SUCCESS;
             }
         }
@@ -1355,7 +1355,7 @@ fn build_workflow_event(
         } else {
             "workflow_completed"
         },
-        fallow_version: env!("CARGO_PKG_VERSION"),
+        plow_version: env!("CARGO_PKG_VERSION"),
         workflow: record.workflow,
         integration_surface: integration_surface(record.output),
         invocation_context,
@@ -1413,7 +1413,7 @@ fn status_changed_event(enabled: bool) -> TelemetryEvent {
     TelemetryEvent {
         schema_version: TELEMETRY_SCHEMA_VERSION,
         event: "telemetry_status_changed",
-        fallow_version: env!("CARGO_PKG_VERSION"),
+        plow_version: env!("CARGO_PKG_VERSION"),
         workflow: Workflow::Unknown,
         integration_surface: IntegrationSurface::CliHuman,
         invocation_context: classify_invocation_context(),
@@ -1451,7 +1451,7 @@ fn example_event() -> TelemetryEvent {
     TelemetryEvent {
         schema_version: TELEMETRY_SCHEMA_VERSION,
         event: "workflow_completed",
-        fallow_version: env!("CARGO_PKG_VERSION"),
+        plow_version: env!("CARGO_PKG_VERSION"),
         workflow: Workflow::Audit,
         integration_surface: IntegrationSurface::Mcp,
         invocation_context: InvocationContext::Agent,
@@ -1705,7 +1705,7 @@ fn resolve_install_id_with(mode: EffectiveMode, config_path: Option<&Path>) -> O
     // No file yet (env-on without a `telemetry.json`): start from the default
     // (config-level `enabled` stays false) and mint below, so the persisted
     // file carries ONLY the token. Writing `enabled: true` here would escalate
-    // a per-invocation `FALLOW_TELEMETRY=on` into a persistent user-config
+    // a per-invocation `PLOW_TELEMETRY=on` into a persistent user-config
     // opt-in that outlives the env var.
     let mut config = read_config_from(path).unwrap_or_default();
     if let Some(existing) = config.install_id.as_deref() {
@@ -1744,10 +1744,10 @@ fn env_truthy(name: &str) -> bool {
     })
 }
 
-/// Fallow's per-user config directory (`<platform-base>/fallow`), or `None`
+/// Plow's per-user config directory (`<platform-base>/plow`), or `None`
 /// when no home/config base is resolvable (e.g. a stripped CI environment).
 ///
-/// Shared by telemetry (`telemetry.json`) and Fallow Impact (`impact.json` +
+/// Shared by telemetry (`telemetry.json`) and Plow Impact (`impact.json` +
 /// the per-project `impact/<key>.json` store), so both surfaces resolve the
 /// same base and never drift.
 pub fn config_dir() -> Option<PathBuf> {
@@ -1762,7 +1762,7 @@ pub fn config_dir() -> Option<PathBuf> {
             .map(PathBuf::from)
             .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
     }?;
-    Some(base.join("fallow"))
+    Some(base.join("plow"))
 }
 
 fn config_path() -> Option<PathBuf> {
@@ -2034,7 +2034,7 @@ fn post_telemetry_payload(
     }
 }
 
-/// Advisory lock serialising spool rewrites across concurrent `fallow` processes.
+/// Advisory lock serialising spool rewrites across concurrent `plow` processes.
 ///
 /// A normal append never takes this lock (the hot path stays lock-free); only a
 /// drain or an over-cap trim does, so at most one process rewrites the spool at a
@@ -2196,7 +2196,7 @@ fn integration_surface(output: OutputFormat) -> IntegrationSurface {
     }
 }
 
-/// Parse an allowlisted `FALLOW_INTEGRATION_SURFACE` override. Only the non-CLI
+/// Parse an allowlisted `PLOW_INTEGRATION_SURFACE` override. Only the non-CLI
 /// surfaces are accepted; the CLI surfaces stay auto-derived from env + format,
 /// so an override cannot relabel a genuine CLI run as one of those.
 fn parse_integration_surface_override(value: &str) -> Option<IntegrationSurface> {
@@ -2210,7 +2210,7 @@ fn parse_integration_surface_override(value: &str) -> Option<IntegrationSurface>
     }
 }
 
-/// The MCP tool that triggered this run, when set via `FALLOW_MCP_TOOL` and
+/// The MCP tool that triggered this run, when set via `PLOW_MCP_TOOL` and
 /// present in the shared manifest allowlist (never the caller's string), so
 /// an off-allowlist or adversarial value is dropped to `None` rather than
 /// echoed into the payload.
@@ -2218,14 +2218,14 @@ fn mcp_tool() -> Option<&'static str> {
     mcp_tool_from_value(&std::env::var(MCP_TOOL_ENV).ok()?)
 }
 
-/// Resolve an `FALLOW_MCP_TOOL` value against the allowlist. Pure so it can be
+/// Resolve an `PLOW_MCP_TOOL` value against the allowlist. Pure so it can be
 /// unit-tested without touching process env. The allowlist is the shared MCP
-/// tool manifest in `fallow_types::mcp_manifest` (kept in sync with the live
+/// tool manifest in `plow_types::mcp_manifest` (kept in sync with the live
 /// server by a drift test in `crates/mcp`), so an off-allowlist or adversarial
 /// value drops to `None` and cannot inject a free-form string into the payload.
 fn mcp_tool_from_value(value: &str) -> Option<&'static str> {
     let value = value.trim();
-    fallow_types::mcp_manifest::MCP_TOOLS
+    plow_types::mcp_manifest::MCP_TOOLS
         .iter()
         .map(|tool| tool.name)
         .find(|name| *name == value)
@@ -2850,7 +2850,7 @@ mod tests {
         assert_eq!(
             doc_keys, real_keys,
             "docs/telemetry.md example payload fields are out of sync with the emitted \
-             TelemetryEvent (compare against `fallow telemetry inspect --example`)"
+             TelemetryEvent (compare against `plow telemetry inspect --example`)"
         );
     }
 
@@ -3487,7 +3487,7 @@ mod tests {
 
     #[test]
     fn resolve_install_id_mints_lazily_for_env_on_without_file() {
-        // FALLOW_TELEMETRY=on with no telemetry.json: the send path mints once
+        // PLOW_TELEMETRY=on with no telemetry.json: the send path mints once
         // and persists ONLY the token; the config-level enabled flag must stay
         // default-off so the env opt-in stays scoped to the invocation.
         let dir = tempfile::tempdir().expect("tempdir");
@@ -3584,7 +3584,7 @@ mod tests {
             "install id must never be an event-payload property",
         );
         assert_eq!(
-            seen[0].0.get("X-Fallow-Install"),
+            seen[0].0.get("X-Plow-Install"),
             None,
             "the transport header name must never leak into the payload",
         );
@@ -4239,8 +4239,8 @@ mod tests {
     #[test]
     fn mcp_tool_from_value_returns_static_str_for_known_tools() {
         // Check a few tools that exist in the manifest; the actual set is in
-        // fallow_types::mcp_manifest::MCP_TOOLS.
-        let tools: Vec<&str> = fallow_types::mcp_manifest::MCP_TOOLS
+        // plow_types::mcp_manifest::MCP_TOOLS.
+        let tools: Vec<&str> = plow_types::mcp_manifest::MCP_TOOLS
             .iter()
             .map(|t| t.name)
             .collect();

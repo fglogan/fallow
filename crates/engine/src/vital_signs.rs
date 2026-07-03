@@ -2,7 +2,7 @@
 //!
 //! Vital signs are a fixed set of project-wide metrics computed from available
 //! health data. They are always shown as a summary in the health report and can
-//! be persisted to `.fallow/snapshots/` for Phase 2b trend tracking.
+//! be persisted to `.plow/snapshots/` for Phase 2b trend tracking.
 
 use std::path::{Path, PathBuf};
 
@@ -11,7 +11,7 @@ use crate::clear_ambient_git_env;
 /// Number of seconds in one day.
 const SECS_PER_DAY: u64 = 86_400;
 
-use fallow_output::{
+use plow_output::{
     DEFAULT_CYCLOMATIC_CRITICAL, FileHealthScore, HEALTH_SCORE_FORMULA_VERSION,
     HOTSPOT_SCORE_THRESHOLD, HealthScore, HealthScorePenalties, HealthTrend, HotspotEntry,
     RiskProfile, SNAPSHOT_SCHEMA_VERSION, TrendCount, TrendDirection, TrendMetric, TrendPoint,
@@ -644,7 +644,7 @@ pub fn build_snapshot(
     root: &Path,
     shallow_clone: bool,
     health_score: Option<&HealthScore>,
-    coverage_model: Option<fallow_output::CoverageModel>,
+    coverage_model: Option<plow_output::CoverageModel>,
 ) -> VitalSignsSnapshot {
     let now = chrono_timestamp();
 
@@ -699,7 +699,7 @@ const fn days_to_ymd(days: u64) -> (u64, u64, u64) {
 
 /// Save a snapshot to disk.
 ///
-/// If `path` is `None`, writes to `.fallow/snapshots/{timestamp}.json`.
+/// If `path` is `None`, writes to `.plow/snapshots/{timestamp}.json`.
 /// Creates parent directories as needed.
 pub fn save_snapshot(
     snapshot: &VitalSignsSnapshot,
@@ -708,7 +708,7 @@ pub fn save_snapshot(
 ) -> Result<PathBuf, String> {
     let path = explicit_path.map_or_else(
         || {
-            let dir = root.join(".fallow").join("snapshots");
+            let dir = root.join(".plow").join("snapshots");
             let filename = snapshot.timestamp.replace(':', "-");
             dir.join(format!("{filename}.json"))
         },
@@ -736,7 +736,7 @@ pub fn save_snapshot(
     reason = "corrupt-snapshot warnings to stderr, preserved verbatim from the CLI health path"
 )]
 pub fn load_snapshots(root: &Path) -> Vec<VitalSignsSnapshot> {
-    let dir = root.join(".fallow").join("snapshots");
+    let dir = root.join(".plow").join("snapshots");
     let Ok(entries) = std::fs::read_dir(&dir) else {
         return Vec::new();
     };
@@ -1191,7 +1191,7 @@ mod tests {
             angular_entry_component_refs: Vec::new(),
             has_dynamic_component_render: false,
             has_dynamic_dispatch: false,
-            complexity: vec![fallow_types::extract::FunctionComplexity {
+            complexity: vec![plow_types::extract::FunctionComplexity {
                 name: format!("fn_{id}"),
                 line: id + 1,
                 col: 0,
@@ -1371,7 +1371,7 @@ mod tests {
         let saved_path = save_snapshot(&snapshot, root, None).unwrap();
 
         assert!(saved_path.exists());
-        assert!(saved_path.starts_with(root.join(".fallow/snapshots")));
+        assert!(saved_path.starts_with(root.join(".plow/snapshots")));
 
         let content = std::fs::read_to_string(&saved_path).unwrap();
         let loaded: VitalSignsSnapshot = serde_json::from_str(&content).unwrap();
@@ -1671,7 +1671,7 @@ mod tests {
     fn load_snapshots_returns_sorted() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        let snap_dir = root.join(".fallow/snapshots");
+        let snap_dir = root.join(".plow/snapshots");
         std::fs::create_dir_all(&snap_dir).unwrap();
 
         let older = make_test_snapshot("2026-01-01T00:00:00Z", Some(72.0));
@@ -1698,7 +1698,7 @@ mod tests {
     fn load_snapshots_skips_corrupt_files() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        let snap_dir = root.join(".fallow/snapshots");
+        let snap_dir = root.join(".plow/snapshots");
         std::fs::create_dir_all(&snap_dir).unwrap();
 
         std::fs::write(snap_dir.join("corrupt.json"), "not valid json").unwrap();
@@ -1718,7 +1718,7 @@ mod tests {
     fn load_snapshots_ignores_non_json() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        let snap_dir = root.join(".fallow/snapshots");
+        let snap_dir = root.join(".plow/snapshots");
         std::fs::create_dir_all(&snap_dir).unwrap();
 
         std::fs::write(snap_dir.join("readme.txt"), "not a snapshot").unwrap();

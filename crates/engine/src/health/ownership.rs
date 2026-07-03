@@ -40,10 +40,10 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use xxhash_rust::xxh3::xxh3_64;
 
 use crate::{AuthorContribution, FileChurn};
-use fallow_config::EmailMode;
+use plow_config::EmailMode;
 
 use crate::codeowners::CodeOwners;
-use fallow_output::{
+use plow_output::{
     ContributorEntry, ContributorIdentifierFormat, OwnershipMetrics, OwnershipState,
 };
 
@@ -662,7 +662,7 @@ mod tests {
     #[test]
     fn human_github_noreply_is_not_a_bot() {
         let globs =
-            compile_bot_globs(&fallow_config::OwnershipConfig::default().bot_patterns).unwrap();
+            compile_bot_globs(&plow_config::OwnershipConfig::default().bot_patterns).unwrap();
         assert!(!is_bot(
             "49056869+sapphi-red@users.noreply.github.com",
             &globs

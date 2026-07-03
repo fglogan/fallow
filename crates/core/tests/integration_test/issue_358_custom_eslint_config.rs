@@ -12,7 +12,7 @@ use super::common::{create_config, fixture_path};
 fn imports_in_custom_location_eslint_config_credit_their_packages() {
     let root = fixture_path("issue-358-custom-eslint-config");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_deps: Vec<&str> = results
         .unused_dependencies
@@ -35,7 +35,7 @@ fn imports_in_custom_location_eslint_config_credit_their_packages() {
 fn custom_location_config_file_itself_is_not_unused() {
     let root = fixture_path("issue-358-custom-eslint-config");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files: Vec<String> = results
         .unused_files

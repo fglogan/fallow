@@ -14,5 +14,5 @@ export const factsForFile = (doc: WalkthroughDocument, file: string): string[] =
     facts.push(`attention ${found.attention}${found.deprioritized ? " (deprioritized)" : ""}`);
     return facts;
   }
-  return ["no Fallow signal for this file in the current review"];
+  return ["no Plow signal for this file in the current review"];
 };

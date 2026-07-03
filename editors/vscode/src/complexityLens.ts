@@ -3,7 +3,7 @@ import type { ComplexityDecorationController } from "./complexityDecorations.js"
 import { getComplexityBreakdownEnabled, getHealthInlineComplexity } from "./config.js";
 
 /** Command id wired in extension.ts; toggles one function's per-line breakdown. */
-export const TOGGLE_COMPLEXITY_BREAKDOWN_COMMAND = "fallow.toggleComplexityBreakdown";
+export const TOGGLE_COMPLEXITY_BREAKDOWN_COMMAND = "plow.toggleComplexityBreakdown";
 
 /** Payload the lens passes to the toggle command (a single complex function). */
 export interface ComplexityToggleTarget {
@@ -15,13 +15,13 @@ export interface ComplexityToggleTarget {
  * One code lens per complex function, anchored at its signature line, showing
  * the compact `N cyc, N cog` summary plus a `show breakdown` / `hide breakdown`
  * toggle that flips with the function's pin state. Clicking runs
- * `fallow.toggleComplexityBreakdown`, which pins/unpins the per-line detail in
+ * `plow.toggleComplexityBreakdown`, which pins/unpins the per-line detail in
  * `ComplexityDecorationController`.
  *
  * This is the VS Code-native replacement for the LSP complexity lens: the LSP
  * lens stays available to other editors (Neovim/Zed/Helix) but is not requested
  * by this extension, so there is no double lens here. Gated on
- * `fallow.health.inlineComplexity` (default on).
+ * `plow.health.inlineComplexity` (default on).
  */
 export class ComplexityLensProvider implements vscode.CodeLensProvider {
   readonly onDidChangeCodeLenses: vscode.Event<void>;

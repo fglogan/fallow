@@ -99,7 +99,7 @@ fn render_security_parent_help() -> String {
             arg
         }
     });
-    match root.try_get_matches_from_mut(["fallow", "security", "--help"]) {
+    match root.try_get_matches_from_mut(["plow", "security", "--help"]) {
         Ok(_) => String::new(),
         Err(err) => err.to_string(),
     }
@@ -107,12 +107,12 @@ fn render_security_parent_help() -> String {
 
 fn render_security_survivors_help() -> String {
     "\
-Render verifier-retained survivor candidates from fallow output plus verifier verdicts.
+Render verifier-retained survivor candidates from plow output plus verifier verdicts.
 
-Usage: fallow security survivors --candidates <PATH> --verdicts <PATH> [OPTIONS]
+Usage: plow security survivors --candidates <PATH> --verdicts <PATH> [OPTIONS]
 
 Options:
-      --candidates <PATH>                      Raw `fallow security --format json` candidate output
+      --candidates <PATH>                      Raw `plow security --format json` candidate output
       --verdicts <PATH>                        Verifier verdict JSON file
       --require-verdict-for-each-candidate     Fail when any candidate has no matching verdict
   -f, --format <FORMAT>                        Output format: human or json [default: human]
@@ -120,7 +120,7 @@ Options:
   -h, --help                                   Print help
 
 Verdict JSON:
-  [{\"schema_version\":\"fallow-security-verdict/v1\",\"finding_id\":\"sec-a\",\"verdict\":\"survivor\"}]
+  [{\"schema_version\":\"plow-security-verdict/v1\",\"finding_id\":\"sec-a\",\"verdict\":\"survivor\"}]
 
 Repo-local docs: docs/security-agent-verification.md
 "
@@ -131,7 +131,7 @@ fn render_security_blind_spots_help() -> String {
     "\
 Group unresolved security callees into actionable blind-spot output.
 
-Usage: fallow security blind-spots [OPTIONS]
+Usage: plow security blind-spots [OPTIONS]
 
 Options:
   -r, --root <ROOT>                  Project root directory

@@ -4,10 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { capturedFramingPath, readCapturedLines } from "./capturedFraming";
 
-/** A root with a seeded `.fallow-review/captured.jsonl`. */
+/** A root with a seeded `.plow-review/captured.jsonl`. */
 const seedRoot = (label: string, contents: string): string => {
   const root = mkdtempSync(join(tmpdir(), label));
-  mkdirSync(join(root, ".fallow-review"), { recursive: true });
+  mkdirSync(join(root, ".plow-review"), { recursive: true });
   writeFileSync(capturedFramingPath(root), contents, "utf8");
   return root;
 };

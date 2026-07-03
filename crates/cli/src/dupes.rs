@@ -1,8 +1,8 @@
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
-use fallow_config::{OutputFormat, ResolvedConfig};
-use fallow_types::duplicates::{DefaultIgnoreSkips, DuplicationReport};
+use plow_config::{OutputFormat, ResolvedConfig};
+use plow_types::duplicates::{DefaultIgnoreSkips, DuplicationReport};
 
 use crate::baseline::{DuplicationBaselineData, filter_new_clone_groups, recompute_stats};
 use crate::check::{get_changed_files, resolve_workspace_scope};
@@ -17,13 +17,13 @@ pub enum DupesMode {
     Semantic,
 }
 
-impl From<fallow_config::DetectionMode> for DupesMode {
-    fn from(mode: fallow_config::DetectionMode) -> Self {
+impl From<plow_config::DetectionMode> for DupesMode {
+    fn from(mode: plow_config::DetectionMode) -> Self {
         match mode {
-            fallow_config::DetectionMode::Strict => Self::Strict,
-            fallow_config::DetectionMode::Mild => Self::Mild,
-            fallow_config::DetectionMode::Weak => Self::Weak,
-            fallow_config::DetectionMode::Semantic => Self::Semantic,
+            plow_config::DetectionMode::Strict => Self::Strict,
+            plow_config::DetectionMode::Mild => Self::Mild,
+            plow_config::DetectionMode::Weak => Self::Weak,
+            plow_config::DetectionMode::Semantic => Self::Semantic,
         }
     }
 }
@@ -77,8 +77,8 @@ pub struct DupesOptions<'a> {
     pub group_by: Option<crate::GroupBy>,
     /// When true, emit a timing panel after the duplication report. Mirrors
     /// the global `--performance` flag handling for `check` and `health`.
-    /// Standalone `fallow dupes` reads this; combined-mode invocations rely
-    /// on the bare `fallow` pipeline panel and ignore this field.
+    /// Standalone `plow dupes` reads this; combined-mode invocations rely
+    /// on the bare `plow` pipeline panel and ignore this field.
     pub performance: bool,
 }
 
@@ -102,15 +102,15 @@ fn parse_trace_spec(spec: &str) -> Result<(&str, usize), &'static str> {
 /// `--format json`); `FILE:LINE` resolves the clone(s) containing a source
 /// location.
 fn run_clone_trace(
-    report: &fallow_types::duplicates::DuplicationReport,
+    report: &plow_types::duplicates::DuplicationReport,
     root: &std::path::Path,
     trace_spec: &str,
     output: OutputFormat,
 ) -> ExitCode {
     let (trace_result, not_found) =
-        if let Some(fp) = trace_spec.strip_prefix(fallow_engine::FINGERPRINT_PREFIX) {
-            let fingerprint = format!("{}{fp}", fallow_engine::FINGERPRINT_PREFIX);
-            let result = fallow_engine::trace_clone_by_fingerprint(report, root, &fingerprint);
+        if let Some(fp) = trace_spec.strip_prefix(plow_engine::FINGERPRINT_PREFIX) {
+            let fingerprint = format!("{}{fp}", plow_engine::FINGERPRINT_PREFIX);
+            let result = plow_engine::trace_clone_by_fingerprint(report, root, &fingerprint);
             (
                 result,
                 format!("no clone group with fingerprint {fingerprint}"),
@@ -120,7 +120,7 @@ fn run_clone_trace(
                 Ok(parsed) => parsed,
                 Err(msg) => return emit_error(msg, 2, output),
             };
-            let result = fallow_engine::trace_clone(report, root, file_path, line);
+            let result = plow_engine::trace_clone(report, root, file_path, line);
             (result, format!("no clone found at {file_path}:{line}"))
         };
     if trace_result.matched_instance.is_none() {
@@ -135,22 +135,22 @@ fn run_clone_trace(
 /// CLI scalar fields (`mode`, `min_tokens`, `min_lines`, `threshold`) are
 /// `Option<T>` so an absent flag falls through to the value declared in
 /// `toml_dupes`. This is what lets users set e.g. `duplicates.minLines = 8`
-/// in `.fallowrc.jsonc` and have `fallow dupes` honor it. The opt-in toggles
+/// in `.plowrc.jsonc` and have `plow dupes` honor it. The opt-in toggles
 /// (`skip_local`, `cross_language`) use OR-merge, so any `true` (CLI or config)
 /// wins. `ignore_imports` defaults to `true` and supports opt-out, so it uses
 /// precedence instead: an explicit CLI `Some(true|false)` wins over config,
 /// `None` defers to the config value.
 fn build_dupes_config(
     opts: &DupesOptions<'_>,
-    toml_dupes: &fallow_config::DuplicatesConfig,
-) -> fallow_config::DuplicatesConfig {
+    toml_dupes: &plow_config::DuplicatesConfig,
+) -> plow_config::DuplicatesConfig {
     let mode = opts.mode.map_or(toml_dupes.mode, |m| match m {
-        DupesMode::Strict => fallow_config::DetectionMode::Strict,
-        DupesMode::Mild => fallow_config::DetectionMode::Mild,
-        DupesMode::Weak => fallow_config::DetectionMode::Weak,
-        DupesMode::Semantic => fallow_config::DetectionMode::Semantic,
+        DupesMode::Strict => plow_config::DetectionMode::Strict,
+        DupesMode::Mild => plow_config::DetectionMode::Mild,
+        DupesMode::Weak => plow_config::DetectionMode::Weak,
+        DupesMode::Semantic => plow_config::DetectionMode::Semantic,
     });
-    fallow_config::DuplicatesConfig {
+    plow_config::DuplicatesConfig {
         enabled: true,
         mode,
         min_tokens: opts.min_tokens.unwrap_or(toml_dupes.min_tokens),
@@ -175,7 +175,7 @@ fn exceeds_threshold(threshold: f64, duplication_percentage: f64) -> bool {
     threshold > 0.0 && duplication_percentage > threshold
 }
 
-use fallow_engine::filter_duplication_by_changed_files as filter_by_changed_files;
+use plow_engine::filter_duplication_by_changed_files as filter_by_changed_files;
 
 /// Filter a duplication report to only retain clone groups where at least one
 /// instance belongs to a file under one of the given workspace roots. Mirrors
@@ -187,7 +187,7 @@ use fallow_engine::filter_duplication_by_changed_files as filter_by_changed_file
 /// reported duplication percentage reflects the scoped slice, not the whole
 /// repo.
 fn filter_by_workspaces(
-    report: &mut fallow_types::duplicates::DuplicationReport,
+    report: &mut plow_types::duplicates::DuplicationReport,
     ws_roots: &[std::path::PathBuf],
     root: &std::path::Path,
 ) {
@@ -196,7 +196,7 @@ fn filter_by_workspaces(
             .iter()
             .any(|i| ws_roots.iter().any(|r| i.file.starts_with(r)))
     });
-    fallow_engine::refresh_clone_families(report, root);
+    plow_engine::refresh_clone_families(report, root);
     report.stats = recompute_stats(report);
 }
 
@@ -211,13 +211,13 @@ fn filter_by_workspaces(
 /// Families and stats are rebuilt from the surviving groups so that the
 /// reported duplication percentage reflects the scoped slice.
 fn filter_by_diff(
-    report: &mut fallow_types::duplicates::DuplicationReport,
+    report: &mut plow_types::duplicates::DuplicationReport,
     diff_index: &crate::report::ci::diff_filter::DiffIndex,
     root: &std::path::Path,
 ) {
     use crate::report::ci::diff_filter::relative_to_diff_path;
 
-    let instance_overlaps = |instance: &fallow_types::duplicates::CloneInstance| -> bool {
+    let instance_overlaps = |instance: &plow_types::duplicates::CloneInstance| -> bool {
         let Some(rel) = relative_to_diff_path(&instance.file, root) else {
             return true;
         };
@@ -229,7 +229,7 @@ fn filter_by_diff(
     report
         .clone_groups
         .retain(|g| g.instances.iter().any(instance_overlaps));
-    fallow_engine::refresh_clone_families(report, root);
+    plow_engine::refresh_clone_families(report, root);
     report.stats = recompute_stats(report);
 }
 
@@ -261,7 +261,7 @@ pub fn execute_dupes(opts: &DupesOptions<'_>) -> Result<DupesResult, ExitCode> {
 /// that already shares parsed modules with health.
 pub fn execute_dupes_with_files(
     opts: &DupesOptions<'_>,
-    files: Vec<fallow_types::discover::DiscoveredFile>,
+    files: Vec<plow_types::discover::DiscoveredFile>,
 ) -> Result<DupesResult, ExitCode> {
     execute_dupes_inner(opts, Some(files))
 }
@@ -281,7 +281,7 @@ fn load_dupes_config_for_analysis(opts: &DupesOptions<'_>) -> Result<ResolvedCon
                 .or_else(|| opts.production.then_some(true)),
             quiet: opts.quiet,
         },
-        fallow_config::ProductionAnalysis::Dupes,
+        plow_config::ProductionAnalysis::Dupes,
     )
 }
 
@@ -324,7 +324,7 @@ fn filter_dupes_report(
 
 fn execute_dupes_inner(
     opts: &DupesOptions<'_>,
-    pre_discovered: Option<Vec<fallow_types::discover::DiscoveredFile>>,
+    pre_discovered: Option<Vec<plow_types::discover::DiscoveredFile>>,
 ) -> Result<DupesResult, ExitCode> {
     let start = Instant::now();
 
@@ -332,7 +332,7 @@ fn execute_dupes_inner(
 
     let dupes_config = build_dupes_config(opts, &config.duplicates);
     let files =
-        pre_discovered.unwrap_or_else(|| fallow_engine::discover_files_with_plugin_scopes(&config));
+        pre_discovered.unwrap_or_else(|| plow_engine::discover_files_with_plugin_scopes(&config));
 
     let changed_files_from_since = resolve_changed_since(opts);
     let effective_changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>> =
@@ -542,7 +542,7 @@ fn apply_top(report: &mut DuplicationReport, n: usize, root: &std::path::Path) {
             })
     });
     report.clone_groups.truncate(n);
-    fallow_engine::refresh_clone_families(report, root);
+    plow_engine::refresh_clone_families(report, root);
     report.stats.clone_groups = report.clone_groups.len();
     report.stats.clone_instances = report.clone_groups.iter().map(|g| g.instances.len()).sum();
     report.sort();
@@ -551,14 +551,14 @@ fn apply_top(report: &mut DuplicationReport, n: usize, root: &std::path::Path) {
 fn run_duplication_analysis(
     opts: &DupesOptions<'_>,
     config: &ResolvedConfig,
-    files: &[fallow_types::discover::DiscoveredFile],
-    dupes_config: &fallow_config::DuplicatesConfig,
+    files: &[plow_types::discover::DiscoveredFile],
+    dupes_config: &plow_config::DuplicatesConfig,
     changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
 ) -> (DuplicationReport, DefaultIgnoreSkips) {
     let cache_dir = (!opts.no_cache).then_some(config.cache_dir.as_path());
     let analysis = if let Some(changed_files) = changed_files {
         let changed_files = changed_files.iter().cloned().collect::<Vec<_>>();
-        fallow_engine::find_duplicates_touching_files_with_defaults(
+        plow_engine::find_duplicates_touching_files_with_defaults(
             &config.root,
             files,
             dupes_config,
@@ -566,7 +566,7 @@ fn run_duplication_analysis(
             cache_dir,
         )
     } else {
-        fallow_engine::find_duplicates_with_defaults(&config.root, files, dupes_config, cache_dir)
+        plow_engine::find_duplicates_with_defaults(&config.root, files, dupes_config, cache_dir)
     };
     (analysis.report, analysis.default_ignore_skips)
 }
@@ -643,7 +643,7 @@ pub fn run_dupes(opts: &DupesOptions<'_>) -> ExitCode {
     })
 }
 
-/// Emit a stderr timing panel for `fallow dupes --performance`. Stays out of
+/// Emit a stderr timing panel for `plow dupes --performance`. Stays out of
 /// stdout so JSON / SARIF / CodeClimate envelopes are not corrupted; the
 /// panel renders only for human-readable formats so machine readers don't
 /// see decorative ANSI art.
@@ -831,10 +831,8 @@ pub fn print_ignore_imports_note(result: &DupesResult, quiet: bool) {
 mod tests {
     use super::*;
     use crate::baseline::{DuplicationBaselineData, filter_new_clone_groups, recompute_stats};
-    use fallow_config::{DetectionMode, DuplicatesConfig, NormalizationConfig};
-    use fallow_types::duplicates::{
-        CloneGroup, CloneInstance, DuplicationReport, DuplicationStats,
-    };
+    use plow_config::{DetectionMode, DuplicatesConfig, NormalizationConfig};
+    use plow_types::duplicates::{CloneGroup, CloneInstance, DuplicationReport, DuplicationStats};
     use std::path::{Path, PathBuf};
 
     fn instance(file: &str, start: usize, end: usize) -> CloneInstance {
@@ -1278,12 +1276,12 @@ mod tests {
         let mut opts = default_opts_for_config(&root, DupesMode::Mild);
         opts.mode = None;
         let toml = DuplicatesConfig {
-            mode: fallow_config::DetectionMode::Strict,
+            mode: plow_config::DetectionMode::Strict,
             ..DuplicatesConfig::default()
         };
         let config = build_dupes_config(&opts, &toml);
         assert!(
-            matches!(config.mode, fallow_config::DetectionMode::Strict),
+            matches!(config.mode, plow_config::DetectionMode::Strict),
             "config mode must win when --mode is omitted"
         );
     }

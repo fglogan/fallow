@@ -6,20 +6,18 @@ use std::process::{Command, Stdio};
 use std::{collections::BTreeMap, fs};
 
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
-use fallow_config::OutputFormat;
-use fallow_cov_protocol::{
+use globset::GlobSet;
+use oxc_coverage_instrument::{FileCoverage, FnEntry, Location, Position};
+use plow_config::OutputFormat;
+use plow_cov_protocol::{
     BlastRadiusEntry as ProtocolBlastRadiusEntry, CaptureQuality, Confidence, CoverageSource,
     Evidence, Finding as ProtocolFinding, FunctionIdentity, HotPath as ProtocolHotPath,
     IdentityResolution, ImportanceEntry as ProtocolImportanceEntry, PROTOCOL_VERSION,
     ReportVerdict, Request, Response, RiskBand, StaticFile, StaticFindings, StaticFunction,
-    Verdict, Watermark, function_identity_id,
+    Verdict, Watermark, function_identity_id as protocol_function_identity_id,
 };
-use fallow_license::{
-    DEFAULT_HARD_FAIL_DAYS, Feature, LicenseStatus, load_and_verify, load_raw_jwt,
-};
-use fallow_v8_coverage::V8CoverageDump;
-use globset::GlobSet;
-use oxc_coverage_instrument::{FileCoverage, FnEntry, Location, Position};
+use plow_license::{DEFAULT_HARD_FAIL_DAYS, Feature, LicenseStatus, load_and_verify, load_raw_jwt};
+use plow_v8_coverage::V8CoverageDump;
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::Deserialize;
 use srcmap_sourcemap::{GeneratedLocation, GeneratedOffsetLookup, SourceMap};
@@ -29,8 +27,8 @@ use url::Url;
 use crate::error::emit_error;
 use crate::health::scoring::IstanbulCoverage;
 use crate::license::verifying_key;
-use fallow_engine::RuntimeCoverageOptions;
-use fallow_output::{
+use plow_engine::RuntimeCoverageOptions;
+use plow_output::{
     RUNTIME_STALE_AFTER_DAYS, RuntimeCoverageAction, RuntimeCoverageConfidence,
     RuntimeCoverageDataSource, RuntimeCoverageDiscriminators, RuntimeCoverageEvidence,
     RuntimeCoverageFinding, RuntimeCoverageHotPath, RuntimeCoverageMessage,
@@ -39,19 +37,27 @@ use fallow_output::{
     RuntimeCoverageVerdict, RuntimeCoverageWatermark,
 };
 
-/// Ed25519 public key used to verify the fallow-cov sidecar binary at every
+fn function_identity_id(file: &str, name: &str, start_line: u32) -> String {
+    let stable_id = protocol_function_identity_id(file, name, start_line);
+    match stable_id.strip_prefix("fallow:") {
+        Some(rest) => format!("plow:{rest}"),
+        None => stable_id,
+    }
+}
+
+/// Ed25519 public key used to verify the plow-cov sidecar binary at every
 /// spawn. Intentionally SEPARATE from the license-signing pubkey at
 /// `crate::license::PUBLIC_KEY_BYTES` so binary and license keys can rotate
-/// independently; see `fallow-cloud/decisions/008-sidecar-key-rotation.md`.
+/// independently; see `plow-cloud/decisions/008-sidecar-key-rotation.md`.
 ///
 /// The constant name deliberately avoids the substring `PUBLIC_KEY_BYTES` so
-/// the `fallow-cloud/.github/workflows/public-key-parity.yml` Python regex
+/// the `plow-cloud/.github/workflows/public-key-parity.yml` Python regex
 /// (which matches the first `PUBLIC_KEY_BYTES: [u8; 32]` in the file) never
 /// misidentifies it as the license pubkey.
 ///
 /// Must match the `ED25519_BINARY_SIGNING_PUBLIC_KEY` repository variable on
-/// `fallow-rs/fallow-cloud` byte-for-byte; the `binary-signing-parity.yml`
-/// workflow on fallow-cloud asserts this daily. If you rotate the key, update
+/// `plow-rs/plow-cloud` byte-for-byte; the `binary-signing-parity.yml`
+/// workflow on plow-cloud asserts this daily. If you rotate the key, update
 /// both sides in the same release cycle per the procedure in ADR 008.
 #[cfg(not(feature = "test-sidecar-key"))]
 const BINARY_SIGNING_VERIFY_KEY: [u8; 32] = [
@@ -107,7 +113,7 @@ enum GeneratedPositionLookup<'a> {
         source: &'a str,
         lookup: GeneratedOffsetLookup<'a>,
     },
-    V8LineOffsets(fallow_v8_coverage::LineOffsetTable),
+    V8LineOffsets(plow_v8_coverage::LineOffsetTable),
 }
 
 impl GeneratedPositionLookup<'_> {
@@ -148,7 +154,7 @@ struct RemappedFunction {
 
 struct RemappedScript {
     functions: Vec<RemappedFunction>,
-    residual_script: Option<fallow_v8_coverage::ScriptCoverage>,
+    residual_script: Option<plow_v8_coverage::ScriptCoverage>,
 }
 
 #[derive(Debug, Clone)]
@@ -158,7 +164,7 @@ struct AccumulatedFunction {
 }
 
 /// Dedup key for merging V8-remapped functions across overlapping script
-/// dumps. NOT the protocol's `fallow_cov_protocol::FunctionIdentity` (the
+/// dumps. NOT the protocol's `plow_cov_protocol::FunctionIdentity` (the
 /// cross-surface join key); this is a purely local position-based key used to
 /// coalesce the same physical function seen in multiple coverage scripts.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -244,10 +250,10 @@ pub fn prepare_options(
 
 pub(super) struct RuntimeCoverageAnalysisInput<'a> {
     pub root: &'a Path,
-    pub modules: &'a [fallow_types::extract::ModuleInfo],
-    pub analysis_output: &'a fallow_engine::DeadCodeAnalysisArtifacts,
+    pub modules: &'a [plow_types::extract::ModuleInfo],
+    pub analysis_output: &'a plow_engine::DeadCodeAnalysisArtifacts,
     pub istanbul_coverage: Option<&'a IstanbulCoverage>,
-    pub file_paths: &'a FxHashMap<fallow_types::discover::FileId, &'a PathBuf>,
+    pub file_paths: &'a FxHashMap<plow_types::discover::FileId, &'a PathBuf>,
     pub ignore_set: &'a GlobSet,
     pub changed_files: Option<&'a FxHashSet<PathBuf>>,
     pub ws_roots: Option<&'a [PathBuf]>,
@@ -298,7 +304,7 @@ fn validate_license_status(
 ) -> Result<(), ExitCode> {
     match status {
         LicenseStatus::Missing => Err(emit_error(
-            "Continuous runtime monitoring requires a valid license or trial. Run: fallow license activate --trial --email you@company.com",
+            "Continuous runtime monitoring requires a valid license or trial. Run: plow license activate --trial --email you@company.com",
             3,
             output,
         )),
@@ -306,13 +312,13 @@ fn validate_license_status(
             days_since_expiry, ..
         } => Err(emit_error(
             &format!(
-                "license expired {days_since_expiry} days ago. Refresh with: fallow license refresh"
+                "license expired {days_since_expiry} days ago. Refresh with: plow license refresh"
             ),
             3,
             output,
         )),
         _ if !status.permits(&Feature::RuntimeCoverage) => Err(emit_error(
-            "License is valid but does not include continuous runtime monitoring. Upgrade at fallow.tools/upgrade.",
+            "License is valid but does not include continuous runtime monitoring. Upgrade at plow.tools/upgrade.",
             3,
             output,
         )),
@@ -321,23 +327,23 @@ fn validate_license_status(
 }
 
 pub fn discover_sidecar(root: Option<&Path>) -> Result<PathBuf, String> {
-    if let Some(path) = env_non_empty("FALLOW_COV_BIN") {
+    if let Some(path) = env_non_empty("PLOW_COV_BIN") {
         let candidate = PathBuf::from(&path);
         if candidate.is_file() {
             return Ok(candidate);
         }
         return Err(format!(
-            "FALLOW_COV_BIN is set to {path} but no file exists there. Unset FALLOW_COV_BIN to fall back to sidecar auto-discovery, or point it at the fallow-cov binary."
+            "PLOW_COV_BIN is set to {path} but no file exists there. Unset PLOW_COV_BIN to fall back to sidecar auto-discovery, or point it at the plow-cov binary."
         ));
     }
 
-    if let Some(path) = env_non_empty("FALLOW_COV_BINARY_PATH") {
+    if let Some(path) = env_non_empty("PLOW_COV_BINARY_PATH") {
         let candidate = PathBuf::from(&path);
         if candidate.is_file() {
             return Ok(candidate);
         }
         return Err(format!(
-            "FALLOW_COV_BINARY_PATH is set to {path} but no file exists there. Unset FALLOW_COV_BINARY_PATH to fall back to sidecar auto-discovery, or point it at the fallow-cov binary."
+            "PLOW_COV_BINARY_PATH is set to {path} but no file exists there. Unset PLOW_COV_BINARY_PATH to fall back to sidecar auto-discovery, or point it at the plow-cov binary."
         ));
     }
 
@@ -362,7 +368,7 @@ pub fn discover_sidecar(root: Option<&Path>) -> Result<PathBuf, String> {
         return Ok(canonical);
     }
 
-    if let Some(path) = find_on_path("fallow-cov") {
+    if let Some(path) = find_on_path("plow-cov") {
         return Ok(path);
     }
 
@@ -381,13 +387,13 @@ fn env_non_empty(key: &str) -> Option<String> {
 }
 
 pub fn canonical_sidecar_path() -> PathBuf {
-    let home = fallow_license::user_home_dir().unwrap_or_else(|| PathBuf::from("."));
+    let home = plow_license::user_home_dir().unwrap_or_else(|| PathBuf::from("."));
     let binary = if cfg!(windows) {
-        "fallow-cov.exe"
+        "plow-cov.exe"
     } else {
-        "fallow-cov"
+        "plow-cov"
     };
-    home.join(".fallow").join("bin").join(binary)
+    home.join(".plow").join("bin").join(binary)
 }
 
 fn find_on_path(binary: &str) -> Option<PathBuf> {
@@ -425,19 +431,19 @@ fn find_project_local_sidecar(root: &Path) -> Option<PathBuf> {
     None
 }
 
-/// Walks up from `root` looking for a platform-specific `fallow-cov` binary
-/// inside a `node_modules/@fallow-cli/fallow-cov-<platform>/` subdirectory.
+/// Walks up from `root` looking for a platform-specific `plow-cov` binary
+/// inside a `node_modules/@plow-cli/plow-cov-<platform>/` subdirectory.
 ///
-/// After `npm install @fallow-cli/fallow-cov`, npm's `optionalDependencies`
+/// After `npm install @plow-cli/plow-cov`, npm's `optionalDependencies`
 /// plus os/cpu/libc filtering installs exactly one platform subpackage. Its
 /// binary is the one with an adjacent `.sig` file, which is required for
 /// signature verification before spawning. This lookup prefers that real
-/// binary over the Node wrapper at `node_modules/.bin/fallow-cov`.
+/// binary over the Node wrapper at `node_modules/.bin/plow-cov`.
 fn find_platform_package_sidecar(root: &Path) -> Option<PathBuf> {
     let binary_name = sidecar_binary_name();
     for ancestor in root.ancestors() {
-        let fallow_cli_dir = ancestor.join("node_modules").join("@fallow-cli");
-        if let Some(path) = find_scoped_platform_sidecar(&fallow_cli_dir, binary_name) {
+        let plow_cli_dir = ancestor.join("node_modules").join("@plow-cli");
+        if let Some(path) = find_scoped_platform_sidecar(&plow_cli_dir, binary_name) {
             return Some(path);
         }
 
@@ -451,14 +457,14 @@ fn find_platform_package_sidecar(root: &Path) -> Option<PathBuf> {
     None
 }
 
-fn find_scoped_platform_sidecar(fallow_cli_dir: &Path, binary_name: &str) -> Option<PathBuf> {
-    let entries = fs::read_dir(fallow_cli_dir).ok()?;
+fn find_scoped_platform_sidecar(plow_cli_dir: &Path, binary_name: &str) -> Option<PathBuf> {
+    let entries = fs::read_dir(plow_cli_dir).ok()?;
     for entry in entries.flatten() {
         let name = entry.file_name();
         let Some(name_str) = name.to_str() else {
             continue;
         };
-        if !name_str.starts_with("fallow-cov-") {
+        if !name_str.starts_with("plow-cov-") {
             continue;
         }
         let candidate = entry.path().join(binary_name);
@@ -479,11 +485,11 @@ fn find_package_store_platform_sidecar(node_modules: &Path, store_dir: &str) -> 
         let Some(name_str) = name.to_str() else {
             continue;
         };
-        if !name_str.starts_with("@fallow-cli+fallow-cov-") {
+        if !name_str.starts_with("@plow-cli+plow-cov-") {
             continue;
         }
 
-        let scoped_dir = entry.path().join("node_modules").join("@fallow-cli");
+        let scoped_dir = entry.path().join("node_modules").join("@plow-cli");
         if let Some(path) = find_scoped_platform_sidecar(&scoped_dir, binary_name) {
             candidates.push((sidecar_package_version_key(&path), path));
         }
@@ -523,9 +529,9 @@ fn parse_sidecar_version_key(version: &str) -> Vec<u64> {
 
 const fn sidecar_binary_name() -> &'static str {
     if cfg!(windows) {
-        "fallow-cov.exe"
+        "plow-cov.exe"
     } else {
-        "fallow-cov"
+        "plow-cov"
     }
 }
 
@@ -568,10 +574,10 @@ fn detect_package_manager_from_field(root: &Path) -> Option<LocalPackageManager>
 impl LocalPackageManager {
     const fn install_command(self) -> &'static str {
         match self {
-            Self::Npm => "npm install --save-dev @fallow-cli/fallow-cov",
-            Self::Pnpm => "pnpm add -D @fallow-cli/fallow-cov",
-            Self::Yarn => "yarn add -D @fallow-cli/fallow-cov",
-            Self::Bun => "bun add -d @fallow-cli/fallow-cov",
+            Self::Npm => "npm install --save-dev @plow-cli/plow-cov",
+            Self::Pnpm => "pnpm add -D @plow-cli/plow-cov",
+            Self::Yarn => "yarn add -D @plow-cli/plow-cov",
+            Self::Bun => "bun add -d @plow-cli/plow-cov",
         }
     }
 
@@ -592,7 +598,7 @@ impl LocalPackageManager {
             Self::Yarn => resolve_sidecar_via_command(
                 root,
                 OsStr::new("yarn"),
-                &["bin", "fallow-cov"],
+                &["bin", "plow-cov"],
                 PackageManagerOutput::BinaryPath,
             ),
             Self::Bun => resolve_sidecar_via_command(
@@ -673,9 +679,9 @@ fn normalize_package_manager_path(root: &Path, candidate: &str) -> PathBuf {
 
 fn project_local_sidecar_names() -> &'static [&'static str] {
     if cfg!(windows) {
-        &["fallow-cov.cmd", "fallow-cov.exe", "fallow-cov"]
+        &["plow-cov.cmd", "plow-cov.exe", "plow-cov"]
     } else {
-        &["fallow-cov"]
+        &["plow-cov"]
     }
 }
 
@@ -684,11 +690,11 @@ fn sidecar_missing_message(root: Option<&Path>) -> String {
         canonical_sidecar_path().display().to_string(),
         "PATH".to_owned(),
     ];
-    let mut install_example = "npm install --save-dev @fallow-cli/fallow-cov".to_owned();
+    let mut install_example = "npm install --save-dev @plow-cli/plow-cov".to_owned();
     if let Some(root) = root {
         checks.insert(
             0,
-            root.join("node_modules/.bin/fallow-cov")
+            root.join("node_modules/.bin/plow-cov")
                 .display()
                 .to_string(),
         );
@@ -700,7 +706,7 @@ fn sidecar_missing_message(root: Option<&Path>) -> String {
         }
     }
     format!(
-        "Sidecar binary fallow-cov not found. Checked {}. Install with your package manager (for example `{install_example}`) or set FALLOW_COV_BIN.",
+        "Sidecar binary plow-cov not found. Checked {}. Install with your package manager (for example `{install_example}`) or set PLOW_COV_BIN.",
         checks.join(", "),
     )
 }
@@ -708,9 +714,9 @@ fn sidecar_missing_message(root: Option<&Path>) -> String {
 impl LocalPackageManager {
     const fn lookup_hint(self) -> &'static str {
         match self {
-            Self::Npm => "`npm root` + `.bin/fallow-cov`",
+            Self::Npm => "`npm root` + `.bin/plow-cov`",
             Self::Pnpm => "`pnpm bin`",
-            Self::Yarn => "`yarn bin fallow-cov`",
+            Self::Yarn => "`yarn bin plow-cov`",
             Self::Bun => "`bun pm bin`",
         }
     }
@@ -852,7 +858,7 @@ fn build_static_files(
 /// Whether a module should contribute functions to the request.
 fn module_is_eligible(
     input: &RuntimeCoverageAnalysisInput<'_>,
-    module: &fallow_types::extract::ModuleInfo,
+    module: &plow_types::extract::ModuleInfo,
     path: &Path,
     relative: &Path,
 ) -> bool {
@@ -874,7 +880,7 @@ fn module_is_eligible(
 
 /// Per-function inputs threaded from `build_static_files` into `static_function`.
 struct BuildStaticFunctionInput<'a> {
-    function: &'a fallow_types::extract::FunctionComplexity,
+    function: &'a plow_types::extract::FunctionComplexity,
     path: &'a Path,
     canonical_path: Option<&'a Path>,
     static_signals: &'a StaticSignalIndex,
@@ -920,13 +926,13 @@ fn assemble_request(
 ) -> Request {
     Request {
         protocol_version: PROTOCOL_VERSION.to_owned(),
-        license: fallow_cov_protocol::License {
+        license: plow_cov_protocol::License {
             jwt: options.license_jwt.clone(),
         },
         project_root: project_root.to_string_lossy().into_owned(),
         coverage_sources,
         static_findings: StaticFindings { files },
-        options: fallow_cov_protocol::Options {
+        options: plow_cov_protocol::Options {
             include_hot_paths: true,
             min_invocations_for_hot: Some(options.min_invocations_hot),
             min_observation_volume: options.min_observation_volume,
@@ -941,9 +947,9 @@ fn assemble_request(
 }
 
 fn build_static_signal_index(
-    modules: &[fallow_types::extract::ModuleInfo],
-    analysis_output: &fallow_engine::DeadCodeAnalysisArtifacts,
-    file_paths: &FxHashMap<fallow_types::discover::FileId, &PathBuf>,
+    modules: &[plow_types::extract::ModuleInfo],
+    analysis_output: &plow_engine::DeadCodeAnalysisArtifacts,
+    file_paths: &FxHashMap<plow_types::discover::FileId, &PathBuf>,
 ) -> Result<StaticSignalIndex, String> {
     let graph = analysis_output
         .graph
@@ -956,7 +962,7 @@ fn build_static_signal_index(
         .iter()
         .map(|module| (module.file_id, module))
         .collect();
-    for export in fallow_engine::module_value_exports(graph) {
+    for export in plow_engine::module_value_exports(graph) {
         let Some(&path) = file_paths.get(&export.file_id) else {
             continue;
         };
@@ -974,7 +980,7 @@ fn build_static_signal_index(
 /// Seed the signal index with unused-file and unused-export dead-code signals.
 fn index_dead_code_signals(
     index: &mut StaticSignalIndex,
-    analysis_output: &fallow_engine::DeadCodeAnalysisArtifacts,
+    analysis_output: &plow_engine::DeadCodeAnalysisArtifacts,
 ) {
     for file in &analysis_output.results.unused_files {
         index.unused_files.insert(file.file.path.clone());
@@ -996,8 +1002,8 @@ fn index_dead_code_signals(
 /// Index one graph value export, including test-referenced state.
 fn index_graph_value_export(
     index: &mut StaticSignalIndex,
-    export: &fallow_engine::ModuleValueExport,
-    module: Option<&fallow_types::extract::ModuleInfo>,
+    export: &plow_engine::ModuleValueExport,
+    module: Option<&plow_types::extract::ModuleInfo>,
     path: &Path,
 ) {
     index
@@ -1008,7 +1014,7 @@ fn index_graph_value_export(
 
     if let Some(module) = module {
         let (line, _) =
-            fallow_types::extract::byte_offset_to_line_col(&module.line_offsets, export.span_start);
+            plow_types::extract::byte_offset_to_line_col(&module.line_offsets, export.span_start);
         index
             .exported_lines
             .entry(path.to_path_buf())
@@ -1032,7 +1038,7 @@ fn index_graph_value_export(
 
 fn function_static_used(
     path: &Path,
-    function: &fallow_types::extract::FunctionComplexity,
+    function: &plow_types::extract::FunctionComplexity,
     static_signals: &StaticSignalIndex,
 ) -> bool {
     if static_signals.unused_files.contains(path) {
@@ -1054,7 +1060,7 @@ fn function_static_used(
 fn function_test_covered(
     path: &Path,
     canonical_path: Option<&Path>,
-    function: &fallow_types::extract::FunctionComplexity,
+    function: &plow_types::extract::FunctionComplexity,
     static_signals: &StaticSignalIndex,
     istanbul_coverage: Option<&IstanbulCoverage>,
 ) -> bool {
@@ -1079,7 +1085,7 @@ fn function_test_covered(
 
 fn function_matches_export(
     path: &Path,
-    function: &fallow_types::extract::FunctionComplexity,
+    function: &plow_types::extract::FunctionComplexity,
     static_signals: &StaticSignalIndex,
 ) -> bool {
     static_signals
@@ -1222,11 +1228,11 @@ fn preprocess_v8_coverage_file(
 /// Split V8 scripts into source-map-remapped Istanbul functions and the
 /// residual scripts that had no usable source map.
 fn remap_dump_scripts(
-    scripts: Vec<fallow_v8_coverage::ScriptCoverage>,
+    scripts: Vec<plow_v8_coverage::ScriptCoverage>,
     cache: &BTreeMap<String, SourceMapCacheEntry>,
 ) -> (
     BTreeMap<PathBuf, BTreeMap<RemappedFnKey, AccumulatedFunction>>,
-    Vec<fallow_v8_coverage::ScriptCoverage>,
+    Vec<plow_v8_coverage::ScriptCoverage>,
 ) {
     let mut remapped_files: BTreeMap<PathBuf, BTreeMap<RemappedFnKey, AccumulatedFunction>> =
         BTreeMap::new();
@@ -1254,7 +1260,7 @@ fn remap_dump_scripts(
 fn write_residual_coverage(
     temp_root: &Path,
     index: usize,
-    residual_scripts: Vec<fallow_v8_coverage::ScriptCoverage>,
+    residual_scripts: Vec<plow_v8_coverage::ScriptCoverage>,
 ) -> Result<Option<PathBuf>, String> {
     if residual_scripts.is_empty() {
         return Ok(None);
@@ -1305,7 +1311,7 @@ fn ensure_temp_dir(temp_dir: &mut Option<TempDir>) -> Result<&Path, String> {
 }
 
 fn remap_script_with_source_map(
-    script: &fallow_v8_coverage::ScriptCoverage,
+    script: &plow_v8_coverage::ScriptCoverage,
     entry: &SourceMapCacheEntry,
 ) -> Option<RemappedScript> {
     let sourcemap = SourceMap::from_json(&entry.data.to_string()).ok()?;
@@ -1316,7 +1322,7 @@ fn remap_script_with_source_map(
             lookup: GeneratedOffsetLookup::new(source),
         },
         None => GeneratedPositionLookup::V8LineOffsets(
-            fallow_v8_coverage::LineOffsetTable::from_v8_line_lengths(&entry.line_lengths)?,
+            plow_v8_coverage::LineOffsetTable::from_v8_line_lengths(&entry.line_lengths)?,
         ),
     };
     let mut remapped = Vec::new();
@@ -1345,7 +1351,7 @@ fn remap_script_with_source_map(
     })
 }
 
-fn generated_source_for_script(script: &fallow_v8_coverage::ScriptCoverage) -> Option<String> {
+fn generated_source_for_script(script: &plow_v8_coverage::ScriptCoverage) -> Option<String> {
     if let Some(path) = file_url_to_path(&script.url)
         && let Ok(source) = fs::read_to_string(path)
     {
@@ -1372,8 +1378,8 @@ fn utf16_source_offset_to_byte_offset(source: &str, target_offset: u32) -> Optio
 }
 
 fn remap_function(
-    script: &fallow_v8_coverage::ScriptCoverage,
-    function: &fallow_v8_coverage::FunctionCoverage,
+    script: &plow_v8_coverage::ScriptCoverage,
+    function: &plow_v8_coverage::FunctionCoverage,
     entry: &SourceMapCacheEntry,
     sourcemap: &SourceMap,
     positions: &GeneratedPositionLookup<'_>,
@@ -1668,14 +1674,14 @@ fn verify_sidecar_signature(binary: &Path) -> Result<(), String> {
 
     let sig_bytes = fs::read(&sig_path).map_err(|err| {
         format!(
-            "Sidecar binary at {} is missing its signature file {}: {err}. The fallow CLI refuses to spawn an unsigned sidecar. Reinstall @fallow-cli/fallow-cov.",
+            "Sidecar binary at {} is missing its signature file {}: {err}. The plow CLI refuses to spawn an unsigned sidecar. Reinstall @plow-cli/plow-cov.",
             binary.display(),
             sig_path.display()
         )
     })?;
     let sig_array: [u8; 64] = sig_bytes.as_slice().try_into().map_err(|_| {
         format!(
-            "Sidecar signature file at {} is {} bytes; expected 64. Reinstall @fallow-cli/fallow-cov.",
+            "Sidecar signature file at {} is {} bytes; expected 64. Reinstall @plow-cli/plow-cov.",
             sig_path.display(),
             sig_bytes.len()
         )
@@ -1695,7 +1701,7 @@ fn verify_sidecar_signature(binary: &Path) -> Result<(), String> {
 
     key.verify(&binary_bytes, &signature).map_err(|err| {
         format!(
-            "Sidecar binary at {} failed Ed25519 signature verification: {err}. The .sig file does not match the fallow CLI's compiled-in binary-signing public key. Reinstall @fallow-cli/fallow-cov from npm, or if you are building from a pre-release fallow source, rebuild against the published fallow release.",
+            "Sidecar binary at {} failed Ed25519 signature verification: {err}. The .sig file does not match the plow CLI's compiled-in binary-signing public key. Reinstall @plow-cli/plow-cov from npm, or if you are building from a pre-release plow source, rebuild against the published plow release.",
             binary.display()
         )
     })?;
@@ -1775,7 +1781,7 @@ fn write_sidecar_request(
     Ok(())
 }
 
-/// Map the sidecar's exit code onto fallow's exit-code ladder.
+/// Map the sidecar's exit code onto plow's exit-code ladder.
 fn check_sidecar_exit_status(
     output_data: &std::process::Output,
     output: OutputFormat,
@@ -1816,12 +1822,12 @@ fn check_response_protocol(response: &Response, output: OutputFormat) -> Result<
     if response_major != supported_major {
         let message = if response_major > supported_major {
             format!(
-                "sidecar emits protocol v{}; this fallow supports up to v{}. Upgrade fallow.",
+                "sidecar emits protocol v{}; this plow supports up to v{}. Upgrade plow.",
                 response.protocol_version, PROTOCOL_VERSION
             )
         } else {
             format!(
-                "sidecar emits protocol v{}; this fallow requires v{}+. Upgrade @fallow-cli/fallow-cov.",
+                "sidecar emits protocol v{}; this plow requires v{}+. Upgrade @plow-cli/plow-cov.",
                 response.protocol_version, PROTOCOL_VERSION
             )
         };
@@ -1938,9 +1944,9 @@ fn convert_response(
     }
 }
 
-/// Confidence-table defaults the sidecar (`fallow-cov`) applies when the
+/// Confidence-table defaults the sidecar (`plow-cov`) applies when the
 /// corresponding option is unset. Kept in sync with
-/// `fallow-cov/src/analysis.rs` (`MIN_OBSERVATION_VOLUME_DEFAULT`,
+/// `plow-cov/src/analysis.rs` (`MIN_OBSERVATION_VOLUME_DEFAULT`,
 /// `LOW_TRAFFIC_THRESHOLD_DEFAULT`); the sidecar lives in a separate repo so the
 /// values are mirrored here, not imported. They are resolved CLI-side only to
 /// report them in the discriminator block (#321); the sidecar still owns the
@@ -2056,10 +2062,10 @@ fn map_runtime_hot_paths(entries: Vec<ProtocolHotPath>) -> Vec<RuntimeCoverageHo
 
 fn map_runtime_blast_radius(
     entries: Vec<ProtocolBlastRadiusEntry>,
-) -> Vec<fallow_output::RuntimeCoverageBlastRadiusEntry> {
+) -> Vec<plow_output::RuntimeCoverageBlastRadiusEntry> {
     let mut blast_radius = entries
         .into_iter()
-        .map(|entry| fallow_output::RuntimeCoverageBlastRadiusEntry {
+        .map(|entry| plow_output::RuntimeCoverageBlastRadiusEntry {
             id: entry.id,
             stable_id: entry.identity.map(|identity| identity.stable_id),
             file: PathBuf::from(entry.file),
@@ -2088,10 +2094,10 @@ fn map_runtime_blast_radius(
 
 fn map_runtime_importance(
     entries: Vec<ProtocolImportanceEntry>,
-) -> Vec<fallow_output::RuntimeCoverageImportanceEntry> {
+) -> Vec<plow_output::RuntimeCoverageImportanceEntry> {
     let mut importance = entries
         .into_iter()
-        .map(|entry| fallow_output::RuntimeCoverageImportanceEntry {
+        .map(|entry| plow_output::RuntimeCoverageImportanceEntry {
             id: entry.id,
             stable_id: entry.identity.map(|identity| identity.stable_id),
             file: PathBuf::from(entry.file),
@@ -2192,8 +2198,8 @@ fn map_watermark(watermark: &Watermark) -> RuntimeCoverageWatermark {
     }
 }
 
-fn map_capture_quality(quality: &CaptureQuality) -> fallow_output::RuntimeCoverageCaptureQuality {
-    fallow_output::RuntimeCoverageCaptureQuality {
+fn map_capture_quality(quality: &CaptureQuality) -> plow_output::RuntimeCoverageCaptureQuality {
+    plow_output::RuntimeCoverageCaptureQuality {
         window_seconds: quality.window_seconds,
         instances_observed: quality.instances_observed,
         lazy_parse_warning: quality.lazy_parse_warning,
@@ -2219,20 +2225,20 @@ mod tests {
         AccumulatedFunction, BINARY_SIGNING_VERIFY_KEY, PackageManagerOutput, RemappedFnKey,
         RemappedFunction, RuntimeCoverageAnalysisInput, StaticFunctionInput, StaticSignalIndex,
         build_request, build_static_signal_index, convert_response, discover_sidecar,
-        looks_like_istanbul, merge_remapped_functions, path_binary_candidates,
-        prepare_coverage_sources, resolve_original_source_path, resolve_sidecar_from_output,
-        resolve_sidecar_via_command, sidecar_binary_name, static_function, tracking_state_label,
-        verify_sidecar_signature, write_istanbul_coverage_file,
+        function_identity_id, looks_like_istanbul, merge_remapped_functions,
+        path_binary_candidates, prepare_coverage_sources, resolve_original_source_path,
+        resolve_sidecar_from_output, resolve_sidecar_via_command, sidecar_binary_name,
+        static_function, tracking_state_label, verify_sidecar_signature,
+        write_istanbul_coverage_file,
     };
-    use fallow_config::{FallowConfig, OutputFormat};
-    use fallow_cov_protocol::{
-        Confidence, CoverageSource, DiagnosticMessage, Evidence, Finding, FunctionIdentity,
-        HotPath, IdentityResolution, PROTOCOL_VERSION, ReportVerdict, Response, Summary, Verdict,
-        function_identity_id,
-    };
-    use fallow_engine::RuntimeCoverageOptions;
     use globset::{Glob, GlobSetBuilder};
     use oxc_coverage_instrument::{Location, Position};
+    use plow_config::{OutputFormat, PlowConfig};
+    use plow_cov_protocol::{
+        Confidence, CoverageSource, DiagnosticMessage, Evidence, Finding, FunctionIdentity,
+        HotPath, IdentityResolution, PROTOCOL_VERSION, ReportVerdict, Response, Summary, Verdict,
+    };
+    use plow_engine::RuntimeCoverageOptions;
     use rustc_hash::{FxHashMap, FxHashSet};
     use std::collections::BTreeMap;
     use std::path::Path;
@@ -2240,9 +2246,9 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
     use url::Url;
 
-    fn empty_analysis_output() -> fallow_engine::DeadCodeAnalysisArtifacts {
-        fallow_engine::DeadCodeAnalysisArtifacts {
-            results: fallow_types::results::AnalysisResults::default(),
+    fn empty_analysis_output() -> plow_engine::DeadCodeAnalysisArtifacts {
+        plow_engine::DeadCodeAnalysisArtifacts {
+            results: plow_types::results::AnalysisResults::default(),
             timings: None,
             graph: None,
             modules: None,
@@ -2271,7 +2277,7 @@ mod tests {
     fn binary_signing_verify_key_must_not_be_placeholder() {
         assert_ne!(
             BINARY_SIGNING_VERIFY_KEY, [0u8; 32],
-            "BINARY_SIGNING_VERIFY_KEY is the all-zeros placeholder. Generate a real keypair per fallow-cloud/decisions/008-sidecar-key-rotation.md and paste the public bytes here before cutting a release."
+            "BINARY_SIGNING_VERIFY_KEY is the all-zeros placeholder. Generate a real keypair per plow-cloud/decisions/008-sidecar-key-rotation.md and paste the public bytes here before cutting a release."
         );
     }
 
@@ -2305,7 +2311,7 @@ mod tests {
     fn verify_sidecar_signature_rejects_missing_sig_file() {
         let root = make_temp_dir("cov-sig-missing");
         std::fs::create_dir_all(&root).expect("create temp dir");
-        let binary = root.join("fallow-cov");
+        let binary = root.join("plow-cov");
         std::fs::write(&binary, b"not a real binary").expect("write binary");
 
         let err = verify_sidecar_signature(&binary).expect_err("missing .sig must fail");
@@ -2314,7 +2320,7 @@ mod tests {
             "error message missing expected guidance: {err}"
         );
         assert!(
-            err.contains("Reinstall @fallow-cli/fallow-cov"),
+            err.contains("Reinstall @plow-cli/plow-cov"),
             "error message missing reinstall hint: {err}"
         );
 
@@ -2325,7 +2331,7 @@ mod tests {
     fn verify_sidecar_signature_rejects_wrong_length_sig() {
         let root = make_temp_dir("cov-sig-wrong-length");
         std::fs::create_dir_all(&root).expect("create temp dir");
-        let binary = root.join("fallow-cov");
+        let binary = root.join("plow-cov");
         std::fs::write(&binary, b"not a real binary").expect("write binary");
         let sig_path = {
             let mut path = binary.as_os_str().to_os_string();
@@ -2347,7 +2353,7 @@ mod tests {
     fn verify_sidecar_signature_rejects_bad_signature() {
         let root = make_temp_dir("cov-sig-bad");
         std::fs::create_dir_all(&root).expect("create temp dir");
-        let binary = root.join("fallow-cov");
+        let binary = root.join("plow-cov");
         std::fs::write(&binary, b"not a real binary").expect("write binary");
         let sig_path = {
             let mut path = binary.as_os_str().to_os_string();
@@ -2506,9 +2512,9 @@ mod tests {
         std::fs::create_dir_all(&bin_dir)
             .unwrap_or_else(|err| panic!("failed to create {}: {err}", bin_dir.display()));
         let sidecar = if cfg!(windows) {
-            bin_dir.join("fallow-cov.cmd")
+            bin_dir.join("plow-cov.cmd")
         } else {
-            bin_dir.join("fallow-cov")
+            bin_dir.join("plow-cov")
         };
         std::fs::write(&sidecar, "")
             .unwrap_or_else(|err| panic!("failed to write {}: {err}", sidecar.display()));
@@ -2527,8 +2533,8 @@ mod tests {
         let root = make_temp_dir("sidecar-platform-pkg");
         let platform_dir = root
             .join("node_modules")
-            .join("@fallow-cli")
-            .join("fallow-cov-darwin-arm64");
+            .join("@plow-cli")
+            .join("plow-cov-darwin-arm64");
         let bin_dir = root.join("node_modules").join(".bin");
         std::fs::create_dir_all(&platform_dir)
             .unwrap_or_else(|err| panic!("failed to create {}: {err}", platform_dir.display()));
@@ -2536,15 +2542,15 @@ mod tests {
             .unwrap_or_else(|err| panic!("failed to create {}: {err}", bin_dir.display()));
 
         let binary_name = if cfg!(windows) {
-            "fallow-cov.exe"
+            "plow-cov.exe"
         } else {
-            "fallow-cov"
+            "plow-cov"
         };
         let real_binary = platform_dir.join(binary_name);
         let wrapper = if cfg!(windows) {
-            bin_dir.join("fallow-cov.cmd")
+            bin_dir.join("plow-cov.cmd")
         } else {
-            bin_dir.join("fallow-cov")
+            bin_dir.join("plow-cov")
         };
         std::fs::write(&real_binary, "")
             .unwrap_or_else(|err| panic!("failed to write {}: {err}", real_binary.display()));
@@ -2569,10 +2575,10 @@ mod tests {
         let platform_dir = root
             .join("node_modules")
             .join(".bun")
-            .join("@fallow-cli+fallow-cov-darwin-arm64@0.1.8")
+            .join("@plow-cli+plow-cov-darwin-arm64@0.1.8")
             .join("node_modules")
-            .join("@fallow-cli")
-            .join("fallow-cov-darwin-arm64");
+            .join("@plow-cli")
+            .join("plow-cov-darwin-arm64");
         let bin_dir = root.join("node_modules").join(".bin");
         std::fs::create_dir_all(&platform_dir)
             .unwrap_or_else(|err| panic!("failed to create {}: {err}", platform_dir.display()));
@@ -2581,9 +2587,9 @@ mod tests {
 
         let real_binary = platform_dir.join(sidecar_binary_name());
         let wrapper = if cfg!(windows) {
-            bin_dir.join("fallow-cov.cmd")
+            bin_dir.join("plow-cov.cmd")
         } else {
-            bin_dir.join("fallow-cov")
+            bin_dir.join("plow-cov")
         };
         std::fs::write(&real_binary, "")
             .unwrap_or_else(|err| panic!("failed to write {}: {err}", real_binary.display()));
@@ -2626,10 +2632,10 @@ mod tests {
         let platform_dir = root
             .join("node_modules")
             .join(".pnpm")
-            .join("@fallow-cli+fallow-cov-darwin-arm64@0.1.8_abcd1234efgh5678")
+            .join("@plow-cli+plow-cov-darwin-arm64@0.1.8_abcd1234efgh5678")
             .join("node_modules")
-            .join("@fallow-cli")
-            .join("fallow-cov-darwin-arm64");
+            .join("@plow-cli")
+            .join("plow-cov-darwin-arm64");
         let bin_dir = root.join("node_modules").join(".bin");
         std::fs::create_dir_all(&platform_dir)
             .unwrap_or_else(|err| panic!("failed to create {}: {err}", platform_dir.display()));
@@ -2638,9 +2644,9 @@ mod tests {
 
         let real_binary = platform_dir.join(sidecar_binary_name());
         let wrapper = if cfg!(windows) {
-            bin_dir.join("fallow-cov.cmd")
+            bin_dir.join("plow-cov.cmd")
         } else {
-            bin_dir.join("fallow-cov")
+            bin_dir.join("plow-cov")
         };
         std::fs::write(&real_binary, "")
             .unwrap_or_else(|err| panic!("failed to write {}: {err}", real_binary.display()));
@@ -2658,15 +2664,12 @@ mod tests {
 
     #[test]
     fn path_binary_candidates_include_windows_cmd_shims() {
-        let candidates = path_binary_candidates("fallow-cov");
+        let candidates = path_binary_candidates("plow-cov");
 
         if cfg!(windows) {
-            assert_eq!(
-                candidates,
-                vec!["fallow-cov", "fallow-cov.exe", "fallow-cov.cmd"]
-            );
+            assert_eq!(candidates, vec!["plow-cov", "plow-cov.exe", "plow-cov.cmd"]);
         } else {
-            assert_eq!(candidates, vec!["fallow-cov"]);
+            assert_eq!(candidates, vec!["plow-cov"]);
         }
     }
 
@@ -2692,10 +2695,10 @@ mod tests {
     #[test]
     fn scoped_platform_sidecar_ignores_unusable_package_dirs() {
         let root = make_temp_dir("sidecar-scoped-ignore");
-        let scoped = root.join("node_modules").join("@fallow-cli");
-        std::fs::create_dir_all(scoped.join("fallow-cov-darwin-arm64"))
+        let scoped = root.join("node_modules").join("@plow-cli");
+        std::fs::create_dir_all(scoped.join("plow-cov-darwin-arm64"))
             .unwrap_or_else(|err| panic!("failed to create scoped package: {err}"));
-        std::fs::create_dir_all(scoped.join("not-fallow-cov"))
+        std::fs::create_dir_all(scoped.join("not-plow-cov"))
             .unwrap_or_else(|err| panic!("failed to create unrelated package: {err}"));
 
         assert_eq!(
@@ -2793,10 +2796,10 @@ mod tests {
         let store = node_modules.join(".pnpm");
         for version in ["0.1.4", "0.1.8"] {
             let package_dir = store
-                .join(format!("@fallow-cli+fallow-cov-darwin-arm64@{version}"))
+                .join(format!("@plow-cli+plow-cov-darwin-arm64@{version}"))
                 .join("node_modules")
-                .join("@fallow-cli")
-                .join("fallow-cov-darwin-arm64");
+                .join("@plow-cli")
+                .join("plow-cov-darwin-arm64");
             std::fs::create_dir_all(&package_dir)
                 .unwrap_or_else(|err| panic!("failed to create {}: {err}", package_dir.display()));
             std::fs::write(
@@ -2823,21 +2826,21 @@ mod tests {
         let unplugged_dir = root
             .join(".yarn")
             .join("unplugged")
-            .join("fallow-cov")
+            .join("plow-cov")
             .join("node_modules")
             .join(".bin");
         std::fs::create_dir_all(&unplugged_dir)
             .unwrap_or_else(|err| panic!("failed to create {}: {err}", unplugged_dir.display()));
 
         let sidecar = if cfg!(windows) {
-            unplugged_dir.join("fallow-cov.cmd")
+            unplugged_dir.join("plow-cov.cmd")
         } else {
-            unplugged_dir.join("fallow-cov")
+            unplugged_dir.join("plow-cov")
         };
         std::fs::write(&sidecar, "")
             .unwrap_or_else(|err| panic!("failed to write {}: {err}", sidecar.display()));
 
-        // `yarn bin fallow-cov` prints the absolute sidecar path on its last
+        // `yarn bin plow-cov` prints the absolute sidecar path on its last
         // line. Parse that output directly instead of spawning yarn, which
         // flaked under the instrumented coverage run.
         let stdout = format!("{}\n", sidecar.display());
@@ -2859,9 +2862,9 @@ mod tests {
             .unwrap_or_else(|err| panic!("failed to create {}: {err}", bin_dir.display()));
 
         let sidecar = if cfg!(windows) {
-            bin_dir.join("fallow-cov.cmd")
+            bin_dir.join("plow-cov.cmd")
         } else {
-            bin_dir.join("fallow-cov")
+            bin_dir.join("plow-cov")
         };
         std::fs::write(&sidecar, "")
             .unwrap_or_else(|err| panic!("failed to write {}: {err}", sidecar.display()));
@@ -2888,7 +2891,7 @@ mod tests {
 
         let resolved = resolve_sidecar_via_command(
             &root,
-            std::ffi::OsStr::new("definitely-not-fallow-cov-manager"),
+            std::ffi::OsStr::new("definitely-not-plow-cov-manager"),
             &["bin"],
             PackageManagerOutput::BinDir,
         );
@@ -2901,13 +2904,13 @@ mod tests {
 
     #[test]
     fn parse_source_map_cache_rejects_missing_or_malformed_cache() {
-        let missing = fallow_v8_coverage::V8CoverageDump {
+        let missing = plow_v8_coverage::V8CoverageDump {
             result: Vec::new(),
             source_map_cache: None,
         };
         assert!(super::parse_source_map_cache(&missing).is_none());
 
-        let malformed = fallow_v8_coverage::V8CoverageDump {
+        let malformed = plow_v8_coverage::V8CoverageDump {
             result: Vec::new(),
             source_map_cache: Some(serde_json::json!("not a cache object")),
         };
@@ -2973,7 +2976,7 @@ mod tests {
         assert_eq!(value["start_line"], 42);
         assert_eq!(value["end_line"], 50);
         assert_eq!(value["identity"]["resolution"], "unresolved");
-        assert_eq!(value["identity"]["stable_id"], "fallow:fn:cb4482d6aef7c79a");
+        assert_eq!(value["identity"]["stable_id"], "plow:fn:cb4482d6aef7c79a");
         assert_eq!(value["identity"]["source_hash"], "0123456789abcdef");
         assert!(value["identity"].get("start_column").is_none());
     }
@@ -2984,7 +2987,7 @@ mod tests {
     /// wire reprs). `identity` lets a test exercise the v2 join-key threading.
     fn proto_finding(identity: Option<&FunctionIdentity>) -> Finding {
         serde_json::from_value(serde_json::json!({
-            "id": "fallow:prod:abc12345",
+            "id": "plow:prod:abc12345",
             "file": "src/app.ts",
             "function": "alpha",
             "line": 8,
@@ -3008,7 +3011,7 @@ mod tests {
 
     fn proto_hot_path() -> HotPath {
         serde_json::from_value(serde_json::json!({
-            "id": "fallow:hot:def67890",
+            "id": "plow:hot:def67890",
             "file": "src/app.ts",
             "function": "alpha",
             "line": 8,
@@ -3122,14 +3125,14 @@ mod tests {
             0.001,
         );
 
-        assert_eq!(report.findings[0].id, "fallow:prod:abc12345");
+        assert_eq!(report.findings[0].id, "plow:prod:abc12345");
         assert_eq!(report.findings[0].line, 8);
         assert_eq!(
             report.findings[0].verdict,
-            fallow_output::RuntimeCoverageVerdict::ReviewRequired,
+            plow_output::RuntimeCoverageVerdict::ReviewRequired,
         );
         assert_eq!(report.findings[0].evidence.static_status, "used");
-        assert_eq!(report.hot_paths[0].id, "fallow:hot:def67890");
+        assert_eq!(report.hot_paths[0].id, "plow:hot:def67890");
         assert_eq!(report.hot_paths[0].percentile, 50);
 
         // #321: the merge pipeline emits a discriminator block that reproduces
@@ -3154,7 +3157,7 @@ mod tests {
         assert_eq!(report.actionability_verdict, None);
         assert_eq!(
             report.provenance.data_source,
-            fallow_output::RuntimeCoverageDataSource::Local,
+            plow_output::RuntimeCoverageDataSource::Local,
         );
         assert_eq!(report.provenance.is_production, "unknown");
         assert_eq!(report.provenance.freshness_days, Some(0));
@@ -3296,15 +3299,15 @@ mod tests {
         )
         .unwrap_or_else(|err| panic!("failed to write app.test.ts: {err}"));
 
-        let parsed = fallow_engine::AnalysisSession::from_resolved_config(
-            FallowConfig::default().resolve(root.clone(), OutputFormat::Json, 1, true, true, None),
+        let parsed = plow_engine::AnalysisSession::from_resolved_config(
+            PlowConfig::default().resolve(root.clone(), OutputFormat::Json, 1, true, true, None),
         )
         .into_parsed_parts(true);
         let config = parsed.config;
         let files = parsed.files;
         let modules = parsed.modules;
         let file_paths: FxHashMap<_, _> = files.iter().map(|file| (file.id, &file.path)).collect();
-        let analysis_output = fallow_engine::analyze_with_parse_result(&config, &modules)
+        let analysis_output = plow_engine::analyze_with_parse_result(&config, &modules)
             .unwrap_or_else(|err| panic!("failed to analyze temp project: {err}"));
         let static_signals = build_static_signal_index(&modules, &analysis_output, &file_paths)
             .unwrap_or_else(|err| panic!("failed to build static signal index: {err}"));
@@ -3429,8 +3432,8 @@ mod tests {
         )
         .unwrap_or_else(|err| panic!("failed to write other.ts: {err}"));
 
-        let parsed = fallow_engine::AnalysisSession::from_resolved_config(
-            FallowConfig::default().resolve(root.clone(), OutputFormat::Json, 1, true, true, None),
+        let parsed = plow_engine::AnalysisSession::from_resolved_config(
+            PlowConfig::default().resolve(root.clone(), OutputFormat::Json, 1, true, true, None),
         )
         .into_parsed_parts(true);
         let files = parsed.files;
@@ -3987,7 +3990,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_else(|err| panic!("clock went backwards: {err}"))
             .as_nanos();
-        std::env::temp_dir().join(format!("fallow-cli-{name}-{}-{nanos}", std::process::id()))
+        std::env::temp_dir().join(format!("plow-cli-{name}-{}-{nanos}", std::process::id()))
     }
 
     fn file_url(path: &Path) -> String {
@@ -4009,7 +4012,7 @@ mod tests {
         }
     }
 
-    fn script_coverage_with_url(url: &str) -> fallow_v8_coverage::ScriptCoverage {
+    fn script_coverage_with_url(url: &str) -> plow_v8_coverage::ScriptCoverage {
         serde_json::from_value(serde_json::json!({
             "scriptId": "1",
             "url": url,
@@ -4020,15 +4023,15 @@ mod tests {
 
     fn write_bun_store_sidecar(store: &Path, version: &str) -> PathBuf {
         let platform_dir = store
-            .join(format!("@fallow-cli+fallow-cov-darwin-arm64@{version}"))
+            .join(format!("@plow-cli+plow-cov-darwin-arm64@{version}"))
             .join("node_modules")
-            .join("@fallow-cli")
-            .join("fallow-cov-darwin-arm64");
+            .join("@plow-cli")
+            .join("plow-cov-darwin-arm64");
         std::fs::create_dir_all(&platform_dir)
             .unwrap_or_else(|err| panic!("failed to create {}: {err}", platform_dir.display()));
         std::fs::write(
             platform_dir.join("package.json"),
-            format!(r#"{{"name":"@fallow-cli/fallow-cov-darwin-arm64","version":"{version}"}}"#),
+            format!(r#"{{"name":"@plow-cli/plow-cov-darwin-arm64","version":"{version}"}}"#),
         )
         .unwrap_or_else(|err| {
             panic!(
@@ -4058,26 +4061,26 @@ mod tests {
     fn sidecar_package_version_key_reads_sibling_package_json() {
         let dir = tempfile::tempdir().expect("tempdir");
         std::fs::write(dir.path().join("package.json"), r#"{"version":"3.4.5"}"#).unwrap();
-        let binary = dir.path().join("fallow-cov");
+        let binary = dir.path().join("plow-cov");
         assert_eq!(super::sidecar_package_version_key(&binary), vec![3, 4, 5]);
 
         // No package.json next to the binary -> empty key, never a panic.
         let bare = tempfile::tempdir().expect("tempdir");
-        assert!(super::sidecar_package_version_key(&bare.path().join("fallow-cov")).is_empty());
+        assert!(super::sidecar_package_version_key(&bare.path().join("plow-cov")).is_empty());
     }
 
     #[test]
     fn normalize_package_manager_path_joins_relative_against_root() {
         let root = Path::new("/proj");
         assert_eq!(
-            super::normalize_package_manager_path(root, "node_modules/.bin/fallow-cov"),
-            PathBuf::from("/proj/node_modules/.bin/fallow-cov")
+            super::normalize_package_manager_path(root, "node_modules/.bin/plow-cov"),
+            PathBuf::from("/proj/node_modules/.bin/plow-cov")
         );
         // Absolute candidates are returned unchanged.
         let abs = if cfg!(windows) {
-            "C:\\tools\\fallow-cov"
+            "C:\\tools\\plow-cov"
         } else {
-            "/tools/fallow-cov"
+            "/tools/plow-cov"
         };
         assert_eq!(
             super::normalize_package_manager_path(root, abs),
@@ -4089,7 +4092,7 @@ mod tests {
     fn project_local_sidecar_names_include_the_bare_binary() {
         let names = super::project_local_sidecar_names();
         assert!(!names.is_empty());
-        assert!(names.contains(&"fallow-cov"));
+        assert!(names.contains(&"plow-cov"));
     }
 
     #[test]
@@ -4097,8 +4100,8 @@ mod tests {
         // Without a project root: canonical path, PATH, and the default npm hint.
         let generic = super::sidecar_missing_message(None);
         assert!(generic.contains("PATH"), "got: {generic}");
-        assert!(generic.contains("npm install --save-dev @fallow-cli/fallow-cov"));
-        assert!(generic.contains("FALLOW_COV_BIN"));
+        assert!(generic.contains("npm install --save-dev @plow-cli/plow-cov"));
+        assert!(generic.contains("PLOW_COV_BIN"));
 
         // With a pnpm project root: the node_modules bin path and a pnpm hint.
         let dir = tempfile::tempdir().expect("tempdir");
@@ -4109,7 +4112,7 @@ mod tests {
         .unwrap();
         let scoped = super::sidecar_missing_message(Some(dir.path()));
         assert!(
-            scoped.contains("node_modules/.bin/fallow-cov"),
+            scoped.contains("node_modules/.bin/plow-cov"),
             "got: {scoped}"
         );
         assert!(scoped.contains("pnpm"), "pnpm hint missing: {scoped}");
@@ -4122,29 +4125,29 @@ mod tests {
                 "npm",
                 r#"{"name":"p","packageManager":"npm@10.0.0"}"#,
                 "package-lock.json",
-                "`npm root` + `.bin/fallow-cov`",
-                "npm install --save-dev @fallow-cli/fallow-cov",
+                "`npm root` + `.bin/plow-cov`",
+                "npm install --save-dev @plow-cli/plow-cov",
             ),
             (
                 "pnpm",
                 r#"{"name":"p","packageManager":"pnpm@9.0.0"}"#,
                 "pnpm-lock.yaml",
                 "`pnpm bin`",
-                "pnpm add -D @fallow-cli/fallow-cov",
+                "pnpm add -D @plow-cli/plow-cov",
             ),
             (
                 "yarn",
                 r#"{"name":"p","packageManager":"yarn@4.0.0"}"#,
                 "yarn.lock",
-                "`yarn bin fallow-cov`",
-                "yarn add -D @fallow-cli/fallow-cov",
+                "`yarn bin plow-cov`",
+                "yarn add -D @plow-cli/plow-cov",
             ),
             (
                 "bun",
                 r#"{"name":"p","packageManager":"bun@1.2.0"}"#,
                 "bun.lock",
                 "`bun pm bin`",
-                "bun add -d @fallow-cli/fallow-cov",
+                "bun add -d @plow-cli/plow-cov",
             ),
         ] {
             let dir = tempfile::tempdir().expect("tempdir");
@@ -4156,7 +4159,7 @@ mod tests {
             let message = super::sidecar_missing_message(Some(dir.path()));
 
             assert!(
-                message.contains("node_modules/.bin/fallow-cov"),
+                message.contains("node_modules/.bin/plow-cov"),
                 "{name} message should list project-local bin path: {message}"
             );
             assert!(
@@ -4210,22 +4213,22 @@ mod tests {
         for (manager, install, hint) in [
             (
                 super::LocalPackageManager::Npm,
-                "npm install --save-dev @fallow-cli/fallow-cov",
-                "`npm root` + `.bin/fallow-cov`",
+                "npm install --save-dev @plow-cli/plow-cov",
+                "`npm root` + `.bin/plow-cov`",
             ),
             (
                 super::LocalPackageManager::Pnpm,
-                "pnpm add -D @fallow-cli/fallow-cov",
+                "pnpm add -D @plow-cli/plow-cov",
                 "`pnpm bin`",
             ),
             (
                 super::LocalPackageManager::Yarn,
-                "yarn add -D @fallow-cli/fallow-cov",
-                "`yarn bin fallow-cov`",
+                "yarn add -D @plow-cli/plow-cov",
+                "`yarn bin plow-cov`",
             ),
             (
                 super::LocalPackageManager::Bun,
-                "bun add -d @fallow-cli/fallow-cov",
+                "bun add -d @plow-cli/plow-cov",
                 "`bun pm bin`",
             ),
         ] {

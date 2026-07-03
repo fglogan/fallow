@@ -13,7 +13,7 @@ pub(super) struct GlobalHealthThresholds {
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct AppliedHealthThresholds {
-    pub(super) effective: fallow_output::HealthEffectiveThresholds,
+    pub(super) effective: plow_output::HealthEffectiveThresholds,
     pub(super) override_index: Option<usize>,
 }
 
@@ -21,13 +21,13 @@ pub(super) struct CompiledThresholdOverride {
     index: usize,
     matchers: globset::GlobSet,
     functions: Vec<String>,
-    configured: fallow_output::HealthConfiguredThresholds,
+    configured: plow_output::HealthConfiguredThresholds,
     reason: Option<String>,
 }
 
 pub(super) struct ThresholdOverrideMatch<'a> {
     entry: &'a CompiledThresholdOverride,
-    effective: fallow_output::HealthEffectiveThresholds,
+    effective: plow_output::HealthEffectiveThresholds,
 }
 
 pub(super) struct ThresholdOverrideResolver {
@@ -38,7 +38,7 @@ pub(super) struct ThresholdOverrideResolver {
 impl ThresholdOverrideResolver {
     #[must_use]
     pub(super) fn new(
-        overrides: &[fallow_config::HealthThresholdOverride],
+        overrides: &[plow_config::HealthThresholdOverride],
         global: GlobalHealthThresholds,
     ) -> Self {
         let entries = overrides
@@ -57,7 +57,7 @@ impl ThresholdOverrideResolver {
                         .build()
                         .unwrap_or_else(|_| globset::GlobSet::empty()),
                     functions: override_entry.functions.clone(),
-                    configured: fallow_output::HealthConfiguredThresholds {
+                    configured: plow_output::HealthConfiguredThresholds {
                         max_cyclomatic: override_entry.max_cyclomatic,
                         max_cognitive: override_entry.max_cognitive,
                         max_crap: override_entry.max_crap,
@@ -75,7 +75,7 @@ impl ThresholdOverrideResolver {
         relative: &Path,
         function: &str,
     ) -> (AppliedHealthThresholds, Vec<ThresholdOverrideMatch<'_>>) {
-        let mut effective = fallow_output::HealthEffectiveThresholds {
+        let mut effective = plow_output::HealthEffectiveThresholds {
             max_cyclomatic: self.global.cyclomatic,
             max_cognitive: self.global.cognitive,
             max_crap: self.global.crap,
@@ -145,7 +145,7 @@ pub(super) struct MeasuredThresholdMetrics {
 pub(super) struct ThresholdOverrideStateTracker {
     matched_indexes: FxHashSet<usize>,
     seen: FxHashSet<ThresholdOverrideStateKey>,
-    states: Vec<fallow_output::ThresholdOverrideState>,
+    states: Vec<plow_output::ThresholdOverrideState>,
 }
 
 impl ThresholdOverrideStateTracker {
@@ -182,9 +182,9 @@ impl ThresholdOverrideStateTracker {
                     .max_cognitive
                     .is_some_and(|threshold| cognitive > threshold);
             let status = if global_exceeded && !local_exceeded {
-                fallow_output::ThresholdOverrideStatus::Active
+                plow_output::ThresholdOverrideStatus::Active
             } else if !global_exceeded {
-                fallow_output::ThresholdOverrideStatus::Stale
+                plow_output::ThresholdOverrideStatus::Stale
             } else {
                 continue;
             };
@@ -195,7 +195,7 @@ impl ThresholdOverrideStateTracker {
                 function: Some(function.to_string()),
                 configured_thresholds: configured,
                 effective_thresholds: matched.effective,
-                metrics: Some(fallow_output::ThresholdOverrideMetrics {
+                metrics: Some(plow_output::ThresholdOverrideMetrics {
                     cyclomatic,
                     cognitive,
                     crap: None,
@@ -220,9 +220,9 @@ impl ThresholdOverrideStateTracker {
                 continue;
             };
             let status = if metrics.crap >= global.crap && metrics.crap < max_crap {
-                fallow_output::ThresholdOverrideStatus::Active
+                plow_output::ThresholdOverrideStatus::Active
             } else if metrics.crap < global.crap {
-                fallow_output::ThresholdOverrideStatus::Stale
+                plow_output::ThresholdOverrideStatus::Stale
             } else {
                 continue;
             };
@@ -233,7 +233,7 @@ impl ThresholdOverrideStateTracker {
                 function: Some(function.to_string()),
                 configured_thresholds: matched.entry.configured,
                 effective_thresholds: matched.effective,
-                metrics: Some(fallow_output::ThresholdOverrideMetrics {
+                metrics: Some(plow_output::ThresholdOverrideMetrics {
                     cyclomatic: metrics.cyclomatic,
                     cognitive: metrics.cognitive,
                     crap: Some(metrics.crap),
@@ -257,12 +257,12 @@ impl ThresholdOverrideStateTracker {
                 continue;
             }
             self.push_state(ThresholdOverrideStateInput {
-                status: fallow_output::ThresholdOverrideStatus::NoMatch,
+                status: plow_output::ThresholdOverrideStatus::NoMatch,
                 override_index: entry.index,
                 path: None,
                 function: None,
                 configured_thresholds: entry.configured,
-                effective_thresholds: fallow_output::HealthEffectiveThresholds {
+                effective_thresholds: plow_output::HealthEffectiveThresholds {
                     max_cyclomatic: entry
                         .configured
                         .max_cyclomatic
@@ -280,7 +280,7 @@ impl ThresholdOverrideStateTracker {
         }
     }
 
-    pub(super) fn into_states(mut self) -> Vec<fallow_output::ThresholdOverrideState> {
+    pub(super) fn into_states(mut self) -> Vec<plow_output::ThresholdOverrideState> {
         self.states.sort_by(|a, b| {
             a.override_index
                 .cmp(&b.override_index)
@@ -292,9 +292,9 @@ impl ThresholdOverrideStateTracker {
 
     fn push_state(&mut self, input: ThresholdOverrideStateInput) {
         let status_key = match input.status {
-            fallow_output::ThresholdOverrideStatus::Active => "active",
-            fallow_output::ThresholdOverrideStatus::Stale => "stale",
-            fallow_output::ThresholdOverrideStatus::NoMatch => "no_match",
+            plow_output::ThresholdOverrideStatus::Active => "active",
+            plow_output::ThresholdOverrideStatus::Stale => "stale",
+            plow_output::ThresholdOverrideStatus::NoMatch => "no_match",
         };
         let key = ThresholdOverrideStateKey {
             status: status_key,
@@ -306,7 +306,7 @@ impl ThresholdOverrideStateTracker {
         if !self.seen.insert(key) {
             return;
         }
-        self.states.push(fallow_output::ThresholdOverrideState {
+        self.states.push(plow_output::ThresholdOverrideState {
             status: input.status,
             override_index: input.override_index,
             path: input.path,
@@ -331,13 +331,13 @@ pub(super) struct ComplexityFunctionContext<'a> {
 }
 
 struct ThresholdOverrideStateInput {
-    status: fallow_output::ThresholdOverrideStatus,
+    status: plow_output::ThresholdOverrideStatus,
     override_index: usize,
     path: Option<PathBuf>,
     function: Option<String>,
-    configured_thresholds: fallow_output::HealthConfiguredThresholds,
-    effective_thresholds: fallow_output::HealthEffectiveThresholds,
-    metrics: Option<fallow_output::ThresholdOverrideMetrics>,
+    configured_thresholds: plow_output::HealthConfiguredThresholds,
+    effective_thresholds: plow_output::HealthEffectiveThresholds,
+    metrics: Option<plow_output::ThresholdOverrideMetrics>,
     reason: Option<String>,
     dimension: ThresholdOverrideDimension,
 }

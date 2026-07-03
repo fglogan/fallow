@@ -91,7 +91,7 @@ fn catalogue() -> &'static Catalogue {
     CATALOGUE.get_or_init(|| {
         let parsed: ToolingCatalogue = toml::from_str(CATALOGUE_TOML).expect(
             "embedded crates/core/data/tooling.toml must parse; run \
-             `cargo test -p fallow-core catalogue_parses` to see the error",
+             `cargo test -p plow-core catalogue_parses` to see the error",
         );
         Catalogue {
             prefixes: parsed.prefix.into_iter().map(|p| p.pattern).collect(),

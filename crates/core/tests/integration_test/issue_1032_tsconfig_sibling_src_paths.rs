@@ -125,7 +125,7 @@ fn create_issue_1032_project(root: &Path, shape: TsconfigShape) {
 
 fn assert_issue_1032_project_resolves(root: &Path) {
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files: Vec<String> = results
         .unused_files

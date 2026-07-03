@@ -1,14 +1,14 @@
 use serde::Serialize;
 use serde_json::Value;
 
-/// Envelope emitted by `fallow --format codeclimate` and
-/// `fallow --format gitlab-codequality`. GitLab Code Quality consumes the
+/// Envelope emitted by `plow --format codeclimate` and
+/// `plow --format gitlab-codequality`. GitLab Code Quality consumes the
 /// same shape. The wire form is a bare JSON array, not an object.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
     feature = "schema",
-    schemars(title = "fallow --format codeclimate / gitlab-codequality")
+    schemars(title = "plow --format codeclimate / gitlab-codequality")
 )]
 #[serde(transparent)]
 #[allow(
@@ -175,7 +175,7 @@ pub fn codeclimate_issues_to_value(issues: &[CodeClimateIssue]) -> Value {
 /// Add a top-level grouped property to each typed CodeClimate issue.
 ///
 /// Grouped CLI outputs use this to attach `owner` or `group` while keeping the
-/// issue array shape and path lookup contract in `fallow-output`.
+/// issue array shape and path lookup contract in `plow-output`.
 pub fn annotate_codeclimate_issues(
     issues: &mut [CodeClimateIssue],
     field: CodeClimateAnnotationField,
@@ -197,7 +197,7 @@ mod tests {
     #[test]
     fn codeclimate_issue_serializes_spec_shape() {
         let issue = build_codeclimate_issue(CodeClimateIssueInput {
-            check_name: "fallow/test",
+            check_name: "plow/test",
             description: "description",
             category: "Bug Risk",
             severity: CodeClimateSeverity::Major,
@@ -228,7 +228,7 @@ mod tests {
     #[test]
     fn build_codeclimate_issue_defaults_missing_line_to_one() {
         let issue = build_codeclimate_issue(CodeClimateIssueInput {
-            check_name: "fallow/test",
+            check_name: "plow/test",
             description: "description",
             category: "Bug Risk",
             severity: CodeClimateSeverity::Minor,
@@ -251,7 +251,7 @@ mod tests {
     #[test]
     fn annotate_codeclimate_issues_adds_owner_from_location_path() {
         let mut issues = vec![build_codeclimate_issue(CodeClimateIssueInput {
-            check_name: "fallow/test",
+            check_name: "plow/test",
             description: "description",
             category: "Bug Risk",
             severity: CodeClimateSeverity::Minor,
@@ -271,7 +271,7 @@ mod tests {
     #[test]
     fn annotate_codeclimate_issues_adds_group_from_location_path() {
         let mut issues = vec![build_codeclimate_issue(CodeClimateIssueInput {
-            check_name: "fallow/test",
+            check_name: "plow/test",
             description: "description",
             category: "Bug Risk",
             severity: CodeClimateSeverity::Minor,

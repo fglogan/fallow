@@ -1,7 +1,7 @@
 src/**
 node_modules/**
 .vscode/**
-.fallow/**
+.plow/**
 .test-dist/**
 test/**
 tsconfig.json
@@ -9,6 +9,6 @@ tsconfig.test.json
 vitest.config.mts
 rolldown.config.mjs
 pnpm-lock.yaml
-.fallowrc.json
+.plowrc.json
 **/*.map
 .gitignore

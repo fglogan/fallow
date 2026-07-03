@@ -1,7 +1,7 @@
-/// Output format for fallow results.
+/// Output format for plow results.
 ///
 /// This is command-line and integration metadata, not stored in config files.
-/// Keeping it in `fallow-types` lets config, output, CLI, MCP, and API layers
+/// Keeping it in `plow-types` lets config, output, CLI, MCP, and API layers
 /// agree on the same contract without creating a config-to-output dependency.
 #[derive(Debug, Default, Clone, Copy)]
 pub enum OutputFormat {

@@ -81,7 +81,7 @@ pub enum EmailMode {
     Hash,
 }
 
-/// Configuration for ownership analysis (`fallow health --hotspots --ownership`).
+/// Configuration for ownership analysis (`plow health --hotspots --ownership`).
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct OwnershipConfig {
@@ -107,7 +107,7 @@ impl Default for OwnershipConfig {
     }
 }
 
-/// Configuration for complexity health metrics (`fallow health`).
+/// Configuration for complexity health metrics (`plow health`).
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct HealthConfig {
@@ -126,7 +126,7 @@ pub struct HealthConfig {
     /// coverage: high complexity plus low coverage produces a high CRAP
     /// score. Functions meeting or exceeding this threshold are reported.
     /// Use `--coverage` with Istanbul data for accurate per-function CRAP;
-    /// otherwise fallow estimates coverage from the module graph.
+    /// otherwise plow estimates coverage from the module graph.
     #[serde(default = "default_max_crap")]
     pub max_crap: f64,
 
@@ -139,14 +139,14 @@ pub struct HealthConfig {
 
     /// Path to Istanbul-format coverage data for accurate per-function CRAP
     /// scores. Relative paths resolve against the project root. The CLI
-    /// `--coverage` flag and `FALLOW_COVERAGE` environment variable override
+    /// `--coverage` flag and `PLOW_COVERAGE` environment variable override
     /// this value.
     #[serde(default)]
     pub coverage: Option<PathBuf>,
 
     /// Absolute prefix to strip from Istanbul file paths before CRAP matching.
     /// Use when coverage was generated under a different checkout root in CI
-    /// or Docker. The CLI `--coverage-root` flag and `FALLOW_COVERAGE_ROOT`
+    /// or Docker. The CLI `--coverage-root` flag and `PLOW_COVERAGE_ROOT`
     /// environment variable override this value.
     #[serde(default)]
     pub coverage_root: Option<PathBuf>,
@@ -169,8 +169,8 @@ pub struct HealthConfig {
     /// Whether health JSON output emits `suppress-line` action hints
     /// alongside complexity findings (default: `true`). Set to `false` to
     /// opt out across the project: useful for teams that manage suppressions
-    /// exclusively through `// fallow-ignore-*` comments authored by hand or
-    /// through the `fallow.suppress` LSP code action, but who do not want
+    /// exclusively through `// plow-ignore-*` comments authored by hand or
+    /// through the `plow.suppress` LSP code action, but who do not want
     /// CI-driven `suppress-line` action hints in their JSON output.
     /// `--baseline` activates auto-omission regardless of this setting,
     /// since baseline files are a separate suppression mechanism.

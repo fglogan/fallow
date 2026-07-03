@@ -17,7 +17,7 @@ let mockMutedDiagnosticCategories = new Set<string>();
 let mockIssueTypesResponse: unknown = [];
 
 const mockBinaryResolution = vi.hoisted(() => ({
-  localBinary: "/mock/fallow-lsp" as string | null,
+  localBinary: "/mock/plow-lsp" as string | null,
   pathBinary: null as string | null,
   installedBinary: null as string | null,
   configuredBinary: null as string | null,
@@ -135,7 +135,7 @@ vi.mock("../src/config.js", () => ({
 }));
 
 // VS Code injects this module at runtime; here it resolves to the vi.mock above.
-// fallow-ignore-next-line unlisted-dependency
+// plow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
 import {
   createInitializationOptions,
@@ -161,7 +161,7 @@ afterEach(async () => {
 beforeEach(() => {
   mockIssueTypes = { "code-duplication": true };
   mockChangedSince = "origin/main";
-  mockConfigPath = "/workspace/.fallowrc.jsonc";
+  mockConfigPath = "/workspace/.plowrc.jsonc";
   mockProductionOverride = undefined;
   mockDuplicationMode = "semantic";
   mockDuplicationThreshold = 8;
@@ -174,7 +174,7 @@ beforeEach(() => {
   mockHealthInlineComplexity = false;
   mockMutedDiagnosticCategories = new Set();
   mockIssueTypesResponse = [];
-  mockBinaryResolution.localBinary = "/mock/fallow-lsp";
+  mockBinaryResolution.localBinary = "/mock/plow-lsp";
   mockBinaryResolution.pathBinary = null;
   mockBinaryResolution.installedBinary = null;
   mockBinaryResolution.configuredBinary = null;
@@ -191,11 +191,11 @@ const outputChannel = () => ({
 });
 
 describe("createInitializationOptions", () => {
-  it("forwards duplication settings to fallow-lsp", () => {
+  it("forwards duplication settings to plow-lsp", () => {
     expect(createInitializationOptions()).toEqual({
       issueTypes: { "code-duplication": true },
       changedSince: "origin/main",
-      configPath: "/workspace/.fallowrc.jsonc",
+      configPath: "/workspace/.plowrc.jsonc",
       production: undefined,
       duplication: {
         mode: "semantic",
@@ -227,7 +227,7 @@ describe("createInitializationOptions", () => {
     expect("production" in JSON.parse(JSON.stringify(options))).toBe(false);
   });
 
-  it("does not forward inline complexity to fallow-lsp (extension owns the lens)", () => {
+  it("does not forward inline complexity to plow-lsp (extension owns the lens)", () => {
     // The extension renders its own complexity lens (ComplexityLensProvider) so
     // it can toggle the per-line breakdown; forwarding the LSP option too would
     // double-render. The LSP lens stays opt-in for other editors.
@@ -238,7 +238,7 @@ describe("createInitializationOptions", () => {
 });
 
 describe("loadDiagnosticCategories", () => {
-  it("loads categories from fallow/issueTypes", async () => {
+  it("loads categories from plow/issueTypes", async () => {
     const out = outputChannel();
     const client = {
       sendRequest: vi.fn(async () => [{ code: "future-rule", label: "Future Rule" }]),
@@ -246,9 +246,9 @@ describe("loadDiagnosticCategories", () => {
 
     await loadDiagnosticCategories(client as never, out as never);
 
-    expect(client.sendRequest).toHaveBeenCalledWith("fallow/issueTypes");
+    expect(client.sendRequest).toHaveBeenCalledWith("plow/issueTypes");
     expect(getDiagnosticCategories()).toEqual([{ code: "future-rule", label: "Future Rule" }]);
-    expect(out.lines.at(-1)).toBe("Loaded 1 diagnostic categories from fallow-lsp.");
+    expect(out.lines.at(-1)).toBe("Loaded 1 diagnostic categories from plow-lsp.");
   });
 
   it("refreshes diagnostic mute baseline after loading live categories", async () => {
@@ -349,7 +349,7 @@ describe("restartClient lifecycle", () => {
     // not left on the old (now-stopped) client, or the status bar freezes.
     const fresh = mockLanguageClient.instances[mockLanguageClient.instances.length - 1];
     expect(fresh!.onNotification).toHaveBeenCalledWith(
-      "fallow/analysisComplete",
+      "plow/analysisComplete",
       onAnalysisComplete,
     );
   });
@@ -440,17 +440,17 @@ describe("triggerPullDiagnosticRefresh", () => {
 });
 
 describe("requestServerDiagnosticRefresh", () => {
-  it("sends the fallow/refreshDiagnostics request", async () => {
+  it("sends the plow/refreshDiagnostics request", async () => {
     const sendRequest = vi.fn(async () => undefined);
     await requestServerDiagnosticRefresh({ sendRequest } as never);
-    expect(sendRequest).toHaveBeenCalledWith("fallow/refreshDiagnostics");
+    expect(sendRequest).toHaveBeenCalledWith("plow/refreshDiagnostics");
   });
 
   it("swallows MethodNotFound from older servers without the handler", async () => {
     const sendRequest = vi.fn(async () => {
-      throw new Error("Unhandled method fallow/refreshDiagnostics");
+      throw new Error("Unhandled method plow/refreshDiagnostics");
     });
     await expect(requestServerDiagnosticRefresh({ sendRequest } as never)).resolves.toBeUndefined();
-    expect(sendRequest).toHaveBeenCalledWith("fallow/refreshDiagnostics");
+    expect(sendRequest).toHaveBeenCalledWith("plow/refreshDiagnostics");
   });
 });

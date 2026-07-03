@@ -25,10 +25,10 @@ pub struct IssueKindMeta {
     pub mcp_issue_type: Option<&'static str>,
     /// Suppression token agents should emit, when suppressible.
     pub suppress_token: Option<&'static str>,
-    /// Whether the suppression comment should use `fallow-ignore-file`.
+    /// Whether the suppression comment should use `plow-ignore-file`.
     pub suppress_file_level: bool,
     /// Whether the LSP exposes this row through initialization options and
-    /// `fallow/issueTypes`.
+    /// `plow/issueTypes`.
     pub lsp: bool,
     /// Broad documentation category for authoring and generated manifests.
     pub docs_category: &'static str,
@@ -766,7 +766,7 @@ pub struct IssueResultMeta {
 /// TypeScript backwards-compat alias emitted for a dead-code result row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TsAliasMeta {
-    /// Bare alias name kept available from the published `fallow/types` subpath.
+    /// Bare alias name kept available from the published `plow/types` subpath.
     pub name: &'static str,
     /// Generated `*Finding` wrapper type the alias resolves to.
     pub parent: &'static str,
@@ -1126,7 +1126,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "stale-suppression",
-        meta_description: "A fallow suppression comment or tag no longer matches any active issue.",
+        meta_description: "A plow suppression comment or tag no longer matches any active issue.",
         meta_docs_path: "explanations/dead-code#stale-suppressions",
         meta_name: "Stale Suppressions",
         summary_label: "Stale suppressions",
@@ -1296,7 +1296,7 @@ pub const KNOWN_ISSUE_KIND_NAMES: &[&str] = &[
     "unused-svelte-events",
 ];
 
-/// CLI filter flags on `fallow dead-code` that scope output to one issue family.
+/// CLI filter flags on `plow dead-code` that scope output to one issue family.
 pub const DEAD_CODE_FILTER_FLAGS: &[&str] = &[
     "--unused-files",
     "--unused-exports",
@@ -1447,9 +1447,9 @@ pub fn issue_result_meta_by_code(code: &str) -> Option<&'static IssueResultMeta>
 /// SARIF rule ids used by CI formatters for a canonical issue code.
 #[must_use]
 pub fn issue_sarif_rule_ids(code: &str) -> Vec<String> {
-    let mut ids = vec![format!("fallow/{code}")];
+    let mut ids = vec![format!("plow/{code}")];
     if code == "stale-suppression" {
-        ids.push("fallow/missing-suppression-reason".to_string());
+        ids.push("plow/missing-suppression-reason".to_string());
     }
     ids
 }
@@ -1728,17 +1728,17 @@ mod tests {
                 .unwrap_or_else(|| panic!("result metadata code {} has no issue row", meta.code));
             assert!(issue.sarif_enabled());
             let sarif_ids = issue.sarif_rule_ids();
-            assert!(sarif_ids.contains(&format!("fallow/{}", meta.code)));
+            assert!(sarif_ids.contains(&format!("plow/{}", meta.code)));
             for rule_id in sarif_ids {
                 assert!(
-                    rule_id.starts_with("fallow/"),
+                    rule_id.starts_with("plow/"),
                     "result metadata code {} has unprefixed SARIF rule id {rule_id}",
                     meta.code
                 );
             }
             for check_name in issue.codeclimate_check_names() {
                 assert!(
-                    check_name.starts_with("fallow/"),
+                    check_name.starts_with("plow/"),
                     "result metadata code {} has unprefixed CodeClimate check name {check_name}",
                     meta.code
                 );

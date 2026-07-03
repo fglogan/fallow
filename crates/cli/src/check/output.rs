@@ -1,8 +1,8 @@
 use std::io::{BufWriter, Write};
 use std::process::ExitCode;
 
-use fallow_config::{OutputFormat, ResolvedConfig};
-use fallow_engine::RetainedModuleGraph;
+use plow_config::{OutputFormat, ResolvedConfig};
+use plow_engine::RetainedModuleGraph;
 use rustc_hash::FxHashSet;
 
 use super::TraceOptions;
@@ -24,7 +24,7 @@ pub(super) fn handle_trace_output(
                 output,
             ));
         };
-        match fallow_engine::trace_export(graph, root, file_path, export_name) {
+        match plow_engine::trace_export(graph, root, file_path, export_name) {
             Some(trace) => {
                 report::print_export_trace(&trace, output);
                 return Some(ExitCode::SUCCESS);
@@ -40,7 +40,7 @@ pub(super) fn handle_trace_output(
     }
 
     if let Some(ref file_path) = trace_opts.trace_file {
-        match fallow_engine::trace_file(graph, root, file_path) {
+        match plow_engine::trace_file(graph, root, file_path) {
             Some(trace) => {
                 report::print_file_trace(&trace, output);
                 return Some(ExitCode::SUCCESS);
@@ -56,13 +56,13 @@ pub(super) fn handle_trace_output(
     }
 
     if let Some(ref pkg_name) = trace_opts.trace_dependency {
-        let trace = fallow_engine::trace_dependency(graph, root, pkg_name, script_used_packages);
+        let trace = plow_engine::trace_dependency(graph, root, pkg_name, script_used_packages);
         report::print_dependency_trace(&trace, output);
         return Some(ExitCode::SUCCESS);
     }
 
     if let Some(ref file_path) = trace_opts.impact_closure {
-        match fallow_engine::trace_impact_closure(graph, root, file_path) {
+        match plow_engine::trace_impact_closure(graph, root, file_path) {
             Some(trace) => {
                 report::print_impact_closure_trace(&trace, output);
                 return Some(ExitCode::SUCCESS);
@@ -82,7 +82,7 @@ pub(super) fn handle_trace_output(
 
 /// Write SARIF output to a file if `--sarif-file` was specified.
 pub fn write_sarif_file(
-    results: &fallow_types::results::AnalysisResults,
+    results: &plow_types::results::AnalysisResults,
     config: &ResolvedConfig,
     sarif_path: &std::path::Path,
     quiet: bool,
@@ -123,12 +123,12 @@ pub fn write_sarif_file(
 /// Run duplication cross-reference and print combined findings.
 pub fn run_cross_reference(
     config: &ResolvedConfig,
-    unfiltered_results: &fallow_types::results::AnalysisResults,
+    unfiltered_results: &plow_types::results::AnalysisResults,
     quiet: bool,
 ) {
-    let files = fallow_engine::discover_files_with_plugin_scopes(config);
-    let dupe_report = fallow_engine::find_duplicates(&config.root, &files, &config.duplicates);
-    let cross_ref = fallow_engine::cross_reference(&dupe_report, unfiltered_results);
+    let files = plow_engine::discover_files_with_plugin_scopes(config);
+    let dupe_report = plow_engine::find_duplicates(&config.root, &files, &config.duplicates);
+    let cross_ref = plow_engine::cross_reference(&dupe_report, unfiltered_results);
 
     if cross_ref.has_findings() {
         report::print_cross_reference_findings(&cross_ref, &config.root, quiet, config.output);
@@ -202,8 +202,8 @@ mod tests {
         assert!(!trace_opts.any_active());
     }
 
-    fn make_resolved_config() -> fallow_config::ResolvedConfig {
-        fallow_config::ResolvedConfig {
+    fn make_resolved_config() -> plow_config::ResolvedConfig {
+        plow_config::ResolvedConfig {
             root: std::path::PathBuf::from("/project"),
             entry_patterns: vec![],
             ignore_patterns: globset::GlobSet::empty(),
@@ -217,14 +217,14 @@ mod tests {
             compiled_ignore_exports: vec![],
             compiled_ignore_catalog_references: vec![],
             compiled_ignore_dependency_overrides: vec![],
-            ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+            ignore_exports_used_in_file: plow_config::IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             ignore_decorators: vec![],
             unused_component_props_ignore: None,
-            duplicates: fallow_config::DuplicatesConfig::default(),
-            health: fallow_config::HealthConfig::default(),
-            rules: fallow_config::RulesConfig::default(),
-            boundaries: fallow_config::ResolvedBoundaryConfig::default(),
+            duplicates: plow_config::DuplicatesConfig::default(),
+            health: plow_config::HealthConfig::default(),
+            rules: plow_config::RulesConfig::default(),
+            boundaries: plow_config::ResolvedBoundaryConfig::default(),
             production: false,
             quiet: true,
             external_plugins: vec![],
@@ -232,13 +232,13 @@ mod tests {
             dynamically_loaded: vec![],
             overrides: vec![],
             regression: None,
-            audit: fallow_config::AuditConfig::default(),
+            audit: plow_config::AuditConfig::default(),
             codeowners: None,
             public_packages: vec![],
-            flags: fallow_config::FlagsConfig::default(),
-            security: fallow_config::SecurityConfig::default(),
-            fix: fallow_config::FixConfig::default(),
-            resolve: fallow_config::ResolveConfig::default(),
+            flags: plow_config::FlagsConfig::default(),
+            security: plow_config::SecurityConfig::default(),
+            fix: plow_config::FixConfig::default(),
+            resolve: plow_config::ResolveConfig::default(),
             include_entry_exports: false,
             auto_imports: false,
             cache_max_size_mb: None,
@@ -249,7 +249,7 @@ mod tests {
 
     #[test]
     fn write_sarif_file_creates_output() {
-        let results = fallow_types::results::AnalysisResults::default();
+        let results = plow_types::results::AnalysisResults::default();
         let config = make_resolved_config();
 
         let dir = tempfile::tempdir().expect("create temp dir");
@@ -266,7 +266,7 @@ mod tests {
 
     #[test]
     fn write_sarif_file_creates_parent_directories() {
-        let results = fallow_types::results::AnalysisResults::default();
+        let results = plow_types::results::AnalysisResults::default();
         let config = make_resolved_config();
 
         let dir = tempfile::tempdir().expect("create temp dir");

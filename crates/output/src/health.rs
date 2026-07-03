@@ -1,16 +1,16 @@
 use std::time::Duration;
 
-use fallow_types::envelope::{ElapsedMs, Meta, SchemaVersion, ToolVersion};
-use fallow_types::output::NextStep;
+use plow_types::envelope::{ElapsedMs, Meta, SchemaVersion, ToolVersion};
+use plow_types::output::NextStep;
 use serde::Serialize;
 
-use fallow_types::workspace::WorkspaceDiagnostic;
+use plow_types::workspace::WorkspaceDiagnostic;
 
 use crate::{
     GroupByMode, RootEnvelopeMode, apply_root_kind, attach_telemetry_meta, strip_root_prefix,
 };
 
-/// Envelope emitted by `fallow health --format json` (plus the `health` block
+/// Envelope emitted by `plow health --format json` (plus the `health` block
 /// inside the combined and audit envelopes).
 ///
 /// The body is `HealthReport` flattened into the envelope so every report
@@ -23,7 +23,7 @@ use crate::{
 /// documents the field and serde populates it natively.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(feature = "schema", schemars(title = "fallow health --format json"))]
+#[cfg_attr(feature = "schema", schemars(title = "plow health --format json"))]
 pub struct HealthOutput<Report, Group> {
     pub schema_version: SchemaVersion,
     pub version: ToolVersion,
@@ -88,7 +88,7 @@ pub fn build_health_output<Report, Group>(
 
 /// Build and serialize a health root JSON envelope.
 ///
-/// This keeps the health contract serialization in `fallow-output` while
+/// This keeps the health contract serialization in `plow-output` while
 /// callers still own report assembly, workspace diagnostics, and follow-up
 /// suggestion policy.
 ///

@@ -7,7 +7,7 @@ use oxc_span::{GetSpan, Span};
 use rustc_hash::FxHashMap;
 
 use crate::{MemberInfo, MemberKind};
-use fallow_types::extract::{AngularInputMember, AngularOutputMember};
+use plow_types::extract::{AngularInputMember, AngularOutputMember};
 
 pub struct AngularComponentMetadata {
     pub template_url: Option<String>,

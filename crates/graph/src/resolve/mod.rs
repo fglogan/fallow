@@ -42,10 +42,10 @@ use std::sync::Mutex;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_config::{AutoImportKind, AutoImportRule};
-use fallow_types::discover::{DiscoveredFile, FileId};
-use fallow_types::extract::{ImportInfo, ImportedName, ModuleInfo};
 use oxc_span::Span;
+use plow_config::{AutoImportKind, AutoImportRule};
+use plow_types::discover::{DiscoveredFile, FileId};
+use plow_types::extract::{ImportInfo, ImportedName, ModuleInfo};
 
 use dynamic_imports::{resolve_dynamic_imports, resolve_dynamic_patterns};
 use re_exports::resolve_re_exports;
@@ -63,7 +63,7 @@ pub struct ResolveAllImportsInput<'a> {
     /// Discovered source files indexed by [`FileId`].
     pub files: &'a [DiscoveredFile],
     /// Workspace package roots used for package self-resolution.
-    pub workspaces: &'a [fallow_config::WorkspaceInfo],
+    pub workspaces: &'a [plow_config::WorkspaceInfo],
     /// Active plugin names that affect extensions and resolver conditions.
     pub active_plugins: &'a [String],
     /// Configured TypeScript path alias pairs.
@@ -220,7 +220,7 @@ pub fn resolve_all_imports_with_session(
 }
 
 fn build_workspace_roots<'a>(
-    workspaces: &'a [fallow_config::WorkspaceInfo],
+    workspaces: &'a [plow_config::WorkspaceInfo],
     canonical_ws_roots: &'a [PathBuf],
 ) -> FxHashMap<&'a str, &'a Path> {
     workspaces
@@ -250,7 +250,7 @@ fn build_package_manifests(
     let root_canonical =
         dunce::canonicalize(input.root).unwrap_or_else(|_| input.root.to_path_buf());
     let mut package_manifests = Vec::new();
-    if let Ok(package_json) = fallow_config::PackageJson::load(&input.root.join("package.json")) {
+    if let Ok(package_json) = plow_config::PackageJson::load(&input.root.join("package.json")) {
         package_manifests.push(PackageManifestInfo {
             root: input.root.to_path_buf(),
             canonical_root: root_canonical,
@@ -259,7 +259,7 @@ fn build_package_manifests(
         });
     }
     for (ws, canonical_root) in input.workspaces.iter().zip(canonical_ws_roots.iter()) {
-        if let Ok(package_json) = fallow_config::PackageJson::load(&ws.root.join("package.json")) {
+        if let Ok(package_json) = plow_config::PackageJson::load(&ws.root.join("package.json")) {
             package_manifests.push(PackageManifestInfo {
                 root: ws.root.clone(),
                 canonical_root: canonical_root.clone(),

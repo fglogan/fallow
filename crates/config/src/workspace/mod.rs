@@ -618,7 +618,7 @@ mod tests {
 
     #[test]
     fn discover_workspaces_from_tsconfig_references() {
-        let temp_dir = std::env::temp_dir().join("fallow-test-ws-tsconfig-refs");
+        let temp_dir = std::env::temp_dir().join("plow-test-ws-tsconfig-refs");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(temp_dir.join("packages/core")).unwrap();
         std::fs::create_dir_all(temp_dir.join("packages/ui")).unwrap();
@@ -645,7 +645,7 @@ mod tests {
 
     #[test]
     fn tsconfig_references_outside_root_rejected() {
-        let temp_dir = std::env::temp_dir().join("fallow-test-tsconfig-outside");
+        let temp_dir = std::env::temp_dir().join("plow-test-tsconfig-outside");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(temp_dir.join("project/packages/core")).unwrap();
         std::fs::create_dir_all(temp_dir.join("outside")).unwrap();
@@ -925,7 +925,7 @@ mod tests {
         std::fs::create_dir_all(&deep).unwrap();
 
         std::fs::write(benchmarks.join("package.json"), r#"{"name": "benchmarks"}"#).unwrap();
-        std::fs::write(vscode.join("package.json"), r#"{"name": "fallow-vscode"}"#).unwrap();
+        std::fs::write(vscode.join("package.json"), r#"{"name": "plow-vscode"}"#).unwrap();
         std::fs::write(deep.join("package.json"), r#"{"name": "deep-fixture"}"#).unwrap();
 
         let workspaces = discover_workspaces(dir.path());
@@ -936,7 +936,7 @@ mod tests {
             "top-level nested package should be discovered: {workspaces:?}"
         );
         assert!(
-            names.contains(&"fallow-vscode"),
+            names.contains(&"plow-vscode"),
             "second-level nested package should be discovered: {workspaces:?}"
         );
         assert!(

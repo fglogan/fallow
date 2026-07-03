@@ -5,7 +5,7 @@
 )]
 
 //! End-to-end integration test for the runtime-weighted focus map on
-//! `fallow review` (the alias of `fallow audit --brief`).
+//! `plow review` (the alias of `plow audit --brief`).
 //!
 //! Drives the full CLI -> sidecar pipeline with a signed stub sidecar that
 //! reports a hot path (`src/sink.ts::render`, 250 invocations), against a temp
@@ -24,7 +24,7 @@
 //! `stub_sidecar` bin (a `compile_error!` blocks the feature from release
 //! builds). Run (the test fn names do not contain "runtime_focus", so target the
 //! binary rather than a bare name filter, which would match zero of them):
-//!   cargo test -p fallow-cli --features test-sidecar-key --test audit_brief_runtime_focus_tests
+//!   cargo test -p plow-cli --features test-sidecar-key --test audit_brief_runtime_focus_tests
 
 #[path = "common/mod.rs"]
 mod common;
@@ -41,7 +41,7 @@ mod gated {
 
     use tempfile::TempDir;
 
-    use super::common::{CommandOutput, fallow_bin};
+    use super::common::{CommandOutput, plow_bin};
     use super::sign;
 
     /// Run git in `dir` with hermetic config + a fixed test identity.
@@ -66,14 +66,14 @@ mod gated {
         );
     }
 
-    /// Copy the test stub sidecar to `<root>/fallow-cov`, make it executable, and
+    /// Copy the test stub sidecar to `<root>/plow-cov`, make it executable, and
     /// Ed25519-sign it so the CLI's signature check accepts it.
     fn copy_and_sign_stub(root: &Path) -> PathBuf {
         let source = PathBuf::from(env!("CARGO_BIN_EXE_stub_sidecar"));
         let target = root.join(if cfg!(windows) {
-            "fallow-cov.exe"
+            "plow-cov.exe"
         } else {
-            "fallow-cov"
+            "plow-cov"
         });
         fs::copy(&source, &target).expect("copy stub sidecar");
         #[cfg(unix)]
@@ -130,20 +130,20 @@ mod gated {
         tmp
     }
 
-    /// Run `fallow review --format json` against `repo`. With `runtime`, attaches
+    /// Run `plow review --format json` against `repo`. With `runtime`, attaches
     /// the signed stub + a runtime-coverage license + the `security-hot` stub mode
     /// so the sidecar reports a hot path. `home` isolates license/cache state.
     fn run_review(repo: &Path, home: &Path, stub: &Path, runtime: bool) -> CommandOutput {
-        let mut cmd = Command::new(fallow_bin());
+        let mut cmd = Command::new(plow_bin());
         cmd.current_dir(repo);
         cmd.env("NO_COLOR", "1").env("RUST_LOG", "");
-        cmd.env_remove("FALLOW_LICENSE");
-        cmd.env_remove("FALLOW_LICENSE_PATH");
-        cmd.env_remove("FALLOW_COV_BINARY_PATH");
-        cmd.env_remove("FALLOW_COVERAGE");
-        cmd.env_remove("FALLOW_BIN");
-        cmd.env_remove("FALLOW_FORMAT");
-        cmd.env_remove("FALLOW_QUIET");
+        cmd.env_remove("PLOW_LICENSE");
+        cmd.env_remove("PLOW_LICENSE_PATH");
+        cmd.env_remove("PLOW_COV_BINARY_PATH");
+        cmd.env_remove("PLOW_COVERAGE");
+        cmd.env_remove("PLOW_BIN");
+        cmd.env_remove("PLOW_FORMAT");
+        cmd.env_remove("PLOW_QUIET");
         cmd.env("HOME", home).env("USERPROFILE", home);
         cmd.args([
             "review",
@@ -160,12 +160,12 @@ mod gated {
             // ignores the path's contents, so an empty V8 shape is sufficient.
             let coverage = home.join("coverage-final-v8.json");
             fs::write(&coverage, br#"{"result":[]}"#).expect("write coverage input");
-            cmd.env("FALLOW_COV_BIN", stub);
-            cmd.env("FALLOW_LICENSE", sign::mint_runtime_coverage_jwt());
-            cmd.env("FALLOW_STUB_MODE", "security-hot");
+            cmd.env("PLOW_COV_BIN", stub);
+            cmd.env("PLOW_LICENSE", sign::mint_runtime_coverage_jwt());
+            cmd.env("PLOW_STUB_MODE", "security-hot");
             cmd.args(["--runtime-coverage", &coverage.to_string_lossy()]);
         }
-        let output = cmd.output().expect("run fallow binary");
+        let output = cmd.output().expect("run plow binary");
         CommandOutput {
             stdout: String::from_utf8_lossy(&output.stdout).to_string(),
             stderr: String::from_utf8_lossy(&output.stderr).to_string(),

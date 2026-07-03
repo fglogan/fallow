@@ -1,12 +1,12 @@
 //! Symbol trace types exposed through the engine boundary.
 
-use fallow_config::ResolvedConfig;
+use plow_config::ResolvedConfig;
 
 use crate::{
     EngineError, EngineResult, core_backend, session::analyze_dead_code_with_artifacts_from_config,
 };
 
-use fallow_types::trace_chain::{SymbolChainQuery, SymbolChainTrace};
+use plow_types::trace_chain::{SymbolChainQuery, SymbolChainTrace};
 
 /// Run symbol-level call-chain tracing through the engine boundary.
 ///

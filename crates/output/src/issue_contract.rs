@@ -1,22 +1,22 @@
 use std::collections::BTreeMap;
 
-use fallow_types::envelope::{Meta, MetaRule};
-pub use fallow_types::issue_meta::{CODECLIMATE_RESULT_CODES, TsAliasMeta};
-use fallow_types::issue_meta::{
+use plow_types::envelope::{Meta, MetaRule};
+pub use plow_types::issue_meta::{CODECLIMATE_RESULT_CODES, TsAliasMeta};
+use plow_types::issue_meta::{
     IssueResultMeta, issue_meta_by_code, issue_result_meta_by_code, result_issue_metas,
 };
 
-const DOCS_BASE: &str = "https://docs.fallow.tools";
+const DOCS_BASE: &str = "https://docs.genesis-plow.dev";
 
 /// Docs URL for the dead-code/check command.
-pub const CHECK_DOCS: &str = "https://docs.fallow.tools/cli/dead-code";
+pub const CHECK_DOCS: &str = "https://docs.genesis-plow.dev/cli/dead-code";
 
 /// `_meta` description for the per-finding `actions[]` array shared across
 /// JSON output.
 pub const ACTIONS_FIELD_DEFINITION: &str = "Per-finding fix and suppression suggestions. Each entry carries a `type` discriminant (kebab-case) plus a per-action `auto_fixable` bool. Consumers dispatch on `type` to choose the remediation and filter on `auto_fixable` of each individual entry.";
 
 /// `_meta` description for the per-action `auto_fixable` bool.
-pub const ACTIONS_AUTO_FIXABLE_FIELD_DEFINITION: &str = "Evaluated PER FINDING, not per action type. The same `type` may carry `auto_fixable: true` on one finding and `auto_fixable: false` on another when per-instance guards in the `fallow fix` applier discriminate. Filter on this bool of each individual action, not on `type` alone. Current per-instance flips: (1) `remove-catalog-entry` is `true` only when the finding's `hardcoded_consumers` array is empty (else fallow fix skips the entry to avoid breaking `pnpm install`); (2) the primary dependency action flips between `remove-dependency` (`auto_fixable: true`) and `move-dependency` (`auto_fixable: false`) based on `used_in_workspaces`; (3) `add-to-config` for `ignoreExports` is `true` when fallow fix can safely apply the action, which means EITHER a fallow config file already exists OR no config exists and the working directory is NOT inside a monorepo subpackage (the applier then creates `.fallowrc.json` using `fallow init`'s framework-aware scaffolding and layers the new rules on top); `false` inside a monorepo subpackage with no workspace-root config because the applier refuses to fragment per-package configs; (4) `update-catalog-reference` is always `false` today (catalog-switching applier not yet wired). All `suppress-line` and `suppress-file` actions are uniformly `false`.";
+pub const ACTIONS_AUTO_FIXABLE_FIELD_DEFINITION: &str = "Evaluated PER FINDING, not per action type. The same `type` may carry `auto_fixable: true` on one finding and `auto_fixable: false` on another when per-instance guards in the `plow fix` applier discriminate. Filter on this bool of each individual action, not on `type` alone. Current per-instance flips: (1) `remove-catalog-entry` is `true` only when the finding's `hardcoded_consumers` array is empty (else plow fix skips the entry to avoid breaking `pnpm install`); (2) the primary dependency action flips between `remove-dependency` (`auto_fixable: true`) and `move-dependency` (`auto_fixable: false`) based on `used_in_workspaces`; (3) `add-to-config` for `ignoreExports` is `true` when plow fix can safely apply the action, which means EITHER a plow config file already exists OR no config exists and the working directory is NOT inside a monorepo subpackage (the applier then creates `.plowrc.json` using `plow init`'s framework-aware scaffolding and layers the new rules on top); `false` inside a monorepo subpackage with no workspace-root config because the applier refuses to fragment per-package configs; (4) `update-catalog-reference` is always `false` today (catalog-switching applier not yet wired). All `suppress-line` and `suppress-file` actions are uniformly `false`.";
 
 /// Output-facing contract metadata for a serialized dead-code result row.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,7 +70,7 @@ impl IssueOutputContract {
     }
 }
 
-/// Build the `_meta` object for `fallow dead-code --format json --explain`.
+/// Build the `_meta` object for `plow dead-code --format json --explain`.
 #[must_use]
 pub fn check_meta() -> Meta {
     let mut rules = BTreeMap::new();
@@ -88,7 +88,7 @@ pub fn check_meta() -> Meta {
         "missing-suppression-reason".to_string(),
         MetaRule {
             name: Some("Missing Suppression Reason".to_string()),
-            description: Some("A fallow-ignore-next-line or fallow-ignore-file suppression omits the explanatory reason required by the requireSuppressionReason rule. Add a short reason after the suppression token, or remove the suppression if the issue is no longer intentional.".to_string()),
+            description: Some("A plow-ignore-next-line or plow-ignore-file suppression omits the explanatory reason required by the requireSuppressionReason rule. Add a short reason after the suppression token, or remove the suppression if the issue is no longer intentional.".to_string()),
             docs: Some(rule_docs_url("explanations/dead-code#stale-suppressions")),
         },
     );
@@ -169,7 +169,7 @@ mod tests {
         assert!(meta.rules.contains_key("missing-suppression-reason"));
         assert_eq!(
             meta.rules["unused-dev-dependency"].docs.as_deref(),
-            Some("https://docs.fallow.tools/explanations/dead-code#unused-devdependencies")
+            Some("https://docs.genesis-plow.dev/explanations/dead-code#unused-devdependencies")
         );
     }
 
@@ -179,20 +179,20 @@ mod tests {
             assert!(
                 contract
                     .sarif_rule_ids
-                    .contains(&format!("fallow/{}", contract.code)),
+                    .contains(&format!("plow/{}", contract.code)),
                 "result metadata code {} has wrong SARIF rule id",
                 contract.code
             );
             for rule_id in contract.sarif_rule_ids {
                 assert!(
-                    rule_id.starts_with("fallow/"),
+                    rule_id.starts_with("plow/"),
                     "result metadata code {} has unprefixed SARIF rule id {rule_id}",
                     contract.code
                 );
             }
             for check_name in contract.codeclimate_check_names {
                 assert!(
-                    check_name.starts_with("fallow/"),
+                    check_name.starts_with("plow/"),
                     "result metadata code {} has unprefixed CodeClimate check name {check_name}",
                     contract.code
                 );

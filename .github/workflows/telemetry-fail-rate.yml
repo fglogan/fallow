@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       target_version:
-        description: "Published fallow version to check"
+        description: "Published plow version to check"
         required: false
         type: string
   schedule:
@@ -36,13 +36,13 @@ jobs:
           set -euo pipefail
           target="$INPUT_TARGET_VERSION"
           if [ -z "$target" ]; then
-            target="$(npm view fallow version)"
+            target="$(npm view plow version)"
           fi
           printf 'version=%s\n' "$target" >> "$GITHUB_OUTPUT"
 
       - name: Check telemetry fail rate
         env:
-          FALLOW_TELEMETRY_TARGET_VERSION: ${{ steps.target.outputs.version }}
+          PLOW_TELEMETRY_TARGET_VERSION: ${{ steps.target.outputs.version }}
           POSTHOG_HOST: ${{ vars.POSTHOG_HOST }}
           POSTHOG_PERSONAL_API_KEY: ${{ secrets.POSTHOG_PERSONAL_API_KEY }}
           POSTHOG_PROJECT_ID: ${{ secrets.POSTHOG_PROJECT_ID }}

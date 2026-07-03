@@ -11,7 +11,7 @@ use super::common::{create_config, fixture_path};
 fn vue_props_items_vfor_credits_class_member_accesses() {
     let root = fixture_path("issue-1711-vue-props-vfor");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_members: Vec<String> = results
         .unused_class_members

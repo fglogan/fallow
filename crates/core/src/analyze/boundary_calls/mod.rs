@@ -1,8 +1,8 @@
 use rustc_hash::FxHashMap;
 
-use fallow_config::ResolvedConfig;
-use fallow_types::extract::{ImportedName, ModuleInfo};
-use fallow_types::results::BoundaryCallViolation;
+use plow_config::ResolvedConfig;
+use plow_types::extract::{ImportedName, ModuleInfo};
+use plow_types::results::BoundaryCallViolation;
 
 use crate::discover::FileId;
 use crate::graph::{ModuleGraph, ModuleNode};

@@ -4,7 +4,7 @@ use super::common::{create_config, fixture_path};
 fn divergent_binary_name_not_flagged_as_unused() {
     let root = fixture_path("bin-script-deps");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_dev_dep_names: Vec<&str> = results
         .unused_dev_dependencies

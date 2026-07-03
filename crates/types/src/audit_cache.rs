@@ -39,7 +39,7 @@ pub struct AuditCoverageFingerprint {
 pub struct AuditCacheKeyPayload {
     /// Audit base snapshot cache schema version.
     pub cache_version: u8,
-    /// Fallow CLI version that produced the key.
+    /// Plow CLI version that produced the key.
     pub cli_version: String,
     /// Resolved git SHA for the base ref.
     pub base_sha: String,
@@ -200,7 +200,7 @@ mod tests {
 
     fn config() -> AuditConfigFingerprint {
         AuditConfigFingerprint {
-            path: Some("fallow.toml".to_string()),
+            path: Some("plow.toml".to_string()),
             resolved_hash: Some("abc".to_string()),
         }
     }

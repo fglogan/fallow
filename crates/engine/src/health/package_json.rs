@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use fallow_config::ResolvedConfig;
+use plow_config::ResolvedConfig;
 use rustc_hash::FxHashSet;
 
 /// Returns `true` when the project's root `package.json` declares a Tailwind

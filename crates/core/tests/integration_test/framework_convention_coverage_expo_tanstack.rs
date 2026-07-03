@@ -4,7 +4,7 @@ use super::common::{create_config, fixture_path};
 use super::framework_convention_coverage_common::{
     collect_unused_exports, collect_unused_files, has_unused_export, normalize_path,
 };
-use fallow_core::results::AnalysisResults;
+use plow_core::results::AnalysisResults;
 use tempfile::tempdir;
 
 fn write_project_file(root: &Path, relative_path: &str, source: &str) {
@@ -38,7 +38,7 @@ fn duplicate_export_locations(
 fn expo_router_special_files_and_exports_are_covered() {
     let root = fixture_path("expo-router-conventions");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files = collect_unused_files(&root, &results);
     assert!(
@@ -94,7 +94,7 @@ fn expo_router_special_files_and_exports_are_covered() {
 fn tanstack_router_custom_route_dir_and_lazy_exports_are_covered() {
     let root = fixture_path("tanstack-router-conventions");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files = collect_unused_files(&root, &results);
     assert!(
@@ -158,7 +158,7 @@ fn tanstack_router_custom_route_dir_and_lazy_exports_are_covered() {
 fn tanstack_router_prefix_and_ignore_patterns_stay_strict() {
     let root = fixture_path("tanstack-router-prefix-and-ignore");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files = collect_unused_files(&root, &results);
     for path in ["src/routes/helper.tsx", "src/routes/ignored.page.tsx"] {
@@ -204,7 +204,7 @@ fn tanstack_router_prefix_and_ignore_patterns_stay_strict() {
 fn tanstack_start_custom_route_file_ignore_prefix_keeps_dash_routes_live() {
     let root = fixture_path("tanstack-router-custom-ignore-prefix");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     // With routeFileIgnorePrefix overridden to "__excluded__" via the vite
     // tanstackStart({ router: { ... } }) call, the default "-" prefix is no
@@ -295,7 +295,7 @@ export const routeTree = [dashRoute];
     );
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused_files = collect_unused_files(root, &results);
     assert!(
         !unused_files
@@ -329,7 +329,7 @@ fn tanstack_router_default_ignore_prefix_still_ignores_dash_files() {
     write_project_file(root, "src/routes/-helper.tsx", "export const Route = {};\n");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused_files = collect_unused_files(root, &results);
     assert!(
         unused_files
@@ -390,7 +390,7 @@ export const Route = createFileRoute("/")({});
     );
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let duplicate_route_locations = duplicate_export_locations(root, &results, "Route");
 
     assert!(
@@ -403,7 +403,7 @@ export const Route = createFileRoute("/")({});
 fn tanstack_router_generated_route_tree_import_without_file_is_not_unresolved() {
     let root = fixture_path("tanstack-router-generated-route-tree-import");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unresolved_specifiers: Vec<&str> = results
         .unresolved_imports
         .iter()
@@ -436,7 +436,7 @@ fn route_tree_generated_import_stays_unresolved_without_tanstack_router_plugin()
     write_project_file(root, "src/router.ts", "import './routeTree.gen';\n");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unresolved_specifiers: Vec<&str> = results
         .unresolved_imports
         .iter()
@@ -479,7 +479,7 @@ export async function loadManifest() {
     );
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unlisted_names: Vec<&str> = results
         .unlisted_dependencies
         .iter()
@@ -531,7 +531,7 @@ fn tanstack_start_virtual_modules_stay_unlisted_without_plugin() {
     );
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unlisted_names: Vec<&str> = results
         .unlisted_dependencies
         .iter()
@@ -553,7 +553,7 @@ fn tanstack_start_virtual_modules_stay_unlisted_without_plugin() {
 fn tanstack_router_inline_virtual_route_config_is_covered() {
     let root = fixture_path("tanstack-router-virtual-routes");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files = collect_unused_files(&root, &results);
     for path in [
@@ -634,7 +634,7 @@ export const routes = [RouteA, RouteB];
     write_project_file(root, "src/features/b.ts", "export const Route = 'b';\n");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let duplicate_route_locations = duplicate_export_locations(root, &results, "Route");
 
     assert!(
@@ -705,7 +705,7 @@ export const routes = rootRoute("root.tsx", [
     write_project_file(root, "src/routes/orphan.tsx", "export const Route = {};\n");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused_files = collect_unused_files(root, &results);
     for path in [
         "routes.ts",
@@ -841,7 +841,7 @@ export default defineConfig({
     write_project_file(root, "src/routes/legacy.tsx", "export const Route = {};\n");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused_files = collect_unused_files(root, &results);
     for path in [
         "src/routeTree.gen.ts",
@@ -949,7 +949,7 @@ export const routes = rootRoute("root.tsx", [
     write_project_file(root, "app/pages/legacy.tsx", "export const Route = {};\n");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused_files = collect_unused_files(root, &results);
     for path in [
         "webpack.config.ts",
@@ -1020,7 +1020,7 @@ export default defineConfig({});
     write_project_file(root, "src/routes/legacy.tsx", "export const Route = {};\n");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused_files = collect_unused_files(root, &results);
     assert!(
         !unused_files
@@ -1071,7 +1071,7 @@ module.exports = {
     write_project_file(root, "src/routes/legacy.tsx", "export const Route = {};\n");
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused_files = collect_unused_files(root, &results);
     assert!(
         !unused_files
@@ -1125,7 +1125,7 @@ fn tanstack_router_custom_route_dir_replaces_default_used_export_rules() {
     );
 
     let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused_files = collect_unused_files(root, &results);
     assert!(
         !unused_files
@@ -1169,7 +1169,7 @@ fn tanstack_router_invalid_ignore_pattern_returns_config_error() {
     write_project_file(root, "src/routes/index.tsx", "export const Route = {};\n");
 
     let config = create_config(root.to_path_buf());
-    let err = fallow_core::analyze(&config).expect_err("analysis should fail");
+    let err = plow_core::analyze(&config).expect_err("analysis should fail");
     assert_eq!(err.code(), Some("E004"));
     let rendered = err.to_string();
     assert!(

@@ -2,11 +2,11 @@ use std::borrow::Cow;
 use std::fmt::Write;
 use std::path::Path;
 
-use fallow_types::duplicates::DuplicationReport;
-use fallow_types::output_dead_code::*;
-use fallow_types::results::{AnalysisResults, UnusedExport, UnusedMember};
+use plow_types::duplicates::DuplicationReport;
+use plow_types::output_dead_code::*;
+use plow_types::results::{AnalysisResults, UnusedExport, UnusedMember};
 
-use fallow_output::normalize_uri;
+use plow_output::normalize_uri;
 
 use crate::ResultGroup;
 
@@ -53,11 +53,11 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
     let mut out = String::new();
 
     if total == 0 {
-        out.push_str("## Fallow: no issues found\n");
+        out.push_str("## Plow: no issues found\n");
         return out;
     }
 
-    let _ = write!(out, "## Fallow: {total} issue{} found\n\n", plural(total));
+    let _ = write!(out, "## Plow: {total} issue{} found\n\n", plural(total));
 
     push_markdown_primary_sections(&mut out, results, root);
     push_markdown_import_sections(&mut out, results, root);
@@ -416,7 +416,7 @@ fn push_markdown_suppression_sections(
 }
 
 fn format_markdown_circular_dependency(
-    cycle: &fallow_types::output_dead_code::CircularDependencyFinding,
+    cycle: &plow_types::output_dead_code::CircularDependencyFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     let chain: Vec<String> = cycle.cycle.files.iter().map(|p| rel(p)).collect();
@@ -441,13 +441,13 @@ fn format_markdown_circular_dependency(
 }
 
 fn format_markdown_re_export_cycle(
-    cycle: &fallow_types::output_dead_code::ReExportCycleFinding,
+    cycle: &plow_types::output_dead_code::ReExportCycleFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     let chain: Vec<String> = cycle.cycle.files.iter().map(|p| rel(p)).collect();
     let kind_tag = match cycle.cycle.kind {
-        fallow_types::results::ReExportCycleKind::SelfLoop => " *(self-loop)*",
-        fallow_types::results::ReExportCycleKind::MultiNode => "",
+        plow_types::results::ReExportCycleKind::SelfLoop => " *(self-loop)*",
+        plow_types::results::ReExportCycleKind::MultiNode => "",
     };
     vec![format!(
         "- {}{}",
@@ -461,7 +461,7 @@ fn format_markdown_re_export_cycle(
 }
 
 fn format_markdown_boundary_violation(
-    v: &fallow_types::output_dead_code::BoundaryViolationFinding,
+    v: &plow_types::output_dead_code::BoundaryViolationFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -475,7 +475,7 @@ fn format_markdown_boundary_violation(
 }
 
 fn format_markdown_boundary_coverage(
-    v: &fallow_types::output_dead_code::BoundaryCoverageViolationFinding,
+    v: &plow_types::output_dead_code::BoundaryCoverageViolationFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -486,7 +486,7 @@ fn format_markdown_boundary_coverage(
 }
 
 fn format_markdown_boundary_call(
-    v: &fallow_types::output_dead_code::BoundaryCallViolationFinding,
+    v: &plow_types::output_dead_code::BoundaryCallViolationFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -500,7 +500,7 @@ fn format_markdown_boundary_call(
 }
 
 fn format_markdown_policy_violation(
-    v: &fallow_types::output_dead_code::PolicyViolationFinding,
+    v: &plow_types::output_dead_code::PolicyViolationFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -519,7 +519,7 @@ fn format_markdown_policy_violation(
 }
 
 fn format_markdown_invalid_client_export(
-    e: &fallow_types::output_dead_code::InvalidClientExportFinding,
+    e: &plow_types::output_dead_code::InvalidClientExportFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -532,7 +532,7 @@ fn format_markdown_invalid_client_export(
 }
 
 fn format_markdown_mixed_client_server_barrel(
-    b: &fallow_types::output_dead_code::MixedClientServerBarrelFinding,
+    b: &plow_types::output_dead_code::MixedClientServerBarrelFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -545,7 +545,7 @@ fn format_markdown_mixed_client_server_barrel(
 }
 
 fn format_markdown_misplaced_directive(
-    d: &fallow_types::output_dead_code::MisplacedDirectiveFinding,
+    d: &plow_types::output_dead_code::MisplacedDirectiveFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -557,7 +557,7 @@ fn format_markdown_misplaced_directive(
 }
 
 fn format_markdown_unprovided_inject(
-    i: &fallow_types::output_dead_code::UnprovidedInjectFinding,
+    i: &plow_types::output_dead_code::UnprovidedInjectFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -570,7 +570,7 @@ fn format_markdown_unprovided_inject(
 }
 
 fn format_markdown_unrendered_component(
-    c: &fallow_types::output_dead_code::UnrenderedComponentFinding,
+    c: &plow_types::output_dead_code::UnrenderedComponentFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     // Lit: `component_name` is the registered TAG, so render it as a custom
@@ -593,7 +593,7 @@ fn format_markdown_unrendered_component(
 }
 
 fn format_markdown_unused_component_prop(
-    p: &fallow_types::output_dead_code::UnusedComponentPropFinding,
+    p: &plow_types::output_dead_code::UnusedComponentPropFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -605,7 +605,7 @@ fn format_markdown_unused_component_prop(
 }
 
 fn format_markdown_unused_component_emit(
-    e: &fallow_types::output_dead_code::UnusedComponentEmitFinding,
+    e: &plow_types::output_dead_code::UnusedComponentEmitFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -617,7 +617,7 @@ fn format_markdown_unused_component_emit(
 }
 
 fn format_markdown_unused_svelte_event(
-    e: &fallow_types::output_dead_code::UnusedSvelteEventFinding,
+    e: &plow_types::output_dead_code::UnusedSvelteEventFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -629,7 +629,7 @@ fn format_markdown_unused_svelte_event(
 }
 
 fn format_markdown_unused_component_input(
-    i: &fallow_types::output_dead_code::UnusedComponentInputFinding,
+    i: &plow_types::output_dead_code::UnusedComponentInputFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -641,7 +641,7 @@ fn format_markdown_unused_component_input(
 }
 
 fn format_markdown_unused_component_output(
-    o: &fallow_types::output_dead_code::UnusedComponentOutputFinding,
+    o: &plow_types::output_dead_code::UnusedComponentOutputFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -653,7 +653,7 @@ fn format_markdown_unused_component_output(
 }
 
 fn format_markdown_unused_server_action(
-    a: &fallow_types::output_dead_code::UnusedServerActionFinding,
+    a: &plow_types::output_dead_code::UnusedServerActionFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -665,7 +665,7 @@ fn format_markdown_unused_server_action(
 }
 
 fn format_markdown_unused_load_data_key(
-    k: &fallow_types::output_dead_code::UnusedLoadDataKeyFinding,
+    k: &plow_types::output_dead_code::UnusedLoadDataKeyFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -677,7 +677,7 @@ fn format_markdown_unused_load_data_key(
 }
 
 fn format_markdown_route_collision(
-    c: &fallow_types::output_dead_code::RouteCollisionFinding,
+    c: &plow_types::output_dead_code::RouteCollisionFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -689,7 +689,7 @@ fn format_markdown_route_collision(
 }
 
 fn format_markdown_dynamic_segment_name_conflict(
-    c: &fallow_types::output_dead_code::DynamicSegmentNameConflictFinding,
+    c: &plow_types::output_dead_code::DynamicSegmentNameConflictFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -828,13 +828,13 @@ pub fn build_grouped_markdown(groups: &[ResultGroup], root: &Path) -> String {
     let mut out = String::new();
 
     if total == 0 {
-        out.push_str("## Fallow: no issues found\n");
+        out.push_str("## Plow: no issues found\n");
         return out;
     }
 
     let _ = writeln!(
         out,
-        "## Fallow: {total} issue{} found (grouped)\n",
+        "## Plow: {total} issue{} found (grouped)\n",
         plural(total)
     );
 
@@ -861,7 +861,7 @@ pub fn build_grouped_markdown(groups: &[ResultGroup], root: &Path) -> String {
         }
         let body = build_markdown(&group.results, root);
         let sections = body
-            .strip_prefix("## Fallow: no issues found\n")
+            .strip_prefix("## Plow: no issues found\n")
             .or_else(|| body.find("\n\n").map(|pos| &body[pos + 2..]))
             .unwrap_or(&body);
         out.push_str(sections);
@@ -876,7 +876,7 @@ fn format_export(e: &UnusedExport) -> String {
 }
 
 fn format_private_type_leak(
-    entry: &fallow_types::output_dead_code::PrivateTypeLeakFinding,
+    entry: &plow_types::output_dead_code::PrivateTypeLeakFinding,
 ) -> String {
     let e = &entry.leak;
     format!(
@@ -982,14 +982,14 @@ pub fn build_duplication_markdown(report: &DuplicationReport, root: &Path) -> St
     let mut out = String::new();
 
     if report.clone_groups.is_empty() {
-        out.push_str("## Fallow: no code duplication found\n");
+        out.push_str("## Plow: no code duplication found\n");
         return out;
     }
 
     let stats = &report.stats;
     let _ = write!(
         out,
-        "## Fallow: {} clone group{} found ({:.1}% duplication)\n\n",
+        "## Plow: {} clone group{} found ({:.1}% duplication)\n\n",
         stats.clone_groups,
         plural(stats.clone_groups),
         stats.duplication_percentage,
@@ -1071,7 +1071,7 @@ fn write_duplication_families(out: &mut String, report: &DuplicationReport, root
 
 /// Build markdown output for health (complexity) results.
 #[must_use]
-pub fn build_health_markdown(report: &fallow_output::HealthReport, root: &Path) -> String {
+pub fn build_health_markdown(report: &plow_output::HealthReport, root: &Path) -> String {
     let mut out = String::new();
 
     if let Some(ref hs) = report.health_score {
@@ -1094,7 +1094,7 @@ pub fn build_health_markdown(report: &fallow_output::HealthReport, root: &Path) 
         if report.vital_signs.is_none() {
             let _ = write!(
                 out,
-                "## Fallow: no functions exceed complexity thresholds\n\n\
+                "## Plow: no functions exceed complexity thresholds\n\n\
                  **{}** functions analyzed (max cyclomatic: {}, max cognitive: {}, max CRAP: {:.1})\n",
                 report.summary.functions_analyzed,
                 report.summary.max_cyclomatic_threshold,
@@ -1122,7 +1122,7 @@ pub fn build_health_markdown(report: &fallow_output::HealthReport, root: &Path) 
 /// Render the opt-in `## CSS Health` markdown section (present only with
 /// `--css`): a summary of structural metrics, value sprawl, and candidate counts
 /// plus a bounded list of the most actionable located candidates.
-fn write_css_analytics_section(out: &mut String, report: &fallow_output::HealthReport) {
+fn write_css_analytics_section(out: &mut String, report: &plow_output::HealthReport) {
     let Some(ref css) = report.css_analytics else {
         return;
     };
@@ -1170,7 +1170,7 @@ fn write_css_analytics_section(out: &mut String, report: &fallow_output::HealthR
     out.push('\n');
 }
 
-fn write_css_candidate_details(out: &mut String, css: &fallow_output::CssAnalyticsReport) {
+fn write_css_candidate_details(out: &mut String, css: &plow_output::CssAnalyticsReport) {
     write_css_keyframe_details(out, css);
     write_css_tailwind_details(out, css);
     write_css_class_candidate_details(out, css);
@@ -1178,7 +1178,7 @@ fn write_css_candidate_details(out: &mut String, css: &fallow_output::CssAnalyti
     write_css_font_size_mix_details(out, css);
 }
 
-fn write_css_keyframe_details(out: &mut String, css: &fallow_output::CssAnalyticsReport) {
+fn write_css_keyframe_details(out: &mut String, css: &plow_output::CssAnalyticsReport) {
     if !css.undefined_keyframes.is_empty() {
         let named: Vec<String> = css
             .undefined_keyframes
@@ -1194,7 +1194,7 @@ fn write_css_keyframe_details(out: &mut String, css: &fallow_output::CssAnalytic
     }
 }
 
-fn write_css_tailwind_details(out: &mut String, css: &fallow_output::CssAnalyticsReport) {
+fn write_css_tailwind_details(out: &mut String, css: &plow_output::CssAnalyticsReport) {
     if !css.tailwind_arbitrary_values.is_empty() {
         let named: Vec<String> = css
             .tailwind_arbitrary_values
@@ -1206,7 +1206,7 @@ fn write_css_tailwind_details(out: &mut String, css: &fallow_output::CssAnalytic
     }
 }
 
-fn write_css_class_candidate_details(out: &mut String, css: &fallow_output::CssAnalyticsReport) {
+fn write_css_class_candidate_details(out: &mut String, css: &plow_output::CssAnalyticsReport) {
     if !css.unresolved_class_references.is_empty() {
         let named: Vec<String> = css
             .unresolved_class_references
@@ -1240,7 +1240,7 @@ fn write_css_class_candidate_details(out: &mut String, css: &fallow_output::CssA
     }
 }
 
-fn write_css_font_candidate_details(out: &mut String, css: &fallow_output::CssAnalyticsReport) {
+fn write_css_font_candidate_details(out: &mut String, css: &plow_output::CssAnalyticsReport) {
     if !css.unused_font_faces.is_empty() {
         let named: Vec<String> = css
             .unused_font_faces
@@ -1269,7 +1269,7 @@ fn write_css_font_candidate_details(out: &mut String, css: &fallow_output::CssAn
     }
 }
 
-fn write_css_font_size_mix_details(out: &mut String, css: &fallow_output::CssAnalyticsReport) {
+fn write_css_font_size_mix_details(out: &mut String, css: &plow_output::CssAnalyticsReport) {
     if let Some(mix) = &css.font_size_unit_mix {
         let breakdown: Vec<String> = mix
             .notations
@@ -1287,7 +1287,7 @@ fn write_css_font_size_mix_details(out: &mut String, css: &fallow_output::CssAna
 
 fn write_coverage_intelligence_section(
     out: &mut String,
-    report: &fallow_output::HealthReport,
+    report: &plow_output::HealthReport,
     root: &Path,
 ) {
     let Some(ref intelligence) = report.coverage_intelligence else {
@@ -1329,7 +1329,7 @@ fn write_coverage_intelligence_section(
 /// Write one coverage-intelligence finding row.
 fn write_coverage_intelligence_row(
     out: &mut String,
-    finding: &fallow_output::CoverageIntelligenceFinding,
+    finding: &plow_output::CoverageIntelligenceFinding,
     root: &Path,
 ) {
     let path = escape_backticks(&normalize_uri(
@@ -1361,7 +1361,7 @@ fn write_coverage_intelligence_row(
 
 fn write_runtime_coverage_section(
     out: &mut String,
-    report: &fallow_output::HealthReport,
+    report: &plow_output::HealthReport,
     root: &Path,
 ) {
     let Some(ref production) = report.runtime_coverage else {
@@ -1378,7 +1378,7 @@ fn write_runtime_coverage_section(
 /// Write the runtime-coverage summary header and capture-quality lines.
 fn write_runtime_coverage_summary(
     out: &mut String,
-    production: &fallow_output::RuntimeCoverageReport,
+    production: &plow_output::RuntimeCoverageReport,
 ) {
     let _ = writeln!(
         out,
@@ -1411,7 +1411,7 @@ fn write_runtime_coverage_summary(
 /// Write the runtime-coverage per-finding table.
 fn write_runtime_coverage_findings(
     out: &mut String,
-    production: &fallow_output::RuntimeCoverageReport,
+    production: &plow_output::RuntimeCoverageReport,
     root: &Path,
 ) {
     if production.findings.is_empty() {
@@ -1443,7 +1443,7 @@ fn write_runtime_coverage_findings(
 /// Write the runtime-coverage hot-paths table.
 fn write_runtime_coverage_hot_paths(
     out: &mut String,
-    production: &fallow_output::RuntimeCoverageReport,
+    production: &plow_output::RuntimeCoverageReport,
     root: &Path,
 ) {
     if production.hot_paths.is_empty() {
@@ -1469,7 +1469,7 @@ fn write_runtime_coverage_hot_paths(
 }
 
 /// Write the trend comparison table to the output.
-fn write_trend_section(out: &mut String, report: &fallow_output::HealthReport) {
+fn write_trend_section(out: &mut String, report: &plow_output::HealthReport) {
     let Some(ref trend) = report.health_trend else {
         return;
     };
@@ -1517,7 +1517,7 @@ fn write_trend_section(out: &mut String, report: &fallow_output::HealthReport) {
 }
 
 /// Write one trend metric row with unit-aware value and delta formatting.
-fn write_trend_metric_row(out: &mut String, m: &fallow_output::TrendMetric) {
+fn write_trend_metric_row(out: &mut String, m: &plow_output::TrendMetric) {
     let fmt_val = |v: f64| -> String {
         if m.unit == "%" {
             format!("{v:.1}%")
@@ -1549,7 +1549,7 @@ fn write_trend_metric_row(out: &mut String, m: &fallow_output::TrendMetric) {
 }
 
 /// Write the vital signs summary table to the output.
-fn write_vital_signs_section(out: &mut String, report: &fallow_output::HealthReport) {
+fn write_vital_signs_section(out: &mut String, report: &plow_output::HealthReport) {
     let Some(ref vs) = report.vital_signs else {
         return;
     };
@@ -1587,7 +1587,7 @@ fn write_vital_signs_section(out: &mut String, report: &fallow_output::HealthRep
 }
 
 /// Write the complexity findings table to the output.
-fn write_findings_section(out: &mut String, report: &fallow_output::HealthReport, root: &Path) {
+fn write_findings_section(out: &mut String, report: &plow_output::HealthReport, root: &Path) {
     if report.findings.is_empty() {
         return;
     }
@@ -1619,7 +1619,7 @@ fn write_findings_section(out: &mut String, report: &fallow_output::HealthReport
 /// Write the heading line for the complexity findings section.
 fn write_findings_heading(
     out: &mut String,
-    report: &fallow_output::HealthReport,
+    report: &plow_output::HealthReport,
     has_synthetic: bool,
 ) {
     let count = report.summary.functions_above_threshold;
@@ -1632,11 +1632,11 @@ fn write_findings_heading(
     if shown < count {
         let _ = write!(
             out,
-            "## Fallow: {count} {subject}{} ({shown} shown)\n\n",
+            "## Plow: {count} {subject}{} ({shown} shown)\n\n",
             plural(count),
         );
     } else {
-        let _ = write!(out, "## Fallow: {count} {subject}{}\n\n", plural(count));
+        let _ = write!(out, "## Plow: {count} {subject}{}\n\n", plural(count));
     }
 }
 
@@ -1653,8 +1653,8 @@ fn write_findings_table_header(out: &mut String, has_synthetic: bool) {
 /// Write one complexity finding row, including threshold-breach markers.
 fn write_findings_row(
     out: &mut String,
-    finding: &fallow_output::HealthFinding,
-    report: &fallow_output::HealthReport,
+    finding: &plow_output::HealthFinding,
+    report: &plow_output::HealthReport,
     root: &Path,
 ) {
     let file_str = escape_backticks(&normalize_uri(
@@ -1663,7 +1663,7 @@ fn write_findings_row(
     let thresholds =
         finding
             .effective_thresholds
-            .unwrap_or(fallow_output::HealthEffectiveThresholds {
+            .unwrap_or(plow_output::HealthEffectiveThresholds {
                 max_cyclomatic: report.summary.max_cyclomatic_threshold,
                 max_cognitive: report.summary.max_cognitive_threshold,
                 max_crap: report.summary.max_crap_threshold,
@@ -1679,9 +1679,9 @@ fn write_findings_row(
         ""
     };
     let severity_label = match finding.severity {
-        fallow_output::FindingSeverity::Critical => "critical",
-        fallow_output::FindingSeverity::High => "high",
-        fallow_output::FindingSeverity::Moderate => "moderate",
+        plow_output::FindingSeverity::Critical => "critical",
+        plow_output::FindingSeverity::High => "high",
+        plow_output::FindingSeverity::Moderate => "moderate",
     };
     let crap_cell = match finding.crap {
         Some(crap) => {
@@ -1707,7 +1707,7 @@ fn write_findings_row(
 
 fn write_threshold_overrides_section(
     out: &mut String,
-    report: &fallow_output::HealthReport,
+    report: &plow_output::HealthReport,
     root: &Path,
 ) {
     if report.threshold_overrides.is_empty() {
@@ -1721,9 +1721,9 @@ fn write_threshold_overrides_section(
     out.push_str("|---------:|:-------|:-------|:--------|\n");
     for entry in &report.threshold_overrides {
         let status = match entry.status {
-            fallow_output::ThresholdOverrideStatus::Active => "active",
-            fallow_output::ThresholdOverrideStatus::Stale => "stale",
-            fallow_output::ThresholdOverrideStatus::NoMatch => "no_match",
+            plow_output::ThresholdOverrideStatus::Active => "active",
+            plow_output::ThresholdOverrideStatus::Stale => "stale",
+            plow_output::ThresholdOverrideStatus::NoMatch => "no_match",
         };
         let target = entry.path.as_ref().map_or_else(
             || "<no matching file or function>".to_string(),
@@ -1759,7 +1759,7 @@ fn write_threshold_overrides_section(
 }
 
 /// Write the file health scores table to the output.
-fn write_file_scores_section(out: &mut String, report: &fallow_output::HealthReport, root: &Path) {
+fn write_file_scores_section(out: &mut String, report: &plow_output::HealthReport, root: &Path) {
     if report.file_scores.is_empty() {
         return;
     }
@@ -1798,11 +1798,7 @@ fn write_file_scores_section(out: &mut String, report: &fallow_output::HealthRep
     }
 }
 
-fn write_coverage_gaps_section(
-    out: &mut String,
-    report: &fallow_output::HealthReport,
-    root: &Path,
-) {
+fn write_coverage_gaps_section(out: &mut String, report: &plow_output::HealthReport, root: &Path) {
     let Some(ref gaps) = report.coverage_gaps else {
         return;
     };
@@ -1860,7 +1856,7 @@ fn write_coverage_gaps_section(
 /// owner, notes) for the markdown hotspots table. Cells fall back to an
 /// en-dash (U+2013) when ownership data is missing for an entry.
 fn ownership_md_cells(
-    ownership: Option<&fallow_output::OwnershipMetrics>,
+    ownership: Option<&plow_output::OwnershipMetrics>,
 ) -> (String, String, String, String) {
     let Some(o) = ownership else {
         let dash = "\u{2013}".to_string();
@@ -1880,7 +1876,7 @@ fn ownership_md_cells(
     if o.unowned == Some(true) {
         notes.push("**unowned**");
     }
-    if o.ownership_state == fallow_output::OwnershipState::DeclaredInactive {
+    if o.ownership_state == plow_output::OwnershipState::DeclaredInactive {
         notes.push("declared owner inactive");
     }
     if o.drift {
@@ -1894,7 +1890,7 @@ fn ownership_md_cells(
     (bus, top, owner, notes_str)
 }
 
-fn write_hotspots_section(out: &mut String, report: &fallow_output::HealthReport, root: &Path) {
+fn write_hotspots_section(out: &mut String, report: &plow_output::HealthReport, root: &Path) {
     if report.hotspots.is_empty() {
         return;
     }
@@ -1949,7 +1945,7 @@ fn write_hotspots_table_header(out: &mut String, any_ownership: bool) {
 /// Write one hotspot row, including ownership cells when the table is widened.
 fn write_hotspots_row(
     out: &mut String,
-    entry: &fallow_output::HotspotFinding,
+    entry: &plow_output::HotspotFinding,
     any_ownership: bool,
     root: &Path,
 ) {
@@ -1983,7 +1979,7 @@ fn write_hotspots_row(
 }
 
 /// Write the refactoring targets table to the output.
-fn write_targets_section(out: &mut String, report: &fallow_output::HealthReport, root: &Path) {
+fn write_targets_section(out: &mut String, report: &plow_output::HealthReport, root: &Path) {
     if report.targets.is_empty() {
         return;
     }
@@ -2008,7 +2004,7 @@ fn write_targets_section(out: &mut String, report: &fallow_output::HealthReport,
 }
 
 /// Write the metric legend collapsible section to the output.
-fn write_metric_legend(out: &mut String, report: &fallow_output::HealthReport) {
+fn write_metric_legend(out: &mut String, report: &plow_output::HealthReport) {
     let has_scores = !report.file_scores.is_empty();
     let has_coverage = report.coverage_gaps.is_some();
     let has_hotspots = !report.hotspots.is_empty();
@@ -2049,7 +2045,7 @@ fn write_metric_legend(out: &mut String, report: &fallow_output::HealthReport) {
         out.push_str("- **Confidence**: recommendation reliability (high = deterministic analysis, medium = heuristic, low = git-dependent)\n");
     }
     out.push_str(
-        "\n[Full metric reference](https://docs.fallow.tools/explanations/metrics)\n\n</details>\n",
+        "\n[Full metric reference](https://docs.genesis-plow.dev/explanations/metrics)\n\n</details>\n",
     );
 }
 
@@ -2067,12 +2063,12 @@ fn write_metric_legend(out: &mut String, report: &fallow_output::HealthReport) {
 /// instead of silently ignoring it.
 #[must_use]
 pub fn build_walkthrough_markdown(
-    guide: &fallow_output::StandardWalkthroughGuide,
+    guide: &plow_output::StandardWalkthroughGuide,
     root: &Path,
     viewed: &[String],
 ) -> String {
     let mut out = String::new();
-    out.push_str("## Fallow Review: Walkthrough\n\n");
+    out.push_str("## Plow Review: Walkthrough\n\n");
     push_walkthrough_focus(&mut out, guide, viewed);
 
     if guide.direction.order.is_empty() {
@@ -2104,11 +2100,11 @@ pub fn build_walkthrough_markdown(
 /// changed set and non-source files are surfaced, not silently dropped.
 fn push_walkthrough_focus(
     out: &mut String,
-    guide: &fallow_output::StandardWalkthroughGuide,
+    guide: &plow_output::StandardWalkthroughGuide,
     viewed: &[String],
 ) {
     let triage = &guide.digest.triage;
-    let acc = fallow_output::WalkthroughAccounting::compute(guide, viewed);
+    let acc = plow_output::WalkthroughAccounting::compute(guide, viewed);
     let total = acc.header_total();
     let _ = write!(
         out,
@@ -2135,15 +2131,15 @@ fn push_walkthrough_focus(
 /// collapsed out into Cleared) into (contract-break, orientation), each in
 /// `direction.order`.
 fn partition_walkthrough_stages<'a>(
-    guide: &'a fallow_output::StandardWalkthroughGuide,
+    guide: &'a plow_output::StandardWalkthroughGuide,
     viewed: &[String],
 ) -> (
-    Vec<&'a fallow_output::DirectionUnit>,
-    Vec<&'a fallow_output::DirectionUnit>,
+    Vec<&'a plow_output::DirectionUnit>,
+    Vec<&'a plow_output::DirectionUnit>,
 ) {
     let mut load_bearing = Vec::new();
     let mut mechanical = Vec::new();
-    for unit in fallow_output::visible_stage_units(guide, viewed) {
+    for unit in plow_output::visible_stage_units(guide, viewed) {
         if unit.concern_lens == "contract-break" {
             load_bearing.push(unit);
         } else {
@@ -2157,8 +2153,8 @@ fn partition_walkthrough_stages<'a>(
 fn push_walkthrough_stage(
     out: &mut String,
     title: &str,
-    units: &[&fallow_output::DirectionUnit],
-    guide: &fallow_output::StandardWalkthroughGuide,
+    units: &[&plow_output::DirectionUnit],
+    guide: &plow_output::StandardWalkthroughGuide,
     root: &Path,
 ) {
     if units.is_empty() {
@@ -2185,8 +2181,8 @@ fn push_walkthrough_stage(
 
 /// Synthesize the inline-code-span badges for a file in markdown (paste-safe).
 fn walkthrough_markdown_badges(
-    unit: &fallow_output::DirectionUnit,
-    guide: &fallow_output::StandardWalkthroughGuide,
+    unit: &plow_output::DirectionUnit,
+    guide: &plow_output::StandardWalkthroughGuide,
 ) -> Vec<String> {
     let mut badges: Vec<String> = Vec::new();
     for decision in &guide.digest.decisions.decisions {
@@ -2194,9 +2190,9 @@ fn walkthrough_markdown_badges(
             continue;
         }
         let token = match decision.category {
-            fallow_output::DecisionCategory::CouplingBoundary => "COUPLING",
-            fallow_output::DecisionCategory::PublicApiContract => "PUBLIC-API",
-            fallow_output::DecisionCategory::Dependency => "DEPENDENCY",
+            plow_output::DecisionCategory::CouplingBoundary => "COUPLING",
+            plow_output::DecisionCategory::PublicApiContract => "PUBLIC-API",
+            plow_output::DecisionCategory::Dependency => "DEPENDENCY",
         };
         let chip = format!("`{token}`");
         if !badges.contains(&chip) {
@@ -2226,8 +2222,8 @@ fn walkthrough_markdown_badges(
 /// carries (consumers, importers) is the same number the within-stage order
 /// follows, so the order mirrors the human surface (the count it shows).
 fn walkthrough_fact(
-    unit: &fallow_output::DirectionUnit,
-    guide: &fallow_output::StandardWalkthroughGuide,
+    unit: &plow_output::DirectionUnit,
+    guide: &plow_output::StandardWalkthroughGuide,
 ) -> String {
     if let Some(decision) = guide
         .digest
@@ -2240,10 +2236,10 @@ fn walkthrough_fact(
         // the contract-member list, PRESERVING the trailing guidance question. The
         // result is plain prose with no backticks, so it never emits a
         // backslash-backtick sequence and never re-prints the path.
-        return fallow_output::clean_decision_fact(
+        return plow_output::clean_decision_fact(
             &decision.question,
             &unit.file,
-            fallow_output::MAX_CONTRACT_MEMBERS,
+            plow_output::MAX_CONTRACT_MEMBERS,
         );
     }
     if !unit.out_of_diff.is_empty() {
@@ -2266,7 +2262,7 @@ fn walkthrough_fact(
     "orientation only".to_string()
 }
 
-fn walkthrough_introduced(file: &str, guide: &fallow_output::StandardWalkthroughGuide) -> bool {
+fn walkthrough_introduced(file: &str, guide: &plow_output::StandardWalkthroughGuide) -> bool {
     let deltas = &guide.digest.deltas;
     deltas
         .boundary_introduced
@@ -2276,7 +2272,7 @@ fn walkthrough_introduced(file: &str, guide: &fallow_output::StandardWalkthrough
         .any(|entry| entry.contains(file))
 }
 
-fn walkthrough_bus_factor(file: &str, guide: &fallow_output::StandardWalkthroughGuide) -> bool {
+fn walkthrough_bus_factor(file: &str, guide: &plow_output::StandardWalkthroughGuide) -> bool {
     guide
         .digest
         .routing
@@ -2285,7 +2281,7 @@ fn walkthrough_bus_factor(file: &str, guide: &fallow_output::StandardWalkthrough
         .any(|u| u.file == file && u.bus_factor_one)
 }
 
-fn walkthrough_weakened(file: &str, guide: &fallow_output::StandardWalkthroughGuide) -> bool {
+fn walkthrough_weakened(file: &str, guide: &plow_output::StandardWalkthroughGuide) -> bool {
     guide.digest.weakening.iter().any(|w| w.file == file)
 }
 
@@ -2295,7 +2291,7 @@ fn walkthrough_weakened(file: &str, guide: &fallow_output::StandardWalkthroughGu
 /// human surface does.
 fn push_walkthrough_cleared(
     out: &mut String,
-    guide: &fallow_output::StandardWalkthroughGuide,
+    guide: &plow_output::StandardWalkthroughGuide,
     root: &Path,
     viewed: &[String],
 ) {
@@ -2343,26 +2339,26 @@ fn markdown_relative_path_str(file: &str, root: &Path) -> String {
     escape_backticks(&normalize_uri(file))
 }
 
-fn walkthrough_risk_label(risk: fallow_output::RiskClass) -> &'static str {
+fn walkthrough_risk_label(risk: plow_output::RiskClass) -> &'static str {
     match risk {
-        fallow_output::RiskClass::Low => "low",
-        fallow_output::RiskClass::Medium => "medium",
-        fallow_output::RiskClass::High => "high",
+        plow_output::RiskClass::Low => "low",
+        plow_output::RiskClass::Medium => "medium",
+        plow_output::RiskClass::High => "high",
     }
 }
 
-fn walkthrough_effort_label(effort: fallow_output::ReviewEffort) -> &'static str {
+fn walkthrough_effort_label(effort: plow_output::ReviewEffort) -> &'static str {
     match effort {
-        fallow_output::ReviewEffort::Glance => "glance",
-        fallow_output::ReviewEffort::Review => "review",
-        fallow_output::ReviewEffort::DeepDive => "deep-dive",
+        plow_output::ReviewEffort::Glance => "glance",
+        plow_output::ReviewEffort::Review => "review",
+        plow_output::ReviewEffort::DeepDive => "deep-dive",
     }
 }
 
 #[cfg(test)]
 mod walkthrough_markdown_tests {
     use super::build_walkthrough_markdown;
-    use fallow_output::{
+    use plow_output::{
         AgentSchema, Decision, DecisionCategory, DecisionSurface, DiffTriage, DirectionUnit,
         FocusLabel, FocusMap, FocusScore, FocusUnit, GraphFacts, INJECTION_NOTE,
         ImpactClosureFacts, PartitionFacts, ReviewBriefSchemaVersion, ReviewDeltas,
@@ -2460,7 +2456,7 @@ mod walkthrough_markdown_tests {
     fn renders_header_stage_and_code_span_badges() {
         let guide = guide_with_question("src/page.ts", "Couple ui to db?");
         let md = build_walkthrough_markdown(&guide, Path::new("/project"), &[]);
-        assert!(md.starts_with("## Fallow Review"), "got: {md}");
+        assert!(md.starts_with("## Plow Review"), "got: {md}");
         assert!(md.contains("### Stage 1"), "got: {md}");
         assert!(md.contains("`COUPLING`"), "badges are code spans: {md}");
         assert!(md.contains("`OUT-OF-DIFF`"), "got: {md}");

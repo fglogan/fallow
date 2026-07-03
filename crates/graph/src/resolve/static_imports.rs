@@ -10,7 +10,7 @@
 
 use std::path::Path;
 
-use fallow_types::extract::ImportInfo;
+use plow_types::extract::ImportInfo;
 
 use super::ResolvedImport;
 use super::specifier::resolve_specifier;

@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 // VS Code injects this module into the extension host at runtime.
-// fallow-ignore-next-line unlisted-dependency
+// plow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
 import { resolveCliForRun } from "./commands.js";
 import { getLicenseShowStatusBar } from "./config.js";
@@ -35,7 +35,7 @@ interface LicenseExec {
 }
 
 /**
- * Spawn `fallow license ...` and collect stdout/stderr. License output is
+ * Spawn `plow license ...` and collect stdout/stderr. License output is
  * tiny, so the default pipe buffer is fine (no 50MB maxBuffer needed). When
  * `stdin` is provided it is written to the child and the stream closed, so a
  * pasted token reaches the CLI via `--stdin` and never appears in argv.
@@ -50,7 +50,7 @@ const execLicense = (
     if (!binary) {
       reject(
         new Error(
-          "fallow CLI binary not found. Checked fallow.lspPath sibling, local node_modules/.bin, PATH, managed extension storage, and auto-download.",
+          "plow CLI binary not found. Checked plow.lspPath sibling, local node_modules/.bin, PATH, managed extension storage, and auto-download.",
         ),
       );
       return;
@@ -82,7 +82,7 @@ const execLicense = (
     child.on("close", (code, signal) => {
       unregisterChild(child);
       if (signal) {
-        reject(new Error(`fallow exited via signal ${signal}`));
+        reject(new Error(`plow exited via signal ${signal}`));
         return;
       }
       resolve({ code, stdout, stderr });
@@ -97,7 +97,7 @@ const execLicense = (
 const licenseCwd = (): string => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
 
 /**
- * Run a `fallow license <sub> --format json` invocation and normalize the
+ * Run a `plow license <sub> --format json` invocation and normalize the
  * outcome into a {@link LicenseActionResult}. `{0,3}` are parsed as a status;
  * any other exit code surfaces the structured-error message (falling back to
  * stderr). Spawn failures (missing binary, signal) reject and are caught by the
@@ -117,7 +117,7 @@ const runLicense = async (
 
   if (parsed.ok) {
     // Log only the resolved state, never the token.
-    outputChannel?.appendLine(`Fallow license: ${parsed.data.state}`);
+    outputChannel?.appendLine(`Plow license: ${parsed.data.state}`);
     const isStatusExit = code === null || STATUS_EXIT_CODES.has(code);
     return {
       ok: isStatusExit,
@@ -129,8 +129,8 @@ const runLicense = async (
   // Non-status exit, or unparseable output: prefer the structured error
   // message, then stderr, then a generic line.
   const message =
-    parsed.error.length > 0 ? parsed.error : stderr.trim() || "fallow license failed.";
-  outputChannel?.appendLine(`Fallow license error (exit ${code ?? "?"}): ${message}`);
+    parsed.error.length > 0 ? parsed.error : stderr.trim() || "plow license failed.";
+  outputChannel?.appendLine(`Plow license error (exit ${code ?? "?"}): ${message}`);
   return { ok: false, status: null, message };
 };
 
@@ -140,19 +140,19 @@ const runLicense = async (
 
 let licenseStatusBarItem: vscode.StatusBarItem | null = null;
 
-/** Default license path mirrored from `fallow_license` (`~/.fallow/license.jwt`). */
-const defaultLicensePath = (): string => path.join(os.homedir(), ".fallow", "license.jwt");
+/** Default license path mirrored from `plow_license` (`~/.plow/license.jwt`). */
+const defaultLicensePath = (): string => path.join(os.homedir(), ".plow", "license.jwt");
 
 /**
  * Whether license material exists on this machine, without shelling out to
- * `fallow`. Checks `$FALLOW_LICENSE` / `$FALLOW_LICENSE_PATH` / the default
+ * `plow`. Checks `$PLOW_LICENSE` / `$PLOW_LICENSE_PATH` / the default
  * file, matching the Rust loader precedence. Drives whether the indicator is
  * shown at all: users who never had a license get no badge.
  */
 const licenseMaterialPresent = (): boolean =>
   hasLicenseMaterial(
-    process.env["FALLOW_LICENSE"],
-    process.env["FALLOW_LICENSE_PATH"],
+    process.env["PLOW_LICENSE"],
+    process.env["PLOW_LICENSE_PATH"],
     defaultLicensePath(),
     (filePath) => {
       try {
@@ -188,7 +188,7 @@ const applyParts = (status: LicenseStatusJson | null): void => {
 
 /**
  * Create the singleton license status-bar item, but only when the indicator is
- * enabled (`fallow.license.showStatusBar`) AND license material is present.
+ * enabled (`plow.license.showStatusBar`) AND license material is present.
  * No-op when the item already exists. Idempotent: callers run it before a probe
  * so the badge appears the moment a license is activated (without a reload).
  */
@@ -200,14 +200,14 @@ const ensureLicenseStatusBar = (): void => {
     return;
   }
   licenseStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 49);
-  licenseStatusBarItem.command = "fallow.license.status";
+  licenseStatusBarItem.command = "plow.license.status";
   applyParts(null);
   licenseStatusBarItem.show();
 };
 
 /**
  * Create the license status-bar item, or return `null` when the indicator is
- * disabled (`fallow.license.showStatusBar: false`) OR no license material is
+ * disabled (`plow.license.showStatusBar: false`) OR no license material is
  * present (free users never see a license badge). Sits just right of the
  * analysis item (priority 49 vs 50). Renders a neutral placeholder immediately;
  * callers update it asynchronously via {@link refreshLicenseStatus}.
@@ -218,7 +218,7 @@ export const createLicenseStatusBar = (): vscode.StatusBarItem | null => {
 };
 
 /**
- * Probe `fallow license status` and update the indicator. Best-effort: a
+ * Probe `plow license status` and update the indicator. Best-effort: a
  * missing binary or spawn error leaves the placeholder in place and is logged,
  * never surfaced as an error toast (the probe is passive). Creates the item
  * first if a license was just activated; stays a no-op for free users (no
@@ -237,7 +237,7 @@ export const refreshLicenseStatus = async (
     applyParts(result.status);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    outputChannel?.appendLine(`Fallow license: status probe failed: ${message}`);
+    outputChannel?.appendLine(`Plow license: status probe failed: ${message}`);
   }
 };
 
@@ -283,9 +283,9 @@ const afterAction = async (
 ): Promise<void> => {
   await refreshLicenseStatus(context, outputChannel);
   if (result.ok) {
-    void vscode.window.showInformationMessage(`Fallow: ${result.message}`);
+    void vscode.window.showInformationMessage(`Plow: ${result.message}`);
   } else {
-    void vscode.window.showErrorMessage(`Fallow: ${result.message}`);
+    void vscode.window.showErrorMessage(`Plow: ${result.message}`);
   }
 };
 
@@ -294,7 +294,7 @@ const activateFromPaste = async (
   outputChannel: vscode.OutputChannel | undefined,
 ): Promise<void> => {
   const token = await vscode.window.showInputBox({
-    title: "Activate Fallow License",
+    title: "Activate Plow License",
     prompt: "Paste your license token",
     password: true,
     ignoreFocusOut: true,
@@ -313,7 +313,7 @@ const activateFromFile = async (
   outputChannel: vscode.OutputChannel | undefined,
 ): Promise<void> => {
   const picked = await vscode.window.showOpenDialog({
-    title: "Select a Fallow license file",
+    title: "Select a Plow license file",
     canSelectMany: false,
     openLabel: "Activate",
   });
@@ -330,7 +330,7 @@ const activateTrial = async (
   outputChannel: vscode.OutputChannel | undefined,
 ): Promise<void> => {
   const email = await vscode.window.showInputBox({
-    title: "Start a Fallow Trial",
+    title: "Start a Plow Trial",
     prompt: "Email for your 30-day trial",
     ignoreFocusOut: true,
     validateInput: (value) => validateEmail(value),
@@ -341,7 +341,7 @@ const activateTrial = async (
   const result = await vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
-      title: "Fallow: requesting a trial license...",
+      title: "Plow: requesting a trial license...",
       cancellable: false,
     },
     () => runLicense(context, ["activate", "--trial", "--email", email.trim()], outputChannel),
@@ -354,7 +354,7 @@ export const activateLicenseCommand = async (
   outputChannel?: vscode.OutputChannel,
 ): Promise<void> => {
   const picked = await vscode.window.showQuickPick(ACTIVATE_ITEMS, {
-    title: "Activate Fallow License",
+    title: "Activate Plow License",
     placeHolder: "How would you like to activate your license?",
   });
   if (!picked) {
@@ -370,7 +370,7 @@ export const activateLicenseCommand = async (
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    void vscode.window.showErrorMessage(`Fallow: ${message}`);
+    void vscode.window.showErrorMessage(`Plow: ${message}`);
   }
 };
 
@@ -382,10 +382,10 @@ export const licenseStatusCommand = async (
     const result = await runLicense(context, ["status"], outputChannel);
     ensureLicenseStatusBar();
     applyParts(result.status);
-    void vscode.window.showInformationMessage(`Fallow: ${result.message}`);
+    void vscode.window.showInformationMessage(`Plow: ${result.message}`);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    void vscode.window.showErrorMessage(`Fallow: ${message}`);
+    void vscode.window.showErrorMessage(`Plow: ${message}`);
   }
 };
 
@@ -397,7 +397,7 @@ export const refreshLicenseCommand = async (
     const result = await vscode.window.withProgress(
       {
         location: vscode.ProgressLocation.Notification,
-        title: "Fallow: refreshing license...",
+        title: "Plow: refreshing license...",
         cancellable: false,
       },
       () => runLicense(context, ["refresh"], outputChannel),
@@ -405,7 +405,7 @@ export const refreshLicenseCommand = async (
     await afterAction(context, outputChannel, result);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    void vscode.window.showErrorMessage(`Fallow: ${message}`);
+    void vscode.window.showErrorMessage(`Plow: ${message}`);
   }
 };
 
@@ -414,7 +414,7 @@ export const deactivateLicenseCommand = async (
   outputChannel?: vscode.OutputChannel,
 ): Promise<void> => {
   const confirm = await vscode.window.showWarningMessage(
-    "Fallow: remove the local license? Paid features will stop working until you re-activate.",
+    "Plow: remove the local license? Paid features will stop working until you re-activate.",
     "Remove",
     "Cancel",
   );
@@ -425,12 +425,12 @@ export const deactivateLicenseCommand = async (
     const result = await runLicense(context, ["deactivate"], outputChannel);
     await refreshLicenseStatus(context, outputChannel);
     if (result.ok) {
-      void vscode.window.showInformationMessage(`Fallow: ${result.message}`);
+      void vscode.window.showInformationMessage(`Plow: ${result.message}`);
     } else {
-      void vscode.window.showErrorMessage(`Fallow: ${result.message}`);
+      void vscode.window.showErrorMessage(`Plow: ${result.message}`);
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    void vscode.window.showErrorMessage(`Fallow: ${message}`);
+    void vscode.window.showErrorMessage(`Plow: ${message}`);
   }
 };

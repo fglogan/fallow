@@ -1,17 +1,17 @@
-use fallow_config::{FallowConfig, OutputFormat, RulesConfig, Severity};
+use plow_config::{OutputFormat, PlowConfig, RulesConfig, Severity};
 
 use crate::common::fixture_path;
 
 /// Resolve the fixture with the default rule set: `unused-load-data-key` at
 /// `warn` (its default). The detector is gated on the project declaring
 /// `@sveltejs/kit`, which the fixture's package.json does.
-fn fixture_config(name: &str) -> fallow_config::ResolvedConfig {
-    FallowConfig::default().resolve(fixture_path(name), OutputFormat::Human, 4, true, true, None)
+fn fixture_config(name: &str) -> plow_config::ResolvedConfig {
+    PlowConfig::default().resolve(fixture_path(name), OutputFormat::Human, 4, true, true, None)
 }
 
 /// Same fixture with the rule turned off (neuter check).
-fn fixture_config_rule_off(name: &str) -> fallow_config::ResolvedConfig {
-    FallowConfig {
+fn fixture_config_rule_off(name: &str) -> plow_config::ResolvedConfig {
+    PlowConfig {
         rules: RulesConfig {
             unused_load_data_keys: Severity::Off,
             ..RulesConfig::default()
@@ -21,7 +21,7 @@ fn fixture_config_rule_off(name: &str) -> fallow_config::ResolvedConfig {
     .resolve(fixture_path(name), OutputFormat::Human, 4, true, true, None)
 }
 
-fn key_names(results: &fallow_core::results::AnalysisResults) -> Vec<String> {
+fn key_names(results: &plow_core::results::AnalysisResults) -> Vec<String> {
     results
         .unused_load_data_keys
         .iter()
@@ -32,7 +32,7 @@ fn key_names(results: &fallow_core::results::AnalysisResults) -> Vec<String> {
 #[test]
 fn dead_load_key_is_flagged_and_anchored() {
     let config = fixture_config("sveltekit-load-data");
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let keys = key_names(&results);
     assert!(
@@ -64,7 +64,7 @@ fn dead_load_key_is_flagged_and_anchored() {
 #[test]
 fn consumed_load_key_is_not_flagged() {
     let config = fixture_config("sveltekit-load-data");
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let keys = key_names(&results);
     // `used` is read via data.used in the sibling +page.svelte.
@@ -77,7 +77,7 @@ fn consumed_load_key_is_not_flagged() {
 #[test]
 fn global_page_data_channel_credits_the_key() {
     let config = fixture_config("sveltekit-load-data");
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let keys = key_names(&results);
     // `globalKey` is read ONLY via page.data.globalKey in a shared Header.svelte,
@@ -91,7 +91,7 @@ fn global_page_data_channel_credits_the_key() {
 #[test]
 fn server_load_key_consumed_by_universal_sibling_is_not_flagged() {
     let config = fixture_config("sveltekit-load-data");
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let keys = key_names(&results);
     // `serverKey` is returned by +page.server.ts and read only by the sibling
@@ -109,7 +109,7 @@ fn typed_data_prop_component_attribute_consumer_is_credited() {
     // a key through a component attribute (`<Widget value={data.shown} />`). The
     // typed binding must NOT cause the consumer read to be missed.
     let config = fixture_config("sveltekit-load-data");
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let keys = key_names(&results);
     assert!(
@@ -125,7 +125,7 @@ fn typed_data_prop_component_attribute_consumer_is_credited() {
 #[test]
 fn rule_off_produces_no_findings() {
     let config = fixture_config_rule_off("sveltekit-load-data");
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.unused_load_data_keys.is_empty(),
@@ -142,7 +142,7 @@ fn global_page_data_whole_object_use_abstains_project_wide() {
     // `unused_load_data_keys_global_abstain` flag, distinguishing a real zero
     // from a project-wide abstain.
     let config = fixture_config("sveltekit-load-data-global-abstain");
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.unused_load_data_keys.is_empty(),
@@ -158,7 +158,7 @@ fn global_page_data_whole_object_use_abstains_project_wide() {
 #[test]
 fn no_findings_when_sveltekit_is_absent() {
     let config = fixture_config("sveltekit-load-data-no-dep");
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.unused_load_data_keys.is_empty(),

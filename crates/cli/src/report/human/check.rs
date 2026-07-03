@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use colored::Colorize;
-use fallow_config::{RulesConfig, Severity};
-use fallow_types::output_dead_code::*;
-use fallow_types::results::{
+use plow_config::{RulesConfig, Severity};
+use plow_types::output_dead_code::*;
+use plow_types::results::{
     AnalysisResults, DuplicateExport, TestOnlyDependency, TypeOnlyDependency, UnusedDependency,
     UnusedExport, UnusedMember,
 };
@@ -329,53 +329,53 @@ fn inject_explain_blocks(lines: Vec<String>) -> Vec<String> {
 
 fn check_explain_for_header(line: &str) -> Option<&'static crate::explain::RuleDef> {
     let mappings = [
-        ("Unused files", "fallow/unused-file"),
-        ("Unused exports", "fallow/unused-export"),
-        ("Unused type exports", "fallow/unused-type"),
-        ("Private type leaks", "fallow/private-type-leak"),
-        ("Unused dependencies", "fallow/unused-dependency"),
-        ("Unused devDependencies", "fallow/unused-dev-dependency"),
+        ("Unused files", "plow/unused-file"),
+        ("Unused exports", "plow/unused-export"),
+        ("Unused type exports", "plow/unused-type"),
+        ("Private type leaks", "plow/private-type-leak"),
+        ("Unused dependencies", "plow/unused-dependency"),
+        ("Unused devDependencies", "plow/unused-dev-dependency"),
         (
             "Unused optionalDependencies",
-            "fallow/unused-optional-dependency",
+            "plow/unused-optional-dependency",
         ),
-        ("Type-only dependencies", "fallow/type-only-dependency"),
+        ("Type-only dependencies", "plow/type-only-dependency"),
         (
             "Test-only production dependencies",
-            "fallow/test-only-dependency",
+            "plow/test-only-dependency",
         ),
-        ("Unused enum members", "fallow/unused-enum-member"),
-        ("Unused class members", "fallow/unused-class-member"),
-        ("Unused store members", "fallow/unused-store-member"),
-        ("Unresolved imports", "fallow/unresolved-import"),
-        ("Unlisted dependencies", "fallow/unlisted-dependency"),
-        ("Duplicate exports", "fallow/duplicate-export"),
-        ("Circular dependencies", "fallow/circular-dependency"),
-        ("Re-Export Cycles", "fallow/re-export-cycle"),
-        ("Boundary violations", "fallow/boundary-violation"),
-        ("Stale suppressions", "fallow/stale-suppression"),
-        ("Unused catalog entries", "fallow/unused-catalog-entry"),
-        ("Empty catalog groups", "fallow/empty-catalog-group"),
+        ("Unused enum members", "plow/unused-enum-member"),
+        ("Unused class members", "plow/unused-class-member"),
+        ("Unused store members", "plow/unused-store-member"),
+        ("Unresolved imports", "plow/unresolved-import"),
+        ("Unlisted dependencies", "plow/unlisted-dependency"),
+        ("Duplicate exports", "plow/duplicate-export"),
+        ("Circular dependencies", "plow/circular-dependency"),
+        ("Re-Export Cycles", "plow/re-export-cycle"),
+        ("Boundary violations", "plow/boundary-violation"),
+        ("Stale suppressions", "plow/stale-suppression"),
+        ("Unused catalog entries", "plow/unused-catalog-entry"),
+        ("Empty catalog groups", "plow/empty-catalog-group"),
         (
             "Unresolved catalog references",
-            "fallow/unresolved-catalog-reference",
+            "plow/unresolved-catalog-reference",
         ),
         (
             "Unused dependency overrides",
-            "fallow/unused-dependency-override",
+            "plow/unused-dependency-override",
         ),
         (
             "Misconfigured dependency overrides",
-            "fallow/misconfigured-dependency-override",
+            "plow/misconfigured-dependency-override",
         ),
-        ("Invalid client exports", "fallow/invalid-client-export"),
+        ("Invalid client exports", "plow/invalid-client-export"),
         (
             "Mixed client/server barrels",
-            "fallow/mixed-client-server-barrel",
+            "plow/mixed-client-server-barrel",
         ),
-        ("Unprovided injects", "fallow/unprovided-inject"),
-        ("Unrendered components", "fallow/unrendered-component"),
-        ("Misplaced directives", "fallow/misplaced-directive"),
+        ("Unprovided injects", "plow/unprovided-inject"),
+        ("Unrendered components", "plow/unrendered-component"),
+        ("Misplaced directives", "plow/misplaced-directive"),
     ];
     let (_, rule_id) = mappings
         .iter()
@@ -433,7 +433,7 @@ fn format_unused_export(e: &UnusedExport) -> String {
 }
 
 fn format_private_type_leak(
-    entry: &fallow_types::output_dead_code::PrivateTypeLeakFinding,
+    entry: &plow_types::output_dead_code::PrivateTypeLeakFinding,
 ) -> String {
     let e = &entry.leak;
     format!(
@@ -1027,8 +1027,8 @@ fn push_dependency_override_sections(
 /// empty or the rule is `Off` (which already removed entries upstream).
 fn push_unused_catalog_entries_section(
     lines: &mut Vec<String>,
-    entries: &[fallow_types::output_dead_code::UnusedCatalogEntryFinding],
-    severity: fallow_config::Severity,
+    entries: &[plow_types::output_dead_code::UnusedCatalogEntryFinding],
+    severity: plow_config::Severity,
     max_items: usize,
     total_issues: usize,
     root: &Path,
@@ -1081,8 +1081,8 @@ fn push_unused_catalog_entries_section(
 
 fn push_empty_catalog_groups_section(
     lines: &mut Vec<String>,
-    groups: &[fallow_types::output_dead_code::EmptyCatalogGroupFinding],
-    severity: fallow_config::Severity,
+    groups: &[plow_types::output_dead_code::EmptyCatalogGroupFinding],
+    severity: plow_config::Severity,
     max_items: usize,
     total_issues: usize,
     root: &Path,
@@ -1128,8 +1128,8 @@ fn push_empty_catalog_groups_section(
 /// write bare `catalog:` think of it as "the catalog", not as a named one.
 fn push_unresolved_catalog_references_section(
     lines: &mut Vec<String>,
-    findings: &[fallow_types::output_dead_code::UnresolvedCatalogReferenceFinding],
-    severity: fallow_config::Severity,
+    findings: &[plow_types::output_dead_code::UnresolvedCatalogReferenceFinding],
+    severity: plow_config::Severity,
     max_items: usize,
     total_issues: usize,
     root: &Path,
@@ -1154,7 +1154,7 @@ fn push_unresolved_catalog_references_section(
 /// Formats one unresolved-catalog-reference finding into its headline row,
 /// detail row, and optional single-catalog suggestion.
 fn format_unresolved_catalog_reference(
-    finding: &fallow_types::output_dead_code::UnresolvedCatalogReferenceFinding,
+    finding: &plow_types::output_dead_code::UnresolvedCatalogReferenceFinding,
     root: &Path,
 ) -> Vec<String> {
     let finding = &finding.reference;
@@ -1210,8 +1210,8 @@ fn format_unresolved_catalog_reference(
 /// conservative-static algorithm flags.
 fn push_unused_dependency_overrides_section(
     lines: &mut Vec<String>,
-    findings: &[fallow_types::output_dead_code::UnusedDependencyOverrideFinding],
-    severity: fallow_config::Severity,
+    findings: &[plow_types::output_dead_code::UnusedDependencyOverrideFinding],
+    severity: plow_config::Severity,
     max_items: usize,
     total_issues: usize,
     root: &Path,
@@ -1266,8 +1266,8 @@ fn push_unused_dependency_overrides_section(
 /// rule defaults to error.
 fn push_misconfigured_dependency_overrides_section(
     lines: &mut Vec<String>,
-    findings: &[fallow_types::output_dead_code::MisconfiguredDependencyOverrideFinding],
-    severity: fallow_config::Severity,
+    findings: &[plow_types::output_dead_code::MisconfiguredDependencyOverrideFinding],
+    severity: plow_config::Severity,
     max_items: usize,
     total_issues: usize,
     root: &Path,
@@ -1397,7 +1397,7 @@ fn push_react_component_health_sections(
         level: severity_to_level(rules.thin_wrapper),
         root,
         max_files: MAX_FLAT_ITEMS,
-        get_path: |w: &fallow_types::output_dead_code::ThinWrapperFinding| w.wrapper.file.as_path(),
+        get_path: |w: &plow_types::output_dead_code::ThinWrapperFinding| w.wrapper.file.as_path(),
         format_detail: &format_thin_wrapper,
     });
 
@@ -1408,7 +1408,7 @@ fn push_react_component_health_sections(
         level: severity_to_level(rules.duplicate_prop_shape),
         root,
         max_files: MAX_FLAT_ITEMS,
-        get_path: |d: &fallow_types::output_dead_code::DuplicatePropShapeFinding| {
+        get_path: |d: &plow_types::output_dead_code::DuplicatePropShapeFinding| {
             d.shape.file.as_path()
         },
         format_detail: &format_duplicate_prop_shape,
@@ -1477,7 +1477,7 @@ fn push_client_server_policy_sections(
         level: severity_to_level(rules.invalid_client_export),
         root,
         max_files: MAX_FLAT_ITEMS,
-        get_path: |e: &fallow_types::output_dead_code::InvalidClientExportFinding| {
+        get_path: |e: &plow_types::output_dead_code::InvalidClientExportFinding| {
             e.export.path.as_path()
         },
         format_detail: &format_invalid_client_export,
@@ -1490,7 +1490,7 @@ fn push_client_server_policy_sections(
         level: severity_to_level(rules.mixed_client_server_barrel),
         root,
         max_files: MAX_FLAT_ITEMS,
-        get_path: |b: &fallow_types::output_dead_code::MixedClientServerBarrelFinding| {
+        get_path: |b: &plow_types::output_dead_code::MixedClientServerBarrelFinding| {
             b.barrel.path.as_path()
         },
         format_detail: &format_mixed_client_server_barrel,
@@ -1503,7 +1503,7 @@ fn push_client_server_policy_sections(
         level: severity_to_level(rules.misplaced_directive),
         root,
         max_files: MAX_FLAT_ITEMS,
-        get_path: |d: &fallow_types::output_dead_code::MisplacedDirectiveFinding| {
+        get_path: |d: &plow_types::output_dead_code::MisplacedDirectiveFinding| {
             d.directive_site.path.as_path()
         },
         format_detail: &format_misplaced_directive,
@@ -1525,7 +1525,7 @@ fn push_provider_render_policy_sections(
         level: severity_to_level(rules.unprovided_injects),
         root,
         max_files: MAX_FLAT_ITEMS,
-        get_path: |i: &fallow_types::output_dead_code::UnprovidedInjectFinding| {
+        get_path: |i: &plow_types::output_dead_code::UnprovidedInjectFinding| {
             i.inject.path.as_path()
         },
         format_detail: &format_unprovided_inject,
@@ -1538,7 +1538,7 @@ fn push_provider_render_policy_sections(
         level: severity_to_level(rules.unrendered_components),
         root,
         max_files: MAX_FLAT_ITEMS,
-        get_path: |c: &fallow_types::output_dead_code::UnrenderedComponentFinding| {
+        get_path: |c: &plow_types::output_dead_code::UnrenderedComponentFinding| {
             c.component.path.as_path()
         },
         format_detail: &format_unrendered_component,
@@ -1570,7 +1570,7 @@ fn push_component_io_sections(
         level: severity_to_level(rules.unused_component_props),
         root,
         max_files: MAX_FLAT_ITEMS,
-        get_path: |p: &fallow_types::output_dead_code::UnusedComponentPropFinding| {
+        get_path: |p: &plow_types::output_dead_code::UnusedComponentPropFinding| {
             p.prop.path.as_path()
         },
         format_detail: &format_unused_component_prop,
@@ -1585,7 +1585,7 @@ fn push_component_io_sections(
         level: severity_to_level(rules.unused_component_emits),
         root,
         max_files: MAX_FLAT_ITEMS,
-        get_path: |e: &fallow_types::output_dead_code::UnusedComponentEmitFinding| {
+        get_path: |e: &plow_types::output_dead_code::UnusedComponentEmitFinding| {
             e.emit.path.as_path()
         },
         format_detail: &format_unused_component_emit,
@@ -1598,7 +1598,7 @@ fn push_component_io_sections(
         level: severity_to_level(rules.unused_component_inputs),
         root,
         max_files: MAX_FLAT_ITEMS,
-        get_path: |i: &fallow_types::output_dead_code::UnusedComponentInputFinding| {
+        get_path: |i: &plow_types::output_dead_code::UnusedComponentInputFinding| {
             i.input.path.as_path()
         },
         format_detail: &format_unused_component_input,
@@ -1611,7 +1611,7 @@ fn push_component_io_sections(
         level: severity_to_level(rules.unused_component_outputs),
         root,
         max_files: MAX_FLAT_ITEMS,
-        get_path: |o: &fallow_types::output_dead_code::UnusedComponentOutputFinding| {
+        get_path: |o: &plow_types::output_dead_code::UnusedComponentOutputFinding| {
             o.output.path.as_path()
         },
         format_detail: &format_unused_component_output,
@@ -1633,7 +1633,7 @@ fn push_framework_key_sections(
         level: severity_to_level(rules.unused_svelte_events),
         root,
         max_files: MAX_FLAT_ITEMS,
-        get_path: |e: &fallow_types::output_dead_code::UnusedSvelteEventFinding| {
+        get_path: |e: &plow_types::output_dead_code::UnusedSvelteEventFinding| {
             e.event.path.as_path()
         },
         format_detail: &format_unused_svelte_event,
@@ -1646,7 +1646,7 @@ fn push_framework_key_sections(
         level: severity_to_level(rules.unused_server_actions),
         root,
         max_files: MAX_FLAT_ITEMS,
-        get_path: |a: &fallow_types::output_dead_code::UnusedServerActionFinding| {
+        get_path: |a: &plow_types::output_dead_code::UnusedServerActionFinding| {
             a.action.path.as_path()
         },
         format_detail: &format_unused_server_action,
@@ -1659,9 +1659,7 @@ fn push_framework_key_sections(
         level: severity_to_level(rules.unused_load_data_keys),
         root,
         max_files: MAX_FLAT_ITEMS,
-        get_path: |k: &fallow_types::output_dead_code::UnusedLoadDataKeyFinding| {
-            k.key.path.as_path()
-        },
+        get_path: |k: &plow_types::output_dead_code::UnusedLoadDataKeyFinding| k.key.path.as_path(),
         format_detail: &format_unused_load_data_key,
     });
 }
@@ -1682,7 +1680,7 @@ fn build_route_policy_section(
         level: severity_to_level(rules.route_collision),
         root,
         max_files: MAX_FLAT_ITEMS,
-        get_path: |c: &fallow_types::output_dead_code::RouteCollisionFinding| {
+        get_path: |c: &plow_types::output_dead_code::RouteCollisionFinding| {
             c.collision.path.as_path()
         },
         format_detail: &format_route_collision,
@@ -1695,7 +1693,7 @@ fn build_route_policy_section(
         level: severity_to_level(rules.dynamic_segment_name_conflict),
         root,
         max_files: MAX_FLAT_ITEMS,
-        get_path: |c: &fallow_types::output_dead_code::DynamicSegmentNameConflictFinding| {
+        get_path: |c: &plow_types::output_dead_code::DynamicSegmentNameConflictFinding| {
             c.conflict.path.as_path()
         },
         format_detail: &format_dynamic_segment_name_conflict,
@@ -1703,7 +1701,7 @@ fn build_route_policy_section(
 }
 
 fn format_invalid_client_export(
-    entry: &fallow_types::output_dead_code::InvalidClientExportFinding,
+    entry: &plow_types::output_dead_code::InvalidClientExportFinding,
 ) -> String {
     let e = &entry.export;
     format!(
@@ -1715,7 +1713,7 @@ fn format_invalid_client_export(
 }
 
 fn format_mixed_client_server_barrel(
-    entry: &fallow_types::output_dead_code::MixedClientServerBarrelFinding,
+    entry: &plow_types::output_dead_code::MixedClientServerBarrelFinding,
 ) -> String {
     let b = &entry.barrel;
     format!(
@@ -1730,7 +1728,7 @@ fn format_mixed_client_server_barrel(
 }
 
 fn format_misplaced_directive(
-    entry: &fallow_types::output_dead_code::MisplacedDirectiveFinding,
+    entry: &plow_types::output_dead_code::MisplacedDirectiveFinding,
 ) -> String {
     let d = &entry.directive_site;
     format!(
@@ -1745,7 +1743,7 @@ fn format_misplaced_directive(
 }
 
 fn format_unprovided_inject(
-    entry: &fallow_types::output_dead_code::UnprovidedInjectFinding,
+    entry: &plow_types::output_dead_code::UnprovidedInjectFinding,
 ) -> String {
     let i = &entry.inject;
     format!(
@@ -1761,7 +1759,7 @@ fn format_unprovided_inject(
 }
 
 fn format_unrendered_component(
-    entry: &fallow_types::output_dead_code::UnrenderedComponentFinding,
+    entry: &plow_types::output_dead_code::UnrenderedComponentFinding,
 ) -> String {
     let c = &entry.component;
     // Lit: the `component_name` is the registered TAG, so render it as a custom
@@ -1786,7 +1784,7 @@ fn format_unrendered_component(
 }
 
 fn format_unused_component_prop(
-    entry: &fallow_types::output_dead_code::UnusedComponentPropFinding,
+    entry: &plow_types::output_dead_code::UnusedComponentPropFinding,
 ) -> String {
     let p = &entry.prop;
     format!(
@@ -1799,7 +1797,7 @@ fn format_unused_component_prop(
 
 /// Anchor a prop-drilling chain to its SOURCE hop file for grouped display.
 fn prop_drilling_anchor(
-    c: &fallow_types::output_dead_code::PropDrillingChainFinding,
+    c: &plow_types::output_dead_code::PropDrillingChainFinding,
 ) -> &std::path::Path {
     c.chain
         .hops
@@ -1808,7 +1806,7 @@ fn prop_drilling_anchor(
 }
 
 fn format_prop_drilling_chain(
-    entry: &fallow_types::output_dead_code::PropDrillingChainFinding,
+    entry: &plow_types::output_dead_code::PropDrillingChainFinding,
 ) -> String {
     let c = &entry.chain;
     let trail = c
@@ -1831,7 +1829,7 @@ fn format_prop_drilling_chain(
     )
 }
 
-fn format_thin_wrapper(entry: &fallow_types::output_dead_code::ThinWrapperFinding) -> String {
+fn format_thin_wrapper(entry: &plow_types::output_dead_code::ThinWrapperFinding) -> String {
     let w = &entry.wrapper;
     format!(
         "{} {} {}",
@@ -1846,7 +1844,7 @@ fn format_thin_wrapper(entry: &fallow_types::output_dead_code::ThinWrapperFindin
 }
 
 fn format_duplicate_prop_shape(
-    entry: &fallow_types::output_dead_code::DuplicatePropShapeFinding,
+    entry: &plow_types::output_dead_code::DuplicatePropShapeFinding,
 ) -> String {
     let d = &entry.shape;
     format!(
@@ -1863,7 +1861,7 @@ fn format_duplicate_prop_shape(
 }
 
 fn format_unused_component_emit(
-    entry: &fallow_types::output_dead_code::UnusedComponentEmitFinding,
+    entry: &plow_types::output_dead_code::UnusedComponentEmitFinding,
 ) -> String {
     let e = &entry.emit;
     format!(
@@ -1875,7 +1873,7 @@ fn format_unused_component_emit(
 }
 
 fn format_unused_component_input(
-    entry: &fallow_types::output_dead_code::UnusedComponentInputFinding,
+    entry: &plow_types::output_dead_code::UnusedComponentInputFinding,
 ) -> String {
     let i = &entry.input;
     format!(
@@ -1887,7 +1885,7 @@ fn format_unused_component_input(
 }
 
 fn format_unused_component_output(
-    entry: &fallow_types::output_dead_code::UnusedComponentOutputFinding,
+    entry: &plow_types::output_dead_code::UnusedComponentOutputFinding,
 ) -> String {
     let o = &entry.output;
     format!(
@@ -1899,7 +1897,7 @@ fn format_unused_component_output(
 }
 
 fn format_unused_svelte_event(
-    entry: &fallow_types::output_dead_code::UnusedSvelteEventFinding,
+    entry: &plow_types::output_dead_code::UnusedSvelteEventFinding,
 ) -> String {
     let e = &entry.event;
     format!(
@@ -1912,7 +1910,7 @@ fn format_unused_svelte_event(
 }
 
 fn format_unused_server_action(
-    entry: &fallow_types::output_dead_code::UnusedServerActionFinding,
+    entry: &plow_types::output_dead_code::UnusedServerActionFinding,
 ) -> String {
     let a = &entry.action;
     format!(
@@ -1924,7 +1922,7 @@ fn format_unused_server_action(
 }
 
 fn format_unused_load_data_key(
-    entry: &fallow_types::output_dead_code::UnusedLoadDataKeyFinding,
+    entry: &plow_types::output_dead_code::UnusedLoadDataKeyFinding,
 ) -> String {
     let k = &entry.key;
     format!(
@@ -1937,7 +1935,7 @@ fn format_unused_load_data_key(
     )
 }
 
-fn format_route_collision(entry: &fallow_types::output_dead_code::RouteCollisionFinding) -> String {
+fn format_route_collision(entry: &plow_types::output_dead_code::RouteCollisionFinding) -> String {
     let c = &entry.collision;
     let others = c.conflicting_paths.len();
     let plural = if others == 1 { "" } else { "s" };
@@ -1953,7 +1951,7 @@ fn format_route_collision(entry: &fallow_types::output_dead_code::RouteCollision
 }
 
 fn format_dynamic_segment_name_conflict(
-    entry: &fallow_types::output_dead_code::DynamicSegmentNameConflictFinding,
+    entry: &plow_types::output_dead_code::DynamicSegmentNameConflictFinding,
 ) -> String {
     let c = &entry.conflict;
     format!(
@@ -1974,11 +1972,11 @@ fn format_dynamic_segment_name_conflict(
 /// because rule-level `severity` overrides the `policy-violation` master.
 fn build_policy_violations_section(
     lines: &mut Vec<String>,
-    items: &[fallow_types::output_dead_code::PolicyViolationFinding],
+    items: &[plow_types::output_dead_code::PolicyViolationFinding],
     root: &Path,
     total_issues: usize,
 ) {
-    use fallow_types::results::PolicyViolationSeverity;
+    use plow_types::results::PolicyViolationSeverity;
 
     if items.is_empty() {
         return;
@@ -2019,7 +2017,7 @@ fn build_policy_violations_section(
     }
     lines.push(format!(
         "  {}",
-        "suppress: // fallow-ignore-next-line policy-violation:<pack>/<rule-id> (or policy-violation for every rule-pack rule)"
+        "suppress: // plow-ignore-next-line policy-violation:<pack>/<rule-id> (or policy-violation for every rule-pack rule)"
             .dimmed()
     ));
     push_section_footer_with_count(lines, title, items.len());
@@ -2053,7 +2051,7 @@ fn build_maintenance_section(
 /// by top-level directory and shows file counts per directory.
 fn build_dir_rollup_section(
     lines: &mut Vec<String>,
-    unused_files: &[fallow_types::output_dead_code::UnusedFileFinding],
+    unused_files: &[plow_types::output_dead_code::UnusedFileFinding],
     root: &Path,
     rules: &RulesConfig,
     total_issues: usize,
@@ -2082,7 +2080,7 @@ fn build_dir_rollup_section(
 }
 
 fn unused_file_dir_counts(
-    unused_files: &[fallow_types::output_dead_code::UnusedFileFinding],
+    unused_files: &[plow_types::output_dead_code::UnusedFileFinding],
     root: &Path,
 ) -> Vec<(String, usize, bool)> {
     let mut dir_counts: Vec<(String, usize, bool)> = Vec::new();
@@ -2112,7 +2110,7 @@ fn unused_file_dir_counts(
 }
 
 fn unused_file_display_entries(
-    unused_files: &[fallow_types::output_dead_code::UnusedFileFinding],
+    unused_files: &[plow_types::output_dead_code::UnusedFileFinding],
     root: &Path,
     dir_counts: &[(String, usize, bool)],
     dominant: Option<&str>,
@@ -2284,7 +2282,7 @@ where
 /// Build duplicate exports grouped by file pair instead of flat list.
 fn build_duplicate_exports_section(
     lines: &mut Vec<String>,
-    items: &[fallow_types::output_dead_code::DuplicateExportFinding],
+    items: &[plow_types::output_dead_code::DuplicateExportFinding],
     level: Level,
     root: &Path,
     total_issues: usize,
@@ -2323,7 +2321,7 @@ fn build_duplicate_exports_section(
 /// Group duplicate-export findings by their first two distinct file paths,
 /// collecting the export names per pair and sorting groups by export count desc.
 fn collect_duplicate_export_pairs<'a>(
-    items: &'a [fallow_types::output_dead_code::DuplicateExportFinding],
+    items: &'a [plow_types::output_dead_code::DuplicateExportFinding],
     root: &Path,
 ) -> Vec<(String, String, Vec<&'a str>)> {
     let mut pair_groups: Vec<(String, String, Vec<&str>)> = Vec::new();
@@ -2396,7 +2394,7 @@ fn push_duplicate_export_group(
 /// Build circular dependencies grouped by hub file with path elision.
 fn build_circular_deps_section(
     lines: &mut Vec<String>,
-    items: &[fallow_types::output_dead_code::CircularDependencyFinding],
+    items: &[plow_types::output_dead_code::CircularDependencyFinding],
     level: Level,
     root: &Path,
     total_issues: usize,
@@ -2435,10 +2433,10 @@ fn build_circular_deps_section(
 }
 
 fn circular_dependency_hub_groups<'a>(
-    items: &'a [fallow_types::output_dead_code::CircularDependencyFinding],
+    items: &'a [plow_types::output_dead_code::CircularDependencyFinding],
     root: &Path,
-) -> Vec<(String, Vec<&'a fallow_types::results::CircularDependency>)> {
-    let mut hub_groups: Vec<(String, Vec<&'a fallow_types::results::CircularDependency>)> =
+) -> Vec<(String, Vec<&'a plow_types::results::CircularDependency>)> {
+    let mut hub_groups: Vec<(String, Vec<&'a plow_types::results::CircularDependency>)> =
         Vec::new();
     let mut hub_map: rustc_hash::FxHashMap<String, usize> = rustc_hash::FxHashMap::default();
 
@@ -2472,7 +2470,7 @@ fn circular_dependency_hub_line(hub_path: &str, cycle_count: usize) -> String {
 
 fn circular_dependency_cycle_line(
     hub_path: &str,
-    cycle: &fallow_types::results::CircularDependency,
+    cycle: &plow_types::results::CircularDependency,
     root: &Path,
 ) -> String {
     let rel_paths: Vec<String> = cycle
@@ -2496,7 +2494,7 @@ fn circular_dependency_cycle_line(
     )
 }
 
-fn circular_type_only_tag(cycle: &fallow_types::results::CircularDependency) -> String {
+fn circular_type_only_tag(cycle: &plow_types::results::CircularDependency) -> String {
     if cycle
         .files
         .iter()
@@ -2508,7 +2506,7 @@ fn circular_type_only_tag(cycle: &fallow_types::results::CircularDependency) -> 
     }
 }
 
-fn circular_cross_package_tag(cycle: &fallow_types::results::CircularDependency) -> String {
+fn circular_cross_package_tag(cycle: &plow_types::results::CircularDependency) -> String {
     if cycle.is_cross_package {
         format!(" {}", "(cross-package)".dimmed())
     } else {
@@ -2524,7 +2522,7 @@ fn circular_cross_package_tag(cycle: &fallow_types::results::CircularDependency)
 /// from any surface).
 fn build_re_export_cycles_section(
     lines: &mut Vec<String>,
-    items: &[fallow_types::output_dead_code::ReExportCycleFinding],
+    items: &[plow_types::output_dead_code::ReExportCycleFinding],
     level: Level,
     root: &Path,
     total_issues: usize,
@@ -2545,8 +2543,8 @@ fn build_re_export_cycles_section(
             .unwrap_or_default();
         lines.push(format!("  {}", format_path(&first_path)));
         let header_line = match cycle.kind {
-            fallow_types::results::ReExportCycleKind::SelfLoop => "Self-loop (1 file):".to_string(),
-            fallow_types::results::ReExportCycleKind::MultiNode => {
+            plow_types::results::ReExportCycleKind::SelfLoop => "Self-loop (1 file):".to_string(),
+            plow_types::results::ReExportCycleKind::MultiNode => {
                 format!("Cycle ({} files):", cycle.files.len())
             }
         };
@@ -2556,10 +2554,10 @@ fn build_re_export_cycles_section(
             lines.push(format!("      - {}", format_path(&rel)));
         }
         let fix_hint = match cycle.kind {
-            fallow_types::results::ReExportCycleKind::SelfLoop => {
+            plow_types::results::ReExportCycleKind::SelfLoop => {
                 "To fix: remove the `export * from './'` (or equivalent) inside this file."
             }
-            fallow_types::results::ReExportCycleKind::MultiNode => {
+            plow_types::results::ReExportCycleKind::MultiNode => {
                 "To fix: remove one `export * from` statement on any member file."
             }
         };
@@ -2583,7 +2581,7 @@ fn build_re_export_cycles_section(
 /// Build boundary violations section grouped by importing file.
 fn build_boundary_violations_section(
     lines: &mut Vec<String>,
-    items: &[fallow_types::output_dead_code::BoundaryViolationFinding],
+    items: &[plow_types::output_dead_code::BoundaryViolationFinding],
     level: Level,
     root: &Path,
     total_issues: usize,
@@ -2623,7 +2621,7 @@ fn build_boundary_violations_section(
 /// Build boundary coverage section for files matched by no zone.
 fn build_boundary_coverage_violations_section(
     lines: &mut Vec<String>,
-    items: &[fallow_types::output_dead_code::BoundaryCoverageViolationFinding],
+    items: &[plow_types::output_dead_code::BoundaryCoverageViolationFinding],
     level: Level,
     root: &Path,
     total_issues: usize,
@@ -2661,7 +2659,7 @@ fn build_boundary_coverage_violations_section(
 /// matching rule from the output itself.
 fn build_boundary_call_violations_section(
     lines: &mut Vec<String>,
-    items: &[fallow_types::output_dead_code::BoundaryCallViolationFinding],
+    items: &[plow_types::output_dead_code::BoundaryCallViolationFinding],
     level: Level,
     root: &Path,
     total_issues: usize,
@@ -2696,7 +2694,7 @@ fn build_boundary_call_violations_section(
     // wrong token by analogy with every finding where rule id and token align.
     lines.push(format!(
         "  {}",
-        "suppress: // fallow-ignore-next-line boundary-violation (one token covers all boundary findings)"
+        "suppress: // plow-ignore-next-line boundary-violation (one token covers all boundary findings)"
             .dimmed()
     ));
     push_section_footer_with_count(lines, title, items.len());
@@ -2705,7 +2703,7 @@ fn build_boundary_call_violations_section(
 
 fn build_stale_suppressions_section(
     lines: &mut Vec<String>,
-    items: &[fallow_types::results::StaleSuppression],
+    items: &[plow_types::results::StaleSuppression],
     level: Level,
     root: &Path,
     total_issues: usize,
@@ -2983,7 +2981,7 @@ fn emit_grouped_body(
 
     let lines = build_human_lines_with_explain(&group.results, root, rules, None, explain);
     for line in &lines {
-        if line.contains("docs.fallow.tools") && !seen_footers.insert(line.clone()) {
+        if line.contains("docs.genesis-plow.dev") && !seen_footers.insert(line.clone()) {
             continue;
         }
         outln!("{line}");
@@ -3089,15 +3087,15 @@ fn emit_config_quality_signal(results: &AnalysisResults, root: &Path) {
             let advice = if is_source_dir {
                 format!(
                     "Note: {pct:.0}% of unused files are under {dominant_dir}/ \
-                     \u{2014} run `fallow list --entry-points` to verify entry-point detection \
-                     \u{2014} https://docs.fallow.tools/explanations/dead-code#unused-files"
+                     \u{2014} run `plow list --entry-points` to verify entry-point detection \
+                     \u{2014} https://docs.genesis-plow.dev/explanations/dead-code#unused-files"
                 )
             } else {
                 format!(
                     "Note: {pct:.0}% of unused files are under {dominant_dir}/ \
                      \u{2014} consider adding it to ignorePatterns or using --production \
                      (analyzes only production entry points) \
-                     \u{2014} https://docs.fallow.tools/explanations/dead-code#unused-files"
+                     \u{2014} https://docs.genesis-plow.dev/explanations/dead-code#unused-files"
                 )
             };
             eprintln!("  {}", advice.yellow());
@@ -3546,9 +3544,9 @@ fn print_check_summary_failure(total: usize, elapsed: Duration) {
 mod tests {
     use super::super::{plain, strip_ansi};
     use super::*;
-    use fallow_config::{RulesConfig, Severity};
-    use fallow_types::extract::MemberKind;
-    use fallow_types::results::*;
+    use plow_config::{RulesConfig, Severity};
+    use plow_types::extract::MemberKind;
+    use plow_types::results::*;
     use std::path::PathBuf;
 
     /// Build sample results including optional deps (extends the shared helper).
@@ -3742,7 +3740,7 @@ mod tests {
         assert!(text.contains("zone 'domain'"));
         // The rule id is boundary-call-violation but the working token is the
         // family token; the section must teach the literal token.
-        assert!(text.contains("// fallow-ignore-next-line boundary-violation"));
+        assert!(text.contains("// plow-ignore-next-line boundary-violation"));
     }
 
     #[test]
@@ -3757,9 +3755,9 @@ mod tests {
                 col: 2,
                 pack: "team-policy".to_string(),
                 rule_id: "no-moment".to_string(),
-                kind: fallow_types::results::PolicyRuleKind::BannedImport,
+                kind: plow_types::results::PolicyRuleKind::BannedImport,
                 matched: "moment/locale/nl".to_string(),
-                severity: fallow_types::results::PolicyViolationSeverity::Error,
+                severity: plow_types::results::PolicyViolationSeverity::Error,
                 message: Some("Use date-fns.".to_string()),
             }));
 
@@ -3772,7 +3770,7 @@ mod tests {
         assert!(text.contains("moment/locale/nl"));
         assert!(text.contains("team-policy/no-moment"));
         assert!(text.contains("Use date-fns."));
-        assert!(text.contains("fallow-ignore-next-line policy-violation:<pack>/<rule-id>"));
+        assert!(text.contains("plow-ignore-next-line policy-violation:<pack>/<rule-id>"));
     }
 
     #[test]
@@ -4564,7 +4562,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
         results.unused_enum_members.push(
-            fallow_types::output_dead_code::UnusedEnumMemberFinding::with_actions(UnusedMember {
+            plow_types::output_dead_code::UnusedEnumMemberFinding::with_actions(UnusedMember {
                 path: root.join("src/types.ts"),
                 parent_name: "Status".to_string(),
                 member_name: "Unused".to_string(),
@@ -4574,7 +4572,7 @@ mod tests {
             }),
         );
         results.unused_class_members.push(
-            fallow_types::output_dead_code::UnusedClassMemberFinding::with_actions(UnusedMember {
+            plow_types::output_dead_code::UnusedClassMemberFinding::with_actions(UnusedMember {
                 path: root.join("src/foo.ts"),
                 parent_name: "Foo".to_string(),
                 member_name: "bar".to_string(),
@@ -4614,7 +4612,7 @@ mod tests {
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);
         let text = plain(&lines);
-        assert!(text.contains("docs.fallow.tools/explanations/dead-code"));
+        assert!(text.contains("docs.genesis-plow.dev/explanations/dead-code"));
         assert!(text.contains("Files not reachable from any entry point"));
     }
 

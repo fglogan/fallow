@@ -1,8 +1,8 @@
-//! End-to-end tests that exercise the full param → arg-builder → real fallow binary → JSON parse chain.
+//! End-to-end tests that exercise the full param → arg-builder → real plow binary → JSON parse chain.
 //!
-//! These tests require the `fallow` binary at `target/debug/fallow`. When running
-//! `cargo test --workspace`, Cargo builds it automatically. If running `cargo test -p fallow-mcp`
-//! alone, build the binary first: `cargo build -p fallow-cli`.
+//! These tests require the `plow` binary at `target/debug/plow`. When running
+//! `cargo test --workspace`, Cargo builds it automatically. If running `cargo test -p plow-mcp`
+//! alone, build the binary first: `cargo build -p plow-cli`.
 
 use std::path::PathBuf;
 
@@ -11,25 +11,25 @@ use rmcp::model::RawContent;
 use crate::tools::{
     build_analyze_args, build_health_args, build_project_info_args, build_security_candidates_args,
     build_trace_clone_args, build_trace_dependency_args, build_trace_export_args,
-    build_trace_file_args, execute_code_mode, inspect_target, run_fallow, run_trace_clone_tool,
+    build_trace_file_args, execute_code_mode, inspect_target, run_plow, run_trace_clone_tool,
     run_trace_export_tool,
 };
 
-/// Resolve the fallow binary from `FALLOW_BIN`, or the workspace target dir.
-fn fallow_binary() -> String {
-    if let Ok(bin) = std::env::var("FALLOW_BIN") {
+/// Resolve the plow binary from `PLOW_BIN`, or the workspace target dir.
+fn plow_binary() -> String {
+    if let Ok(bin) = std::env::var("PLOW_BIN") {
         return bin;
     }
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     path.pop(); // crates/
     path.pop(); // project root
-    path.push("target/debug/fallow");
+    path.push("target/debug/plow");
     if cfg!(windows) {
         path.set_extension("exe");
     }
     assert!(
         path.is_file(),
-        "fallow binary not found at {path:?}. Build it first: cargo build -p fallow-cli"
+        "plow binary not found at {path:?}. Build it first: cargo build -p plow-cli"
     );
     path.to_string_lossy().to_string()
 }
@@ -54,14 +54,14 @@ fn extract_text(result: &rmcp::model::CallToolResult) -> &str {
 
 #[tokio::test]
 async fn e2e_analyze_returns_json_on_basic_project() {
-    let bin = fallow_binary();
+    let bin = plow_binary();
     let root = fixture_path("basic-project");
     let params = crate::params::AnalyzeParams {
         root: Some(root.to_string_lossy().to_string()),
         ..Default::default()
     };
     let args = build_analyze_args(&params).unwrap();
-    let result = run_fallow(&bin, &args).await.unwrap();
+    let result = run_plow(&bin, &args).await.unwrap();
 
     assert_eq!(result.is_error, Some(false));
 
@@ -80,14 +80,14 @@ async fn e2e_analyze_returns_json_on_basic_project() {
 
 #[tokio::test]
 async fn e2e_project_info_returns_files() {
-    let bin = fallow_binary();
+    let bin = plow_binary();
     let root = fixture_path("basic-project");
     let params = crate::params::ProjectInfoParams {
         root: Some(root.to_string_lossy().to_string()),
         ..Default::default()
     };
     let args = build_project_info_args(&params);
-    let result = run_fallow(&bin, &args).await.unwrap();
+    let result = run_plow(&bin, &args).await.unwrap();
 
     assert_eq!(result.is_error, Some(false));
 
@@ -103,12 +103,12 @@ async fn e2e_project_info_returns_files() {
 
 #[test]
 fn e2e_code_execute_runs_project_info_on_basic_project() {
-    let bin = fallow_binary();
+    let bin = plow_binary();
     let root = fixture_path("basic-project");
     let output = execute_code_mode(
         bin,
         crate::params::CodeExecuteParams {
-            code: "return { fileCount: fallow.projectInfo({ files: true }).file_count, root };"
+            code: "return { fileCount: plow.projectInfo({ files: true }).file_count, root };"
                 .to_string(),
             root: Some(root.to_string_lossy().to_string()),
             timeout_ms: Some(10_000),
@@ -126,12 +126,12 @@ fn e2e_code_execute_runs_project_info_on_basic_project() {
 
 #[test]
 fn e2e_code_execute_enforces_host_output_limit() {
-    let bin = fallow_binary();
+    let bin = plow_binary();
     let root = fixture_path("basic-project");
     let output = execute_code_mode(
         bin,
         crate::params::CodeExecuteParams {
-            code: "return fallow.projectInfo({ files: true });".to_string(),
+            code: "return plow.projectInfo({ files: true });".to_string(),
             root: Some(root.to_string_lossy().to_string()),
             timeout_ms: Some(10_000),
             max_output_bytes: Some(1),
@@ -152,12 +152,12 @@ fn e2e_code_execute_enforces_host_output_limit() {
 
 #[test]
 fn e2e_code_execute_rejects_fix_apply() {
-    let bin = fallow_binary();
+    let bin = plow_binary();
     let root = fixture_path("basic-project");
     let output = execute_code_mode(
         bin,
         crate::params::CodeExecuteParams {
-            code: "return fallow.run('fix_apply', {});".to_string(),
+            code: "return plow.run('fix_apply', {});".to_string(),
             root: Some(root.to_string_lossy().to_string()),
             timeout_ms: Some(1_000),
             max_output_bytes: Some(10_000),
@@ -184,7 +184,7 @@ fn e2e_code_execute_rejects_fix_apply() {
 
 #[tokio::test]
 async fn e2e_analyze_with_issue_type_filter() {
-    let bin = fallow_binary();
+    let bin = plow_binary();
     let root = fixture_path("basic-project");
     let params = crate::params::AnalyzeParams {
         root: Some(root.to_string_lossy().to_string()),
@@ -192,7 +192,7 @@ async fn e2e_analyze_with_issue_type_filter() {
         ..Default::default()
     };
     let args = build_analyze_args(&params).unwrap();
-    let result = run_fallow(&bin, &args).await.unwrap();
+    let result = run_plow(&bin, &args).await.unwrap();
 
     assert_eq!(result.is_error, Some(false));
 
@@ -213,14 +213,14 @@ async fn e2e_analyze_with_issue_type_filter() {
 
 #[tokio::test]
 async fn e2e_security_candidates_returns_security_json() {
-    let bin = fallow_binary();
+    let bin = plow_binary();
     let root = fixture_path("security-client-server-leak");
     let params = crate::params::SecurityCandidatesParams {
         root: Some(root.to_string_lossy().to_string()),
         ..Default::default()
     };
     let args = build_security_candidates_args(&params).unwrap();
-    let result = run_fallow(&bin, &args).await.unwrap();
+    let result = run_plow(&bin, &args).await.unwrap();
 
     assert_eq!(result.is_error, Some(false));
 
@@ -236,7 +236,7 @@ async fn e2e_security_candidates_returns_security_json() {
 
 #[tokio::test]
 async fn e2e_security_candidates_paths_scope_real_cli_output() {
-    let bin = fallow_binary();
+    let bin = plow_binary();
     let root = fixture_path("security-client-server-leak");
     let params = crate::params::SecurityCandidatesParams {
         root: Some(root.to_string_lossy().to_string()),
@@ -244,7 +244,7 @@ async fn e2e_security_candidates_paths_scope_real_cli_output() {
         ..Default::default()
     };
     let args = build_security_candidates_args(&params).unwrap();
-    let result = run_fallow(&bin, &args).await.unwrap();
+    let result = run_plow(&bin, &args).await.unwrap();
 
     assert_eq!(result.is_error, Some(false));
 
@@ -261,7 +261,7 @@ async fn e2e_security_candidates_paths_scope_real_cli_output() {
 
 #[tokio::test]
 async fn e2e_trace_export_returns_json() {
-    let bin = fallow_binary();
+    let bin = plow_binary();
     let root = fixture_path("basic-project");
     let args = build_trace_export_args(&crate::params::TraceExportParams {
         file: "src/utils.ts".to_string(),
@@ -274,7 +274,7 @@ async fn e2e_trace_export_returns_json() {
         threads: None,
     })
     .unwrap();
-    let result = run_fallow(&bin, &args).await.unwrap();
+    let result = run_plow(&bin, &args).await.unwrap();
 
     assert_eq!(result.is_error, Some(false));
 
@@ -314,7 +314,7 @@ async fn api_backed_trace_export_tool_returns_json() {
 
 #[tokio::test]
 async fn e2e_trace_file_returns_json() {
-    let bin = fallow_binary();
+    let bin = plow_binary();
     let root = fixture_path("basic-project");
     let args = build_trace_file_args(&crate::params::TraceFileParams {
         file: "src/utils.ts".to_string(),
@@ -326,7 +326,7 @@ async fn e2e_trace_file_returns_json() {
         threads: None,
     })
     .unwrap();
-    let result = run_fallow(&bin, &args).await.unwrap();
+    let result = run_plow(&bin, &args).await.unwrap();
 
     assert_eq!(result.is_error, Some(false));
 
@@ -343,7 +343,7 @@ async fn e2e_trace_file_returns_json() {
 
 #[tokio::test]
 async fn e2e_inspect_target_file_returns_evidence_bundle() {
-    let bin = fallow_binary();
+    let bin = plow_binary();
     let root = fixture_path("basic-project");
     let result = inspect_target(
         &bin,
@@ -381,7 +381,7 @@ async fn e2e_inspect_target_file_returns_evidence_bundle() {
 
 #[tokio::test]
 async fn e2e_inspect_target_symbol_returns_symbol_and_file_evidence() {
-    let bin = fallow_binary();
+    let bin = plow_binary();
     let root = fixture_path("basic-project");
     let result = inspect_target(
         &bin,
@@ -435,7 +435,7 @@ async fn e2e_inspect_target_symbol_returns_symbol_and_file_evidence() {
 
 #[tokio::test]
 async fn e2e_trace_dependency_returns_json() {
-    let bin = fallow_binary();
+    let bin = plow_binary();
     let root = fixture_path("basic-project");
     let args = build_trace_dependency_args(&crate::params::TraceDependencyParams {
         package_name: "react".to_string(),
@@ -447,7 +447,7 @@ async fn e2e_trace_dependency_returns_json() {
         threads: None,
     })
     .unwrap();
-    let result = run_fallow(&bin, &args).await.unwrap();
+    let result = run_plow(&bin, &args).await.unwrap();
 
     assert_eq!(result.is_error, Some(false));
 
@@ -460,7 +460,7 @@ async fn e2e_trace_dependency_returns_json() {
 
 #[tokio::test]
 async fn e2e_trace_clone_returns_json() {
-    let bin = fallow_binary();
+    let bin = plow_binary();
     let root = fixture_path("duplicate-code");
     let args = build_trace_clone_args(&crate::params::TraceCloneParams {
         file: Some("src/original.ts".to_string()),
@@ -481,7 +481,7 @@ async fn e2e_trace_clone_returns_json() {
         min_occurrences: None,
     })
     .unwrap();
-    let result = run_fallow(&bin, &args).await.unwrap();
+    let result = run_plow(&bin, &args).await.unwrap();
 
     assert_eq!(result.is_error, Some(false));
 
@@ -550,7 +550,7 @@ async fn api_backed_trace_clone_tool_returns_json() {
 
 #[tokio::test]
 async fn e2e_health_returns_json() {
-    let bin = fallow_binary();
+    let bin = plow_binary();
     let root = fixture_path("complexity-project");
     let params = crate::params::HealthParams {
         root: Some(root.to_string_lossy().to_string()),
@@ -558,7 +558,7 @@ async fn e2e_health_returns_json() {
         ..Default::default()
     };
     let args = build_health_args(&params);
-    let result = run_fallow(&bin, &args).await.unwrap();
+    let result = run_plow(&bin, &args).await.unwrap();
 
     assert_eq!(result.is_error, Some(false));
 

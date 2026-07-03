@@ -2,12 +2,12 @@
 set -eo pipefail
 
 # Write job summary using the appropriate jq script
-# Required env: FALLOW_COMMAND, ACTION_JQ_DIR
-# Optional env: CHANGED_SINCE, INPUT_ROOT, FALLOW_RESULTS_FILE,
-#   FALLOW_SCOPED_RESULTS_FILE, FALLOW_CHANGED_FILES_FILE
+# Required env: PLOW_COMMAND, ACTION_JQ_DIR
+# Optional env: CHANGED_SINCE, INPUT_ROOT, PLOW_RESULTS_FILE,
+#   PLOW_SCOPED_RESULTS_FILE, PLOW_CHANGED_FILES_FILE
 
 select_summary_script() {
-  case "$FALLOW_COMMAND" in
+  case "$PLOW_COMMAND" in
     dead-code|check) echo "${ACTION_JQ_DIR}/summary-check.jq" ;;
     dupes)           echo "${ACTION_JQ_DIR}/summary-dupes.jq" ;;
     health)          echo "${ACTION_JQ_DIR}/summary-health.jq" ;;
@@ -15,7 +15,7 @@ select_summary_script() {
     security)        echo "${ACTION_JQ_DIR}/summary-security.jq" ;;
     fix)             echo "${ACTION_JQ_DIR}/summary-fix.jq" ;;
     "")              echo "${ACTION_JQ_DIR}/summary-combined.jq" ;;
-    *)               echo "::error::Unexpected command: ${FALLOW_COMMAND}"; exit 2 ;;
+    *)               echo "::error::Unexpected command: ${PLOW_COMMAND}"; exit 2 ;;
   esac
 }
 
@@ -26,9 +26,9 @@ if [ ! -f "$JQ_FILE" ]; then
 fi
 
 # Scope results to changed files when --changed-since is active
-RESULTS_FILE="${FALLOW_RESULTS_FILE:-fallow-results.json}"
-SCOPED_RESULTS_FILE="${FALLOW_SCOPED_RESULTS_FILE:-fallow-results-scoped.json}"
-CHANGED_FILES_FILE="${FALLOW_CHANGED_FILES_FILE:-fallow-changed-files.json}"
+RESULTS_FILE="${PLOW_RESULTS_FILE:-plow-results.json}"
+SCOPED_RESULTS_FILE="${PLOW_SCOPED_RESULTS_FILE:-plow-results-scoped.json}"
+CHANGED_FILES_FILE="${PLOW_CHANGED_FILES_FILE:-plow-changed-files.json}"
 if [ -n "${CHANGED_SINCE:-}" ]; then
   CHANGED_JSON=""
 

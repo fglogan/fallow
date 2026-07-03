@@ -54,7 +54,7 @@ pub use trace::{
 use std::process::Stdio;
 use std::time::Duration;
 
-use fallow_types::issue_meta::MCP_ISSUE_TYPE_FLAGS;
+use plow_types::issue_meta::MCP_ISSUE_TYPE_FLAGS;
 use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, Content, RawContent};
 use tokio::process::Command;
@@ -129,7 +129,7 @@ pub const VALID_DUPES_MODES: &[&str] = &["strict", "mild", "weak", "semantic"];
 /// Valid gate values for the `audit` tool.
 pub const VALID_AUDIT_GATES: &[&str] = &["new-only", "all"];
 
-/// Build a structured validation error body matching the shape `run_fallow` emits
+/// Build a structured validation error body matching the shape `run_plow` emits
 /// for CLI-level errors.
 pub fn validation_error_body(message: impl Into<String>) -> String {
     serde_json::json!({
@@ -140,9 +140,9 @@ pub fn validation_error_body(message: impl Into<String>) -> String {
     .to_string()
 }
 
-/// Read the subprocess timeout from `FALLOW_TIMEOUT_SECS` or fall back to the default.
+/// Read the subprocess timeout from `PLOW_TIMEOUT_SECS` or fall back to the default.
 fn timeout_duration() -> Duration {
-    std::env::var("FALLOW_TIMEOUT_SECS")
+    std::env::var("PLOW_TIMEOUT_SECS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
         .map_or(
@@ -151,17 +151,17 @@ fn timeout_duration() -> Duration {
         )
 }
 
-/// Execute the fallow CLI binary with the given arguments and return the result.
+/// Execute the plow CLI binary with the given arguments and return the result.
 ///
 /// Untagged variant retained for the subprocess-behavior tests (timeouts, exit
 /// codes, signal handling); production tool dispatch goes through `run_tool` so
 /// the spawned CLI's telemetry is attributed to the `mcp` surface.
 #[cfg(test)]
-pub async fn run_fallow(binary: &str, args: &[String]) -> Result<CallToolResult, McpError> {
-    spawn_fallow(binary, args, timeout_duration(), None).await
+pub async fn run_plow(binary: &str, args: &[String]) -> Result<CallToolResult, McpError> {
+    spawn_plow(binary, args, timeout_duration(), None).await
 }
 
-/// Execute the fallow CLI for a named MCP tool. Tags the spawned process so its
+/// Execute the plow CLI for a named MCP tool. Tags the spawned process so its
 /// telemetry event is attributed to the `mcp` integration surface and the
 /// specific tool, instead of looking like any other `cli_json` run. The CLI
 /// only reads these when telemetry is enabled; they carry no paths or
@@ -171,19 +171,19 @@ pub async fn run_tool(
     tool: &'static str,
     args: &[String],
 ) -> Result<CallToolResult, McpError> {
-    spawn_fallow(binary, args, timeout_duration(), Some(tool)).await
+    spawn_plow(binary, args, timeout_duration(), Some(tool)).await
 }
 
 #[cfg(all(test, unix))]
-pub async fn run_fallow_with_timeout(
+pub async fn run_plow_with_timeout(
     binary: &str,
     args: &[String],
     timeout: Duration,
 ) -> Result<CallToolResult, McpError> {
-    spawn_fallow(binary, args, timeout, None).await
+    spawn_plow(binary, args, timeout, None).await
 }
 
-async fn spawn_fallow(
+async fn spawn_plow(
     binary: &str,
     args: &[String],
     timeout: Duration,
@@ -199,16 +199,16 @@ async fn spawn_fallow(
         // The CLI inherits this process's env, so the existing telemetry path
         // emits a single, correctly-attributed event (no second emit here).
         command
-            .env("FALLOW_INTEGRATION_SURFACE", "mcp")
-            .env("FALLOW_MCP_TOOL", tool);
+            .env("PLOW_INTEGRATION_SURFACE", "mcp")
+            .env("PLOW_MCP_TOOL", tool);
     }
     let output = tokio::time::timeout(timeout, command.output())
         .await
         .map_err(|_| {
             McpError::internal_error(
                 format!(
-                    "fallow subprocess timed out after {}s. \
-                 Set FALLOW_TIMEOUT_SECS to increase the limit.",
+                    "plow subprocess timed out after {}s. \
+                 Set PLOW_TIMEOUT_SECS to increase the limit.",
                     timeout.as_secs()
                 ),
                 None,
@@ -217,9 +217,9 @@ async fn spawn_fallow(
         .map_err(|e| {
             McpError::internal_error(
                 format!(
-                    "Failed to execute fallow binary '{binary}': {e}. \
-                 Ensure fallow is installed and available in PATH, \
-                 or set the FALLOW_BIN environment variable."
+                    "Failed to execute plow binary '{binary}': {e}. \
+                 Ensure plow is installed and available in PATH, \
+                 or set the PLOW_BIN environment variable."
                 ),
                 None,
             )
@@ -265,7 +265,7 @@ fn non_success_result(exit_code: i32, stdout: &str, stderr: &str) -> CallToolRes
     }
 
     let message = if stderr.is_empty() {
-        format!("fallow exited with code {exit_code}")
+        format!("plow exited with code {exit_code}")
     } else {
         stderr.trim().to_string()
     };
@@ -279,18 +279,18 @@ fn non_success_result(exit_code: i32, stdout: &str, stderr: &str) -> CallToolRes
     CallToolResult::error(vec![Content::text(error_json.to_string())])
 }
 
-/// Execute fallow and ensure successful JSON responses have a top-level
+/// Execute plow and ensure successful JSON responses have a top-level
 /// `warnings` array for agent-facing runtime context tools. Untagged variant
 /// retained for tests; production goes through `run_tool_with_top_level_warnings`.
 #[cfg(all(test, unix))]
-pub async fn run_fallow_with_top_level_warnings(
+pub async fn run_plow_with_top_level_warnings(
     binary: &str,
     args: &[String],
 ) -> Result<CallToolResult, McpError> {
-    Ok(ensure_top_level_warnings(run_fallow(binary, args).await?))
+    Ok(ensure_top_level_warnings(run_plow(binary, args).await?))
 }
 
-/// Tool-attributed variant of `run_fallow_with_top_level_warnings` (see
+/// Tool-attributed variant of `run_plow_with_top_level_warnings` (see
 /// `run_tool`).
 pub async fn run_tool_with_top_level_warnings(
     binary: &str,

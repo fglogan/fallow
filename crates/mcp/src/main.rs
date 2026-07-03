@@ -29,7 +29,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             reason = "version query writes to stdout by design"
         )]
         {
-            println!("fallow-mcp {}", env!("CARGO_PKG_VERSION"));
+            println!("plow-mcp {}", env!("CARGO_PKG_VERSION"));
         }
         return Ok(());
     }
@@ -40,7 +40,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_ansi(false)
         .init();
 
-    let server = server::FallowMcp::new();
+    let server = server::PlowMcp::new();
     let service = server.serve(stdio()).await?;
     service.waiting().await?;
     Ok(())

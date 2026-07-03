@@ -3,7 +3,7 @@
 use crate::root_envelopes::{RootEnvelopeMode, attach_telemetry_meta, serialize_named_json_output};
 use serde::Serialize;
 
-/// Serialize the `fallow trace --format json` envelope.
+/// Serialize the `plow trace --format json` envelope.
 ///
 /// # Errors
 ///

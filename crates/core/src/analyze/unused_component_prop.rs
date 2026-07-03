@@ -21,7 +21,7 @@ use std::path::Path;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_types::extract::ModuleInfo;
+use plow_types::extract::ModuleInfo;
 
 use crate::discover::FileId;
 use crate::graph::{ModuleGraph, ModuleNode};
@@ -213,7 +213,7 @@ pub struct ReactPropScan {
 /// - `ComponentFunction.has_unharvestable_props`: a rest/spread param
 ///   (`{ ...rest }` / a trailing rest parameter), a bare-identifier props param
 ///   (the `forwardRef<T, Props>` / `memo` imported-interface case, ADR-001), an
-///   array-pattern param, a computed prop key, or a nested destructure fallow
+///   array-pattern param, a computed prop key, or a nested destructure plow
 ///   cannot flatten with confidence. The whole component abstains.
 /// - `ComponentFunction.is_exported`: a prop on an EXPORTED component is part of
 ///   its public contract (consumers pass it; the component need not read it).

@@ -94,13 +94,13 @@ const fakeContext = {
 } as any;
 
 const binDir = path.join("/storage", "bin");
-const lspPath = path.join(binDir, "fallow-lsp");
-const cliPath = path.join(binDir, "fallow");
+const lspPath = path.join(binDir, "plow-lsp");
+const cliPath = path.join(binDir, "plow");
 const lspSigPath = `${lspPath}.sig`;
 const cliSigPath = `${cliPath}.sig`;
 const lspDigestPath = `${lspPath}.sha256`;
 const cliDigestPath = `${cliPath}.sha256`;
-const versionPath = path.join(binDir, ".fallow-version");
+const versionPath = path.join(binDir, ".plow-version");
 const binaryBytes = Buffer.from("signed-binary");
 const signatureBytes = Buffer.alloc(64, 1);
 const digestHex = Buffer.from("signed-binary", "utf8")
@@ -153,7 +153,7 @@ describe("matchesExtensionVersion", () => {
       mockFiles[f] = "x";
     }
     // Extension is 2.26.0 (vscode mock); the CLI reports a stale version.
-    mockExecOutput = "fallow 2.25.0\n";
+    mockExecOutput = "plow 2.25.0\n";
 
     const ok = await matchesExtensionVersion(binDir, cliPath, "CLI");
 
@@ -173,7 +173,7 @@ describe("matchesExtensionVersion", () => {
 
   it("returns true (no purge) when the binary version matches the extension", async () => {
     mockFiles[cliPath] = "x";
-    mockExecOutput = "fallow 2.26.0\n";
+    mockExecOutput = "plow 2.26.0\n";
     expect(await matchesExtensionVersion(binDir, cliPath, "CLI")).toBe(true);
     expect(cliPath in mockFiles).toBe(true);
   });
@@ -187,41 +187,41 @@ describe("getBinaryVersion", () => {
     mockHashInput = "";
   });
 
-  it("parses version from fallow-lsp output", async () => {
-    mockExecOutput = "fallow-lsp 2.25.0\n";
-    expect(await getBinaryVersion("/bin/fallow-lsp")).toBe("2.25.0");
+  it("parses version from plow-lsp output", async () => {
+    mockExecOutput = "plow-lsp 2.25.0\n";
+    expect(await getBinaryVersion("/bin/plow-lsp")).toBe("2.25.0");
   });
 
-  it("parses version from fallow CLI output", async () => {
-    mockExecOutput = "fallow 2.88.1\n";
-    expect(await getBinaryVersion("/bin/fallow")).toBe("2.88.1");
+  it("parses version from plow CLI output", async () => {
+    mockExecOutput = "plow 2.88.1\n";
+    expect(await getBinaryVersion("/bin/plow")).toBe("2.88.1");
   });
 
   it("ignores the npm shim's appended verified line", async () => {
-    mockExecOutput = "fallow-lsp 2.88.1\nverified: yes (sentinel /Users/me/.cache/2.0.0/x)\n";
-    expect(await getBinaryVersion("/bin/fallow-lsp")).toBe("2.88.1");
+    mockExecOutput = "plow-lsp 2.88.1\nverified: yes (sentinel /Users/me/.cache/2.0.0/x)\n";
+    expect(await getBinaryVersion("/bin/plow-lsp")).toBe("2.88.1");
   });
 
-  it("does not mistake a Node crash banner for the fallow version", async () => {
+  it("does not mistake a Node crash banner for the plow version", async () => {
     // A resolved npm shim that cannot find its platform binary can surface a
-    // Node banner; that bare semver must not be read as the fallow version.
+    // Node banner; that bare semver must not be read as the plow version.
     mockExecOutput = "Cannot find module 'detect-libc'\nNode.js v22.22.1\n";
-    expect(await getBinaryVersion("/bin/fallow-lsp")).toBeNull();
+    expect(await getBinaryVersion("/bin/plow-lsp")).toBeNull();
   });
 
   it("does not match a stray semver in a sentinel path with no version line", async () => {
-    mockExecOutput = "verified: yes (sentinel /Users/me/.cache/fallow/2.0.0/sentinel)\n";
-    expect(await getBinaryVersion("/bin/fallow-lsp")).toBeNull();
+    mockExecOutput = "verified: yes (sentinel /Users/me/.cache/plow/2.0.0/sentinel)\n";
+    expect(await getBinaryVersion("/bin/plow-lsp")).toBeNull();
   });
 
   it("returns null on exec failure", async () => {
     mockExecError = true;
-    expect(await getBinaryVersion("/bin/fallow-lsp")).toBeNull();
+    expect(await getBinaryVersion("/bin/plow-lsp")).toBeNull();
   });
 
   it("returns null on unparsable output", async () => {
     mockExecOutput = "unknown";
-    expect(await getBinaryVersion("/bin/fallow-lsp")).toBeNull();
+    expect(await getBinaryVersion("/bin/plow-lsp")).toBeNull();
   });
 });
 
@@ -290,13 +290,13 @@ describe("platformTargetFor", () => {
 describe("releaseApiUrlForVersion", () => {
   it("targets the release tag when the extension version is known", () => {
     expect(releaseApiUrlForVersion("2.26.0")).toBe(
-      "https://api.github.com/repos/fallow-rs/fallow/releases/tags/v2.26.0",
+      "https://api.github.com/repos/fglogan/genesis-plow/releases/tags/v2.26.0",
     );
   });
 
   it("falls back to the latest release only when the extension version is unavailable", () => {
     expect(releaseApiUrlForVersion(null)).toBe(
-      "https://api.github.com/repos/fallow-rs/fallow/releases/latest",
+      "https://api.github.com/repos/fglogan/genesis-plow/releases/latest",
     );
   });
 });
@@ -342,7 +342,7 @@ describe("getInstalledBinaryPath", () => {
   it("falls back to --version when no marker exists", async () => {
     mockFiles[lspPath] = binaryBytes;
     mockFiles[lspSigPath] = signatureBytes;
-    mockExecOutput = "fallow-lsp 2.26.0\n";
+    mockExecOutput = "plow-lsp 2.26.0\n";
 
     expect(await getInstalledBinaryPath(fakeContext)).toBe(lspPath);
   });
@@ -359,7 +359,7 @@ describe("getInstalledBinaryPath", () => {
   it("treats mismatched --version as stale when no marker", async () => {
     mockFiles[lspPath] = binaryBytes;
     mockFiles[lspSigPath] = signatureBytes;
-    mockExecOutput = "fallow-lsp 2.24.0\n";
+    mockExecOutput = "plow-lsp 2.24.0\n";
 
     expect(await getInstalledBinaryPath(fakeContext)).toBeNull();
     expect(mockFiles[lspPath]).toBeUndefined();
@@ -367,7 +367,7 @@ describe("getInstalledBinaryPath", () => {
 
   it("treats missing signature as stale without executing the binary", async () => {
     mockFiles[lspPath] = binaryBytes;
-    mockExecOutput = "fallow-lsp 2.26.0\n";
+    mockExecOutput = "plow-lsp 2.26.0\n";
 
     expect(await getInstalledBinaryPath(fakeContext)).toBeNull();
     expect(mockFiles[lspPath]).toBeUndefined();
@@ -435,7 +435,7 @@ describe("getInstalledCliPath", () => {
     mockFiles[cliPath] = binaryBytes;
     mockFiles[cliSigPath] = signatureBytes;
     mockFiles[versionPath] = "2.26.0";
-    mockExecOutput = "fallow 2.26.0\n";
+    mockExecOutput = "plow 2.26.0\n";
 
     expect(await getInstalledCliPath(fakeContext)).toBe(cliPath);
   });
@@ -444,7 +444,7 @@ describe("getInstalledCliPath", () => {
     mockFiles[cliPath] = binaryBytes;
     mockFiles[cliDigestPath] = digestHex;
     mockFiles[versionPath] = "2.26.0";
-    mockExecOutput = "fallow 2.26.0\n";
+    mockExecOutput = "plow 2.26.0\n";
 
     expect(await getInstalledCliPath(fakeContext)).toBe(cliPath);
   });
@@ -453,7 +453,7 @@ describe("getInstalledCliPath", () => {
     mockFiles[cliPath] = binaryBytes;
     mockFiles[cliSigPath] = signatureBytes;
     mockFiles[versionPath] = "2.26.0";
-    mockExecOutput = "fallow 2.25.0\n";
+    mockExecOutput = "plow 2.25.0\n";
 
     expect(await getInstalledCliPath(fakeContext)).toBeNull();
     expect(mockFiles[cliPath]).toBeUndefined();
@@ -478,7 +478,7 @@ describe("getInstalledCliPath", () => {
 describe("sweepOrphanTempFiles", () => {
   // A pid that is NOT this process: such temps are crash orphans, never live.
   const orphanPid = process.pid + 1;
-  const orphanBinary = path.join(binDir, `.fallow-lsp.${orphanPid}.1.tmp`);
+  const orphanBinary = path.join(binDir, `.plow-lsp.${orphanPid}.1.tmp`);
   const orphanSig = `${orphanBinary}.sig`;
   const orphanDigest = `${orphanBinary}.sha256`;
 
@@ -520,7 +520,7 @@ describe("sweepOrphanTempFiles", () => {
 
   it("never deletes a live temp owned by the current process", () => {
     const livePid = process.pid;
-    const liveBinary = path.join(binDir, `.fallow.${livePid}.2.tmp`);
+    const liveBinary = path.join(binDir, `.plow.${livePid}.2.tmp`);
     const liveSig = `${liveBinary}.sig`;
     mockFiles[liveBinary] = binaryBytes;
     mockFiles[liveSig] = signatureBytes;

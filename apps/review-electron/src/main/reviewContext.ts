@@ -16,7 +16,7 @@ import type { ReviewContext, ReviewContextItem } from "../model/reviewContext";
 
 /** Path to the persisted author-agent review brief. */
 export const reviewContextPath = (root: string): string =>
-  join(root, ".fallow-review", "review-context.json");
+  join(root, ".plow-review", "review-context.json");
 
 const asString = (v: unknown): string => (typeof v === "string" ? v : "");
 

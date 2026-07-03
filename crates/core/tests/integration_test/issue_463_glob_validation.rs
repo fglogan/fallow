@@ -4,10 +4,10 @@
 
 use std::fs;
 
-use fallow_config::FallowConfig;
+use plow_config::PlowConfig;
 
 fn write_config(dir: &std::path::Path, body: &str) -> std::path::PathBuf {
-    let path = dir.join(".fallowrc.json");
+    let path = dir.join(".plowrc.json");
     fs::write(&path, body).expect("write config");
     path
 }
@@ -15,7 +15,7 @@ fn write_config(dir: &std::path::Path, body: &str) -> std::path::PathBuf {
 fn load_err(body: &str) -> String {
     let tmp = tempfile::tempdir().expect("create tempdir");
     let path = write_config(tmp.path(), body);
-    let err = FallowConfig::load(&path).expect_err("load should reject invalid glob");
+    let err = PlowConfig::load(&path).expect_err("load should reject invalid glob");
     err.to_string()
 }
 
@@ -62,7 +62,7 @@ fn ignore_unresolved_imports_parent_relative_specifier_accepted() {
             ]
         }"#,
     );
-    let config = FallowConfig::load(&path).expect("specifier glob config should load");
+    let config = PlowConfig::load(&path).expect("specifier glob config should load");
     assert_eq!(
         config.ignore_unresolved_imports,
         vec!["@example/icons", "@example/icons/**", "../generated/**"]
@@ -259,7 +259,7 @@ fn valid_relative_patterns_accepted() {
             "health": { "ignore": ["src/legacy/**"] }
         }"#,
     );
-    let config = FallowConfig::load(&path).expect("valid config should load");
+    let config = PlowConfig::load(&path).expect("valid config should load");
     assert_eq!(config.entry, vec!["src/**/*.ts", "./entry.ts"]);
     assert_eq!(config.ignore_patterns.len(), 2);
 }
@@ -268,5 +268,5 @@ fn valid_relative_patterns_accepted() {
 fn empty_config_still_loads() {
     let tmp = tempfile::tempdir().expect("create tempdir");
     let path = write_config(tmp.path(), r"{}");
-    FallowConfig::load(&path).expect("empty config should load");
+    PlowConfig::load(&path).expect("empty config should load");
 }

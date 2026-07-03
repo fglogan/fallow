@@ -1,6 +1,6 @@
 use crate::params::ListBoundariesParams;
 
-use fallow_api::{
+use plow_api::{
     AnalysisOptions, ListBoundariesOptions, run_list_boundaries as run_api_list_boundaries,
     serialize_list_boundaries_programmatic_json,
 };
@@ -94,7 +94,7 @@ mod tests {
         )
         .expect("write package");
         std::fs::write(
-            project.path().join(".fallowrc.json"),
+            project.path().join(".plowrc.json"),
             r#"{
                 "boundaries": {
                     "zones": [

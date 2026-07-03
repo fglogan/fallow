@@ -3,27 +3,27 @@ use std::path::Path;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use fallow_api::{
+use plow_api::{
     CheckJsonExtraOutputs, CheckJsonOutputInput, CheckJsonPayloadInput, DupesReportPayload,
     DuplicationGrouping, DuplicationJsonOutputInput, GroupedCheckJsonOutputInput,
     GroupedDuplicationJsonOutputInput,
 };
-use fallow_types::duplicates::DuplicationReport;
+use plow_types::duplicates::DuplicationReport;
 #[cfg(test)]
-use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
-use fallow_types::results::AnalysisResults;
+use plow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
+use plow_types::results::AnalysisResults;
 
 #[cfg(test)]
-use fallow_output::strip_root_prefix;
-use fallow_types::envelope::{
+use plow_output::strip_root_prefix;
+use plow_types::envelope::{
     BaselineCategoryDelta, BaselineDeltas, BaselineMatch, RegressionResult, RegressionStatus,
     RegressionToleranceKind,
 };
 
 use super::emit_json;
 use crate::report::grouping::{OwnershipResolver, ResultGroup};
-use fallow_config::WorkspaceDiagnostic;
-use fallow_output::GroupByMode;
+use plow_config::WorkspaceDiagnostic;
+use plow_output::GroupByMode;
 
 pub(super) struct PrintJsonInput<'a> {
     pub(super) results: &'a AnalysisResults,
@@ -48,7 +48,7 @@ pub(super) fn print_json(input: &PrintJsonInput<'_>) -> ExitCode {
         root,
         elapsed,
         config_fixable,
-        explain.then(fallow_output::check_meta),
+        explain.then(plow_output::check_meta),
         check_json_extras(regression, None, baseline_matched),
     ) {
         Ok(output) => emit_json(&output, "JSON"),
@@ -71,14 +71,14 @@ pub(super) struct PrintGroupedJsonInput<'a> {
 }
 
 pub(super) fn print_grouped_json(input: &PrintGroupedJsonInput<'_>) -> ExitCode {
-    let output = match fallow_api::serialize_grouped_check_json(GroupedCheckJsonOutputInput {
+    let output = match plow_api::serialize_grouped_check_json(GroupedCheckJsonOutputInput {
         groups: input.groups,
         original: input.original,
         root: input.root,
         elapsed: input.elapsed,
         grouped_by: group_by_mode_from_label(input.resolver.mode_label()),
         config_fixable: input.config_fixable,
-        meta: input.explain.then(fallow_output::check_meta),
+        meta: input.explain.then(plow_output::check_meta),
         next_steps: crate::report::suggestions::build_dead_code_next_steps(
             input.original,
             input.root,
@@ -140,7 +140,7 @@ fn api_check_json_document_with_config_fixable_and_meta(
     root: &Path,
     elapsed: Duration,
     config_fixable: bool,
-    meta: Option<fallow_types::envelope::Meta>,
+    meta: Option<plow_types::envelope::Meta>,
 ) -> Result<serde_json::Value, serde_json::Error> {
     api_check_json_document_with_config_fixable_meta_and_extras(
         results,
@@ -157,10 +157,10 @@ pub(super) fn api_check_json_document_with_config_fixable_meta_and_extras(
     root: &Path,
     elapsed: Duration,
     config_fixable: bool,
-    meta: Option<fallow_types::envelope::Meta>,
+    meta: Option<plow_types::envelope::Meta>,
     extras: CheckJsonExtraOutputs,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    fallow_api::serialize_check_json(CheckJsonOutputInput {
+    plow_api::serialize_check_json(CheckJsonOutputInput {
         results,
         root,
         elapsed,
@@ -201,7 +201,7 @@ pub fn api_check_json_payload_with_config_fixable_and_extras(
     config_fixable: bool,
     extras: CheckJsonExtraOutputs,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    fallow_api::serialize_check_json_payload(CheckJsonPayloadInput {
+    plow_api::serialize_check_json_payload(CheckJsonPayloadInput {
         results,
         root,
         elapsed,
@@ -325,12 +325,12 @@ fn insert_meta(output: &mut serde_json::Value, meta: serde_json::Value) {
 }
 
 pub(super) fn api_health_json_document(
-    report: &fallow_output::HealthReport,
+    report: &plow_output::HealthReport,
     root: &Path,
     elapsed: Duration,
     explain: bool,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let output = fallow_api::serialize_health_report_json(fallow_api::HealthJsonReportInput {
+    let output = plow_api::serialize_health_report_json(plow_api::HealthJsonReportInput {
         report: report.clone(),
         root,
         elapsed,
@@ -338,7 +338,7 @@ pub(super) fn api_health_json_document(
         grouped_by: None,
         groups: None,
         workspace_diagnostics: workspace_diagnostics_for_output(root),
-        next_steps: fallow_output::build_health_next_steps(
+        next_steps: plow_output::build_health_next_steps(
             crate::report::suggestions::health_next_steps_input(
                 report,
                 root,
@@ -353,13 +353,13 @@ pub(super) fn api_health_json_document(
 }
 
 pub(super) fn api_grouped_health_json_document(
-    report: &fallow_output::HealthReport,
-    grouping: &fallow_output::HealthGrouping,
+    report: &plow_output::HealthReport,
+    grouping: &plow_output::HealthGrouping,
     root: &Path,
     elapsed: Duration,
     explain: bool,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    fallow_api::serialize_health_report_json(fallow_api::HealthJsonReportInput {
+    plow_api::serialize_health_report_json(plow_api::HealthJsonReportInput {
         report: report.clone(),
         root,
         elapsed,
@@ -367,7 +367,7 @@ pub(super) fn api_grouped_health_json_document(
         grouped_by: Some(group_by_mode_from_label(grouping.mode)),
         groups: Some(grouping.groups.clone()),
         workspace_diagnostics: workspace_diagnostics_for_output(root),
-        next_steps: fallow_output::build_health_next_steps(
+        next_steps: plow_output::build_health_next_steps(
             crate::report::suggestions::health_next_steps_input(
                 report,
                 root,
@@ -381,7 +381,7 @@ pub(super) fn api_grouped_health_json_document(
 }
 
 pub(super) fn print_health_json(
-    report: &fallow_output::HealthReport,
+    report: &plow_output::HealthReport,
     root: &Path,
     elapsed: Duration,
     explain: bool,
@@ -396,8 +396,8 @@ pub(super) fn print_health_json(
 }
 
 pub(super) fn print_grouped_health_json(
-    report: &fallow_output::HealthReport,
-    grouping: &fallow_output::HealthGrouping,
+    report: &plow_output::HealthReport,
+    grouping: &plow_output::HealthGrouping,
     root: &Path,
     elapsed: Duration,
     explain: bool,
@@ -424,11 +424,11 @@ pub(super) fn api_duplication_json_document(
         crate::report::suggestions::setup_pointer_applicable(root),
         crate::report::suggestions::due_impact_digest(root),
     );
-    fallow_api::serialize_duplication_json(DuplicationJsonOutputInput {
+    plow_api::serialize_duplication_json(DuplicationJsonOutputInput {
         report,
         root,
         elapsed,
-        meta: explain.then(fallow_output::dupes_meta),
+        meta: explain.then(plow_output::dupes_meta),
         workspace_diagnostics: workspace_diagnostics_for_output(root),
         next_steps,
         envelope_mode: crate::output_runtime::current_root_envelope_mode(),
@@ -465,12 +465,12 @@ pub(super) fn api_grouped_duplication_json_document(
         crate::report::suggestions::setup_pointer_applicable(root),
         crate::report::suggestions::due_impact_digest(root),
     );
-    fallow_api::serialize_grouped_duplication_json(GroupedDuplicationJsonOutputInput {
+    plow_api::serialize_grouped_duplication_json(GroupedDuplicationJsonOutputInput {
         report,
         grouping,
         root,
         elapsed,
-        meta: explain.then(fallow_output::dupes_meta),
+        meta: explain.then(plow_output::dupes_meta),
         workspace_diagnostics: workspace_diagnostics_for_output(root),
         next_steps,
         envelope_mode: crate::output_runtime::current_root_envelope_mode(),
@@ -521,16 +521,16 @@ pub(super) fn print_trace_json<T: serde::Serialize>(value: &T) {
 mod tests {
     use super::*;
     use crate::report::test_helpers::sample_results;
-    use fallow_output::{
+    use plow_output::{
         RuntimeCoverageAction, RuntimeCoverageConfidence, RuntimeCoverageDataSource,
         RuntimeCoverageEvidence, RuntimeCoverageFinding, RuntimeCoverageHotPath,
         RuntimeCoverageMessage, RuntimeCoverageReport, RuntimeCoverageReportVerdict,
         RuntimeCoverageSchemaVersion, RuntimeCoverageSummary, RuntimeCoverageVerdict,
         RuntimeCoverageWatermark,
     };
-    use fallow_types::extract::MemberKind;
-    use fallow_types::output_dead_code::*;
-    use fallow_types::results::*;
+    use plow_types::extract::MemberKind;
+    use plow_types::output_dead_code::*;
+    use plow_types::results::*;
     use std::path::PathBuf;
     use std::time::Duration;
 
@@ -619,7 +619,7 @@ mod tests {
     )]
     fn health_json_includes_runtime_coverage_with_relative_paths_and_actions() {
         let root = PathBuf::from("/project");
-        let report = fallow_output::HealthReport {
+        let report = plow_output::HealthReport {
             runtime_coverage: Some(RuntimeCoverageReport {
                 schema_version: RuntimeCoverageSchemaVersion::V1,
                 verdict: RuntimeCoverageReportVerdict::ColdCodeDetected,
@@ -635,7 +635,7 @@ mod tests {
                     trace_count: 2_847_291,
                     period_days: 30,
                     deployments_seen: 14,
-                    capture_quality: Some(fallow_output::RuntimeCoverageCaptureQuality {
+                    capture_quality: Some(plow_output::RuntimeCoverageCaptureQuality {
                         window_seconds: 720,
                         instances_observed: 1,
                         lazy_parse_warning: true,
@@ -643,7 +643,7 @@ mod tests {
                     }),
                 },
                 findings: vec![RuntimeCoverageFinding {
-                    id: "fallow:prod:deadbeef".to_owned(),
+                    id: "plow:prod:deadbeef".to_owned(),
                     stable_id: None,
                     path: root.join("src/cold.ts"),
                     function: "coldPath".to_owned(),
@@ -669,7 +669,7 @@ mod tests {
                     discriminators: None,
                 }],
                 hot_paths: vec![RuntimeCoverageHotPath {
-                    id: "fallow:hot:cafebabe".to_owned(),
+                    id: "plow:hot:cafebabe".to_owned(),
                     stable_id: None,
                     path: root.join("src/hot.ts"),
                     function: "hotPath".to_owned(),
@@ -689,15 +689,15 @@ mod tests {
                 actionable: true,
                 actionability_reason: None,
                 actionability_verdict: None,
-                provenance: fallow_output::RuntimeCoverageProvenance::default(),
+                provenance: plow_output::RuntimeCoverageProvenance::default(),
             }),
             ..Default::default()
         };
 
-        let envelope: fallow_output::HealthOutput<
-            fallow_output::HealthReport,
-            fallow_output::HealthGroup,
-        > = fallow_output::HealthOutput {
+        let envelope: plow_output::HealthOutput<
+            plow_output::HealthReport,
+            plow_output::HealthGroup,
+        > = plow_output::HealthOutput {
             schema_version: SchemaVersion(SCHEMA_VERSION),
             version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
             elapsed_ms: ElapsedMs(7),
@@ -730,7 +730,7 @@ mod tests {
         let finding = &output["runtime_coverage"]["findings"][0];
         assert_eq!(finding["path"], "src/cold.ts");
         assert_eq!(finding["verdict"], "review_required");
-        assert_eq!(finding["id"], "fallow:prod:deadbeef");
+        assert_eq!(finding["id"], "plow:prod:deadbeef");
         assert_eq!(finding["actions"][0]["type"], "review-deletion");
         let hot_path = &output["runtime_coverage"]["hot_paths"][0];
         assert_eq!(hot_path["path"], "src/hot.ts");
@@ -749,9 +749,9 @@ mod tests {
     #[test]
     fn grouped_health_json_uses_api_contract_for_group_paths() {
         let root = PathBuf::from("/project");
-        let grouping = fallow_output::HealthGrouping {
+        let grouping = plow_output::HealthGrouping {
             mode: "package",
-            groups: vec![fallow_output::HealthGroup {
+            groups: vec![plow_output::HealthGroup {
                 key: "app".to_string(),
                 owners: None,
                 files_analyzed: 1,
@@ -762,7 +762,7 @@ mod tests {
                 findings: Vec::new(),
                 file_scores: Vec::new(),
                 hotspots: Vec::new(),
-                large_functions: vec![fallow_output::LargeFunctionEntry {
+                large_functions: vec![plow_output::LargeFunctionEntry {
                     path: root.join("src/large.ts"),
                     name: "large".to_string(),
                     line: 12,
@@ -774,7 +774,7 @@ mod tests {
         };
 
         let output = api_grouped_health_json_document(
-            &fallow_output::HealthReport::default(),
+            &plow_output::HealthReport::default(),
             &grouping,
             &root,
             Duration::ZERO,
@@ -1282,7 +1282,7 @@ mod tests {
     fn duplicate_export_add_to_config_is_auto_fixable_when_config_exists() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        std::fs::write(root.join(".fallowrc.json"), "{}\n").unwrap();
+        std::fs::write(root.join(".plowrc.json"), "{}\n").unwrap();
         let mut results = AnalysisResults::default();
         results
             .duplicate_exports
@@ -1786,7 +1786,7 @@ mod tests {
             api_check_json_document(&results, &root, elapsed).expect("should serialize");
         insert_meta(
             &mut output,
-            serde_json::to_value(fallow_output::check_meta()).unwrap(),
+            serde_json::to_value(plow_output::check_meta()).unwrap(),
         );
 
         assert!(output["_meta"]["docs"].is_string());
@@ -1854,7 +1854,7 @@ mod tests {
         assert_eq!(actions[1]["type"], "suppress-line");
         assert_eq!(
             actions[1]["comment"],
-            "// fallow-ignore-next-line unused-export"
+            "// plow-ignore-next-line unused-export"
         );
     }
 
@@ -1882,7 +1882,7 @@ mod tests {
         assert_eq!(action["value"], "src/middleware/error.ts");
         assert_eq!(
             action["description"],
-            "Add \"src/middleware/error.ts\" to boundaries.coverage.allowUnmatched in fallow config"
+            "Add \"src/middleware/error.ts\" to boundaries.coverage.allowUnmatched in plow config"
         );
     }
 
@@ -1918,11 +1918,11 @@ mod tests {
         let type_actions = output["unused_types"][0]["actions"].as_array().unwrap();
         assert_eq!(
             export_actions[1]["comment"],
-            "// fallow-ignore-next-line unused-export, unused-type"
+            "// plow-ignore-next-line unused-export, unused-type"
         );
         assert_eq!(
             type_actions[1]["comment"],
-            "// fallow-ignore-next-line unused-export, unused-type"
+            "// plow-ignore-next-line unused-export, unused-type"
         );
     }
 
@@ -1942,7 +1942,7 @@ mod tests {
         assert_eq!(actions[0]["auto_fixable"], false);
         assert!(actions[0]["note"].is_string());
         assert_eq!(actions[1]["type"], "suppress-file");
-        assert_eq!(actions[1]["comment"], "// fallow-ignore-file unused-file");
+        assert_eq!(actions[1]["comment"], "// plow-ignore-file unused-file");
     }
 
     #[test]
@@ -2053,7 +2053,7 @@ mod tests {
     /// the JSON post-pass into the typed wrapper.
     fn build_actions_for_finding_json(
         finding_json: serde_json::Value,
-        opts: fallow_output::HealthActionOptions,
+        opts: plow_output::HealthActionOptions,
         max_cyclomatic_threshold: u16,
         max_cognitive_threshold: u16,
         max_crap_threshold: f64,
@@ -2070,14 +2070,14 @@ mod tests {
                 .or_insert(serde_json::Value::String("moderate".to_string()));
         }
         let violation = synthesize_complexity_violation(&value);
-        let ctx = fallow_output::HealthActionContext {
+        let ctx = plow_output::HealthActionContext {
             opts,
             max_cyclomatic_threshold,
             max_cognitive_threshold,
             max_crap_threshold,
             crap_refactor_band: 5,
         };
-        let finding = fallow_output::HealthFinding::with_actions(violation, &ctx);
+        let finding = plow_output::HealthFinding::with_actions(violation, &ctx);
         let serialized = serde_json::to_value(&finding).expect("serialize HealthFinding");
         serialized["actions"]
             .as_array()
@@ -2091,8 +2091,8 @@ mod tests {
     /// shape.
     fn synthesize_complexity_violation(
         value: &serde_json::Value,
-    ) -> fallow_output::ComplexityViolation {
-        use fallow_output::{CoverageSource, CoverageTier, ExceededThreshold, FindingSeverity};
+    ) -> plow_output::ComplexityViolation {
+        use plow_output::{CoverageSource, CoverageTier, ExceededThreshold, FindingSeverity};
         let exceeded = match value["exceeded"].as_str().unwrap_or("crap") {
             "cyclomatic" => ExceededThreshold::Cyclomatic,
             "cognitive" => ExceededThreshold::Cognitive,
@@ -2128,7 +2128,7 @@ mod tests {
                     "estimated_component_inherited" => CoverageSource::EstimatedComponentInherited,
                     other => panic!("unknown coverage_source label: {other}"),
                 });
-        fallow_output::ComplexityViolation {
+        plow_output::ComplexityViolation {
             path: std::path::PathBuf::from(value["path"].as_str().unwrap_or("src/x.ts")),
             name: value["name"].as_str().unwrap_or("fn").to_string(),
             line: u32::try_from(value["line"].as_u64().unwrap_or(0)).unwrap_or(0),
@@ -2148,7 +2148,7 @@ mod tests {
                     u16::try_from(p.get(key).and_then(serde_json::Value::as_u64).unwrap_or(0))
                         .unwrap_or(0)
                 };
-                fallow_output::ReactHookProfile {
+                plow_output::ReactHookProfile {
                     state: read_u16("state"),
                     effect: read_u16("effect"),
                     memo: read_u16("memo"),
@@ -2172,7 +2172,7 @@ mod tests {
                 .map(std::path::PathBuf::from),
             component_rollup: value.get("component_rollup").and_then(|v| {
                 let map = v.as_object()?;
-                Some(fallow_output::ComponentRollup {
+                Some(plow_output::ComponentRollup {
                     component: map.get("component")?.as_str()?.to_string(),
                     class_worst_function: map.get("class_worst_function")?.as_str()?.to_string(),
                     class_cyclomatic: u16::try_from(map.get("class_cyclomatic")?.as_u64()?).ok()?,
@@ -2203,7 +2203,7 @@ mod tests {
                 "line_count": 150,
                 "exceeded": "both"
             }),
-            fallow_output::HealthActionOptions::default(),
+            plow_output::HealthActionOptions::default(),
             20,
             15,
             30.0,
@@ -2219,10 +2219,7 @@ mod tests {
                 .contains("processData")
         );
         assert_eq!(actions[1]["type"], "suppress-line");
-        assert_eq!(
-            actions[1]["comment"],
-            "// fallow-ignore-next-line complexity"
-        );
+        assert_eq!(actions[1]["comment"], "// plow-ignore-next-line complexity");
     }
 
     #[test]
@@ -2238,7 +2235,7 @@ mod tests {
                 "line_count": 150,
                 "exceeded": "both"
             }),
-            fallow_output::HealthActionOptions::default(),
+            plow_output::HealthActionOptions::default(),
             20,
             15,
             30.0,
@@ -2260,7 +2257,7 @@ mod tests {
                 "line_count": 40,
                 "exceeded": "both"
             }),
-            fallow_output::HealthActionOptions::default(),
+            plow_output::HealthActionOptions::default(),
             20,
             15,
             30.0,
@@ -2268,10 +2265,7 @@ mod tests {
 
         let suppress = &actions[1];
         assert_eq!(suppress["type"], "suppress-file");
-        assert_eq!(
-            suppress["comment"],
-            "<!-- fallow-ignore-file complexity -->"
-        );
+        assert_eq!(suppress["comment"], "<!-- plow-ignore-file complexity -->");
         assert_eq!(suppress["placement"], "top-of-template");
     }
 
@@ -2288,7 +2282,7 @@ mod tests {
                 "line_count": 40,
                 "exceeded": "both"
             }),
-            fallow_output::HealthActionOptions::default(),
+            plow_output::HealthActionOptions::default(),
             20,
             15,
             30.0,
@@ -2370,7 +2364,7 @@ mod tests {
             max_cyclomatic_threshold,
             max_cognitive_threshold,
             max_crap_threshold,
-            fallow_output::HealthActionOptions::default(),
+            plow_output::HealthActionOptions::default(),
         )
     }
 
@@ -2388,15 +2382,15 @@ mod tests {
         max_cyclomatic_threshold: u16,
         max_cognitive_threshold: u16,
         max_crap_threshold: f64,
-        action_opts: fallow_output::HealthActionOptions,
+        action_opts: plow_output::HealthActionOptions,
     ) -> serde_json::Value {
         let tier = coverage_tier.map(|t| match t {
-            "none" => fallow_output::CoverageTier::None,
-            "partial" => fallow_output::CoverageTier::Partial,
-            "high" => fallow_output::CoverageTier::High,
+            "none" => plow_output::CoverageTier::None,
+            "partial" => plow_output::CoverageTier::Partial,
+            "high" => plow_output::CoverageTier::High,
             other => panic!("unknown coverage tier label: {other}"),
         });
-        let violation = fallow_output::ComplexityViolation {
+        let violation = plow_output::ComplexityViolation {
             path: std::path::PathBuf::from("src/risk.ts"),
             name: "computeScore".to_string(),
             line: 12,
@@ -2409,8 +2403,8 @@ mod tests {
             react_jsx_max_depth: 0,
             react_prop_count: 0,
             react_hook_profile: None,
-            exceeded: fallow_output::ExceededThreshold::Crap,
-            severity: fallow_output::FindingSeverity::Moderate,
+            exceeded: plow_output::ExceededThreshold::Crap,
+            severity: plow_output::FindingSeverity::Moderate,
             crap: Some(35.5),
             coverage_pct: None,
             coverage_tier: tier,
@@ -2421,14 +2415,14 @@ mod tests {
             effective_thresholds: None,
             threshold_source: None,
         };
-        let ctx = fallow_output::HealthActionContext {
+        let ctx = plow_output::HealthActionContext {
             opts: action_opts,
             max_cyclomatic_threshold,
             max_cognitive_threshold,
             max_crap_threshold,
             crap_refactor_band: 5,
         };
-        let finding = fallow_output::HealthFinding::with_actions(violation, &ctx);
+        let finding = plow_output::HealthFinding::with_actions(violation, &ctx);
         let actions_meta = if action_opts.omit_suppress_line {
             Some(serde_json::json!({
                 "suppression_hints_omitted": true,
@@ -2572,7 +2566,7 @@ mod tests {
 
     #[test]
     fn crap_only_secondary_refactor_respects_configured_band() {
-        let violation = fallow_output::ComplexityViolation {
+        let violation = plow_output::ComplexityViolation {
             path: std::path::PathBuf::from("src/risk.ts"),
             name: "computeScore".to_string(),
             line: 12,
@@ -2585,11 +2579,11 @@ mod tests {
             react_jsx_max_depth: 0,
             react_prop_count: 0,
             react_hook_profile: None,
-            exceeded: fallow_output::ExceededThreshold::Crap,
-            severity: fallow_output::FindingSeverity::Moderate,
+            exceeded: plow_output::ExceededThreshold::Crap,
+            severity: plow_output::FindingSeverity::Moderate,
             crap: Some(35.5),
             coverage_pct: None,
-            coverage_tier: Some(fallow_output::CoverageTier::None),
+            coverage_tier: Some(plow_output::CoverageTier::None),
             coverage_source: None,
             inherited_from: None,
             component_rollup: None,
@@ -2597,26 +2591,26 @@ mod tests {
             effective_thresholds: None,
             threshold_source: None,
         };
-        let narrow_ctx = fallow_output::HealthActionContext {
-            opts: fallow_output::HealthActionOptions::default(),
+        let narrow_ctx = plow_output::HealthActionContext {
+            opts: plow_output::HealthActionOptions::default(),
             max_cyclomatic_threshold: 20,
             max_cognitive_threshold: 15,
             max_crap_threshold: 30.0,
             crap_refactor_band: 5,
         };
-        let wide_ctx = fallow_output::HealthActionContext {
+        let wide_ctx = plow_output::HealthActionContext {
             crap_refactor_band: 6,
             ..narrow_ctx
         };
 
-        let narrow_actions = fallow_output::build_health_finding_actions(&violation, &narrow_ctx);
-        let wide_actions = fallow_output::build_health_finding_actions(&violation, &wide_ctx);
+        let narrow_actions = plow_output::build_health_finding_actions(&violation, &narrow_ctx);
+        let wide_actions = plow_output::build_health_finding_actions(&violation, &wide_ctx);
 
         assert!(
             !narrow_actions.iter().any(|a| {
                 matches!(
                     a.kind,
-                    fallow_types::output_health::HealthFindingActionType::RefactorFunction
+                    plow_types::output_health::HealthFindingActionType::RefactorFunction
                 )
             }),
             "default band should not refactor a CRAP-only finding 6 below max cyclomatic"
@@ -2625,7 +2619,7 @@ mod tests {
             wide_actions.iter().any(|a| {
                 matches!(
                     a.kind,
-                    fallow_types::output_health::HealthFindingActionType::RefactorFunction
+                    plow_types::output_health::HealthFindingActionType::RefactorFunction
                 )
             }),
             "configured wider band should emit the secondary refactor action"
@@ -2645,7 +2639,7 @@ mod tests {
                 "line_count": 80,
                 "exceeded": "cyclomatic",
             }),
-            fallow_output::HealthActionOptions::default(),
+            plow_output::HealthActionOptions::default(),
             20,
             15,
             30.0,
@@ -2673,7 +2667,7 @@ mod tests {
             20,
             15,
             30.0,
-            fallow_output::HealthActionOptions {
+            plow_output::HealthActionOptions {
                 omit_suppress_line: true,
                 omit_reason: Some("baseline-active"),
             },
@@ -2700,7 +2694,7 @@ mod tests {
             20,
             15,
             30.0,
-            fallow_output::HealthActionOptions {
+            plow_output::HealthActionOptions {
                 omit_suppress_line: true,
                 omit_reason: Some("config-disabled"),
             },
@@ -2758,7 +2752,7 @@ mod tests {
             }
             let actions = build_actions_for_finding_json(
                 finding,
-                fallow_output::HealthActionOptions::default(),
+                plow_output::HealthActionOptions::default(),
                 max,
                 15,
                 30.0,

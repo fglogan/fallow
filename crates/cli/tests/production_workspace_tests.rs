@@ -10,12 +10,12 @@ mod common;
 use std::fmt::Write as _;
 use std::process::Command;
 
-use common::{CommandOutput, fallow_bin, parse_json, run_fallow, run_fallow_raw};
+use common::{CommandOutput, parse_json, plow_bin, run_plow, run_plow_raw};
 use tempfile::TempDir;
 
 #[test]
 fn production_mode_check_exits_successfully() {
-    let output = run_fallow(
+    let output = run_plow(
         "check",
         "basic-project",
         &["--production", "--format", "json", "--quiet"],
@@ -34,7 +34,7 @@ fn production_mode_check_exits_successfully() {
 
 #[test]
 fn production_mode_health_exits_successfully() {
-    let output = run_fallow(
+    let output = run_plow(
         "health",
         "basic-project",
         &["--production", "--format", "json", "--quiet"],
@@ -47,7 +47,7 @@ fn production_mode_health_exits_successfully() {
 
 #[test]
 fn production_mode_dupes_exits_successfully() {
-    let output = run_fallow(
+    let output = run_plow(
         "dupes",
         "basic-project",
         &["--production", "--format", "json", "--quiet"],
@@ -89,9 +89,9 @@ fn create_per_analysis_production_fixture() -> TempDir {
     Command::new("git")
         .args([
             "-c",
-            "user.name=fallow",
+            "user.name=plow",
             "-c",
-            "user.email=fallow@example.com",
+            "user.email=plow@example.com",
             "commit",
             "-m",
             "init",
@@ -105,7 +105,7 @@ fn create_per_analysis_production_fixture() -> TempDir {
 }
 
 fn run_combined_raw(root: &std::path::Path, args: &[&str], envs: &[(&str, &str)]) -> CommandOutput {
-    let mut cmd = Command::new(fallow_bin());
+    let mut cmd = Command::new(plow_bin());
     cmd.arg("--root")
         .arg(root)
         .env("RUST_LOG", "")
@@ -116,7 +116,7 @@ fn run_combined_raw(root: &std::path::Path, args: &[&str], envs: &[(&str, &str)]
     for arg in args {
         cmd.arg(arg);
     }
-    let output = cmd.output().expect("failed to run fallow binary");
+    let output = cmd.output().expect("failed to run plow binary");
     CommandOutput {
         stdout: String::from_utf8_lossy(&output.stdout).to_string(),
         stderr: String::from_utf8_lossy(&output.stderr).to_string(),
@@ -128,7 +128,7 @@ fn run_combined_raw(root: &std::path::Path, args: &[&str], envs: &[(&str, &str)]
 fn combined_config_can_enable_production_health_only() {
     let dir = create_per_analysis_production_fixture();
     std::fs::write(
-        dir.path().join(".fallowrc.json"),
+        dir.path().join(".plowrc.json"),
         r#"{"production":{"health":true,"deadCode":false,"dupes":false}}"#,
     )
     .unwrap();
@@ -168,7 +168,7 @@ fn combined_config_can_enable_production_health_only() {
     let output = run_combined_raw(
         dir.path(),
         &["--format", "json", "--quiet", "--only", "health"],
-        &[("FALLOW_PRODUCTION_HEALTH", "false")],
+        &[("PLOW_PRODUCTION_HEALTH", "false")],
     );
     assert!(
         output.code == 0 || output.code == 1,
@@ -185,11 +185,11 @@ fn combined_config_can_enable_production_health_only() {
         .collect();
     assert!(
         paths.contains(&"src/complex.test.ts"),
-        "FALLOW_PRODUCTION_HEALTH=false should override config and include test complexity: {paths:?}"
+        "PLOW_PRODUCTION_HEALTH=false should override config and include test complexity: {paths:?}"
     );
 
     std::fs::write(
-        dir.path().join(".fallowrc.json"),
+        dir.path().join(".plowrc.json"),
         r#"{"production":{"health":false,"deadCode":false,"dupes":false}}"#,
     )
     .unwrap();
@@ -197,8 +197,8 @@ fn combined_config_can_enable_production_health_only() {
         dir.path(),
         &["--format", "json", "--quiet", "--only", "health"],
         &[
-            ("FALLOW_PRODUCTION", "false"),
-            ("FALLOW_PRODUCTION_HEALTH", "true"),
+            ("PLOW_PRODUCTION", "false"),
+            ("PLOW_PRODUCTION_HEALTH", "true"),
         ],
     );
     assert!(
@@ -211,7 +211,7 @@ fn combined_config_can_enable_production_health_only() {
     let findings = json["health"]["findings"].as_array().unwrap();
     assert!(
         findings.is_empty(),
-        "FALLOW_PRODUCTION_HEALTH=true should override global false env and exclude test complexity: {findings:?}"
+        "PLOW_PRODUCTION_HEALTH=true should override global false env and exclude test complexity: {findings:?}"
     );
 }
 
@@ -223,8 +223,8 @@ fn per_analysis_env_var_beats_global_env_var() {
         dir.path(),
         &["--format", "json", "--quiet", "--only", "health"],
         &[
-            ("FALLOW_PRODUCTION", "false"),
-            ("FALLOW_PRODUCTION_HEALTH", "true"),
+            ("PLOW_PRODUCTION", "false"),
+            ("PLOW_PRODUCTION_HEALTH", "true"),
         ],
     );
     assert!(
@@ -237,15 +237,15 @@ fn per_analysis_env_var_beats_global_env_var() {
     let findings = json["health"]["findings"].as_array().unwrap();
     assert!(
         findings.is_empty(),
-        "FALLOW_PRODUCTION_HEALTH=true must beat FALLOW_PRODUCTION=false (per-analysis env wins): {findings:?}"
+        "PLOW_PRODUCTION_HEALTH=true must beat PLOW_PRODUCTION=false (per-analysis env wins): {findings:?}"
     );
 
     let output = run_combined_raw(
         dir.path(),
         &["--format", "json", "--quiet", "--only", "health"],
         &[
-            ("FALLOW_PRODUCTION", "true"),
-            ("FALLOW_PRODUCTION_HEALTH", "false"),
+            ("PLOW_PRODUCTION", "true"),
+            ("PLOW_PRODUCTION_HEALTH", "false"),
         ],
     );
     assert!(
@@ -263,7 +263,7 @@ fn per_analysis_env_var_beats_global_env_var() {
         .collect();
     assert!(
         paths.contains(&"src/complex.test.ts"),
-        "FALLOW_PRODUCTION_HEALTH=false must beat FALLOW_PRODUCTION=true: {paths:?}"
+        "PLOW_PRODUCTION_HEALTH=false must beat PLOW_PRODUCTION=true: {paths:?}"
     );
 }
 
@@ -275,7 +275,7 @@ fn audit_accepts_production_health_flag() {
     source.push_str("\n// touched for audit\n");
     std::fs::write(path, source).unwrap();
 
-    let output = run_fallow_raw(&[
+    let output = run_plow_raw(&[
         "audit",
         "--root",
         dir.path().to_str().unwrap(),
@@ -305,7 +305,7 @@ fn audit_accepts_production_health_flag() {
 
 #[test]
 fn workspace_scoping_limits_output_to_package() {
-    let output = run_fallow(
+    let output = run_plow(
         "check",
         "workspace-project",
         &["--workspace", "shared", "--format", "json", "--quiet"],
@@ -342,7 +342,7 @@ fn workspace_scoping_limits_output_to_package() {
 
 #[test]
 fn workspace_scoping_on_nonexistent_package() {
-    let output = run_fallow(
+    let output = run_plow(
         "check",
         "workspace-project",
         &[
@@ -362,12 +362,12 @@ fn workspace_scoping_on_nonexistent_package() {
 
 #[test]
 fn regression_baseline_round_trip() {
-    let dir = std::env::temp_dir().join(format!("fallow-regression-test-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("plow-regression-test-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::create_dir_all(&dir);
     let baseline_path = dir.join("regression.json");
 
-    let output = run_fallow(
+    let output = run_plow(
         "check",
         "basic-project",
         &[
@@ -387,7 +387,7 @@ fn regression_baseline_round_trip() {
         "--save-regression-baseline should create file"
     );
 
-    let output = run_fallow(
+    let output = run_plow(
         "check",
         "basic-project",
         &[

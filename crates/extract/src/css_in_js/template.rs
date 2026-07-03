@@ -30,11 +30,11 @@ use super::shared::{WRAPPER, count_newlines};
 
 /// A CSS-valid identifier placeholder substituted for every `${...}`
 /// interpolation. Chosen so that a value-position interpolation
-/// (`color: ${x}` -> `color: fallowinterp`) parses as an identifier rather than a
+/// (`color: ${x}` -> `color: plowinterp`) parses as an identifier rather than a
 /// number / hex / color keyword, so it can never be mistaken for a design-token
 /// color and an interpolation `compute_css_analytics` cannot make valid is simply
 /// dropped by its `error_recovery: true` parse.
-const INTERP_PLACEHOLDER: &str = "fallowinterp";
+const INTERP_PLACEHOLDER: &str = "plowinterp";
 
 /// Matches the opening of a CSS-in-JS tagged template: a recognized tag
 /// (`styled.div`, `styled(Component)`, bare `css` / `keyframes` /

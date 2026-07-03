@@ -1,7 +1,7 @@
 //! Correctness gate for the persisted graph cache.
 //!
 //! The persisted graph cache (`crate::cache`, gated on `no_cache == false`)
-//! loads a previously-built `ModuleGraph` from `.fallow/graph-cache.bin` and
+//! loads a previously-built `ModuleGraph` from `.plow/graph-cache.bin` and
 //! skips the graph build when the file set + fingerprints + graph-affecting
 //! options are byte-identical. The non-negotiable invariant is TRANSPARENCY: a
 //! cache hit must produce identical analysis results to a cold build. These
@@ -11,8 +11,8 @@
 
 use std::path::Path;
 
-use fallow_core::graph_cache::{GraphCacheManifest, GraphCacheMode};
-use fallow_types::source_fingerprint::SourceFingerprint;
+use plow_core::graph_cache::{GraphCacheManifest, GraphCacheMode};
+use plow_types::source_fingerprint::SourceFingerprint;
 
 use super::common::{create_config_with_cache, fixture_path};
 
@@ -47,7 +47,7 @@ fn assert_cold_warm_identical(fixture: &str) {
     let config = create_config_with_cache(root, cache_dir.clone());
 
     // Cold: no cache exists yet, graph is built fresh and persisted.
-    let cold = fallow_core::analyze(&config).expect("cold analysis succeeds");
+    let cold = plow_core::analyze(&config).expect("cold analysis succeeds");
     assert!(
         cache_dir.join("graph-cache.bin").exists(),
         "{fixture}: cold run must persist graph-cache.bin"
@@ -55,7 +55,7 @@ fn assert_cold_warm_identical(fixture: &str) {
 
     // Warm: graph-cache.bin exists; the graph build is skipped and the cached
     // graph is loaded (with namespace_imported reconstructed).
-    let warm = fallow_core::analyze(&config).expect("warm analysis succeeds");
+    let warm = plow_core::analyze(&config).expect("warm analysis succeeds");
 
     // Full structural equality: serialize both and compare every issue vec.
     let cold_json = serde_json::to_value(&cold).expect("serialize cold results");
@@ -109,7 +109,7 @@ fn source_change_misses_cache_and_reflects_change() {
     let config = create_config_with_cache(root.clone(), cache_dir.clone());
 
     // Cold run: build + persist.
-    let before = fallow_core::analyze(&config).expect("cold analysis");
+    let before = plow_core::analyze(&config).expect("cold analysis");
     let unused_before = before.unused_exports.len();
 
     // Mutate a source file: add a brand-new export that nothing imports. This
@@ -128,7 +128,7 @@ fn source_change_misses_cache_and_reflects_change() {
 
     // Re-discover the now-mutated file set and confirm the persisted manifest
     // no longer matches the current inputs (the cache will MISS, not stale-serve).
-    let files = fallow_core::discover::discover_files(&config);
+    let files = plow_core::discover::discover_files(&config);
     let current = GraphCacheManifest::from_discovered_files(
         &config.root,
         &files,
@@ -139,7 +139,7 @@ fn source_change_misses_cache_and_reflects_change() {
             })
         },
     );
-    let store = fallow_core::graph_cache::GraphCacheStore::load(&cache_dir)
+    let store = plow_core::graph_cache::GraphCacheStore::load(&cache_dir)
         .expect("persisted graph cache exists after cold run");
     assert!(
         !store.manifest.matches_inputs(&current),
@@ -147,7 +147,7 @@ fn source_change_misses_cache_and_reflects_change() {
     );
 
     // The next analyze run must rebuild and reflect the new dead export.
-    let after = fallow_core::analyze(&config).expect("analysis after mutation");
+    let after = plow_core::analyze(&config).expect("analysis after mutation");
     assert_eq!(
         after.unused_exports.len(),
         unused_before + 1,
@@ -167,7 +167,7 @@ fn file_deletion_misses_cache_and_reflects_change() {
     let config = create_config_with_cache(root.clone(), cache_dir.clone());
 
     // Cold run: build + persist.
-    let before = fallow_core::analyze(&config).expect("cold analysis");
+    let before = plow_core::analyze(&config).expect("cold analysis");
     assert!(
         before
             .unused_files
@@ -179,7 +179,7 @@ fn file_deletion_misses_cache_and_reflects_change() {
     let target = root.join("src/orphan.ts");
     std::fs::remove_file(&target).expect("delete unused fixture file");
 
-    let files = fallow_core::discover::discover_files(&config);
+    let files = plow_core::discover::discover_files(&config);
     let current = GraphCacheManifest::from_discovered_files(
         &config.root,
         &files,
@@ -190,14 +190,14 @@ fn file_deletion_misses_cache_and_reflects_change() {
             })
         },
     );
-    let store = fallow_core::graph_cache::GraphCacheStore::load(&cache_dir)
+    let store = plow_core::graph_cache::GraphCacheStore::load(&cache_dir)
         .expect("persisted graph cache exists after cold run");
     assert!(
         !store.manifest.matches_inputs(&current),
         "a deleted source file must invalidate the persisted graph-cache manifest"
     );
 
-    let after = fallow_core::analyze(&config).expect("analysis after deletion");
+    let after = plow_core::analyze(&config).expect("analysis after deletion");
     assert!(
         after
             .unused_files
@@ -237,12 +237,12 @@ fn assert_benchmark_cold_warm_total(name: &str) {
     let cache = tempfile::tempdir().expect("create temp cache dir");
     let config = create_config_with_cache(fixture, cache.path().to_path_buf());
 
-    let cold = fallow_core::analyze(&config).expect("cold benchmark analysis");
+    let cold = plow_core::analyze(&config).expect("cold benchmark analysis");
     assert!(
         cache.path().join("graph-cache.bin").exists(),
         "{name}: cold run must persist graph-cache.bin"
     );
-    let warm = fallow_core::analyze(&config).expect("warm benchmark analysis");
+    let warm = plow_core::analyze(&config).expect("warm benchmark analysis");
 
     assert_eq!(
         cold.total_issues(),
@@ -271,7 +271,7 @@ fn manifest_matches_only_on_identical_inputs() {
     copy_tree(&fixture_path("namespace-imports"), &root);
 
     let config = create_config_with_cache(root, temp.path().join("cache"));
-    let files = fallow_core::discover::discover_files(&config);
+    let files = plow_core::discover::discover_files(&config);
 
     let fingerprint_provider = |path: &Path| {
         std::fs::metadata(path).map_or(SourceFingerprint::new(0, 0), |m| {

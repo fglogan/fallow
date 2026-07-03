@@ -4,10 +4,10 @@ import { errorMessage } from "./errors";
 describe("errorMessage", () => {
   it("strips the Electron IPC wrapper and Error prefix", () => {
     const e = new Error(
-      `Error invoking remote method 'review:get': Error: Couldn't find the "fallow" binary. Set FALLOW_BIN or add fallow to your PATH.`,
+      `Error invoking remote method 'review:get': Error: Couldn't find the "plow" binary. Set PLOW_BIN or add plow to your PATH.`,
     );
     expect(errorMessage(e)).toBe(
-      `Couldn't find the "fallow" binary. Set FALLOW_BIN or add fallow to your PATH.`,
+      `Couldn't find the "plow" binary. Set PLOW_BIN or add plow to your PATH.`,
     );
   });
 

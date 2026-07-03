@@ -1,5 +1,5 @@
 [package]
-name = "fallow-output"
+name = "plow-output"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,21 +8,21 @@ homepage.workspace = true
 documentation.workspace = true
 keywords.workspace = true
 categories.workspace = true
-description = "Output contract types for fallow reports"
+description = "Output contract types for plow reports"
 readme = "../../README.md"
 
 [lib]
 doctest = false
 
 [dependencies]
-fallow-types = { workspace = true }
+plow-types = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 rustc-hash = { workspace = true }
 schemars = { workspace = true, optional = true }
 
 [features]
-schema = ["dep:schemars", "fallow-types/schema"]
+schema = ["dep:schemars", "plow-types/schema"]
 
 [lints]
 workspace = true

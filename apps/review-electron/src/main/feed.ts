@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import type { FeedItem } from "../model/agent";
 
 /** JSONL feed of human annotations the coding agent reads. */
-export const feedPath = (root: string): string => join(root, ".fallow-review", "feed.jsonl");
+export const feedPath = (root: string): string => join(root, ".plow-review", "feed.jsonl");
 
 export const appendFeedItem = async (root: string, item: FeedItem): Promise<void> => {
   const path = feedPath(root);

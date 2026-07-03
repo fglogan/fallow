@@ -17,14 +17,14 @@ const launch = async (): Promise<ElectronApplication> =>
     cwd: worktreeRoot,
     env: {
       ...process.env,
-      FALLOW_BIN: process.env["FALLOW_BIN"] ?? resolve(worktreeRoot, "target", "release", "fallow"),
+      PLOW_BIN: process.env["PLOW_BIN"] ?? resolve(worktreeRoot, "target", "release", "plow"),
     } as Record<string, string>,
   });
 
 test("boots and renders the review shell", async () => {
   app = await launch();
   const win = await app.firstWindow();
-  await expect(win.getByRole("heading", { name: "Fallow Review" })).toBeVisible();
+  await expect(win.getByRole("heading", { name: "Plow Review" })).toBeVisible();
   await expect(win.getByRole("button", { name: "Load review" })).toBeVisible();
   await expect(win.getByTestId("mode-live")).toBeVisible();
 });
@@ -33,7 +33,7 @@ test("loads a grounded walkthrough from the real engine", async () => {
   app = await launch();
   const win = await app.firstWindow();
   await win.getByRole("button", { name: "Load review" }).click();
-  // `fallow review` runs on the worktree; wait for the focus headline to render.
+  // `plow review` runs on the worktree; wait for the focus headline to render.
   await expect(win.getByTestId("review-loaded")).toBeVisible({ timeout: 150_000 });
 });
 
@@ -53,7 +53,7 @@ test("inspector bridge pushes a grounded card to the UI", async () => {
   await expect(win.getByTestId("review-loaded")).toBeVisible({ timeout: 150_000 });
 
   // Simulate the in-page picker posting a selection to the localhost bridge.
-  const res = await fetch("http://127.0.0.1:7787/fallow-select", {
+  const res = await fetch("http://127.0.0.1:7787/plow-select", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({

@@ -1,6 +1,6 @@
 use crate::params::AuditParams;
 
-use fallow_api::{
+use plow_api::{
     AnalysisOptions, AuditGate, AuditOptions, run_audit as run_audit_api,
     serialize_audit_programmatic_json,
 };

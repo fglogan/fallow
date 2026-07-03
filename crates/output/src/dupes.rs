@@ -1,28 +1,28 @@
 //! Shared output contracts for duplication action arrays.
 //!
 //! The duplication report body still lives close to the CLI renderer because
-//! it wraps clone types owned by `fallow-core`. These action DTOs are
+//! it wraps clone types owned by `plow-core`. These action DTOs are
 //! core-independent and are shared by CLI schema emission, JSON output, and
 //! future API/LSP consumers.
 
 use std::time::Duration;
 
-use fallow_types::envelope::{ElapsedMs, Meta, SchemaVersion, ToolVersion};
-use fallow_types::output::NextStep;
-use fallow_types::workspace::WorkspaceDiagnostic;
+use plow_types::envelope::{ElapsedMs, Meta, SchemaVersion, ToolVersion};
+use plow_types::output::NextStep;
+use plow_types::workspace::WorkspaceDiagnostic;
 use serde::Serialize;
 
 use crate::GroupByMode;
 use crate::root_envelopes::{RootEnvelopeMode, attach_telemetry_meta, serialize_named_json_output};
 
-/// Envelope emitted by `fallow dupes --format json`.
+/// Envelope emitted by `plow dupes --format json`.
 ///
 /// `Report` and `Group` are generic so the envelope can live in
-/// `fallow-output` while duplication report wrappers and grouped output
+/// `plow-output` while duplication report wrappers and grouped output
 /// internals continue to migrate out of CLI/API-specific crates.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(feature = "schema", schemars(title = "fallow dupes --format json"))]
+#[cfg_attr(feature = "schema", schemars(title = "plow dupes --format json"))]
 pub struct DupesOutput<Report, Group> {
     pub schema_version: SchemaVersion,
     pub version: ToolVersion,
@@ -87,7 +87,7 @@ pub fn build_dupes_output<Report, Group>(
     }
 }
 
-/// Serialize `fallow dupes --format json`.
+/// Serialize `plow dupes --format json`.
 ///
 /// # Errors
 ///
@@ -108,7 +108,7 @@ where
 }
 
 /// Inline suppression comment emitted for code duplication findings.
-pub const DUPES_SUPPRESS_COMMENT: &str = "// fallow-ignore-next-line code-duplication";
+pub const DUPES_SUPPRESS_COMMENT: &str = "// plow-ignore-next-line code-duplication";
 
 /// Shared description for the suppression action emitted on duplication findings.
 pub const DUPES_SUPPRESS_DESCRIPTION: &str =
@@ -124,14 +124,14 @@ pub struct CloneGroupAction {
     /// Action type identifier.
     #[serde(rename = "type")]
     pub kind: CloneGroupActionType,
-    /// Whether `fallow fix` can auto-apply this action. Both variants are
+    /// Whether `plow fix` can auto-apply this action. Both variants are
     /// manual today; the field is non-singleton so a future auto-applier
     /// does not need a schema change.
     pub auto_fixable: bool,
     /// Human-readable description of the action.
     pub description: String,
     /// The inline comment to insert (e.g.,
-    /// `// fallow-ignore-next-line code-duplication`). Present on
+    /// `// plow-ignore-next-line code-duplication`). Present on
     /// `suppress-line`; absent on `extract-shared`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub comment: Option<String>,
@@ -160,7 +160,7 @@ pub struct CloneFamilyAction {
     /// Action type identifier.
     #[serde(rename = "type")]
     pub kind: CloneFamilyActionType,
-    /// Whether `fallow fix` can auto-apply this action. All three variants
+    /// Whether `plow fix` can auto-apply this action. All three variants
     /// are manual today.
     pub auto_fixable: bool,
     /// Human-readable description of the action.
@@ -170,7 +170,7 @@ pub struct CloneFamilyAction {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
     /// The inline comment to insert (e.g.,
-    /// `// fallow-ignore-next-line code-duplication`). Present on
+    /// `// plow-ignore-next-line code-duplication`). Present on
     /// `suppress-line` only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub comment: Option<String>,

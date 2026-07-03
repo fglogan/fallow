@@ -10,24 +10,24 @@ import { NoteComposer } from "./NoteComposer";
 
 /** Tone for a severity badge: only `high` gets the amber accent; the rest stay muted. */
 const severityTone = (s: Severity): string =>
-  s === "high" ? "text-fallow-amber" : "text-muted-foreground";
+  s === "high" ? "text-plow-amber" : "text-muted-foreground";
 
 const ANCHOR_CROSS_CUTTING = "cross-cutting";
 
-/** Render the fallow-validation status of a trade-off's anchor. `anchored` is the
+/** Render the plow-validation status of a trade-off's anchor. `anchored` is the
  * only graph-confirmed state; the rest stay muted (the prose is always inference). */
 const AnchorStatus = ({ status }: { status: TradeOffAnchorStatus | undefined }) => {
   if (status === "anchored") {
     return (
-      <span className="flex items-center gap-1 text-[11px] text-fallow-green" title="fallow confirmed this region changed">
+      <span className="flex items-center gap-1 text-[11px] text-plow-green" title="plow confirmed this region changed">
         <ShieldCheck className="size-3" />
-        anchored in fallow
+        anchored in plow
       </span>
     );
   }
   if (status === "unanchored") {
     return (
-      <span className="flex items-center gap-1 text-[11px] text-fallow-amber" title="the anchor is not a changed region in the current diff">
+      <span className="flex items-center gap-1 text-[11px] text-plow-amber" title="the anchor is not a changed region in the current diff">
         <ShieldAlert className="size-3" />
         anchor not in diff
       </span>
@@ -87,9 +87,9 @@ export const TradeOffList = ({
   return (
     <section className="space-y-2">
       <Header count={tradeoffs.tradeoffs.length} />
-      {/* Stale: fallow refused the anchors because the tree moved since elicitation. */}
+      {/* Stale: plow refused the anchors because the tree moved since elicitation. */}
       {validation?.stale && (
-        <p className="flex items-center gap-1.5 rounded-md border border-fallow-amber/40 bg-fallow-amber/10 p-2 text-[11px] text-fallow-amber">
+        <p className="flex items-center gap-1.5 rounded-md border border-plow-amber/40 bg-plow-amber/10 p-2 text-[11px] text-plow-amber">
           <ShieldAlert className="size-3.5 shrink-0" />
           the tree moved since these were elicited; re-run the trade-off elicitation
         </p>

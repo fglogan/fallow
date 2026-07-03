@@ -1,7 +1,7 @@
-import type { FallowApi } from "../../preload";
+import type { PlowApi } from "../../preload";
 
 declare global {
   interface Window {
-    fallow: FallowApi;
+    plow: PlowApi;
   }
 }

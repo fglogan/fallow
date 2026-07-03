@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-pub use fallow_types::churn::ChurnTrend;
+pub use plow_types::churn::ChurnTrend;
 use rustc_hash::FxHashMap;
 
 /// Function pointer signature used to intercept git churn subprocesses.
@@ -18,8 +18,8 @@ pub struct SinceDuration {
     pub display: String,
 }
 
-impl From<fallow_core::churn::SinceDuration> for SinceDuration {
-    fn from(duration: fallow_core::churn::SinceDuration) -> Self {
+impl From<plow_core::churn::SinceDuration> for SinceDuration {
+    fn from(duration: plow_core::churn::SinceDuration) -> Self {
         Self {
             git_after: duration.git_after,
             display: duration.display,
@@ -27,7 +27,7 @@ impl From<fallow_core::churn::SinceDuration> for SinceDuration {
     }
 }
 
-impl From<&SinceDuration> for fallow_core::churn::SinceDuration {
+impl From<&SinceDuration> for plow_core::churn::SinceDuration {
     fn from(duration: &SinceDuration) -> Self {
         Self {
             git_after: duration.git_after.clone(),
@@ -49,8 +49,8 @@ pub struct AuthorContribution {
     pub last_commit_ts: u64,
 }
 
-impl From<fallow_core::churn::AuthorContribution> for AuthorContribution {
-    fn from(author: fallow_core::churn::AuthorContribution) -> Self {
+impl From<plow_core::churn::AuthorContribution> for AuthorContribution {
+    fn from(author: plow_core::churn::AuthorContribution) -> Self {
         Self {
             commits: author.commits,
             weighted_commits: author.weighted_commits,
@@ -79,8 +79,8 @@ pub struct FileChurn {
     pub authors: FxHashMap<u32, AuthorContribution>,
 }
 
-impl From<fallow_core::churn::FileChurn> for FileChurn {
-    fn from(file: fallow_core::churn::FileChurn) -> Self {
+impl From<plow_core::churn::FileChurn> for FileChurn {
+    fn from(file: plow_core::churn::FileChurn) -> Self {
         Self {
             path: file.path,
             commits: file.commits,
@@ -108,8 +108,8 @@ pub struct ChurnResult {
     pub author_pool: Vec<String>,
 }
 
-impl From<fallow_core::churn::ChurnResult> for ChurnResult {
-    fn from(result: fallow_core::churn::ChurnResult) -> Self {
+impl From<plow_core::churn::ChurnResult> for ChurnResult {
+    fn from(result: plow_core::churn::ChurnResult) -> Self {
         Self {
             files: result
                 .files
@@ -124,7 +124,7 @@ impl From<fallow_core::churn::ChurnResult> for ChurnResult {
 
 /// Install a spawn hook for git churn analysis.
 pub fn set_spawn_hook(hook: ChurnSpawnHook) {
-    fallow_core::churn::set_spawn_hook(hook);
+    plow_core::churn::set_spawn_hook(hook);
 }
 
 /// Parse a `--since` value into a git-compatible duration.
@@ -133,29 +133,29 @@ pub fn set_spawn_hook(hook: ChurnSpawnHook) {
 ///
 /// Returns an error if the input is not a supported duration or ISO date.
 pub fn parse_since(input: &str) -> Result<SinceDuration, String> {
-    fallow_core::churn::parse_since(input).map(SinceDuration::from)
+    plow_core::churn::parse_since(input).map(SinceDuration::from)
 }
 
 /// Analyze git churn for files under `root`.
 #[must_use]
 pub fn analyze_churn(root: &Path, since: &SinceDuration) -> Option<ChurnResult> {
-    let since = fallow_core::churn::SinceDuration::from(since);
-    fallow_core::churn::analyze_churn(root, &since).map(ChurnResult::from)
+    let since = plow_core::churn::SinceDuration::from(since);
+    plow_core::churn::analyze_churn(root, &since).map(ChurnResult::from)
 }
 
-/// Analyze churn from a normalized `fallow-churn/v1` file.
+/// Analyze churn from a normalized `plow-churn/v1` file.
 ///
 /// # Errors
 ///
 /// Returns an error when the import file cannot be read, parsed, or validated.
 pub fn analyze_churn_from_file(path: &Path, root: &Path) -> Result<ChurnResult, String> {
-    fallow_core::churn::analyze_churn_from_file(path, root).map(ChurnResult::from)
+    plow_core::churn::analyze_churn_from_file(path, root).map(ChurnResult::from)
 }
 
 /// Check whether `root` is inside a git repository.
 #[must_use]
 pub fn is_git_repo(root: &Path) -> bool {
-    fallow_core::churn::is_git_repo(root)
+    plow_core::churn::is_git_repo(root)
 }
 
 /// Analyze churn with disk caching.
@@ -166,8 +166,8 @@ pub fn analyze_churn_cached(
     cache_dir: &Path,
     no_cache: bool,
 ) -> Option<(ChurnResult, bool)> {
-    let since = fallow_core::churn::SinceDuration::from(since);
-    fallow_core::churn::analyze_churn_cached(root, &since, cache_dir, no_cache)
+    let since = plow_core::churn::SinceDuration::from(since);
+    plow_core::churn::analyze_churn_cached(root, &since, cache_dir, no_cache)
         .map(|(result, cache_hit)| (ChurnResult::from(result), cache_hit))
 }
 
@@ -187,7 +187,7 @@ mod tests {
         let mut authors = FxHashMap::default();
         authors.insert(
             0,
-            fallow_core::churn::AuthorContribution {
+            plow_core::churn::AuthorContribution {
                 commits: 2,
                 weighted_commits: 1.5,
                 first_commit_ts: 10,
@@ -197,7 +197,7 @@ mod tests {
         let mut files = FxHashMap::default();
         files.insert(
             PathBuf::from("/repo/src/a.ts"),
-            fallow_core::churn::FileChurn {
+            plow_core::churn::FileChurn {
                 path: PathBuf::from("/repo/src/a.ts"),
                 commits: 2,
                 weighted_commits: 1.5,
@@ -207,7 +207,7 @@ mod tests {
                 authors,
             },
         );
-        let result = ChurnResult::from(fallow_core::churn::ChurnResult {
+        let result = ChurnResult::from(plow_core::churn::ChurnResult {
             files,
             shallow_clone: true,
             author_pool: vec!["dev@example.com".to_string()],

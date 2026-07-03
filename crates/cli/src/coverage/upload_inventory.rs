@@ -1,5 +1,5 @@
-//! `fallow coverage upload-inventory` - push a static function inventory to
-//! fallow cloud.
+//! `plow coverage upload-inventory` - push a static function inventory to
+//! plow cloud.
 //!
 //! The inventory is the **static side** of the three-state Production
 //! Coverage story. The runtime coverage pipeline ships function hit-counts;
@@ -8,25 +8,27 @@
 //! The cloud join key is `(filePath, functionName, lineNumber)` since the
 //! line-aware function-identity migration (`0010`), so distinct same-named
 //! functions at different lines in the same file are preserved and merged
-//! into their own rows. The walker behind `fallow_engine::walk_source_with_complexity`
+//! into their own rows. The walker behind `plow_engine::walk_source_with_complexity`
 //! emits Istanbul / `oxc-coverage-instrument`-compatible names and unique
 //! 1-based line numbers per function declaration.
 //!
 //! This subcommand is a paid-tier workflow. It runs only when the user
-//! invokes it explicitly; no other fallow command touches the network.
+//! invokes it explicitly; no other plow command touches the network.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Write as _};
 use std::path::Path;
 use std::process::ExitCode;
 
-use fallow_config::ResolvedConfig;
-use fallow_cov_protocol::{FunctionIdentity, IdentityResolution, function_identity_id};
-use fallow_engine::{
+use globset::{Glob, GlobSet, GlobSetBuilder};
+use plow_config::ResolvedConfig;
+use plow_cov_protocol::{
+    FunctionIdentity, IdentityResolution, function_identity_id as protocol_function_identity_id,
+};
+use plow_engine::{
     ChurnResult, ChurnTrend, FileChurn, InventoryComplexity, InventoryEntry, analyze_churn_cached,
     discover_files_with_plugin_scopes, parse_since, walk_source_with_complexity,
 };
-use globset::{Glob, GlobSet, GlobSetBuilder};
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
 
@@ -40,9 +42,17 @@ use crate::api::{
 use crate::coverage::upload_common;
 
 /// Log prefix used on every human-facing line from this subcommand.
-/// Matches the pattern `fallow license:` / `fallow coverage setup:` established
+/// Matches the pattern `plow license:` / `plow coverage setup:` established
 /// by sibling commands so CI log parsers can anchor on it.
-const LOG_PREFIX: &str = "fallow coverage upload-inventory";
+const LOG_PREFIX: &str = "plow coverage upload-inventory";
+
+fn function_identity_id(file: &str, name: &str, start_line: u32) -> String {
+    let stable_id = protocol_function_identity_id(file, name, start_line);
+    match stable_id.strip_prefix("fallow:") {
+        Some(rest) => format!("plow:{rest}"),
+        None => stable_id,
+    }
+}
 
 /// Client-side mirror of the server cap on inventory size. Validated here so
 /// users see a specific error before a 400 round-trip.
@@ -76,7 +86,7 @@ const MAX_SYMBOLS_PER_CALLER_SITE: usize = 64;
 
 /// Git-history window used to compute the per-file churn shipped alongside the
 /// inventory. Matches the default window the local hotspot analysis uses, so
-/// the uploaded churn lines up with what `fallow` reports locally. The signal
+/// the uploaded churn lines up with what `plow` reports locally. The signal
 /// is recency-weighted (90-day half-life), so a longer window mostly adds
 /// near-zero-weight history; six months captures the active hot files without
 /// dragging in stale churn.
@@ -87,7 +97,7 @@ const CHURN_SINCE: &str = "6m";
 const UPLOAD_CONNECT_TIMEOUT_SECS: u64 = 5;
 const UPLOAD_TOTAL_TIMEOUT_SECS: u64 = 30;
 
-/// Exit codes. Documented in `fallow coverage upload-inventory --help`.
+/// Exit codes. Documented in `plow coverage upload-inventory --help`.
 /// User-fixable errors are separated from transient server errors so CI
 /// pipelines can distinguish retry vs fail-the-build.
 const EXIT_VALIDATION: u8 = 10;
@@ -99,15 +109,15 @@ const EXIT_SERVER_ERROR: u8 = 13;
 /// SFC / Astro / MDX / CSS / HTML are out of scope for v1 and emit nothing.
 const SUPPORTED_EXTENSIONS: &[&str] = &["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"];
 
-/// Arguments for `fallow coverage upload-inventory`.
+/// Arguments for `plow coverage upload-inventory`.
 #[derive(Clone, Default)]
 pub struct UploadInventoryArgs {
-    /// Explicit API key. Overrides `$FALLOW_API_KEY`.
+    /// Explicit API key. Overrides `$PLOW_API_KEY`.
     pub api_key: Option<String>,
     /// Explicit API endpoint base (e.g. staging, on-prem). Overrides
-    /// `$FALLOW_API_URL` and the compiled-in default.
+    /// `$PLOW_API_URL` and the compiled-in default.
     pub api_endpoint: Option<String>,
-    /// Explicit project identifier (`fallow-cloud-api` or `owner/repo`).
+    /// Explicit project identifier (`plow-cloud-api` or `owner/repo`).
     /// Overrides the auto-detected git remote + `$GITHUB_REPOSITORY` /
     /// `$CI_PROJECT_PATH` heuristics.
     pub project_id: Option<String>,
@@ -118,7 +128,7 @@ pub struct UploadInventoryArgs {
     /// not match the uploaded git SHA.
     pub allow_dirty: bool,
     /// Additional glob patterns excluded from the walk (applied after the
-    /// configured fallow ignore rules).
+    /// configured plow ignore rules).
     pub exclude_paths: Vec<String>,
     /// Prefix prepended to every emitted filePath so the static inventory
     /// can match the path shape the runtime beacon reports. Required for
@@ -156,7 +166,7 @@ impl fmt::Debug for UploadInventoryArgs {
     }
 }
 
-/// Dispatch `fallow coverage upload-inventory`.
+/// Dispatch `plow coverage upload-inventory`.
 pub fn run(args: &UploadInventoryArgs, root: &Path) -> ExitCode {
     match run_inner(args, root) {
         Ok(()) => ExitCode::SUCCESS,
@@ -528,7 +538,7 @@ struct InventoryFunction {
     ///
     /// Computed over the REPO-RELATIVE path, NOT the `--path-prefix`-prefixed
     /// `filePath`: the protocol contract is `FunctionIdentity.file` is relative
-    /// to the project root, and fallow's own consumer (`coverage analyze`)
+    /// to the project root, and plow's own consumer (`coverage analyze`)
     /// computes its static index over the repo-relative path. If the identity
     /// hashed the prefixed path, the producer and consumer `stable_id` values
     /// would diverge and the join would silently break. `--path-prefix` only
@@ -693,7 +703,7 @@ fn collect_caller_edges(
     config: &ResolvedConfig,
     functions: &[InventoryFunction],
 ) -> BTreeMap<String, Vec<CallerSitePayload>> {
-    let artifacts = match fallow_engine::analyze_retaining_modules(config, false, true) {
+    let artifacts = match plow_engine::analyze_retaining_modules(config, false, true) {
         Ok(artifacts) => artifacts,
         Err(err) => {
             eprintln!(
@@ -748,7 +758,7 @@ fn collect_caller_edges(
 /// Wire form of a single file's churn. All fields optional so a future
 /// producer can ship a subset and so the server treats each independently as
 /// best-effort context. `trend` serializes as the same snake-case strings the
-/// rest of fallow uses (`accelerating` / `stable` / `cooling`).
+/// rest of plow uses (`accelerating` / `stable` / `cooling`).
 #[derive(Debug, Serialize)]
 struct FileChurnPayload {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -839,15 +849,15 @@ fn resolve_api_key(args: &UploadInventoryArgs) -> Result<String, UploadError> {
             return Ok(trimmed.to_owned());
         }
     }
-    if let Ok(from_env) = std::env::var("FALLOW_API_KEY") {
+    if let Ok(from_env) = std::env::var("PLOW_API_KEY") {
         let trimmed = from_env.trim();
         if !trimmed.is_empty() {
             return Ok(trimmed.to_owned());
         }
     }
     Err(UploadError::Validation(
-        "no API key. Set $FALLOW_API_KEY or pass --api-key <KEY>. Generate at \
-         https://fallow.cloud/settings#api-keys."
+        "no API key. Set $PLOW_API_KEY or pass --api-key <KEY>. Generate at \
+         https://plow.cloud/settings#api-keys."
             .to_owned(),
     ))
 }
@@ -865,7 +875,7 @@ fn endpoint_url(override_endpoint: Option<&str>, project_id: &str) -> String {
 
 /// URL-encode the `{repo}` path segment.
 ///
-/// Project IDs can be bare (`fallow-cloud-api`) or slash-scoped
+/// Project IDs can be bare (`plow-cloud-api`) or slash-scoped
 /// (`acme/widgets`), but the server receives them as a single percent-encoded
 /// segment under `/v1/coverage/{repo}/inventory`, so `/` must be encoded too.
 #[expect(
@@ -959,7 +969,7 @@ fn upload(
             format_bytes(data.data.blob_size),
         );
         println!(
-            "  -> Inventory stored. The Untracked filter lights up once runtime coverage arrives for this SHA. Dashboard: https://fallow.cloud/{project_id}"
+            "  -> Inventory stored. The Untracked filter lights up once runtime coverage arrives for this SHA. Dashboard: https://plow.cloud/{project_id}"
         );
         if let Some(overlap) = data.data.path_overlap.as_ref() {
             print_overlap_warning_if_needed(overlap);
@@ -1074,11 +1084,11 @@ fn print_dry_run_summary(
 fn display_endpoint_url(override_endpoint: Option<&str>, project_id: &str) -> String {
     let base = override_endpoint.map_or_else(
         || {
-            std::env::var("FALLOW_API_URL")
+            std::env::var("PLOW_API_URL")
                 .ok()
                 .filter(|v| !v.trim().is_empty())
                 .map_or_else(
-                    || "https://api.fallow.cloud".to_owned(),
+                    || "https://api.plow.cloud".to_owned(),
                     |v| v.trim().trim_end_matches('/').to_owned(),
                 )
         },
@@ -1112,14 +1122,14 @@ mod tests {
     #[test]
     fn upload_inventory_args_debug_masks_api_key() {
         let args = UploadInventoryArgs {
-            api_key: Some("fallow_live_secret_token_value".to_owned()),
-            api_endpoint: Some("https://api.fallow.cloud".to_owned()),
+            api_key: Some("plow_live_secret_token_value".to_owned()),
+            api_endpoint: Some("https://api.plow.cloud".to_owned()),
             project_id: Some("acme/web".to_owned()),
             ..UploadInventoryArgs::default()
         };
         let formatted = format!("{args:?}");
         assert!(
-            !formatted.contains("fallow_live_secret_token_value"),
+            !formatted.contains("plow_live_secret_token_value"),
             "api_key leaked through Debug: {formatted}"
         );
         assert!(
@@ -1137,8 +1147,8 @@ mod tests {
     #[test]
     fn parse_git_remote_https_with_dot_git() {
         assert_eq!(
-            parse_git_remote_to_project_id("https://github.com/fallow-rs/fallow.git"),
-            Some("fallow-rs/fallow".to_owned())
+            parse_git_remote_to_project_id("https://github.com/fglogan/genesis-plow.git"),
+            Some("fglogan/genesis-plow".to_owned())
         );
     }
 
@@ -1153,16 +1163,16 @@ mod tests {
     #[test]
     fn parse_git_remote_ssh_colon_shape() {
         assert_eq!(
-            parse_git_remote_to_project_id("git@github.com:fallow-rs/fallow.git"),
-            Some("fallow-rs/fallow".to_owned())
+            parse_git_remote_to_project_id("git@github.com:fglogan/genesis-plow.git"),
+            Some("fglogan/genesis-plow".to_owned())
         );
     }
 
     #[test]
     fn parse_git_remote_ssh_scheme_shape() {
         assert_eq!(
-            parse_git_remote_to_project_id("ssh://git@github.com/fallow-rs/fallow.git"),
-            Some("fallow-rs/fallow".to_owned())
+            parse_git_remote_to_project_id("ssh://git@github.com/fglogan/genesis-plow.git"),
+            Some("fglogan/genesis-plow".to_owned())
         );
     }
 
@@ -1182,12 +1192,12 @@ mod tests {
 
     #[test]
     fn validate_project_id_accepts_owner_repo() {
-        assert!(validate_project_id("fallow-rs/fallow").is_ok());
+        assert!(validate_project_id("fglogan/genesis-plow").is_ok());
     }
 
     #[test]
     fn validate_project_id_accepts_bare_name() {
-        assert!(validate_project_id("fallow-cloud-api").is_ok());
+        assert!(validate_project_id("plow-cloud-api").is_ok());
     }
 
     #[test]
@@ -1204,8 +1214,8 @@ mod tests {
     #[test]
     fn url_encode_path_segment_preserves_safe_chars() {
         assert_eq!(
-            url_encode_path_segment("fallow-rs/fallow"),
-            "fallow-rs%2Ffallow"
+            url_encode_path_segment("fglogan/genesis-plow"),
+            "fglogan%2Fgenesis-plow"
         );
     }
 
@@ -1235,11 +1245,11 @@ mod tests {
     #[test]
     fn resolve_api_key_trims_explicit_value() {
         let args = UploadInventoryArgs {
-            api_key: Some("  fallow_key_123  ".to_owned()),
+            api_key: Some("  plow_key_123  ".to_owned()),
             ..UploadInventoryArgs::default()
         };
 
-        assert_eq!(resolve_api_key(&args).unwrap(), "fallow_key_123");
+        assert_eq!(resolve_api_key(&args).unwrap(), "plow_key_123");
     }
 
     #[test]
@@ -1620,7 +1630,7 @@ mod tests {
     fn identity_matches_protocol_conformance_fixture() {
         assert_eq!(
             function_identity_id("src/render.tsx", "render", 42),
-            "fallow:fn:cb4482d6aef7c79a"
+            "plow:fn:cb4482d6aef7c79a"
         );
     }
 

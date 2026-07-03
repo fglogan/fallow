@@ -2,7 +2,7 @@ use crate::params::AnalyzeParams;
 
 use std::path::PathBuf;
 
-use fallow_api::{
+use plow_api::{
     AnalysisOptions, DeadCodeFilters, DeadCodeOptions, run_boundary_violations,
     run_circular_dependencies, run_dead_code, serialize_boundary_violations_programmatic_json,
     serialize_circular_dependencies_programmatic_json, serialize_dead_code_programmatic_json,

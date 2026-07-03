@@ -15,13 +15,13 @@ use crate::{
         TraceExportProgrammaticOutput, TraceFileProgrammaticOutput, serialize_health_report_json,
     },
 };
-use fallow_output::{
+use plow_output::{
     CHECK_SCHEMA_VERSION, CheckOutput, GroupByMode, RootEnvelopeMode,
     build_decision_surface_output, serialize_check_json_output,
     serialize_decision_surface_json_output, serialize_dupes_json_output,
     serialize_feature_flags_json_output, strip_root_prefix,
 };
-use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
+use plow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
 use serde::Serialize;
 use std::path::Path;
 use std::time::Duration;
@@ -50,7 +50,7 @@ pub fn serialize_decision_surface_programmatic_json(
     )
     .map_err(|err| {
         ProgrammaticError::new(format!("failed to serialize decision surface: {err}"), 2)
-            .with_code("FALLOW_SERIALIZE_DECISION_SURFACE")
+            .with_code("PLOW_SERIALIZE_DECISION_SURFACE")
             .with_context("decision-surface")
     })
 }
@@ -107,7 +107,7 @@ pub fn serialize_audit_programmatic_json(
     )
     .map_err(|err| {
         ProgrammaticError::new(format!("failed to serialize audit report: {err}"), 2)
-            .with_code("FALLOW_SERIALIZE_AUDIT_REPORT")
+            .with_code("PLOW_SERIALIZE_AUDIT_REPORT")
             .with_context("audit")
     })
 }
@@ -126,7 +126,7 @@ fn serialize_audit_dead_code(
     })
     .map_err(|err| {
         ProgrammaticError::new(format!("failed to serialize audit dead-code: {err}"), 2)
-            .with_code("FALLOW_SERIALIZE_AUDIT_DEAD_CODE")
+            .with_code("PLOW_SERIALIZE_AUDIT_DEAD_CODE")
             .with_context("audit.deadCode")
     })?;
     if let Some(base) = base_snapshot {
@@ -146,7 +146,7 @@ fn serialize_audit_duplication(
 ) -> ProgrammaticResult<serde_json::Value> {
     let mut json = serde_json::to_value(&output.output.report).map_err(|err| {
         ProgrammaticError::new(format!("failed to serialize audit duplication: {err}"), 2)
-            .with_code("FALLOW_SERIALIZE_AUDIT_DUPLICATION")
+            .with_code("PLOW_SERIALIZE_AUDIT_DUPLICATION")
             .with_context("audit.duplication")
     })?;
     let root_prefix = format!("{}/", output.root.display());
@@ -163,7 +163,7 @@ fn serialize_audit_complexity(
 ) -> ProgrammaticResult<serde_json::Value> {
     let mut json = serde_json::to_value(&output.report).map_err(|err| {
         ProgrammaticError::new(format!("failed to serialize audit complexity: {err}"), 2)
-            .with_code("FALLOW_SERIALIZE_AUDIT_COMPLEXITY")
+            .with_code("PLOW_SERIALIZE_AUDIT_COMPLEXITY")
             .with_context("audit.complexity")
     })?;
     let root_prefix = format!("{}/", output.root.display());
@@ -221,7 +221,7 @@ pub fn serialize_dead_code_programmatic_json(
         envelope_mode,
         telemetry_analysis_run_id.as_deref(),
         "dead-code",
-        "FALLOW_SERIALIZE_DEAD_CODE_REPORT",
+        "PLOW_SERIALIZE_DEAD_CODE_REPORT",
     )
 }
 
@@ -245,7 +245,7 @@ pub fn serialize_circular_dependencies_programmatic_json(
         envelope_mode,
         telemetry_analysis_run_id.as_deref(),
         "circular-dependencies",
-        "FALLOW_SERIALIZE_CIRCULAR_DEPENDENCIES_REPORT",
+        "PLOW_SERIALIZE_CIRCULAR_DEPENDENCIES_REPORT",
     )
 }
 
@@ -269,7 +269,7 @@ pub fn serialize_boundary_violations_programmatic_json(
         envelope_mode,
         telemetry_analysis_run_id.as_deref(),
         "boundary-violations",
-        "FALLOW_SERIALIZE_BOUNDARY_VIOLATIONS_REPORT",
+        "PLOW_SERIALIZE_BOUNDARY_VIOLATIONS_REPORT",
     )
 }
 
@@ -311,7 +311,7 @@ pub fn serialize_duplication_programmatic_json(
         serialize_dupes_json_output(output, envelope_mode, telemetry_analysis_run_id.as_deref())
             .map_err(|err| {
                 ProgrammaticError::new(format!("failed to serialize duplication report: {err}"), 2)
-                    .with_code("FALLOW_SERIALIZE_DUPLICATION_REPORT")
+                    .with_code("PLOW_SERIALIZE_DUPLICATION_REPORT")
                     .with_context("dupes")
             })?;
     let root_prefix = format!("{}/", root.display());
@@ -337,7 +337,7 @@ pub fn serialize_feature_flags_programmatic_json(
             format!("failed to serialize feature flags report: {err}"),
             2,
         )
-        .with_code("FALLOW_SERIALIZE_FEATURE_FLAGS_REPORT")
+        .with_code("PLOW_SERIALIZE_FEATURE_FLAGS_REPORT")
         .with_context("feature-flags")
     })
 }
@@ -353,7 +353,7 @@ pub fn serialize_trace_export_programmatic_json(
     serialize_trace_programmatic_output(
         output.output,
         "export trace",
-        "FALLOW_SERIALIZE_TRACE_EXPORT",
+        "PLOW_SERIALIZE_TRACE_EXPORT",
         "trace_export",
     )
 }
@@ -369,7 +369,7 @@ pub fn serialize_trace_file_programmatic_json(
     serialize_trace_programmatic_output(
         output.output,
         "file trace",
-        "FALLOW_SERIALIZE_TRACE_FILE",
+        "PLOW_SERIALIZE_TRACE_FILE",
         "trace_file",
     )
 }
@@ -385,7 +385,7 @@ pub fn serialize_trace_dependency_programmatic_json(
     serialize_trace_programmatic_output(
         output.output,
         "dependency trace",
-        "FALLOW_SERIALIZE_TRACE_DEPENDENCY",
+        "PLOW_SERIALIZE_TRACE_DEPENDENCY",
         "trace_dependency",
     )
 }
@@ -401,7 +401,7 @@ pub fn serialize_trace_clone_programmatic_json(
     serialize_trace_programmatic_output(
         output.output,
         "clone trace",
-        "FALLOW_SERIALIZE_TRACE_CLONE",
+        "PLOW_SERIALIZE_TRACE_CLONE",
         "trace_clone",
     )
 }
@@ -458,7 +458,7 @@ pub fn serialize_health_programmatic_json(
     })
     .map_err(|err| {
         ProgrammaticError::new(format!("failed to serialize health report: {err}"), 2)
-            .with_code("FALLOW_SERIALIZE_HEALTH_REPORT")
+            .with_code("PLOW_SERIALIZE_HEALTH_REPORT")
             .with_context("health")
     })
 }

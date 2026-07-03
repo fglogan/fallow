@@ -1,6 +1,6 @@
 //! Structural CSS analytics computed from the parsed CSS syntax tree.
 //!
-//! `fallow health` consumes these on demand to surface specificity hotspots,
+//! `plow health` consumes these on demand to surface specificity hotspots,
 //! `!important` density, over-complex selectors, and deep nesting: the kind of
 //! codebase-scale structural CSS slop that per-rule linters do not aggregate.
 //! The metrics come from the same lightningcss parse used for CSS Module class
@@ -28,7 +28,7 @@ use lightningcss::values::color::CssColor;
 use lightningcss::visitor::{VisitTypes, Visitor};
 use rustc_hash::FxHashSet;
 
-use fallow_types::extract::{CssAnalytics, CssDeclarationBlock, CssRuleMetric};
+use plow_types::extract::{CssAnalytics, CssDeclarationBlock, CssRuleMetric};
 
 /// Selector component count above which a rule is considered over-complex.
 const MAX_PLAIN_COMPLEXITY: u16 = 4;

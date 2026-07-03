@@ -1,10 +1,10 @@
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
-use fallow_config::{OutputFormat, ResolvedConfig, RulesConfig, Severity};
-use fallow_types::discover::DiscoveredFile;
-use fallow_types::extract::ModuleInfo;
-use fallow_types::results::AnalysisResults;
+use plow_config::{OutputFormat, ResolvedConfig, RulesConfig, Severity};
+use plow_types::discover::DiscoveredFile;
+use plow_types::extract::ModuleInfo;
+use plow_types::results::AnalysisResults;
 
 use crate::baseline::{BaselineData, filter_new_issues};
 use crate::error::emit_error;
@@ -110,7 +110,7 @@ impl IssueFilters {
     }
 
     /// When any filter is active, clear issue types that were NOT requested.
-    pub fn apply(&self, results: &mut fallow_types::results::AnalysisResults) {
+    pub fn apply(&self, results: &mut plow_types::results::AnalysisResults) {
         if !self.any_active() {
             return;
         }
@@ -121,7 +121,7 @@ impl IssueFilters {
         self.apply_catalog_filters(results);
     }
 
-    fn apply_core_filters(&self, results: &mut fallow_types::results::AnalysisResults) {
+    fn apply_core_filters(&self, results: &mut plow_types::results::AnalysisResults) {
         if !self.unused_files {
             results.unused_files.clear();
         }
@@ -155,7 +155,7 @@ impl IssueFilters {
         }
     }
 
-    fn apply_component_filters(&self, results: &mut fallow_types::results::AnalysisResults) {
+    fn apply_component_filters(&self, results: &mut plow_types::results::AnalysisResults) {
         if !self.unprovided_injects {
             results.unprovided_injects.clear();
         }
@@ -203,7 +203,7 @@ impl IssueFilters {
         }
     }
 
-    fn apply_graph_filters(&self, results: &mut fallow_types::results::AnalysisResults) {
+    fn apply_graph_filters(&self, results: &mut plow_types::results::AnalysisResults) {
         if !self.duplicate_exports {
             results.duplicate_exports.clear();
         }
@@ -220,7 +220,7 @@ impl IssueFilters {
         }
     }
 
-    fn apply_policy_filters(&self, results: &mut fallow_types::results::AnalysisResults) {
+    fn apply_policy_filters(&self, results: &mut plow_types::results::AnalysisResults) {
         if !self.policy_violations {
             results.policy_violations.clear();
         }
@@ -229,7 +229,7 @@ impl IssueFilters {
         }
     }
 
-    fn apply_catalog_filters(&self, results: &mut fallow_types::results::AnalysisResults) {
+    fn apply_catalog_filters(&self, results: &mut plow_types::results::AnalysisResults) {
         if !self.unused_catalog_entries {
             results.unused_catalog_entries.clear();
         }
@@ -318,15 +318,15 @@ pub struct CheckResult {
     pub baseline_deltas: Option<crate::baseline::BaselineDeltas>,
     /// When a baseline was loaded: (total entries in baseline, entries that matched current issues).
     pub baseline_matched: Option<(usize, usize)>,
-    pub timings: Option<fallow_types::trace::PipelineTimings>,
+    pub timings: Option<plow_types::trace::PipelineTimings>,
     /// Retained parse data for sharing with health (only populated when retain_modules_for_health=true).
-    pub shared_parse: Option<fallow_engine::HealthSharedParseData>,
+    pub shared_parse: Option<plow_engine::HealthSharedParseData>,
     /// Impact closure for the review brief: the transitive
     /// affected-but-not-in-diff set plus coordination gaps. Populated by the
     /// audit brief path from the retained graph against the changed-file set;
     /// `None` outside the brief path. Holds root-relative paths so it survives
     /// the graph drop and serializes directly.
-    pub impact_closure: Option<fallow_engine::ImpactClosurePaths>,
+    pub impact_closure: Option<plow_engine::ImpactClosurePaths>,
     /// Exports-aware public-export key set for the review brief: the
     /// `<rel_path>::<name>` keys reachable through `package.json` `exports` +
     /// re-export reachability. Computed from the retained graph on the brief
@@ -340,14 +340,14 @@ pub struct CheckResult {
     /// changed-file set, before the graph is dropped; `None` outside the brief
     /// path. Holds root-relative paths so it survives the graph drop and
     /// serializes directly.
-    pub partition_order: Option<fallow_engine::PartitionOrderPaths>,
+    pub partition_order: Option<plow_engine::PartitionOrderPaths>,
     /// Per-changed-file graph facts for the review brief's stage 4 weighted
     /// focus map: fan-in/out (blast radius) plus the dynamic-dispatch and
     /// re-export-indirection confidence-flag signals. Computed from the retained
     /// graph on the brief path against the changed-file set, before the graph is
     /// dropped; `None` outside the brief path. Holds root-relative paths so it
     /// survives the graph drop.
-    pub focus_facts: Option<Vec<fallow_engine::FocusFileFactsPaths>>,
+    pub focus_facts: Option<Vec<plow_engine::FocusFileFactsPaths>>,
     /// Per-changed-file `rel_path -> [(exported-symbol, 1-based declaration line)]`
     /// map for the decision surface, so a coordination / public-API decision can
     /// anchor an inline comment to the exact export line. Computed from the
@@ -363,8 +363,8 @@ pub struct CheckResult {
 
 struct CheckAnalysisData {
     results: AnalysisResults,
-    trace_graph: Option<fallow_engine::RetainedModuleGraph>,
-    trace_timings: Option<fallow_types::trace::PipelineTimings>,
+    trace_graph: Option<plow_engine::RetainedModuleGraph>,
+    trace_timings: Option<plow_types::trace::PipelineTimings>,
     retained_modules: Option<Vec<ModuleInfo>>,
     retained_files: Option<Vec<DiscoveredFile>>,
     script_used_packages: rustc_hash::FxHashSet<String>,
@@ -375,7 +375,7 @@ fn run_check_analysis(
     config: &ResolvedConfig,
 ) -> Result<CheckAnalysisData, ExitCode> {
     if opts.retain_modules_for_health {
-        return fallow_engine::analyze_retaining_modules(config, true, true)
+        return plow_engine::analyze_retaining_modules(config, true, true)
             .map(|output| CheckAnalysisData {
                 results: output.results,
                 trace_graph: output.graph,
@@ -388,7 +388,7 @@ fn run_check_analysis(
     }
 
     if opts.trace_opts.any_active() {
-        return fallow_engine::analyze_with_trace(config)
+        return plow_engine::analyze_with_trace(config)
             .map(|output| CheckAnalysisData {
                 results: output.results,
                 trace_graph: output.graph,
@@ -400,7 +400,7 @@ fn run_check_analysis(
             .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output));
     }
 
-    fallow_engine::analyze(config)
+    plow_engine::analyze(config)
         .map(|analysis| CheckAnalysisData {
             results: analysis.results,
             trace_graph: None,
@@ -425,7 +425,7 @@ fn prepare_check_config(opts: &CheckOptions<'_>) -> Result<ResolvedConfig, ExitC
                 .or_else(|| opts.production.then_some(true)),
             quiet: opts.quiet,
         },
-        fallow_config::ProductionAnalysis::DeadCode,
+        plow_config::ProductionAnalysis::DeadCode,
     )?;
     if opts.include_entry_exports {
         config.include_entry_exports = true;
@@ -437,8 +437,8 @@ fn prepare_check_config(opts: &CheckOptions<'_>) -> Result<ResolvedConfig, ExitC
 fn handle_trace_side_effects(
     opts: &CheckOptions<'_>,
     config: &ResolvedConfig,
-    trace_graph: Option<&fallow_engine::RetainedModuleGraph>,
-    trace_timings: Option<&fallow_types::trace::PipelineTimings>,
+    trace_graph: Option<&plow_engine::RetainedModuleGraph>,
+    trace_timings: Option<&plow_types::trace::PipelineTimings>,
     script_used_packages: &rustc_hash::FxHashSet<String>,
 ) -> Result<(), ExitCode> {
     if let Some(timings) = trace_timings
@@ -573,8 +573,8 @@ fn save_check_regression_baseline(
 fn regression_config_path(opts: &CheckOptions<'_>) -> std::path::PathBuf {
     opts.config_path.as_ref().map_or_else(
         || {
-            fallow_config::FallowConfig::find_config_path(opts.root)
-                .unwrap_or_else(|| opts.root.join(".fallowrc.json"))
+            plow_config::PlowConfig::find_config_path(opts.root)
+                .unwrap_or_else(|| opts.root.join(".plowrc.json"))
         },
         Clone::clone,
     )
@@ -582,12 +582,12 @@ fn regression_config_path(opts: &CheckOptions<'_>) -> std::path::PathBuf {
 
 fn build_shared_parse_data(
     results: &AnalysisResults,
-    trace_graph: Option<fallow_engine::RetainedModuleGraph>,
+    trace_graph: Option<plow_engine::RetainedModuleGraph>,
     retained_modules: Option<Vec<ModuleInfo>>,
     retained_files: Option<Vec<DiscoveredFile>>,
     script_used_packages: &rustc_hash::FxHashSet<String>,
-) -> Option<fallow_engine::HealthSharedParseData> {
-    fallow_engine::health_shared_parse_data_from_artifacts(
+) -> Option<plow_engine::HealthSharedParseData> {
+    plow_engine::health_shared_parse_data_from_artifacts(
         results,
         trace_graph,
         retained_modules,
@@ -918,7 +918,7 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
 /// `Ok(None)` when no baseline was loaded, `Ok(Some((entries, matched)))` when
 /// a baseline was loaded, or `Err(ExitCode)` on fatal errors.
 fn handle_baseline(
-    results: &mut fallow_types::results::AnalysisResults,
+    results: &mut plow_types::results::AnalysisResults,
     save_path: Option<&std::path::Path>,
     load_path: Option<&std::path::Path>,
     root: &std::path::Path,
@@ -938,7 +938,7 @@ fn handle_baseline(
 
 /// Serialize the current results to a baseline file, creating parent dirs.
 fn save_baseline_file(
-    results: &fallow_types::results::AnalysisResults,
+    results: &plow_types::results::AnalysisResults,
     baseline_path: &std::path::Path,
     root: &std::path::Path,
     quiet: bool,
@@ -974,7 +974,7 @@ fn save_baseline_file(
 /// Load a baseline file, filter out matched issues, and return
 /// `(baseline_entries, matched)`.
 fn load_and_compare_baseline(
-    results: &mut fallow_types::results::AnalysisResults,
+    results: &mut plow_types::results::AnalysisResults,
     baseline_path: &std::path::Path,
     root: &std::path::Path,
     quiet: bool,
@@ -1006,9 +1006,9 @@ fn load_and_compare_baseline(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_types::extract::MemberKind;
-    use fallow_types::output_dead_code::*;
-    use fallow_types::results::*;
+    use plow_types::extract::MemberKind;
+    use plow_types::output_dead_code::*;
+    use plow_types::results::*;
     use std::path::PathBuf;
 
     fn no_filters() -> IssueFilters {
@@ -1053,14 +1053,14 @@ mod tests {
 
     #[test]
     fn private_type_leaks_filter_opts_in_off_by_default_rule() {
-        let mut rules = fallow_config::RulesConfig::default();
-        assert_eq!(rules.private_type_leaks, fallow_config::Severity::Off);
+        let mut rules = plow_config::RulesConfig::default();
+        assert_eq!(rules.private_type_leaks, plow_config::Severity::Off);
 
         let mut filters = no_filters();
         filters.private_type_leaks = true;
         filters.activate_explicit_opt_ins(&mut rules);
 
-        assert_eq!(rules.private_type_leaks, fallow_config::Severity::Warn);
+        assert_eq!(rules.private_type_leaks, plow_config::Severity::Warn);
     }
 
     #[expect(
@@ -1276,7 +1276,7 @@ mod tests {
         // Regression for #1192: a single-type filter that is not --unused-deps must clear
         // test-only-dependency findings, matching every other dependency kind. Before the fix the
         // --unused-deps clear arm omitted test_only_dependencies, so it leaked into the output of
-        // any single-type filter run (e.g. `fallow dead-code --unused-files`).
+        // any single-type filter run (e.g. `plow dead-code --unused-files`).
         let mut results = make_results();
         assert_eq!(results.test_only_dependencies.len(), 1);
 
@@ -1309,8 +1309,8 @@ mod tests {
     fn apply_circular_deps_filter_keeps_only_circular_deps() {
         let mut results = make_results();
         results.circular_dependencies.push(
-            fallow_types::output_dead_code::CircularDependencyFinding::with_actions(
-                fallow_types::results::CircularDependency {
+            plow_types::output_dead_code::CircularDependencyFinding::with_actions(
+                plow_types::results::CircularDependency {
                     files: vec![
                         PathBuf::from("/project/src/a.ts"),
                         PathBuf::from("/project/src/b.ts"),
@@ -1406,8 +1406,8 @@ mod tests {
     fn apply_boundary_violations_filter() {
         let mut results = make_results();
         results.boundary_violations.push(
-            fallow_types::output_dead_code::BoundaryViolationFinding::with_actions(
-                fallow_types::results::BoundaryViolation {
+            plow_types::output_dead_code::BoundaryViolationFinding::with_actions(
+                plow_types::results::BoundaryViolation {
                     from_path: PathBuf::from("/project/src/bad.ts"),
                     to_path: PathBuf::from("/project/lib/secret.ts"),
                     from_zone: "src".to_string(),
@@ -1433,8 +1433,8 @@ mod tests {
     fn apply_all_filter_types_simultaneously() {
         let mut results = make_results();
         results.circular_dependencies.push(
-            fallow_types::output_dead_code::CircularDependencyFinding::with_actions(
-                fallow_types::results::CircularDependency {
+            plow_types::output_dead_code::CircularDependencyFinding::with_actions(
+                plow_types::results::CircularDependency {
                     files: vec![
                         PathBuf::from("/project/src/a.ts"),
                         PathBuf::from("/project/src/b.ts"),
@@ -1448,8 +1448,8 @@ mod tests {
             ),
         );
         results.boundary_violations.push(
-            fallow_types::output_dead_code::BoundaryViolationFinding::with_actions(
-                fallow_types::results::BoundaryViolation {
+            plow_types::output_dead_code::BoundaryViolationFinding::with_actions(
+                plow_types::results::BoundaryViolation {
                     from_path: PathBuf::from("/project/src/x.ts"),
                     to_path: PathBuf::from("/project/lib/y.ts"),
                     from_zone: "src".to_string(),
@@ -1518,7 +1518,7 @@ mod tests {
                 },
             ));
         results.type_only_dependencies.push(
-            fallow_types::output_dead_code::TypeOnlyDependencyFinding::with_actions(
+            plow_types::output_dead_code::TypeOnlyDependencyFinding::with_actions(
                 TypeOnlyDependency {
                     package_name: "zod".into(),
                     path: PathBuf::from("/project/package.json"),

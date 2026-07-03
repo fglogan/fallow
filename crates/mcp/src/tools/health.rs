@@ -1,6 +1,6 @@
 use crate::params::HealthParams;
 
-use fallow_api::{
+use plow_api::{
     AnalysisOptions, ComplexityOptions, ComplexitySort, OwnershipEmailMode, TargetEffort,
     run_health as run_api_health, serialize_health_programmatic_json,
 };

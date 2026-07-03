@@ -18,7 +18,7 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_types::discover::FileId;
+use plow_types::discover::FileId;
 use rustc_hash::FxHashSet;
 
 use super::{ModuleGraph, ReferenceKind};
@@ -243,8 +243,8 @@ fn relativize(path: &Path, root: &Path) -> String {
 mod tests {
     use super::*;
     use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
-    use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
-    use fallow_types::extract::{ExportInfo, ExportName, ImportInfo, ImportedName, VisibilityTag};
+    use plow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
+    use plow_types::extract::{ExportInfo, ExportName, ImportInfo, ImportedName, VisibilityTag};
     use std::path::PathBuf;
 
     fn file(id: u32, path: &str) -> DiscoveredFile {
@@ -354,7 +354,7 @@ mod tests {
     #[test]
     fn re_export_barrel_flags_indirection() {
         use crate::resolve::ResolvedReExport;
-        use fallow_types::extract::ReExportInfo;
+        use plow_types::extract::ReExportInfo;
 
         let files = vec![
             file(0, "/p/src/impl.ts"),

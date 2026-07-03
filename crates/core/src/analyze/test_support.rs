@@ -1,7 +1,7 @@
 //! Shared test fixtures for the analyze detectors.
 
-use fallow_types::discover::FileId;
-use fallow_types::extract::ModuleInfo;
+use plow_types::discover::FileId;
+use plow_types::extract::ModuleInfo;
 
 /// A fully-zeroed [`ModuleInfo`] with `file_id == FileId(1)` for detector unit
 /// tests. Construct with struct-update syntax: `ModuleInfo { angular_inputs:

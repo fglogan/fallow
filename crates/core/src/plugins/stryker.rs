@@ -198,7 +198,7 @@ mod tests {
     }
 
     #[test]
-    fn always_used_includes_documented_names_and_fallow_extensions() {
+    fn always_used_includes_documented_names_and_plow_extensions() {
         let plugin = StrykerPlugin;
         let patterns = plugin.always_used();
         assert!(patterns.contains(&"stryker.conf.{json,js,mjs,cjs,jsonc,ts}"));

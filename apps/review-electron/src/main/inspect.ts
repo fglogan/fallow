@@ -17,7 +17,7 @@ export type InspectorCard = {
   facts: string[];
 };
 
-/** Join a picker selection to grounded Fallow facts from the latest review. */
+/** Join a picker selection to grounded Plow facts from the latest review. */
 export const buildInspectorCard = (
   doc: WalkthroughDocument | null,
   sel: Selection,

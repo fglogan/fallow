@@ -1,5 +1,5 @@
-use fallow_config::ResolvedConfig;
-use fallow_output::{CoverageModel, HealthActionContext, HealthActionOptions};
+use plow_config::ResolvedConfig;
+use plow_output::{CoverageModel, HealthActionContext, HealthActionOptions};
 
 use super::HealthExecutionOptions;
 

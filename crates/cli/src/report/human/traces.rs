@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use colored::Colorize;
-use fallow_types::trace::{CloneTrace, DependencyTrace, ExportTrace, FileTrace, TracedCloneGroup};
+use plow_types::trace::{CloneTrace, DependencyTrace, ExportTrace, FileTrace, TracedCloneGroup};
 
 use super::{plural, relative_path};
 
@@ -325,11 +325,11 @@ fn push_clone_group_lines(
 mod tests {
     use std::path::PathBuf;
 
-    use fallow_engine::{
+    use plow_engine::{
         CloneTrace, DependencyTrace, ExportReference, ExportTrace, FileTrace, ReExportChain,
         TracedCloneGroup, TracedExport, TracedReExport,
     };
-    use fallow_types::duplicates::{CloneInstance, RefactoringKind, RefactoringSuggestion};
+    use plow_types::duplicates::{CloneInstance, RefactoringKind, RefactoringSuggestion};
 
     use super::*;
 

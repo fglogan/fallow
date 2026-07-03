@@ -3,11 +3,11 @@ set -euo pipefail
 
 # Real-world performance benchmark for CI.
 #
-# Clones 8 open-source projects, runs fallow on each (cold + warm cache),
+# Clones 8 open-source projects, runs plow on each (cold + warm cache),
 # and outputs timing results as benchmark-action compatible JSON.
 #
 # Usage:
-#   ./bench-ci.sh [--fallow-bin PATH] [--clone-dir DIR] [--runs N]
+#   ./bench-ci.sh [--plow-bin PATH] [--clone-dir DIR] [--runs N]
 #
 # Output:
 #   benchmark-action JSON to stdout
@@ -16,10 +16,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-FALLOW_BIN=""
-CLONE_DIR="/tmp/fallow-bench-ci"
+PLOW_BIN=""
+CLONE_DIR="/tmp/plow-bench-ci"
 RUNS=3
-export FALLOW_QUIET="${FALLOW_QUIET:-1}"
+export PLOW_QUIET="${PLOW_QUIET:-1}"
 PROJECT_TIMEOUT_SECONDS="${PROJECT_TIMEOUT_SECONDS:-45}"
 HEARTBEAT_SECONDS="${HEARTBEAT_SECONDS:-30}"
 QUERY_MAX_COLD_MS="${QUERY_MAX_COLD_MS:-5000}"
@@ -27,8 +27,8 @@ QUERY_MAX_COLD_MS="${QUERY_MAX_COLD_MS:-5000}"
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --fallow-bin)   FALLOW_BIN="$2";  shift 2 ;;
-        --fallow-bin=*) FALLOW_BIN="${1#*=}"; shift ;;
+        --plow-bin)   PLOW_BIN="$2";  shift 2 ;;
+        --plow-bin=*) PLOW_BIN="${1#*=}"; shift ;;
         --clone-dir)    CLONE_DIR="$2";   shift 2 ;;
         --clone-dir=*)  CLONE_DIR="${1#*=}"; shift ;;
         --runs)         RUNS="$2";        shift 2 ;;
@@ -53,35 +53,35 @@ PROJECTS=(
 )
 
 # ---------------------------------------------------------------------------
-# Find fallow binary
+# Find plow binary
 # ---------------------------------------------------------------------------
 
-if [[ -z "${FALLOW_BIN}" ]]; then
-    if command -v fallow &>/dev/null; then
-        FALLOW_BIN="fallow"
+if [[ -z "${PLOW_BIN}" ]]; then
+    if command -v plow &>/dev/null; then
+        PLOW_BIN="plow"
     else
         for candidate in \
-            "${REPO_ROOT}/target/release/fallow" \
-            "${REPO_ROOT}/target/debug/fallow"; do
+            "${REPO_ROOT}/target/release/plow" \
+            "${REPO_ROOT}/target/debug/plow"; do
             if [[ -x "${candidate}" ]]; then
-                FALLOW_BIN="${candidate}"
+                PLOW_BIN="${candidate}"
                 break
             fi
         done
     fi
 fi
 
-if [[ -z "${FALLOW_BIN}" ]]; then
-    echo "Error: fallow binary not found. Build with 'cargo build --release' or pass --fallow-bin PATH" >&2
+if [[ -z "${PLOW_BIN}" ]]; then
+    echo "Error: plow binary not found. Build with 'cargo build --release' or pass --plow-bin PATH" >&2
     exit 1
 fi
 
-if [[ "${FALLOW_BIN}" != /* ]] && [[ "${FALLOW_BIN}" == */* ]]; then
-    FALLOW_BIN="$(cd "$(dirname "${FALLOW_BIN}")" && pwd)/$(basename "${FALLOW_BIN}")"
+if [[ "${PLOW_BIN}" != /* ]] && [[ "${PLOW_BIN}" == */* ]]; then
+    PLOW_BIN="$(cd "$(dirname "${PLOW_BIN}")" && pwd)/$(basename "${PLOW_BIN}")"
 fi
 
-if ! "${FALLOW_BIN}" --version &>/dev/null; then
-    echo "Error: fallow binary at '${FALLOW_BIN}' does not work" >&2
+if ! "${PLOW_BIN}" --version &>/dev/null; then
+    echo "Error: plow binary at '${PLOW_BIN}' does not work" >&2
     exit 1
 fi
 
@@ -130,12 +130,12 @@ install_deps() {
 
 clear_cache() {
     local dir="$1"
-    rm -rf "${dir}/.fallow"
+    rm -rf "${dir}/.plow"
 }
 
 # Returns elapsed time in milliseconds
 # Sets: ELAPSED_MS
-run_fallow() {
+run_plow() {
     local dir="$1"; shift
     local elapsed_ticks=0
     local pid
@@ -145,12 +145,12 @@ run_fallow() {
     local heartbeat_ticks=$((HEARTBEAT_SECONDS * 10))
 
     if command -v setsid >/dev/null 2>&1; then
-        setsid "${FALLOW_BIN}" --quiet --format json --summary "$@" --root "${dir}" >/dev/null 2>/dev/null &
+        setsid "${PLOW_BIN}" --quiet --format json --summary "$@" --root "${dir}" >/dev/null 2>/dev/null &
         pid=$!
         kill_target="-${pid}"
     elif command -v python3 >/dev/null 2>&1; then
         python3 -c 'import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' \
-            "${FALLOW_BIN}" --quiet --format json --summary "$@" --root "${dir}" >/dev/null 2>/dev/null &
+            "${PLOW_BIN}" --quiet --format json --summary "$@" --root "${dir}" >/dev/null 2>/dev/null &
         pid=$!
         kill_target="-${pid}"
     else
@@ -171,7 +171,7 @@ run_fallow() {
         sleep 0.1
         elapsed_ticks=$((elapsed_ticks + 1))
         if (( heartbeat_ticks > 0 && elapsed_ticks % heartbeat_ticks == 0 )); then
-            echo "    Still running fallow ($((elapsed_ticks / 10))s)..." >&2
+            echo "    Still running plow ($((elapsed_ticks / 10))s)..." >&2
         fi
     done
 
@@ -180,12 +180,12 @@ run_fallow() {
     return "${run_status}"
 }
 
-time_fallow() {
+time_plow() {
     local dir="$1"; shift
     local start end run_status
     start=$(date +%s%N 2>/dev/null || python3 -c "import time; print(int(time.time()*1e9))")
 
-    if run_fallow "${dir}" "$@"; then
+    if run_plow "${dir}" "$@"; then
         run_status=0
     else
         run_status=$?
@@ -197,13 +197,13 @@ time_fallow() {
     return "${run_status}"
 }
 
-fallow_skip_message() {
+plow_skip_message() {
     local phase="$1"
     local run_status="$2"
     if [[ "${run_status}" -eq 124 ]]; then
-        echo "    SKIP: fallow timed out during ${phase} after ${PROJECT_TIMEOUT_SECONDS}s"
+        echo "    SKIP: plow timed out during ${phase} after ${PROJECT_TIMEOUT_SECONDS}s"
     else
-        echo "    SKIP: fallow exited with status ${run_status} during ${phase}"
+        echo "    SKIP: plow exited with status ${run_status} during ${phase}"
     fi
 }
 
@@ -230,7 +230,7 @@ fmt_ms() {
 # ---------------------------------------------------------------------------
 
 echo "=== Real-World Performance Benchmark ===" >&2
-echo "Fallow:     ${FALLOW_BIN}" >&2
+echo "Plow:     ${PLOW_BIN}" >&2
 echo "Projects:   ${#PROJECTS[@]}" >&2
 echo "Runs:       ${RUNS}" >&2
 echo "" >&2
@@ -264,11 +264,11 @@ for entry in "${PROJECTS[@]}"; do
     cold_times=()
     for (( i=0; i<RUNS; i++ )); do
         clear_cache "${dest}"
-        if time_fallow "${dest}" --no-cache; then
+        if time_plow "${dest}" --no-cache; then
             :
         else
             run_status=$?
-            fallow_skip_message "cold run" "${run_status}" >&2
+            plow_skip_message "cold run" "${run_status}" >&2
             clear_cache "${dest}"
             continue 2
         fi
@@ -279,22 +279,22 @@ for entry in "${PROJECTS[@]}"; do
     # --- Warm runs (with cache) ---
     clear_cache "${dest}"
     # Populate cache
-    if run_fallow "${dest}"; then
+    if run_plow "${dest}"; then
         :
     else
         run_status=$?
-        fallow_skip_message "cache warmup" "${run_status}" >&2
+        plow_skip_message "cache warmup" "${run_status}" >&2
         clear_cache "${dest}"
         continue
     fi
     # Measure
     warm_times=()
     for (( i=0; i<RUNS; i++ )); do
-        if time_fallow "${dest}"; then
+        if time_plow "${dest}"; then
             :
         else
             run_status=$?
-            fallow_skip_message "warm run" "${run_status}" >&2
+            plow_skip_message "warm run" "${run_status}" >&2
             clear_cache "${dest}"
             continue 2
         fi

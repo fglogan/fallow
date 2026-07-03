@@ -3,7 +3,7 @@
 //! Activates on the `vscode` package and credits provider interface methods
 //! that VS Code invokes through registration APIs.
 
-use fallow_config::{ScopedUsedClassMemberRule, UsedClassMemberRule};
+use plow_config::{ScopedUsedClassMemberRule, UsedClassMemberRule};
 
 use super::Plugin;
 

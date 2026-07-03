@@ -2,8 +2,8 @@
 
 use std::time::Instant;
 
-use fallow_config::ResolvedConfig;
-use fallow_output::{
+use plow_config::ResolvedConfig;
+use plow_output::{
     ComplexityViolation, FileHealthScore, HealthGrouping, HealthTimings, HotspotEntry,
     HotspotSummary, RefactoringTarget,
 };
@@ -23,7 +23,7 @@ use super::{
 
 pub(super) struct HealthOutputContextInput<'a, R> {
     pub(super) config: &'a ResolvedConfig,
-    pub(super) files: &'a [fallow_types::discover::DiscoveredFile],
+    pub(super) files: &'a [plow_types::discover::DiscoveredFile],
     pub(super) modules: &'a [crate::source::ModuleInfo],
     pub(super) scope: &'a HealthScope<'a, R>,
     pub(super) needs_file_scores: bool,
@@ -44,14 +44,14 @@ pub(super) struct HealthOutputContext<'a, R> {
 
 pub(super) struct HealthOutputBuildInput<'a, R> {
     config: &'a ResolvedConfig,
-    files: &'a [fallow_types::discover::DiscoveredFile],
+    files: &'a [plow_types::discover::DiscoveredFile],
     modules: &'a [crate::source::ModuleInfo],
     file_paths: &'a rustc_hash::FxHashMap<crate::discover::FileId, &'a std::path::PathBuf>,
     group_resolver: Option<&'a R>,
     needs_file_scores: bool,
     report_coverage_gaps: bool,
     has_istanbul_coverage: bool,
-    threshold_overrides: Vec<fallow_output::ThresholdOverrideState>,
+    threshold_overrides: Vec<plow_output::ThresholdOverrideState>,
     max_cyclomatic: u16,
     max_cognitive: u16,
     max_crap: f64,
@@ -73,8 +73,8 @@ pub(super) struct HealthOutputSectionInput {
 }
 
 struct HealthOutputSupportingParts {
-    grouping: Option<fallow_output::HealthGrouping>,
-    timings: Option<fallow_output::HealthTimings>,
+    grouping: Option<plow_output::HealthGrouping>,
+    timings: Option<plow_output::HealthTimings>,
 }
 
 pub(super) fn prepare_health_output_context<R>(
@@ -187,7 +187,7 @@ fn build_health_report_pipeline_input<R>(
     vital_data: HealthVitalData,
     derived_sections: HealthDerivedSections,
     findings: Vec<ComplexityViolation>,
-    framework_health: Option<fallow_output::FrameworkHealthDiagnostics>,
+    framework_health: Option<plow_output::FrameworkHealthDiagnostics>,
 ) -> HealthReportPipelineInput {
     HealthReportPipelineInput {
         report_coverage_gaps: build.report_coverage_gaps,
@@ -221,7 +221,7 @@ struct HealthSupportingPartsInput<'a, R> {
     derived_sections: &'a HealthDerivedSections,
     vital_data: &'a HealthVitalData,
     findings: &'a [ComplexityViolation],
-    action_ctx: &'a fallow_output::HealthActionContext,
+    action_ctx: &'a plow_output::HealthActionContext,
 }
 
 #[expect(
@@ -245,7 +245,7 @@ fn build_health_supporting_parts<R: super::HealthGroupResolver>(
 
 fn build_health_output_grouping<R: super::HealthGroupResolver>(
     input: &HealthSupportingPartsInput<'_, R>,
-) -> Option<fallow_output::HealthGrouping> {
+) -> Option<plow_output::HealthGrouping> {
     let file_scores = health_file_scores_slice(input.analysis_data.score_output.as_ref());
     build_health_grouping_from_context(HealthGroupingContextInput {
         opts: input.opts,
@@ -269,7 +269,7 @@ fn build_health_output_grouping<R: super::HealthGroupResolver>(
 struct HealthReportPipelineInput {
     report_coverage_gaps: bool,
     findings: Vec<ComplexityViolation>,
-    threshold_overrides: Vec<fallow_output::ThresholdOverrideState>,
+    threshold_overrides: Vec<plow_output::ThresholdOverrideState>,
     files_analyzed: usize,
     total_functions: usize,
     total_above_threshold: usize,
@@ -281,9 +281,9 @@ struct HealthReportPipelineInput {
     hotspots: Vec<HotspotEntry>,
     hotspot_summary: Option<HotspotSummary>,
     targets: Vec<RefactoringTarget>,
-    target_thresholds: Option<fallow_output::TargetThresholds>,
+    target_thresholds: Option<plow_output::TargetThresholds>,
     has_istanbul_coverage: bool,
-    framework_health: Option<fallow_output::FrameworkHealthDiagnostics>,
+    framework_health: Option<plow_output::FrameworkHealthDiagnostics>,
     sev_critical: usize,
     sev_high: usize,
     sev_moderate: usize,
@@ -291,9 +291,9 @@ struct HealthReportPipelineInput {
 
 fn build_health_report_from_pipeline(
     opts: &HealthOptions<'_>,
-    action_ctx: &fallow_output::HealthActionContext,
+    action_ctx: &plow_output::HealthActionContext,
     input: HealthReportPipelineInput,
-) -> fallow_output::HealthReport {
+) -> plow_output::HealthReport {
     assemble_health_report(
         opts,
         action_ctx,
@@ -334,7 +334,7 @@ struct HealthGroupingContextInput<'a, R> {
     config: &'a ResolvedConfig,
     group_resolver: Option<&'a R>,
     candidate_paths: &'a rustc_hash::FxHashSet<std::path::PathBuf>,
-    files: &'a [fallow_types::discover::DiscoveredFile],
+    files: &'a [plow_types::discover::DiscoveredFile],
     modules: &'a [crate::source::ModuleInfo],
     file_paths: &'a rustc_hash::FxHashMap<crate::discover::FileId, &'a std::path::PathBuf>,
     score_output: Option<&'a scoring::FileScoreOutput>,
@@ -344,7 +344,7 @@ struct HealthGroupingContextInput<'a, R> {
     vital_data: &'a HealthVitalData,
     targets: &'a [RefactoringTarget],
     needs_file_scores: bool,
-    action_ctx: &'a fallow_output::HealthActionContext,
+    action_ctx: &'a plow_output::HealthActionContext,
 }
 
 #[expect(
@@ -353,7 +353,7 @@ struct HealthGroupingContextInput<'a, R> {
 )]
 fn build_health_grouping_from_context<R: super::HealthGroupResolver>(
     input: HealthGroupingContextInput<'_, R>,
-) -> Option<fallow_output::HealthGrouping> {
+) -> Option<plow_output::HealthGrouping> {
     build_optional_health_grouping_opt(
         input.group_resolver,
         &input.config.root,

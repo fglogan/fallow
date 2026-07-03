@@ -1,6 +1,6 @@
-//! CSS analytics execution for `fallow health`.
+//! CSS analytics execution for `plow health`.
 
-use fallow_config::ResolvedConfig;
+use plow_config::ResolvedConfig;
 
 use super::package_json::{
     class_matches_dependency_prefix, dependency_class_prefixes, project_uses_tailwind,
@@ -21,7 +21,7 @@ pub(super) struct HealthScanCtx<'a> {
 }
 
 /// Compute structural CSS analytics, honoring the same ignore / changed-since /
-/// workspace filters as the rest of `fallow health`. Standard CSS is parsed for
+/// workspace filters as the rest of `plow health`. Standard CSS is parsed for
 /// structural metrics; preprocessor sources are only used by candidate checks
 /// that can stay conservative without expanding Sass/Less semantics. Only
 /// stylesheets with a structurally notable rule are listed individually; the
@@ -91,9 +91,9 @@ impl CssTokenSets {
     /// savings descending (then first occurrence path).
     fn group_duplicate_blocks(
         &self,
-        summary: &mut fallow_output::CssAnalyticsSummary,
-    ) -> Vec<fallow_output::CssDuplicateBlock> {
-        use fallow_output::{CssBlockOccurrence, CssCandidateAction, CssDuplicateBlock};
+        summary: &mut plow_output::CssAnalyticsSummary,
+    ) -> Vec<plow_output::CssDuplicateBlock> {
+        use plow_output::{CssBlockOccurrence, CssCandidateAction, CssDuplicateBlock};
 
         let mut groups: Vec<CssDuplicateBlock> = self
             .declaration_blocks
@@ -137,7 +137,7 @@ impl CssTokenSets {
 
     /// Fold one stylesheet's analytics into the project-wide token sets,
     /// recording the first-defining file (`rel`) per located name.
-    fn record(&mut self, analytics: &fallow_types::extract::CssAnalytics, rel: &str) {
+    fn record(&mut self, analytics: &plow_types::extract::CssAnalytics, rel: &str) {
         self.colors.extend(analytics.colors.iter().cloned());
         self.font_sizes.extend(analytics.font_sizes.iter().cloned());
         self.z_indexes.extend(analytics.z_indexes.iter().cloned());
@@ -235,9 +235,9 @@ impl CssTokenSets {
     /// summary counts and returns the located list sorted by (kind, path, name).
     fn group_unused_at_rules(
         &self,
-        summary: &mut fallow_output::CssAnalyticsSummary,
-    ) -> Vec<fallow_output::UnusedAtRule> {
-        use fallow_output::{CssCandidateAction, UnusedAtRule, UnusedAtRuleKind};
+        summary: &mut plow_output::CssAnalyticsSummary,
+    ) -> Vec<plow_output::UnusedAtRule> {
+        use plow_output::{CssCandidateAction, UnusedAtRule, UnusedAtRuleKind};
 
         let mut out: Vec<UnusedAtRule> = Vec::new();
         for name in self
@@ -281,12 +281,12 @@ impl CssTokenSets {
     /// undefined (`undefined`).
     fn finalize(
         &self,
-        summary: &mut fallow_output::CssAnalyticsSummary,
+        summary: &mut plow_output::CssAnalyticsSummary,
     ) -> (
-        Vec<fallow_output::UnreferencedKeyframes>,
-        Vec<fallow_output::UndefinedKeyframes>,
+        Vec<plow_output::UnreferencedKeyframes>,
+        Vec<plow_output::UndefinedKeyframes>,
     ) {
-        use fallow_output::{CssCandidateAction, UndefinedKeyframes, UnreferencedKeyframes};
+        use plow_output::{CssCandidateAction, UndefinedKeyframes, UnreferencedKeyframes};
 
         summary.unique_colors = saturate_len(self.colors.len());
         summary.unique_font_sizes = saturate_len(self.font_sizes.len());
@@ -354,9 +354,9 @@ impl CssTokenSets {
     /// set the summary count.
     fn unused_font_faces(
         &self,
-        summary: &mut fallow_output::CssAnalyticsSummary,
-    ) -> Vec<fallow_output::UnusedFontFace> {
-        use fallow_output::{CssCandidateAction, UnusedFontFace};
+        summary: &mut plow_output::CssAnalyticsSummary,
+    ) -> Vec<plow_output::UnusedFontFace> {
+        use plow_output::{CssCandidateAction, UnusedFontFace};
         // CSS font-family names are case-insensitive (CSS Fonts Level 4 4.2.1),
         // unlike `@keyframes` custom-ident names (case-sensitive, via
         // `locate_keyframe_diff`), so match case-insensitively while keeping the
@@ -392,9 +392,9 @@ impl CssTokenSets {
     /// user-zoom accessibility). Advisory only, never gated.
     fn font_size_unit_mix(
         &self,
-        summary: &mut fallow_output::CssAnalyticsSummary,
-    ) -> Option<fallow_output::CssNotationConsistency> {
-        use fallow_output::{CssCandidateAction, CssNotationConsistency, CssNotationCount};
+        summary: &mut plow_output::CssAnalyticsSummary,
+    ) -> Option<plow_output::CssNotationConsistency> {
+        use plow_output::{CssCandidateAction, CssNotationConsistency, CssNotationCount};
 
         let mut counts: rustc_hash::FxHashMap<&'static str, u32> = rustc_hash::FxHashMap::default();
         for value in &self.font_sizes {
@@ -502,7 +502,7 @@ fn saturate_len(len: usize) -> u32 {
 
 /// `(first path, first line)` sort key for a duplicate block; occurrences are
 /// pre-sorted, so the first is the lexicographic minimum.
-fn occurrence_sort_key(block: &fallow_output::CssDuplicateBlock) -> (&str, u32) {
+fn occurrence_sort_key(block: &plow_output::CssDuplicateBlock) -> (&str, u32) {
     block
         .occurrences
         .first()
@@ -519,7 +519,7 @@ fn occurrence_sort_key(block: &fallow_output::CssDuplicateBlock) -> (&str, u32) 
 /// the file is filtered out (extension, ignore set, changed-files, workspace
 /// scope) or unreadable.
 fn read_markup_scan_source(
-    file: &fallow_types::discover::DiscoveredFile,
+    file: &plow_types::discover::DiscoveredFile,
     ctx: HealthScanCtx<'_>,
 ) -> Option<(String, String)> {
     let HealthScanCtx {
@@ -557,13 +557,13 @@ fn read_markup_scan_source(
 }
 
 fn scan_markup_tailwind_arbitrary_values(
-    files: &[fallow_types::discover::DiscoveredFile],
+    files: &[plow_types::discover::DiscoveredFile],
     ctx: HealthScanCtx<'_>,
-    summary: &mut fallow_output::CssAnalyticsSummary,
-) -> Vec<fallow_output::TailwindArbitraryValue> {
+    summary: &mut plow_output::CssAnalyticsSummary,
+) -> Vec<plow_output::TailwindArbitraryValue> {
     let HealthScanCtx { config, .. } = ctx;
 
-    use fallow_output::TailwindArbitraryValue;
+    use plow_output::TailwindArbitraryValue;
 
     if !project_uses_tailwind(&config.root) {
         return Vec::new();
@@ -591,7 +591,7 @@ fn scan_markup_tailwind_arbitrary_values(
     let mut out: Vec<TailwindArbitraryValue> = agg
         .into_iter()
         .map(|(value, (count, path, line))| TailwindArbitraryValue {
-            actions: vec![fallow_output::CssCandidateAction::replace_arbitrary_value(
+            actions: vec![plow_output::CssCandidateAction::replace_arbitrary_value(
                 &value,
             )],
             value,
@@ -674,7 +674,7 @@ fn collect_animate_keyframe_names(source: &str, out: &mut rustc_hash::FxHashSet<
 /// Tailwind utilities without declaring the npm dep at the scanned root
 /// (CDN / PostCSS / monorepo subpackage).
 fn collect_markup_keyframe_references(
-    files: &[fallow_types::discover::DiscoveredFile],
+    files: &[plow_types::discover::DiscoveredFile],
     config: &ResolvedConfig,
     ignore_set: &globset::GlobSet,
 ) -> rustc_hash::FxHashSet<String> {
@@ -721,7 +721,7 @@ const MIN_TOKEN_LEN: usize = 5;
 /// preprocessors dominate, because the parser cannot expand their loops/mixins,
 /// so the defined-class set is unreliable.
 fn count_stylesheet_kinds(
-    files: &[fallow_types::discover::DiscoveredFile],
+    files: &[plow_types::discover::DiscoveredFile],
     config: &ResolvedConfig,
     ignore_set: &globset::GlobSet,
 ) -> (usize, usize) {
@@ -750,11 +750,11 @@ fn count_stylesheet_kinds(
 /// unchanged file must still count as defined, or a markup token referencing it
 /// would false-positive as unresolved. Only the ignore filter applies.
 fn collect_defined_css_classes(
-    files: &[fallow_types::discover::DiscoveredFile],
+    files: &[plow_types::discover::DiscoveredFile],
     config: &ResolvedConfig,
     ignore_set: &globset::GlobSet,
 ) -> rustc_hash::FxHashSet<String> {
-    use fallow_types::extract::ExportName;
+    use plow_types::extract::ExportName;
     let mut defined: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
     for file in files {
         let path = &file.path;
@@ -854,9 +854,9 @@ fn collect_unresolved_class_refs_in_file<'a>(
     defined: &rustc_hash::FxHashSet<String>,
     by_len: &'a rustc_hash::FxHashMap<usize, Vec<&'a str>>,
     seen: &mut rustc_hash::FxHashSet<(String, u32, String)>,
-    out: &mut Vec<fallow_output::UnresolvedClassReference>,
+    out: &mut Vec<plow_output::UnresolvedClassReference>,
 ) {
-    use fallow_output::{CssCandidateAction, UnresolvedClassReference};
+    use plow_output::{CssCandidateAction, UnresolvedClassReference};
     for token in crate::css::scan_markup_class_tokens(source).static_tokens {
         if token.value.len() < MIN_TOKEN_LEN
             || is_tailwind_shaped(&token.value)
@@ -891,15 +891,15 @@ fn collect_unresolved_class_refs_in_file<'a>(
 /// restriction: Tailwind utilities and third-party classes are not one edit from
 /// an authored class. Candidates, never gated.
 fn scan_unresolved_class_references(
-    files: &[fallow_types::discover::DiscoveredFile],
+    files: &[plow_types::discover::DiscoveredFile],
     ctx: HealthScanCtx<'_>,
-    summary: &mut fallow_output::CssAnalyticsSummary,
-) -> Vec<fallow_output::UnresolvedClassReference> {
+    summary: &mut plow_output::CssAnalyticsSummary,
+) -> Vec<plow_output::UnresolvedClassReference> {
     let HealthScanCtx {
         config, ignore_set, ..
     } = ctx;
 
-    use fallow_output::UnresolvedClassReference;
+    use plow_output::UnresolvedClassReference;
 
     // Abstain on preprocessor-dominant projects. lightningcss parses `.scss` /
     // `.sass` / `.less` source textually but cannot expand loops / mixins, so a
@@ -990,8 +990,8 @@ fn mask_font_face_blocks(lower_source: &str) -> String {
 /// `.scss` theme, a canvas/JS `fontFamily` assignment, an inline style), so it
 /// is NOT dead.
 fn font_families_referenced_in_source(
-    candidates: &[fallow_output::UnusedFontFace],
-    files: &[fallow_types::discover::DiscoveredFile],
+    candidates: &[plow_output::UnusedFontFace],
+    files: &[plow_types::discover::DiscoveredFile],
     config: &ResolvedConfig,
     ignore_set: &globset::GlobSet,
 ) -> rustc_hash::FxHashSet<String> {
@@ -1070,7 +1070,7 @@ const MIN_UNREF_CLASS_LEN: usize = 5;
 /// `require_dash` controls strictness. For CLASS crediting it is `true`: only
 /// compound (dash-bearing) tokens are taken, so a generic single word never
 /// coincidentally credits a class and breaks the whole-sheet abstain that
-/// protects classes used in a surface fallow cannot read (Phoenix `.heex`). For
+/// protects classes used in a surface plow cannot read (Phoenix `.heex`). For
 /// KEYFRAME crediting it is `false` (the caller filters to actually-defined
 /// keyframes, so over-extraction is inert), letting a single-word keyframe name
 /// (`spin`, `jsanim`) be credited from a JS `animation:` string too.
@@ -1180,11 +1180,11 @@ fn extract_dotted_class_names(selector: &str, out: &mut rustc_hash::FxHashSet<St
 /// unreferenced-global-class candidate. Classes wrapped in `:global(...)` are
 /// dropped: they target externally-applied DOM and are never authored in markup.
 fn collect_defined_css_classes_located(
-    files: &[fallow_types::discover::DiscoveredFile],
+    files: &[plow_types::discover::DiscoveredFile],
     config: &ResolvedConfig,
     ignore_set: &globset::GlobSet,
 ) -> Vec<(String, Vec<(String, u32)>)> {
-    use fallow_types::extract::ExportName;
+    use plow_types::extract::ExportName;
     let mut out: Vec<(String, Vec<(String, u32)>)> = Vec::new();
     for file in files {
         let path = &file.path;
@@ -1245,10 +1245,10 @@ fn collect_defined_css_classes_located(
 ///   static markup token OR a substring of any dynamic-class source, so a class
 ///   assembled from a `${...}` / `clsx(...)` fragment is never flagged.
 fn scan_unreferenced_css_classes(
-    files: &[fallow_types::discover::DiscoveredFile],
+    files: &[plow_types::discover::DiscoveredFile],
     ctx: HealthScanCtx<'_>,
-    summary: &mut fallow_output::CssAnalyticsSummary,
-) -> Vec<fallow_output::UnreferencedCssClass> {
+    summary: &mut plow_output::CssAnalyticsSummary,
+) -> Vec<plow_output::UnreferencedCssClass> {
     let HealthScanCtx {
         config,
         ignore_set,
@@ -1256,7 +1256,7 @@ fn scan_unreferenced_css_classes(
         ws_roots,
     } = ctx;
 
-    use fallow_output::UnreferencedCssClass;
+    use plow_output::UnreferencedCssClass;
 
     // Partial scope cannot prove a global class dead.
     if changed_files.is_some() || ws_roots.is_some() {
@@ -1321,7 +1321,7 @@ impl CssReferenceSurface {
 }
 
 fn css_reference_surface(
-    files: &[fallow_types::discover::DiscoveredFile],
+    files: &[plow_types::discover::DiscoveredFile],
     config: &ResolvedConfig,
     ignore_set: &globset::GlobSet,
 ) -> CssReferenceSurface {
@@ -1337,7 +1337,7 @@ fn css_reference_surface(
 
 fn collect_css_reference_surface_file(
     surface: &mut CssReferenceSurface,
-    file: &fallow_types::discover::DiscoveredFile,
+    file: &plow_types::discover::DiscoveredFile,
     config: &ResolvedConfig,
     ignore_set: &globset::GlobSet,
 ) {
@@ -1368,14 +1368,14 @@ fn collect_css_reference_surface_file(
 }
 
 fn push_unreferenced_css_class_candidates(
-    out: &mut Vec<fallow_output::UnreferencedCssClass>,
+    out: &mut Vec<plow_output::UnreferencedCssClass>,
     rel: &str,
     classes: Vec<(String, u32)>,
     published: &rustc_hash::FxHashSet<String>,
     dependency_prefixes: &rustc_hash::FxHashSet<String>,
     reference_surface: &CssReferenceSurface,
 ) {
-    use fallow_output::{CssCandidateAction, UnreferencedCssClass};
+    use plow_output::{CssCandidateAction, UnreferencedCssClass};
 
     if published.contains(rel)
         || !classes
@@ -1507,12 +1507,12 @@ fn line_at_offset(source: &str, offset: usize) -> u32 {
 /// so a genuinely-dead token is missed before a live one is flagged.
 struct UnusedThemeTokenScanInput<'a> {
     tokens: &'a CssTokenSets,
-    files: &'a [fallow_types::discover::DiscoveredFile],
+    files: &'a [plow_types::discover::DiscoveredFile],
     config: &'a ResolvedConfig,
     ignore_set: &'a globset::GlobSet,
     changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
     ws_roots: Option<&'a [std::path::PathBuf]>,
-    summary: &'a mut fallow_output::CssAnalyticsSummary,
+    summary: &'a mut plow_output::CssAnalyticsSummary,
 }
 
 /// A classified `@theme` token candidate (namespace + name + definition site)
@@ -1591,8 +1591,8 @@ fn collect_theme_var_reads(tokens: &CssTokenSets) -> rustc_hash::FxHashSet<Strin
 
 fn scan_unused_theme_tokens(
     input: &mut UnusedThemeTokenScanInput<'_>,
-) -> Vec<fallow_output::UnusedThemeToken> {
-    use fallow_output::{CssCandidateAction, UnusedThemeToken};
+) -> Vec<plow_output::UnusedThemeToken> {
+    use plow_output::{CssCandidateAction, UnusedThemeToken};
 
     // Partial scope cannot prove a token dead.
     if input.changed_files.is_some() || input.ws_roots.is_some() {
@@ -1654,7 +1654,7 @@ fn scan_unused_theme_tokens(
 /// consumers. The index is descriptive only and sets no summary count.
 struct TokenConsumersInput<'a> {
     tokens: &'a CssTokenSets,
-    files: &'a [fallow_types::discover::DiscoveredFile],
+    files: &'a [plow_types::discover::DiscoveredFile],
     config: &'a ResolvedConfig,
     ignore_set: &'a globset::GlobSet,
     changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
@@ -1683,8 +1683,8 @@ fn collect_located_utility_consumers(
     located
 }
 
-fn build_token_consumers(input: &TokenConsumersInput<'_>) -> Vec<fallow_output::TokenConsumers> {
-    use fallow_output::{
+fn build_token_consumers(input: &TokenConsumersInput<'_>) -> Vec<plow_output::TokenConsumers> {
+    use plow_output::{
         ConsumerKind, TOKEN_CONSUMER_SAMPLE_CAP, TokenConsumerLocation, TokenConsumers,
     };
 
@@ -1698,7 +1698,7 @@ fn build_token_consumers(input: &TokenConsumersInput<'_>) -> Vec<fallow_output::
         return Vec::new();
     }
 
-    let mut summary = fallow_output::CssAnalyticsSummary::default();
+    let mut summary = plow_output::CssAnalyticsSummary::default();
     let candidates = classify_theme_token_candidates(&UnusedThemeTokenScanInput {
         tokens: input.tokens,
         files: input.files,
@@ -1788,7 +1788,7 @@ fn build_token_consumers(input: &TokenConsumersInput<'_>) -> Vec<fallow_output::
 struct CssInJsDefiner {
     rel_path: String,
     binding: String,
-    leaves: Vec<fallow_extract::CssInJsToken>,
+    leaves: Vec<plow_extract::CssInJsToken>,
 }
 
 /// The definer-pass result: every `(file, binding)` token-definition site plus the
@@ -1884,8 +1884,8 @@ fn resolve_relative_specifier(
 /// token-definition function, collecting each `(file, binding)` token-definition
 /// site plus the lookup structures the consumer pass needs.
 fn collect_css_in_js_definers(
-    modules: &[fallow_types::extract::ModuleInfo],
-    path_by_id: &rustc_hash::FxHashMap<fallow_types::discover::FileId, &std::path::Path>,
+    modules: &[plow_types::extract::ModuleInfo],
+    path_by_id: &rustc_hash::FxHashMap<plow_types::discover::FileId, &std::path::Path>,
     config: &ResolvedConfig,
 ) -> CssInJsDefiners {
     let mut definers: Vec<CssInJsDefiner> = Vec::new();
@@ -1911,7 +1911,7 @@ fn collect_css_in_js_definers(
         if !source_mentions_token_definer(&source) {
             continue;
         }
-        let defs = fallow_extract::css_in_js_token_defs(&source, abs);
+        let defs = plow_extract::css_in_js_token_defs(&source, abs);
         if defs.is_empty() {
             continue;
         }
@@ -1941,12 +1941,12 @@ fn collect_css_in_js_definers(
 /// binding, re-parse it and collect located member-access reads, deduped by
 /// `(consumer file, line)` per `(definer, leaf token path)`.
 fn collect_css_in_js_consumers(
-    modules: &[fallow_types::extract::ModuleInfo],
-    path_by_id: &rustc_hash::FxHashMap<fallow_types::discover::FileId, &std::path::Path>,
+    modules: &[plow_types::extract::ModuleInfo],
+    path_by_id: &rustc_hash::FxHashMap<plow_types::discover::FileId, &std::path::Path>,
     config: &ResolvedConfig,
     definers: &CssInJsDefiners,
 ) -> rustc_hash::FxHashMap<(usize, String), rustc_hash::FxHashSet<(String, u32)>> {
-    use fallow_types::extract::ImportedName;
+    use plow_types::extract::ImportedName;
     let mut hits: rustc_hash::FxHashMap<(usize, String), rustc_hash::FxHashSet<(String, u32)>> =
         rustc_hash::FxHashMap::default();
 
@@ -1991,7 +1991,7 @@ fn collect_css_in_js_consumers(
                 .map(|t| t.path.clone())
                 .collect();
             for hit in
-                fallow_extract::css_in_js_token_consumers(&source, consumer_abs, alias, &leaf_set)
+                plow_extract::css_in_js_token_consumers(&source, consumer_abs, alias, &leaf_set)
             {
                 hits.entry((idx, hit.token_path))
                     .or_default()
@@ -2008,18 +2008,18 @@ fn collect_css_in_js_consumers(
 /// wire shape as the Tailwind `@theme` index (kind `js-member`). Graph-independent:
 /// uses `ModuleInfo` imports + member accesses plus a bounded re-parse for lines.
 fn build_css_in_js_token_consumers(
-    files: &[fallow_types::discover::DiscoveredFile],
-    modules: &[fallow_types::extract::ModuleInfo],
+    files: &[plow_types::discover::DiscoveredFile],
+    modules: &[plow_types::extract::ModuleInfo],
     config: &ResolvedConfig,
-) -> Vec<fallow_output::TokenConsumers> {
-    use fallow_output::{
+) -> Vec<plow_output::TokenConsumers> {
+    use plow_output::{
         ConsumerKind, TOKEN_CONSUMER_SAMPLE_CAP, TokenConsumerLocation, TokenConsumers,
     };
 
     if !project_uses_css_in_js(&config.root) {
         return Vec::new();
     }
-    let path_by_id: rustc_hash::FxHashMap<fallow_types::discover::FileId, &std::path::Path> =
+    let path_by_id: rustc_hash::FxHashMap<plow_types::discover::FileId, &std::path::Path> =
         files.iter().map(|f| (f.id, f.path.as_path())).collect();
 
     let definers = collect_css_in_js_definers(modules, &path_by_id, config);
@@ -2068,8 +2068,8 @@ fn build_css_in_js_token_consumers(
     out
 }
 
-fn consumer_kind_rank(kind: fallow_output::ConsumerKind) -> u8 {
-    use fallow_output::ConsumerKind;
+fn consumer_kind_rank(kind: plow_output::ConsumerKind) -> u8 {
+    use plow_output::ConsumerKind;
     match kind {
         ConsumerKind::ThemeVar => 0,
         ConsumerKind::CssVar => 1,
@@ -2082,10 +2082,10 @@ fn consumer_kind_rank(kind: fallow_output::ConsumerKind) -> u8 {
 /// The markup / source-derived CSS candidate lists, gathered in one pass-set so
 /// the orchestrator stays a thin assembler.
 struct MarkupCssCandidates {
-    tailwind_arbitrary_values: Vec<fallow_output::TailwindArbitraryValue>,
-    unresolved_class_references: Vec<fallow_output::UnresolvedClassReference>,
-    unreferenced_css_classes: Vec<fallow_output::UnreferencedCssClass>,
-    unused_theme_tokens: Vec<fallow_output::UnusedThemeToken>,
+    tailwind_arbitrary_values: Vec<plow_output::TailwindArbitraryValue>,
+    unresolved_class_references: Vec<plow_output::UnresolvedClassReference>,
+    unreferenced_css_classes: Vec<plow_output::UnreferencedCssClass>,
+    unused_theme_tokens: Vec<plow_output::UnusedThemeToken>,
 }
 
 /// Run the markup / source-scanning CSS candidates (Tailwind arbitrary values,
@@ -2094,12 +2094,12 @@ struct MarkupCssCandidates {
 /// own summary counts.
 struct MarkupCssCandidateInput<'a> {
     tokens: &'a CssTokenSets,
-    files: &'a [fallow_types::discover::DiscoveredFile],
+    files: &'a [plow_types::discover::DiscoveredFile],
     config: &'a ResolvedConfig,
     ignore_set: &'a globset::GlobSet,
     changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
     ws_roots: Option<&'a [std::path::PathBuf]>,
-    summary: &'a mut fallow_output::CssAnalyticsSummary,
+    summary: &'a mut plow_output::CssAnalyticsSummary,
 }
 
 fn scan_markup_css_candidates(input: &mut MarkupCssCandidateInput<'_>) -> MarkupCssCandidates {
@@ -2186,7 +2186,7 @@ enum CssScanKind {
 }
 
 fn css_report_scan_target<'a>(
-    file: &'a fallow_types::discover::DiscoveredFile,
+    file: &'a plow_types::discover::DiscoveredFile,
     ctx: HealthScanCtx<'_>,
     css_in_js: bool,
 ) -> Option<(&'a std::path::Path, CssScanKind)> {
@@ -2228,8 +2228,8 @@ fn css_report_scan_target<'a>(
 fn record_scoped_unused_classes(
     source: &str,
     relative: &std::path::Path,
-    summary: &mut fallow_output::CssAnalyticsSummary,
-    scoped_unused: &mut Vec<fallow_output::ScopedUnusedClasses>,
+    summary: &mut plow_output::CssAnalyticsSummary,
+    scoped_unused: &mut Vec<plow_output::ScopedUnusedClasses>,
 ) {
     let classes = crate::css::scoped_unused_classes(source);
     if classes.is_empty() {
@@ -2239,10 +2239,10 @@ fn record_scoped_unused_classes(
     summary.scoped_unused_classes = summary
         .scoped_unused_classes
         .saturating_add(u32::try_from(classes.len()).unwrap_or(u32::MAX));
-    scoped_unused.push(fallow_output::ScopedUnusedClasses {
+    scoped_unused.push(plow_output::ScopedUnusedClasses {
         path: relative.to_string_lossy().replace('\\', "/"),
         classes,
-        actions: vec![fallow_output::CssCandidateAction::verify_scoped_classes()],
+        actions: vec![plow_output::CssCandidateAction::verify_scoped_classes()],
     });
 }
 
@@ -2317,8 +2317,8 @@ fn css_report_scan_items<'a>(
 }
 
 fn record_css_analytics_summary(
-    summary: &mut fallow_output::CssAnalyticsSummary,
-    analytics: &fallow_types::extract::CssAnalytics,
+    summary: &mut plow_output::CssAnalyticsSummary,
+    analytics: &plow_types::extract::CssAnalytics,
 ) {
     summary.total_rules = summary.total_rules.saturating_add(analytics.rule_count);
     summary.total_declarations = summary
@@ -2339,9 +2339,9 @@ fn record_css_analytics_summary(
 /// The per-file CSS walk accumulator: structural file reports, the project-wide
 /// token sets, scoped SFC unused-class findings, and the running summary.
 struct CssWalkAccum {
-    file_reports: Vec<fallow_output::CssFileAnalytics>,
-    summary: fallow_output::CssAnalyticsSummary,
-    scoped_unused: Vec<fallow_output::ScopedUnusedClasses>,
+    file_reports: Vec<plow_output::CssFileAnalytics>,
+    summary: plow_output::CssAnalyticsSummary,
+    scoped_unused: Vec<plow_output::ScopedUnusedClasses>,
     tokens: CssTokenSets,
     scoring: CssGradeScoring,
 }
@@ -2355,7 +2355,7 @@ struct CssGradeScoring {
 }
 
 impl CssGradeScoring {
-    fn add_non_atomic(&mut self, analytics: &fallow_types::extract::CssAnalytics) {
+    fn add_non_atomic(&mut self, analytics: &plow_types::extract::CssAnalytics) {
         self.non_atomic_declarations = self
             .non_atomic_declarations
             .saturating_add(analytics.total_declarations);
@@ -2371,27 +2371,27 @@ impl CssGradeScoring {
 /// The finalized whole-project token metrics (keyframes, duplicate blocks, unused
 /// at-rules, font-size unit mix, unused font faces) derived after the file walk.
 struct CssTokenMetrics {
-    unreferenced_keyframes: Vec<fallow_output::UnreferencedKeyframes>,
-    undefined_keyframes: Vec<fallow_output::UndefinedKeyframes>,
-    duplicate_declaration_blocks: Vec<fallow_output::CssDuplicateBlock>,
-    unused_at_rules: Vec<fallow_output::UnusedAtRule>,
-    font_size_unit_mix: Option<fallow_output::CssNotationConsistency>,
-    unused_font_faces: Vec<fallow_output::UnusedFontFace>,
+    unreferenced_keyframes: Vec<plow_output::UnreferencedKeyframes>,
+    undefined_keyframes: Vec<plow_output::UndefinedKeyframes>,
+    duplicate_declaration_blocks: Vec<plow_output::CssDuplicateBlock>,
+    unused_at_rules: Vec<plow_output::UnusedAtRule>,
+    font_size_unit_mix: Option<plow_output::CssNotationConsistency>,
+    unused_font_faces: Vec<plow_output::UnusedFontFace>,
 }
 
 /// CSS analytics plus internal-only inputs for the styling-health grade.
 pub(super) struct CssAnalyticsComputation {
-    pub(super) report: fallow_output::CssAnalyticsReport,
+    pub(super) report: plow_output::CssAnalyticsReport,
     pub(super) scoring_inputs: super::styling_score::StylingScoringInputs,
 }
 
 /// Walk every in-scope stylesheet / SFC, accumulating structural metrics, the
 /// project token sets, and scoped SFC unused-class findings.
 fn walk_css_files(
-    files: &[fallow_types::discover::DiscoveredFile],
+    files: &[plow_types::discover::DiscoveredFile],
     ctx: HealthScanCtx<'_>,
 ) -> CssWalkAccum {
-    use fallow_output::{CssAnalyticsSummary, CssFileAnalytics, ScopedUnusedClasses};
+    use plow_output::{CssAnalyticsSummary, CssFileAnalytics, ScopedUnusedClasses};
 
     let mut file_reports = Vec::new();
     let mut summary = CssAnalyticsSummary::default();
@@ -2466,8 +2466,8 @@ fn walk_css_files(
 /// token metrics and prune unused `@font-face` families referenced elsewhere.
 fn finalize_css_token_metrics(
     tokens: &mut CssTokenSets,
-    summary: &mut fallow_output::CssAnalyticsSummary,
-    files: &[fallow_types::discover::DiscoveredFile],
+    summary: &mut plow_output::CssAnalyticsSummary,
+    files: &[plow_types::discover::DiscoveredFile],
     config: &ResolvedConfig,
     ignore_set: &globset::GlobSet,
 ) -> CssTokenMetrics {
@@ -2509,8 +2509,8 @@ fn finalize_css_token_metrics(
 }
 
 pub(super) fn compute_css_analytics_report(
-    files: &[fallow_types::discover::DiscoveredFile],
-    modules: &[fallow_types::extract::ModuleInfo],
+    files: &[plow_types::discover::DiscoveredFile],
+    modules: &[plow_types::extract::ModuleInfo],
     ctx: HealthScanCtx<'_>,
 ) -> Option<CssAnalyticsComputation> {
     let HealthScanCtx {
@@ -2579,9 +2579,9 @@ fn assemble_css_report(
     walk: CssWalkAccum,
     metrics: CssTokenMetrics,
     candidates: MarkupCssCandidates,
-    token_consumers: Vec<fallow_output::TokenConsumers>,
-) -> Option<fallow_output::CssAnalyticsReport> {
-    use fallow_output::CssAnalyticsReport;
+    token_consumers: Vec<plow_output::TokenConsumers>,
+) -> Option<plow_output::CssAnalyticsReport> {
+    use plow_output::CssAnalyticsReport;
 
     let candidates_empty = candidates.tailwind_arbitrary_values.is_empty()
         && candidates.unresolved_class_references.is_empty()
@@ -2619,21 +2619,14 @@ fn assemble_css_report(
 )]
 mod token_consumer_tests {
     use super::*;
-    use fallow_config::{FallowConfig, OutputFormat};
-    use fallow_output::ConsumerKind;
-    use fallow_types::discover::{DiscoveredFile, FileId};
+    use plow_config::{OutputFormat, PlowConfig};
+    use plow_output::ConsumerKind;
+    use plow_types::discover::{DiscoveredFile, FileId};
     use std::path::Path;
 
     /// Resolve a default config rooted at `root`.
     fn config_at(root: &Path) -> ResolvedConfig {
-        FallowConfig::default().resolve(
-            root.to_path_buf(),
-            OutputFormat::Human,
-            1,
-            true,
-            true,
-            None,
-        )
+        PlowConfig::default().resolve(root.to_path_buf(), OutputFormat::Human, 1, true, true, None)
     }
 
     /// Write `relative` under `root` with `body`, returning a `DiscoveredFile`.
@@ -2909,11 +2902,11 @@ mod token_consumer_tests {
     /// member-access) actually runs.
     fn css_computation_3d(root: &Path, files: &[DiscoveredFile]) -> CssAnalyticsComputation {
         let config = config_at(root);
-        let modules: Vec<fallow_types::extract::ModuleInfo> = files
+        let modules: Vec<plow_types::extract::ModuleInfo> = files
             .iter()
             .map(|f| {
                 let src = std::fs::read_to_string(&f.path).unwrap_or_default();
-                fallow_extract::parse_source_to_module(f.id, &f.path, &src, 0, false)
+                plow_extract::parse_source_to_module(f.id, &f.path, &src, 0, false)
             })
             .collect();
         compute_css_analytics_report(
@@ -2932,7 +2925,7 @@ mod token_consumer_tests {
     /// The CSS-in-JS (`js-member`) token-consumer entries from a computation.
     fn js_token_consumers(
         computation: &CssAnalyticsComputation,
-    ) -> Vec<&fallow_output::TokenConsumers> {
+    ) -> Vec<&plow_output::TokenConsumers> {
         computation
             .report
             .token_consumers
@@ -2940,7 +2933,7 @@ mod token_consumer_tests {
             .filter(|t| {
                 t.consumers
                     .iter()
-                    .all(|c| c.kind == fallow_output::ConsumerKind::JsMember)
+                    .all(|c| c.kind == plow_output::ConsumerKind::JsMember)
                     && t.token.contains('.')
                     && !t.token.starts_with("--")
             })
@@ -2950,7 +2943,7 @@ mod token_consumer_tests {
     fn find_token<'a>(
         computation: &'a CssAnalyticsComputation,
         token: &str,
-    ) -> Option<&'a fallow_output::TokenConsumers> {
+    ) -> Option<&'a plow_output::TokenConsumers> {
         computation
             .report
             .token_consumers
@@ -2991,7 +2984,7 @@ mod token_consumer_tests {
         assert_eq!(primary.consumers.len(), 1);
         assert_eq!(
             primary.consumers[0].kind,
-            fallow_output::ConsumerKind::JsMember
+            plow_output::ConsumerKind::JsMember
         );
         assert_eq!(primary.consumers[0].path, "src/card.ts");
         // Defined-but-unconsumed leaf -> count 0 (criterion 6).
@@ -3092,10 +3085,7 @@ mod token_consumer_tests {
             find_token(&computation, "vars.color.brand").expect("brand blast radius present");
         assert_eq!(brand.consumer_count, 1);
         assert_eq!(brand.consumers[0].path, "src/box.css.ts");
-        assert_eq!(
-            brand.consumers[0].kind,
-            fallow_output::ConsumerKind::JsMember
-        );
+        assert_eq!(brand.consumers[0].kind, plow_output::ConsumerKind::JsMember);
     }
 
     #[test]
@@ -3222,7 +3212,7 @@ mod token_consumer_tests {
             "src/x.ts",
             "export const vars = { color: { primary: '#000' } };\nexport const y = vars.color.primary;\n",
         );
-        let modules = vec![fallow_extract::parse_source_to_module(
+        let modules = vec![plow_extract::parse_source_to_module(
             f.id,
             &f.path,
             &std::fs::read_to_string(&f.path).unwrap(),
@@ -3336,7 +3326,7 @@ mod token_consumer_tests {
         // marked low-confidence with the atomic reason rather than a confident A.
         assert_eq!(
             styling.confidence,
-            fallow_output::StylingHealthConfidence::Low,
+            plow_output::StylingHealthConfidence::Low,
             "predominantly-atomic project is low-confidence",
         );
         let reason = styling.confidence_reason.expect("atomic caveat");

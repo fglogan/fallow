@@ -20,7 +20,7 @@ reference/
 
 # Coverage reports
 coverage/
-# But allow the CLI's `fallow coverage` subcommand module
+# But allow the CLI's `plow coverage` subcommand module
 !crates/cli/src/coverage/
 # And allow the v8-coverage normalizer crate
 !crates/v8-coverage/
@@ -34,7 +34,7 @@ benchmarks/knip6
 benchmarks/knip6/
 
 # Incremental cache
-.fallow/
+.plow/
 
 # Ephemeral git worktrees created for parallel/agent work
 .worktrees/
@@ -49,13 +49,13 @@ proptest-regressions/
 *.tgz
 
 # npm platform binaries (added by CI, not committed)
-npm/darwin-arm64/fallow
-npm/darwin-x64/fallow
-npm/linux-x64-gnu/fallow
-npm/linux-arm64-gnu/fallow
-npm/linux-x64-musl/fallow
-npm/linux-arm64-musl/fallow
-npm/win32-x64-msvc/fallow.exe
+npm/darwin-arm64/plow
+npm/darwin-x64/plow
+npm/linux-x64-gnu/plow
+npm/linux-arm64-gnu/plow
+npm/linux-x64-musl/plow
+npm/linux-arm64-musl/plow
+npm/win32-x64-msvc/plow.exe
 
 # Internal planning docs
 .internal
@@ -97,8 +97,8 @@ AGENTS.md
 !tests/AGENTS.md
 !.github/workflows/AGENTS.md
 
-# In-flight feature plans written by /fallow-implement and re-read by /panel-review,
-# the implementation phase, and /fallow-review. Transient; promoted concepts go to decisions/.
+# In-flight feature plans written by /plow-implement and re-read by /panel-review,
+# the implementation phase, and /plow-review. Transient; promoted concepts go to decisions/.
 .plans/
 # Stray undotted variant: research/plan scratch docs belong in the gitignored
 # .plans/, never committed. Ignored so `git add -A` cannot sweep one in again.
@@ -112,4 +112,4 @@ decisions/
 
 # Runtime scratch the review app writes (human notes feed, captured framing).
 # App-subtree .gitignore already ignores it; this keeps a root `git add -A` safe.
-.fallow-review/
+.plow-review/

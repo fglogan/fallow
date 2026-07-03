@@ -3,13 +3,13 @@
 use std::path::Path;
 use std::time::Duration;
 
-use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
-use fallow_types::results::{FeatureFlag, FlagConfidence, FlagKind};
+use plow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
+use plow_types::results::{FeatureFlag, FlagConfidence, FlagKind};
 use serde::Serialize;
 
 use crate::root_envelopes::{RootEnvelopeMode, attach_telemetry_meta, serialize_named_json_output};
 
-/// Inputs for building `fallow flags --format json`.
+/// Inputs for building `plow flags --format json`.
 pub struct FeatureFlagsOutputInput<'a> {
     pub schema_version: u32,
     pub version: String,
@@ -19,10 +19,10 @@ pub struct FeatureFlagsOutputInput<'a> {
     pub meta: Option<FeatureFlagsMeta>,
 }
 
-/// Envelope emitted by `fallow flags --format json`.
+/// Envelope emitted by `plow flags --format json`.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(feature = "schema", schemars(title = "fallow flags --format json"))]
+#[cfg_attr(feature = "schema", schemars(title = "plow flags --format json"))]
 pub struct FeatureFlagsOutput {
     pub schema_version: SchemaVersion,
     pub version: ToolVersion,
@@ -153,7 +153,7 @@ pub fn build_feature_flags_output(input: FeatureFlagsOutputInput<'_>) -> Feature
     }
 }
 
-/// Serialize `fallow flags --format json`.
+/// Serialize `plow flags --format json`.
 ///
 /// # Errors
 ///
@@ -169,7 +169,7 @@ pub fn serialize_feature_flags_json_output(
     Ok(value)
 }
 
-/// Metadata emitted when `fallow flags --explain --format json` is requested.
+/// Metadata emitted when `plow flags --explain --format json` is requested.
 #[must_use]
 pub const fn feature_flags_meta() -> FeatureFlagsMeta {
     FeatureFlagsMeta {
@@ -185,7 +185,7 @@ pub const fn feature_flags_meta() -> FeatureFlagsMeta {
                 medium: "Pattern match with some ambiguity",
                 low: "Heuristic match (config objects), may produce false positives",
             },
-            docs: "https://docs.fallow.tools/cli/flags",
+            docs: "https://docs.genesis-plow.dev/cli/flags",
         },
     }
 }
@@ -238,7 +238,7 @@ fn feature_flag_actions(flag_name: &str) -> Vec<FeatureFlagAction> {
             kind: FeatureFlagActionType::SuppressLine,
             auto_fixable: false,
             description: "Suppress with an inline comment".to_string(),
-            comment: Some("// fallow-ignore-next-line feature-flag".to_string()),
+            comment: Some("// plow-ignore-next-line feature-flag".to_string()),
         },
     ]
 }
@@ -306,7 +306,7 @@ mod tests {
         );
         assert_eq!(
             value["_meta"]["feature_flags"]["docs"],
-            "https://docs.fallow.tools/cli/flags"
+            "https://docs.genesis-plow.dev/cli/flags"
         );
         assert_eq!(value["_meta"]["telemetry"]["analysis_run_id"], "run-flags");
     }

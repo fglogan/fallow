@@ -17,9 +17,9 @@ export type FeedItem = {
   at: string;
 };
 
-/** One per-hunk change anchor fallow emits in the walkthrough guide: a stable,
+/** One per-hunk change anchor plow emits in the walkthrough guide: a stable,
  * content-addressed id for a changed region. The app maps a trade-off's
- * `file:line` to one of these to cite it for fallow-side validation. */
+ * `file:line` to one of these to cite it for plow-side validation. */
 export type ChangeAnchor = {
   changeAnchor: string;
   file: string;
@@ -28,7 +28,7 @@ export type ChangeAnchor = {
   previousChangeAnchor?: string;
 };
 
-/** Result of `fallow review --walkthrough-guide`: the E5 agent-contract digest. */
+/** Result of `plow review --walkthrough-guide`: the E5 agent-contract digest. */
 export type Guide = {
   graphSnapshotHash: string;
   emittedSignalIds: string[];
@@ -38,7 +38,7 @@ export type Guide = {
   schemaShape: string;
 };
 
-/** One judgment in the agent-walkthrough payload fallow post-validates. An anchor
+/** One judgment in the agent-walkthrough payload plow post-validates. An anchor
  * is a `signal_id` (a graph finding) OR a `change_anchor` (a changed region). */
 export type Judgment = {
   signal_id: string;
@@ -47,13 +47,13 @@ export type Judgment = {
   concern?: string;
 };
 
-/** The payload `fallow review --walkthrough-file` ingests and graph-validates. */
+/** The payload `plow review --walkthrough-file` ingests and graph-validates. */
 export type AgentWalkthrough = {
   graph_snapshot_hash: string;
   judgments: Judgment[];
 };
 
-/** One accepted judgment in the fallow validation envelope (graph-anchored).
+/** One accepted judgment in the plow validation envelope (graph-anchored).
  * `anchor_kind` is `"signal"` (graph finding) or `"change"` (changed region);
  * `change_anchor` carries the cited `chg:` id when `anchor_kind === "change"`. */
 export type AcceptedJudgment = {
@@ -65,7 +65,7 @@ export type AcceptedJudgment = {
   deterministic: boolean;
 };
 
-/** The fixed `fallow review --walkthrough-file` validation envelope shape. */
+/** The fixed `plow review --walkthrough-file` validation envelope shape. */
 export type ValidationEnvelope = {
   stale?: boolean;
   accepted?: AcceptedJudgment[];
@@ -86,7 +86,7 @@ export type FramingOrigin = "captured" | "reconstructed";
 /**
  * One inline framing block rendered next to its own decision, keyed by
  * `signalId`. Carries its {@link FramingOrigin} and `deterministic:false` so the
- * UI can fence it as non-graph-fact regardless of origin. Mirrors the fallow
+ * UI can fence it as non-graph-fact regardless of origin. Mirrors the plow
  * envelope's accepted-judgment shape plus the origin tag.
  */
 export type InlineFraming = {

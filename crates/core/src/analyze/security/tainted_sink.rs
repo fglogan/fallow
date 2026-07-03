@@ -1,4 +1,4 @@
-//! Catalogue-driven tainted-sink candidate detector (opt-in, `fallow security`).
+//! Catalogue-driven tainted-sink candidate detector (opt-in, `plow security`).
 //!
 //! Matches category-blind [`SinkSite`]s captured
 //! by the extract layer against the data-driven catalogue
@@ -14,16 +14,16 @@ use std::sync::OnceLock;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_types::extract::{
+use plow_types::extract::{
     ModuleInfo, SanitizedSinkArg, SanitizerScope, SecurityUrlShape, SinkSite, TaintedBinding,
 };
-use fallow_types::output::{IssueAction, SuppressFileAction, SuppressFileKind};
-use fallow_types::results::{
+use plow_types::output::{IssueAction, SuppressFileAction, SuppressFileKind};
+use plow_types::results::{
     SecurityCandidate, SecurityCandidateBoundary, SecurityCandidateSink, SecurityFinding,
     SecurityFindingKind, SecurityNetworkContext, SecuritySeverity,
     SecurityUnresolvedCalleeDiagnostic, TraceHop, TraceHopRole,
 };
-use fallow_types::suppress::IssueKind;
+use plow_types::suppress::IssueKind;
 
 use super::catalogue::{Matcher, catalogue};
 use super::{LineOffsetsMap, byte_offset_to_line_col};
@@ -104,7 +104,7 @@ pub(super) fn build_actions() -> Vec<IssueAction> {
         kind: SuppressFileKind::SuppressFile,
         auto_fixable: false,
         description: "Suppress with a file-level comment at the top of the file".to_string(),
-        comment: format!("// fallow-ignore-file {SUPPRESS_KIND}"),
+        comment: format!("// plow-ignore-file {SUPPRESS_KIND}"),
     })]
 }
 
@@ -565,7 +565,7 @@ fn tainted_sink_source_read(input: &TaintedSinkFindingInput<'_>) -> Option<(u32,
 
 /// Run the catalogue-driven tainted-sink detector. Returns the findings plus the
 /// in-band blind-spot stats. Callers gate this on the `security_sink` rule
-/// severity; it never runs under bare `fallow` or the `audit` gate.
+/// severity; it never runs under bare `plow` or the `audit` gate.
 #[must_use]
 pub fn find_tainted_sinks(
     graph: &ModuleGraph,
@@ -778,11 +778,11 @@ mod tests {
 
     fn sink_with_idents_and_sources(idents: &[&str], source_paths: &[&str]) -> SinkSite {
         SinkSite {
-            sink_shape: fallow_types::extract::SinkShape::Call,
+            sink_shape: plow_types::extract::SinkShape::Call,
             callee_path: "eval".to_string(),
             arg_index: 0,
             arg_is_non_literal: true,
-            arg_kind: fallow_types::extract::SinkArgKind::Other,
+            arg_kind: plow_types::extract::SinkArgKind::Other,
             arg_literal: None,
             regex_pattern: None,
             object_properties: Vec::new(),

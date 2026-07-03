@@ -8,7 +8,7 @@
 //! `react_props`, `hook_uses`, `render_edges`) and derive per-component context
 //! the editor surfaces. The result rides the `#[serde(skip)]`
 //! `AnalysisResults::react_component_intel` carrier (in-process LSP only), so
-//! bare `fallow` / `audit` and the JSON / schema surface are untouched.
+//! bare `plow` / `audit` and the JSON / schema surface are untouched.
 //!
 //! Counts are HONEST (the render-fan-in incident lesson): test / spec / story /
 //! fixture render sites are EXCLUDED from `render_sites`, `distinct_parents`,
@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_types::extract::{HookUseKind, ModuleInfo};
+use plow_types::extract::{HookUseKind, ModuleInfo};
 
 use crate::discover::FileId;
 use crate::graph::ModuleGraph;

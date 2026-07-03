@@ -3,8 +3,8 @@
 use std::process::ExitCode;
 use std::time::Instant;
 
-use fallow_config::ResolvedConfig;
-use fallow_output::{ComplexityViolation, FindingSeverity, RefactoringTarget};
+use plow_config::ResolvedConfig;
+use plow_output::{ComplexityViolation, FindingSeverity, RefactoringTarget};
 
 use crate::baseline::HealthBaselineData;
 
@@ -22,7 +22,7 @@ use super::{HealthOptions, scoring, sort_findings};
 
 pub(super) struct HealthFindingsData {
     pub(super) findings: Vec<ComplexityViolation>,
-    pub(super) threshold_overrides: Vec<fallow_output::ThresholdOverrideState>,
+    pub(super) threshold_overrides: Vec<plow_output::ThresholdOverrideState>,
     pub(super) files_analyzed: usize,
     pub(super) total_functions: usize,
     pub(super) complexity_ms: f64,
@@ -50,7 +50,7 @@ pub(super) struct HealthFindingsInput<'a> {
     pub(super) ignore_set: &'a globset::GlobSet,
     pub(super) changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
     pub(super) ws_roots: Option<&'a [std::path::PathBuf]>,
-    pub(super) diff_index: Option<&'a fallow_output::DiffIndex>,
+    pub(super) diff_index: Option<&'a plow_output::DiffIndex>,
     pub(super) max_cyclomatic: u16,
     pub(super) max_cognitive: u16,
     pub(super) max_crap: f64,
@@ -198,7 +198,7 @@ fn should_emit_no_match_threshold_overrides(
     opts: &HealthOptions<'_>,
     changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
     ws_roots: Option<&[std::path::PathBuf]>,
-    diff_index: Option<&fallow_output::DiffIndex>,
+    diff_index: Option<&plow_output::DiffIndex>,
 ) -> bool {
     opts.changed_since.is_none()
         && opts.diff_index.is_none()
@@ -216,7 +216,7 @@ fn finalize_health_findings(
     opts: &HealthOptions<'_>,
     config: &ResolvedConfig,
     findings: &mut Vec<ComplexityViolation>,
-    diff_index: Option<&fallow_output::DiffIndex>,
+    diff_index: Option<&plow_output::DiffIndex>,
 ) -> Result<HealthFindingFinalizeResult, ExitCode> {
     if let Some(diff_index) = diff_index {
         filter_complexity_findings_by_diff(findings, diff_index, &config.root);
@@ -272,7 +272,7 @@ pub(super) fn save_health_baseline_if_requested(
     opts: &HealthOptions<'_>,
     config: &ResolvedConfig,
     findings: &[ComplexityViolation],
-    runtime_coverage: Option<&fallow_output::RuntimeCoverageReport>,
+    runtime_coverage: Option<&plow_output::RuntimeCoverageReport>,
     targets: &[RefactoringTarget],
 ) -> Result<(), ExitCode> {
     if let Some(save_path) = opts.save_baseline {

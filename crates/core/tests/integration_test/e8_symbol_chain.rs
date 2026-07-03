@@ -1,4 +1,4 @@
-//! E8 done-condition tests for `fallow trace` symbol-level call chains.
+//! E8 done-condition tests for `plow trace` symbol-level call chains.
 //!
 //! 1. The caller set matches the hand-computed import-symbol caller set.
 //! 2. An unresolved callee is REPORTED, not silently dropped.
@@ -8,7 +8,7 @@
 //! where `audit_focus` is defined.)
 
 use super::common::{create_config, fixture_path};
-use fallow_core::trace_chain::{
+use plow_core::trace_chain::{
     SymbolChainQuery, TraceDirections, UnresolvedReason, trace_symbol_chain,
 };
 
@@ -24,10 +24,10 @@ fn trace_fixture(
     symbol: &str,
     directions: TraceDirections,
     depth: u32,
-) -> fallow_core::trace_chain::SymbolChainTrace {
+) -> plow_core::trace_chain::SymbolChainTrace {
     let config = create_config(fixture_path(fixture));
-    let output = fallow_core::analyze_retaining_modules(&config, true, true)
-        .expect("analysis should succeed");
+    let output =
+        plow_core::analyze_retaining_modules(&config, true, true).expect("analysis should succeed");
     let graph = output.graph.as_ref().expect("graph should be retained");
     let modules = output
         .modules
@@ -49,7 +49,7 @@ fn trace_fixture(
 
 /// Normalize a hop's file path to a forward-slash string for cross-platform
 /// comparison.
-fn hop_files(hops: &[fallow_core::trace_chain::ChainHop]) -> std::collections::BTreeSet<String> {
+fn hop_files(hops: &[plow_core::trace_chain::ChainHop]) -> std::collections::BTreeSet<String> {
     hops.iter()
         .map(|h| h.file.to_string_lossy().replace('\\', "/"))
         .collect()

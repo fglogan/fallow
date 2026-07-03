@@ -11,9 +11,9 @@
 //! When a new publishable crate joins the workspace (or one is retired / marked
 //! `publish = false`) without updating that list, a release silently stops
 //! publishing at the first crate whose dependency is missing from the index.
-//! v2.103.0 hit exactly this: the new `fallow-output` / `fallow-engine` /
-//! `fallow-api` crates were absent from the list, so the chain broke right
-//! after `fallow-types` and the rest of the workspace never reached crates.io.
+//! v2.103.0 hit exactly this: the new `plow-output` / `plow-engine` /
+//! `plow-api` crates were absent from the list, so the chain broke right
+//! after `plow-types` and the rest of the workspace never reached crates.io.
 //!
 //! This test fails loudly the moment the list and the publishable set diverge.
 

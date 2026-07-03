@@ -7,7 +7,7 @@ pub use crate::issue_meta::{DEAD_CODE_FILTER_FLAGS, KNOWN_ISSUE_KIND_NAMES};
 /// # Examples
 ///
 /// ```
-/// use fallow_types::suppress::IssueKind;
+/// use plow_types::suppress::IssueKind;
 ///
 /// let kind = IssueKind::parse("unused-export");
 /// assert_eq!(kind, Some(IssueKind::UnusedExport));
@@ -448,7 +448,7 @@ pub fn is_valid_policy_identifier(value: &str) -> bool {
 /// # Examples
 ///
 /// ```
-/// use fallow_types::suppress::{Suppression, IssueKind};
+/// use plow_types::suppress::{Suppression, IssueKind};
 ///
 /// // File-wide suppression (line 0, no specific kind)
 /// let file_wide = Suppression::all(0, 1);
@@ -463,8 +463,8 @@ pub struct Suppression {
     /// 1-based line this suppression applies to. 0 = file-wide suppression.
     pub line: u32,
     /// 1-based line where the suppression comment itself appears.
-    /// For `fallow-ignore-next-line`, this is `line - 1`.
-    /// For `fallow-ignore-file`, this is the actual line of the comment in the source.
+    /// For `plow-ignore-next-line`, this is `line - 1`.
+    /// For `plow-ignore-file`, this is the actual line of the comment in the source.
     pub comment_line: u32,
     /// None = suppress all issue kinds on this line or file.
     pub target: Option<SuppressionTarget>,
@@ -597,7 +597,7 @@ pub fn is_file_suppressed(suppressions: &[Suppression], kind: IssueKind) -> bool
 
 /// A suppression token that did not parse to any known `IssueKind`.
 ///
-/// Emitted alongside `Suppression` when a `// fallow-ignore-*` marker contains
+/// Emitted alongside `Suppression` when a `// plow-ignore-*` marker contains
 /// a typo or an obsolete issue-kind name. The known tokens on the same marker
 /// are recorded as normal `Suppression` entries; this struct preserves the
 /// unknown token so the downstream `find_stale` pass can surface it as a
@@ -607,8 +607,8 @@ pub fn is_file_suppressed(suppressions: &[Suppression], kind: IssueKind) -> bool
 pub struct UnknownSuppressionKind {
     /// 1-based line where the suppression comment itself appears.
     pub comment_line: u32,
-    /// Whether the marker was `fallow-ignore-file` (`true`) or
-    /// `fallow-ignore-next-line` (`false`).
+    /// Whether the marker was `plow-ignore-file` (`true`) or
+    /// `plow-ignore-next-line` (`false`).
     pub is_file_level: bool,
     /// The verbatim token from the marker that did not parse.
     pub token: String,
@@ -619,9 +619,9 @@ pub struct UnknownSuppressionKind {
 /// Levenshtein edit distance between two ASCII-leaning strings.
 ///
 /// Local duplicate of the config-crate helper (see
-/// `crates/config/src/config/rules.rs::levenshtein`) so `fallow-types` can
+/// `crates/config/src/config/rules.rs::levenshtein`) so `plow-types` can
 /// compute "did you mean?" suggestions for unknown suppression tokens without
-/// taking a dependency on `fallow-config`. Issue-kind names are short
+/// taking a dependency on `plow-config`. Issue-kind names are short
 /// (max ~33 chars) so allocation cost is negligible.
 fn levenshtein(a: &str, b: &str) -> usize {
     let a_bytes = a.as_bytes();

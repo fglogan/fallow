@@ -10,7 +10,7 @@ const CONFIG_EXPORTS: &[&str] = &["default"];
 
 fn additional_data_entry_pattern(
     root: &std::path::Path,
-    source: &fallow_extract::css::CssImportSource,
+    source: &plow_extract::css::CssImportSource,
 ) -> Option<String> {
     let normalized = source.normalized.trim_start_matches("./");
     if normalized.is_empty()
@@ -24,7 +24,7 @@ fn additional_data_entry_pattern(
 
 fn additional_data_package_name(
     root: &std::path::Path,
-    source: &fallow_extract::css::CssImportSource,
+    source: &plow_extract::css::CssImportSource,
 ) -> Option<String> {
     let normalized = source.normalized.trim_start_matches("./");
     is_additional_data_package_import(root, source, normalized)
@@ -33,7 +33,7 @@ fn additional_data_package_name(
 
 fn is_additional_data_package_import(
     root: &std::path::Path,
-    source: &fallow_extract::css::CssImportSource,
+    source: &plow_extract::css::CssImportSource,
     normalized: &str,
 ) -> bool {
     let raw = source.raw.as_str();
@@ -183,7 +183,7 @@ define_plugin!(
             );
             let is_scss_like = matches!(preprocessor, "scss" | "sass");
             for blob in body {
-                for spec in fallow_extract::css::extract_css_import_sources(&blob, is_scss_like) {
+                for spec in plow_extract::css::extract_css_import_sources(&blob, is_scss_like) {
                     if let Some(dep) = additional_data_package_name(root, &spec) {
                         result.referenced_dependencies.push(dep);
                     }

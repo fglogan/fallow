@@ -2,7 +2,7 @@ use super::common::{create_config, fixture_path};
 
 fn unused_file_paths(
     root: &std::path::Path,
-    results: &fallow_types::results::AnalysisResults,
+    results: &plow_types::results::AnalysisResults,
 ) -> Vec<String> {
     results
         .unused_files
@@ -19,7 +19,7 @@ fn unused_file_paths(
         .collect()
 }
 
-fn unused_members(results: &fallow_types::results::AnalysisResults) -> Vec<String> {
+fn unused_members(results: &plow_types::results::AnalysisResults) -> Vec<String> {
     results
         .unused_class_members
         .iter()
@@ -36,7 +36,7 @@ fn unused_members(results: &fallow_types::results::AnalysisResults) -> Vec<Strin
 fn issue_617_obsidian_entry_assets_and_lifecycle_members_are_credited() {
     let root = fixture_path("issue-617-obsidian-plugin");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_paths = unused_file_paths(&root, &results);
     for path in ["src/main.ts", "manifest.json", "styles.css", "cdp.js"] {
@@ -94,7 +94,7 @@ fn issue_617_obsidian_entry_assets_and_lifecycle_members_are_credited() {
 fn issue_617_non_obsidian_project_keeps_similarly_named_methods_reportable() {
     let root = fixture_path("issue-617-non-obsidian-control");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let unused_members = unused_members(&results);
 
     for member in [

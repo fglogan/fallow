@@ -1,4 +1,4 @@
-//! Per-group attribution for `fallow dupes --group-by`.
+//! Per-group attribution for `plow dupes --group-by`.
 //!
 //! For each `CloneGroup`, every instance is attributed to a group key (owner,
 //! directory, package, or section) via the same [`OwnershipResolver`] used by
@@ -13,8 +13,8 @@
 
 use std::path::Path;
 
-use fallow_api::DuplicationGrouping;
-use fallow_types::duplicates::{CloneGroup, DuplicationReport};
+use plow_api::DuplicationGrouping;
+use plow_types::duplicates::{CloneGroup, DuplicationReport};
 
 use super::grouping::OwnershipResolver;
 use super::relative_path;
@@ -26,7 +26,7 @@ use super::relative_path;
 /// to reach the running maximum wins, which means equal counts resolve to the
 /// alphabetically-smallest key.
 pub fn largest_owner(group: &CloneGroup, root: &Path, resolver: &OwnershipResolver) -> String {
-    fallow_api::largest_clone_group_owner_with(group, |path| {
+    plow_api::largest_clone_group_owner_with(group, |path| {
         resolver.resolve(relative_path(path, root))
     })
 }
@@ -40,7 +40,7 @@ pub fn build_duplication_grouping(
     root: &Path,
     resolver: &OwnershipResolver,
 ) -> DuplicationGrouping {
-    fallow_api::build_duplication_grouping_with(report, resolver.mode_label(), |path| {
+    plow_api::build_duplication_grouping_with(report, resolver.mode_label(), |path| {
         resolver.resolve(relative_path(path, root))
     })
 }
@@ -49,7 +49,7 @@ pub fn build_duplication_grouping(
 mod tests {
     use std::path::PathBuf;
 
-    use fallow_types::duplicates::{CloneInstance, DuplicationStats};
+    use plow_types::duplicates::{CloneInstance, DuplicationStats};
 
     use super::*;
     use crate::codeowners::{CodeOwners, UNOWNED_LABEL};

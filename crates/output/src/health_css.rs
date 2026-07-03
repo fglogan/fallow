@@ -1,4 +1,4 @@
-/// Structural CSS analytics surfaced by `fallow health --css`.
+/// Structural CSS analytics surfaced by `plow health --css`.
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CssAnalyticsReport {
@@ -26,7 +26,7 @@ pub struct CssAnalyticsReport {
     pub undefined_keyframes: Vec<UndefinedKeyframes>,
     /// Groups of style rules across the project that share an identical
     /// declaration block (4+ declarations, sorted and `!important`-aware),
-    /// grouped by content: copy-paste consolidation candidates (fallow's
+    /// grouped by content: copy-paste consolidation candidates (plow's
     /// duplication signal applied to CSS). Sorted by estimated savings
     /// descending.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -101,7 +101,7 @@ pub struct CssAnalyticsReport {
     ///
     /// Color-notation mixing (hex vs rgb vs hsl) is deliberately NOT surfaced:
     /// the CSS parser canonicalizes every legacy sRGB notation to hex before
-    /// fallow sees the value, so the authored distinction is already gone and
+    /// plow sees the value, so the authored distinction is already gone and
     /// cannot be recovered without a separate raw-token pass.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font_size_unit_mix: Option<CssNotationConsistency>,
@@ -188,7 +188,7 @@ pub struct TailwindArbitraryValue {
 }
 
 /// A group of style rules across the project that share an identical declaration
-/// block: a copy-paste consolidation candidate (fallow's duplication signal
+/// block: a copy-paste consolidation candidate (plow's duplication signal
 /// applied to CSS). Only blocks of 4+ declarations appearing in 2+ rules are
 /// reported, so the signal stays a strong copy-paste indicator rather than
 /// flagging legitimately-repeated small blocks.
@@ -464,7 +464,7 @@ pub struct CssCandidateAction {
     /// Action type identifier (`verify-unused`).
     #[serde(rename = "type")]
     pub kind: CssCandidateActionType,
-    /// Always `false`: CSS candidates are never auto-fixed (`fallow fix` does
+    /// Always `false`: CSS candidates are never auto-fixed (`plow fix` does
     /// not touch them) because the residual consumer may live outside CSS.
     pub auto_fixable: bool,
     /// Human-readable description of what to confirm before removing.
@@ -542,7 +542,7 @@ impl CssCandidateAction {
             kind: CssCandidateActionType::VerifyUnused,
             auto_fixable: false,
             description: format!(
-                "Confirm no HTML email, server-rendered template, CMS content, or Markdown applies the \"{name}\" class before removing it (fallow scanned only in-project JS/TS/HTML/Vue/Svelte/Astro markup)."
+                "Confirm no HTML email, server-rendered template, CMS content, or Markdown applies the \"{name}\" class before removing it (plow scanned only in-project JS/TS/HTML/Vue/Svelte/Astro markup)."
             ),
             command: safe_token_search(name),
         }
@@ -730,7 +730,7 @@ pub struct CssFileAnalytics {
     /// Project-root-relative, forward-slash path.
     pub path: String,
     /// The stylesheet's structural metrics.
-    pub analytics: fallow_types::extract::CssAnalytics,
+    pub analytics: plow_types::extract::CssAnalytics,
 }
 
 /// Project-wide CSS analytics aggregates across every analyzed stylesheet

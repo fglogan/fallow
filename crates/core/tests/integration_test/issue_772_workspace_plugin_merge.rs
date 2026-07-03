@@ -15,7 +15,7 @@ use crate::common::{create_config, fixture_path};
 fn workspace_lit_lifecycle_members_survive_merge_but_genuine_unused_still_flagged() {
     let root = fixture_path("issue-772-workspace-plugin-merge");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused: Vec<String> = results
         .unused_class_members
@@ -38,7 +38,7 @@ fn workspace_lit_lifecycle_members_survive_merge_but_genuine_unused_still_flagge
 fn workspace_angular_scss_include_paths_survive_merge() {
     let root = fixture_path("issue-772-workspace-plugin-merge");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unresolved_variables: Vec<String> = results
         .unresolved_imports

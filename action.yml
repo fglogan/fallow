@@ -1,4 +1,4 @@
-name: 'Fallow - Codebase Intelligence'
+name: 'Plow - Codebase Intelligence'
 description: 'Deterministic codebase intelligence for TypeScript/JavaScript in CI: quality, PR risk, hotspots, duplication, architecture.'
 author: 'Bart Waardenburg'
 
@@ -16,7 +16,7 @@ inputs:
     required: false
     default: '.'
   config:
-    description: 'Path to config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml)'
+    description: 'Path to config file (.plowrc.json, .plowrc.jsonc, plow.toml, or .plow.toml)'
     required: false
   format:
     description: 'Output format (human, json, sarif, compact, markdown, codeclimate, pr-comment-github, pr-comment-gitlab, review-github, review-gitlab, badge)'
@@ -60,15 +60,15 @@ inputs:
     description: 'Save current results as a baseline file'
     required: false
   version:
-    description: 'Fallow version override. When omitted, the action uses the project package.json fallow dependency spec if present, otherwise latest. Pin a current fallow version so Ed25519 + SHA-256 binary verification can run.'
+    description: 'Plow version override. When omitted, the action uses the project package.json plow dependency spec if present, otherwise latest. Pin a current plow version so Ed25519 + SHA-256 binary verification can run.'
     required: false
     default: ''
   args:
-    description: 'Additional arguments to pass to fallow (space-separated)'
+    description: 'Additional arguments to pass to plow (space-separated)'
     required: false
     default: ''
   artifacts-dir:
-    description: 'Directory for generated action artifacts such as fallow-results.json, fallow-results.sarif, fallow-stderr.log, and fallow-analysis-args.sh. Relative to the workflow workspace.'
+    description: 'Directory for generated action artifacts such as plow-results.json, plow-results.sarif, plow-stderr.log, and plow-analysis-args.sh. Relative to the workflow workspace.'
     required: false
     default: '.'
   comment:
@@ -100,11 +100,11 @@ inputs:
     required: false
     default: '50'
   comment-id:
-    description: 'Sticky-comment marker id, embedded in the HTML comment that identifies fallow''s comment for upsert. Defaults to ''fallow-results'', auto-suffixed with the workspace name when running scoped to a single workspace package.'
+    description: 'Sticky-comment marker id, embedded in the HTML comment that identifies plow''s comment for upsert. Defaults to ''plow-results'', auto-suffixed with the workspace name when running scoped to a single workspace package.'
     required: false
     default: ''
   summary-scope:
-    description: 'Sticky PR summary comment scope: ''all'' (default, include project-level dependency/catalog/override findings even when their anchor line is outside the diff) or ''diff'' (apply the diff filter to those findings too). Does not affect inline review comments. If the diff file is unavailable, fallow reports all findings.'
+    description: 'Sticky PR summary comment scope: ''all'' (default, include project-level dependency/catalog/override findings even when their anchor line is outside the diff) or ''diff'' (apply the diff filter to those findings too). Does not affect inline review comments. If the diff file is unavailable, plow reports all findings.'
     required: false
     default: 'all'
   diff-filter:
@@ -112,11 +112,11 @@ inputs:
     required: false
     default: 'added'
   diff-file:
-    description: 'Path to a unified-diff file. When set (directly OR derived by the analyze step from `gh pr diff` / `git diff --unified=0`), fallow narrows source-anchored findings to lines inside an added hunk; project-level findings (unused deps, catalog entries, dependency overrides) bypass the analysis filter. Sticky summary comments can opt into filtering project-level findings too with `summary-scope: diff`; inline review comments stay line-scoped. Also drives line-level scoping of the runtime-coverage `hot-path-touched` verdict. When both `diff-file` and `changed-since` are set, the diff filter wins for line-level filtering and `changed-since` still scopes file discovery; fallow logs a one-line stderr note. The analyze step propagates the resolved path via $GITHUB_ENV so the comment / review steps reuse the same file.'
+    description: 'Path to a unified-diff file. When set (directly OR derived by the analyze step from `gh pr diff` / `git diff --unified=0`), plow narrows source-anchored findings to lines inside an added hunk; project-level findings (unused deps, catalog entries, dependency overrides) bypass the analysis filter. Sticky summary comments can opt into filtering project-level findings too with `summary-scope: diff`; inline review comments stay line-scoped. Also drives line-level scoping of the runtime-coverage `hot-path-touched` verdict. When both `diff-file` and `changed-since` are set, the diff filter wins for line-level filtering and `changed-since` still scopes file discovery; plow logs a one-line stderr note. The analyze step propagates the resolved path via $GITHUB_ENV so the comment / review steps reuse the same file.'
     required: false
     default: ''
   api-retries:
-    description: 'Maximum HTTP retry attempts for fallow ci reconcile-review and the bash gh-api wrappers. Defaults to 3.'
+    description: 'Maximum HTTP retry attempts for plow ci reconcile-review and the bash gh-api wrappers. Defaults to 3.'
     required: false
     default: '3'
   api-retry-delay:
@@ -220,7 +220,7 @@ inputs:
     description: 'Only fail for findings at or above this severity (moderate, high, critical). Use "critical" to only fail on critical complexity findings.'
     required: false
   save-snapshot:
-    description: 'Save vital signs snapshot to .fallow/snapshots/ for trend tracking. Use actions/cache to persist across runs. Provide a path or leave empty for default. Works with health and bare command.'
+    description: 'Save vital signs snapshot to .plow/snapshots/ for trend tracking. Use actions/cache to persist across runs. Provide a path or leave empty for default. Works with health and bare command.'
     required: false
   trend:
     description: 'Compare current metrics against the most recent saved snapshot and show per-metric deltas. Requires a previous snapshot from save-snapshot. Works with health and bare command.'
@@ -230,7 +230,7 @@ inputs:
     description: 'Comma-separated issue types to report (dead-code command). Valid: unused-files, unused-exports, unused-types, unused-deps, unused-enum-members, unused-class-members, unresolved-imports, unlisted-deps, duplicate-exports, circular-deps'
     required: false
   include-entry-exports:
-    description: 'Report unused exports in entry files instead of auto-marking them as used. Catches framework export typos. Applied to dead-code analysis; also configurable persistently via includeEntryExports in your fallow config.'
+    description: 'Report unused exports in entry files instead of auto-marking them as used. Catches framework export typos. Applied to dead-code analysis; also configurable persistently via includeEntryExports in your plow config.'
     required: false
     default: 'false'
   # Audit-specific inputs
@@ -314,20 +314,20 @@ outputs:
 runs:
   using: 'composite'
   steps:
-    - name: Install fallow
+    - name: Install plow
       shell: bash
       env:
-        FALLOW_VERSION: ${{ inputs.version }}
+        PLOW_VERSION: ${{ inputs.version }}
         INPUT_ROOT: ${{ inputs.root }}
       run: bash ${{ github.action_path }}/action/scripts/install.sh
 
     - name: Cache analysis results
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
       with:
-        path: ${{ inputs.root }}/.fallow
-        key: fallow-cache-${{ runner.os }}-${{ hashFiles(format('{0}/**/package.json', inputs.root)) }}
+        path: ${{ inputs.root }}/.plow
+        key: plow-cache-${{ runner.os }}-${{ hashFiles(format('{0}/**/package.json', inputs.root)) }}
         restore-keys: |
-          fallow-cache-${{ runner.os }}-
+          plow-cache-${{ runner.os }}-
 
     - name: Run analysis
       id: analyze
@@ -405,14 +405,14 @@ runs:
         # the diff under artifacts-dir and exports it via $GITHUB_ENV so subsequent
         # steps (comment.sh, review.sh) skip their own `gh pr diff`
         # fetch and reuse the same file.
-        FALLOW_DIFF_FILE: ${{ inputs.diff-file }}
+        PLOW_DIFF_FILE: ${{ inputs.diff-file }}
       run: bash ${{ github.action_path }}/action/scripts/analyze.sh
 
     - name: Job summary
       if: always() && steps.analyze.outputs.issues != ''
       shell: bash
       env:
-        FALLOW_COMMAND: ${{ steps.analyze.outputs.command }}
+        PLOW_COMMAND: ${{ steps.analyze.outputs.command }}
         ACTION_JQ_DIR: ${{ github.action_path }}/action/jq
         CHANGED_SINCE: ${{ steps.analyze.outputs.changed_since }}
         INPUT_ROOT: ${{ inputs.root }}
@@ -429,7 +429,7 @@ runs:
         steps.analyze.outputs.issues != '0'
       shell: bash
       env:
-        FALLOW_COMMAND: ${{ steps.analyze.outputs.command }}
+        PLOW_COMMAND: ${{ steps.analyze.outputs.command }}
         MAX_ANNOTATIONS: ${{ inputs.max-annotations }}
         ACTION_JQ_DIR: ${{ github.action_path }}/action/jq
         CHANGED_SINCE: ${{ steps.analyze.outputs.changed_since }}
@@ -459,7 +459,7 @@ runs:
       uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
       with:
         sarif_file: ${{ steps.analyze.outputs.sarif }}
-        category: fallow
+        category: plow
         token: ${{ inputs.github-token }}
 
     - name: Post PR comment
@@ -475,19 +475,19 @@ runs:
         GH_TOKEN: ${{ inputs.github-token }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
         GH_REPO: ${{ github.repository }}
-        FALLOW_COMMAND: ${{ steps.analyze.outputs.command }}
+        PLOW_COMMAND: ${{ steps.analyze.outputs.command }}
         CHANGED_SINCE: ${{ steps.analyze.outputs.changed_since }}
         INPUT_ROOT: ${{ inputs.root }}
-        FALLOW_COMMENT_ID: ${{ inputs.comment-id }}
-        FALLOW_SUMMARY_SCOPE: ${{ inputs.summary-scope }}
-        FALLOW_DIFF_FILTER: ${{ inputs.diff-filter }}
-        # FALLOW_DIFF_FILE is propagated from the analyze step via
+        PLOW_COMMENT_ID: ${{ inputs.comment-id }}
+        PLOW_SUMMARY_SCOPE: ${{ inputs.summary-scope }}
+        PLOW_DIFF_FILTER: ${{ inputs.diff-filter }}
+        # PLOW_DIFF_FILE is propagated from the analyze step via
         # $GITHUB_ENV. Declaring it here would override the propagation
         # whenever inputs.diff-file is empty (the default), forcing
         # comment.sh to re-fetch the diff via `gh pr diff` and
         # double-paying the API quota.
-        FALLOW_API_RETRIES: ${{ inputs.api-retries }}
-        FALLOW_API_RETRY_DELAY: ${{ inputs.api-retry-delay }}
+        PLOW_API_RETRIES: ${{ inputs.api-retries }}
+        PLOW_API_RETRY_DELAY: ${{ inputs.api-retry-delay }}
       run: bash ${{ github.action_path }}/action/scripts/comment.sh
 
     - name: Post review comments
@@ -505,17 +505,17 @@ runs:
         PR_NUMBER: ${{ github.event.pull_request.number }}
         PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         GH_REPO: ${{ github.repository }}
-        FALLOW_COMMAND: ${{ steps.analyze.outputs.command }}
-        FALLOW_ROOT: ${{ inputs.root }}
-        FALLOW_REVIEW_GUIDANCE: ${{ inputs.review-guidance }}
+        PLOW_COMMAND: ${{ steps.analyze.outputs.command }}
+        PLOW_ROOT: ${{ inputs.root }}
+        PLOW_REVIEW_GUIDANCE: ${{ inputs.review-guidance }}
         MAX_COMMENTS: ${{ inputs.max-comments || inputs.max-annotations }}
         CHANGED_SINCE: ${{ steps.analyze.outputs.changed_since }}
-        FALLOW_COMMENT_ID: ${{ inputs.comment-id }}
-        FALLOW_DIFF_FILTER: ${{ inputs.diff-filter }}
-        # FALLOW_DIFF_FILE is propagated from the analyze step via
+        PLOW_COMMENT_ID: ${{ inputs.comment-id }}
+        PLOW_DIFF_FILTER: ${{ inputs.diff-filter }}
+        # PLOW_DIFF_FILE is propagated from the analyze step via
         # $GITHUB_ENV (see comment on the comment step env block).
-        FALLOW_API_RETRIES: ${{ inputs.api-retries }}
-        FALLOW_API_RETRY_DELAY: ${{ inputs.api-retry-delay }}
+        PLOW_API_RETRIES: ${{ inputs.api-retries }}
+        PLOW_API_RETRY_DELAY: ${{ inputs.api-retry-delay }}
       run: bash ${{ github.action_path }}/action/scripts/review.sh
 
     - name: Check threshold
@@ -536,25 +536,25 @@ runs:
           # fail -> error-tier (fail). Counting introduced findings instead
           # would re-introduce the bug issue #302 was filed to fix.
           if [ "$VERDICT" = "fail" ]; then
-            echo "::error::Fallow audit failed (gate: ${INPUT_GATE:-new-only}, ${ISSUES} finding(s) at error severity in changed files)"
+            echo "::error::Plow audit failed (gate: ${INPUT_GATE:-new-only}, ${ISSUES} finding(s) at error severity in changed files)"
             exit 1
           fi
           exit 0
         fi
         if [ "$ISSUES" -gt 0 ]; then
           case "$INPUT_COMMAND" in
-            dead-code|check) echo "::error::Fallow found ${ISSUES} unused code issues" ;;
-            dupes)           echo "::error::Fallow found ${ISSUES} clone groups" ;;
-            health)          echo "::error::Fallow found ${ISSUES} health findings" ;;
+            dead-code|check) echo "::error::Plow found ${ISSUES} unused code issues" ;;
+            dupes)           echo "::error::Plow found ${ISSUES} clone groups" ;;
+            health)          echo "::error::Plow found ${ISSUES} health findings" ;;
             security)
               if [ -n "$INPUT_SECURITY_GATE" ]; then
-                echo "::error::Fallow security gate failed (gate: ${INPUT_SECURITY_GATE}, ${ISSUES} candidate(s))"
+                echo "::error::Plow security gate failed (gate: ${INPUT_SECURITY_GATE}, ${ISSUES} candidate(s))"
                 exit 8
               fi
-              echo "::error::Fallow found ${ISSUES} security candidates"
+              echo "::error::Plow found ${ISSUES} security candidates"
               ;;
-            fix)             echo "::error::Fallow found ${ISSUES} fixable issues" ;;
-            "")              echo "::error::Fallow found ${ISSUES} issues" ;;
+            fix)             echo "::error::Plow found ${ISSUES} fixable issues" ;;
+            "")              echo "::error::Plow found ${ISSUES} issues" ;;
           esac
           exit 1
         fi

@@ -4,7 +4,7 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime};
 
-use fallow_engine::clear_ambient_git_env;
+use plow_engine::clear_ambient_git_env;
 use xxhash_rust::xxh3::xxh3_64;
 
 use crate::report::plural;
@@ -121,7 +121,7 @@ fn non_reusable_worktree_path() -> Option<PathBuf> {
         .ok()?
         .as_nanos();
     Some(std::env::temp_dir().join(format!(
-        "fallow-audit-base-{}-{nanos}-{seq}",
+        "plow-audit-base-{}-{nanos}-{seq}",
         std::process::id()
     )))
 }
@@ -226,7 +226,7 @@ pub fn reusable_worktree_lock_path(reusable_path: &Path) -> PathBuf {
 const DEFAULT_AUDIT_CACHE_MAX_AGE_DAYS: u32 = 30;
 
 /// Env var that overrides `audit.cacheMaxAgeDays` from the config.
-const AUDIT_CACHE_MAX_AGE_ENV: &str = "FALLOW_AUDIT_CACHE_MAX_AGE_DAYS";
+const AUDIT_CACHE_MAX_AGE_ENV: &str = "PLOW_AUDIT_CACHE_MAX_AGE_DAYS";
 
 /// Sidecar filename suffix used to track last-use of a reusable worktree.
 const REUSABLE_LAST_USED_SUFFIX: &str = ".last-used";
@@ -272,7 +272,7 @@ pub fn touch_last_used(reusable_path: &Path) {
 
 /// Resolve the GC threshold for persistent reusable caches.
 ///
-/// Precedence: `FALLOW_AUDIT_CACHE_MAX_AGE_DAYS` env var > `audit.cacheMaxAgeDays`
+/// Precedence: `PLOW_AUDIT_CACHE_MAX_AGE_DAYS` env var > `audit.cacheMaxAgeDays`
 /// config field > 30-day default. `0` from either source disables the sweep
 /// entirely (returns `None`). Invalid env values (non-integer) silently fall
 /// back to config / default; audits do not fail on a typo in a runner env var.
@@ -283,7 +283,7 @@ pub fn resolve_cache_max_age(root: &Path, config_path: Option<&PathBuf>) -> Opti
         }
         tracing::debug!(
             value = %raw,
-            "FALLOW_AUDIT_CACHE_MAX_AGE_DAYS is not a valid u32; falling back to config/default",
+            "PLOW_AUDIT_CACHE_MAX_AGE_DAYS is not a valid u32; falling back to config/default",
         );
     }
     if let Some(days) = load_audit_config(root, config_path).and_then(|c| c.cache_max_age_days) {
@@ -305,13 +305,13 @@ pub fn days_to_duration(days: u32) -> Option<Duration> {
 fn load_audit_config(
     root: &Path,
     config_path: Option<&PathBuf>,
-) -> Option<fallow_config::AuditConfig> {
+) -> Option<plow_config::AuditConfig> {
     if let Some(path) = config_path {
-        return fallow_config::FallowConfig::load(path)
+        return plow_config::PlowConfig::load(path)
             .ok()
             .map(|config| config.audit);
     }
-    fallow_config::FallowConfig::find_and_load(root)
+    plow_config::PlowConfig::find_and_load(root)
         .ok()
         .flatten()
         .map(|(config, _path)| config.audit)
@@ -331,7 +331,7 @@ fn load_audit_config(
 ///   when `max_age` is `Some`).
 ///
 /// Concurrency: each candidate is gated by [`ReusableWorktreeLock`] before
-/// removal, so an in-flight `fallow audit` mid-rebuild against the same
+/// removal, so an in-flight `plow audit` mid-rebuild against the same
 /// cache entry will not be disturbed (the sweep skips on contention). The
 /// orphan branch re-checks existence under the lock so a rebuild that
 /// recreated the directory between the check and the lock is preserved.
@@ -378,7 +378,7 @@ pub fn sweep_old_reusable_caches(repo_root: &Path, max_age: Option<Duration>, qu
         let s = plural(removed as usize);
         let _ = writeln!(
             std::io::stderr(),
-            "fallow: reclaimed {removed} stale base-snapshot cache{s}",
+            "plow: reclaimed {removed} stale base-snapshot cache{s}",
         );
     }
 }
@@ -473,7 +473,7 @@ fn reusable_audit_worktree_path(repo_root: &Path, base_sha: &str) -> PathBuf {
     let repo_hash = xxh3_64(repo_root.to_string_lossy().as_bytes());
     let sha_prefix = base_sha.get(..16).unwrap_or(base_sha);
     std::env::temp_dir().join(format!(
-        "fallow-audit-base-cache-{repo_hash:016x}-{sha_prefix}"
+        "plow-audit-base-cache-{repo_hash:016x}-{sha_prefix}"
     ))
 }
 
@@ -538,7 +538,7 @@ pub fn paths_equal(left: &Path, right: &Path) -> bool {
 /// far outweighs the residual drift.
 ///
 /// The meta-framework entries must stay aligned with the set recognized by
-/// `missing_meta_framework_prerequisites` in `fallow_core`'s plugin registry.
+/// `missing_meta_framework_prerequisites` in `plow_core`'s plugin registry.
 /// Adding a framework's prepare-dir warning there without extending this list
 /// silently reintroduces the broken-tsconfig-chain bug on the base pass for
 /// that framework.
@@ -614,7 +614,7 @@ pub fn sweep_orphan_audit_worktrees(repo_root: &Path) {
     };
     let mut removed_any = false;
     for path in worktrees {
-        if !is_fallow_audit_worktree_path(&path)
+        if !is_plow_audit_worktree_path(&path)
             || is_reusable_audit_worktree_path(&path)
             || audit_worktree_process_is_alive(&path)
         {
@@ -654,21 +654,21 @@ pub fn parse_worktree_list(output: &str) -> Vec<PathBuf> {
         .lines()
         .filter_map(|line| line.strip_prefix("worktree "))
         .map(PathBuf::from)
-        .filter(|path| is_fallow_audit_worktree_path(path))
+        .filter(|path| is_plow_audit_worktree_path(path))
         .collect()
 }
 
-pub fn is_fallow_audit_worktree_path(path: &Path) -> bool {
+pub fn is_plow_audit_worktree_path(path: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
         return false;
     };
-    name.starts_with("fallow-audit-base-") && path_is_inside_temp_dir(path)
+    name.starts_with("plow-audit-base-") && path_is_inside_temp_dir(path)
 }
 
 pub fn is_reusable_audit_worktree_path(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
-        .is_some_and(|name| name.starts_with("fallow-audit-base-cache-"))
+        .is_some_and(|name| name.starts_with("plow-audit-base-cache-"))
 }
 
 fn path_is_inside_temp_dir(path: &Path) -> bool {
@@ -700,7 +700,7 @@ fn audit_worktree_process_is_alive(path: &Path) -> bool {
 }
 
 pub fn audit_worktree_pid(name: &str) -> Option<u32> {
-    name.strip_prefix("fallow-audit-base-")?
+    name.strip_prefix("plow-audit-base-")?
         .split('-')
         .next()?
         .parse()
@@ -836,7 +836,7 @@ mod tests {
     fn non_reusable_worktree_path_pid_is_parseable() {
         let path = non_reusable_worktree_path().expect("path should build");
         let name = path.file_name().unwrap().to_str().unwrap();
-        assert!(is_fallow_audit_worktree_path(&path));
+        assert!(is_plow_audit_worktree_path(&path));
         assert!(!is_reusable_audit_worktree_path(&path));
         assert_eq!(audit_worktree_pid(name), Some(std::process::id()));
     }

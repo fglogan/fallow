@@ -11,7 +11,7 @@ export const decodePngDataUrl = (dataUrl: string): Buffer => {
 };
 
 export const shotPath = (root: string, at: number): string =>
-  join(root, ".fallow-review", "shots", `shot-${at}.png`);
+  join(root, ".plow-review", "shots", `shot-${at}.png`);
 
 export type SaveAnnotation = {
   annotatedDataUrl: string;

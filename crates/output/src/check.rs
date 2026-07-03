@@ -2,14 +2,14 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Duration;
 
-use fallow_types::envelope::{
+use plow_types::envelope::{
     BaselineDeltas, BaselineMatch, CheckSummary, ElapsedMs, EntryPoints, Meta, RegressionResult,
     SchemaVersion, ToolVersion,
 };
-use fallow_types::output::{IssueAction, NextStep};
-use fallow_types::output_health::{HealthFindingAction, HealthFindingActionType};
-use fallow_types::results::AnalysisResults;
-use fallow_types::workspace::WorkspaceDiagnostic;
+use plow_types::output::{IssueAction, NextStep};
+use plow_types::output_health::{HealthFindingAction, HealthFindingActionType};
+use plow_types::results::AnalysisResults;
+use plow_types::workspace::WorkspaceDiagnostic;
 use serde::Serialize;
 
 use crate::HealthReport;
@@ -18,7 +18,7 @@ use crate::root_envelopes::{RootEnvelopeMode, attach_telemetry_meta, serialize_n
 /// Current schema version for the dead-code/check JSON envelope.
 pub const CHECK_SCHEMA_VERSION: u32 = 7;
 
-/// Envelope emitted by `fallow dead-code --format json` (plus the `check`
+/// Envelope emitted by `plow dead-code --format json` (plus the `check`
 /// block inside the combined and audit envelopes).
 ///
 /// The body is the full `AnalysisResults` flattened into the envelope so
@@ -29,7 +29,7 @@ pub const CHECK_SCHEMA_VERSION: u32 = 7;
 /// JSON layer always emits.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(feature = "schema", schemars(title = "fallow dead-code --format json"))]
+#[cfg_attr(feature = "schema", schemars(title = "plow dead-code --format json"))]
 pub struct CheckOutput {
     pub schema_version: SchemaVersion,
     pub version: ToolVersion,
@@ -51,16 +51,16 @@ pub struct CheckOutput {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     /// Read-only follow-up commands computed from this run's findings, emitted
-    /// at the JSON root so an agent acting on the output is pointed at fallow's
+    /// at the JSON root so an agent acting on the output is pointed at plow's
     /// adjacent verification capabilities (trace, complexity breakdown, audit,
     /// workspace scoping). Each command is runnable as-is and never mutating;
     /// see [`NextStep`] for both contracts. Omitted when empty or when
-    /// `FALLOW_SUGGESTIONS=off`; does NOT contribute to `total_issues`.
+    /// `PLOW_SUGGESTIONS=off`; does NOT contribute to `total_issues`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub next_steps: Vec<NextStep>,
 }
 
-/// Envelope emitted by `fallow dead-code --group-by ... --format json`.
+/// Envelope emitted by `plow dead-code --group-by ... --format json`.
 ///
 /// Issues are partitioned into resolver buckets (CODEOWNERS team, directory
 /// prefix, workspace package, or GitLab CODEOWNERS section) instead of flat
@@ -70,9 +70,7 @@ pub struct CheckOutput {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
     feature = "schema",
-    schemars(
-        title = "fallow dead-code --group-by <owner|directory|package|section> --format json"
-    )
+    schemars(title = "plow dead-code --group-by <owner|directory|package|section> --format json")
 )]
 pub struct CheckGroupedOutput {
     pub schema_version: SchemaVersion,
@@ -174,7 +172,7 @@ fn serialize_check_family_json_output<T: Serialize>(
     Ok(value)
 }
 
-/// Serialize `fallow dead-code --format json`.
+/// Serialize `plow dead-code --format json`.
 ///
 /// # Errors
 ///
@@ -187,7 +185,7 @@ pub fn serialize_check_json_output(
     serialize_check_family_json_output(output, "dead-code", mode, analysis_run_id)
 }
 
-/// Serialize `fallow dead-code --group-by ... --format json`.
+/// Serialize `plow dead-code --group-by ... --format json`.
 ///
 /// # Errors
 ///
@@ -692,7 +690,7 @@ fn rewrite_dead_code_suppress_line_actions(
         |path: &Path, line, actions: &mut Vec<IssueAction>| {
             let anchor = suppress_anchor(path, line);
             if let Some(kinds) = anchors.get(&anchor) {
-                let comment = format!("// fallow-ignore-next-line {}", kinds.join(", "));
+                let comment = format!("// plow-ignore-next-line {}", kinds.join(", "));
                 rewrite_action_comments(actions, &comment);
             }
         }
@@ -725,7 +723,7 @@ fn rewrite_health_suppress_line_actions(
     for finding in &mut report.findings {
         let anchor = suppress_anchor(&finding.violation.path, finding.violation.line);
         if let Some(kinds) = anchors.get(&anchor) {
-            let comment = format!("// fallow-ignore-next-line {}", kinds.join(", "));
+            let comment = format!("// plow-ignore-next-line {}", kinds.join(", "));
             rewrite_health_action_comments(&mut finding.actions, &comment);
         }
     }
@@ -733,7 +731,7 @@ fn rewrite_health_suppress_line_actions(
         if let Some(hop) = finding.chain.hops.first() {
             let anchor = suppress_anchor(&hop.file, hop.line);
             if let Some(kinds) = anchors.get(&anchor) {
-                let comment = format!("// fallow-ignore-next-line {}", kinds.join(", "));
+                let comment = format!("// plow-ignore-next-line {}", kinds.join(", "));
                 rewrite_action_comments(&mut finding.actions, &comment);
             }
         }
@@ -811,7 +809,7 @@ fn health_suppress_line_comment(action: &HealthFindingAction) -> Option<&str> {
 
 fn parse_suppress_line_comment(comment: &str) -> Vec<String> {
     comment
-        .strip_prefix("// fallow-ignore-next-line ")
+        .strip_prefix("// plow-ignore-next-line ")
         .map(|rest| {
             rest.split(|c: char| c == ',' || c.is_whitespace())
                 .filter(|token| !token.is_empty())
@@ -902,11 +900,9 @@ pub fn build_check_summary(results: &AnalysisResults) -> CheckSummary {
 mod tests {
     use super::*;
     use crate::{ComplexityViolation, ExceededThreshold, FindingSeverity, HealthFinding};
-    use fallow_types::output_dead_code::{
-        UnusedExportFinding, UnusedFileFinding, UnusedTypeFinding,
-    };
-    use fallow_types::results::{UnusedExport, UnusedFile};
-    use fallow_types::workspace::WorkspaceDiagnosticKind;
+    use plow_types::output_dead_code::{UnusedExportFinding, UnusedFileFinding, UnusedTypeFinding};
+    use plow_types::results::{UnusedExport, UnusedFile};
+    use plow_types::workspace::WorkspaceDiagnosticKind;
 
     #[test]
     fn build_check_output_counts_issues_and_entry_points() {
@@ -976,7 +972,7 @@ mod tests {
         let type_comment = suppress_comment(&output.results.unused_types[0].actions);
         assert_eq!(
             export_comment,
-            Some("// fallow-ignore-next-line unused-export, unused-type")
+            Some("// plow-ignore-next-line unused-export, unused-type")
         );
         assert_eq!(type_comment, export_comment);
     }
@@ -1029,7 +1025,7 @@ mod tests {
                     description: "Suppress with an inline comment above the function declaration"
                         .to_string(),
                     note: None,
-                    comment: Some("// fallow-ignore-next-line complexity".to_string()),
+                    comment: Some("// plow-ignore-next-line complexity".to_string()),
                     placement: Some("above-function-declaration".to_string()),
                     target_path: None,
                 }],
@@ -1042,11 +1038,11 @@ mod tests {
 
         assert_eq!(
             suppress_comment(&results.unused_exports[0].actions),
-            Some("// fallow-ignore-next-line unused-export, complexity")
+            Some("// plow-ignore-next-line unused-export, complexity")
         );
         assert_eq!(
             health.findings[0].actions[0].comment.as_deref(),
-            Some("// fallow-ignore-next-line unused-export, complexity")
+            Some("// plow-ignore-next-line unused-export, complexity")
         );
     }
 

@@ -5,13 +5,13 @@ expression: json_str
 [
   {
     "type": "issue",
-    "check_name": "fallow/unused-file",
+    "check_name": "plow/unused-file",
     "description": "File is not reachable from any entry point",
     "categories": [
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "e3912cb6bb9b0212",
+    "fingerprint": "cf1a29e15c023d0d",
     "location": {
       "path": "src/dead.ts",
       "lines": {
@@ -21,13 +21,13 @@ expression: json_str
   },
   {
     "type": "issue",
-    "check_name": "fallow/unused-export",
+    "check_name": "plow/unused-export",
     "description": "Export 'helperFn' is never imported by other modules",
     "categories": [
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "ebe2360218821412",
+    "fingerprint": "6b7fb5f6ae546edb",
     "location": {
       "path": "src/utils.ts",
       "lines": {
@@ -37,13 +37,13 @@ expression: json_str
   },
   {
     "type": "issue",
-    "check_name": "fallow/unused-type",
+    "check_name": "plow/unused-type",
     "description": "Type export 'OldType' is never imported by other modules",
     "categories": [
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "deb0e9de35cc06d9",
+    "fingerprint": "08e7c60812746b38",
     "location": {
       "path": "src/types.ts",
       "lines": {
@@ -53,13 +53,13 @@ expression: json_str
   },
   {
     "type": "issue",
-    "check_name": "fallow/unused-dependency",
+    "check_name": "plow/unused-dependency",
     "description": "Package 'lodash' is in dependencies but never imported",
     "categories": [
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "1d04d08d81daf650",
+    "fingerprint": "e2e2b90970ca2c99",
     "location": {
       "path": "package.json",
       "lines": {
@@ -69,13 +69,13 @@ expression: json_str
   },
   {
     "type": "issue",
-    "check_name": "fallow/unused-dev-dependency",
+    "check_name": "plow/unused-dev-dependency",
     "description": "Package 'jest' is in devDependencies but never imported",
     "categories": [
       "Bug Risk"
     ],
     "severity": "minor",
-    "fingerprint": "2a4393b133ea1523",
+    "fingerprint": "74a05f7f893190e6",
     "location": {
       "path": "package.json",
       "lines": {
@@ -85,13 +85,13 @@ expression: json_str
   },
   {
     "type": "issue",
-    "check_name": "fallow/unused-optional-dependency",
+    "check_name": "plow/unused-optional-dependency",
     "description": "Package 'fsevents' is in optionalDependencies but never imported",
     "categories": [
       "Bug Risk"
     ],
     "severity": "minor",
-    "fingerprint": "66616a09b329d842",
+    "fingerprint": "5ce60c2d71e2d6ad",
     "location": {
       "path": "package.json",
       "lines": {
@@ -101,13 +101,13 @@ expression: json_str
   },
   {
     "type": "issue",
-    "check_name": "fallow/type-only-dependency",
+    "check_name": "plow/type-only-dependency",
     "description": "Package 'zod' is only imported via type-only imports (consider moving to devDependencies)",
     "categories": [
       "Bug Risk"
     ],
     "severity": "minor",
-    "fingerprint": "34d2064787c07f45",
+    "fingerprint": "3d74179acf41bda0",
     "location": {
       "path": "package.json",
       "lines": {
@@ -117,13 +117,13 @@ expression: json_str
   },
   {
     "type": "issue",
-    "check_name": "fallow/test-only-dependency",
+    "check_name": "plow/test-only-dependency",
     "description": "Package 'msw' is only imported by test files (consider moving to devDependencies)",
     "categories": [
       "Bug Risk"
     ],
     "severity": "minor",
-    "fingerprint": "ebc538b211ef05f5",
+    "fingerprint": "8c337e042e8095c8",
     "location": {
       "path": "package.json",
       "lines": {
@@ -133,13 +133,13 @@ expression: json_str
   },
   {
     "type": "issue",
-    "check_name": "fallow/unused-enum-member",
+    "check_name": "plow/unused-enum-member",
     "description": "Enum member 'Status.Deprecated' is never referenced",
     "categories": [
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "090d4d65832bf868",
+    "fingerprint": "4fdc52289547d8e7",
     "location": {
       "path": "src/enums.ts",
       "lines": {
@@ -149,13 +149,13 @@ expression: json_str
   },
   {
     "type": "issue",
-    "check_name": "fallow/unused-class-member",
+    "check_name": "plow/unused-class-member",
     "description": "Class member 'UserService.legacyMethod' is never referenced",
     "categories": [
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "25579ea7b6940453",
+    "fingerprint": "dd4d62478ebd0dea",
     "location": {
       "path": "src/service.ts",
       "lines": {
@@ -165,13 +165,13 @@ expression: json_str
   },
   {
     "type": "issue",
-    "check_name": "fallow/unused-store-member",
+    "check_name": "plow/unused-store-member",
     "description": "Store member 'useCounterStore.legacyAction' is never referenced",
     "categories": [
       "Bug Risk"
     ],
     "severity": "minor",
-    "fingerprint": "a2cd7cf87121a06f",
+    "fingerprint": "1b6b9adec9797dbc",
     "location": {
       "path": "src/stores/counter.ts",
       "lines": {
@@ -181,13 +181,13 @@ expression: json_str
   },
   {
     "type": "issue",
-    "check_name": "fallow/unresolved-import",
+    "check_name": "plow/unresolved-import",
     "description": "Import './missing-module' could not be resolved",
     "categories": [
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "231a7ed9e16a19a6",
+    "fingerprint": "af1eb4eb0844d085",
     "location": {
       "path": "src/app.ts",
       "lines": {
@@ -197,13 +197,13 @@ expression: json_str
   },
   {
     "type": "issue",
-    "check_name": "fallow/unlisted-dependency",
+    "check_name": "plow/unlisted-dependency",
     "description": "Package 'chalk' is imported but not listed in package.json",
     "categories": [
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "2ef210a41606f3aa",
+    "fingerprint": "db9e8d2cbc4f7fcb",
     "location": {
       "path": "src/cli.ts",
       "lines": {
@@ -213,13 +213,13 @@ expression: json_str
   },
   {
     "type": "issue",
-    "check_name": "fallow/duplicate-export",
+    "check_name": "plow/duplicate-export",
     "description": "Export 'Config' appears in multiple modules",
     "categories": [
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "da73cab5c65b029d",
+    "fingerprint": "1d5f8d291b3b6fcc",
     "location": {
       "path": "src/config.ts",
       "lines": {
@@ -229,13 +229,13 @@ expression: json_str
   },
   {
     "type": "issue",
-    "check_name": "fallow/duplicate-export",
+    "check_name": "plow/duplicate-export",
     "description": "Export 'Config' appears in multiple modules",
     "categories": [
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "cc6a09c8dc227321",
+    "fingerprint": "ec485b2f5051e03e",
     "location": {
       "path": "src/types.ts",
       "lines": {
@@ -245,13 +245,13 @@ expression: json_str
   },
   {
     "type": "issue",
-    "check_name": "fallow/circular-dependency",
+    "check_name": "plow/circular-dependency",
     "description": "Circular dependency: src/a.ts → src/b.ts",
     "categories": [
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "405f0abed155920d",
+    "fingerprint": "9f70c2f1869ab63a",
     "location": {
       "path": "src/a.ts",
       "lines": {
@@ -261,13 +261,13 @@ expression: json_str
   },
   {
     "type": "issue",
-    "check_name": "fallow/re-export-cycle",
+    "check_name": "plow/re-export-cycle",
     "description": "Re-export cycle: src/api/index.ts <-> src/api/internal/index.ts",
     "categories": [
       "Bug Risk"
     ],
     "severity": "minor",
-    "fingerprint": "3b15e7a61f99e1df",
+    "fingerprint": "d5108d19da1b478c",
     "location": {
       "path": "src/api/index.ts",
       "lines": {
@@ -277,13 +277,13 @@ expression: json_str
   },
   {
     "type": "issue",
-    "check_name": "fallow/invalid-client-export",
+    "check_name": "plow/invalid-client-export",
     "description": "Export `metadata` is not allowed in a \"use client\" file (Next.js server-only / route-config name)",
     "categories": [
       "Bug Risk"
     ],
     "severity": "minor",
-    "fingerprint": "8e530508aa988833",
+    "fingerprint": "81283760fca75e0c",
     "location": {
       "path": "app/page.tsx",
       "lines": {
@@ -293,13 +293,13 @@ expression: json_str
   },
   {
     "type": "issue",
-    "check_name": "fallow/mixed-client-server-barrel",
+    "check_name": "plow/mixed-client-server-barrel",
     "description": "Barrel re-exports both a \"use client\" module (`./Button`) and a server-only module (`./fetchUser`); one import drags the other's directive across the boundary",
     "categories": [
       "Bug Risk"
     ],
     "severity": "minor",
-    "fingerprint": "2e57fc499772bc84",
+    "fingerprint": "a26a1cc5a4e57127",
     "location": {
       "path": "app/components/index.ts",
       "lines": {
@@ -309,13 +309,13 @@ expression: json_str
   },
   {
     "type": "issue",
-    "check_name": "fallow/unprovided-inject",
+    "check_name": "plow/unprovided-inject",
     "description": "inject(`THEME_KEY`) has no matching provide(`THEME_KEY`) in this project; at runtime it returns undefined (provide the key or remove this inject)",
     "categories": [
       "Bug Risk"
     ],
     "severity": "minor",
-    "fingerprint": "82ebf4620cc2bba5",
+    "fingerprint": "4e4a7216bbdc8cfa",
     "location": {
       "path": "src/useTheme.ts",
       "lines": {
@@ -325,13 +325,13 @@ expression: json_str
   },
   {
     "type": "issue",
-    "check_name": "fallow/unused-component-input",
+    "check_name": "plow/unused-component-input",
     "description": "input `variant` is declared but referenced nowhere in component `UserCardComponent` (remove it or use it)",
     "categories": [
       "Bug Risk"
     ],
     "severity": "minor",
-    "fingerprint": "43da4dfe078e4765",
+    "fingerprint": "8a93cdfaa7cabafc",
     "location": {
       "path": "src/user-card.component.ts",
       "lines": {
@@ -341,13 +341,13 @@ expression: json_str
   },
   {
     "type": "issue",
-    "check_name": "fallow/unused-component-output",
+    "check_name": "plow/unused-component-output",
     "description": "output `selected` is declared but emitted nowhere in component `UserCardComponent` (remove it or emit it)",
     "categories": [
       "Bug Risk"
     ],
     "severity": "minor",
-    "fingerprint": "48412c022e3ac5ab",
+    "fingerprint": "d1644f190d895a1a",
     "location": {
       "path": "src/user-card.component.ts",
       "lines": {
@@ -357,13 +357,13 @@ expression: json_str
   },
   {
     "type": "issue",
-    "check_name": "fallow/unused-svelte-event",
+    "check_name": "plow/unused-svelte-event",
     "description": "event `dead` is dispatched by component `Child` but listened to nowhere in the project (remove it or listen for it)",
     "categories": [
       "Bug Risk"
     ],
     "severity": "minor",
-    "fingerprint": "844a7c0e7c849332",
+    "fingerprint": "b5004391914737c9",
     "location": {
       "path": "src/Child.svelte",
       "lines": {
@@ -373,13 +373,13 @@ expression: json_str
   },
   {
     "type": "issue",
-    "check_name": "fallow/unused-catalog-entry",
+    "check_name": "plow/unused-catalog-entry",
     "description": "Catalog entry 'is-even' is not referenced by any workspace package",
     "categories": [
       "Bug Risk"
     ],
     "severity": "minor",
-    "fingerprint": "01c68b8e65ee42b9",
+    "fingerprint": "de3ed2a0e833c4b0",
     "location": {
       "path": "pnpm-workspace.yaml",
       "lines": {
@@ -389,13 +389,13 @@ expression: json_str
   },
   {
     "type": "issue",
-    "check_name": "fallow/unused-catalog-entry",
+    "check_name": "plow/unused-catalog-entry",
     "description": "Catalog entry 'old-thing' (catalog 'legacy') is not referenced by any workspace package",
     "categories": [
       "Bug Risk"
     ],
     "severity": "minor",
-    "fingerprint": "2d5072d3451b44dd",
+    "fingerprint": "291da29e40ca77e0",
     "location": {
       "path": "pnpm-workspace.yaml",
       "lines": {
@@ -405,13 +405,13 @@ expression: json_str
   },
   {
     "type": "issue",
-    "check_name": "fallow/empty-catalog-group",
+    "check_name": "plow/empty-catalog-group",
     "description": "Catalog group 'react17' has no entries",
     "categories": [
       "Bug Risk"
     ],
     "severity": "minor",
-    "fingerprint": "03506bd5a376e100",
+    "fingerprint": "eeb511f2856ae1d9",
     "location": {
       "path": "pnpm-workspace.yaml",
       "lines": {
@@ -421,13 +421,13 @@ expression: json_str
   },
   {
     "type": "issue",
-    "check_name": "fallow/unresolved-catalog-reference",
+    "check_name": "plow/unresolved-catalog-reference",
     "description": "Package 'old-react' is referenced via `catalog:react17` but catalog 'react17' does not declare it; `pnpm install` will fail (available in: react18)",
     "categories": [
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "3b583c29be84724a",
+    "fingerprint": "5deef6f1aba529f1",
     "location": {
       "path": "packages/app/package.json",
       "lines": {
@@ -437,13 +437,13 @@ expression: json_str
   },
   {
     "type": "issue",
-    "check_name": "fallow/unused-dependency-override",
+    "check_name": "plow/unused-dependency-override",
     "description": "Override `axios` forces version `^1.6.0` but `axios` is not declared by any workspace package or resolved in pnpm-lock.yaml (may target a transitive dependency; pnpm install --frozen-lockfile is the ground truth)",
     "categories": [
       "Bug Risk"
     ],
     "severity": "minor",
-    "fingerprint": "9e455c649fd184fe",
+    "fingerprint": "65639e7e9f12c73f",
     "location": {
       "path": "pnpm-workspace.yaml",
       "lines": {
@@ -453,13 +453,13 @@ expression: json_str
   },
   {
     "type": "issue",
-    "check_name": "fallow/misconfigured-dependency-override",
+    "check_name": "plow/misconfigured-dependency-override",
     "description": "Override `@types/react@<<18` -> `18.0.0` is malformed: override key cannot be parsed",
     "categories": [
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "21be520b86ce0207",
+    "fingerprint": "6c6967f2a0a29fc8",
     "location": {
       "path": "package.json",
       "lines": {

@@ -9,7 +9,7 @@ use super::common::{create_config, fixture_path};
 
 /// Look up one component's `(render_sites, distinct_parents)` by name from the
 /// metric's per-component detail.
-fn counts_for(metric: &fallow_core::results::RenderFanInMetric, name: &str) -> Option<(u32, u32)> {
+fn counts_for(metric: &plow_core::results::RenderFanInMetric, name: &str) -> Option<(u32, u32)> {
     metric
         .per_component
         .iter()
@@ -26,7 +26,7 @@ fn counts_for(metric: &fallow_core::results::RenderFanInMetric, name: &str) -> O
 fn counts_render_sites_and_distinct_parents() {
     let root = fixture_path("render-fan-in");
     let config = create_config(root); // not rule-gated; runs whenever React declared
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let metric = results
         .render_fan_in
@@ -91,7 +91,7 @@ fn counts_render_sites_and_distinct_parents() {
 fn rarely_rendered_component_is_not_high_fan_in() {
     let root = fixture_path("render-fan-in");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let metric = results.render_fan_in.as_ref().expect("metric present");
 
     let button = counts_for(metric, "Button").expect("Button present").0;
@@ -114,7 +114,7 @@ fn rarely_rendered_component_is_not_high_fan_in() {
 fn test_files_are_excluded_from_render_fan_in() {
     let root = fixture_path("render-fan-in");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     let metric = results.render_fan_in.as_ref().expect("metric present");
 
     // The test-local `Page` component must not be a fan-in target at all.
@@ -147,7 +147,7 @@ fn dep_gated_to_react() {
     // The Vue fixture declares only `vue` (no react/react-dom/next/preact).
     let root = fixture_path("unused-component-prop");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
     assert!(
         results.render_fan_in.is_none(),
         "render fan-in must not compute on a non-React project"

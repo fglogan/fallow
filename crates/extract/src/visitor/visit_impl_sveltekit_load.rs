@@ -145,7 +145,7 @@ fn ts_type_reference_base_name(ty: &TSType<'_>) -> Option<String> {
 /// signal an abstain (spread, non-object/non-literal return, or a computed key).
 fn harvest_load_return_keys(
     returned: &Expression<'_>,
-) -> Result<Vec<fallow_types::extract::LoadReturnKey>, ()> {
+) -> Result<Vec<plow_types::extract::LoadReturnKey>, ()> {
     let Expression::ObjectExpression(obj) = unwrap_paren_expr(returned) else {
         // A non-object terminal return (`return data`, `return makeData()`)
         // cannot be key-harvested: abstain.
@@ -165,7 +165,7 @@ fn harvest_load_return_keys(
                     return Err(());
                 };
                 let span = prop.key.span();
-                keys.push(fallow_types::extract::LoadReturnKey {
+                keys.push(plow_types::extract::LoadReturnKey {
                     name: name.to_string(),
                     span_start: span.start,
                     span_end: span.end,

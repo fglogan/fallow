@@ -2,7 +2,7 @@
 source: crates/cli/tests/snapshot_tests.rs
 expression: output
 ---
-## Fallow: 1 high complexity function
+## Plow: 1 high complexity function
 
 | File | Function | Severity | Cyclomatic | Cognitive | CRAP | Lines |
 |:-----|:---------|:---------|:-----------|:----------|:-----|:------|
@@ -25,12 +25,12 @@ expression: output
 
 | ID | Path | Function | Verdict | Invocations | Confidence |
 |:---|:-----|:---------|:--------|------------:|:-----------|
-| `fallow:prod:deadbeef` | `src/cold.ts`:14 | `coldPath` | review_required | 0 | medium |
-| `fallow:prod:feedface` | `src/unknown.ts`:8 | `lateBound` | coverage_unavailable | - | none |
+| `plow:prod:deadbeef` | `src/cold.ts`:14 | `coldPath` | review_required | 0 | medium |
+| `plow:prod:feedface` | `src/unknown.ts`:8 | `lateBound` | coverage_unavailable | - | none |
 
 | ID | Hot path | Function | Invocations | Percentile |
 |:---|:---------|:---------|------------:|-----------:|
-| `fallow:hot:cafebabe` | `src/hot.ts`:3 | `hotPath` | 250 | 99 |
+| `plow:hot:cafebabe` | `src/hot.ts`:3 | `hotPath` | 250 | 99 |
 
 ## Coverage Intelligence
 
@@ -40,5 +40,5 @@ expression: output
 
 | ID | Path | Identity | Verdict | Recommendation | Confidence | Signals |
 |:---|:-----|:---------|:--------|:---------------|:-----------|:--------|
-| `fallow:coverage-intel:0badc0de` | `src/hot.ts`:10 | `handler` | risky-change-detected | add-test-or-split-before-merge | high | changed, hot_path, low_test_coverage, high_crap |
-| `fallow:coverage-intel:1deadfa1` | `src/dead.ts`:4 | `deadPath` | high-confidence-delete | delete-after-confirming-owner | high | static_unused, runtime_cold, no_test_path |
+| `plow:coverage-intel:0badc0de` | `src/hot.ts`:10 | `handler` | risky-change-detected | add-test-or-split-before-merge | high | changed, hot_path, low_test_coverage, high_crap |
+| `plow:coverage-intel:1deadfa1` | `src/dead.ts`:4 | `deadPath` | high-confidence-delete | delete-after-confirming-owner | high | static_unused, runtime_cold, no_test_path |

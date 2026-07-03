@@ -1,7 +1,7 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
 
-use fallow_config::OutputFormat;
+use plow_config::OutputFormat;
 
 use super::enum_helpers::{EnumDeclarationRange, removable_exported_enum_range};
 use super::plan::{
@@ -9,10 +9,10 @@ use super::plan::{
 };
 
 /// Directory names whose contents are commonly consumed through paths
-/// fallow's static graph cannot see: Vitest / Jest `__mocks__` aliases,
+/// plow's static graph cannot see: Vitest / Jest `__mocks__` aliases,
 /// Playwright / Cypress e2e suites, published-package `examples`, and
 /// fixture / golden harnesses wired up by a build step. Removing an
-/// `export` from a file under any of these is low confidence; `fallow fix`
+/// `export` from a file under any of these is low confidence; `plow fix`
 /// withholds the rewrite (see [`SkipReason::LowConfidenceOffGraph`]).
 ///
 /// Matched against every directory component of the file's
@@ -79,7 +79,7 @@ pub(super) struct ExportFix {
 pub(super) struct ExportFixInput<'a, 'export> {
     pub(super) root: &'a Path,
     pub(super) exports_by_file:
-        &'a FxHashMap<PathBuf, Vec<&'export fallow_types::results::UnusedExport>>,
+        &'a FxHashMap<PathBuf, Vec<&'export plow_types::results::UnusedExport>>,
     pub(super) hashes: &'a CapturedHashes,
     pub(super) unresolved_import_files: &'a FxHashSet<PathBuf>,
     pub(super) plan: &'a mut FixPlan,
@@ -197,9 +197,9 @@ fn push_export_fix_json(
 /// `unresolved_import_files` is the set of absolute paths that have at
 /// least one unresolved import. A file in that set, or under an off-graph
 /// consumer directory, has its export removals withheld as low confidence
-/// (issue #602): the rewrite would risk breaking a consumer fallow's graph
+/// (issue #602): the rewrite would risk breaking a consumer plow's graph
 /// cannot see. The skip is recorded on `plan` so the orchestrator surfaces
-/// it; the export stays reported by `fallow dead-code`.
+/// it; the export stays reported by `plow dead-code`.
 pub(super) fn apply_export_fixes(input: &mut ExportFixInput<'_, '_>) {
     let root = input.root;
     let exports_by_file = input.exports_by_file;
@@ -251,7 +251,7 @@ pub(super) fn apply_export_fixes(input: &mut ExportFixInput<'_, '_>) {
 
 fn collect_export_line_fixes(
     lines: &[&str],
-    file_exports: &[&fallow_types::results::UnusedExport],
+    file_exports: &[&plow_types::results::UnusedExport],
 ) -> Vec<ExportFix> {
     file_exports
         .iter()
@@ -261,7 +261,7 @@ fn collect_export_line_fixes(
 
 fn export_line_fix(
     lines: &[&str],
-    export: &fallow_types::results::UnusedExport,
+    export: &plow_types::results::UnusedExport,
 ) -> Option<ExportFix> {
     let line_idx = export.line.saturating_sub(1) as usize;
     let line = *lines.get(line_idx)?;
@@ -451,7 +451,7 @@ fn delete_export_lines(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_types::results::UnusedExport;
+    use plow_types::results::UnusedExport;
 
     #[expect(
         clippy::too_many_arguments,

@@ -2,7 +2,7 @@ use super::common::{create_config, fixture_path};
 
 fn unused_file_paths(
     root: &std::path::Path,
-    results: &fallow_types::results::AnalysisResults,
+    results: &plow_types::results::AnalysisResults,
 ) -> Vec<String> {
     results
         .unused_files
@@ -23,7 +23,7 @@ fn unused_file_paths(
 fn issue_622_varlock_schema_and_vite_integration_dependencies_are_reachable() {
     let root = fixture_path("issue-622-varlock-plugin");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_paths = unused_file_paths(&root, &results);
     assert!(
@@ -64,7 +64,7 @@ fn issue_622_varlock_activates_from_nested_schema_without_dependency() {
     // must therefore be credited rather than reported as an unused dependency.
     let root = fixture_path("issue-622-varlock-nested-schema");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_dev_dependencies: Vec<&str> = results
         .unused_dev_dependencies

@@ -13,7 +13,7 @@
 //! Per the verdict (`.plans/agentic-review-e0-verdict.md`) the decision
 //! categories are NOT uniformly reliable on a syntactic engine (ADR-001). Exactly
 //! three are validated and shippable, each backed by a deterministic signal
-//! fallow already emits:
+//! plow already emits:
 //!
 //! 1. **coupling/boundary** (`boundary_introduced`): a new cross-zone edge.
 //! 2. **public-API/contract** (`public_api_added` + coordination gaps): a
@@ -32,18 +32,18 @@
 //! ## The trust mechanism (anti-hallucination)
 //!
 //! Post-validation closes on EXTRACTION, not on framing. Every decision carries a
-//! `signal_id` deterministically derived from the fallow-emitted candidate key it
+//! `signal_id` deterministically derived from the plow-emitted candidate key it
 //! frames (a delta key or a coordination-gap key). The deterministic layer keeps
 //! the SET of signal_ids it emitted; `DecisionSurface::accept_signal_id` returns
 //! true iff an id is in that set. An agent-proposed decision whose `signal_id` was
 //! never emitted is REJECTED. The agent proposes; the graph disposes.
 
-pub use fallow_output::{
+pub use plow_output::{
     Decision, DecisionCategory, DecisionSurface, TruncationNote, build_decision_surface_output,
 };
 use xxhash_rust::xxh3::xxh3_64;
 
-use fallow_output::{ReviewDeltas, RoutingFacts};
+use plow_output::{ReviewDeltas, RoutingFacts};
 
 /// Default decision-surface cap (the working-memory limit). The surface holds at
 /// most this many ranked decisions; the rest collapse into a truncation note.
@@ -54,7 +54,7 @@ pub const MIN_DECISION_CAP: usize = 3;
 pub const MAX_DECISION_CAP: usize = 5;
 
 /// Derive a deterministic, content-addressed `signal_id` from a category tag plus
-/// the fallow-emitted candidate key. The tag namespaces the key so a boundary key
+/// the plow-emitted candidate key. The tag namespaces the key so a boundary key
 /// and a public-API key sharing text never collide. Pure: same inputs always
 /// yield the same id (byte-identical across runs).
 #[must_use]
@@ -67,7 +67,7 @@ pub fn derive_signal_id(category: DecisionCategory, candidate_key: &str) -> Stri
 }
 
 /// A representative boundary violation used to anchor a coupling/boundary
-/// decision to a file + line. Decoupled from the `fallow_types` finding type so
+/// decision to a file + line. Decoupled from the `plow_types` finding type so
 /// the extractor unit-tests without constructing full findings.
 #[derive(Debug, Clone)]
 pub struct BoundaryAnchor {
@@ -144,8 +144,8 @@ fn route_for(routing: &RoutingFacts, anchor_file: &str) -> (Vec<String>, bool) {
 }
 
 /// Whether the head source of `anchor_file` suppresses a decision of `category`
-/// at (1-based) `line`. Honors a file-level `fallow-ignore-file` and a
-/// line-level `fallow-ignore-next-line` immediately above the anchor line, in
+/// at (1-based) `line`. Honors a file-level `plow-ignore-file` and a
+/// line-level `plow-ignore-next-line` immediately above the anchor line, in
 /// both the category-scoped (`decision-surface` / category tag) and bare forms.
 fn is_decision_suppressed(
     head_source: Option<&str>,
@@ -157,14 +157,14 @@ fn is_decision_suppressed(
     };
     let lines: Vec<&str> = source.lines().collect();
     let token_matches = |comment: &str| {
-        if !comment.contains("fallow-ignore") {
+        if !comment.contains("plow-ignore") {
             return false;
         }
         // A bare ignore (no kind) suppresses; a kinded ignore must name the
         // decision-surface family or this decision's category tag.
         let after = comment
-            .split_once("fallow-ignore-file")
-            .or_else(|| comment.split_once("fallow-ignore-next-line"))
+            .split_once("plow-ignore-file")
+            .or_else(|| comment.split_once("plow-ignore-next-line"))
             .map(|(_, rest)| rest.trim());
         match after {
             None => false,
@@ -180,14 +180,14 @@ fn is_decision_suppressed(
     // File-level: any line carrying a file-level ignore.
     if lines
         .iter()
-        .any(|l| l.contains("fallow-ignore-file") && token_matches(l))
+        .any(|l| l.contains("plow-ignore-file") && token_matches(l))
     {
         return true;
     }
     // Line-level: the comment sits immediately above the 1-based anchor line.
     if line >= 2
         && let Some(prev) = lines.get((line - 2) as usize)
-        && prev.contains("fallow-ignore-next-line")
+        && prev.contains("plow-ignore-next-line")
         && token_matches(prev)
     {
         return true;
@@ -456,7 +456,7 @@ fn classify_candidates(inputs: &DecisionInputs<'_>) -> Vec<Decision> {
 ///
 /// The emitted-signal-id allowlist is built over EVERY classified decision
 /// (before the cap and before suppression drops), so `accept_signal_id` still
-/// recognizes a collapsed-or-suppressed decision's anchor as fallow-emitted.
+/// recognizes a collapsed-or-suppressed decision's anchor as plow-emitted.
 #[must_use]
 pub fn extract_decision_surface(inputs: &DecisionInputs<'_>) -> DecisionSurface {
     let cap = inputs.cap.clamp(MIN_DECISION_CAP, MAX_DECISION_CAP);
@@ -466,10 +466,10 @@ pub fn extract_decision_surface(inputs: &DecisionInputs<'_>) -> DecisionSurface 
     // The allowlist: every signal_id the deterministic layer emitted.
     let emitted_signal_ids: Vec<String> = classified.iter().map(|d| d.signal_id.clone()).collect();
 
-    // Drop suppressed decisions (suppression parity): a `// fallow-ignore` on the
+    // Drop suppressed decisions (suppression parity): a `// plow-ignore` on the
     // anchor hides the decision. Done BEFORE the cap so a suppressed decision does
     // not consume a slot. The signal_id stays on the allowlist (anchor is still a
-    // real fallow signal), so an agent re-proposing it is not "hallucinating".
+    // real plow signal), so an agent re-proposing it is not "hallucinating".
     classified.retain(|d| {
         let source = (inputs.head_source)(&d.anchor_file);
         !is_decision_suppressed(source.as_deref(), d.category, d.anchor_line)
@@ -507,7 +507,7 @@ pub fn extract_decision_surface(inputs: &DecisionInputs<'_>) -> DecisionSurface 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_output::RoutingUnit;
+    use plow_output::RoutingUnit;
 
     fn deltas(boundary: &[&str], public_api: &[&str]) -> ReviewDeltas {
         ReviewDeltas {
@@ -570,7 +570,7 @@ mod tests {
         }
     }
 
-    // (a) Every surfaced decision has a signal_id fallow emitted.
+    // (a) Every surfaced decision has a signal_id plow emitted.
     #[test]
     fn every_decision_signal_id_resolves_to_an_emitted_candidate() {
         let d = deltas(&["ui->-db"], &["src/api.ts::Widget"]);
@@ -645,9 +645,9 @@ mod tests {
         assert_eq!(low.decisions.len(), MIN_DECISION_CAP);
     }
 
-    // (e) A `// fallow-ignore` suppresses a flagged decision.
+    // (e) A `// plow-ignore` suppresses a flagged decision.
     #[test]
-    fn fallow_ignore_suppresses_a_flagged_decision() {
+    fn plow_ignore_suppresses_a_flagged_decision() {
         let d = deltas(&["ui->-db"], &[]);
         let anchors = vec![BoundaryAnchor {
             zone_pair_key: "ui->-db".to_string(),
@@ -665,9 +665,8 @@ mod tests {
 
         // File-level suppression hides it.
         let file_src = |f: &str| {
-            (f == "src/ui/page.ts").then(|| {
-                "// fallow-ignore-file decision-surface\nimport db from 'db';\n".to_string()
-            })
+            (f == "src/ui/page.ts")
+                .then(|| "// plow-ignore-file decision-surface\nimport db from 'db';\n".to_string())
         };
         let suppressed =
             extract_decision_surface(&inputs(&d, &anchors, &[], &routing, &file_src, 4));
@@ -682,7 +681,7 @@ mod tests {
         // Line-level suppression immediately above the anchor line also hides it.
         let line_src = |f: &str| {
             (f == "src/ui/page.ts").then(|| {
-                "line1\n// fallow-ignore-next-line decision-surface\nimport db from 'db';\n"
+                "line1\n// plow-ignore-next-line decision-surface\nimport db from 'db';\n"
                     .to_string()
             })
         };
@@ -707,7 +706,7 @@ mod tests {
         let routing = empty_routing();
         let bare = |f: &str| {
             (f == "src/ui/page.ts")
-                .then(|| "// fallow-ignore-next-line\nimport db from 'db';\n".to_string())
+                .then(|| "// plow-ignore-next-line\nimport db from 'db';\n".to_string())
         };
         let surface = extract_decision_surface(&inputs(&d, &anchors, &[], &routing, &bare, 4));
         assert!(surface.decisions.is_empty(), "bare blanket ignore hides it");
@@ -726,7 +725,7 @@ mod tests {
         let routing = empty_routing();
         let other = |f: &str| {
             (f == "src/ui/page.ts").then(|| {
-                "// fallow-ignore-next-line unused-export\nimport db from 'db';\n".to_string()
+                "// plow-ignore-next-line unused-export\nimport db from 'db';\n".to_string()
             })
         };
         let surface = extract_decision_surface(&inputs(&d, &anchors, &[], &routing, &other, 4));

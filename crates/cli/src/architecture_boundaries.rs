@@ -9,7 +9,7 @@ fn api_consumers_depend_on_api_not_engine_cli_or_core() {
         "crates/mcp/Cargo.toml",
         "crates/napi/Cargo.toml",
     ] {
-        assert_no_deps(manifest, &["fallow-engine", "fallow-cli", "fallow-core"]);
+        assert_no_deps(manifest, &["plow-engine", "plow-cli", "plow-core"]);
     }
 }
 
@@ -17,12 +17,12 @@ fn api_consumers_depend_on_api_not_engine_cli_or_core() {
 fn cli_does_not_depend_on_core() {
     let manifest = read_manifest("crates/cli/Cargo.toml");
     assert!(
-        !section_has_dep(&manifest, "dependencies", "fallow-core"),
-        "fallow-cli must not depend on fallow-core in production dependencies"
+        !section_has_dep(&manifest, "dependencies", "plow-core"),
+        "plow-cli must not depend on plow-core in production dependencies"
     );
     assert!(
-        !section_has_dep(&manifest, "dev-dependencies", "fallow-core"),
-        "fallow-cli tests must use public contract crates instead of fallow-core"
+        !section_has_dep(&manifest, "dev-dependencies", "plow-core"),
+        "plow-cli tests must use public contract crates instead of plow-core"
     );
 }
 
@@ -55,51 +55,46 @@ fn lower_contract_crates_do_not_depend_upward() {
     assert_no_deps(
         "crates/types/Cargo.toml",
         &[
-            "fallow-config",
-            "fallow-output",
-            "fallow-api",
-            "fallow-engine",
-            "fallow-cli",
-            "fallow-core",
+            "plow-config",
+            "plow-output",
+            "plow-api",
+            "plow-engine",
+            "plow-cli",
+            "plow-core",
         ],
     );
     assert_no_deps(
         "crates/config/Cargo.toml",
         &[
-            "fallow-output",
-            "fallow-api",
-            "fallow-engine",
-            "fallow-cli",
-            "fallow-core",
+            "plow-output",
+            "plow-api",
+            "plow-engine",
+            "plow-cli",
+            "plow-core",
         ],
     );
     assert_no_deps(
         "crates/output/Cargo.toml",
-        &["fallow-api", "fallow-engine", "fallow-cli", "fallow-core"],
+        &["plow-api", "plow-engine", "plow-cli", "plow-core"],
     );
 }
 
 #[test]
 fn api_and_engine_do_not_depend_on_cli() {
-    assert_no_deps("crates/api/Cargo.toml", &["fallow-cli"]);
-    assert_no_deps("crates/engine/Cargo.toml", &["fallow-api", "fallow-cli"]);
+    assert_no_deps("crates/api/Cargo.toml", &["plow-cli"]);
+    assert_no_deps("crates/engine/Cargo.toml", &["plow-api", "plow-cli"]);
 }
 
 #[test]
 fn api_does_not_depend_on_core_or_cli() {
-    assert_no_deps("crates/api/Cargo.toml", &["fallow-core", "fallow-cli"]);
+    assert_no_deps("crates/api/Cargo.toml", &["plow-core", "plow-cli"]);
     for source_path in rust_sources_under(["crates/api/src"]) {
         let source = read_source_without_line_comments(&source_path)
             .unwrap_or_else(|error| panic!("read {source_path}: {error}"));
-        for forbidden in [
-            "fallow_core::",
-            "use fallow_core",
-            "fallow_cli::",
-            "use fallow_cli",
-        ] {
+        for forbidden in ["plow_core::", "use plow_core", "plow_cli::", "use plow_cli"] {
             assert!(
                 !source.contains(forbidden),
-                "{source_path} must consume fallow-engine or API-owned helpers instead of {forbidden}"
+                "{source_path} must consume plow-engine or API-owned helpers instead of {forbidden}"
             );
         }
     }
@@ -115,9 +110,9 @@ fn public_boundaries_do_not_wildcard_reexport_internal_type_crates() {
         let source =
             std::fs::read_to_string(workspace_root().join(source_path)).expect("read source");
         for forbidden in [
-            concat!("pub use fallow_types::extract::", "*"),
-            concat!("pub use fallow_types::results::", "*"),
-            concat!("pub use fallow_types::output_dead_code::", "*"),
+            concat!("pub use plow_types::extract::", "*"),
+            concat!("pub use plow_types::results::", "*"),
+            concat!("pub use plow_types::output_dead_code::", "*"),
         ] {
             assert!(
                 !source.contains(forbidden),
@@ -132,23 +127,23 @@ fn api_editor_contracts_do_not_route_type_contracts_through_engine_facade() {
     let source_path = "crates/api/src/editor.rs";
     let source = std::fs::read_to_string(workspace_root().join(source_path)).expect("read source");
     for forbidden in [
-        "pub use fallow_engine::",
-        "pub use fallow_engine::source::",
-        "pub use fallow_engine::results::",
-        "pub type EditorCloneFamily = fallow_engine::",
-        "pub type EditorCloneGroup = fallow_engine::",
-        "pub type EditorCloneInstance = fallow_engine::",
-        "pub type EditorDuplicationReport = fallow_engine::",
-        "pub type EditorDuplicationStats = fallow_engine::",
-        "pub type EditorMirroredDirectory = fallow_engine::",
-        "pub type EditorRefactoringKind = fallow_engine::",
-        "pub type EditorRefactoringSuggestion = fallow_engine::",
-        "pub type EditorDeadCodeAnalysisOutput = fallow_engine::",
-        "pub type EditorProjectAnalysisOutput = fallow_engine::",
+        "pub use plow_engine::",
+        "pub use plow_engine::source::",
+        "pub use plow_engine::results::",
+        "pub type EditorCloneFamily = plow_engine::",
+        "pub type EditorCloneGroup = plow_engine::",
+        "pub type EditorCloneInstance = plow_engine::",
+        "pub type EditorDuplicationReport = plow_engine::",
+        "pub type EditorDuplicationStats = plow_engine::",
+        "pub type EditorMirroredDirectory = plow_engine::",
+        "pub type EditorRefactoringKind = plow_engine::",
+        "pub type EditorRefactoringSuggestion = plow_engine::",
+        "pub type EditorDeadCodeAnalysisOutput = plow_engine::",
+        "pub type EditorProjectAnalysisOutput = plow_engine::",
     ] {
         assert!(
             !source.contains(forbidden),
-            "{source_path} must re-export editor type contracts from fallow-types directly"
+            "{source_path} must re-export editor type contracts from plow-types directly"
         );
     }
 }
@@ -158,9 +153,9 @@ fn api_programmatic_health_runner_does_not_expose_engine_results() {
     let source_path = "crates/api/src/runtime/mod.rs";
     let source = std::fs::read_to_string(workspace_root().join(source_path)).expect("read source");
     for forbidden in [
-        "pub analysis: fallow_engine::HealthAnalysisResult",
-        "pub type ProgrammaticHealthAnalysis = fallow_engine::",
-        "pub type ProgrammaticHealthRun = fallow_engine::",
+        "pub analysis: plow_engine::HealthAnalysisResult",
+        "pub type ProgrammaticHealthAnalysis = plow_engine::",
+        "pub type ProgrammaticHealthRun = plow_engine::",
         "pub fn derive_programmatic_health_execution_options",
     ] {
         assert!(
@@ -172,7 +167,7 @@ fn api_programmatic_health_runner_does_not_expose_engine_results() {
     let lib_path = "crates/api/src/lib.rs";
     let lib = std::fs::read_to_string(workspace_root().join(lib_path)).expect("read source");
     for forbidden in [
-        "pub use fallow_engine::{",
+        "pub use plow_engine::{",
         "ComplexityRunOptions, ComplexitySectionOptions, DerivedComplexityOptions",
         "DerivedHealthSections, HealthSectionOptions, derive_complexity_sections",
         "derive_programmatic_health_execution_options",
@@ -191,7 +186,7 @@ fn engine_does_not_publish_legacy_graph_cache_resolve_modules() {
     for forbidden in ["pub mod cache;", "pub mod graph;", "pub mod resolve;"] {
         assert!(
             !lib.contains(forbidden),
-            "fallow-engine must keep legacy {forbidden} wrapper modules private or removed"
+            "plow-engine must keep legacy {forbidden} wrapper modules private or removed"
         );
     }
 
@@ -227,10 +222,10 @@ fn api_and_cli_use_duplicate_output_contracts_from_types() {
         let source = read_source_without_line_comments(&source_path)
             .unwrap_or_else(|error| panic!("read {source_path}: {error}"));
         for ty in duplicate_contract_types {
-            let forbidden = format!("fallow_engine::{ty}");
+            let forbidden = format!("plow_engine::{ty}");
             assert!(
                 !source.contains(&forbidden),
-                "{source_path} must import duplicate output contracts from fallow-types, not fallow-engine"
+                "{source_path} must import duplicate output contracts from plow-types, not plow-engine"
             );
         }
     }
@@ -259,10 +254,10 @@ fn api_and_cli_use_trace_output_contracts_from_types() {
         let source = read_source_without_line_comments(&source_path)
             .unwrap_or_else(|error| panic!("read {source_path}: {error}"));
         for ty in trace_contract_types {
-            let forbidden = format!("fallow_engine::{ty}");
+            let forbidden = format!("plow_engine::{ty}");
             assert!(
                 !source.contains(&forbidden),
-                "{source_path} must import trace output contracts from fallow-types, not fallow-engine"
+                "{source_path} must import trace output contracts from plow-types, not plow-engine"
             );
         }
     }
@@ -305,46 +300,46 @@ fn engine_git_helpers_are_private_root_api() {
         let source = read_source_without_line_comments(&source_path)
             .unwrap_or_else(|error| panic!("read {source_path}: {error}"));
         for forbidden in [
-            "fallow_engine::changed_files::",
-            "use fallow_engine::changed_files::",
-            "fallow_engine::churn::",
-            "use fallow_engine::churn::",
-            "fallow_engine::cross_reference::",
-            "use fallow_engine::cross_reference::",
-            "fallow_engine::dead_code::",
-            "use fallow_engine::dead_code::",
-            "fallow_engine::discover::",
-            "use fallow_engine::discover::",
-            "fallow_engine::duplicates::",
-            "use fallow_engine::duplicates::",
-            "fallow_engine::error::",
-            "use fallow_engine::error::",
-            "fallow_engine::extract::",
-            "use fallow_engine::extract::",
-            "fallow_engine::flags::",
-            "use fallow_engine::flags::",
-            "fallow_engine::git_env::",
-            "use fallow_engine::git_env::",
-            "fallow_engine::health::",
-            "use fallow_engine::health::",
-            "fallow_engine::module_graph::",
-            "use fallow_engine::module_graph::",
-            "fallow_engine::plugins::",
-            "use fallow_engine::plugins::",
-            "fallow_engine::public_api::",
-            "use fallow_engine::public_api::",
-            "fallow_engine::security::",
-            "use fallow_engine::security::",
-            "fallow_engine::source::",
-            "use fallow_engine::source::",
-            "fallow_engine::trace::",
-            "use fallow_engine::trace::",
-            "fallow_engine::trace_chain::",
-            "use fallow_engine::trace_chain::",
+            "plow_engine::changed_files::",
+            "use plow_engine::changed_files::",
+            "plow_engine::churn::",
+            "use plow_engine::churn::",
+            "plow_engine::cross_reference::",
+            "use plow_engine::cross_reference::",
+            "plow_engine::dead_code::",
+            "use plow_engine::dead_code::",
+            "plow_engine::discover::",
+            "use plow_engine::discover::",
+            "plow_engine::duplicates::",
+            "use plow_engine::duplicates::",
+            "plow_engine::error::",
+            "use plow_engine::error::",
+            "plow_engine::extract::",
+            "use plow_engine::extract::",
+            "plow_engine::flags::",
+            "use plow_engine::flags::",
+            "plow_engine::git_env::",
+            "use plow_engine::git_env::",
+            "plow_engine::health::",
+            "use plow_engine::health::",
+            "plow_engine::module_graph::",
+            "use plow_engine::module_graph::",
+            "plow_engine::plugins::",
+            "use plow_engine::plugins::",
+            "plow_engine::public_api::",
+            "use plow_engine::public_api::",
+            "plow_engine::security::",
+            "use plow_engine::security::",
+            "plow_engine::source::",
+            "use plow_engine::source::",
+            "plow_engine::trace::",
+            "use plow_engine::trace::",
+            "plow_engine::trace_chain::",
+            "use plow_engine::trace_chain::",
         ] {
             assert!(
                 !source.contains(forbidden),
-                "{source_path} must use explicit fallow-engine root git helper APIs"
+                "{source_path} must use explicit plow-engine root git helper APIs"
             );
         }
     }
@@ -382,8 +377,8 @@ fn engine_session_and_dead_code_route_core_calls_through_backend_adapter() {
         let source =
             std::fs::read_to_string(workspace_root().join(source_path)).expect("read source");
         assert!(
-            !source.contains("fallow_core::"),
-            "{source_path} must use engine::core_backend instead of direct fallow_core calls"
+            !source.contains("plow_core::"),
+            "{source_path} must use engine::core_backend instead of direct plow_core calls"
         );
     }
 }
@@ -394,16 +389,16 @@ fn api_consumers_do_not_reference_engine_core_or_cli_sources() {
         let source = read_source_without_line_comments(&source_path)
             .unwrap_or_else(|error| panic!("read {source_path}: {error}"));
         for forbidden in [
-            "fallow_engine::",
-            "use fallow_engine",
-            "fallow_core::",
-            "use fallow_core",
-            "fallow_cli::",
-            "use fallow_cli",
+            "plow_engine::",
+            "use plow_engine",
+            "plow_core::",
+            "use plow_core",
+            "plow_cli::",
+            "use plow_cli",
         ] {
             assert!(
                 !source.contains(forbidden),
-                "{source_path} must consume fallow-api instead of {forbidden}"
+                "{source_path} must consume plow-api instead of {forbidden}"
             );
         }
     }
@@ -428,7 +423,7 @@ fn engine_root_facade_does_not_reexport_private_adapter_helpers() {
     ] {
         assert!(
             !source.contains(forbidden),
-            "fallow-engine root facade must not re-export private adapter helper {forbidden}"
+            "plow-engine root facade must not re-export private adapter helper {forbidden}"
         );
     }
 }
@@ -451,10 +446,10 @@ fn engine_core_references_stay_inside_adapter_modules() {
     for source_path in rust_sources_under(["crates/engine/src"]) {
         let source = read_source_without_line_comments(&source_path)
             .unwrap_or_else(|error| panic!("read {source_path}: {error}"));
-        if source.contains("fallow_core::") || source.contains("use fallow_core") {
+        if source.contains("plow_core::") || source.contains("use plow_core") {
             assert!(
                 allowed.contains(&source_path.as_str()),
-                "{source_path} must route fallow_core access through an explicit engine adapter"
+                "{source_path} must route plow_core access through an explicit engine adapter"
             );
         }
     }
@@ -465,10 +460,10 @@ fn engine_source_inventory_owns_public_contracts() {
     let source_path = "crates/engine/src/source.rs";
     let source = std::fs::read_to_string(workspace_root().join(source_path)).expect("read source");
     for forbidden in [
-        "pub use fallow_extract::cache::CacheStore",
-        "pub use fallow_extract::inventory::",
-        "pub type InventoryEntry = fallow_extract::",
-        "pub type CacheStore = fallow_extract::",
+        "pub use plow_extract::cache::CacheStore",
+        "pub use plow_extract::inventory::",
+        "pub type InventoryEntry = plow_extract::",
+        "pub type CacheStore = plow_extract::",
     ] {
         assert!(
             !source.contains(forbidden),
@@ -510,7 +505,7 @@ fn engine_root_does_not_publish_graph_node_internals() {
     let coverage_path = "crates/cli/src/health/coverage.rs";
     let coverage =
         std::fs::read_to_string(workspace_root().join(coverage_path)).expect("read coverage");
-    for forbidden in ["fallow_engine::ModuleNode", ".is_test_reachable"] {
+    for forbidden in ["plow_engine::ModuleNode", ".is_test_reachable"] {
         assert!(
             !coverage.contains(forbidden),
             "{coverage_path} must use engine-owned graph export snapshots"
@@ -521,11 +516,11 @@ fn engine_root_does_not_publish_graph_node_internals() {
     let module_graph = std::fs::read_to_string(workspace_root().join(module_graph_path))
         .expect("read engine module graph");
     for forbidden in [
-        "pub use fallow_graph::",
-        "pub type ModuleGraph = fallow_graph::",
-        "pub type ModuleNode = fallow_graph::",
-        "pub type ExportSymbol = fallow_graph::",
-        "pub type ResolvedModule = fallow_graph::",
+        "pub use plow_graph::",
+        "pub type ModuleGraph = plow_graph::",
+        "pub type ModuleNode = plow_graph::",
+        "pub type ExportSymbol = plow_graph::",
+        "pub type ResolvedModule = plow_graph::",
     ] {
         assert!(
             !module_graph.contains(forbidden),
@@ -546,7 +541,7 @@ fn cli_audit_uses_engine_graph_fact_helpers() {
     ] {
         assert!(
             !source.contains(forbidden),
-            "{source_path} must ask fallow-engine for path-resolved graph facts"
+            "{source_path} must ask plow-engine for path-resolved graph facts"
         );
     }
 }

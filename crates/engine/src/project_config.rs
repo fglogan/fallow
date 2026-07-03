@@ -2,8 +2,8 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_config::{FallowConfig, ProductionAnalysis, ResolvedConfig, WorkspaceDiagnostic};
-use fallow_types::output_format::OutputFormat;
+use plow_config::{PlowConfig, ProductionAnalysis, ResolvedConfig, WorkspaceDiagnostic};
+use plow_types::output_format::OutputFormat;
 
 use crate::{EngineError, EngineResult, engine_error};
 
@@ -33,7 +33,7 @@ pub struct ProjectConfigOptions {
 /// Returns an error when an explicit config cannot be loaded or automatic
 /// config discovery finds an invalid config.
 pub fn config_for_project(root: &Path, config_path: Option<&Path>) -> EngineResult<ProjectConfig> {
-    fallow_core::config_for_project(root, config_path)
+    plow_core::config_for_project(root, config_path)
         .map(|(config, path)| ProjectConfig {
             workspace_diagnostics: collect_workspace_diagnostics(&config),
             config,
@@ -45,13 +45,13 @@ pub fn config_for_project(root: &Path, config_path: Option<&Path>) -> EngineResu
 /// Resolve the parse-cache size limit for a resolved config.
 #[must_use]
 pub fn resolve_cache_max_size_bytes(config: &ResolvedConfig) -> usize {
-    fallow_core::resolve_cache_max_size_bytes(config)
+    plow_core::resolve_cache_max_size_bytes(config)
 }
 
 pub fn default_project_config(root: &Path) -> ProjectConfig {
     let threads = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
     ProjectConfig {
-        config: FallowConfig::default().resolve(
+        config: PlowConfig::default().resolve(
             root.to_path_buf(),
             OutputFormat::Human,
             threads,
@@ -84,9 +84,9 @@ pub fn config_for_project_analysis(
     let (mut config, path) = match user_config {
         Some((config, path)) => (config, Some(path)),
         None => (
-            FallowConfig {
+            PlowConfig {
                 production: options.production_override.unwrap_or(false).into(),
-                ..FallowConfig::default()
+                ..PlowConfig::default()
             },
             None,
         ),
@@ -115,7 +115,7 @@ pub fn config_for_project_analysis(
 }
 
 fn collect_workspace_diagnostics(config: &ResolvedConfig) -> Vec<WorkspaceDiagnostic> {
-    fallow_config::discover_workspaces_with_diagnostics(&config.root, &config.ignore_patterns)
+    plow_config::discover_workspaces_with_diagnostics(&config.root, &config.ignore_patterns)
         .map(|(_, diagnostics)| diagnostics)
         .unwrap_or_default()
 }
@@ -123,23 +123,23 @@ fn collect_workspace_diagnostics(config: &ResolvedConfig) -> Vec<WorkspaceDiagno
 fn load_user_config(
     root: &Path,
     config_path: Option<&Path>,
-) -> EngineResult<Option<(FallowConfig, PathBuf)>> {
+) -> EngineResult<Option<(PlowConfig, PathBuf)>> {
     if let Some(path) = config_path {
-        let config = FallowConfig::load(path)
+        let config = PlowConfig::load(path)
             .map_err(|err| EngineError::new(format!("invalid config: {err:#}")))?;
         return Ok(Some((config, path.to_path_buf())));
     }
-    FallowConfig::find_and_load(root)
+    PlowConfig::find_and_load(root)
         .map_err(|err| EngineError::new(format!("invalid config: {err}")))
 }
 
-fn validate_config(root: &Path, config: &FallowConfig) -> EngineResult<()> {
-    fallow_config::discover_and_validate_external_plugins(root, &config.plugins)
+fn validate_config(root: &Path, config: &PlowConfig) -> EngineResult<()> {
+    plow_config::discover_and_validate_external_plugins(root, &config.plugins)
         .map_err(|errors| joined_config_errors("invalid external plugin definition", &errors))?;
     config
         .validate_resolved_boundaries(root)
         .map_err(|errors| joined_config_errors("invalid boundary configuration", &errors))?;
-    fallow_config::load_rule_packs(root, &config.rule_packs)
+    plow_config::load_rule_packs(root, &config.rule_packs)
         .map_err(|errors| joined_config_errors("invalid rule pack", &errors))?;
     Ok(())
 }

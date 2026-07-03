@@ -2,11 +2,11 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_config::ResolvedConfig;
-use fallow_output::{
+use plow_config::ResolvedConfig;
+use plow_output::{
     ComplexityViolation, CoverageGaps, HotspotEntry, LargeFunctionEntry, RefactoringTarget,
 };
-use fallow_types::discover::DiscoveredFile;
+use plow_types::discover::DiscoveredFile;
 use rustc_hash::FxHashSet;
 
 use super::runtime_filter::relative_to_root;
@@ -23,7 +23,7 @@ use super::scoring;
 /// silently dropped: surfacing an unfilterable path is better than hiding it.
 pub(super) fn filter_complexity_findings_by_diff(
     findings: &mut Vec<ComplexityViolation>,
-    diff_index: &fallow_output::DiffIndex,
+    diff_index: &plow_output::DiffIndex,
     root: &Path,
 ) {
     findings.retain(|finding| {
@@ -41,7 +41,7 @@ pub(super) fn filter_complexity_findings_by_diff(
 /// Drop hotspot entries whose file is not touched by the supplied diff.
 pub(super) fn filter_hotspots_by_diff(
     hotspots: &mut Vec<HotspotEntry>,
-    diff_index: &fallow_output::DiffIndex,
+    diff_index: &plow_output::DiffIndex,
     root: &Path,
 ) {
     hotspots.retain(|hotspot| match relative_to_root(&hotspot.path, root) {
@@ -53,7 +53,7 @@ pub(super) fn filter_hotspots_by_diff(
 /// Drop refactoring targets whose file is not touched by the diff.
 pub(super) fn filter_refactoring_targets_by_diff(
     targets: &mut Vec<RefactoringTarget>,
-    diff_index: &fallow_output::DiffIndex,
+    diff_index: &plow_output::DiffIndex,
     root: &Path,
 ) {
     targets.retain(|target| match relative_to_root(&target.path, root) {
@@ -66,7 +66,7 @@ pub(super) fn filter_refactoring_targets_by_diff(
 /// in the supplied diff.
 pub(super) fn filter_large_functions_by_diff(
     entries: &mut Vec<LargeFunctionEntry>,
-    diff_index: &fallow_output::DiffIndex,
+    diff_index: &plow_output::DiffIndex,
     root: &Path,
 ) {
     entries.retain(|entry| {

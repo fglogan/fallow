@@ -31,7 +31,7 @@ const status = (overrides: Partial<LicenseStatusJson> = {}): LicenseStatusJson =
   days_since_expiry: null,
   refresh_suggested: false,
   runtime_coverage_enabled: true,
-  license_path: "/home/x/.fallow/license.jwt",
+  license_path: "/home/x/.plow/license.jwt",
   message: "License active (team, 5 seats), 12 days until expiry.",
   ...overrides,
 });
@@ -75,7 +75,7 @@ describe("parseLicenseJson", () => {
         runtime_coverage_enabled: false,
       }),
       kind: "license-deactivate" as const,
-      message: "License removed from /home/x/.fallow/license.jwt.",
+      message: "License removed from /home/x/.plow/license.jwt.",
       removed: true,
     };
     const result = parseLicenseJson(JSON.stringify(deactivate));
@@ -130,7 +130,7 @@ describe("parseLicenseJson", () => {
 describe("licenseStatusBarParts", () => {
   it("renders valid with a verified icon and neutral background", () => {
     const parts = licenseStatusBarParts(status());
-    expect(parts.text).toBe("$(verified) Fallow: team");
+    expect(parts.text).toBe("$(verified) Plow: team");
     expect(parts.severity).toBeNull();
     expect(parts.tooltipMd).toContain("Tier: team");
     expect(parts.tooltipMd).toContain("Expires in 12 days");
@@ -146,7 +146,7 @@ describe("licenseStatusBarParts", () => {
       const parts = licenseStatusBarParts(
         status({ state, days_until_expiry: null, days_since_expiry: 3 }),
       );
-      expect(parts.text).toBe("$(warning) Fallow: expired");
+      expect(parts.text).toBe("$(warning) Plow: expired");
       expect(parts.severity).toBe("statusBarItem.warningBackground");
       expect(parts.tooltipMd).toContain("Expired 3 days ago");
     }
@@ -156,7 +156,7 @@ describe("licenseStatusBarParts", () => {
     const parts = licenseStatusBarParts(
       status({ state: "hard_fail", days_until_expiry: null, days_since_expiry: 45 }),
     );
-    expect(parts.text).toBe("$(error) Fallow: expired");
+    expect(parts.text).toBe("$(error) Plow: expired");
     expect(parts.severity).toBe("statusBarItem.errorBackground");
   });
 
@@ -164,16 +164,16 @@ describe("licenseStatusBarParts", () => {
     const parts = licenseStatusBarParts(
       status({ state: "missing", tier: null, seats: null, features: [] }),
     );
-    expect(parts.text).toBe("$(key) Fallow: no license");
+    expect(parts.text).toBe("$(key) Plow: no license");
     expect(parts.severity).toBeNull();
-    expect(parts.tooltipMd).toContain("command:fallow.license.activate");
+    expect(parts.tooltipMd).toContain("command:plow.license.activate");
   });
 });
 
 describe("licensePlaceholderParts", () => {
   it("is neutral with the key icon", () => {
     const parts = licensePlaceholderParts();
-    expect(parts.text).toBe("$(key) Fallow License");
+    expect(parts.text).toBe("$(key) Plow License");
     expect(parts.severity).toBeNull();
   });
 });
@@ -243,9 +243,9 @@ describe("validateEmail", () => {
 
 describe("hasLicenseMaterial", () => {
   const noFiles = (): boolean => false;
-  const defaultPath = "/home/u/.fallow/license.jwt";
+  const defaultPath = "/home/u/.plow/license.jwt";
 
-  it("is true when an inline $FALLOW_LICENSE JWT is set", () => {
+  it("is true when an inline $PLOW_LICENSE JWT is set", () => {
     expect(hasLicenseMaterial("eyJ.payload.sig", undefined, defaultPath, noFiles)).toBe(true);
   });
 
@@ -253,7 +253,7 @@ describe("hasLicenseMaterial", () => {
     expect(hasLicenseMaterial("   ", undefined, defaultPath, noFiles)).toBe(false);
   });
 
-  it("uses $FALLOW_LICENSE_PATH (and does NOT fall back to the default) when set", () => {
+  it("uses $PLOW_LICENSE_PATH (and does NOT fall back to the default) when set", () => {
     const exists = (p: string): boolean => p === "/custom/license.jwt";
     expect(hasLicenseMaterial(undefined, "/custom/license.jwt", defaultPath, exists)).toBe(true);
     // Path env set but the file is missing => not present, default is never consulted.

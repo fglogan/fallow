@@ -2,13 +2,13 @@ use std::io::IsTerminal;
 use std::process::ExitCode;
 
 use colored::Colorize;
-use fallow_api::{
+use plow_api::{
     AuditCodeClimateOutputInput, AuditJsonHeaderInput, AuditJsonOutputInput, AuditSarifOutputInput,
     DupesReportPayload,
 };
-use fallow_config::{AuditGate, OutputFormat};
-use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
-use fallow_types::results::AnalysisResults;
+use plow_config::{AuditGate, OutputFormat};
+use plow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
+use plow_types::results::AnalysisResults;
 
 use crate::error::emit_error;
 use crate::report;
@@ -159,7 +159,7 @@ pub fn print_audit_findings(result: &AuditResult, quiet: bool, explain: bool, sh
             crate::health::HealthPrintOptions {
                 quiet,
                 explain,
-                gates: fallow_engine::HealthGateOptions::default(),
+                gates: plow_engine::HealthGateOptions::default(),
                 summary: false,
                 summary_heading: true,
                 show_explain_tip: false,
@@ -175,7 +175,7 @@ fn print_audit_explain_tip(show_headers: bool) {
     if show_headers && std::io::stdout().is_terminal() && !crate::report::sink::is_redirected() {
         println!(
             "{}",
-            "Tip: run `fallow explain <issue label>`; spaces and hyphens both work, e.g. `fallow explain unused files`."
+            "Tip: run `plow explain <issue label>`; spaces and hyphens both work, e.g. `plow explain unused files`."
                 .dimmed()
         );
         println!();
@@ -201,7 +201,7 @@ fn short_base_ref(base_ref: &str) -> &str {
 }
 
 /// Format the scope context line. When the base ref was auto-detected (or set
-/// via `FALLOW_AUDIT_BASE`), append the provenance so the comparison target is
+/// via `PLOW_AUDIT_BASE`), append the provenance so the comparison target is
 /// checkable, e.g. `vs a1b2c3d4e5f6 (merge-base with origin/main)`.
 fn format_scope_line(result: &AuditResult) -> String {
     format_scope_line_parts(
@@ -345,7 +345,7 @@ fn print_audit_json(result: &AuditResult) -> ExitCode {
 fn build_audit_json_output(result: &AuditResult) -> Result<serde_json::Value, ExitCode> {
     let mut check_results = result.check.as_ref().map(|check| check.results.clone());
     let mut health_report = result.health.as_ref().map(|health| health.report.clone());
-    fallow_output::harmonize_dead_code_health_suppress_line_actions(
+    plow_output::harmonize_dead_code_health_suppress_line_actions(
         check_results.as_mut(),
         health_report.as_mut(),
     );
@@ -368,7 +368,7 @@ fn build_audit_json_output(result: &AuditResult) -> Result<serde_json::Value, Ex
         _ => None,
     };
 
-    fallow_api::serialize_audit_json(
+    plow_api::serialize_audit_json(
         AuditJsonOutputInput {
             header: audit_json_header_input(result),
             dead_code,
@@ -506,7 +506,7 @@ fn build_audit_health_json(
 fn build_audit_health_json_with_report(
     result: &AuditResult,
     health: &crate::health::HealthResult,
-    report: &fallow_output::HealthReport,
+    report: &plow_output::HealthReport,
 ) -> Result<serde_json::Value, ExitCode> {
     match serde_json::to_value(report) {
         Ok(mut json) => {
@@ -525,8 +525,8 @@ fn build_audit_health_json_with_report(
     }
 }
 
-fn audit_next_steps(result: &AuditResult) -> Vec<fallow_types::output::NextStep> {
-    let input = fallow_output::build_audit_next_steps_input(
+fn audit_next_steps(result: &AuditResult) -> Vec<plow_types::output::NextStep> {
+    let input = plow_output::build_audit_next_steps_input(
         result
             .check
             .as_ref()
@@ -534,7 +534,7 @@ fn audit_next_steps(result: &AuditResult) -> Vec<fallow_types::output::NextStep>
         result.health.as_ref().map(|health| &health.report),
         crate::report::suggestions::suggestions_enabled(),
     );
-    fallow_output::build_audit_next_steps(&input)
+    plow_output::build_audit_next_steps(&input)
 }
 
 fn print_audit_sarif(result: &AuditResult) -> ExitCode {
@@ -545,7 +545,7 @@ fn print_audit_sarif(result: &AuditResult) -> ExitCode {
         .health
         .as_ref()
         .map(|health| report::api_health_sarif_document(&health.report, &health.config.root));
-    let combined = fallow_api::build_audit_sarif(AuditSarifOutputInput {
+    let combined = plow_api::build_audit_sarif(AuditSarifOutputInput {
         dead_code: check_sarif.as_ref(),
         duplication: result.dupes.as_ref().map(|dupes| &dupes.report),
         health: health_sarif.as_ref(),
@@ -560,15 +560,15 @@ fn print_audit_codeclimate(result: &AuditResult) -> ExitCode {
 }
 
 fn build_audit_codeclimate(result: &AuditResult) -> serde_json::Value {
-    fallow_api::build_audit_codeclimate(AuditCodeClimateOutputInput {
+    plow_api::build_audit_codeclimate(AuditCodeClimateOutputInput {
         dead_code: result.check.as_ref().map_or_else(Vec::new, |check| {
-            fallow_api::build_codeclimate(&check.results, &check.config.root, &check.config.rules)
+            plow_api::build_codeclimate(&check.results, &check.config.root, &check.config.rules)
         }),
         duplication: result.dupes.as_ref().map_or_else(Vec::new, |dupes| {
-            fallow_api::build_duplication_codeclimate(&dupes.report, &dupes.config.root)
+            plow_api::build_duplication_codeclimate(&dupes.report, &dupes.config.root)
         }),
         health: result.health.as_ref().map_or_else(Vec::new, |health| {
-            fallow_api::build_health_codeclimate(&health.report, &health.config.root)
+            plow_api::build_health_codeclimate(&health.report, &health.config.root)
         }),
     })
 }
@@ -578,7 +578,7 @@ mod tests {
     use std::process::ExitCode;
     use std::time::Duration;
 
-    use fallow_config::{AuditGate, OutputFormat};
+    use plow_config::{AuditGate, OutputFormat};
 
     use crate::audit::{AuditAttribution, AuditResult, AuditSummary, AuditVerdict};
 

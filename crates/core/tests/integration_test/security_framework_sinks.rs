@@ -11,8 +11,8 @@
 //!     `bypassSecurityTrustHtml` call does NOT fire (precision), while a global
 //!     `innerHTML` sink still does (global rows are not framework-gated).
 
-use fallow_config::Severity;
-use fallow_core::results::{AnalysisResults, SecurityFindingKind};
+use plow_config::Severity;
+use plow_core::results::{AnalysisResults, SecurityFindingKind};
 
 use super::common::{create_config_with_rules, fixture_path};
 
@@ -21,7 +21,7 @@ fn analyze_fixture(name: &str) -> AnalysisResults {
     let config = create_config_with_rules(root, |rules| {
         rules.security_sink = Severity::Warn;
     });
-    fallow_core::analyze(&config).expect("analysis should succeed")
+    plow_core::analyze(&config).expect("analysis should succeed")
 }
 
 #[test]

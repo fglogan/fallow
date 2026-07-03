@@ -10,7 +10,7 @@ use super::common::{create_config, fixture_path};
 fn vue_vfor_loop_variable_credits_class_member_accesses() {
     let root = fixture_path("issue-1707-vue-vfor-class-member");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = plow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_members: Vec<String> = results
         .unused_class_members

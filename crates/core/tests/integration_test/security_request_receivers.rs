@@ -1,8 +1,8 @@
 //! Integration coverage for project-configured security request receivers
 //! (issue #1125).
 
-use fallow_config::Severity;
-use fallow_core::results::{AnalysisResults, SecurityFinding, TaintConfidence};
+use plow_config::Severity;
+use plow_core::results::{AnalysisResults, SecurityFinding, TaintConfidence};
 
 use super::common::{create_config_with_rules, fixture_path};
 
@@ -15,7 +15,7 @@ fn analyze_with_request_receivers(receivers: Vec<&str>) -> AnalysisResults {
         rules.security_sink = Severity::Warn;
     });
     config.security.request_receivers = receivers.into_iter().map(str::to_string).collect();
-    fallow_core::analyze(&config).expect("analysis should succeed")
+    plow_core::analyze(&config).expect("analysis should succeed")
 }
 
 fn line_of(needle: &str) -> u32 {
